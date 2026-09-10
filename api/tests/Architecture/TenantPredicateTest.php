@@ -159,6 +159,8 @@ final class TenantPredicateTest extends TestCase
         // takže únik mezi firmami by byl únik zvlášť citlivých osobních údajů.
         'payroll_sickness_cases',
         'payroll_sickness_case_work_days',
+        // Platební karty firmy (1799_payment_cards.sql).
+        'payment_cards',
     ];
 
     /**

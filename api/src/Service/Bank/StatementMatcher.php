@@ -397,9 +397,20 @@ final class StatementMatcher
                     return $res;
                 }
             }
-            // 2) karetní platby (bez VS) / VS bez shody → fuzzy dle částky + podobného
+            // 2) pohyb kartou → doklad téže karty (koncovka + částka + datum). Koncovka je
+            //    silný signál: doklad JINÉ karty se nespáruje ani v dalších krocích.
+            $cardLast4 = isset($row['card_last4']) && \MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) $row['card_last4'])
+                ? (string) $row['card_last4']
+                : null;
+            if ($cardLast4 !== null) {
+                $card = $this->matchPurchaseByCard($pdo, $supplierId, $cardLast4, abs($amount), (string) $row['posted_at'], $transactionId, $txCurrency);
+                if (($card['status'] ?? 'unmatched') !== 'unmatched' || !empty($card['requires_review'])) {
+                    return $card;
+                }
+            }
+            // 3) karetní platby (bez VS) / VS bez shody → fuzzy dle částky + podobného
             //    názvu protistrany (u karet je název obchodníka odlišný od jména dodavatele).
-            $res = $this->matchPurchaseFuzzy($pdo, $supplierId, abs($amount), (string) ($row['counterparty_name'] ?? ''), (string) $row['posted_at'], $transactionId, $txCurrency);
+            $res = $this->matchPurchaseFuzzy($pdo, $supplierId, abs($amount), (string) ($row['counterparty_name'] ?? ''), (string) $row['posted_at'], $transactionId, $txCurrency, $cardLast4);
             $fuzzyReview = !empty($res['requires_review']) ? $res : null;
             if (($res['status'] ?? 'unmatched') !== 'unmatched'
                 || ($fuzzyReview !== null && (!$allowAmountDateFallback || !empty($vs)))) {
@@ -417,6 +428,7 @@ final class StatementMatcher
                 $txCurrency,
                 (int) $row['statement_id'],
                 (string) ($row['counterparty_name'] ?? ''),
+                $cardLast4,
             );
             if (($fallback['status'] ?? 'unmatched') !== 'unmatched' || !empty($fallback['requires_review'])) {
                 return $fallback;
@@ -914,13 +926,13 @@ final class StatementMatcher
      * právě jeden takový — jinak je shoda nejednoznačná a necháme unmatched (radši ručně
      * než špatně). Confidence 60 + auto_partial = příznak ke kontrole.
      */
-    private function matchPurchaseFuzzy(\PDO $pdo, int $supplierId, float $absAmount, string $cpName, string $postedAt, int $transactionId, ?string $txCurrency): array
+    private function matchPurchaseFuzzy(\PDO $pdo, int $supplierId, float $absAmount, string $cpName, string $postedAt, int $transactionId, ?string $txCurrency, ?string $cardLast4 = null): array
     {
         // Měnu nefiltrujeme v SQL — částku porovnáváme přes expectedMatch (cizoměnová
         // faktura placená kartou z CZK účtu se přepočte kurzem faktury).
         $settled = PurchaseSettledExpr::settled('pi');
         $sql = "SELECT pi.id, COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
-                       ({$settled}) AS settled_amount,
+                       ({$settled}) AS settled_amount, pi.card_last4,
                        pi.exchange_rate, c.company_name AS vendor_name, cur.code AS currency
                   FROM purchase_invoices pi
                   JOIN clients c ON c.id = pi.vendor_id
@@ -936,6 +948,9 @@ final class StatementMatcher
             $remaining = round((float) $r['amount_to_pay'] - (float) ($r['settled_amount'] ?? 0.0), 2);
             if ($remaining <= 0.005) {
                 continue;
+            }
+            if (\MyInvoice\Service\Bank\Card\CardPaymentCandidates::isOtherCard($cardLast4, $r['card_last4'] ?? null)) {
+                continue; // doklad jiné karty — koncovka přebíjí podobnost názvu
             }
             $m = $this->expectedMatch($remaining, (string) ($r['currency'] ?? self::LOCAL_CURRENCY), (float) ($r['exchange_rate'] ?: 0), $txCurrency);
             if ($m === null || abs($absAmount - $m['expected']) > $m['exact']) {
@@ -959,6 +974,92 @@ final class StatementMatcher
         ];
     }
 
+    private ?\MyInvoice\Service\Bank\Card\CardPaymentCandidates $cardCandidatesInstance = null;
+
+    private function cardCandidates(): \MyInvoice\Service\Bank\Card\CardPaymentCandidates
+    {
+        return $this->cardCandidatesInstance ??= new \MyInvoice\Service\Bank\Card\CardPaymentCandidates($this->db);
+    }
+
+    /**
+     * Pohyb kartou → přijatý doklad (účtenka, faktura) téže karty.
+     *
+     * Jediný doklad se STEJNOU koncovkou, sedící částkou a datem se spáruje
+     * automaticky. Doklad placený kartou bez koncovky je jen návrh ke kontrole, a to
+     * pouze tehdy, když si ho nemůže nárokovat pohyb jiné karty se stejnou částkou.
+     * Doklad s jinou koncovkou kandidátem není nikdy (viz CardPaymentCandidates).
+     */
+    private function matchPurchaseByCard(\PDO $pdo, int $supplierId, string $last4, float $absAmount, string $postedAt, int $transactionId, ?string $txCurrency): array
+    {
+        $cards = $this->cardCandidates();
+        $strong = [];
+        $weak = [];
+        foreach ($cards->openDocuments($supplierId, $last4, $postedAt) as $r) {
+            $remaining = round((float) $r['amount_to_pay'] - (float) ($r['settled_amount'] ?? 0.0), 2);
+            if ($remaining <= 0.005) {
+                continue;
+            }
+            $m = $this->expectedMatch($remaining, (string) ($r['currency'] ?? self::LOCAL_CURRENCY), (float) ($r['exchange_rate'] ?: 0), $txCurrency);
+            if ($m === null || abs($absAmount - $m['expected']) > $m['exact']) {
+                continue;
+            }
+            if (($r['card_last4'] ?? null) === $last4) {
+                $strong[] = $r;
+            } else {
+                $weak[] = $r;
+            }
+        }
+
+        if (count($strong) > 1) {
+            return ['status' => 'unmatched', 'reason' => 'ambiguous_card_match'];
+        }
+        if (count($strong) === 1) {
+            $pi = $strong[0];
+            // Dvě stejné platby toutéž kartou (a jeden doklad) — nehádat, který pohyb to je.
+            if ($cards->competingTransactions($supplierId, $transactionId, $last4, $absAmount, $postedAt, true) > 0) {
+                return [
+                    'status' => 'unmatched',
+                    'reason' => 'card_match_requires_review',
+                    'requires_review' => true,
+                    'purchase_invoice_id' => (int) $pi['id'],
+                    'card_last4' => $last4,
+                ];
+            }
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?")
+                    ->execute([$postedAt, $pi['id'], $supplierId]);
+                $pdo->prepare(
+                    "INSERT INTO payment_matches
+                        (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type, match_confidence)
+                     VALUES (?, ?, ?, ?, 'auto', 90)"
+                )->execute([$supplierId, $transactionId, $pi['id'], $absAmount]);
+                $pdo->prepare(
+                    "UPDATE bank_transactions SET match_status = 'auto_exact', matched_at = NOW()
+                      WHERE id = ? AND match_status = 'unmatched'"
+                )->execute([$transactionId]);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $e;
+            }
+            $this->logPaymentMatch('purchase_invoice', (int) $pi['id'], $supplierId, 'auto_exact', $absAmount, '', $transactionId);
+            return ['status' => 'auto_exact', 'purchase_invoice_id' => (int) $pi['id'], 'card_last4' => $last4];
+        }
+        if (count($weak) === 1
+            && $cards->competingTransactions($supplierId, $transactionId, $last4, $absAmount, $postedAt, false) === 0
+            && $cards->competingTransactions($supplierId, $transactionId, $last4, $absAmount, $postedAt, true) === 0) {
+            return [
+                'status' => 'unmatched',
+                'reason' => 'card_match_requires_review',
+                'requires_review' => true,
+                'purchase_invoice_id' => (int) $weak[0]['id'],
+                'card_last4' => $last4,
+            ];
+        }
+        return ['status' => 'unmatched', 'reason' => $weak === [] ? 'no_card_match' : 'ambiguous_card_match'];
+    }
+
     /** Okno ±N dní kolem data platby pro shodu dle částky+data (zrcadlí BankStatementAction). */
     private const AMOUNT_DATE_DAY_WINDOW = 14;
 
@@ -977,6 +1078,7 @@ final class StatementMatcher
         ?string $txCurrency,
         int $statementId,
         string $counterpartyName,
+        ?string $cardLast4 = null,
     ): array {
         if ($txCurrency === null || trim($txCurrency) === '') {
             return ['status' => 'unmatched', 'reason' => 'amount_date_currency_unknown'];
@@ -1017,7 +1119,7 @@ final class StatementMatcher
 
             $win = self::AMOUNT_DATE_DAY_WINDOW;
             $stmt = $pdo->prepare(
-                "SELECT pi.id, pi.status, pi.paid_at, pi.payment_method,
+                "SELECT pi.id, pi.status, pi.paid_at, pi.payment_method, pi.card_last4,
                         COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                         ({$settled}) AS settled_amount,
                         cur.code AS currency, c.company_name AS vendor_name
@@ -1039,6 +1141,9 @@ final class StatementMatcher
                 if (strtoupper((string) $candidate['currency']) !== $currency) {
                     continue;
                 }
+                if (\MyInvoice\Service\Bank\Card\CardPaymentCandidates::isOtherCard($cardLast4, $candidate['card_last4'] ?? null)) {
+                    continue;
+                }
                 $settledAmount = round((float) $candidate['settled_amount'], 2);
                 if (abs($settledAmount) >= 0.005) {
                     continue;
@@ -1058,6 +1163,13 @@ final class StatementMatcher
             }
 
             $pi = $matches[0];
+            // Doklad placený kartou bez koncovky si může nárokovat i pohyb jiné karty
+            // se stejnou částkou — v tu chvíli by shoda jen podle částky párovala křížem.
+            if ($cardLast4 !== null && ($pi['card_last4'] ?? null) === null
+                && $this->cardCandidates()->competingTransactions($supplierId, $transactionId, $cardLast4, $absAmount, $postedAt, false) > 0) {
+                $pdo->rollBack();
+                return ['status' => 'unmatched', 'reason' => 'ambiguous_amount_date_match'];
+            }
             $alreadyPaid = (string) $pi['status'] === 'paid';
             if ($alreadyPaid && (
                 (string) ($pi['paid_at'] ?? '') !== $postedAt

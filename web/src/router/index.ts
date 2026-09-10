@@ -161,6 +161,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'automation-cockpit': ['accounting'],
   'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'], 'admin-codebooks': ['settings.company'], 'admin-bank-rule-templates': ['bank.rules'], 'admin-approvals': ['invoices.approval'], 'admin-support': ['profile'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
+  'payment-cards': ['settings.bank_accounts'], 'payment-card-new': ['settings.bank_accounts', 'write'], 'payment-card-detail': ['settings.bank_accounts'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
   'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': ['reports'], 'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
   'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],

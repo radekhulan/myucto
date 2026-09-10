@@ -18,6 +18,8 @@ final class MatchSuggestionService
         'ambiguous_vs_purchase', 'no_fuzzy_match', 'ambiguous_fuzzy_match',
         'fuzzy_match_requires_review', 'no_amount_date_match', 'ambiguous_amount_date_match',
         'amount_date_requires_review', 'already_paid_verify',
+        // Párování plateb kartou (koncovka + částka + datum).
+        'no_card_match', 'ambiguous_card_match', 'card_match_requires_review',
     ];
 
     public function __construct(

@@ -239,6 +239,9 @@ function candidateReject() {
       <td class="px-3 py-2 text-xs">
         <div class="font-mono text-neutral-600">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
         <div v-if="tx.counterparty_name" class="text-neutral-600">{{ tx.counterparty_name }}</div>
+        <div v-if="tx.card_last4" class="text-neutral-600" data-test="tx-card">
+          {{ t('payment_cards.tx_card', { last4: tx.card_last4 }) }}<template v-if="tx.card"> · {{ tx.card.holder || tx.card.label }}</template>
+        </div>
         <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
       </td>
@@ -364,6 +367,9 @@ function candidateReject() {
     <div class="text-xs">
       <div class="font-mono text-neutral-600 truncate">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
       <div v-if="tx.counterparty_name" class="text-neutral-600 truncate">{{ tx.counterparty_name }}</div>
+      <div v-if="tx.card_last4" class="text-neutral-600 truncate">
+        {{ t('payment_cards.tx_card', { last4: tx.card_last4 }) }}<template v-if="tx.card"> · {{ tx.card.holder || tx.card.label }}</template>
+      </div>
       <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
         <div v-if="tx.description" class="text-neutral-500 truncate">{{ tx.description }}</div>
     </div>

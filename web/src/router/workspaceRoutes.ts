@@ -284,6 +284,10 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // (reorg menu, audit 2026-07): Firma/Globální nastavení jsou rozdělené a Dodavatelé
       // patří jako samostatný bod pod Globální nastavení.
       { path: 'admin/suppliers',        name: 'admin-suppliers', component: () => import('@/pages/admin/SuppliersPage.vue'), meta: {  } },
+      // Firma → Platební karty: evidence karet (jen koncovka) + platby kartou bez dokladu.
+      { path: 'payment-cards',           name: 'payment-cards',       component: () => import('@/pages/company/PaymentCardsPage.vue'),  meta: { requiresSupplier: true } },
+      { path: 'payment-cards/new',       name: 'payment-card-new',    component: () => import('@/pages/company/PaymentCardDetail.vue'), meta: { requiresSupplier: true } },
+      { path: 'payment-cards/:id(\\d+)', name: 'payment-card-detail', component: () => import('@/pages/company/PaymentCardDetail.vue'), meta: { requiresSupplier: true } },
       {
         path: 'admin/codebooks',
         name: 'admin-codebooks',

@@ -65,6 +65,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/accounting(?:\/|$)|^\/utilities(?:\/|$)/, '88_Ucetni_nastroje'],
   [/^\/tax-evidence(?:\/|$)/, '90_Danova_evidence'],
   [/^\/admin\/suppliers(?:\/|$)/, '91_Multi_supplier'],
+  [/^\/payment-cards(?:\/|$)/, '92a_Platebni_karty'],
   [/^\/admin\/databox(?:\/|$)/, '93_Datova_schranka'],
   [/^\/admin\/isds-gateway(?:\/|$)/, '94_Odesilaci_brana_ISDS'],
   [/^\/isds-gateway\/callback(?:\/|$)/, '94_Odesilaci_brana_ISDS'],

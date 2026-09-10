@@ -67,6 +67,10 @@ export interface BankTransaction {
   counterparty_account: string | null
   counterparty_bank: string | null
   counterparty_name: string | null
+  /** Poslední čtyři číslice platební karty (celé číslo aplikace nezná). */
+  card_last4?: string | null
+  /** Karta firmy podle koncovky a data pohybu — jen v detailu výpisu. */
+  card?: import('./paymentCards').PaymentCardSummary | null
   description: string | null
   bank_ref: string | null
   matched_invoice_id: number | null

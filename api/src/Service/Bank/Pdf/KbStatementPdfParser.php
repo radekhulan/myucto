@@ -292,6 +292,29 @@ final class KbStatementPdfParser implements BankStatementPdfParserInterface
             }
         }
 
+        // Karetní platba: sloupec „Číslo a typ karty" nese maskované číslo, řádek pod ním
+        // („Obchodní místo") obchodníka. Protiúčet karta nemá, takže jméno protistrany
+        // výše nevzniklo — doplníme ho z obchodního místa.
+        $cardLast4 = null;
+        $cardIdx = null;
+        for ($i = $idx; $i < $n; $i++) {
+            $last4 = \MyInvoice\Service\Bank\Card\CardNumberMask::last4FromText($slice[$i]);
+            if ($last4 !== null) {
+                $cardLast4 = $last4;
+                $cardIdx = $i;
+                break;
+            }
+        }
+        if ($cardIdx !== null && $counterpartyName === null) {
+            for ($i = $cardIdx + 1; $i < $n; $i++) {
+                $cand = trim((string) preg_replace('/' . self::MONEY . '/u', '', $slice[$i]));
+                if ($cand !== '' && preg_match('/\p{L}/u', $cand)) {
+                    $counterpartyName = $cand;
+                    break;
+                }
+            }
+        }
+
         // Popis: typ + zbývající poznámkové řádky (bez protiúčtu, symbolů a částky).
         $descParts = [];
         if ($type !== '') $descParts[] = $type;
@@ -306,7 +329,7 @@ final class KbStatementPdfParser implements BankStatementPdfParserInterface
         }
         $description = $descParts !== [] ? mb_substr(implode(' | ', $descParts), 0, 255) : null;
 
-        return [
+        $row = [
             'posted_at'            => $postingDate,
             'amount'               => round($amount, 2),
             'variable_symbol'      => $vs,
@@ -318,6 +341,10 @@ final class KbStatementPdfParser implements BankStatementPdfParserInterface
             'description'          => $description,
             'bank_ref'             => null,
         ];
+        if ($cardLast4 !== null) {
+            $row['card_last4'] = $cardLast4;
+        }
+        return $row;
     }
 
     /** „1 234,56" / „-9 999,00" → float (mezery/NBSP oddělovač tisíců, čárka desetinná). */

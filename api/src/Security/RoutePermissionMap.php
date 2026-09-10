@@ -630,6 +630,13 @@ final class RoutePermissionMap
         ['POST', '#^/api/catalog/exports$#', 'eshop', AccessLevel::READ],
         ['GET', '#^/api/catalog/exports/[0-9]+/download$#', 'eshop', AccessLevel::READ],
         ['*', '#^/api/eshop(/|$)#', 'eshop.write', AccessLevel::WRITE],
+        // Platby kartou bez dokladu jsou bankovní data; nahrání účtenky zakládá přijatý doklad.
+        ['GET', '#^/api/payment-cards/unmatched-payments$#', 'bank', AccessLevel::READ],
+        ['POST', '#^/api/payment-cards/unmatched-payments/[0-9]+/receipt$#', 'purchase_invoices.scan', AccessLevel::WRITE],
+        ['POST', '#^/api/payment-cards/unmatched-payments/[0-9]+/rematch$#', 'bank.match', AccessLevel::WRITE],
+        // Evidence karet patří k nastavení bankovních účtů firmy.
+        ['GET', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::READ],
+        ['*', '#^/api/payment-cards(/|$)#', 'settings.bank_accounts', AccessLevel::WRITE],
         ['POST', '#^/api/logbook/.*/import#', 'logbook.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/logbook(/|$)#', 'logbook.delete', AccessLevel::WRITE],
         ['GET', '#^/api/logbook(/|$)#', 'logbook', AccessLevel::READ],

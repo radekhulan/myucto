@@ -46,8 +46,15 @@ final class MatchCandidateProvider
         $rows = $incoming
             ? $this->issuedPool($supplierId, $posted)
             : $this->purchasePool($supplierId, $posted);
+        $txCard = isset($tx['card_last4']) && \MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) $tx['card_last4'])
+            ? (string) $tx['card_last4']
+            : null;
         $base = [];
         foreach ($rows as $row) {
+            // Doklad placený JINOU kartou není kandidát ani pro návrh (viz StatementMatcher).
+            if (!$incoming && \MyInvoice\Service\Bank\Card\CardPaymentCandidates::isOtherCard($txCard, $row['card_last4'] ?? null)) {
+                continue;
+            }
             $candidate = $this->singleCandidate($tx, $row, $amount, $currency, $posted, $accountMap, $incoming);
             if ($candidate !== null) $base[] = $candidate;
         }
@@ -101,7 +108,7 @@ final class MatchCandidateProvider
                     p.amount_to_pay,
                     (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
                     p.document_kind AS invoice_type, p.status, p.exchange_rate,
-                    p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party
+                    p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4
                FROM purchase_invoices p
                JOIN currencies cur ON cur.id = p.currency_id
                JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id

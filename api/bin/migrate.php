@@ -283,6 +283,14 @@ function runAutoBackfills(\PDO $db, string $binDir): void
                           ) THEN 0 ELSE 1 END",
             'script'  => 'backfill-oss-rates.php',
         ],
+        [
+            // Koncovka karty u pohybů importovaných před migrací 1799 — rozhoduje PHP
+            // (CardNumberMask), ne SQL, viz CardLast4Backfill.
+            'name'    => 'card-last4',
+            'reason'  => 'bankovních pohybů s maskovaným číslem karty bez koncovky',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Bank\Card\CardLast4Backfill($db))->pending(),
+            'script'  => 'backfill-card-last4.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";

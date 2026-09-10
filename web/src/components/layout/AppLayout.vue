@@ -719,6 +719,7 @@ const navSections = computed<NavSection[]>(() => {
       { to: '/admin/integrations?tab=ai',   label: t('nav.ai_settings'),     icon: ICONS.ai },
       { to: '/admin/branding',              label: t('nav.branding'),        icon: ICONS.branding },
       { to: '/admin/codebooks?scope=company', label: t('nav.codebooks'),     icon: ICONS.codebooks, permission: 'settings.company' as PermissionKey },
+      { to: '/payment-cards',               label: t('payment_cards.nav'),   icon: ICONS.coin, permission: 'settings.bank_accounts' as PermissionKey },
       { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
       { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
       { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },

@@ -224,6 +224,15 @@ final class GpcParser
         $merged = $existing === '' ? $info : ($existing . ' | ' . $info);
         $tx['description'] = mb_substr($merged, 0, 255);
 
+        // Koncovka karty z maskovaného čísla („PK: 000000******1234") do vlastního
+        // sloupce — párování plateb kartou na ní stojí. Celé číslo GPC nenese.
+        if (empty($tx['card_last4'])) {
+            $last4 = \MyInvoice\Service\Bank\Card\CardNumberMask::last4FromText($info);
+            if ($last4 !== null) {
+                $tx['card_last4'] = $last4;
+            }
+        }
+
         // counterparty_name: jen pokud chybí. Vezmi část před "PK:" (maskované č. karty),
         // jinak celý text. Tím u karet doplníme obchodníka (název před " PK:").
         if (empty($tx['counterparty_name'])) {
@@ -232,7 +241,7 @@ final class GpcParser
             if ($pkPos !== false) {
                 $name = substr($name, 0, $pkPos);
             }
-            $name = trim($name);
+            $name = trim(\MyInvoice\Service\Bank\Card\CardNumberMask::stripMasked($name));
             if ($name !== '') {
                 $tx['counterparty_name'] = mb_substr($name, 0, 190);
             }

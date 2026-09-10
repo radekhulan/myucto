@@ -144,6 +144,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 
 91. [Více dodavatelů](91_Multi_supplier.md)
 92. [Nastavení](92_Nastaveni.md)
+92a. [Platební karty](92a_Platebni_karty.md)
 93. [Datová schránka](93_Datova_schranka.md)
 94. [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md)
 95. [Elektronické podpisy](95_Elektronicke_podpisy.md)

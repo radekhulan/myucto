@@ -623,8 +623,8 @@ final class BankEmailNoticeRepository
         $pdo->prepare(
             'INSERT INTO bank_transactions
                 (source, source_ref, statement_id, posted_at, amount, balance, currency, variable_symbol, constant_symbol,
-                 counterparty_account, counterparty_bank, counterparty_name, description, bank_ref, match_tolerance)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                 counterparty_account, counterparty_bank, counterparty_name, card_last4, description, bank_ref, match_tolerance)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             'email_notice',
             $transactionSourceRef,
@@ -642,6 +642,7 @@ final class BankEmailNoticeRepository
             $notice->counterpartyAccount,
             $notice->counterpartyBank,
             $notice->counterpartyName,
+            \MyInvoice\Service\Bank\Card\CardNumberMask::last4FromText($notice->counterpartyName, $notice->message),
             $notice->message,
             $notice->bankRef,
             $tolerance,

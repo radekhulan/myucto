@@ -2969,6 +2969,18 @@ final class Routes
         $app->put   ('/api/logbook/cars/{id:[0-9]+}',     [\MyInvoice\Action\Logbook\CarsAction::class, 'update']);
         $app->delete('/api/logbook/cars/{id:[0-9]+}',     [\MyInvoice\Action\Logbook\CarsAction::class, 'delete']);
 
+        // Platební karty firmy + platby kartou bez dokladu. Specifické cesty PŘED /{id}.
+        $app->get   ('/api/payment-cards',                                          [\MyInvoice\Action\Bank\PaymentCardAction::class, 'list']);
+        $app->post  ('/api/payment-cards',                                          [\MyInvoice\Action\Bank\PaymentCardAction::class, 'create']);
+        $app->get   ('/api/payment-cards/holders',                                  [\MyInvoice\Action\Bank\PaymentCardAction::class, 'holders']);
+        $app->get   ('/api/payment-cards/unmatched-payments',                       [\MyInvoice\Action\Bank\CardPaymentOverviewAction::class, 'list']);
+        $app->post  ('/api/payment-cards/unmatched-payments/{id:[0-9]+}/receipt',   [\MyInvoice\Action\Bank\CardPaymentOverviewAction::class, 'uploadReceipt']);
+        $app->post  ('/api/payment-cards/unmatched-payments/{id:[0-9]+}/rematch',   [\MyInvoice\Action\Bank\CardPaymentOverviewAction::class, 'rematch']);
+        $app->get   ('/api/payment-cards/{id:[0-9]+}',                              [\MyInvoice\Action\Bank\PaymentCardAction::class, 'get']);
+        $app->put   ('/api/payment-cards/{id:[0-9]+}',                              [\MyInvoice\Action\Bank\PaymentCardAction::class, 'update']);
+        $app->post  ('/api/payment-cards/{id:[0-9]+}/archive',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'archive']);
+        $app->post  ('/api/payment-cards/{id:[0-9]+}/restore',                      [\MyInvoice\Action\Bank\PaymentCardAction::class, 'restore']);
+
         $app->get   ('/api/logbook/trip-categories',              [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'list']);
         $app->post  ('/api/logbook/trip-categories',              [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'create']);
         $app->put   ('/api/logbook/trip-categories/{id:[0-9]+}',  [\MyInvoice\Action\Logbook\TripCategoriesAction::class, 'update']);

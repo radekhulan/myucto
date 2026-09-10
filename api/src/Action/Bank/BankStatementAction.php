@@ -1603,8 +1603,11 @@ final class BankStatementAction
 
         // Automatizace: stav zaúčtování per transakce (jen double_entry, §3.7 #6).
         $postingByTx = $this->loadPostingInfo($sid, $txIds);
+        // Platba kartou → karta firmy a její držitel (podle koncovky a data pohybu).
+        $cardByTx = (new \MyInvoice\Repository\PaymentCardRepository($this->db))->resolveForTransactions($sid, $transactions);
 
         foreach ($transactions as &$t) {
+            $t['card'] = $cardByTx[(int) $t['id']] ?? null;
             $t['id'] = (int) $t['id'];
             $t['amount'] = (float) $t['amount'];
             $t['balance'] = isset($t['balance']) ? (float) $t['balance'] : null;

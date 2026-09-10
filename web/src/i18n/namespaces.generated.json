@@ -15,6 +15,7 @@
     "license",
     "nav",
     "passkeys",
+    "payment_cards",
     "search",
     "session_lock",
     "status",

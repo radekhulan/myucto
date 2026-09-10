@@ -262,6 +262,7 @@ final class CreditasStatementPdfParser implements BankStatementPdfParserInterfac
         $account = null;
         $bankCode = null;
         $vs = null; $ks = null; $ss = null;
+        $cardLast4 = null;
         $texts = [];
 
         for (; $idx < $n; $idx++) {
@@ -288,6 +289,7 @@ final class CreditasStatementPdfParser implements BankStatementPdfParserInterfac
 
                 // Maskovaná platební karta, volitelně + obchodník na stejné buňce.
                 if (preg_match('/^(\d{6}\*{6}\d{4})\s*(.*)$/u', $cell, $cm)) {
+                    $cardLast4 = substr($cm[1], -4);
                     if (trim($cm[2]) !== '') $texts[] = trim($cm[2]);
                     continue;
                 }
@@ -321,7 +323,7 @@ final class CreditasStatementPdfParser implements BankStatementPdfParserInterfac
         $counterpartyName = $texts[0] ?? null;
         $description = count($texts) > 1 ? mb_substr(implode(' | ', array_slice($texts, 1)), 0, 255) : null;
 
-        return [
+        $row = [
             'posted_at'            => $postingDate,
             'amount'               => round($amount, 2),
             'variable_symbol'      => $vs,
@@ -333,6 +335,11 @@ final class CreditasStatementPdfParser implements BankStatementPdfParserInterfac
             'description'          => $description,
             'bank_ref'             => $bankRef,
         ];
+        // Klíč jen u karetního pohybu — ostatní řádky zůstávají tvarem beze změny.
+        if ($cardLast4 !== null) {
+            $row['card_last4'] = $cardLast4;
+        }
+        return $row;
     }
 
     /** "1 155,94" / "-2 107 708,37" → float (mezery/NBSP jako oddělovač tisíců, čárka desetinná). */
