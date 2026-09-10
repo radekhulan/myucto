@@ -107,6 +107,7 @@ final class FuelingsAction
         if ($ref = $this->tenantRefError($supplierId, $body)) {
             return Json::error($response, 'invalid_reference', $ref, 400);
         }
+        $this->adoptBankStatement($supplierId, $body);
         $body['source'] = 'manual';
         $id = $this->repo->create($supplierId, $body, $this->userId($request));
         $this->assignVehicle($supplierId, $id, $body, null);
@@ -128,6 +129,7 @@ final class FuelingsAction
         if ($ref = $this->tenantRefError($supplierId, $body)) {
             return Json::error($response, 'invalid_reference', $ref, 400);
         }
+        $this->adoptBankStatement($supplierId, $body);
         $this->repo->update($id, $supplierId, $body);
         // Vazby na doklad mění jen klíče, které klient poslal — ruční úprava údajů
         // tankování (bez vazeb v těle) provenienci nepřepisuje.
@@ -196,6 +198,21 @@ final class FuelingsAction
             $badRefs[] = 'source_bank_transaction_id';
         }
         return $badRefs !== [] ? TenantReferenceGuard::message($badRefs) : null;
+    }
+
+    /**
+     * Pohyb z legacy výpisu, který tenantRefError() pustil přes resolver, musí mít
+     * vlastníka zapsaného dřív, než vazbu uloží — jinak ji odmítne trigger 1801
+     * (viz FuelingRepository::adoptLegacyStatement()).
+     *
+     * @param array<string,mixed> $body
+     */
+    private function adoptBankStatement(int $supplierId, array $body): void
+    {
+        $bankTx = $this->intOrNull($body['source_bank_transaction_id'] ?? null);
+        if ($bankTx !== null) {
+            $this->repo->adoptLegacyStatement($supplierId, $bankTx);
+        }
     }
 
     /**

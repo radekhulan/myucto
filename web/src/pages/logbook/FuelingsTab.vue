@@ -96,7 +96,8 @@ const toolbarActions = computed<ActionItem[]>(() => [
     show: canWrite.value || auth.isDemo, run: newFueling },
   { key: 'import', label: t('logbook_fuel.import'), icon: 'upload', variant: 'neutral', show: canWrite.value, run: openImport },
   { key: 'invoices', label: t('logbook.from_invoices'), icon: 'doc', variant: 'neutral', show: canWrite.value, run: openInvoices },
-  { key: 'cash', label: t('logbook_fuel.from_cash'), icon: 'coin', variant: 'neutral', show: canWrite.value, run: openCash },
+  // Pokladní doklady čte jen ten, kdo smí číst pokladnu (backend to vynucuje taky).
+  { key: 'cash', label: t('logbook_fuel.from_cash'), icon: 'coin', variant: 'neutral', show: canWrite.value && auth.canRead('cash'), run: openCash },
   { key: 'export', label: t('logbook.export'), icon: 'download', tier: 'overflow', variant: 'primary',
     disabled: total.value === 0, run: openExport },
 ])

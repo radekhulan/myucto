@@ -55,6 +55,9 @@ final class FuelingFromExtraction
         } catch (\InvalidArgumentException $e) {
             return ['status' => 'invalid', 'error' => $e->getMessage()] + $base;
         }
+        if ($ref->type === 'bank_transaction') {
+            $this->fuelings->adoptLegacyStatement($supplierId, $ref->id);
+        }
 
         $vehicle = $this->vehicles->resolve($supplierId, [
             'plate'      => $f['plate'],

@@ -314,7 +314,8 @@ final class FuelingRepository
     }
 
     /**
-     * Koncovka karty a datum bankovního pohybu firmy (vlastníka určuje výpis).
+     * Koncovka karty a datum bankovního pohybu firmy (vlastníka určuje výpis přes
+     * {@see BankStatementOwnershipResolver} — stejně jako přehled plateb kartou).
      *
      * @return array{card_last4:string|null, posted_at:string}|null
      */
@@ -322,10 +323,10 @@ final class FuelingRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.card_last4, bt.posted_at FROM bank_transactions bt
-               JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
-              WHERE bt.id = ? LIMIT 1'
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql('bs') . ' LIMIT 1'
         );
-        $stmt->execute([$supplierId, $transactionId]);
+        $stmt->execute(array_merge([$transactionId], BankStatementOwnershipResolver::params($supplierId)));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
         return [
@@ -366,16 +367,42 @@ final class FuelingRepository
         return $stmt->fetchColumn() !== false;
     }
 
-    /** Patří bankovní pohyb firmě? (bank_transactions nemá supplier_id — vlastníka určuje výpis) */
+    /**
+     * Patří bankovní pohyb firmě? bank_transactions nemá supplier_id — vlastníka určuje
+     * výpis podle {@see BankStatementOwnershipResolver}, tedy i legacy výpis bez
+     * supplier_id, jehož účet jednoznačně patří této firmě.
+     */
     public function bankTransactionBelongs(int $supplierId, int $transactionId): bool
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT 1 FROM bank_transactions bt
-               JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
-              WHERE bt.id = ? LIMIT 1'
+               JOIN bank_statements bs ON bs.id = bt.statement_id
+              WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql('bs') . ' LIMIT 1'
         );
-        $stmt->execute([$supplierId, $transactionId]);
+        $stmt->execute(array_merge([$transactionId], BankStatementOwnershipResolver::params($supplierId)));
         return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Legacy výpis (bez supplier_id), který resolver jednoznačně přiřazuje této firmě,
+     * dostane supplier_id. Volá se před zápisem vazby tankování na pohyb.
+     *
+     * Proč ne v triggeru 1801: trigger kontroluje jen `bank_statements.supplier_id`.
+     * Pravidlo pro legacy výpisy (normalizace čísla účtu, striktní kód banky,
+     * jednoznačnost napříč všemi firmami) žije v resolveru a jeho kopie ve statickém
+     * SQL triggeru by se od něj časem rozešla; povolit v triggeru NULL by zase oslabilo
+     * pojistku pro všechny legacy výpisy. Zapsání vlastníka je táž jednosměrná
+     * „kolaudace", kterou pro jednoznačné výpisy udělala migrace 1136 — potom resolver
+     * i trigger rozhodují stejně.
+     */
+    public function adoptLegacyStatement(int $supplierId, int $transactionId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE bank_statements bs
+               JOIN bank_transactions bt ON bt.statement_id = bs.id
+                SET bs.supplier_id = ?
+              WHERE bt.id = ? AND bs.supplier_id IS NULL AND ' . BankStatementOwnershipResolver::sql('bs')
+        )->execute(array_merge([$supplierId, $transactionId], BankStatementOwnershipResolver::params($supplierId)));
     }
 
     private function insertSql(): string

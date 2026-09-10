@@ -113,6 +113,36 @@ final class PaymentCardTenantScopeTest extends TestCase
         self::assertArrayHasKey('user_id', $body['error']['errors'] ?? []);
     }
 
+    /**
+     * Karta s držitelem, který mezitím zmizel (smazaný zaměstnanec), musí jít uložit —
+     * dřív každé uložení vracelo 422 a kartu nešlo ani přejmenovat. Stará neplatná
+     * vazba se uvolní, jméno držitele zůstane.
+     */
+    public function testStaleHolderDoesNotBlockSavingTheCard(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payment_cards (supplier_id, label, holder_name, last4, employee_id, user_id)
+             VALUES (?, ?, 'Testovací držitel', '8642', 999999999, 999999999)"
+        )->execute([$this->supplierA, self::LABEL . ' S']);
+        $id = (int) $this->db->pdo()->lastInsertId();
+
+        [$status, $body] = $this->call(fn ($req, $res) => $this->action->update($req, $res, ['id' => $id]), $this->supplierA, [
+            'label' => self::LABEL . ' S2', 'last4' => '8642', 'holder_name' => 'Testovací držitel',
+            'employee_id' => 999999999, 'user_id' => 999999999,
+        ]);
+
+        self::assertSame(200, $status, json_encode($body) ?: '');
+        self::assertNull($body['card']['employee_id']);
+        self::assertNull($body['card']['user_id']);
+        self::assertSame('Testovací držitel', $body['card']['holder_name']);
+
+        // Nově zvolený neplatný držitel se dál odmítá.
+        [$again] = $this->call(fn ($req, $res) => $this->action->update($req, $res, ['id' => $id]), $this->supplierA, [
+            'label' => self::LABEL . ' S3', 'last4' => '8642', 'employee_id' => 999999998,
+        ]);
+        self::assertSame(422, $again);
+    }
+
     public function testCardOfOtherCompanyIsInvisible(): void
     {
         [$status, $body] = $this->call(fn ($req, $res) => $this->action->create($req, $res), $this->supplierA, [

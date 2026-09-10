@@ -101,6 +101,32 @@ final class CashFuelingServiceTest extends TestCase
         self::assertSame(0, $this->fuelingCount($this->supplierB));
     }
 
+    /**
+     * Strop 500 dokladů byl v SQL PŘED filtrem „jen nevytěžené" — po 500 novějších
+     * vytěžených dokladech backfill hlásil nulu a starší doklad nevytěžil nikdy.
+     */
+    public function testBackfillReachesOlderDocumentBehindManyProcessedOnes(): void
+    {
+        $older = $this->cashDocument($this->supplierA, 'Nafta 30 l', 1100.00, ['issue_date' => '2098-01-10']);
+        $this->processedFuelDocuments(501);
+
+        $r = $this->service->backfill($this->supplierA, null, 25);
+
+        self::assertSame(1, $r['processed']);
+        self::assertSame(1, $r['created']);
+        self::assertSame(1, $this->fuelingsOf($older));
+    }
+
+    /** Totéž u automatiky: zpětně datovaný doklad za 500 novějšími tankováními. */
+    public function testAutomaticFuelingOfBackdatedDocumentBehindManyNewerOnes(): void
+    {
+        $this->processedFuelDocuments(501);
+        $older = $this->cashDocument($this->supplierA, 'Nafta 30 l', 1100.00, ['issue_date' => '2098-01-10']);
+
+        self::assertNotNull($this->service->autoFromCashDocument($this->supplierA, $older, null));
+        self::assertSame(1, $this->fuelingsOf($older));
+    }
+
     public function testVatDeductionMismatchWithVehiclePolicyIsWarned(): void
     {
         $this->pdo->prepare("UPDATE cars SET usage_mode = 'mixed', vat_deduction_mode = 'proportional', vat_deduction_percent = 60 WHERE id = ?")
@@ -115,6 +141,26 @@ final class CashFuelingServiceTest extends TestCase
         self::assertSame(1, $w['totals']['vat_mismatches']);
         self::assertSame('over', $w['cars'][0]['vat_mismatches'][0]['direction']);
         self::assertSame(1, $w['totals']['missing'], 'Doklad bez tachometru → chybějící stav.');
+    }
+
+    private function fuelingsOf(int $cashDocumentId): int
+    {
+        $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM fuelings WHERE supplier_id = ? AND source_cash_document_id = ?');
+        $stmt->execute([$this->supplierA, $cashDocumentId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** Novější tankovací pokladní doklady, které už mají tankování. */
+    private function processedFuelDocuments(int $count): void
+    {
+        $insert = $this->pdo->prepare(
+            "INSERT INTO fuelings (supplier_id, fueled_date, amount_with_vat, source, source_cash_document_id)
+             VALUES (?, '2099-03-05', 1000, 'cash', ?)"
+        );
+        for ($i = 0; $i < $count; $i++) {
+            $doc = $this->cashDocument($this->supplierA, 'Nafta 20 l', 1000.00);
+            $insert->execute([$this->supplierA, $doc]);
+        }
     }
 
     /** @return array<string,mixed> */

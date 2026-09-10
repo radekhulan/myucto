@@ -78,11 +78,13 @@ final class PaymentCardAction
     {
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->cards->find($supplierId, $id) === null) {
+        $existing = $this->cards->find($supplierId, $id);
+        if ($existing === null) {
             return Json::error($response, 'not_found', 'Platební karta nenalezena.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $input = PaymentCardInput::normalize($body);
+        $input['data'] = $this->releaseStaleHolder($supplierId, $input['data'], $existing);
         $error = $this->validate($response, $supplierId, $input, $id);
         if ($error !== null) {
             return $error;
@@ -151,6 +153,29 @@ final class PaymentCardAction
                 'Ve stejném období už platí karta se stejnou koncovkou (' . $conflict['label'] . '). Upravte platnost od–do.', 409);
         }
         return null;
+    }
+
+    /**
+     * Držitel, který mezitím zmizel (smazaný zaměstnanec, uživatel odebraný z firmy),
+     * nesmí zablokovat uložení karty. Vazbu, kterou karta UŽ MĚLA a která už neplatí,
+     * uvolníme — jméno držitele zůstává v holder_name. Nově zvolený neplatný držitel
+     * dál končí chybou ve validate().
+     *
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $existing
+     * @return array<string,mixed>
+     */
+    private function releaseStaleHolder(int $supplierId, array $data, array $existing): array
+    {
+        if ($data['employee_id'] !== null && $data['employee_id'] === $existing['employee_id']
+            && !$this->cards->employeeBelongs($supplierId, (int) $data['employee_id'])) {
+            $data['employee_id'] = null;
+        }
+        if ($data['user_id'] !== null && $data['user_id'] === $existing['user_id']
+            && !$this->cards->userBelongs($supplierId, (int) $data['user_id'])) {
+            $data['user_id'] = null;
+        }
+        return $data;
     }
 
     private function userId(Request $request): ?int

@@ -191,7 +191,57 @@ final class StatementMatcherCardPaymentTest extends TestCase
         self::assertSame('received', $this->purchaseStatus($doc));
     }
 
+    /**
+     * Souběh: pohyb mezitím spároval jiný běh (tady ručně). Větev kartou dřív
+     * označila doklad jako zaplacený a vložila párování, i když podmíněný UPDATE
+     * pohybu nezměnil nic — tatáž platba pak visela na dvou dokladech.
+     */
+    public function testCardBranchDoesNotPayDocumentOfTransactionMatchedMeanwhile(): void
+    {
+        $doc = $this->seedPurchase(410.00, '2093-06-14', '4321');
+        $tx = $this->seedTransaction($this->seedStatement(), -410.00, self::DAY, '4321');
+        $this->markManual($tx);
+
+        $res = $this->callBranch('matchPurchaseByCard', [$this->db->pdo(), $this->supplierId, '4321', 410.00, self::DAY, $tx, 'CZK']);
+
+        self::assertSame('unmatched', $res['status'] ?? null);
+        self::assertSame('received', $this->purchaseStatus($doc));
+        self::assertSame(0, $this->matchCount($tx));
+    }
+
+    /** Totéž pro párování podle VS — konzistentně se všemi větvemi, které vkládají párování. */
+    public function testVsBranchDoesNotPayDocumentOfTransactionMatchedMeanwhile(): void
+    {
+        $doc = $this->seedPurchase(420.00, '2093-06-14', null);
+        $tx = $this->seedTransaction($this->seedStatement(), -420.00, self::DAY, '4321');
+        $this->markManual($tx);
+
+        $res = $this->callBranch('matchPurchase', [$this->db->pdo(), $this->supplierId, 'C2093' . $this->docSeq, 420.00, self::DAY, $tx, 'CZK']);
+
+        self::assertSame('unmatched', $res['status'] ?? null);
+        self::assertSame('received', $this->purchaseStatus($doc));
+        self::assertSame(0, $this->matchCount($tx));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private function markManual(int $txId): void
+    {
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET match_status = 'manual' WHERE id = ?")->execute([$txId]);
+    }
+
+    /**
+     * Větev párování volaná napřímo — přes match() by ji guard na uložený stav
+     * vůbec nepustil, a právě mezeru mezi čtením stavu a zápisem test simuluje.
+     *
+     * @param list<mixed> $args
+     * @return array<string,mixed>
+     */
+    private function callBranch(string $method, array $args): array
+    {
+        $ref = new \ReflectionMethod(StatementMatcher::class, $method);
+        return (array) $ref->invokeArgs($this->matcher, $args);
+    }
 
     private function cleanup(): void
     {

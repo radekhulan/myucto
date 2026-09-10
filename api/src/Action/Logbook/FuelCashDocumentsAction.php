@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\CarRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Logbook\CashFuelingService;
@@ -31,6 +33,7 @@ final class FuelCashDocumentsAction
 
     public function list(Request $request, Response $response): Response
     {
+        if ($denied = $this->denyWithoutCash($request, $response)) return $denied;
         $supplierId = SupplierGuard::currentId($request);
         $q = $request->getQueryParams();
         $filters = [];
@@ -45,6 +48,7 @@ final class FuelCashDocumentsAction
 
     public function assign(Request $request, Response $response, array $args): Response
     {
+        if ($denied = $this->denyWithoutCash($request, $response)) return $denied;
         $supplierId = SupplierGuard::currentId($request);
         $docId = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
@@ -62,12 +66,27 @@ final class FuelCashDocumentsAction
 
     public function backfill(Request $request, Response $response): Response
     {
+        if ($denied = $this->denyWithoutCash($request, $response)) return $denied;
         $supplierId = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);
         $limit = isset($body['limit']) ? max(1, min(100, (int) $body['limit'])) : 25;
         $report = $this->service->backfill($supplierId, $this->userId($request), $limit);
         $this->log($request, 'fuel_cash_documents.backfill', 0, $report);
         return Json::ok($response, $report);
+    }
+
+    /**
+     * RoutePermissionMap pouští /api/logbook/* s právem knihy jízd. Tady se ale čtou
+     * a vytěžují POKLADNÍ doklady (číslo, partner, popis, částka), takže je navíc
+     * potřeba čtení pokladny — jinak by kniha jízd byla obchvat kolem práva `cash`.
+     */
+    private function denyWithoutCash(Request $request, Response $response): ?Response
+    {
+        if (RequestAuthorization::allows($request, 'cash', AccessLevel::READ)) {
+            return null;
+        }
+        return Json::error($response, 'forbidden_permission',
+            'Tankování z pokladních dokladů vyžaduje právo číst pokladnu.', 403);
     }
 
     private function userId(Request $request): ?int

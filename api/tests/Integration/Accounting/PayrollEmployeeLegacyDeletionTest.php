@@ -247,6 +247,7 @@ final class PayrollEmployeeLegacyDeletionTest extends TestCase
         $known = array_merge(
             PayrollEmployeeDeletionRepository::moduleTables(),
             PayrollEmployeeDeletionRepository::legacyAgendaTables(),
+            array_keys(PayrollEmployeeDeletionRepository::detachedReferences()),
         );
 
         self::assertSame(
@@ -255,6 +256,51 @@ final class PayrollEmployeeLegacyDeletionTest extends TestCase
             'Tabulka s cizím klíčem na payroll_employees chybí v registru — '
             . 'stará agenda by ji smazala naslepo nebo spadla na FK.',
         );
+    }
+
+    // ── Vozidlo a karta osobu jen jmenují ────────────────────────────────────
+
+    /**
+     * Bez úklidu zůstala karta s id smazaného zaměstnance a každé její uložení
+     * vracelo 422 „Zaměstnanec nepatří této firmě". Vozidlo i karta zůstávají,
+     * vynuluje se jen odkaz na osobu.
+     */
+    public function testLegacyDeletionDetachesVehicleDriverAndCardHolder(): void
+    {
+        $employeeId = $this->employee('Řidič S Kartou');
+        [$carId, $cardId] = $this->vehicleAndCardOf($employeeId);
+
+        self::assertSame(200, $this->delete($employeeId)->getStatusCode());
+
+        $this->assertDetached($carId, $cardId);
+    }
+
+    public function testModuleDeletionDetachesVehicleDriverAndCardHolder(): void
+    {
+        $employeeId = $this->employee('Řidič V Modulu');
+        $this->insertProfile($employeeId);
+        $this->moduleState('active');
+        [$carId, $cardId] = $this->vehicleAndCardOf($employeeId);
+
+        self::assertSame(200, $this->delete($employeeId)->getStatusCode());
+
+        $this->assertDetached($carId, $cardId);
+    }
+
+    public function testBlockedDeletionKeepsVehicleDriverAndCardHolder(): void
+    {
+        $employeeId = $this->employee('Řidič Se Mzdou');
+        $this->insertLegacyMonthlyRecord($employeeId);
+        [$carId, $cardId] = $this->vehicleAndCardOf($employeeId);
+
+        self::assertSame(409, $this->delete($employeeId)->getStatusCode());
+
+        $row = $this->db->pdo()->query(
+            "SELECT c.driver_employee_id AS driver, pc.employee_id AS holder
+               FROM cars c, payment_cards pc WHERE c.id = {$carId} AND pc.id = {$cardId}"
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertSame($employeeId, (int) $row['driver']);
+        self::assertSame($employeeId, (int) $row['holder']);
     }
 
     // ── Auditní stopa ────────────────────────────────────────────────────────
@@ -503,6 +549,32 @@ final class PayrollEmployeeLegacyDeletionTest extends TestCase
             str_repeat('3', 64),
             "legacy-document-{$employeeId}",
         ]);
+    }
+
+    /** @return array{0:int, 1:int} id vozidla a karty, jejichž držitelem je osoba */
+    private function vehicleAndCardOf(int $employeeId): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO cars (supplier_id, registration, driver_employee_id) VALUES (?, ?, ?)')
+            ->execute([$this->supplierId, '9ZZ ' . $employeeId, $employeeId]);
+        $carId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payment_cards (supplier_id, label, holder_name, last4, employee_id)
+             VALUES (?, 'Testovací karta', 'Testovací držitel', '4242', ?)"
+        )->execute([$this->supplierId, $employeeId]);
+
+        return [$carId, (int) $pdo->lastInsertId()];
+    }
+
+    private function assertDetached(int $carId, int $cardId): void
+    {
+        $car = $this->db->pdo()->query("SELECT driver_employee_id FROM cars WHERE id = {$carId}")->fetch(PDO::FETCH_ASSOC);
+        $card = $this->db->pdo()->query("SELECT employee_id, holder_name FROM payment_cards WHERE id = {$cardId}")->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($car, 'Vozidlo smazáním řidiče nezmizí.');
+        self::assertIsArray($card, 'Karta smazáním držitele nezmizí.');
+        self::assertNull($car['driver_employee_id']);
+        self::assertNull($card['employee_id']);
+        self::assertSame('Testovací držitel', $card['holder_name']);
     }
 
     private function rowCount(string $table, string $column, mixed $value): int

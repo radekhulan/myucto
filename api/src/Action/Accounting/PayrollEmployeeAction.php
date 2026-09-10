@@ -270,12 +270,32 @@ final class PayrollEmployeeAction
             );
         }
 
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT legacy_employee_delete');
+        }
         try {
+            // Vozidlo a karta osobu jen jmenují — zůstanou, odkaz se vynuluje.
+            $this->moduleDeletion->detachReferences($supplierId, $id);
             $this->employees->delete($supplierId, $id);
-        } catch (\PDOException $e) {
+            if ($ownsTransaction) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT legacy_employee_delete');
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+            } elseif ($pdo->inTransaction()) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT legacy_employee_delete');
+                $pdo->exec('RELEASE SAVEPOINT legacy_employee_delete');
+            }
             // FK RESTRICT z tabulky, kterou tahle větev nezná. Bez odchycení by
             // uživatel dostal 500 se syrovou databázovou hláškou.
-            if ($e->getCode() !== '23000') {
+            if (!$e instanceof \PDOException || $e->getCode() !== '23000') {
                 throw $e;
             }
             return Json::error(

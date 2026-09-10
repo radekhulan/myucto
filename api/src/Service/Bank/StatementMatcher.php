@@ -831,6 +831,10 @@ final class StatementMatcher
             }
             $pdo->beginTransaction();
             try {
+                if (!$this->claimTransaction($pdo, $transactionId)) {
+                    $pdo->rollBack();
+                    return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+                }
                 $pdo->prepare(
                     "UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?"
                 )->execute([$postedAt, $pi['id']]);
@@ -872,6 +876,10 @@ final class StatementMatcher
             // Párování je (tx, PF) jedinečné → existující řádek jen aktualizujeme.
             $pdo->beginTransaction();
             try {
+                if (!$this->claimTransaction($pdo, $transactionId)) {
+                    $pdo->rollBack();
+                    return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+                }
                 $existing = $pdo->prepare(
                     'SELECT id FROM payment_matches
                       WHERE supplier_id = ? AND bank_transaction_id = ? AND purchase_invoice_id = ?
@@ -974,6 +982,27 @@ final class StatementMatcher
         ];
     }
 
+    /** Stavy pohybu, ze kterých ho automatické párování smí (znovu) spárovat — viz doMatch(). */
+    private const FREE_STATUSES = ['unmatched', 'auto_partial'];
+
+    /**
+     * Zamkne pohyb a ověří, že ho mezitím nespároval jiný běh (souběžné párování,
+     * ruční spárování). Volá se uvnitř transakce PŘED úhradou dokladu a zápisem do
+     * payment_matches — podmíněný UPDATE pohybu na konci by souběh poznal až ve chvíli,
+     * kdy už bylo párování vložené a doklad označený jako zaplacený.
+     *
+     * @param list<string> $free stavy, ze kterých smí tahle větev párovat
+     */
+    private function claimTransaction(\PDO $pdo, int $transactionId, array $free = self::FREE_STATUSES): bool
+    {
+        // SQLite (jednotkové testy) FOR UPDATE nezná; zápisy v transakci serializuje sám.
+        $lock = $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : '';
+        $stmt = $pdo->prepare('SELECT match_status FROM bank_transactions WHERE id = ?' . $lock);
+        $stmt->execute([$transactionId]);
+        $status = $stmt->fetchColumn();
+        return $status !== false && in_array((string) $status, $free, true);
+    }
+
     private ?\MyInvoice\Service\Bank\Card\CardPaymentCandidates $cardCandidatesInstance = null;
 
     private function cardCandidates(): \MyInvoice\Service\Bank\Card\CardPaymentCandidates
@@ -1027,6 +1056,10 @@ final class StatementMatcher
             }
             $pdo->beginTransaction();
             try {
+                if (!$this->claimTransaction($pdo, $transactionId, ['unmatched'])) {
+                    $pdo->rollBack();
+                    return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+                }
                 $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ? AND supplier_id = ?")
                     ->execute([$postedAt, $pi['id'], $supplierId]);
                 $pdo->prepare(
@@ -1261,6 +1294,10 @@ final class StatementMatcher
         $credit = $matches[0];
         $pdo->beginTransaction();
         try {
+            if (!$this->claimTransaction($pdo, $transactionId)) {
+                $pdo->rollBack();
+                return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+            }
             $pdo->prepare("UPDATE invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
                 ->execute([$postedAt, $credit['id']]);
             $pdo->prepare(
@@ -1324,6 +1361,10 @@ final class StatementMatcher
         $credit = $matches[0];
         $pdo->beginTransaction();
         try {
+            if (!$this->claimTransaction($pdo, $transactionId)) {
+                $pdo->rollBack();
+                return ['status' => 'unmatched', 'reason' => 'transaction_not_free'];
+            }
             $pdo->prepare("UPDATE purchase_invoices SET status='paid', paid_at=? WHERE id=? AND status<>'paid'")
                 ->execute([$postedAt, $credit['id']]);
             $pdo->prepare(

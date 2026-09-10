@@ -12,6 +12,8 @@ use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentLinkRepository;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentTagRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Support\Pagination;
@@ -110,7 +112,7 @@ final class DocumentsAction
             return Json::error($response, 'not_found', 'Dokument nenalezen.', 404);
         }
         $doc['tags']        = $this->tags->tagsForDocument($id);
-        $doc['links']       = $this->links->linksForDocument($id, $sid);
+        $doc['links']       = $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request));
         $doc['attachments'] = $this->documents->listChildren($id, $sid, $viewer);
         $doc['breadcrumb']  = $this->breadcrumb($sid, $doc['folder_id']);
         if ($doc['doc_type'] === 'zfo') {
@@ -276,7 +278,7 @@ final class DocumentsAction
             return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
         }
         $this->links->attach($sid, $id, $type, $eid);
-        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid)]);
+        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request))]);
     }
 
     /** DELETE /api/documents/{id}/links {entity_type, entity_id} */
@@ -292,7 +294,18 @@ final class DocumentsAction
         $type = (string) ($body['entity_type'] ?? $q['entity_type'] ?? '');
         $eid = (int) ($body['entity_id'] ?? $q['entity_id'] ?? 0);
         $this->links->detach($sid, $id, $type, $eid);
-        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid)]);
+        return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request))]);
+    }
+
+    /**
+     * Popisek vazby na pokladní doklad nese číslo, partnera a částku — bez práva
+     * číst pokladnu zůstane jen „#id" (stejné pravidlo jako našeptávač vazeb).
+     *
+     * @return list<string>
+     */
+    private static function redactedLinkTypes(Request $request): array
+    {
+        return RequestAuthorization::allows($request, 'cash', AccessLevel::READ) ? [] : ['cash_document'];
     }
 
     /** GET /api/documents/trash */

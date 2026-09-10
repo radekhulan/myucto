@@ -26,6 +26,29 @@ final class CardNumberMaskTest extends TestCase
         yield 'bez masky' => ['Platba VS 12341234', null];
         yield 'X uvnitř slova' => ['TAXXXX1234', null];
         yield 'málo maskovacích znaků' => ['karta **1234', null];
+        yield 'maskovaný IBAN' => ['Příchozí platba CZ** **** **** **** **** 1234', null];
+        yield 'IBAN s kontrolními číslicemi' => ['Protiúčet CZ65 0800 **** **** **** 1234', null];
+        yield 'IBAN bez mezer' => ['CZ6508000000000000001234', null];
+        yield 'maskovaný účet s kódem banky' => ['Převod z účtu ******1234/0100', null];
+        yield 'maskovaný účet s předčíslím' => ['Převod 19-******1234/0800', null];
+        yield 'karta vedle IBANu' => ['CZ** **** **** **** **** 1234 PK: 000000******5678', '5678'];
+    }
+
+    /**
+     * Bankovní API nese u každého pohybu maskovaný IBAN / číslo účtu. Dřív jeho
+     * konec prošel vzorem karty, všechny pohyby účtu dostaly falešnou koncovku
+     * a párování kartou pak vyřadilo správné doklady jako „jiná karta".
+     */
+    public function testMaskedAccountInApiMetadataIsNotACard(): void
+    {
+        self::assertNull(CardNumberMask::last4FromStructured([
+            'ownAccount' => ['iban' => 'CZ** **** **** **** **** 1234'],
+            'counterParty' => ['accountNumber' => '******9876', 'name' => 'Dodavatel s.r.o.'],
+        ]));
+        self::assertSame('4242', CardNumberMask::last4FromStructured([
+            'iban' => 'CZ** **** **** **** **** 1234',
+            'account' => ['cardInfo' => ['maskedPan' => '123456******4242']],
+        ]));
     }
 
     #[DataProvider('maskedTexts')]

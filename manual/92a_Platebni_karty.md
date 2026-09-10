@@ -25,6 +25,9 @@ Pole Název, Jméno držitele a Poznámka celé číslo karty odmítnou.
 
 Držitel se zobrazuje u bankovních pohybů a v přehledu plateb bez dokladu.
 Pokud vyberete zaměstnance nebo uživatele, musí patřit do stejné firmy.
+Smažete-li zaměstnance, karta zůstane a vazba na něj se zruší; jméno držitele
+zůstává. Totéž platí pro vozidlo, jehož byl řidičem. Kartu, jejíž uložený
+držitel už do firmy nepatří, jde dál upravovat — vazba se při uložení uvolní.
 
 ### Platnost a archivace
 
@@ -43,6 +46,8 @@ Při importu výpisu se z maskovaného čísla karty (například `PK: 000000***
 uloží koncovka k pohybu. Funguje to pro GPC výpisy (doplňující řádky 078/079),
 PDF výpisy CREDITAS a KB, bankovní API a e-mailová avíza, pokud maskované číslo
 obsahují. Jméno obchodníka se u karetních plateb doplní do protistrany.
+Maskovaný IBAN nebo číslo účtu (`CZ** **** … 1234`, `******1234/0100`) se za
+kartu nepovažuje.
 
 V detailu výpisu se u platby kartou zobrazí koncovka, a je-li karta
 v evidenci, i její držitel nebo název.

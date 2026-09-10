@@ -14,8 +14,14 @@ final class DocumentLinkRepository
 
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<array{entity_type:string,entity_id:int,label:string}> Vazby dokumentu s popiskem entity. */
-    public function linksForDocument(int $documentId, int $supplierId): array
+    /**
+     * Vazby dokumentu s popiskem entity.
+     *
+     * @param list<string> $redactedTypes typy, jejichž popisek volající nesmí vidět
+     *        (chybí mu právo na agendu) — vazba zůstane, popisek bude jen „#id"
+     * @return list<array{entity_type:string,entity_id:int,label:string}>
+     */
+    public function linksForDocument(int $documentId, int $supplierId, array $redactedTypes = []): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT entity_type, entity_id FROM document_links
@@ -25,7 +31,10 @@ final class DocumentLinkRepository
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         // Popisky dávkově — jeden dotaz na typ entity místo N+1 (labelFor per řádek).
-        $labels = $this->labelsForBatch($rows, $supplierId);
+        $labels = $this->labelsForBatch(
+            array_values(array_filter($rows, static fn (array $r): bool => !in_array((string) $r['entity_type'], $redactedTypes, true))),
+            $supplierId,
+        );
 
         $out = [];
         foreach ($rows as $r) {

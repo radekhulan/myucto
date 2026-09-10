@@ -214,6 +214,21 @@ final class PayrollEmployeeDeletionRepository
     private const LEGACY_AGENDA_TABLES = ['payroll_monthly_records'];
 
     /**
+     * Odkazy mimo mzdovou agendu, které osobu jen JMENUJÍ: vozidlo, jemuž je řidičem,
+     * a platební karta, kterou drží. Nejsou to data osoby ani důkaz pohybu — vozidlo
+     * i karta patří firmě a zůstávají, smazáním osoby se jen vynuluje odkaz (jméno
+     * držitele karty dál nese `payment_cards.holder_name`). Obě cesty mazání (modul
+     * Mzdy i starší agenda) jdou přes {@see self::detachReferences()}, takže nový
+     * takový odkaz stačí zapsat sem.
+     *
+     * @var array<string,string> tabulka => sloupec s id zaměstnance
+     */
+    private const DETACH = [
+        'cars' => 'driver_employee_id',
+        'payment_cards' => 'employee_id',
+    ];
+
+    /**
      * Pohyby vázané na konkrétní VZTAH. Rozhodnutí je hlásí rekurzí (aby hláška
      * jmenovala vztah), atomická podmínka mazání je ale musí obsahovat taky —
      * jinak by souběh skončil syrovou FK chybou místo srozumitelné věty.
@@ -375,6 +390,30 @@ final class PayrollEmployeeDeletionRepository
     }
 
     /**
+     * Odkazy, které smazání osoby jen vynuluje — protějšek {@see self::moduleTables()}
+     * pro schématový test.
+     *
+     * @return array<string,string> tabulka => sloupec s id zaměstnance
+     */
+    public static function detachedReferences(): array
+    {
+        return self::DETACH;
+    }
+
+    /**
+     * Vynuluje odkazy na osobu z {@see self::DETACH}. Volá se uvnitř transakce
+     * mazání — kdyby mazání selhalo, odkazy se vrátí s ním.
+     */
+    public function detachReferences(int $supplierId, int $employeeId): void
+    {
+        foreach (self::DETACH as $table => $column) {
+            $this->db->pdo()->prepare(
+                "UPDATE {$table} SET {$column} = NULL WHERE supplier_id = ? AND {$column} = ?"
+            )->execute([$supplierId, $employeeId]);
+        }
+    }
+
+    /**
      * @return array<string,int> počty smazané evidence pro audit a potvrzení
      */
     public function delete(
@@ -456,6 +495,8 @@ final class PayrollEmployeeDeletionRepository
             );
             $stmt->execute([$supplierId, $employeeId]);
         }
+
+        $this->detachReferences($supplierId, $employeeId);
 
         $guard = $this->db->pdo()->prepare(self::guardedDeleteSql());
         $guard->execute([$supplierId, $employeeId]);

@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use PDO;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -100,7 +102,8 @@ final class LinkSearchAction
             }
         }
 
-        if (in_array('cash_document', $types, true)) {
+        // Pokladní doklady jen s právem číst pokladnu — samotné `documents` nestačí.
+        if (in_array('cash_document', $types, true) && RequestAuthorization::allows($request, 'cash', AccessLevel::READ)) {
             foreach ($this->searchCashDocuments($q, $sid) as $r) {
                 $who = (string) ($r['partner_name'] ?: $r['description'] ?: '');
                 $results[] = [

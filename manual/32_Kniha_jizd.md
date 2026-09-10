@@ -184,6 +184,8 @@ Tlačítko **Z pokladny** ukáže všechny takové doklady s odznakem **Nová** 
 a kliknout **Rozpoznat**, resp. **Přiřadit** pro změnu vozidla u již vytvořeného
 tankování. **Vytěžit historii** zpracuje dosud nezpracované doklady. Jeden pokladní
 doklad dá vždy nejvýš jedno tankování — opakované vytěžení jen doplní chybějící údaje.
+Tlačítko **Z pokladny** vidí jen uživatel, který smí číst pokladnu; samotné právo
+na knihu jízd na pokladní doklady nestačí.
 
 ### 32.3.5 Import tankování z CSV / XLSX
 

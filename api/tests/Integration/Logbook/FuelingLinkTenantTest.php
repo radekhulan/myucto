@@ -72,6 +72,69 @@ final class FuelingLinkTenantTest extends TestCase
         self::assertNotNull($ok['body']['source_bank_statement_id']);
     }
 
+    /**
+     * Pohyb z legacy výpisu (bez supplier_id), jehož účet jednoznačně patří firmě,
+     * vidí přehled plateb kartou (resolver). Vazba k tankování ho dřív odmítla
+     * s 400, protože kniha jízd brala vlastníka jen z bs.supplier_id.
+     */
+    public function testBankTransactionFromLegacyStatementCanBeLinked(): void
+    {
+        $account = $this->unusedAccountNumber();
+        $this->pdo->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number)
+             VALUES (?, 'CZK', 'Legacy účet', 'Kč', 'Koruna', 'Koruna', 2, 1, 0, ?)"
+        )->execute([$this->supplierA, $account]);
+        $this->pdo->prepare(
+            "INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, currency, statement_date)
+             VALUES (NULL, 'legacy.gpc', ?, ?, 'CZK', '2099-03-05')"
+        )->execute([hash('sha256', uniqid('legacy', true)), $account]);
+        $statement = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, description)
+             VALUES (?, '2099-03-05', -800, 'CZK', 'Platba kartou')"
+        )->execute([$statement]);
+        $tx = (int) $this->pdo->lastInsertId();
+        $action = $this->container->get(FuelingsAction::class);
+        $body = ['fueled_date' => '2099-03-05', 'amount_with_vat' => 800, 'car_id' => $this->carA];
+
+        $ok = $this->call($action, 'create', 'POST', $body + ['source_bank_transaction_id' => $tx]);
+
+        self::assertSame(201, $ok['status'], json_encode($ok['body']) ?: '');
+        self::assertSame($tx, $ok['body']['source_bank_transaction_id']);
+        self::assertSame($this->supplierA, (int) $this->pdo->query("SELECT supplier_id FROM bank_statements WHERE id = {$statement}")->fetchColumn());
+
+        // Cizí firma ten pohyb dál nenaváže.
+        $this->expectException(\PDOException::class);
+        $this->pdo->prepare('INSERT INTO fuelings (supplier_id, fueled_date, amount_with_vat, source_bank_transaction_id) VALUES (?, ?, 1, ?)')
+            ->execute([$this->supplierB, '2099-03-05', $tx]);
+    }
+
+    /** Syntetické číslo účtu, které projde mod-11 a v DB ho nemá žádná firma. */
+    private function unusedAccountNumber(): string
+    {
+        $weights = [6, 3, 7, 9, 10, 5, 8, 4, 2, 1];
+        $exists = $this->pdo->prepare(
+            "SELECT 1 FROM currencies WHERE TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', '')) = ?
+             UNION SELECT 1 FROM bank_statements WHERE TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', '')) = ?
+             LIMIT 1"
+        );
+        for ($n = 1000000013; $n < 1000100000; $n++) {
+            $digits = str_split((string) $n);
+            $sum = 0;
+            foreach ($digits as $i => $d) {
+                $sum += (int) $d * $weights[$i];
+            }
+            if ($sum % 11 !== 0) {
+                continue;
+            }
+            $exists->execute([(string) $n, (string) $n]);
+            if ($exists->fetchColumn() === false) {
+                return (string) $n;
+            }
+        }
+        self::fail('Nenašlo se volné testovací číslo účtu.');
+    }
+
     public function testUpdateChangesOnlySentLinks(): void
     {
         $doc = $this->cashDocument($this->supplierA, 'Nafta', 1000.00);
