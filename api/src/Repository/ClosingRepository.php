@@ -827,6 +827,12 @@ final class ClosingRepository
      * s prepared-statement placeholdery uvnitř CTE odkazovaného přes LEFT JOIN
      * vrací tiše NULL místo joinnutých hodnot (ověřeno reprodukcí při vývoji).
      *
+     * Výkon: MariaDB materializuje CTE zvlášť za KAŽDÝ odkaz (ověřeno na EXPLAIN —
+     * neplatí tu „spočítá se jednou"). Proto se `bank_credit` čte jen z jediného
+     * místa: mapa transakce → doklad se staví napřed v `bank_target` (dvě disjunktní
+     * větve) a teprve ta se joinuje na `bank_credit`. Nový odkaz na `bank_credit`
+     * nebo `booked` = další plný průchod deníkem.
+     *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
     public function paidInvoicesOpenSaldo(int $supplierId, string $asOf): array
@@ -863,16 +869,24 @@ final class ClosingRepository
                   FROM invoice_payments ip
                  WHERE ip.supplier_id = ? AND ip.bank_transaction_id IS NOT NULL
                  GROUP BY ip.bank_transaction_id
-            ), settled_bank AS (
-                -- Úhrada proformy se musí započítat FINÁLNÍ faktuře, ne proformě.
-                -- Proforma sama nemá předpis na 311 (nezakládá pohledávku), takže by
+            ), bank_target AS (
+                -- Mapa bankovní transakce → cílový doklad a podíl úhrady (num/den).
+                -- Postavená PŘED sáhnutím na `bank_credit`, aby se deník pro 311
+                -- procházel jen jednou: MariaDB materializuje CTE zvlášť za KAŽDÝ
+                -- odkaz, takže dřívější dvojice settled_bank + settled_bank_matched
+                -- znamenala dva plné průchody týchž řádků.
+                --
+                -- Větev 1 — úhrada s vazbou invoice_payments; rozpad poměrem
+                -- ip.amount / total_alloc, když na jedné transakci visí víc dokladů.
+                -- Úhrada proformy se musí započítat FINÁLNÍ faktuře, ne proformě:
+                -- proforma sama nemá předpis na 311 (nezakládá pohledávku), takže by
                 -- ji `JOIN booked` zahodilo a konečná faktura by svítila jako
                 -- neuhrazená, přestože je zaplacená předem.
-                SELECT COALESCE(ch.id, ip.invoice_id) AS invoice_id,
-                       SUM(bc.net_credit * ip.amount / NULLIF(a.total_alloc, 0)) AS settled
+                SELECT ip.bank_transaction_id,
+                       COALESCE(ch.id, ip.invoice_id) AS invoice_id,
+                       ip.amount AS num, a.total_alloc AS den
                   FROM invoice_payments ip
                   JOIN alloc a       ON a.bank_transaction_id = ip.bank_transaction_id
-                  JOIN bank_credit bc ON bc.bank_transaction_id = ip.bank_transaction_id
                   LEFT JOIN invoices pf ON pf.id = ip.invoice_id
                                        AND pf.supplier_id = ip.supplier_id
                                        AND pf.invoice_type = 'proforma'
@@ -881,20 +895,28 @@ final class ClosingRepository
                                        AND ch.invoice_type <> 'proforma'
                                        AND ch.cancelled_at IS NULL
                  WHERE ip.supplier_id = ?
-                 GROUP BY COALESCE(ch.id, ip.invoice_id)
-            ), settled_bank_matched AS (
-                -- Úhrady spárované jen přes bank_transactions.matched_invoice_id (bez
-                -- invoice_payments vazby) — legacy import / ruční match cizoměnové platby
-                -- (např. CZK faktura placená z EUR účtu). Bez tohohle by reálně vypořádaná
-                -- faktura (311 v deníku nulové) svítila jako otevřená. Bereme jen banky
-                -- nepokryté v `alloc`, ať se úhrada nezapočítá dvakrát.
-                SELECT bt.matched_invoice_id AS invoice_id,
-                       SUM(bc.net_credit) AS settled
-                  FROM bank_credit bc
-                  JOIN bank_transactions bt ON bt.id = bc.bank_transaction_id
+                UNION ALL
+                -- Větev 2 — úhrady spárované jen přes bank_transactions.matched_invoice_id
+                -- (bez invoice_payments vazby) — legacy import / ruční match cizoměnové
+                -- platby (např. CZK faktura placená z EUR účtu). Bez tohohle by reálně
+                -- vypořádaná faktura (311 v deníku nulové) svítila jako otevřená. Bereme
+                -- jen banky nepokryté v `alloc`, ať se úhrada nezapočítá dvakrát — obě
+                -- větve jsou tím pádem DISJUNKTNÍ a smí se sečíst jedním SUM.
+                -- num/den NULL = bere se celá částka, žádný rozpad.
+                SELECT bt.id, bt.matched_invoice_id, NULL, NULL
+                  FROM bank_transactions bt
                  WHERE bt.matched_invoice_id IS NOT NULL
-                   AND bc.bank_transaction_id NOT IN (SELECT bank_transaction_id FROM alloc)
-                 GROUP BY bt.matched_invoice_id
+                   AND bt.id NOT IN (SELECT bank_transaction_id FROM alloc)
+            ), settled_bank AS (
+                -- Pořadí operací v rozpadu (net_credit * num / den) je schválně shodné
+                -- s původním zápisem — DECIMAL dělení zaokrouhluje, takže přeskupení
+                -- na net_credit * (num / den) by hnulo posledním desetinným místem.
+                SELECT t.invoice_id,
+                       SUM(CASE WHEN t.den IS NULL THEN bc.net_credit
+                                ELSE bc.net_credit * t.num / NULLIF(t.den, 0) END) AS settled
+                  FROM bank_target t
+                  JOIN bank_credit bc ON bc.bank_transaction_id = t.bank_transaction_id
+                 GROUP BY t.invoice_id
             ), settled_cash AS (
                 SELECT COALESCE(cd.invoice_id, ip.invoice_id) AS invoice_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.amount ELSE -l.amount END) AS settled
@@ -940,12 +962,11 @@ final class ClosingRepository
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
                             THEN i.parent_invoice_id ELSE i.id END AS group_id,
                        b.booked,
-                       COALESCE(sb.settled, 0) + COALESCE(sbm.settled, 0) + COALESCE(sc.settled, 0)
+                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
                          + COALESCE(so.settled, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
-                  LEFT JOIN settled_bank_matched sbm ON sbm.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
             ), grp AS (
@@ -974,7 +995,7 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // booked
             $supplierId, $asOf, $asOf,          // bank_credit
             $supplierId,                        // alloc
-            $supplierId,                        // settled_bank
+            $supplierId,                        // bank_target
             $supplierId, $asOf, $asOf,          // settled_cash
             $supplierId, $asOf, $asOf,          // settled_offset
             $supplierId,                        // doc
@@ -1130,7 +1151,25 @@ final class ClosingRepository
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = adv.id
                   LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = adv.id
                  WHERE pi.supplier_id = ?
-                   AND NOT EXISTS (SELECT 1 FROM booked ba WHERE ba.purchase_invoice_id = adv.id)
+                   -- Tentýž guard jako `NOT EXISTS (SELECT 1 FROM booked …)`, ale bez
+                   -- odkazu na CTE: MariaDB materializuje CTE zvlášť za každý odkaz, a
+                   -- `booked` je plný průchod deníkem. Korelovaně na jedno source_id to
+                   -- je bodový dotaz přes idx_je_supplier_source. Podmínky musí zůstat
+                   -- SHODNÉ s `booked` — jinak se guard rozejde s předpisem, na který
+                   -- se ptá (GROUP BY tam vrací řádek právě tehdy, když sem něco padne).
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM journal_entries ea
+                         JOIN journal_entry_lines la ON la.entry_id = ea.id AND la.supplier_id = ea.supplier_id
+                         JOIN chart_of_accounts caa ON caa.id = la.account_id
+                         LEFT JOIN chart_of_accounts paa ON paa.id = caa.parent_id
+                         LEFT JOIN journal_entries reva ON reva.id = ea.reversed_by
+                        WHERE ea.supplier_id = ? AND ea.source_type = 'purchase_invoice'
+                          AND ea.source_id = adv.id
+                          AND ea.posted_at IS NOT NULL AND ea.entry_date <= ?
+                          AND (ea.reversed_by IS NULL OR reva.entry_date > ?)
+                          AND (caa.account_code LIKE '321%' OR COALESCE(paa.account_code, '') LIKE '321%')
+                   )
             ), doc AS (
                 -- Doklad = předpis + jeho vlastní peněžní vyrovnání. Dobropis se přiřadí
                 -- ke skupině svého RODIČE: opravný doklad nese na 321 opačné znaménko,
@@ -1187,7 +1226,7 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // agreement_debit
             $supplierId,                        // agreement_alloc
             $supplierId,                        // settled_agreement
-            $supplierId,                        // settled_advance
+            $supplierId, $supplierId, $asOf, $asOf, // settled_advance (+ guard nad deníkem)
             $supplierId,                        // doc
             $supplierId, $asOf,                 // final SELECT
         ]);
