@@ -74,6 +74,7 @@
     "markdown_editor",
     "mcp_server_page",
     "mfa_setup",
+    "money_s3",
     "monthly_report",
     "oss_rates",
     "payment_method",
@@ -163,6 +164,7 @@
       "markdown_editor",
       "mcp_server_page",
       "mfa_setup",
+      "money_s3",
       "monthly_report",
       "oss_rates",
       "payment_method",
@@ -372,6 +374,10 @@
       "export",
       "imports",
       "purchase_invoice"
+    ],
+    "imports-money-s3": [
+      "imports",
+      "money_s3"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",

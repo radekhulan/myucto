@@ -59,6 +59,16 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
             : { path: '/purchase-invoices/export' }
         },
       },
+      // Průvodce „Přechod z Money S3" — převod celé účetní agendy ze zálohy Money.
+      // Bez requiresDoubleEntry: firmu v daňové evidenci převod sám přepne.
+      {
+        path: 'imports/money-s3', name: 'imports-money-s3',
+        component: () => import('@/pages/imports/MoneyS3Migration.vue'), meta: { requiresSupplier: true },
+        beforeEnter: () => {
+          const auth = useAuthStore()
+          return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
+        },
+      },
       { path: 'purchase-invoices/payment-orders',  name: 'purchase-invoices-payment-orders', component: () => import('@/pages/purchase-invoices/PaymentOrders.vue') },
       // AI import přijaté faktury (§12b) — extrakční flow vytažený z admin Integrations
       // (?tab=ai zůstává jen nastavení brány). Oprávnění purchase_invoices.scan zrcadlí

@@ -2337,6 +2337,13 @@ final class Routes
         // a mazat tisíce dokladů po jednom nejde.
         $app->post   ('/api/admin/import/batches/{batch:[A-Za-z0-9]{4,32}}/delete',
             \MyInvoice\Action\Admin\Import\DeleteImportBatchAction::class);
+        // Průvodce „Přechod z Money S3" — záloha agendy, náhled, zkouška nanečisto, převod, protokoly.
+        $app->post   ('/api/admin/imports/money-s3/uploads', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'upload']);
+        $app->get    ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'show']);
+        $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/reports', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'attachReport']);
+        $app->post   ('/api/admin/imports/money-s3/uploads/{token:[a-f0-9]{16}}/start', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'start']);
+        $app->get    ('/api/admin/imports/money-s3/runs', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'runs']);
+        $app->get    ('/api/admin/imports/money-s3/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MoneyS3MigrationAction::class, 'run']);
 
         // Kompletní export dat firmy (H-14) — DB + PDF doklady + přílohy do jednoho
         // archivu s manifestem a kontrolními součty. Běží na pozadí

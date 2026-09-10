@@ -450,6 +450,8 @@ const navSections = computed<NavSection[]>(() => {
         // Export/Import přijatých (reorg UX 2026-07, vytažené z Nástrojů).
         { to: '/purchase-invoices/export',   label: t('nav.export'),             icon: ICONS.exports },
         { to: '/purchase-invoices/import', label: t('nav.import'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' },
+        // Převod celé agendy z Money S3 — i pro firmu v daňové evidenci (převod ji přepne).
+        { to: '/imports/money-s3', label: t('nav.money_s3_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' },
         // Majetek patří logicky k nákupu — pořizuje se přijatou fakturou. Zůstává
         // ale účetní funkcí (odpisy, 042/02x), takže se ukazuje jen firmám s aktivním
         // účetnictvím; stejná podmínka jako u sekce Účetnictví níž.

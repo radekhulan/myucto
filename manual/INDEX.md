@@ -130,6 +130,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 81. [Účtový rozvrh](81_Ucetni_osnova.md)
 82. [Zápočty](82_Zapocty.md)
 83. [Aktivace a doúčtování](83_Aktivace_ucetnictvi.md)
+83a. [Přechod z Money S3](83a_Prechod_z_Money_S3.md)
 84. [Inventarizace účtů](84_Inventarizace_rozvahovych_uctu.md)
 85. [Peněžní toky a změny vlastního kapitálu](85_Vykazy_podle_paragrafu_18.md)
 86. [Spojené osoby](86_Propojene_osoby.md)

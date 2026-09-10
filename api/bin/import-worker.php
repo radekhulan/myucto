@@ -98,6 +98,8 @@ try {
         $container->get(AccountingSetupAnalysisService::class)->run($jobId);
     } elseif ($source === 'accounting_history_reclassification') {
         $container->get(AccountingHistoryReclassificationService::class)->run($jobId);
+    } elseif ($source === 'money_s3_import') {
+        $container->get(\MyInvoice\Service\Migration\MoneyS3\MoneyS3ImportJobService::class)->run($jobId);
     } elseif ($source === 'scan_attach') {
         $container->get(\MyInvoice\Service\Document\ScanAttach\ScanAttachJobService::class)->run($jobId);
     } else {

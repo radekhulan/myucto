@@ -88,6 +88,8 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'purchase-invoice-new': ['purchase_invoices.create', 'write'], 'purchase-invoice-detail': ['purchase_invoices'], 'purchase-invoice-edit': ['purchase_invoices', 'write'],
   // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup, viz AppLayout.vue.
   'purchase-invoices-export': ['purchase_invoices'], 'purchase-invoices-import': ['purchase_invoices'],
+  // Přechod z Money S3 — stejné právo jako BE MoneyS3MigrationAction (utilities.import, zápis).
+  'imports-money-s3': ['utilities.import', 'write'],
   // AI import jede na purchase_invoices.scan (write) — stejný klíč kontroluje BE
   // AiExtractPdfAction; readonly/client roli položka nesvítí a route ji nepustí.
   'purchase-invoice-ai-import': ['purchase_invoices.scan', 'write'],

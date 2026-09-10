@@ -724,6 +724,10 @@ final class RoutePermissionMap
         ['GET',    '#^/api/admin/imports/[0-9]+/report$#', 'utilities.import', AccessLevel::READ],
         ['POST',   '#^/api/admin/imports/[0-9]+/cancel$#', 'utilities.import', AccessLevel::WRITE],
         ['DELETE', '#^/api/admin/imports/[0-9]+$#', 'utilities.import', AccessLevel::WRITE],
+        // Průvodce „Přechod z Money S3" (MoneyS3MigrationAction) — stejné oprávnění jako
+        // ostatní importy; převod zapisuje deník, proto nahrání i spuštění chce WRITE.
+        ['POST',   '#^/api/admin/imports/money-s3/uploads(/[a-f0-9]+/(reports|start))?$#', 'utilities.import', AccessLevel::WRITE],
+        ['GET',    '#^/api/admin/imports/money-s3/(uploads/[a-f0-9]+|runs(/[0-9]+)?)$#', 'utilities.import', AccessLevel::READ],
         // Credentials importních integrací — {Idoklad,Fakturoid}CredentialsAction hlídají
         // WRITE i u `status` (odpověď prozrazuje, že je integrace nastavená).
         ['*', '#^/api/admin/imports/(idoklad|fakturoid)/credentials$#', 'utilities.import', AccessLevel::WRITE],
