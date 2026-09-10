@@ -147,6 +147,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
+  'stock-opening-import': ['stock.documents.write', 'write'],
   'stock-sales-orders': ['stock'], 'stock-sales-order-new': ['stock.orders.write', 'write'], 'stock-sales-order-detail': ['stock'],
   'stock-fulfillment': ['stock'],
   'stock-purchase-orders': ['stock'], 'stock-purchase-order-new': ['stock.orders.write', 'write'], 'stock-purchase-order-detail': ['stock'],

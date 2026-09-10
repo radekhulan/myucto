@@ -13,6 +13,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Eshop\Import\CatalogImportProfile;
 use MyInvoice\Service\Eshop\Import\CatalogImportProfileStore;
+use MyInvoice\Service\Eshop\Import\CatalogImportPresets;
 use MyInvoice\Service\Eshop\Import\CatalogImportReader;
 use MyInvoice\Service\Eshop\Import\CatalogImportService;
 use MyInvoice\Service\Eshop\Import\CatalogImportSourceStore;
@@ -29,6 +30,7 @@ final class CatalogImportAction
         private readonly Connection $db,
         private readonly CatalogImportSourceStore $sources,
         private readonly CatalogImportProfileStore $profiles,
+        private readonly CatalogImportPresets $presets,
         private readonly CatalogImportReader $reader,
         private readonly CatalogImportService $imports,
     ) {}
@@ -69,7 +71,10 @@ final class CatalogImportAction
 
     public function profiles(Request $request, Response $response): Response
     {
-        return $this->run($request, $response, fn (int $sid): array => ['items' => $this->profiles->list($sid)]);
+        return $this->run($request, $response, fn (int $sid): array => [
+            'items' => $this->profiles->list($sid),
+            'presets' => $this->presets->all(),
+        ]);
     }
 
     public function saveProfile(Request $request, Response $response, array $args = []): Response

@@ -104,6 +104,7 @@ final class ArchiveService
         'stock_levels'                => 'warehouse_id, stock_item_id',
         'stock_documents'             => 'id',
         'stock_document_lines'        => 'id',
+        'external_entity_map'         => 'id',
         'stock_tracking_allocations'  => 'id',
         'stock_cycle_counts'          => 'id',
         'stock_cycle_count_lines'     => 'id',
@@ -410,7 +411,9 @@ final class ArchiveService
             foreach (self::STOCK_TABLES as $table => $keyCols) {
                 $hasId = $keyCols === 'id';
                 $specs[$table] = [
-                    'where' => 'supplier_id = ?',
+                    'where' => $table === 'external_entity_map'
+                        ? "supplier_id = ? AND connection_id IS NULL AND entity_type = 'stock_opening_line'"
+                        : 'supplier_id = ?',
                     'params' => [$supplierId],
                     'pk' => $hasId ? 'id' : null,
                     'order' => $keyCols,

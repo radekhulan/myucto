@@ -57,6 +57,21 @@ final class VatLedgerService
     ) {}
 
     /**
+     * Identita zdrojového dokladu v kanonickém VAT ledgeru.
+     *
+     * `source` zůstává účetním směrem sale/purchase i pro pokladnu. `document_kind`
+     * proto odděluje samostatný pokladní doklad od faktury se stejným číselným ID.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function documentIdentity(array $row): string
+    {
+        return (string) ($row['source'] ?? '')
+            . ':' . (string) ($row['document_kind'] ?? '')
+            . ':' . (string) ($row['invoice_id'] ?? '0');
+    }
+
+    /**
      * @return list<array<string,mixed>> kanonické řádky (sale i purchase) za období
      */
     public function rows(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
@@ -1003,7 +1018,7 @@ final class VatLedgerService
     /**
      * Daňová pojistka (issue #238): non-CZK řádek bez zafixovaného kurzu se ve
      * VatLedgeru dopočítá náhradním kurzem 1.0 → cizoměnový základ by se tiše vykázal
-     * jako CZK. Vrací DISTINCT doklady (per zdroj+faktura) bez kurzu — akce si je při
+     * jako CZK. Vrací DISTINCT doklady podle documentIdentity bez kurzu; akce si je při
      * stažení doplní z ČNB (MissingExchangeRateFiller), náhled je jen vypíše jako varování.
      *
      * @param list<array<string,mixed>> $rows kanonické řádky z rows()
@@ -1016,7 +1031,7 @@ final class VatLedgerService
             if (empty($r['exchange_rate_missing'])) {
                 continue;
             }
-            $key = (string) ($r['source'] ?? '') . ':' . (string) ($r['invoice_id'] ?? '0');
+            $key = self::documentIdentity($r);
             if (isset($out[$key])) {
                 continue;
             }

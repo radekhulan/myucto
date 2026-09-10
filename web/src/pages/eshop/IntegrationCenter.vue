@@ -37,6 +37,10 @@ const statusClass: Record<IntegrationStatus, string> = {
   paused: 'bg-warning-50 text-warning-700', error: 'bg-danger-50 text-danger-700',
 }
 
+function asObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+}
+
 function applySelected(connection: IntegrationConnection | null) {
   webhookSecret.value = null
   diagnostics.value = null
@@ -46,13 +50,15 @@ function applySelected(connection: IntegrationConnection | null) {
     ownershipJson.value = '{}'
     return
   }
+  const mappings = asObject(connection.mappings)
+  const ownership = asObject(connection.field_ownership) as ConnectionInput['field_ownership']
   form.value = {
     connector_key: connection.connector_key, name: connection.name, status: connection.status,
-    mappings: connection.mappings, field_ownership: connection.field_ownership,
+    mappings, field_ownership: ownership,
     rate_limit_per_minute: connection.rate_limit_per_minute, retention_days: connection.retention_days,
   }
-  mappingsJson.value = JSON.stringify(connection.mappings, null, 2)
-  ownershipJson.value = JSON.stringify(connection.field_ownership, null, 2)
+  mappingsJson.value = JSON.stringify(mappings, null, 2)
+  ownershipJson.value = JSON.stringify(ownership, null, 2)
   void loadDiagnostics(connection.id)
 }
 
@@ -155,7 +161,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
     <EmptyState v-else-if="connections.length === 0 && !creating" boxed accent="accent" icon="link" :title="t('eshop.integrations.empty_title')" :message="t('eshop.integrations.empty_hint')" :cta="canWrite ? t('eshop.integrations.new') : undefined" @action="startCreate" />
     <div v-else class="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(15rem,20rem)_minmax(0,1fr)]">
       <nav class="space-y-2" :aria-label="t('eshop.integrations.connections')">
-        <button v-for="connection in connections" :key="connection.id" type="button" class="w-full rounded-lg border bg-surface p-3 text-left shadow-sm transition-colors hover:border-primary-400" :class="selectedId === connection.id ? 'border-primary-500 ring-1 ring-primary-500/20' : 'border-neutral-200'" @click="selectedId = connection.id; creating = false">
+        <button v-for="connection in connections" :key="connection.id" :data-test="`connection-${connection.id}`" type="button" class="w-full rounded-lg border p-3 text-left shadow-sm transition-colors hover:border-primary-400" :class="selectedId === connection.id ? 'border-primary-500 bg-surface-raised ring-2 ring-primary-500/30' : 'border-neutral-200 bg-surface'" @click="selectedId = connection.id; creating = false">
           <span class="flex flex-wrap items-center justify-between gap-2"><strong class="truncate">{{ connection.name }}</strong><span class="rounded px-2 py-0.5 text-xs font-medium" :class="statusClass[connection.status]">{{ t(`eshop.integrations.status.${connection.status}`) }}</span></span>
           <span class="mt-1 block truncate text-xs text-neutral-500">{{ connection.connector_key }}</span>
         </button>
@@ -172,10 +178,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
             <label class="text-sm"><span class="mb-1 block font-medium">{{ t('eshop.integrations.retention') }}</span><input v-model.number="form.retention_days" type="number" min="1" max="365" class="form-input w-full" /></label>
           </div>
           <div class="mt-3 grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
-            <label class="text-sm"><span class="mb-1 block font-medium">{{ t('eshop.integrations.mappings') }}</span><textarea v-model="mappingsJson" rows="8" spellcheck="false" class="form-textarea w-full font-mono text-xs"></textarea><span class="mt-1 block text-xs text-neutral-500">{{ t('eshop.integrations.mappings_hint') }}</span></label>
-            <label class="text-sm"><span class="mb-1 block font-medium">{{ t('eshop.integrations.ownership') }}</span><textarea v-model="ownershipJson" rows="8" spellcheck="false" class="form-textarea w-full font-mono text-xs"></textarea><span class="mt-1 block text-xs text-neutral-500">{{ t('eshop.integrations.ownership_hint') }}</span></label>
+            <label class="text-sm"><span class="mb-1 block font-medium">{{ t('eshop.integrations.mappings') }}</span><textarea v-model="mappingsJson" data-test="mappings" rows="8" spellcheck="false" class="form-textarea w-full font-mono text-xs"></textarea><span class="mt-1 block text-xs text-neutral-500">{{ t('eshop.integrations.mappings_hint') }}</span></label>
+            <label class="text-sm"><span class="mb-1 block font-medium">{{ t('eshop.integrations.ownership') }}</span><textarea v-model="ownershipJson" data-test="ownership" rows="8" spellcheck="false" class="form-textarea w-full font-mono text-xs"></textarea><span class="mt-1 block text-xs text-neutral-500">{{ t('eshop.integrations.ownership_hint') }}</span></label>
           </div>
-          <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button type="submit" :disabled="acting" :class="btnFilled('primary')"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
+          <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button type="submit" data-test="save" :disabled="acting" :class="btnFilled('primary')"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
         </form>
 
         <div v-if="selected" class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">

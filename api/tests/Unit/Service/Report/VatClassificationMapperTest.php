@@ -185,6 +185,86 @@ final class VatClassificationMapperTest extends TestCase
         $this->assertSame(1000.0, $lines['41']['base']);
     }
 
+    public function testPredictDphCountsInvoiceAndCashWithSameNumericIdButNotInvoiceLines(): void
+    {
+        $this->pdo->exec(
+            "INSERT INTO invoices
+                (id, supplier_id, client_id, varsymbol, issue_date, tax_date, currency_id,
+                 exchange_rate, reverse_charge, status, invoice_type, vat_classification_code, total_with_vat)
+             VALUES (42, 1, 200, 'INV-42', '2026-05-20', '2026-05-20', 1,
+                     1, 0, 'issued', 'invoice', '1', 363)"
+        );
+        $this->pdo->exec(
+            "INSERT INTO invoice_items
+                (id, invoice_id, vat_rate_snapshot, description, total_without_vat,
+                 total_vat, vat_classification_code)
+             VALUES (420, 42, 21, 'First line', 100, 21, '1'),
+                    (421, 42, 21, 'Second line', 200, 42, '1')"
+        );
+        $this->pdo->exec(
+            "INSERT INTO cash_documents
+                (id, supplier_id, doc_number, status, doc_type, vat_mode, tax_date,
+                 issue_date, total_amount, description)
+             VALUES (42, 1, 'CASH-42', 'posted', 'in', 'vat', '2026-05-21',
+                     '2026-05-21', 121, 'Cash sale')"
+        );
+        $this->pdo->exec(
+            "INSERT INTO cash_document_vat_lines
+                (id, cash_document_id, vat_rate, base_amount, vat_amount, vat_classification_code)
+             VALUES (422, 42, 21, 100, 21, '1')"
+        );
+
+        $prediction = $this->mapper->predictDph(1, 2026, 5);
+
+        self::assertSame(2, $prediction['sale_count']);
+        self::assertSame(0, $prediction['sale_draft_count']);
+    }
+
+    public function testDphLineCountKeepsInvoiceAndCashDocumentWithSameNumericIdDistinct(): void
+    {
+        $common = [
+            'invoice_id' => 42,
+            'source' => 'sale',
+            'code' => '1',
+            'dphdp3_line' => '1',
+            'dphdp3_line_secondary' => null,
+            'base_czk' => 100.0,
+            'vat_czk' => 21.0,
+            'label' => 'Sale 21 %',
+            'vat_deduction_none' => false,
+            'is_fixed_asset' => false,
+        ];
+
+        $lines = $this->mapper->projectDphLines([
+            array_replace($common, ['document_kind' => 'invoice']),
+            array_replace($common, ['document_kind' => 'cash', 'base_czk' => 200.0, 'vat_czk' => 42.0]),
+        ]);
+
+        self::assertSame(2, $lines['1']['count']);
+        self::assertSame(300.0, $lines['1']['base']);
+        self::assertSame(63.0, $lines['1']['vat']);
+    }
+
+    public function testMissingExchangeRatesKeepInvoiceAndCashDocumentWithSameNumericIdDistinct(): void
+    {
+        $common = [
+            'invoice_id' => 42,
+            'source' => 'sale',
+            'exchange_rate_missing' => true,
+            'currency' => 'EUR',
+            'tax_date' => '2026-05-15',
+            'issue_date' => '2026-05-15',
+        ];
+
+        $missing = VatLedgerService::missingExchangeRateRows([
+            $common + ['document_kind' => 'invoice', 'doc_number' => 'INV-42'],
+            $common + ['document_kind' => 'cash', 'doc_number' => 'CASH-42'],
+        ]);
+
+        self::assertCount(2, $missing);
+        self::assertSame(['INV-42', 'CASH-42'], array_column($missing, 'doc'));
+    }
+
     // ───── helpers ─────────────────────────────────────────────────────────
 
     private function createSchema(): void

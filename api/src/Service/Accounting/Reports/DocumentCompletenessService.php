@@ -32,9 +32,25 @@ final class DocumentCompletenessService
     /** Prahové hranice stáří pro aging (dny). */
     private const BUCKETS = ['d0_30' => 30, 'd31_60' => 60, 'd61_90' => 90, 'd91_180' => 180];
 
+    /**
+     * Globální strop otevřených položek vrácených přes oba saldokontní účty.
+     *
+     * Na rozdíl od saldokonta se tady nad stropem NEODMÍTÁ, ale zkracuje s příznakem
+     * `truncated`. Důvod je v povaze obou sestav: saldokonto je inventarizační podklad,
+     * kde useknutý seznam rozbije konfrontaci se zůstatkem hlavní knihy, kdežto tohle je
+     * pracovní upozorňovací seznam „doklad po splatnosti bez úhrady" řazený od nejstarších.
+     * Prvních pár tisíc nejstarších je přesně to, co má účetní řešit; odmítnout jí celou
+     * kontrolu úplnosti kvůli počtu je horší než jí ukázat začátek a říct, že pokračuje.
+     *
+     * Bez stropu si tahle sestava brala saldo DVAKRÁT (311 + 321) a nad ~200 tis. doklady
+     * spadla na `memory_limit` stejně jako saldokonto.
+     */
+    private const MAX_OPEN_ITEMS = 5000;
+
     public function __construct(
         private readonly Connection $db,
         private readonly SaldoRepository $saldo,
+        private readonly int $maxOpenItems = self::MAX_OPEN_ITEMS,
     ) {}
 
     /**
@@ -158,24 +174,32 @@ final class DocumentCompletenessService
         $todayDt = new \DateTimeImmutable($today);
         $items = [];
         $totalCzk = 0.0;
+        $truncated = false;
         foreach (['311', '321'] as $code) {
             $acc = $this->saldo->resolveAccount($supplierId, $code);
             if ($acc === null) {
                 continue;
             }
             $normalSide = $acc['normal_side'] ?? (in_array($acc['account_type'], ['asset', 'expense'], true) ? 'debit' : 'credit');
-            foreach ($this->saldo->openItems($supplierId, $acc['id'], $today, $acc['code']) as $it) {
+            $open = $this->saldo->openItems(
+                $supplierId,
+                $acc['id'],
+                $today,
+                $acc['code'],
+                $this->maxOpenItems + 1,
+                null,
+                $today,
+                true,
+            );
+            foreach ($open as $it) {
                 // Orientace na normální stranu účtu — stejná transformace jako SaldoService::buildAccount.
                 $bookedNative = $normalSide === 'debit' ? $it['booked_signed'] : -$it['booked_signed'];
-                $paidNative = round($bookedNative * $it['paid_ratio'], 2);
-                $remaining = round($bookedNative - $paidNative, 2);
-                if ((int) round($remaining * 100.0) === 0) {
+                $settlement = SaldoRepository::settlementAmounts($bookedNative, (float) $it['paid_ratio']);
+                if (!$settlement['open']) {
                     continue; // plně uhrazeno / netto vyrovnáno
                 }
+                $remaining = $settlement['remaining'];
                 $due = (string) $it['due_date'];
-                if ($due === '' || $today <= $due) {
-                    continue; // není po splatnosti
-                }
                 $daysOverdue = (int) (new \DateTimeImmutable($due))->diff($todayDt)->days;
                 $items[] = [
                     'doc_type'      => (string) $it['doc_type'],
@@ -189,15 +213,39 @@ final class DocumentCompletenessService
                     'currency_code' => (string) $it['currency_code'],
                     'remaining_czk' => $remaining,
                 ];
-                $totalCzk = round($totalCzk + $remaining, 2);
             }
         }
 
-        usort($items, static fn (array $a, array $b): int => $b['days_overdue'] <=> $a['days_overdue']);
+        usort($items, static fn (array $a, array $b): int => [
+            $a['due_date'],
+            $a['account_code'],
+            $a['doc_type'],
+            $a['doc_id'],
+        ] <=> [
+            $b['due_date'],
+            $b['account_code'],
+            $b['doc_type'],
+            $b['doc_id'],
+        ]);
+
+        $truncated = count($items) > $this->maxOpenItems;
+        if ($truncated) {
+            $items = array_slice($items, 0, $this->maxOpenItems);
+        }
+        foreach ($items as $item) {
+            $totalCzk = round($totalCzk + (float) $item['remaining_czk'], 2);
+        }
 
         return [
             'items'   => $items,
-            'summary' => ['total_count' => count($items), 'total_czk' => $totalCzk],
+            'summary' => [
+                'total_count' => count($items),
+                'total_czk'   => $totalCzk,
+                // true = otevřených položek bylo nad strop, seznam i součet jsou jen
+                // za načtenou část. Bez tohoto příznaku by zkrácený součet vypadal
+                // jako úplný.
+                'truncated'   => $truncated,
+            ],
         ];
     }
 

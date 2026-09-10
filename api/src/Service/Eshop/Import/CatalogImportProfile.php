@@ -11,7 +11,7 @@ final class CatalogImportProfile
         'min_qty', 'is_active', 'note', 'manufacturer_code', 'manufacturer_id',
         'warranty_months', 'delivery_days', 'weight_g', 'export_eshop', 'is_stocked',
         'pricing_base', 'categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'price', 'prices',
-        'master_id', 'master_external_id', 'variant_options', 'inheritance', 'relations',
+        'master_id', 'master_external_id', 'variant_options', 'inheritance', 'relations', 'media_urls',
     ];
 
     public static function normalize(array $input): array
@@ -49,7 +49,7 @@ final class CatalogImportProfile
         }
         foreach ($operations as $field => $operation) {
             if (!in_array($operation, ['set', 'preserve', 'clear'], true)
-                || (in_array($field, ['id', 'external_id', 'sku', 'name', 'unit', 'item_type'], true) && $operation === 'clear')
+                || (in_array($field, ['id', 'external_id', 'sku', 'name', 'unit', 'item_type', 'media_urls'], true) && $operation === 'clear')
                 || ($field === $identity && $operation !== 'set')) {
                 throw new \InvalidArgumentException('import_operations_invalid');
             }
@@ -129,13 +129,14 @@ final class CatalogImportProfile
             }
             return $decoded;
         }
-        if (in_array($field, ['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices', 'variant_options', 'relations'], true)) {
+        if (in_array($field, ['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices', 'variant_options', 'relations', 'media_urls'], true)) {
             try {
                 $decoded = json_decode($value, true, 32, JSON_THROW_ON_ERROR);
             } catch (\JsonException) {
                 throw new \InvalidArgumentException('import_json_invalid');
             }
-            if (!str_starts_with($value, '[') || !is_array($decoded) || !array_is_list($decoded) || count($decoded) > 200) {
+            $limit = $field === 'media_urls' ? 10 : 200;
+            if (!str_starts_with($value, '[') || !is_array($decoded) || !array_is_list($decoded) || count($decoded) > $limit) {
                 throw new \InvalidArgumentException('import_json_invalid');
             }
             self::validateCollection($field, $decoded);
@@ -183,6 +184,13 @@ final class CatalogImportProfile
     private static function validateCollection(string $field, array $rows): void
     {
         foreach ($rows as $row) {
+            if ($field === 'media_urls') {
+                if (!is_string($row) || strlen($row) > 2048 || preg_match('/[\x00-\x20\x7F]/', $row)
+                    || strtolower((string) parse_url($row, PHP_URL_SCHEME)) !== 'https') {
+                    throw new \InvalidArgumentException('media_url_invalid');
+                }
+                continue;
+            }
             if ($field === 'tag_ids' || ($field === 'categories' && is_int($row))) {
                 if (!is_int($row) || $row < 1 || $row > 2147483647) {
                     throw new \InvalidArgumentException('import_reference_invalid');

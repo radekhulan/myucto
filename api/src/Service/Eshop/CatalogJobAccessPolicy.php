@@ -13,10 +13,11 @@ final class CatalogJobAccessPolicy
     private const KINDS = [
         'price_recompute', 'stock_valuation', 'stock_cycle_prepare', 'sales_order_expiry', 'catalog_export',
         'catalog_bulk_preview', 'catalog_bulk_apply', 'catalog_bulk_restore',
-        'catalog_import_stage', 'catalog_import_apply',
+        'catalog_import_stage', 'catalog_import_apply', 'catalog_import_media',
         'price_matrix_preview', 'price_matrix_apply',
         'product_content_transfer_preview', 'product_content_transfer_apply',
         'integration_reconcile',
+        'stock_opening_import_stage', 'stock_opening_import_apply',
     ];
 
     public static function allows(Request $request, string $kind, bool $write = false, bool $audit = false): bool
@@ -29,6 +30,10 @@ final class CatalogJobAccessPolicy
         }
         if ($kind === 'stock_valuation') {
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
+        }
+        if (str_starts_with($kind, 'stock_opening_import_')) {
+            return (!$write || RequestAuthorization::isSessionAuth($request))
+                && RequestAuthorization::allows($request, 'stock.documents.write', AccessLevel::WRITE);
         }
         if ($kind === 'integration_reconcile') {
             return (!$write || RequestAuthorization::isSessionAuth($request))

@@ -18,6 +18,37 @@ use Symfony\Component\Process\Process;
 
 final class IntegrationCoreTest extends StockTestCase
 {
+    public function testEmptyMappingRoundTripStaysAJsonObjectAndCanBeEdited(): void
+    {
+        $sid = $this->createSupplier();
+        $connections = $this->container->get(IntegrationConnectionService::class);
+        $created = $connections->create($sid, [
+            'connector_key' => 'synthetic.empty',
+            'name' => 'Empty mapping',
+            'status' => 'draft',
+        ], $this->userId);
+
+        self::assertInstanceOf(\stdClass::class, $created['mappings']);
+        self::assertInstanceOf(\stdClass::class, $created['field_ownership']);
+        self::assertSame('{}', json_encode($created['mappings'], JSON_THROW_ON_ERROR));
+        self::assertSame('{}', json_encode($created['field_ownership'], JSON_THROW_ON_ERROR));
+
+        $loaded = $connections->find($sid, $created['id']);
+        self::assertInstanceOf(\stdClass::class, $loaded['mappings']);
+        $edited = $connections->update($sid, $created['id'], [
+            'name' => 'Edited empty mapping',
+            'mappings' => [],
+            'field_ownership' => [],
+        ]);
+        self::assertSame('Edited empty mapping', $edited['name']);
+        self::assertSame('{}', json_encode($edited['mappings'], JSON_THROW_ON_ERROR));
+        self::assertSame('{}', json_encode($edited['field_ownership'], JSON_THROW_ON_ERROR));
+
+        $stored = $this->db->pdo()->query('SELECT mappings_json, field_ownership_json FROM integration_connections WHERE id = ' . (int) $created['id'])
+            ->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(['mappings_json' => '{}', 'field_ownership_json' => '{}'], $stored);
+    }
+
     public function testCredentialsAreEncryptedAndWebhookIsVerifiedAndDeduplicated(): void
     {
         $sid = $this->createSupplier();

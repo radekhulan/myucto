@@ -202,6 +202,10 @@ watch(() => route.query.type, (v) => {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('stock.documents.subtitle') }}</p>
       </div>
       <div v-if="auth.canWrite('stock')" class="flex flex-wrap items-center gap-2">
+        <RouterLink v-if="auth.canWrite('stock.documents.write')" to="/stock/opening-import" :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
+          {{ t('stock.opening_import.action') }}
+        </RouterLink>
         <RouterLink :to="{ path: '/stock/documents/new', query: { doc_type: 'receipt' } }" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('stock.documents.new_receipt') }}

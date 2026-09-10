@@ -317,7 +317,7 @@ final class DphBookBuilder
     {
         $grouped = [];
         foreach ($this->ledger->rows($supplierId, $start, $end, includeDrafts: true) as $r) {
-            $key = $r['source'] . ':' . ($r['document_kind'] ?? '') . ':' . $r['invoice_id'] . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
+            $key = VatLedgerService::documentIdentity($r) . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
             if (!isset($grouped[$key])) {
                 $grouped[$key] = $r;
                 $grouped[$key]['base_czk'] = 0.0;

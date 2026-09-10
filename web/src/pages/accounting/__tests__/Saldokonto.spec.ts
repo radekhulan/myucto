@@ -60,8 +60,10 @@ function makeReport(overrides: Partial<SaldoReport> = {}): SaldoReport {
         account: { id: 1, code: '311', name: 'Odběratelé', normal_side: 'debit' as any },
         gl_balance: 1500,
         open_items_total: 1500,
+        open_items_count: 2,
         difference: 0,
         matches: true,
+        partners_pagination: { page: 1, per_page: 2, total: 2, pages: 1 },
         partners: [
           {
             partner_id: 10,
@@ -209,8 +211,10 @@ describe('Saldokonto.vue', () => {
           account: { id: 2, code: '321', name: 'Dodavatelé', normal_side: 'credit' as any },
           gl_balance: 300,
           open_items_total: 300,
+          open_items_count: 1,
           difference: 0,
           matches: true,
+          partners_pagination: { page: 1, per_page: 1, total: 1, pages: 1 },
           partners: [
             {
               partner_id: 20,

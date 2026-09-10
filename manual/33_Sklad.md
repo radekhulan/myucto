@@ -1114,6 +1114,27 @@ Vratka rozlišuje peněžní řešení, například dobropis nebo refundaci, od 
 návratu zboží. Naskladnění vráceného zboží se provádí přes zásilku a skladový
 protidoklad; peněžní vypořádání tento pohyb samo nespouští.
 
+### 33.14.1 Import počátečních zásob
+
+Na stránce **Sklad - Skladové doklady** otevřete **Import počátečních zásob**.
+Vyberte sklad, datum, vlastní stálý identifikátor importu a CSV nebo XLSX soubor.
+U CSV lze nastavit kódování a oddělovač, u XLSX vybrat list. Po změně těchto
+voleb se znovu načte ukázka pro kontrolu sloupců a jejich mapování.
+Povinné sloupce jsou stálé ID řádku, SKU, množství a pořizovací cena za jednotku.
+SKU i ID mohou začínat nulou; import je zachová jako text.
+
+Nejprve spusťte kontrolu celého souboru. Na pozadí se ověří všechny řádky stejnými
+pravidly jako skutečná příjemka. Teprve dokončený náhled bez chyb lze zaúčtovat.
+Zaúčtování vytváří běžné příjemky po dávkách, takže množství i ocenění vstoupí do
+stejné skladové knihy jako ručně zadané doklady. Průběh lze bezpečně zavřít a znovu
+otevřít; dokončené dávky se neopakují.
+
+Kombinace identifikátoru importu a stálého ID řádku určuje jeho totožnost. Opakovaný
+shodný import nevytvoří další zásobu. Pokud stejné ID nese jiné SKU, sklad, datum,
+množství nebo cenu, náhled zobrazí konflikt a nic nezaúčtuje. Pro další nezávislý
+počáteční stav použijte jiný identifikátor importu. Karty se sledováním šarží nebo
+sériových čísel přijměte ruční příjemkou, kde lze vyplnit úplné alokace.
+
 ## 33.15 Omezení a tipy
 
 - Modul podporuje jen **způsob B** účtování zásob (průběžná evidence bez účtování,

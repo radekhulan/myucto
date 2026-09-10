@@ -3114,6 +3114,14 @@ final class Routes
             $g->post  ('/documents/{id:[0-9]+}/reverse',[\MyInvoice\Action\Stock\StockDocumentAction::class, 'reverse']);
             $g->get   ('/documents/{id:[0-9]+}/pdf',    [\MyInvoice\Action\Stock\StockDocumentAction::class, 'pdf']);
 
+            $g->post  ('/opening-import/sources',       [\MyInvoice\Action\Stock\OpeningStockImportAction::class, 'upload']);
+            $g->get   ('/opening-import/sources/{id:[0-9]+}/sample', [\MyInvoice\Action\Stock\OpeningStockImportAction::class, 'sample']);
+            $g->post  ('/opening-import/preview',       [\MyInvoice\Action\Stock\OpeningStockImportAction::class, 'preview']);
+            $g->post  ('/opening-import/{id:[0-9]+}/apply', [\MyInvoice\Action\Stock\OpeningStockImportAction::class, 'apply']);
+            $g->get   ('/opening-import/jobs/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'get']);
+            $g->get   ('/opening-import/jobs/{id:[0-9]+}/items', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'items']);
+            $g->post  ('/opening-import/jobs/{id:[0-9]+}/{operation:retry|cancel}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'change']);
+
             $g->get   ('/fulfillment/tasks',                                      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'list']);
             $g->post  ('/fulfillment/tasks',                                      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'create']);
             $g->get   ('/fulfillment/tasks/{id:[0-9]+}',                          [\MyInvoice\Action\Stock\FulfillmentAction::class, 'get']);

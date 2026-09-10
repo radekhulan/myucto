@@ -161,6 +161,58 @@ final class PostingServiceTest extends TestCase
         $this->assertBalanced($entry['lines']);
     }
 
+    public function testCashDocumentWithSameIdDoesNotChangePurchaseInvoicePosting(): void
+    {
+        $vendor = $this->client('Dodavatel s kolizním ID', false, true);
+        $attempt = 0;
+        do {
+            $purchaseId = $this->purchase('PF-2099-CASH-ID-' . ++$attempt, $vendor, '40', false, 2000.00, 420.00, 21.00);
+        } while ($this->cashDocumentIdExists($purchaseId));
+        $this->insertCashVatDocumentWithId($purchaseId, 'out', 1000.00, 210.00);
+
+        $lines = $this->posting->buildFromPurchaseInvoice($this->supplierId, $purchaseId);
+        $entryId = $this->posting->postDocument(
+            $this->supplierId,
+            'purchase_invoice',
+            $purchaseId,
+            $lines,
+            ['entry_date' => self::YEAR . '-06-20', 'posted_by' => $this->userId],
+        );
+        $entry = $this->journal->find($entryId, $this->supplierId);
+        $byAccount = $this->linesByAccountCode($entry['lines']);
+
+        self::assertEqualsWithDelta(2000.00, $byAccount['518']['debit'], 0.001);
+        self::assertEqualsWithDelta(420.00, $byAccount['343.100']['debit'], 0.001);
+        self::assertEqualsWithDelta(2420.00, $byAccount['321']['credit'], 0.001);
+        $this->assertBalanced($entry['lines']);
+    }
+
+    public function testCashDocumentWithSameIdDoesNotChangeIssuedInvoicePosting(): void
+    {
+        $client = $this->client('Odběratel s kolizním ID', true, false);
+        $attempt = 0;
+        do {
+            $invoiceId = $this->sale('FV-2099-CASH-ID-' . ++$attempt, $client, '1', 1000.00, 210.00, 21.00);
+        } while ($this->cashDocumentIdExists($invoiceId));
+        $this->insertCashVatDocumentWithId($invoiceId, 'in', 500.00, 105.00);
+
+        $lines = $this->posting->buildFromInvoice($this->supplierId, $invoiceId);
+        $entryId = $this->posting->postDocument(
+            $this->supplierId,
+            'invoice',
+            $invoiceId,
+            $lines,
+            ['entry_date' => self::YEAR . '-06-15', 'posted_by' => $this->userId],
+        );
+        $entry = $this->journal->find($entryId, $this->supplierId);
+        $byAccount = $this->linesByAccountCode($entry['lines']);
+
+        self::assertEqualsWithDelta(1210.00, $byAccount['311']['debit'], 0.001);
+        self::assertEqualsWithDelta(1000.00, $byAccount['602']['credit'], 0.001);
+        self::assertEqualsWithDelta(210.00, $byAccount['343.200']['credit'], 0.001);
+        $this->assertBalanced($entry['lines']);
+    }
+
     public function testIdempotenceRepostSingleEntry(): void
     {
         $client    = $this->client('Odběratel s.r.o.', true, false);
@@ -1573,5 +1625,45 @@ final class PostingServiceTest extends TestCase
              VALUES (?, 'Test položka', 1, 'ks', ?, ?, ?, ?, ?, ?, 0)"
         );
         $stmt->execute([$id, $base, $this->vatRateId, $rate, $base, $vat, $base + $vat]);
+    }
+
+    private function insertCashVatDocumentWithId(int $id, string $docType, float $base, float $vat): void
+    {
+        $pdo = $this->db->pdo();
+
+        $pdo->prepare(
+            'INSERT INTO cash_registers (supplier_id, name, account_code, is_default)
+             VALUES (?, ?, "211", 0)'
+        )->execute([$this->supplierId, 'Kolizní pokladna ' . $id]);
+        $registerId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO cash_documents
+                (id, supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date,
+                 description, vat_mode, total_amount, status, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, "Kolizní pokladní doklad", "vat", ?, "posted", ?)'
+        )->execute([
+            $id,
+            $this->supplierId,
+            $registerId,
+            $docType,
+            $docType === 'in' ? 'sale' : 'purchase',
+            'CASH-ID-' . $id,
+            self::YEAR . '-06-15',
+            self::YEAR . '-06-15',
+            $base + $vat,
+            $this->userId,
+        ]);
+        $pdo->prepare(
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount)
+             VALUES (?, 21.00, ?, ?)'
+        )->execute([$id, $base, $vat]);
+    }
+
+    private function cashDocumentIdExists(int $id): bool
+    {
+        $statement = $this->db->pdo()->prepare('SELECT 1 FROM cash_documents WHERE id = ?');
+        $statement->execute([$id]);
+        return $statement->fetchColumn() !== false;
     }
 }

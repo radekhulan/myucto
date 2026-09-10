@@ -1,0 +1,5 @@
+{
+  "sheet": "Zásoby",
+  "header": ["Kód", "Název", "M. j.", "Čár. kód"],
+  "row": ["000456", "Syntetická testovací zásoba", "ks", "0859123400014"]
+}

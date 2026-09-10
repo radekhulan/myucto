@@ -134,6 +134,10 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Eshop\Import\CatalogMediaFetcher::class => fn (ContainerInterface $c) =>
+                new \MyInvoice\Service\Eshop\Import\GuardedCatalogMediaFetcher(
+                    $c->get(\MyInvoice\Service\Http\OutboundUrlGuard::class),
+                ),
             \MyInvoice\Service\Stock\SalesOrderLineExpander::class => fn (ContainerInterface $c) =>
                 $c->get(\MyInvoice\Service\Stock\ProductSetSalesOrderLineExpander::class),
             \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface::class =>

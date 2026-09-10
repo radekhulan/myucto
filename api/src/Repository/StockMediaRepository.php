@@ -31,6 +31,18 @@ final class StockMediaRepository
         return $row === false ? null : self::cast($row);
     }
 
+    public function findForItemByStorageKey(int $supplierId, int $stockItemId, string $storageKey): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM stock_media
+              WHERE supplier_id = ? AND stock_item_id = ? AND storage_key = ?
+              ORDER BY id LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $stockItemId, $storageKey]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::cast($row);
+    }
+
     /** @return list<array<string,mixed>> */
     public function listForItem(int $supplierId, int $stockItemId): array
     {

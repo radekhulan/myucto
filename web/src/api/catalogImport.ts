@@ -33,6 +33,23 @@ export interface CatalogImportProfile {
   config: CatalogImportConfig
 }
 
+export interface CatalogImportPreset {
+  id: string
+  system: 'abra_flexi' | 'pohoda'
+  version: number
+  format: CatalogImportSource['format']
+  documentation_url: string
+  schema_evidence: 'public_demo_header' | 'documented_ui_columns'
+  version_export_verified: boolean
+  supported_columns: Array<{ source: string; target: string }>
+  config: CatalogImportConfig
+}
+
+export interface CatalogImportProfiles {
+  items: CatalogImportProfile[]
+  presets: CatalogImportPreset[]
+}
+
 export interface CatalogImportSample {
   source: CatalogImportSource
   header: string[]
@@ -48,7 +65,7 @@ export interface CatalogImportItem {
   before: Record<string, unknown> | null
   after: Record<string, unknown> | null
   error_code: string | null
-  input?: { raw?: string[] }
+  input?: { raw?: string[]; media?: Array<{ index: number; url_hash: string }> | { index: number; url_hash: string } }
 }
 
 export interface CatalogImportItems {
@@ -77,8 +94,8 @@ export const catalogImportApi = {
     }).then(response => response.data)
   ),
   profiles: (signal?: AbortSignal) => (
-    api.get<{ items: CatalogImportProfile[] }>('/eshop/imports/profiles', { signal })
-      .then(response => response.data.items)
+    api.get<CatalogImportProfiles>('/eshop/imports/profiles', { signal })
+      .then(response => response.data)
   ),
   createProfile: (name: string, config: CatalogImportConfig, signal?: AbortSignal) => (
     api.post<CatalogImportProfile>('/eshop/imports/profiles', { name, config }, { signal })

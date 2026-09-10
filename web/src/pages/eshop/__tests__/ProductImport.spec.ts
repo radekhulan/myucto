@@ -77,6 +77,29 @@ const sample = {
   fields: ['sku', 'name', 'price', 'prices'],
 }
 
+const abraPreset = {
+  id: 'abra-flexi-cenik-csv-v1',
+  system: 'abra_flexi',
+  version: 1,
+  format: 'csv',
+  documentation_url: 'https://example.test/abra',
+  schema_evidence: 'public_demo_header',
+  version_export_verified: false,
+  supported_columns: [
+    { source: 'SKU', target: 'sku' },
+    { source: 'Název', target: 'name' },
+  ],
+  config: {
+    identity: 'sku',
+    source_key: null,
+    mode: 'upsert',
+    mapping: { sku: 'SKU', name: 'Název' },
+    blank: 'preserve',
+    operations: {},
+    reader: { encoding: 'UTF-8', delimiter: ';', sheet: 0 },
+  },
+}
+
 function job(overrides: Record<string, unknown> = {}) {
   return {
     id: 31,
@@ -167,7 +190,7 @@ describe('ProductImport', () => {
     mocks.canWrite.mockReturnValue(true)
     mocks.upload.mockResolvedValue(source)
     mocks.sample.mockResolvedValue(sample)
-    mocks.profiles.mockResolvedValue([])
+    mocks.profiles.mockResolvedValue({ items: [], presets: [] })
     mocks.items.mockResolvedValue(report())
     mocks.preview.mockResolvedValue(job())
     mocks.getJob.mockResolvedValue(job())
@@ -319,7 +342,7 @@ describe('ProductImport', () => {
         reader: { encoding: 'UTF-8' as const, delimiter: ';' as const, sheet: 0 },
       },
     }
-    mocks.profiles.mockResolvedValue([profile])
+    mocks.profiles.mockResolvedValue({ items: [profile], presets: [] })
     mocks.updateProfile.mockResolvedValue({ ...profile, name: 'Dodavatel B', version: 5 })
     const wrapper = mountPage()
     await uploadFile(wrapper)
@@ -343,5 +366,186 @@ describe('ProductImport', () => {
       4,
       expect.any(AbortSignal),
     )
+  })
+
+  it('keeps the source key when an SKU profile maps a parent by external ID', async () => {
+    const parentProfile = {
+      id: 8,
+      name: 'Varianty dodavatele',
+      version: 1,
+      config: {
+        identity: 'sku' as const,
+        source_key: 'supplier_catalog',
+        mode: 'upsert' as const,
+        mapping: { sku: 'SKU', master_external_id: 'Externí ID masteru' },
+        blank: 'preserve' as const,
+        operations: { sku: 'set' as const, master_external_id: 'set' as const },
+        reader: { encoding: 'UTF-8' as const, delimiter: ';' as const, sheet: 0 },
+      },
+    }
+    mocks.sample.mockResolvedValue({
+      ...sample,
+      header: [...sample.header, 'Externí ID masteru'],
+      fields: [...sample.fields, 'master_external_id'],
+    })
+    mocks.profiles.mockResolvedValue({ items: [parentProfile], presets: [] })
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+
+    await wrapper.get('[data-test="profile-select"]').setValue('8')
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="source-key"]').element as HTMLInputElement).value).toBe('supplier_catalog')
+    expect(wrapper.get('[data-test="preview-import"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.preview).toHaveBeenCalledWith(14, expect.objectContaining({
+      identity: 'sku',
+      source_key: 'supplier_catalog',
+      mapping: expect.objectContaining({ sku: 'SKU', master_external_id: 'Externí ID masteru' }),
+    }), expect.any(AbortSignal))
+  })
+
+  it('waits for the polling interval after an active job response', async () => {
+    vi.useFakeTimers()
+    mocks.preview.mockResolvedValue(job({ status: 'queued', checkpoint: 0, finished_at: null }))
+    mocks.getJob
+      .mockResolvedValueOnce(job({ status: 'running', checkpoint: 0, finished_at: null }))
+      .mockReturnValue(new Promise(() => {}))
+    const wrapper = mountPage()
+
+    try {
+      await uploadFile(wrapper)
+      await wrapper.get('[data-test="preview-import"]').trigger('click')
+      await flushPromises()
+
+      expect(mocks.getJob).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(mocks.getJob).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(mocks.getJob).toHaveBeenCalledTimes(2)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('applies an ERP preset while keeping its mapping editable and refreshing the sample', async () => {
+    mocks.profiles.mockResolvedValue({ items: [], presets: [abraPreset] })
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+
+    await wrapper.get('[data-test="apply-preset-abra-flexi-cenik-csv-v1"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.sample).toHaveBeenCalledTimes(2)
+    expect((wrapper.get('[data-test="mapping-select-sku"]').element as HTMLSelectElement).value).toBe('SKU')
+    expect((wrapper.get('[data-test="mapping-select-name"]').element as HTMLSelectElement).value).toBe('Název')
+
+    await wrapper.get('[data-test="mapping-select-name"]').setValue('')
+    expect((wrapper.get('[data-test="mapping-select-name"]').element as HTMLSelectElement).value).toBe('')
+  })
+
+  it('shows media URL mapping and follows the separate media job after apply', async () => {
+    mocks.sample.mockResolvedValue({
+      ...sample,
+      header: [...sample.header, 'Média'],
+      rows: [['A-1', 'První', '123,45', '[]', '["https://cdn.example.test/a.png"]']],
+      fields: [...sample.fields, 'media_urls'],
+    })
+    mocks.apply.mockResolvedValue(job({
+      id: 32,
+      kind: 'catalog_import_apply',
+      report: { counts: { applied: 1 }, media_job_id: 44 },
+    }))
+    mocks.getJob.mockResolvedValue(job({
+      id: 44,
+      kind: 'catalog_import_media',
+      report: { counts: { applied: 1 }, source_job_id: 32 },
+    }))
+    mocks.items
+      .mockResolvedValueOnce(report('ready'))
+      .mockResolvedValueOnce(report('applied'))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+
+    expect(wrapper.find('[data-test="advanced-fields"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="mapping-select-media_urls"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="operation-media_urls"] option[value="clear"]').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="apply-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.getJob).toHaveBeenCalledWith(44)
+    expect(mocks.items).toHaveBeenLastCalledWith(44, 1, expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('eshop.import2.media_report_title')
+  })
+
+  it('keeps apply conflicts accessible while the media child job runs', async () => {
+    mocks.apply.mockResolvedValue(job({
+      id: 32,
+      kind: 'catalog_import_apply',
+      report: { counts: { applied: 1, failed: 2, conflict: 1 }, media_job_id: 44 },
+    }))
+    mocks.getJob.mockResolvedValue(job({
+      id: 44,
+      kind: 'catalog_import_media',
+      status: 'running',
+      finished_at: null,
+      report: { counts: { applied: 1 }, source_job_id: 32 },
+    }))
+    mocks.items
+      .mockResolvedValueOnce(report('ready'))
+      .mockResolvedValueOnce(report('conflict'))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="apply-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.items).toHaveBeenNthCalledWith(2, 32, 1, expect.any(AbortSignal))
+    expect(wrapper.get('[data-test="apply-failure-summary"]').text()).toContain('eshop.import2.status.failed: 2')
+    expect(wrapper.get('[data-test="apply-failure-summary"]').text()).toContain('eshop.import2.status.conflict: 1')
+    expect(wrapper.text()).toContain('eshop.import2.status.conflict')
+    expect(wrapper.find('[data-test="show-media-report"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('does not attach the old media child after the supplier changes while loading the apply report', async () => {
+    let resolveApplyReport!: (value: ReturnType<typeof report>) => void
+    mocks.apply.mockResolvedValue(job({
+      id: 32,
+      kind: 'catalog_import_apply',
+      report: { counts: { applied: 1, conflict: 1 }, media_job_id: 44 },
+    }))
+    mocks.items
+      .mockResolvedValueOnce(report('ready'))
+      .mockReturnValueOnce(new Promise(resolve => { resolveApplyReport = resolve }))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="apply-import"]').trigger('click')
+    await nextTick()
+
+    supplierStore.currentSupplierId = 2
+    await nextTick()
+    resolveApplyReport(report('conflict'))
+    await flushPromises()
+
+    expect(mocks.getJob).not.toHaveBeenCalledWith(44)
+    expect(wrapper.find('[data-test="source-step"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="preview-step"]').exists()).toBe(false)
+
+    wrapper.unmount()
   })
 })

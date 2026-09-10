@@ -53,8 +53,8 @@ final class IntegrationConnectionService
              field_ownership_json, rate_limit_per_minute, retention_days, created_by)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $stmt->execute([$uuid, $supplierId, $values['connector_key'], $values['name'], $values['status'],
-            json_encode($values['mappings'], JSON_THROW_ON_ERROR),
-            json_encode($values['field_ownership'], JSON_THROW_ON_ERROR),
+            json_encode((object) $values['mappings'], JSON_THROW_ON_ERROR),
+            json_encode((object) $values['field_ownership'], JSON_THROW_ON_ERROR),
             $values['rate_limit_per_minute'], $values['retention_days'], $createdBy]);
         return $this->find($supplierId, (int) $this->db->pdo()->lastInsertId())
             ?? throw new \RuntimeException('Připojení se nepodařilo vytvořit.');
@@ -71,8 +71,8 @@ final class IntegrationConnectionService
             status = ?, mappings_json = ?, field_ownership_json = ?, rate_limit_per_minute = ?, retention_days = ?
             WHERE supplier_id = ? AND id = ?');
         $stmt->execute([$values['connector_key'], $values['name'], $values['status'],
-            json_encode($values['mappings'], JSON_THROW_ON_ERROR),
-            json_encode($values['field_ownership'], JSON_THROW_ON_ERROR),
+            json_encode((object) $values['mappings'], JSON_THROW_ON_ERROR),
+            json_encode((object) $values['field_ownership'], JSON_THROW_ON_ERROR),
             $values['rate_limit_per_minute'], $values['retention_days'], $supplierId, $id]);
         return $this->find($supplierId, $id);
     }
@@ -153,9 +153,9 @@ final class IntegrationConnectionService
             || !in_array($status, self::STATUSES, true)) {
             throw new \InvalidArgumentException('Neplatné připojení.');
         }
-        $mappings = $input['mappings'] ?? [];
-        $ownership = $input['field_ownership'] ?? [];
-        if (!is_array($mappings) || !is_array($ownership)) {
+        $mappings = $this->objectMap($input['mappings'] ?? []);
+        $ownership = $this->objectMap($input['field_ownership'] ?? []);
+        if ($mappings === null || $ownership === null) {
             throw new \InvalidArgumentException('Mapování musí být objekt.');
         }
         foreach ($ownership as $field => $owner) {
@@ -179,13 +179,24 @@ final class IntegrationConnectionService
         foreach (['id', 'supplier_id', 'rate_limit_per_minute', 'retention_days'] as $key) {
             $row[$key] = (int) $row[$key];
         }
-        $row['mappings'] = json_decode($row['mappings_json'], true, 64, JSON_THROW_ON_ERROR);
-        $row['field_ownership'] = json_decode($row['field_ownership_json'], true, 64, JSON_THROW_ON_ERROR);
+        $row['mappings'] = (object) json_decode($row['mappings_json'], true, 64, JSON_THROW_ON_ERROR);
+        $row['field_ownership'] = (object) json_decode($row['field_ownership_json'], true, 64, JSON_THROW_ON_ERROR);
         $row['credentials_configured'] = $row['credentials_enc'] !== null;
         $row['webhook_configured'] = $row['webhook_secret_enc'] !== null;
         unset($row['mappings_json'], $row['field_ownership_json'], $row['credentials_enc'],
             $row['webhook_secret_enc'], $row['webhook_secret_hash']);
         return $row;
+    }
+
+    private function objectMap(mixed $value): ?array
+    {
+        if ($value instanceof \stdClass) {
+            $value = (array) $value;
+        }
+        if (!is_array($value) || ($value !== [] && array_is_list($value))) {
+            return null;
+        }
+        return $value;
     }
 
     private function context(int $supplierId, string $uuid): string

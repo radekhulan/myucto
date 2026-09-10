@@ -36,11 +36,13 @@ const STATUS: Record<string, string> = { queued: 'bg-neutral-100 text-neutral-60
 function isActive(job: CatalogJob) { return job.status === 'queued' || job.status === 'running' }
 function canManage(job: CatalogJob) {
   if (job.kind === 'stock_valuation') return auth.canWrite('stock')
+  if (job.kind.startsWith('stock_opening_import_')) return auth.canWrite('stock.documents.write')
   if (isBulk(job) || workflowUrl(job)) return auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')
   return auth.canWrite('eshop.write')
 }
 function workflowUrl(job: CatalogJob): string | null {
-  if (['catalog_import_stage', 'catalog_import_apply'].includes(job.kind)) return `/eshop?tab=import&import_job=${job.id}`
+  if (job.kind.startsWith('stock_opening_import_')) return `/stock/opening-import?opening_job=${job.id}`
+  if (['catalog_import_stage', 'catalog_import_apply', 'catalog_import_media'].includes(job.kind)) return `/eshop?tab=import&import_job=${job.id}`
   if (['price_matrix_preview', 'price_matrix_apply'].includes(job.kind)) return `/eshop?tab=price-matrix&matrix_job=${job.id}`
   return null
 }

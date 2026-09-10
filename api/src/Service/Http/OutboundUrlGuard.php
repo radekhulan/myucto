@@ -90,12 +90,12 @@ final class OutboundUrlGuard
 
         $ips = $this->resolve($host);
         if ($ips === []) {
-            throw new OutboundRequestException('Host se nepodařilo přeložit na IP adresu.');
+            throw new OutboundRequestException('Host se nepodařilo přeložit na IP adresu.', OutboundRequestException::DNS_UNAVAILABLE);
         }
         foreach ($ips as $ip) {
             if (!$this->isPublicIp($ip)) {
                 // Nehlásíme konkrétní IP — nechceme z chybové hlášky udělat skener sítě.
-                throw new OutboundRequestException('Cíl míří na neveřejnou nebo vyhrazenou adresu.');
+                throw new OutboundRequestException('Cíl míří na neveřejnou nebo vyhrazenou adresu.', OutboundRequestException::TARGET_BLOCKED);
             }
         }
 
@@ -115,7 +115,7 @@ final class OutboundUrlGuard
         $parsed = $this->parseAndCheck($url, $allowedHosts);
         // IP literál umíme posoudit i bez resolveru — rovnou odmítni loopback/private.
         if ($parsed['literal'] && !$this->isPublicIp($parsed['host'])) {
-            throw new OutboundRequestException('Cíl míří na neveřejnou nebo vyhrazenou adresu.');
+            throw new OutboundRequestException('Cíl míří na neveřejnou nebo vyhrazenou adresu.', OutboundRequestException::TARGET_BLOCKED);
         }
     }
 
@@ -282,13 +282,14 @@ final class OutboundUrlGuard
         curl_setopt_array($ch, $opts);
         $ok = curl_exec($ch);
         $err = curl_error($ch);
+        $errno = curl_errno($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $contentType = (string) (curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '');
         curl_close($ch);
 
-        $failure = self::transferFailureReason($ok !== false, $overflow, $err);
+        $failure = self::transferFailureException($ok !== false, $overflow, $errno, $err);
         if ($failure !== null) {
-            throw new OutboundRequestException($failure);
+            throw $failure;
         }
 
         return new OutboundResponse($status, $buffer, $contentType, $respHeaders);
@@ -315,6 +316,22 @@ final class OutboundUrlGuard
             return 'Spojení selhalo: ' . ($curlError !== '' ? $curlError : 'přenos byl přerušen');
         }
         return null;
+    }
+
+    public static function transferFailureException(
+        bool $transferOk,
+        bool $overflow,
+        int $curlErrno,
+        string $curlError,
+    ): ?OutboundRequestException {
+        $message = self::transferFailureReason($transferOk, $overflow, $curlError);
+        if ($message === null) {
+            return null;
+        }
+        if ($overflow || $curlErrno === CURLE_FILESIZE_EXCEEDED) {
+            return new OutboundRequestException($message, OutboundRequestException::SIZE_LIMIT);
+        }
+        return new OutboundRequestException($message);
     }
 
     /**

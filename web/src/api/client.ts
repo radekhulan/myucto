@@ -6,6 +6,15 @@ import { safeReturnPath } from '@/utils/returnPath'
 export const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
+  // Strop je 180 s, protože tolik dává `max_execution_time` na IIS — nejvyšší limit
+  // celého stacku (Docker/Apache má 60 s, nginx `fastcgi_read_timeout` 120 s). Za tou
+  // hranicí už žádný server v téhle sestavě odpovědět nemůže, takže dřív požadavek
+  // vzdát by znamenalo zahodit odpověď, která ještě mohla přijít.
+  //
+  // Bez timeoutu axios čekal navěky: když serverová cesta vypršela, uživatel zůstal
+  // u nekonečného spinneru a neměl jak poznat, že se nic nestane. Nejblíž tomu byly
+  // uzávěrkové kontroly nad velkým deníkem.
+  timeout: 180_000,
   headers: {
     'Accept': 'application/json',
     'Content-Type': 'application/json',

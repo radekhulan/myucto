@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting\Bank;
 
+use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Reports\DocumentCompletenessService;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -83,5 +84,44 @@ final class DocumentCompletenessServiceTest extends BankPostingTestCase
         // Obrácený směr (doklady po splatnosti) je vždy přítomný jako sekce.
         self::assertArrayHasKey('items', $result['documents_overdue_unpaid']);
         self::assertArrayHasKey('summary', $result['documents_overdue_unpaid']);
+    }
+
+    public function testFutureDocumentsCannotHideAnOverdueDocumentBehindTheGlobalCap(): void
+    {
+        $futureClient = $this->client('Alfa budoucí s.r.o.');
+        $overdueClient = $this->client('Zeta po splatnosti s.r.o.');
+        $oldestVendor = $this->client('Dodavatel s nejstarším závazkem s.r.o.');
+        $future = $this->saleInvoice('2099902', $futureClient, 100.00);
+        $overdue = $this->saleInvoice('2099903', $overdueClient, 200.00);
+        $oldest = $this->purchaseInvoice('PF-2099-901', $oldestVendor, 300.00);
+        $this->db->pdo()->prepare('UPDATE invoices SET due_date = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([self::YEAR . '-08-01', $future, $this->supplierId]);
+        $this->db->pdo()->prepare('UPDATE invoices SET due_date = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([self::YEAR . '-06-20', $overdue, $this->supplierId]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET due_date = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([self::YEAR . '-06-10', $oldest, $this->supplierId]);
+        $this->postPredpis('invoice', $future, '311', '602', 100.00);
+        $this->postPredpis('invoice', $overdue, '311', '602', 200.00);
+        $this->postPredpis('purchase_invoice', $oldest, '518', '321', 300.00);
+
+        $limited = new DocumentCompletenessService(
+            $this->db,
+            $this->container->get(SaldoRepository::class),
+            1,
+        );
+        $result = $limited->build(
+            $this->supplierId,
+            30,
+            'all',
+            new \DateTimeImmutable(self::YEAR . '-07-01'),
+        );
+
+        self::assertSame(
+            [$oldest],
+            array_column($result['documents_overdue_unpaid']['items'], 'doc_id'),
+            'Limit se musí použít až na SQL filtrovaný a globálně chronologický seznam po splatnosti.',
+        );
+        self::assertSame('321', $result['documents_overdue_unpaid']['items'][0]['account_code']);
+        self::assertTrue($result['documents_overdue_unpaid']['summary']['truncated']);
     }
 }

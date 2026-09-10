@@ -856,7 +856,7 @@ final class KontrolniHlaseniBuilder
         $missingRates = VatLedgerService::missingExchangeRateRows($ledgerRows);
         $inv = [];
         foreach ($ledgerRows as $r) {
-            $key = $r['source'] . ':' . ($r['document_kind'] ?? '') . ':' . $r['invoice_id'];
+            $key = VatLedgerService::documentIdentity($r);
             if (!isset($inv[$key])) {
                 $inv[$key] = [
                     'source'                => $r['source'],

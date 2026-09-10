@@ -1228,6 +1228,10 @@ export interface SaldoParams {
   /** Kód účtu (311/321/…) nebo 'all' pro default sadu. */
   account?: string
   partner_id?: number
+  /** Stránka SEZNAMU PARTNERŮ. Bez ní přijde celá sestava — viz SaldoPartnersPagination. */
+  page?: number
+  /** Partnerů na stránku (default 50, max 200). Platí jen s `page`. */
+  per_page?: number
 }
 
 export interface SaldoItem {
@@ -1251,13 +1255,28 @@ export interface SaldoPartner {
   items: SaldoItem[]
 }
 
+/**
+ * Stránkování SEZNAMU PARTNERŮ. Součty v bloku účtu jsou vždy za celou sestavu,
+ * ne za stránku — konfrontace se zůstatkem hlavní knihy je tvrzení o celku.
+ * Bez `page` v požadavku přijde celá sestava (`pages: 1`).
+ */
+export interface SaldoPartnersPagination {
+  page: number
+  per_page: number
+  total: number
+  pages: number
+}
+
 export interface SaldoAccountBlock {
   account: { id: number; code: string; name: string; normal_side: NormalSide }
   gl_balance: number
   open_items_total: number
+  /** Počet otevřených položek za CELOU sestavu (strop je 25 000, nad ním backend vrací 422 `too_many_rows`). */
+  open_items_count: number
   difference: number
   matches: boolean
   partners: SaldoPartner[]
+  partners_pagination: SaldoPartnersPagination
 }
 
 /** Období vč. stavu (report ReportPeriod status nenese — saldokonto ho pro UI hint potřebuje). */

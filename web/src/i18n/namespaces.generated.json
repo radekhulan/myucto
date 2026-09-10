@@ -591,6 +591,11 @@
     "stock-documents": [
       "stock"
     ],
+    "stock-opening-import": [
+      "eshop",
+      "imports",
+      "stock"
+    ],
     "stock-document-new": [
       "stock"
     ],

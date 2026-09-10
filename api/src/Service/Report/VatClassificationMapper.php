@@ -63,13 +63,13 @@ final class VatClassificationMapper
 
         $saleInv = []; $saleDraft = []; $purInv = []; $purDraft = [];
         foreach ($rows as $r) {
-            $id = (int) $r['invoice_id'];
+            $documentKey = VatLedgerService::documentIdentity($r);
             if ($r['source'] === 'sale') {
-                $saleInv[$id] = true;
-                if ($r['is_draft']) $saleDraft[$id] = true;
+                $saleInv[$documentKey] = true;
+                if ($r['is_draft']) $saleDraft[$documentKey] = true;
             } else {
-                $purInv[$id] = true;
-                if ($r['is_draft']) $purDraft[$id] = true;
+                $purInv[$documentKey] = true;
+                if ($r['is_draft']) $purDraft[$documentKey] = true;
             }
         }
         return [
@@ -179,7 +179,7 @@ final class VatClassificationMapper
     public function projectDphLines(array $rows): array
     {
         $byLine = [];
-        $invoiceLineSeen = []; // per (source:invId) × line → distinct count
+        $invoiceLineSeen = []; // per document identity × line → distinct count
         foreach ($rows as $r) {
             $primary = $r['dphdp3_line'];
             if ($r['code'] === null || $primary === null) continue; // bez řádku DPHDP3 → přeskoč
@@ -187,10 +187,10 @@ final class VatClassificationMapper
             $baseCzk = (float) $r['base_czk'];
             $vatCzk  = (float) $r['vat_czk'];
             $label   = (string) $r['label'];
-            // Count distinct faktur per řádek: oddělený namespace sale/purchase.
-            $invId = (int) $r['invoice_id'] * 10 + ($r['source'] === 'sale' ? 1 : 2);
+            // Count distinct dokladů per řádek včetně odděleného namespace pokladny.
+            $documentKey = VatLedgerService::documentIdentity($r);
 
-            $this->addLine($byLine, $primary, $baseCzk, $vatCzk, $invId, $invoiceLineSeen, $label);
+            $this->addLine($byLine, $primary, $baseCzk, $vatCzk, $documentKey, $invoiceLineSeen, $label);
 
             // Secondary (typicky ř.43 — mirror odpočet u RC / dovozu služby). U plnění bez
             // nároku na odpočet ('none', § 72/4 — např. reprezentace ze zahraničí v RC) se
@@ -207,7 +207,7 @@ final class VatClassificationMapper
                     $secondary,
                     (float) ($r['deduction_base_czk'] ?? $baseCzk),
                     $secondaryVat,
-                    $invId,
+                    $documentKey,
                     $invoiceLineSeen,
                     $label,
                 );
@@ -225,7 +225,7 @@ final class VatClassificationMapper
                     $assetVat = $assetEligibleLine === $secondary
                         ? (float) ($r['deduction_vat_czk'] ?? $vatCzk)
                         : $vatCzk;
-                    $this->addLine($byLine, '47', $assetBase, $assetVat, $invId, $invoiceLineSeen, 'Hodnota pořízeného majetku (§ 4 odst. 4 písm. c)');
+                    $this->addLine($byLine, '47', $assetBase, $assetVat, $documentKey, $invoiceLineSeen, 'Hodnota pořízeného majetku (§ 4 odst. 4 písm. c)');
                 }
             }
         }
@@ -237,14 +237,14 @@ final class VatClassificationMapper
      * @param array<string, array{base:float, vat:float, count:int, label:string}> $byLine by-ref
      * @param array<string, bool> $invoiceLineSeen by-ref
      */
-    private function addLine(array &$byLine, string $line, float $baseCzk, float $vatCzk, int $invId, array &$invoiceLineSeen, string $label): void
+    private function addLine(array &$byLine, string $line, float $baseCzk, float $vatCzk, string $documentKey, array &$invoiceLineSeen, string $label): void
     {
         if (!isset($byLine[$line])) {
             $byLine[$line] = ['base' => 0.0, 'vat' => 0.0, 'count' => 0, 'label' => $label];
         }
         $byLine[$line]['base'] += $baseCzk;
         $byLine[$line]['vat']  += $vatCzk;
-        $seenKey = $invId . ':' . $line;
+        $seenKey = $documentKey . ':' . $line;
         if (!isset($invoiceLineSeen[$seenKey])) {
             $invoiceLineSeen[$seenKey] = true;
             $byLine[$line]['count']++;

@@ -19,6 +19,7 @@ final class CatalogImportWorker
         private readonly CatalogImportSourceStore $sources,
         private readonly CatalogImportReader $reader,
         private readonly CatalogImportWriter $writer,
+        private readonly CatalogMediaImportService $mediaImports,
     ) {}
 
     public function tickKind(int $supplierId, string $kind, int $maxBatches = 10): ?array
@@ -78,16 +79,25 @@ final class CatalogImportWorker
             $before = null;
             $after = null;
             $values = [];
+            $media = [];
+            $productChanged = false;
             $identity = null;
             $error = null;
             $status = 'failed';
+            $redactedRaw = $this->redactMediaCell($profile, $header, $raw);
             try {
                 $values = CatalogImportProfile::map($profile, $header, $raw);
+                $mediaUrls = is_array($values['media_urls'] ?? null) ? $values['media_urls'] : [];
+                unset($values['media_urls']);
+                $media = $this->mediaImports->sealUrls($supplierId, $job['id'], $checkpoint, $mediaUrls);
                 $identity = $profile['identity'] === 'sku' ? $values['sku'] : hash('sha256', (string) $values[$profile['identity']]);
                 $existing = $this->writer->identify($supplierId, $profile, $values);
                 $before = $existing === null ? null : $this->writer->state($supplierId, (int) $existing['id']);
                 $after = $this->trial($supplierId, $profile, $values, $before);
-                $status = $before !== null && $this->writer->comparable($before) === $this->writer->comparable($after) ? 'unchanged' : 'ready';
+                $productChanged = $before === null || $this->writer->comparable($before) !== $this->writer->comparable($after);
+                $status = $media === [] && !$productChanged ? 'unchanged' : 'ready';
+            } catch (CatalogMediaFetchException $e) {
+                $error = $e->errorCode;
             } catch (EshopException|PricingInputException $e) {
                 $error = $e->errorCode;
             } catch (\InvalidArgumentException $e) {
@@ -98,7 +108,8 @@ final class CatalogImportWorker
             $this->items->append($supplierId, $job['id'], [['ordinal' => $checkpoint,
                 'source_row' => $rows->key(), 'stock_item_id' => $before['id'] ?? null,
                 'expected_version' => $before['row_version'] ?? null,
-                'input' => ['raw' => $raw, 'values' => $values, 'identity' => $identity]]]);
+                'input' => ['raw' => $redactedRaw, 'values' => $values, 'identity' => $identity,
+                    'media' => $media, 'product_changed' => $productChanged]]]);
             $this->items->finish($supplierId, $job['id'], $checkpoint, $status, $before, $after, $error);
         }
         $done = !$rows->valid();
@@ -140,7 +151,14 @@ final class CatalogImportWorker
             $pdo = $this->db->pdo();
             $pdo->exec('SAVEPOINT catalog_import_apply');
             try {
-                $after = $this->writer->write($supplierId, $job['input']['profile'], $item['input']['values'], $item['stock_item_id'], $item['expected_version']);
+                if (($item['input']['product_changed'] ?? true) === false && $item['stock_item_id'] !== null) {
+                    $after = $this->writer->state($supplierId, $item['stock_item_id']);
+                    if ((int) $after['row_version'] !== (int) $item['expected_version']) {
+                        throw new EshopException('version_conflict', 'Karta se od náhledu změnila.', 409);
+                    }
+                } else {
+                    $after = $this->writer->write($supplierId, $job['input']['profile'], $item['input']['values'], $item['stock_item_id'], $item['expected_version']);
+                }
                 if ($this->writer->comparable($after) !== $this->writer->comparable($item['after'])) {
                     throw new EshopException('import_input_changed', 'Výsledek již neodpovídá náhledu. Vytvořte nový náhled.', 409);
                 }
@@ -154,7 +172,24 @@ final class CatalogImportWorker
             }
         }
         $checkpoint = $batch === [] ? $job['checkpoint'] : end($batch)['ordinal'];
-        return ['checkpoint' => $checkpoint, 'done' => $checkpoint === $job['total'],
-            'report' => ['processed' => $checkpoint, 'counts' => $this->items->counts($supplierId, $job['id'])]];
+        $done = $checkpoint === $job['total'];
+        $mediaJobId = $done ? $this->mediaImports->enqueueFromApply($supplierId, $job) : null;
+        return ['checkpoint' => $checkpoint, 'done' => $done,
+            'report' => ['processed' => $checkpoint, 'counts' => $this->items->counts($supplierId, $job['id']),
+                'media_job_id' => $mediaJobId]];
+    }
+
+    private function redactMediaCell(array $profile, array $header, array $raw): array
+    {
+        $label = $profile['mapping']['media_urls'] ?? null;
+        if (!is_string($label)) {
+            return $raw;
+        }
+        foreach ($header as $index => $candidate) {
+            if (trim((string) $candidate) === trim($label) && array_key_exists($index, $raw)) {
+                $raw[$index] = '[media_urls:redacted]';
+            }
+        }
+        return $raw;
     }
 }

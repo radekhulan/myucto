@@ -6,11 +6,13 @@ import {
   catalogImportApi,
   type CatalogImportConfig,
   type CatalogImportItems,
+  type CatalogImportPreset,
   type CatalogImportProfile,
   type CatalogImportSample,
   type CatalogImportSource,
 } from '@/api/catalogImport'
 import { catalogJobsApi, type CatalogJob } from '@/api/catalogJobs'
+import CatalogImportPresets from '@/components/eshop/CatalogImportPresets.vue'
 import CatalogJobProgress from '@/components/stock/CatalogJobProgress.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
@@ -29,7 +31,18 @@ interface RequestToken {
 
 const MAX_FILE_SIZE = 50_000_000
 const POLL_INTERVAL = 2000
-const ADVANCED_FIELDS = new Set(['categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'prices'])
+const ADVANCED_FIELDS = new Set([
+  'categories',
+  'tag_ids',
+  'i18n',
+  'attributes',
+  'fees',
+  'prices',
+  'media_urls',
+  'variant_options',
+  'inheritance',
+  'relations',
+])
 const NON_CLEARABLE_FIELDS = new Set([
   'id',
   'external_id',
@@ -41,11 +54,23 @@ const NON_CLEARABLE_FIELDS = new Set([
   'is_active',
   'is_stocked',
   'export_eshop',
+  'media_urls',
 ])
-const HIDDEN_DIFF_FIELDS = new Set(['id', 'row_version'])
+const HIDDEN_DIFF_FIELDS = new Set(['id', 'row_version', 'url_hash'])
 const ITEM_STATUSES = new Set(['pending', 'ready', 'applied', 'unchanged', 'failed', 'conflict', 'skipped'])
 const IMPORT_ERROR_CODES = new Set([
   'catalog_import_failed',
+  'catalog_media_import_failed',
+  'media_download_failed',
+  'media_download_rejected',
+  'media_empty_file',
+  'media_executable_blocked',
+  'media_file_too_large',
+  'media_redirect_invalid',
+  'media_remote_unavailable',
+  'media_url_blocked',
+  'media_url_invalid',
+  'media_unsupported_type',
   'import_boolean_invalid',
   'import_cell_invalid',
   'import_csv_options_invalid',
@@ -109,11 +134,14 @@ const canWrite = computed(() => (
 const source = ref<CatalogImportSource | null>(null)
 const sample = ref<CatalogImportSample | null>(null)
 const profiles = ref<CatalogImportProfile[]>([])
+const presets = ref<CatalogImportPreset[]>([])
 const selectedProfile = ref<number | ''>('')
 const profileName = ref('')
 const stage = ref<Stage>('source')
 const error = ref('')
 const job = ref<CatalogJob | null>(null)
+const reportJob = ref<CatalogJob | null>(null)
+const applyResultJob = ref<CatalogJob | null>(null)
 const report = ref<CatalogImportItems | null>(null)
 const reportPage = ref(1)
 
@@ -155,11 +183,16 @@ const busy = computed(() => (
   || cancelling.value
 ))
 const activeJob = computed(() => !!job.value && ['queued', 'running'].includes(job.value.status))
-const counts = computed<Record<string, number>>(() => {
-  const raw = job.value?.report?.counts
+function jobCounts(target: CatalogJob | null): Record<string, number> {
+  const raw = target?.report?.counts
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
   return Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, Number(value) || 0]))
-})
+}
+const counts = computed(() => jobCounts(job.value))
+const applyCounts = computed(() => jobCounts(applyResultJob.value))
+const applyFailedCount = computed(() => applyCounts.value.failed ?? 0)
+const applyConflictCount = computed(() => applyCounts.value.conflict ?? 0)
+const hasApplyFailures = computed(() => applyFailedCount.value + applyConflictCount.value > 0)
 const readyCount = computed(() => counts.value.ready ?? 0)
 const canApply = computed(() => (
   canWrite.value
@@ -177,8 +210,11 @@ const availableFields = computed(() => sample.value?.fields ?? [])
 const regularFields = computed(() => availableFields.value.filter(field => !ADVANCED_FIELDS.has(field)))
 const advancedFields = computed(() => availableFields.value.filter(field => ADVANCED_FIELDS.has(field)))
 const priceMappingConflict = computed(() => !!config.value.mapping.price && !!config.value.mapping.prices)
+const sourceKeyRequired = computed(() => (
+  config.value.identity === 'external_id' || !!config.value.mapping.master_external_id
+))
 const sourceKeyValid = computed(() => (
-  config.value.identity !== 'external_id'
+  !sourceKeyRequired.value
   || /^[a-z0-9][a-z0-9_.-]{0,99}$/.test(config.value.source_key ?? '')
 ))
 const mappingValid = computed(() => (
@@ -247,10 +283,13 @@ function resetClientState() {
   source.value = null
   sample.value = null
   profiles.value = []
+  presets.value = []
   selectedProfile.value = ''
   profileName.value = ''
   config.value = emptyConfig()
   job.value = null
+  reportJob.value = null
+  applyResultJob.value = null
   report.value = null
   reportPage.value = 1
   error.value = ''
@@ -411,8 +450,11 @@ async function loadProfiles() {
   const token = beginRequest('profiles')
   profilesLoading.value = true
   try {
-    const nextProfiles = await catalogImportApi.profiles(token.controller.signal)
-    if (isCurrent(token)) profiles.value = nextProfiles
+    const response = await catalogImportApi.profiles(token.controller.signal)
+    if (isCurrent(token)) {
+      profiles.value = response.items
+      presets.value = response.presets
+    }
   } catch (requestError: any) {
     if (isCurrent(token) && !isCancelled(requestError)) error.value = apiError(requestError)
   } finally {
@@ -426,6 +468,13 @@ function selectProfile() {
   if (!profile) return
   config.value = cloneConfig(profile.config)
   profileName.value = profile.name
+  void loadSample()
+}
+
+function applyPreset(preset: CatalogImportPreset) {
+  config.value = cloneConfig(preset.config)
+  selectedProfile.value = ''
+  profileName.value = ''
   void loadSample()
 }
 
@@ -466,7 +515,7 @@ function mappingDisabled(field: string): boolean {
 
 function submitConfig(): CatalogImportConfig {
   const result = cloneConfig(config.value)
-  if (result.identity !== 'external_id') result.source_key = null
+  if (result.identity !== 'external_id' && !result.mapping.master_external_id) result.source_key = null
   for (const field of Object.keys(result.operations)) {
     if (result.operations[field] === 'set' && !result.mapping[field]) delete result.operations[field]
   }
@@ -522,6 +571,8 @@ function invalidateJobRequests() {
 function clearJobState() {
   invalidateJobRequests()
   job.value = null
+  reportJob.value = null
+  applyResultJob.value = null
   report.value = null
   reportPage.value = 1
 }
@@ -563,6 +614,8 @@ async function apply() {
   try {
     const nextJob = await catalogImportApi.apply(previewJob.id, token.controller.signal)
     if (!isCurrent(token) || job.value?.id !== previewJob.id) return
+    reportJob.value = null
+    applyResultJob.value = null
     report.value = null
     reportPage.value = 1
     job.value = nextJob
@@ -582,6 +635,38 @@ async function acceptJob(nextJob: CatalogJob) {
     return
   }
   stopPolling()
+  const mediaJobId = nextJob.kind === 'catalog_import_apply' && nextJob.status === 'completed'
+    ? Number(nextJob.report?.media_job_id ?? 0)
+    : 0
+  if (Number.isSafeInteger(mediaJobId) && mediaJobId > 0) {
+    const expectedGeneration = generation
+    const expectedSupplierId = supplier.currentSupplierId
+    applyResultJob.value = nextJob
+    reportJob.value = nextJob
+    await loadReport(1, nextJob.id)
+    if (disposed || generation !== expectedGeneration || supplier.currentSupplierId !== expectedSupplierId) return
+    const mediaJob = await catalogJobsApi.get(mediaJobId)
+    if (disposed || generation !== expectedGeneration || supplier.currentSupplierId !== expectedSupplierId) return
+    job.value = mediaJob
+    if (['queued', 'running'].includes(mediaJob.status)) {
+      startPolling()
+      return
+    }
+    if (!hasApplyFailures.value) await showReport(mediaJob)
+    return
+  }
+  if (nextJob.kind === 'catalog_import_media'
+    && applyResultJob.value
+    && reportJob.value?.id === applyResultJob.value.id) return
+  reportJob.value = nextJob
+  await loadReport(1, nextJob.id)
+}
+
+async function showReport(nextJob: CatalogJob) {
+  if (reportJob.value?.id === nextJob.id && report.value) return
+  reportJob.value = nextJob
+  report.value = null
+  reportPage.value = 1
   await loadReport(1, nextJob.id)
 }
 
@@ -602,7 +687,7 @@ async function refreshJob() {
     job.value = nextJob
     if (['queued', 'running'].includes(nextJob.status)) return
     stopPolling()
-    await loadReport(1, expectedJobId)
+    await acceptJob(nextJob)
   } catch (requestError: any) {
     if (isCurrent(token) && !isCancelled(requestError)) error.value = apiError(requestError)
   } finally {
@@ -610,13 +695,13 @@ async function refreshJob() {
   }
 }
 
-async function loadReport(page = reportPage.value, expectedJobId = job.value?.id) {
+async function loadReport(page = reportPage.value, expectedJobId = reportJob.value?.id) {
   if (!expectedJobId) return
   const token = beginRequest('report')
   reportLoading.value = true
   try {
     const nextReport = await catalogImportApi.items(expectedJobId, page, token.controller.signal)
-    if (!isCurrent(token) || job.value?.id !== expectedJobId) return
+    if (!isCurrent(token) || reportJob.value?.id !== expectedJobId) return
     report.value = nextReport
     reportPage.value = page
   } catch (requestError: any) {
@@ -687,7 +772,7 @@ async function resumeFromQuery() {
     const nextJob = await catalogJobsApi.get(expectedJobId, token.controller.signal)
     if (!isCurrent(token)) return
     if (nextJob.supplier_id !== token.supplierId
-      || !['catalog_import_stage', 'catalog_import_apply'].includes(nextJob.kind)) {
+      || !['catalog_import_stage', 'catalog_import_apply', 'catalog_import_media'].includes(nextJob.kind)) {
       error.value = t('eshop.import2.resume_error')
       return
     }
@@ -910,6 +995,13 @@ onBeforeUnmount(() => {
         <p class="mt-2 text-xs text-neutral-500">{{ t('eshop.import2.reader_refresh_hint') }}</p>
       </div>
 
+      <CatalogImportPresets
+        :presets="presets"
+        :source-format="source?.format ?? 'csv'"
+        :disabled="busy || !canWrite"
+        @apply="applyPreset"
+      />
+
       <div class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
         <h2 class="font-semibold text-neutral-900">{{ t('eshop.import2.import_rules') }}</h2>
         <div class="mt-3 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
@@ -921,7 +1013,7 @@ onBeforeUnmount(() => {
               <option value="external_id">{{ fieldLabel('external_id') }}</option>
             </select>
           </label>
-          <label v-if="config.identity === 'external_id'">
+          <label v-if="sourceKeyRequired">
             {{ t('eshop.import2.source_key') }}
             <input v-model.trim="config.source_key" class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3" data-test="source-key">
             <span v-if="!sourceKeyValid" class="mt-1 block text-xs text-danger-600">{{ t('eshop.import2.source_key_invalid') }}</span>
@@ -1113,10 +1205,50 @@ onBeforeUnmount(() => {
         {{ itemErrorLabel(job.error_code) }}
       </div>
 
+      <div
+        v-if="applyResultJob && hasApplyFailures"
+        class="flex flex-wrap gap-x-4 gap-y-1 rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700"
+        data-test="apply-failure-summary"
+      >
+        <span>{{ itemStatusLabel('failed') }}: {{ applyFailedCount }}</span>
+        <span>{{ itemStatusLabel('conflict') }}: {{ applyConflictCount }}</span>
+      </div>
+
+      <div
+        v-if="applyResultJob && job?.kind === 'catalog_import_media'"
+        class="flex flex-wrap gap-2"
+        data-test="report-switcher"
+      >
+        <button
+          type="button"
+          :disabled="reportLoading || reportJob?.id === applyResultJob.id"
+          :class="reportJob?.id === applyResultJob.id ? btnFilled('primary') : btnOutline('neutral')"
+          data-test="show-apply-report"
+          @click="showReport(applyResultJob)"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.eye" />
+          </svg>
+          {{ t('eshop.import2.apply_report_title') }}
+        </button>
+        <button
+          type="button"
+          :disabled="reportLoading || reportJob?.id === job.id"
+          :class="reportJob?.id === job.id ? btnFilled('primary') : btnOutline('neutral')"
+          data-test="show-media-report"
+          @click="showReport(job)"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.eye" />
+          </svg>
+          {{ t('eshop.import2.media_report_title') }}
+        </button>
+      </div>
+
       <div class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
         <header class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3">
           <div>
-            <h2 class="font-semibold text-neutral-900">{{ t(job?.kind === 'catalog_import_apply' ? 'eshop.import2.apply_report_title' : 'eshop.import2.report_title') }}</h2>
+            <h2 class="font-semibold text-neutral-900">{{ t(reportJob?.kind === 'catalog_import_media' ? 'eshop.import2.media_report_title' : reportJob?.kind === 'catalog_import_apply' ? 'eshop.import2.apply_report_title' : 'eshop.import2.report_title') }}</h2>
             <p class="mt-0.5 text-xs text-neutral-500">
               {{ report ? t('eshop.import2.report_summary', { total: report.pagination.total }) : t('eshop.import2.report_waiting') }}
             </p>

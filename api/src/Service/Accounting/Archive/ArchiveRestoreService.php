@@ -115,6 +115,7 @@ final class ArchiveRestoreService
         'stock_levels',
         'stock_documents',
         'stock_document_lines',
+        'external_entity_map',
         'stock_tracking_allocations',
         'stock_cycle_counts',
         'stock_cycle_count_lines',
@@ -581,6 +582,12 @@ final class ArchiveRestoreService
 
         foreach ($row as $col => $val) {
             if ($table === 'product_variants' && $col === 'option_signature') {
+                continue;
+            }
+            if ($table === 'external_entity_map' && $col === 'internal_id'
+                && ($row['entity_type'] ?? null) === 'stock_opening_line') {
+                $cols[] = $col;
+                $vals[] = $this->remapRef($table, $col, 'stock_document_lines', $val, $processedSet, $defers, $warnings);
                 continue;
             }
             if ($col === 'id') {

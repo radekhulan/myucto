@@ -14,6 +14,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentException;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Eshop\ProductMediaIngestService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -43,6 +44,7 @@ final class ProductMediaAction
         private readonly StockItemRepository $items,
         private readonly StockMediaRepository $media,
         private readonly DocumentStorage $storage,
+        private readonly ProductMediaIngestService $ingest,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -86,14 +88,6 @@ final class ProductMediaAction
             return Json::error($response, 'too_many_files', 'Příliš mnoho souborů najednou (max ' . self::MAX_FILES_PER_REQUEST . ').', 413);
         }
 
-        $existing = $this->media->listForItem($supplierId, $itemId);
-        $nextOrder = 0;
-        $hasPrimary = false;
-        foreach ($existing as $m) {
-            $nextOrder = max($nextOrder, (int) $m['display_order'] + 1);
-            $hasPrimary = $hasPrimary || (bool) $m['is_primary'];
-        }
-
         $created = [];
         $errors = [];
         foreach ($list as $file) {
@@ -120,7 +114,7 @@ final class ProductMediaAction
             }
 
             try {
-                $stored = $this->storage->storeFromTemp($tmp, $supplierId, $originalName);
+                $result = $this->ingest->ingestTemp($supplierId, $itemId, $tmp, $originalName);
             } catch (DocumentException $e) {
                 @unlink($tmp);
                 $errors[] = ['name' => $originalName, 'reason' => $e->errorCode];
@@ -130,26 +124,7 @@ final class ProductMediaAction
                 $errors[] = ['name' => $originalName, 'reason' => 'store_failed'];
                 continue;
             }
-
-            $mediaType = $stored['doc_type'] === 'image' ? 'image' : 'document';
-            $isPrimary = !$hasPrimary && $mediaType === 'image';
-            $id = $this->media->add($supplierId, $itemId, [
-                'media_type'    => $mediaType,
-                'storage_key'   => $stored['sha256'],
-                'original_name' => $originalName,
-                'mime_type'     => $stored['mime_type'],
-                'size_bytes'    => $stored['size_bytes'],
-                'display_order' => $nextOrder++,
-                'export_eshop'  => true,
-            ]);
-            if ($isPrimary) {
-                $this->media->setPrimaryFlag($supplierId, $id, true);
-                $hasPrimary = true;
-            }
-            $row = $this->media->find($supplierId, $id);
-            if ($row !== null) {
-                $created[] = $row;
-            }
+            $created[] = $result['media'];
         }
 
         $this->log($request, 'eshop.media_uploaded', $itemId, ['count' => count($created)]);

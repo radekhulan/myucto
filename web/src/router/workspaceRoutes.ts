@@ -214,6 +214,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'stock/items/:id(\\d+)',      name: 'stock-item-detail', component: () => import('@/pages/stock/ItemDetail.vue'),   meta: { requiresStock: true } },
       { path: 'stock/items/:id(\\d+)/edit', name: 'stock-item-edit',   component: () => import('@/pages/stock/ItemEditor.vue'),   meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'stock/documents',            name: 'stock-documents',        component: () => import('@/pages/stock/DocumentList.vue'),   meta: { requiresStock: true } },
+      { path: 'stock/opening-import',        name: 'stock-opening-import',   component: () => import('@/pages/stock/OpeningStockImport.vue'), meta: { requiresStock: true, requiresSupplier: true, additionalPermissions: ['stock.documents.write'] } },
       { path: 'stock/documents/new',        name: 'stock-document-new',     component: () => import('@/pages/stock/DocumentEditor.vue'), meta: { requiresStock: true, requiresSupplier: true } },
       { path: 'stock/documents/:id(\\d+)',  name: 'stock-document-detail',  component: () => import('@/pages/stock/DocumentEditor.vue'), meta: { requiresStock: true } },
       { path: 'stock/sales-orders',            name: 'stock-sales-orders',        component: () => import('@/pages/stock/SalesOrderList.vue'),   meta: { requiresStock: true } },

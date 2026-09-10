@@ -39,6 +39,30 @@ final class SaldoService
     /** Výchozí saldokontní účty (odběratelé/dodavatelé/poskytnuté a přijaté zálohy). */
     public const DEFAULT_ACCOUNTS = ['311', '321', '314', '324'];
 
+    /**
+     * Strop otevřených položek na JEDNU sestavu (přes všechny účty dohromady). Nad ním
+     * sestava skončí 422 `too_many_rows` — stejný vzor jako `JournalExportService::MAX_ROWS`.
+     *
+     * Proč strop vůbec: saldokonto bylo jediná sestava bez horní hranice počtu řádků.
+     * Nad ~400 tis. zaúčtovanými doklady spolklo přes 750 MB a spadlo na `memory_limit`
+     * (v Dockeru s 256 MB už kolem 200 tis.) — a s ním i měsíční kontrola úplnosti,
+     * která saldo volá dvakrát.
+     *
+     * Proč zrovna 25 000 a ne 5 000 jako u exportu deníku: nižší strop by odmítl i
+     * sestavy, které dnes bez potíží projdou. 25 000 položek drží špičku hluboko pod
+     * dockerovým limitem a přitom nechá projít vše, co je dnes použitelné. Nad tím už
+     * sestava není čitelná ani jako pracovní podklad a účetní ji stejně musí zúžit
+     * (`account`, `partner_id`, `as_of`) — což hláška říká.
+     *
+     * ODMÍTNOUT, ne useknout: saldokonto je inventarizační podklad (§ 29–30 ZoÚ) a
+     * konfrontace se zůstatkem hlavní knihy dává smysl jen nad ÚPLNÝM seznamem.
+     * Useknutý seznam by tiše vykázal nesouhlasný rozdíl jako inventarizační nález.
+     */
+    public const MAX_OPEN_ITEMS = 25000;
+
+    /** Strop `per_page` pro stránkování náhledu — shodně s `AccountStatementAction`. */
+    public const MAX_PER_PAGE = 200;
+
     public function __construct(
         private readonly Connection $db,
         private readonly SaldoRepository $saldo,
@@ -49,10 +73,20 @@ final class SaldoService
     /**
      * @param string|null $accountFilter kód účtu (311/321/…) nebo null/'all' = default sada
      * @param int|null    $partnerId     volitelný filtr na jednoho partnera
+     * @param int|null    $page          stránka SEZNAMU PARTNERŮ (1..N); null = celá sestava
+     * @param int|null    $perPage       partnerů na stránku (max {@see MAX_PER_PAGE})
      * @return array<string,mixed>
+     * @throws ReportException 422 too_many_rows nad {@see MAX_OPEN_ITEMS}
      */
-    public function build(int $supplierId, int $periodId, ?string $asOf, ?string $accountFilter = null, ?int $partnerId = null): array
-    {
+    public function build(
+        int $supplierId,
+        int $periodId,
+        ?string $asOf,
+        ?string $accountFilter = null,
+        ?int $partnerId = null,
+        ?int $page = null,
+        ?int $perPage = null,
+    ): array {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
             throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
@@ -82,12 +116,17 @@ final class SaldoService
             $balances[(string) $balance['code']] = round((float) $balance['md'] - (float) $balance['d'], 2);
         }
 
+        // Rozpočet otevřených položek je společný pro celou sestavu: každý účet dostane
+        // jen zbytek po předchozích, takže ani sestava přes všechny účty nepřeteče strop.
+        $budget = self::MAX_OPEN_ITEMS;
+
         $accounts = [];
         foreach ($codes as $code) {
-            $block = $this->buildAccount($supplierId, $asOf, (string) $code, $partnerId, $balances);
+            $block = $this->buildAccount($supplierId, $asOf, (string) $code, $partnerId, $balances, $budget);
             if ($block === null) {
                 continue; // účet není v osnově firmy
             }
+            $budget -= $block['open_items_count'];
             // U default sady vynech účty bez zůstatku i bez položek (nezaplevelovat 314/324);
             // u explicitně zvoleného účtu zobraz vždy.
             if (!$explicit && self::cents($block['gl_balance']) === 0 && $block['partners'] === []) {
@@ -95,6 +134,16 @@ final class SaldoService
             }
             $accounts[] = $block;
         }
+
+        // Stránkuje se AŽ TEĎ a jen SEZNAM PARTNERŮ k zobrazení. `gl_balance`,
+        // `open_items_total`, `difference` i `matches` zůstávají za CELOU sestavu —
+        // konfrontace se zůstatkem hlavní knihy je účetní tvrzení o celku, ne o
+        // stránce, a číslo spočítané ze stránky by bylo nepravdivé. Export
+        // (`SaldoAction::export`) stránkování nepoužívá vůbec.
+        foreach ($accounts as &$block) {
+            $block = self::paginatePartners($block, $page, $perPage);
+        }
+        unset($block);
 
         return [
             'as_of'   => $asOf,
@@ -123,9 +172,11 @@ final class SaldoService
 
     /**
      * @param array<string,float> $balances signed zůstatky syntetik k asOf
+     * @param int                 $budget   kolik otevřených položek smí účet ještě přidat
      * @return array<string,mixed>|null null = účet v osnově neexistuje
+     * @throws ReportException 422 too_many_rows
      */
-    private function buildAccount(int $supplierId, string $asOf, string $code, ?int $partnerId, array $balances): ?array
+    private function buildAccount(int $supplierId, string $asOf, string $code, ?int $partnerId, array $balances, int $budget): ?array
     {
         $acc = $this->saldo->resolveAccount($supplierId, $code);
         if ($acc === null) {
@@ -138,14 +189,17 @@ final class SaldoService
         // Zůstatek na normální straně účtu (kladný): pohledávka MD, závazek D.
         $glBalance = $normalSide === 'debit' ? $signed : -$signed;
 
-        $rawItems = $this->saldo->openItems($supplierId, $acc['id'], $asOf, $acc['code']);
+        // O jeden řádek víc, než smí projít — přetečení se pozná, aniž by se celý
+        // (potenciálně milionový) seznam musel načíst do paměti.
+        $rawItems = $this->saldo->openItems($supplierId, $acc['id'], $asOf, $acc['code'], max(1, $budget) + 1, $partnerId);
 
         /** @var array<int, array{partner_id:int, partner_name:string, total_remaining:float, items:list<array<string,mixed>>}> $byPartner */
         $byPartner = [];
         $openTotalCents = 0;
+        $openCount = 0;
         foreach ($rawItems as $it) {
             if ($partnerId !== null && $it['partner_id'] !== $partnerId) {
-                continue;
+                continue; // pojistka — filtr partnera už provedlo SQL
             }
 
             // Orientace na normální stranu účtu (post-review fix H1): stejná transformace
@@ -156,11 +210,21 @@ final class SaldoService
             // (H2 fix) — vynásobením zachová znaménko bookedNative automaticky.
             $bookedNative = $normalSide === 'debit' ? $it['booked_signed'] : -$it['booked_signed'];
             $foreignNative = $normalSide === 'debit' ? $it['foreign_signed'] : -$it['foreign_signed'];
-            $paidNative = round($bookedNative * $it['paid_ratio'], 2);
-            $remaining = round($bookedNative - $paidNative, 2);
+            $settlement = SaldoRepository::settlementAmounts($bookedNative, (float) $it['paid_ratio']);
+            $paidNative = $settlement['paid'];
+            $remaining = $settlement['remaining'];
 
-            if (self::cents($remaining) === 0) {
+            if (!$settlement['open']) {
                 continue; // plně uhrazené / netto vyrovnané = uzavřená položka
+            }
+            if (++$openCount > $budget) {
+                throw new ReportException(
+                    'too_many_rows',
+                    'Saldokonto má k tomuto dni víc než ' . self::MAX_OPEN_ITEMS
+                        . ' otevřených položek — zúžte výběr (jeden účet, jeden partner nebo dřívější datum). '
+                        . 'Useknutý seznam by konfrontaci se zůstatkem hlavní knihy vykázal jako inventarizační rozdíl.',
+                    422,
+                );
             }
             $daysOverdue = 0;
             if ($it['due_date'] !== '' && $asOf > $it['due_date']) {
@@ -207,10 +271,44 @@ final class SaldoService
             ],
             'gl_balance'       => $glBalance,
             'open_items_total' => $openTotal,
+            'open_items_count' => $openCount,
             'difference'       => $difference,
             'matches'          => self::cents($difference) === 0,
             'partners'         => $partners,
         ];
+    }
+
+    /**
+     * Doplní bloku účtu stránkovací hlavičku a případně ořízne `partners` na stránku.
+     * `$page === null` = celá sestava na jedné stránce (výchozí chování, kvůli exportu
+     * i zpětné kompatibilitě klienta).
+     *
+     * @param array<string,mixed> $block
+     * @return array<string,mixed>
+     */
+    private static function paginatePartners(array $block, ?int $page, ?int $perPage): array
+    {
+        /** @var list<array<string,mixed>> $partners */
+        $partners = $block['partners'];
+        $total = count($partners);
+
+        if ($page === null) {
+            $block['partners_pagination'] = [
+                'page' => 1, 'per_page' => max(1, $total), 'total' => $total, 'pages' => 1,
+            ];
+            return $block;
+        }
+
+        $perPage = max(1, min(self::MAX_PER_PAGE, $perPage ?? 50));
+        $pages = max(1, (int) ceil($total / $perPage));
+        $page = max(1, min($pages, $page));
+
+        $block['partners'] = array_slice($partners, ($page - 1) * $perPage, $perPage);
+        $block['partners_pagination'] = [
+            'page' => $page, 'per_page' => $perPage, 'total' => $total, 'pages' => $pages,
+        ];
+
+        return $block;
     }
 
     /**

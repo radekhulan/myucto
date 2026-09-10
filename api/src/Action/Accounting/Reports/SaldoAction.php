@@ -55,7 +55,15 @@ final class SaldoAction
         if ($params === null) return $err;
 
         try {
-            $data = $this->saldo->build($supplierId, $params['period_id'], $params['as_of'], $params['account'], $params['partner_id']);
+            $data = $this->saldo->build(
+                $supplierId,
+                $params['period_id'],
+                $params['as_of'],
+                $params['account'],
+                $params['partner_id'],
+                $params['page'],
+                $params['per_page'],
+            );
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -114,7 +122,7 @@ final class SaldoAction
     }
 
     /**
-     * @return array{period_id:int, as_of:?string, account:?string, partner_id:?int}|null
+     * @return array{period_id:int, as_of:?string, account:?string, partner_id:?int, page:?int, per_page:?int}|null
      */
     private function validateParams(Request $request, Response $response, int $supplierId, ?Response &$err): ?array
     {
@@ -154,12 +162,25 @@ final class SaldoAction
 
         $partnerId = (int) ($q['partner_id'] ?? 0);
 
+        // Stránkuje se SEZNAM PARTNERŮ; bez `page` se vrací celá sestava (výchozí stav,
+        // který potřebuje export i starší klient). Součty a konfrontace s hlavní knihou
+        // jsou vždy za celou sestavu, ne za stránku — viz SaldoService::paginatePartners().
+        $page = (int) ($q['page'] ?? 0);
+        $perPage = (int) ($q['per_page'] ?? 0);
+        if ($page < 0 || $perPage < 0 || $perPage > SaldoService::MAX_PER_PAGE) {
+            $err = Json::error($response, 'validation_failed',
+                'page musí být kladné číslo a per_page nejvýš ' . SaldoService::MAX_PER_PAGE . '.', 422);
+            return null;
+        }
+
         $err = null;
         return [
             'period_id'  => $periodId,
             'as_of'      => $asOf === '' ? null : $asOf,
             'account'    => $account,
             'partner_id' => $partnerId > 0 ? $partnerId : null,
+            'page'       => $page > 0 ? $page : null,
+            'per_page'   => $perPage > 0 ? $perPage : null,
         ];
     }
 

@@ -192,8 +192,35 @@ Záložka **Import zboží** zakládá a aktualizuje skladové karty z CSV nebo 
 3. Vyber režim zakládání, aktualizace nebo obojí. Urči zachování či vymazání prázdných hodnot. Mapování a pravidla lze uložit jako verzovaný profil pro další soubor.
 4. Spusť náhled. Úloha ověří celý soubor a uloží rozdíly před zápisem. Report je stránkovaný a rozlišuje připravené řádky, řádky beze změny, chyby a konflikty.
 5. Potvrď aplikaci připravených řádků. Samostatná úloha zapisuje po dávkách a ukazuje průběh. Chybné řádky se nezapisují; oprav je ve zdroji a vytvoř nový náhled.
+6. Obsahuje-li import adresy médií, navazující úloha je stáhne až po úspěšném zápisu karet. Průběh a chyby jednotlivých adres jsou vidět ve stejném reportu importu.
 
-### 34.7.2 Sloupce souboru
+### 34.7.2 Předvolby ABRA Flexi a POHODA
+
+Předvolba pouze vyplní mapování podporovaných sloupců. Nastavení můžeš před náhledem ručně upravit stejně jako běžný profil.
+
+**ABRA Flexi - ceník v CZK (CSV)**
+
+Předvolba načítá `cenaZaklBezDph` jako cenu v CZK bez DPH. Použij ji pro korunový ceník; u jiné měny toto cenové pole nemapuj a ceny nastav samostatně.
+
+1. V API použij evidenci `cenik`, filtr `(exportNaEshop=true)` a formát `.csv`.
+2. Vyžádej detail `custom:kod,nazev,eanKod,cenaZaklBezDph,skladove,exportNaEshop,popis`, kódování UTF-8 a oddělovač středník. Parametr ABRA Flexi se v URL píše `delimeter=%3B`.
+3. Nahraj CSV a zvol předvolbu **ABRA Flexi - ceník v CZK**.
+
+```text
+/c/FIRMA/cenik/(exportNaEshop=true).csv?detail=custom:kod,nazev,eanKod,cenaZaklBezDph,skladove,exportNaEshop,popis&limit=0&encoding=utf-8&delimeter=%3B
+```
+
+Předvolba mapuje `kod`, `nazev`, `eanKod`, `cenaZaklBezDph`, `skladove`, `exportNaEshop` a `popis`. Hlavička byla ověřena proti veřejnému DEMO API ABRA Flexi. Soubor z konkrétní zákaznické instalace a konkrétní verze ERP ověřen nebyl. Podrobnosti popisuje [oficiální návod ABRA Flexi pro napojení e-shopu](https://www.flexibee.eu/napojeni-na-internetovy-obchod/) a [dokumentace podporovaných formátů](https://podpora.flexibee.eu/cs/articles/3638755-jak-zacit-s-api-flexi-5-6-podporovane-formaty).
+
+**POHODA - tabulka zásob (XLSX)**
+
+1. Otevři **Sklady > Zásoby** a v tabulce vyber **Export tabulky**.
+2. Do exportu zařaď přesně sloupce `Kód`, `Název`, `M. j.` a `Čár. kód`. Výběr lze v POHODĚ uložit jako šablonu.
+3. Zvol XLSX, identifikátory ponech jako text, nahraj první list a použij předvolbu **POHODA - tabulka zásob**.
+
+POHODA předvolba záměrně neimportuje ceny, DPH ani skladové stavy. Přesné názvy čtyř sloupců vycházejí z oficiální dokumentace uživatelského rozhraní. Export z konkrétní verze POHODY ověřen nebyl. Postup exportu a ukládání šablon popisuje [oficiální návod POHODA](https://www.stormware.cz/podpora/faq/pohoda/198/Jak-mohu-vyexportovat-udaje-z-tabulky-do-excelu-nebo-jako-textovy-soubor/?id=3257&p=4); názvy polí jsou v [podrobném nastavení zásob](https://www.stormware.cz/prirucka-pohoda-online/Sklady/Podrobne_nastaveni/).
+
+### 34.7.3 Sloupce souboru
 
 Názvy a pořadí sloupců jsou volitelné, jejich význam určuje mapování. SKU a textové EAN zachovávají úvodní nuly. V XLSX proto identifikátory ukládej jako text; číslice odstraněné už tabulkovým editorem nelze obnovit.
 
@@ -209,8 +236,9 @@ Názvy a pořadí sloupců jsou volitelné, jejich význam určuje mapování. S
 | Hmotnost, záruka a dodání | Celá nezáporná čísla v gramech, měsících a dnech |
 | Kategorie, štítky, překlady, parametry a poplatky | Pokročilé sloupce s JSON seznamy odpovídajícími údajům karty |
 | Měnové ceny | JSON seznam cenových řádků; nelze současně mapovat jednoduchou CZK cenu a měnové ceny |
+| Adresy médií | JSON seznam nejvýše 10 veřejných HTTPS adres obrázků nebo dokumentů pro jednu kartu |
 
-### 34.7.3 Chování importu
+### 34.7.4 Chování importu
 
 - Nenamapované údaje se nemění. Prázdné hodnoty se standardně zachovávají; vymazání musí být zvolené pravidlem profilu nebo pole.
 - Import nikdy nemaže kartu, která v souboru chybí. Skladové stavy a pohyby se tímto importem nezapisují.
@@ -219,6 +247,9 @@ Názvy a pořadí sloupců jsou volitelné, jejich význam určuje mapování. S
 - Novější ruční změnu mezi náhledem a aplikací import nepřepíše. Řádek skončí konfliktem a vyžaduje nový náhled.
 - Dokončené dávky zůstávají zapsané. Po přerušení úloha pokračuje od checkpointu bez opakovaného založení karet; velký import nemá globální rollback.
 - Vzorce v XLSX se nespouštějí. Neplatné hodnoty, příliš velké buňky a nebezpečně rozbalitelné soubory se odmítnou.
+- Média se přidávají, import je nemaže. Stejný obsah se ke stejné kartě nepřipojí podruhé a opakovaný běh nezmění verzi karty.
+- Výsledek zápisu produktů včetně konfliktů zůstává dostupný i během následného stahování médií; oba kroky mají vlastní výsledky.
+- Stahování dovoluje pouze HTTPS, kontroluje cílovou IP při každém přesměrování a odmítá interní, lokální a vyhrazené sítě. Jedno médium může mít nejvýše 8 MiB.
 
 ## 34.8 Cenotvorba
 

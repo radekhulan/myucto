@@ -52,7 +52,11 @@ export interface DocumentCompletenessResult {
   }
   documents_overdue_unpaid: {
     items: OverdueDocumentItem[]
-    summary: { total_count: number; total_czk: number }
+    /**
+     * `truncated` = otevřených položek bylo na saldokontním účtu víc než 5 000;
+     * seznam i součet pak platí jen za načtenou (nejstarší) část.
+     */
+    summary: { total_count: number; total_czk: number; truncated: boolean }
   }
 }
 

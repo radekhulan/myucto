@@ -58,10 +58,10 @@ use PDO;
  * („banka není zaúčtovaná"), ne chyba sestavy.
  *
  * ZÁLOHA INKASOVANÁ PŘÍMO NA SALDOKONTNÍ ÚČET (bez 324/314) — viz
- * {@see advanceOnAccountSql}: proforma je samostatný doklad a platba míří na NI, ne na
+ * {@see advanceOnAccountCte}: proforma je samostatný doklad a platba míří na NI, ne na
  * finální fakturu; když ji účetní účtuje rovnou na 311, vypadá plně předplacená faktura
- * jako celá otevřená. Poddotaz proto přičte takovou zálohu do čitatele i jmenovatele
- * poměru — a protože je podmíněný tím, že úhrada zálohy dopadla NA TENHLE účet, tenantů
+ * jako celá otevřená. Agregace proto přičte takovou zálohu do čitatele i jmenovatele
+ * poměru — a protože je podmíněná tím, že úhrada zálohy dopadla NA TENHLE účet, tenantů
  * používajících 324/314 se nedotkne.
  *
  * Storno (H4): dřívější filtr `reversed_by IS NULL` odrážel AKTUÁLNÍ stav, ne stav
@@ -87,24 +87,12 @@ use PDO;
 final class SaldoRepository
 {
     /**
-     * Den, ke kterému HLAVNÍ KNIHA uznává bankovní úhradu přijaté faktury (`payment_matches`
-     * ⇄ `bank_transactions bt`): `entry_date` zaúčtovaného bankovního zápisu, a když zápis
-     * neexistuje (nezaúčtovaný výpis), fallback na datum pohybu. Právě tenhle den, ne
-     * `paid_at`/`paid_on` z dokladu, řídí, kdy z účtu 321 mizí závazek — konfrontace se
-     * zůstatkem HK proto musí počítat se stejným datem. Obsahuje JEDEN placeholder (asOf
-     * pro časově uvědomělé storno protizápisem).
+     * Bezpečnostní pásmo SQL filtru otevřenosti (viz {@see openFilterSql}). Je ZÁMĚRNĚ
+     * menší než haléřový práh 0,005, kterým rozhoduje `SaldoService::buildAccount()` —
+     * SQL tak vrací nadmnožinu otevřených položek a poslední slovo má pořád PHP.
      */
-    private const MATCH_SETTLEMENT_DATE =
-        "COALESCE(
-            (SELECT MIN(pbe.entry_date)
-               FROM journal_entries pbe
-               LEFT JOIN journal_entries pbrev ON pbrev.id = pbe.reversed_by
-              WHERE pbe.supplier_id = pm.supplier_id
-                AND pbe.source_type = 'bank' AND pbe.source_id = pm.bank_transaction_id
-                AND pbe.posted_at IS NOT NULL
-                AND (pbe.reversed_by IS NULL OR pbrev.entry_date > ?)),
-            DATE(bt.posted_at)
-        )";
+    private const OPEN_EPSILON = '0.0045';
+    private const CANDIDATE_PAGE_SIZE = 5000;
 
     public function __construct(private readonly Connection $db) {}
 
@@ -141,26 +129,236 @@ final class SaldoRepository
      * Otevřené položky účtu k rozvahovému dni: faktury (vydané + přijaté) zaúčtované
      * na daný účet (vč. analytik pod syntetikou) s vazbou přes source_type/source_id.
      * `booked_signed`/`foreign_signed` = SUM(debit − credit) za doklad, SIGNED (viz
-     * doc-komentář třídy). `paid_ratio` viz tamtéž. Filtrace na otevřené (netto
-     * remaining ≠ 0) dělá služba.
+     * doc-komentář třídy). `paid_ratio` viz tamtéž.
      *
+     * Uzavřené položky (netto remaining = 0) odfiltruje UŽ SQL ({@see openFilterSql}) —
+     * bez toho se do PHP tahal každý doklad, který firma kdy na 311/321 zaúčtovala,
+     * a sestava padala na `memory_limit` (1 mil. dokladů ≈ 750 MB) dřív, než se
+     * vůbec dostala k filtru. SQL filtr je jeho NADMNOŽINA; definitivní haléřový
+     * filtr proto repository aplikuje při stránkování kandidátů a stejný veřejný
+     * výpočet používají i obě navazující služby.
+     *
+     * DOLNÍ HRANICE DATA tu ZÁMĚRNĚ NENÍ (a nesmí být): saldo je kumulativní veličina
+     * „k datu". Otevřenou položkou k 31. 12. 2026 může být faktura z roku 2019, kterou
+     * nikdo nezaplatil — jakékoli „ber jen posledních N let" by ji ze seznamu vyhodilo,
+     * Σ otevřených položek by přestala odpovídat zůstatku hlavní knihy (ten dolní
+     * hranici nemá) a rozdíl by se vykázal jako inventarizační nález. Zdola omezit lze
+     * až tehdy, kdyby se sestava počítala od zůstatku po uzávěrce, což by ale zrušila
+     * možnost saldokonta k libovolnému dni napříč obdobími. Objem místo toho řeší
+     * filtr otevřenosti (uzavřené položky se nenačtou) a strop s odmítnutím.
+     *
+     * @param int|null $limit maximální počet vrácených řádků (NULL = bez stropu).
+     *                        Volající si vyžádá o jeden víc, než smí zobrazit, a podle
+     *                        přetečení pozná, že je sestava nad stropem — viz
+     *                        `SaldoService::MAX_OPEN_ITEMS`.
+     * @param int|null $partnerId filtr na jednoho partnera. Musí být v SQL, ne až v PHP:
+     *                        s `$limit` by se strop vyčerpal na cizích partnerech a
+     *                        položky toho hledaného by tiše vypadly.
+     * @param string|null $dueBefore volitelná horní hranice splatnosti (exclusive),
+     *                        aplikovaná v SQL před stránkováním.
+     * @param bool $orderByDue řadit kandidáty primárně od nejstarší splatnosti.
      * @return list<array{doc_type:string, doc_id:int, doc_no:string, issue_date:string,
      *                    due_date:string, status:string, partner_id:int, partner_name:string,
      *                    currency_code:string, booked_signed:float, foreign_signed:float,
      *                    paid_ratio:float}>
      */
-    public function openItems(int $supplierId, int $accountId, string $asOf, ?string $accountCode = null): array
+    public function openItems(
+        int $supplierId,
+        int $accountId,
+        string $asOf,
+        ?string $accountCode = null,
+        ?int $limit = null,
+        ?int $partnerId = null,
+        ?string $dueBefore = null,
+        bool $orderByDue = false,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsSnapshot = !$pdo->inTransaction();
+        if ($ownsSnapshot) {
+            $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            $pdo->exec('SET TRANSACTION READ ONLY');
+            $pdo->beginTransaction();
+        }
+
+        try {
+            if ($accountCode === '324') {
+                $result = $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue);
+            } elseif ($accountCode === '314') {
+                $result = $this->fetchPaidAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue);
+            } else {
+                $result = array_merge(
+                    $this->fetchOpenInvoices($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $this->fetchOpenPurchases($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                );
+            }
+            if ($ownsSnapshot) {
+                $pdo->commit();
+            }
+            return $result;
+        } catch (\Throwable $e) {
+            if ($ownsSnapshot && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /** `AND cl.id = <id>` (int literál, viz fetchOpenInvoices) nebo prázdný řetězec. */
+    private static function partnerSql(?int $partnerId): string
     {
-        if ($accountCode === '324') {
-            return $this->fetchReceivedAdvances($supplierId, $accountId, $asOf);
+        return $partnerId === null ? '' : ' AND cl.id = ' . $partnerId;
+    }
+
+    /**
+     * Hodnoty pro placeholdery dotazů, kde je jediným parametrem `asOf` (viz komentář
+     * u {@see fetchOpenInvoices} o literálních ID). Počet se bere ze SQL, takže se
+     * parametry nemohou rozejít s dotazem.
+     *
+     * @return list<string>
+     */
+    private static function asOfParams(string $sql, string $asOf): array
+    {
+        return array_fill(0, substr_count($sql, '?'), $asOf);
+    }
+
+    /**
+     * SQL protějšek filtru `SaldoService::buildAccount()` („zbytek v haléřích = 0 ⇒
+     * položka je uzavřená"). Platí `remaining = ROUND(booked × (1 − ratio), 2)`, protože
+     * `booked` je už na haléřové mřížce a odečtení mřížkové hodnoty se zaokrouhlením
+     * komutuje; k uzavření tedy stačí `|booked × (1 − ratio)| < 0,005`.
+     *
+     * Práh je tu ZÁMĚRNĚ nižší ({@see OPEN_EPSILON} = 0,0045): v pásmu ⟨0,0045; 0,005)
+     * a na půlhaléřových remízách (kde se komutace zaokrouhlení rozchází o haléř) SQL
+     * řádek raději PUSTÍ a zahodí ho až PHP. Filtr je proto prokazatelná NADMNOŽINA
+     * toho PHP — nikdy nezahodí položku, kterou by sestava zobrazila.
+     *
+     * @param string $booked SQL výraz se signed zaúčtovanou částkou (zaokrouhlenou na 2 des. místa)
+     * @param string $ratio  SQL výraz s poměrem uhrazeno/celkem v ⟨0;1⟩
+     */
+    private static function openFilterSql(string $booked, string $ratio): string
+    {
+        return 'ABS(' . $booked . ' * (1 - (' . $ratio . '))) >= ' . self::OPEN_EPSILON;
+    }
+
+    /**
+     * SQL protějšek {@see paidRatio()} bez zkratky „plně uhrazeno" — clamp do ⟨0;1⟩
+     * a haléřová ochrana proti dělení nulovým `amount_to_pay`.
+     */
+    private static function paidRatioSql(string $paidSignal, string $amountToPay): string
+    {
+        return "CASE WHEN ABS({$amountToPay}) < 0.005 THEN 0
+                     ELSE LEAST(1, GREATEST(0, ({$paidSignal}) / ({$amountToPay}))) END";
+    }
+
+    /**
+     * Filtr otevřenosti pro zálohové účty (324/314), kde otevřenou položkou není faktura,
+     * ale ZAÚČTOVANÝ POHYB peněz snížený o čerpání. Poměr se počítá z pohybu, ne z
+     * `amount_to_pay` — proto vlastní varianta {@see paidRatioSql}: `$movement <= 0`
+     * znamená (shodně s PHP) nulový poměr, ne dělení záporným jmenovatelem.
+     */
+    private static function advanceOpenFilterSql(string $movement, string $settled): string
+    {
+        $m = "ROUND({$movement}, 2)";
+        $s = "ROUND({$settled}, 2)";
+
+        return self::openFilterSql($m, "CASE WHEN {$m} > 0 THEN LEAST(1, GREATEST(0, {$s} / {$m})) ELSE 0 END");
+    }
+
+    private static function dueBeforeSql(string $alias, ?string $dueBefore): string
+    {
+        if ($dueBefore === null) {
+            return '';
         }
-        if ($accountCode === '314') {
-            return $this->fetchPaidAdvances($supplierId, $accountId, $asOf);
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/D', $dueBefore) !== 1) {
+            throw new \InvalidArgumentException('saldo_due_date_invalid');
         }
-        return array_merge(
-            $this->fetchOpenInvoices($supplierId, $accountId, $asOf),
-            $this->fetchOpenPurchases($supplierId, $accountId, $asOf),
-        );
+        return " AND {$alias}.due_date < '{$dueBefore}'";
+    }
+
+    private static function orderSql(string $alias, bool $orderByDue): string
+    {
+        return $orderByDue
+            ? " ORDER BY {$alias}.due_date, {$alias}.id, cl.company_name"
+            : " ORDER BY cl.company_name, {$alias}.due_date, {$alias}.id";
+    }
+
+    private static function limitSql(int $limit, int $offset): string
+    {
+        return ' LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset);
+    }
+
+    /**
+     * @return array{paid:float, remaining:float, open:bool}
+     */
+    public static function settlementAmounts(float $bookedAmount, float $paidRatio): array
+    {
+        $paid = round($bookedAmount * $paidRatio, 2);
+        $remaining = round($bookedAmount - $paid, 2);
+        return [
+            'paid' => $paid,
+            'remaining' => $remaining,
+            'open' => (int) round($remaining * 100.0) !== 0,
+        ];
+    }
+
+    /**
+     * SQL filtr vrací záměrnou nadmnožinu. Tato smyčka plní volající limit až po
+     * definitivním haléřovém filtru a drží každý SQL batch paměťově ohraničený.
+     *
+     * @param callable(string):list<mixed> $params
+     * @param callable(array<string,mixed>):array<string,mixed> $map
+     * @return list<array<string,mixed>>
+     */
+    private function fetchDefinitiveOpenRows(string $sql, callable $params, callable $map, ?int $limit): array
+    {
+        $pageSize = $limit === null
+            ? self::CANDIDATE_PAGE_SIZE
+            : min(self::CANDIDATE_PAGE_SIZE, max(1, $limit));
+        $offset = 0;
+        $result = [];
+
+        do {
+            $pageSql = $sql . self::limitSql($pageSize, $offset);
+            $stmt = $this->db->pdo()->prepare($pageSql);
+            $stmt->execute($params($pageSql));
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($rows as $row) {
+                $item = $map($row);
+                if (!self::settlementAmounts((float) $item['booked_signed'], (float) $item['paid_ratio'])['open']) {
+                    continue;
+                }
+                $result[] = $item;
+                if ($limit !== null && count($result) >= $limit) {
+                    return $result;
+                }
+            }
+            $offset += count($rows);
+        } while (count($rows) === $pageSize);
+
+        return $result;
+    }
+
+    /**
+     * Den, ke kterému HLAVNÍ KNIHA uznává bankovní pohyb: `entry_date` zaúčtovaného
+     * bankovního zápisu, jehož případný protizápis platí až PO asOf. Právě tenhle den,
+     * ne `paid_at`/`paid_on` z dokladu, řídí, kdy z účtu 311/321 mizí pohledávka/závazek —
+     * konfrontace se zůstatkem HK proto musí počítat se stejným datem. Volající si
+     * doplňuje fallback na `DATE(bt.posted_at)` (nezaúčtovaný výpis), u vydaných faktur
+     * ještě na `ip.paid_on`.
+     *
+     * Dřív šlo o KORELOVANÝ poddotaz vyhodnocovaný na každý řádek platby (a ten byl
+     * navíc uvnitř dalšího poddotazu na každý řádek sestavy); teď je to jedna agregace
+     * přes bankovní zápisy firmy. Obsahuje JEDEN placeholder: asOf.
+     */
+    private static function bankSettleCte(int $supplierId): string
+    {
+        return
+            "SELECT be.source_id AS bank_transaction_id, MIN(be.entry_date) AS settled_on
+               FROM journal_entries be
+               LEFT JOIN journal_entries brev ON brev.id = be.reversed_by
+              WHERE be.supplier_id = {$supplierId} AND be.source_type = 'bank' AND be.posted_at IS NOT NULL
+                AND (be.reversed_by IS NULL OR brev.entry_date > ?)
+              GROUP BY be.source_id";
     }
 
     /**
@@ -172,7 +370,15 @@ final class SaldoRepository
      *
      * @return list<array<string,mixed>>
      */
-    private function fetchReceivedAdvances(int $supplierId, int $accountId, string $asOf): array
+    private function fetchReceivedAdvances(
+        int $supplierId,
+        int $accountId,
+        string $asOf,
+        ?int $limit,
+        ?int $partnerId = null,
+        ?string $dueBefore = null,
+        bool $orderByDue = false,
+    ): array
     {
         $sql =
             "WITH params AS (
@@ -244,28 +450,34 @@ final class SaldoRepository
               JOIN currencies cur ON cur.id = p.currency_id
               LEFT JOIN settled s ON s.invoice_id = p.id
              WHERE p.invoice_type = 'proforma'
-             ORDER BY cl.company_name, p.due_date, p.id";
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, $asOf, $accountId]);
+               AND " . self::advanceOpenFilterSql('c.collected_czk', 'COALESCE(s.settled_czk, 0)')
+               . self::partnerSql($partnerId)
+               . self::dueBeforeSql('p', $dueBefore)
+               . self::orderSql('p', $orderByDue);
 
-        return array_map(function (array $r): array {
-            $collected = round((float) $r['collected_czk'], 2);
-            $settled = round((float) $r['settled_czk'], 2);
-            return [
-                'doc_type'       => 'invoice',
-                'doc_id'         => (int) $r['doc_id'],
-                'doc_no'         => (string) $r['doc_no'],
-                'issue_date'     => (string) $r['issue_date'],
-                'due_date'       => (string) $r['due_date'],
-                'status'         => (string) $r['status'],
-                'partner_id'     => (int) $r['partner_id'],
-                'partner_name'   => (string) $r['partner_name'],
-                'currency_code'  => (string) $r['currency_code'],
-                'booked_signed'  => -$collected,
-                'foreign_signed' => 0.0,
-                'paid_ratio'     => $collected > 0.0 ? min(1.0, max(0.0, $settled / $collected)) : 0.0,
-            ];
-        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return $this->fetchDefinitiveOpenRows(
+            $sql,
+            static fn (string $pageSql): array => [$supplierId, $asOf, $accountId],
+            static function (array $r): array {
+                $collected = round((float) $r['collected_czk'], 2);
+                $settled = round((float) $r['settled_czk'], 2);
+                return [
+                    'doc_type'       => 'invoice',
+                    'doc_id'         => (int) $r['doc_id'],
+                    'doc_no'         => (string) $r['doc_no'],
+                    'issue_date'     => (string) $r['issue_date'],
+                    'due_date'       => (string) $r['due_date'],
+                    'status'         => (string) $r['status'],
+                    'partner_id'     => (int) $r['partner_id'],
+                    'partner_name'   => (string) $r['partner_name'],
+                    'currency_code'  => (string) $r['currency_code'],
+                    'booked_signed'  => -$collected,
+                    'foreign_signed' => 0.0,
+                    'paid_ratio'     => $collected > 0.0 ? min(1.0, max(0.0, $settled / $collected)) : 0.0,
+                ];
+            },
+            $limit,
+        );
     }
 
     /**
@@ -283,7 +495,15 @@ final class SaldoRepository
      *
      * @return list<array<string,mixed>>
      */
-    private function fetchPaidAdvances(int $supplierId, int $accountId, string $asOf): array
+    private function fetchPaidAdvances(
+        int $supplierId,
+        int $accountId,
+        string $asOf,
+        ?int $limit,
+        ?int $partnerId = null,
+        ?string $dueBefore = null,
+        bool $orderByDue = false,
+    ): array
     {
         $sql =
             "WITH params AS (
@@ -393,116 +613,171 @@ final class SaldoRepository
               JOIN clients cl ON cl.id = p.vendor_id
               JOIN currencies cur ON cur.id = p.currency_id
               LEFT JOIN settled s ON s.advance_id = p.id
-             WHERE p.document_kind = 'advance'
-                OR (p.document_kind = 'tax_document' AND p.parent_purchase_invoice_id IS NULL)
-             ORDER BY cl.company_name, p.due_date, p.id";
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([$supplierId, $asOf, $accountId]);
+             WHERE (p.document_kind = 'advance'
+                    OR (p.document_kind = 'tax_document' AND p.parent_purchase_invoice_id IS NULL))
+               AND " . self::advanceOpenFilterSql('paid.paid_czk', 'COALESCE(s.settled_czk, 0)')
+               . self::partnerSql($partnerId)
+               . self::dueBeforeSql('p', $dueBefore)
+               . self::orderSql('p', $orderByDue);
 
-        return array_map(function (array $r): array {
-            $paid = round((float) $r['paid_czk'], 2);
-            $settled = round((float) $r['settled_czk'], 2);
-            return [
-                'doc_type'       => 'purchase_invoice',
-                'doc_id'         => (int) $r['doc_id'],
-                'doc_no'         => (string) $r['doc_no'],
-                'issue_date'     => (string) $r['issue_date'],
-                'due_date'       => (string) $r['due_date'],
-                'status'         => (string) $r['status'],
-                'partner_id'     => (int) $r['partner_id'],
-                'partner_name'   => (string) $r['partner_name'],
-                'currency_code'  => (string) $r['currency_code'],
-                'booked_signed'  => $paid,
-                'foreign_signed' => 0.0,
-                'paid_ratio'     => $paid > 0.0 ? min(1.0, max(0.0, $settled / $paid)) : 0.0,
-            ];
-        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return $this->fetchDefinitiveOpenRows(
+            $sql,
+            static fn (string $pageSql): array => [$supplierId, $asOf, $accountId],
+            static function (array $r): array {
+                $paid = round((float) $r['paid_czk'], 2);
+                $settled = round((float) $r['settled_czk'], 2);
+                return [
+                    'doc_type'       => 'purchase_invoice',
+                    'doc_id'         => (int) $r['doc_id'],
+                    'doc_no'         => (string) $r['doc_no'],
+                    'issue_date'     => (string) $r['issue_date'],
+                    'due_date'       => (string) $r['due_date'],
+                    'status'         => (string) $r['status'],
+                    'partner_id'     => (int) $r['partner_id'],
+                    'partner_name'   => (string) $r['partner_name'],
+                    'currency_code'  => (string) $r['currency_code'],
+                    'booked_signed'  => $paid,
+                    'foreign_signed' => 0.0,
+                    'paid_ratio'     => $paid > 0.0 ? min(1.0, max(0.0, $settled / $paid)) : 0.0,
+                ];
+            },
+            $limit,
+        );
     }
 
     /**
+     * Vydané faktury otevřené k asOf. Oproti původní verzi tři změny, VŠECHNY
+     * výkonové (výstup je řádek po řádku shodný):
+     *   1. `paid_as_of` a `advance_on_account` byly korelované poddotazy počítané
+     *      na KAŽDÝ řádek sestavy (a `paid_as_of` v sobě mělo ještě jeden poddotaz
+     *      na řádek platby); teď jsou to CTE agregace spočtené jednou.
+     *   2. Filtr otevřenosti ({@see openFilterSql}) je v SQL, takže se do PHP
+     *      netahají doklady, které sestava stejně zahodí.
+     *   3. Volitelný `LIMIT` — sestava má strop, viz `SaldoService::MAX_OPEN_ITEMS`.
+     *
+     * Filtr je v `HAVING`, ne v obalujícím `SELECT * FROM (…)`: obal by MariaDB donutil
+     * materializovat KAŽDÝ zaúčtovaný doklad do temp tabulky (nad `tmp_table_size` na disk),
+     * což bylo měřitelně dvakrát dražší než ponechat agregaci v hlavním dotazu.
+     *
+     * `HAVING` NESMÍ odkazovat aliasy `paid_as_of` / `advance_on_account` /
+     * `amount_to_pay` — jsou stejnojmenné jako podkladové sloupce a MariaDB tam
+     * přednostně vezme SLOUPEC, tedy `NULL` místo `COALESCE(...,0)`, a filtr pak tiše
+     * zahodí všechny řádky. Výrazy proto drží proměnné `$…Expr` a používají se v SELECT
+     * i v HAVING doslova.
+     *
+     * ID (supplier/account/partner) jdou do SQL LITERÁLEM, ne placeholderem — jsou to
+     * `int`, takže tudy neprojde uživatelský vstup (týž vzor jako
+     * {@see PurchaseSettledExpr::settled()}). Není to kosmetika: nativní prepared
+     * statement se v MariaDB optimalizuje BEZ znalosti hodnot a u těchhle ID pak
+     * neprovede rozklad CTE na LATERAL DERIVED — naměřeno 1,63 s místo 0,81 s na
+     * stejném dotazu. Zbylé placeholdery jsou tím pádem VŠECHNY `asOf`, takže se
+     * parametry nedají prohodit.
+     *
      * @return list<array<string,mixed>>
      */
-    private function fetchOpenInvoices(int $supplierId, int $accountId, string $asOf): array
+    private function fetchOpenInvoices(
+        int $supplierId,
+        int $accountId,
+        string $asOf,
+        ?int $limit,
+        ?int $partnerId = null,
+        ?string $dueBefore = null,
+        bool $orderByDue = false,
+    ): array
     {
-        $sql =
-            "SELECT d.id AS doc_id,
-                    COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
-                    d.issue_date, d.due_date, d.status,
-                    cl.id AS partner_id, cl.company_name AS partner_name,
-                    cur.code AS currency_code,
-                    d.amount_to_pay,
-                    (SELECT COALESCE(SUM(ip.amount), 0)
-                       FROM invoice_payments ip
-                       LEFT JOIN bank_transactions ipbt ON ipbt.id = ip.bank_transaction_id
-                      WHERE ip.supplier_id = d.supplier_id AND ip.invoice_id = d.id
-                        AND COALESCE(
-                                (SELECT MIN(be.entry_date)
-                                   FROM journal_entries be
-                                   LEFT JOIN journal_entries brev ON brev.id = be.reversed_by
-                                  WHERE be.supplier_id = ip.supplier_id
-                                    AND be.source_type = 'bank'
-                                    AND be.source_id = ip.bank_transaction_id
-                                    AND be.posted_at IS NOT NULL
-                                    AND (be.reversed_by IS NULL OR brev.entry_date > ?)),
-                                DATE(ipbt.posted_at),
-                                ip.paid_on
-                            ) <= ?) AS paid_as_of,
-                    " . $this->advanceOnAccountSql('credit') . " AS advance_on_account,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked_signed,
-                    SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                             THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
-                             ELSE 0 END) AS foreign_signed
-               FROM journal_entries e
-               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
-               LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
-               JOIN invoices d      ON d.id = e.source_id AND d.supplier_id = e.supplier_id
-               JOIN clients cl      ON cl.id = d.client_id
-               JOIN currencies cur  ON cur.id = d.currency_id
-              WHERE e.supplier_id = ? AND e.source_type = 'invoice'
-                AND e.posted_at IS NOT NULL
-                AND e.entry_date <= ?
-                AND (e.reversed_by IS NULL OR rev.entry_date > ?)
-                AND (ca.id = ? OR ca.parent_id = ?)
-                AND d.status <> 'draft'
-                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
-              GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status,
-                       cl.id, cl.company_name, cur.code, d.amount_to_pay
-              ORDER BY cl.company_name, d.due_date, d.id";
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([
-            $asOf, $asOf,                       // paid_as_of (storno guard + settlement date)
-            $asOf, $asOf, $accountId, $accountId, // advance_on_account
-            $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf,
-        ]);
+        $advanceCte = $this->advanceOnAccountCte('credit', $supplierId, $accountId);
 
-        return array_map(function (array $r): array {
-            // Předplacení z proformy uhrazené PŘÍMO na tenhle účet (viz advanceOnAccountSql):
-            // vstupuje do čitatele i jmenovatele poměru. `amount_to_pay` finální faktury je
-            // o zálohu snížené (u plně předplacené je nulové), takže bez téhle korekce vyjde
-            // poměr 0 (nebo 1 z nesouvisejícího zbytku) a doklad svítí jako celý otevřený.
-            $advance = round((float) $r['advance_on_account'], 2);
-            return [
-                'doc_type'       => 'invoice',
-                'doc_id'         => (int) $r['doc_id'],
-                'doc_no'         => (string) $r['doc_no'],
-                'issue_date'     => (string) $r['issue_date'],
-                'due_date'       => (string) $r['due_date'],
-                'status'         => (string) $r['status'],
-                'partner_id'     => (int) $r['partner_id'],
-                'partner_name'   => (string) $r['partner_name'],
-                'currency_code'  => (string) $r['currency_code'],
-                'booked_signed'  => round((float) $r['booked_signed'], 2),
-                'foreign_signed' => round((float) $r['foreign_signed'], 2),
-                // Stejnoměnný poměr k asOf; invoice_payments pokrývá bankovní,
-                // hotovostní i ruční platby jednotně.
-                'paid_ratio'     => $this->paidRatio(
-                    false,
-                    (float) $r['paid_as_of'] + $advance,
-                    (float) $r['amount_to_pay'] + $advance,
-                ),
-            ];
-        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $paidExpr    = 'COALESCE(paid.paid_sum, 0)';
+        $advanceExpr = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
+        $toPayExpr   = 'COALESCE(d.amount_to_pay, 0)';
+        $bookedExpr  = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $foreignExpr = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
+                                       THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
+                                       ELSE 0 END), 2)";
+        $ratio = self::paidRatioSql(
+            "{$paidExpr} + {$advanceExpr}",
+            "{$toPayExpr} + {$advanceExpr}",
+        );
+
+        $sql =
+            "WITH bank_settle AS (
+                " . self::bankSettleCte($supplierId) . "
+            ), paid AS (
+                SELECT ip.invoice_id, SUM(ip.amount) AS paid_sum
+                  FROM invoice_payments ip
+                  LEFT JOIN bank_transactions ipbt ON ipbt.id = ip.bank_transaction_id
+                  LEFT JOIN bank_settle bs ON bs.bank_transaction_id = ip.bank_transaction_id
+                 WHERE ip.supplier_id = {$supplierId}
+                   AND COALESCE(bs.settled_on, DATE(ipbt.posted_at), ip.paid_on) <= ?
+                 GROUP BY ip.invoice_id
+            ), advances AS (
+                {$advanceCte}
+            )
+            SELECT d.id AS doc_id,
+                   COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
+                   d.issue_date, d.due_date, d.status,
+                   cl.id AS partner_id, cl.company_name AS partner_name,
+                   cur.code AS currency_code,
+                   {$toPayExpr} AS amount_to_pay,
+                   {$paidExpr} AS paid_as_of,
+                   {$advanceExpr} AS advance_on_account,
+                   {$bookedExpr} AS booked_signed,
+                   {$foreignExpr} AS foreign_signed
+              FROM journal_entries e
+              JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+              JOIN chart_of_accounts ca ON ca.id = l.account_id
+              LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+              JOIN invoices d      ON d.id = e.source_id AND d.supplier_id = e.supplier_id
+              JOIN clients cl      ON cl.id = d.client_id
+              JOIN currencies cur  ON cur.id = d.currency_id
+              LEFT JOIN paid       ON paid.invoice_id = d.id
+              LEFT JOIN advances adv ON adv.advance_id = d.parent_invoice_id
+             WHERE e.supplier_id = {$supplierId} AND e.source_type = 'invoice'
+               AND e.posted_at IS NOT NULL
+               AND e.entry_date <= ?
+               AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+               AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
+               AND d.status <> 'draft'
+               AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
+               " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . "
+             GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status,
+                      cl.id, cl.company_name, cur.code, d.amount_to_pay,
+                      paid.paid_sum, adv.advance_sum
+            HAVING " . self::openFilterSql($bookedExpr, $ratio) . "
+             " . self::orderSql('d', $orderByDue);
+
+        return $this->fetchDefinitiveOpenRows(
+            $sql,
+            static fn (string $pageSql): array => self::asOfParams($pageSql, $asOf),
+            function (array $r): array {
+                // Předplacení z proformy uhrazené PŘÍMO na tenhle účet (viz advanceOnAccountCte):
+                // vstupuje do čitatele i jmenovatele poměru. `amount_to_pay` finální faktury je
+                // o zálohu snížené (u plně předplacené je nulové), takže bez téhle korekce vyjde
+                // poměr 0 (nebo 1 z nesouvisejícího zbytku) a doklad svítí jako celý otevřený.
+                $advance = round((float) $r['advance_on_account'], 2);
+                return [
+                    'doc_type'       => 'invoice',
+                    'doc_id'         => (int) $r['doc_id'],
+                    'doc_no'         => (string) $r['doc_no'],
+                    'issue_date'     => (string) $r['issue_date'],
+                    'due_date'       => (string) $r['due_date'],
+                    'status'         => (string) $r['status'],
+                    'partner_id'     => (int) $r['partner_id'],
+                    'partner_name'   => (string) $r['partner_name'],
+                    'currency_code'  => (string) $r['currency_code'],
+                    'booked_signed'  => round((float) $r['booked_signed'], 2),
+                    'foreign_signed' => round((float) $r['foreign_signed'], 2),
+                    // Stejnoměnný poměr k asOf; invoice_payments pokrývá bankovní,
+                    // hotovostní i ruční platby jednotně.
+                    'paid_ratio'     => $this->paidRatio(
+                        false,
+                        (float) $r['paid_as_of'] + $advance,
+                        (float) $r['amount_to_pay'] + $advance,
+                    ),
+                ];
+            },
+            $limit,
+        );
     }
 
     /**
@@ -523,141 +798,206 @@ final class SaldoRepository
      * faktura si zálohu zúčtuje sama zápisem 324 MD / 311 D ve VLASTNÍM zápisu, takže
      * `booked_signed` už přichází netto. Pro ně vyjde tenhle poddotaz 0 a chování se nemění.
      *
+     * Dřív to byl KORELOVANÝ poddotaz počítaný na každý řádek sestavy; teď je to CTE
+     * agregované jednou přes všechny zálohy firmy a napojené `LEFT JOIN`em na
+     * `parent_invoice_id` / `advance_purchase_invoice_id`. Podmínka „záloha má vůbec
+     * nějaký navazující doklad" ({@see $childExists}) není nový filtr, jen předvýběr:
+     * zálohy bez následníka se stejně nemají na co napojit, takže výsledek je shodný.
+     *
+     * Obsahuje DVA placeholdery, oba asOf (entry_date, storno); ID jsou literály.
+     *
      * @param 'credit'|'debit' $side strana, na kterou úhrada zálohy dopadá na daném účtu
      *                               (311 pohledávka → credit, 321 závazek → debit)
      */
-    private function advanceOnAccountSql(string $side): string
+    private function advanceOnAccountCte(string $side, int $supplierId, int $accountId): string
     {
-        $link = $side === 'credit'
-            ? "pf.id = d.parent_invoice_id AND pf.invoice_type = 'proforma'"
-            : "pf.id = d.advance_purchase_invoice_id AND pf.document_kind = 'advance'";
-        $payments = $side === 'credit'
-            ? "JOIN invoice_payments pip ON pip.supplier_id = pf.supplier_id AND pip.invoice_id = pf.id"
-            : "JOIN payment_matches pip ON pip.supplier_id = pf.supplier_id AND pip.purchase_invoice_id = pf.id";
-        $table = $side === 'credit' ? 'invoices' : 'purchase_invoices';
-        $cashLink = $side === 'credit'
-            ? 'cd.invoice_payment_id = pip.id'
-            : 'cd.purchase_invoice_id = pf.id';
+        if ($side === 'credit') {
+            $key = 'pip.invoice_id';
+            $from = "FROM invoice_payments pip
+                     JOIN invoices pf ON pf.id = pip.invoice_id AND pf.supplier_id = pip.supplier_id
+                                     AND pf.invoice_type = 'proforma'";
+            $childExists = "EXISTS (SELECT 1 FROM invoices ch
+                                     WHERE ch.supplier_id = pf.supplier_id AND ch.parent_invoice_id = pf.id)";
+            $cashLink = 'cd.invoice_payment_id = pip.id';
+        } else {
+            $key = 'pip.purchase_invoice_id';
+            $from = "FROM payment_matches pip
+                     JOIN purchase_invoices pf ON pf.id = pip.purchase_invoice_id AND pf.supplier_id = pip.supplier_id
+                                              AND pf.document_kind = 'advance'";
+            $childExists = "EXISTS (SELECT 1 FROM purchase_invoices ch
+                                     WHERE ch.supplier_id = pf.supplier_id AND ch.advance_purchase_invoice_id = pf.id)";
+            $cashLink = 'cd.purchase_invoice_id = pf.id';
+        }
 
         return
-            "(SELECT COALESCE(SUM(pip.amount), 0)
-                FROM {$table} pf
-                {$payments}
-               WHERE {$link} AND pf.supplier_id = d.supplier_id
-                 AND EXISTS (
-                     SELECT 1
-                       FROM journal_entries pe
-                       JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
-                       JOIN chart_of_accounts pca ON pca.id = pl.account_id
-                       LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
-                      WHERE pe.supplier_id = pip.supplier_id
-                        AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
-                        AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
-                        AND pl.side = '{$side}'
-                        AND (pca.id = ? OR pca.parent_id = ?)
-                        AND (
-                            (pip.bank_transaction_id IS NOT NULL
-                             AND pe.source_type = 'bank' AND pe.source_id = pip.bank_transaction_id)
-                            OR EXISTS (
-                                SELECT 1 FROM cash_documents cd
-                                 WHERE cd.supplier_id = pip.supplier_id AND {$cashLink}
-                                   AND pe.source_type = 'cash' AND pe.source_id = cd.id
-                            )
-                        )
-                 ))";
+            "SELECT {$key} AS advance_id, SUM(pip.amount) AS advance_sum
+               {$from}
+              WHERE pip.supplier_id = {$supplierId}
+                AND {$childExists}
+                AND EXISTS (
+                    SELECT 1
+                      FROM journal_entries pe
+                      JOIN journal_entry_lines pl ON pl.entry_id = pe.id AND pl.supplier_id = pe.supplier_id
+                      JOIN chart_of_accounts pca ON pca.id = pl.account_id
+                      LEFT JOIN journal_entries prev ON prev.id = pe.reversed_by
+                     WHERE pe.supplier_id = pip.supplier_id
+                       AND pe.posted_at IS NOT NULL AND pe.entry_date <= ?
+                       AND (pe.reversed_by IS NULL OR prev.entry_date > ?)
+                       AND pl.side = '{$side}'
+                       AND (pca.id = {$accountId} OR pca.parent_id = {$accountId})
+                       AND (
+                           (pip.bank_transaction_id IS NOT NULL
+                            AND pe.source_type = 'bank' AND pe.source_id = pip.bank_transaction_id)
+                           OR EXISTS (
+                               SELECT 1 FROM cash_documents cd
+                                WHERE cd.supplier_id = pip.supplier_id AND {$cashLink}
+                                  AND pe.source_type = 'cash' AND pe.source_id = cd.id
+                           )
+                       )
+                )
+              GROUP BY {$key}";
     }
 
     /**
+     * Přijaté faktury otevřené k asOf — zrcadlo {@see fetchOpenInvoices} (viz tamní
+     * komentář k CTE, filtru otevřenosti a limitu).
+     *
+     * `settled_by_offsets` zůstává KORELOVANÝM výrazem záměrně: je to sdílený zdroj
+     * pravdy {@see PurchaseSettledExpr::offsetSettledAsOf()}, který používají i uzávěrka
+     * a zápočty. Vlastní „rychlejší" kopie by z něj udělala dvě pravdy — a zápočtové
+     * tabulky (`offset_agreement_items`, `invoice_settlements`) jsou o řády menší než
+     * platby, takže na nich stojí zlomek nákladu.
+     *
      * @return list<array<string,mixed>>
      */
-    private function fetchOpenPurchases(int $supplierId, int $accountId, string $asOf): array
+    private function fetchOpenPurchases(
+        int $supplierId,
+        int $accountId,
+        string $asOf,
+        ?int $limit,
+        ?int $partnerId = null,
+        ?string $dueBefore = null,
+        bool $orderByDue = false,
+    ): array
     {
-        $sql =
-            "SELECT d.id AS doc_id,
-                    COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
-                    d.issue_date, d.due_date, d.status, d.paid_at,
-                    cl.id AS partner_id, cl.company_name AS partner_name,
-                    cur.code AS currency_code,
-                    d.amount_to_pay,
-                    (SELECT COALESCE(SUM(pm.amount), 0)
-                       FROM payment_matches pm
-                       JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
-                      WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id
-                        AND " . self::MATCH_SETTLEMENT_DATE . " <= ?) AS paid_from_matches,
-                    (SELECT COUNT(*)
-                       FROM payment_matches pm
-                       JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
-                      WHERE pm.supplier_id = d.supplier_id AND pm.purchase_invoice_id = d.id
-                        AND " . self::MATCH_SETTLEMENT_DATE . " > ?) AS matches_after_as_of,
-                    " . PurchaseSettledExpr::offsetSettledAsOf('d') . " AS settled_by_offsets,
-                    " . $this->advanceOnAccountSql('debit') . " AS advance_on_account,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END) AS booked_signed,
-                    SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                             THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
-                             ELSE 0 END) AS foreign_signed
-               FROM journal_entries e
-               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
-               LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
-               JOIN purchase_invoices d ON d.id = e.source_id AND d.supplier_id = e.supplier_id
-               JOIN clients cl          ON cl.id = d.vendor_id
-               JOIN currencies cur      ON cur.id = d.currency_id
-              WHERE e.supplier_id = ? AND e.source_type = 'purchase_invoice'
-                AND e.posted_at IS NOT NULL
-                AND e.entry_date <= ?
-                AND (e.reversed_by IS NULL OR rev.entry_date > ?)
-                AND (ca.id = ? OR ca.parent_id = ?)
-                AND d.status <> 'draft'
-                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
-              GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.paid_at,
-                       cl.id, cl.company_name, cur.code, d.amount_to_pay
-              ORDER BY cl.company_name, d.due_date, d.id";
-        $stmt = $this->db->pdo()->prepare($sql);
-        $stmt->execute([
-            $asOf, $asOf,                         // paid_from_matches
-            $asOf, $asOf,                         // matches_after_as_of
-            $asOf, $asOf, $asOf, $asOf,           // settled_by_offsets (datum + storno, obě cesty)
-            $asOf, $asOf, $accountId, $accountId, // advance_on_account
-            $supplierId, $asOf, $asOf, $accountId, $accountId, $asOf,
-        ]);
+        $advanceCte = $this->advanceOnAccountCte('debit', $supplierId, $accountId);
+        $offsets = PurchaseSettledExpr::offsetSettledAsOf('d');
 
-        return array_map(function (array $r) use ($asOf): array {
-            // `status='paid'` je stav DOKLADU (kdy ho účetní odkliká), ne datum, ke kterému
-            // úhradu zná HLAVNÍ KNIHA. Když k dokladu existuje bankovní párování, které deník
-            // uznává AŽ PO rozvahovém dni (PF vystavená 31. 12., zaplacená v lednu, ale
-            // `paid_at` doklad nese v prosinci), zkratka „paid ⇒ ratio 1" doklad ze salda
-            // vyhodí, přestože HK ho k asOf má otevřený — a konfrontace pak nesedí o celou
-            // fakturu. V takovém případě zkratku potlačíme a poměr počítáme z DATOVANÝCH
-            // úhrad. Dokladům BEZ bankovního párování (hotovost, ruční „označit zaplaceno")
-            // zkratka zůstává — jinak by se z nich staly trvale otevřené položky.
-            $paidByStatusAsOf = (string) $r['status'] === 'paid'
-                && $r['paid_at'] !== null
-                && substr((string) $r['paid_at'], 0, 10) <= $asOf
-                && (int) $r['matches_after_as_of'] === 0;
-            $advance = round((float) $r['advance_on_account'], 2);
-            return [
-                'doc_type'       => 'purchase_invoice',
-                'doc_id'         => (int) $r['doc_id'],
-                'doc_no'         => (string) $r['doc_no'],
-                'issue_date'     => (string) $r['issue_date'],
-                'due_date'       => (string) $r['due_date'],
-                'status'         => (string) $r['status'],
-                'partner_id'     => (int) $r['partner_id'],
-                'partner_name'   => (string) $r['partner_name'],
-                'currency_code'  => (string) $r['currency_code'],
-                'booked_signed'  => round((float) $r['booked_signed'], 2),
-                'foreign_signed' => round((float) $r['foreign_signed'], 2),
-                // status='paid' je autoritativní až od paid_at; jinak se poměr skládá z kanálů,
-                // kterými se přijatá faktura umí vyrovnat: banka (payment_matches, KNOWN GAP H3)
-                // a oba zápočty ({@see PurchaseSettledExpr::offsetSettledAsOf}). Zálohová PF
-                // uhrazená přímo na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
-                'paid_ratio'     => $this->paidRatio(
-                    $paidByStatusAsOf,
-                    (float) $r['paid_from_matches'] + (float) $r['settled_by_offsets'] + $advance,
-                    (float) $r['amount_to_pay'] + $advance,
-                ),
-            ];
-        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        $settlementDate = 'COALESCE(bs.settled_on, DATE(bt.posted_at))';
+        $matchedExpr    = 'COALESCE(m.matched_sum, 0)';
+        $afterExpr      = 'COALESCE(m.matched_after, 0)';
+        $advanceExpr    = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
+        $toPayExpr      = 'COALESCE(d.amount_to_pay, 0)';
+        $bookedExpr     = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 2)";
+        $foreignExpr    = "ROUND(SUM(CASE WHEN l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
+                                          THEN (CASE WHEN l.side = 'debit' THEN l.amount_foreign ELSE -l.amount_foreign END)
+                                          ELSE 0 END), 2)";
+
+        // Zkratka „doklad je k asOf plně uhrazený podle svého stavu" — SQL protějšek
+        // $paidByStatusAsOf níže; bez ní by se do PHP tahaly i doklady, které sestava
+        // zahodí jako uzavřené. `{$offsets}` se v HAVING vyhodnotí znovu (aliasy tu
+        // odkazovat nelze, viz fetchOpenInvoices) — jsou to dva indexové poddotazy
+        // nad drobnými zápočtovými tabulkami.
+        $ratioFor = static fn (string $offsets): string =>
+            "CASE WHEN d.status = 'paid' AND d.paid_at IS NOT NULL
+                       AND DATE(d.paid_at) <= ? AND {$afterExpr} = 0
+                  THEN 1 ELSE " . self::paidRatioSql(
+                "{$matchedExpr} + ({$offsets}) + {$advanceExpr}",
+                "{$toPayExpr} + {$advanceExpr}",
+            ) . ' END';
+
+        $sql =
+            "WITH bank_settle AS (
+                " . self::bankSettleCte($supplierId) . "
+            ), matches AS (
+                SELECT pm.purchase_invoice_id AS doc_id,
+                       SUM(CASE WHEN {$settlementDate} <= ? THEN pm.amount ELSE 0 END) AS matched_sum,
+                       SUM(CASE WHEN {$settlementDate} >  ? THEN 1 ELSE 0 END) AS matched_after
+                  FROM payment_matches pm
+                  JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
+                  LEFT JOIN bank_settle bs ON bs.bank_transaction_id = pm.bank_transaction_id
+                 WHERE pm.supplier_id = {$supplierId} AND pm.purchase_invoice_id IS NOT NULL
+                 GROUP BY pm.purchase_invoice_id
+            ), advances AS (
+                {$advanceCte}
+            )
+            SELECT d.id AS doc_id,
+                   COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
+                   d.issue_date, d.due_date, d.status, d.paid_at,
+                   cl.id AS partner_id, cl.company_name AS partner_name,
+                   cur.code AS currency_code,
+                   {$toPayExpr} AS amount_to_pay,
+                   {$matchedExpr} AS paid_from_matches,
+                   {$afterExpr} AS matches_after_as_of,
+                   {$offsets} AS settled_by_offsets,
+                   {$advanceExpr} AS advance_on_account,
+                   {$bookedExpr} AS booked_signed,
+                   {$foreignExpr} AS foreign_signed
+              FROM journal_entries e
+              JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+              JOIN chart_of_accounts ca ON ca.id = l.account_id
+              LEFT JOIN journal_entries rev ON rev.id = e.reversed_by
+              JOIN purchase_invoices d ON d.id = e.source_id AND d.supplier_id = e.supplier_id
+              JOIN clients cl          ON cl.id = d.vendor_id
+              JOIN currencies cur      ON cur.id = d.currency_id
+              LEFT JOIN matches m      ON m.doc_id = d.id
+              LEFT JOIN advances adv   ON adv.advance_id = d.advance_purchase_invoice_id
+             WHERE e.supplier_id = {$supplierId} AND e.source_type = 'purchase_invoice'
+               AND e.posted_at IS NOT NULL
+               AND e.entry_date <= ?
+               AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+               AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
+               AND d.status <> 'draft'
+               AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
+               " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . "
+             GROUP BY d.id, d.supplier_id, doc_no, d.issue_date, d.due_date, d.status, d.paid_at,
+                      cl.id, cl.company_name, cur.code, d.amount_to_pay,
+                      m.matched_sum, m.matched_after, adv.advance_sum
+            HAVING " . self::openFilterSql($bookedExpr, $ratioFor(PurchaseSettledExpr::offsetSettledAsOf('d'))) . "
+             " . self::orderSql('d', $orderByDue);
+
+        return $this->fetchDefinitiveOpenRows(
+            $sql,
+            static fn (string $pageSql): array => self::asOfParams($pageSql, $asOf),
+            function (array $r) use ($asOf): array {
+                // `status='paid'` je stav DOKLADU (kdy ho účetní odkliká), ne datum, ke kterému
+                // úhradu zná HLAVNÍ KNIHA. Když k dokladu existuje bankovní párování, které deník
+                // uznává AŽ PO rozvahovém dni (PF vystavená 31. 12., zaplacená v lednu, ale
+                // `paid_at` doklad nese v prosinci), zkratka „paid ⇒ ratio 1" doklad ze salda
+                // vyhodí, přestože HK ho k asOf má otevřený — a konfrontace pak nesedí o celou
+                // fakturu. V takovém případě zkratku potlačíme a poměr počítáme z DATOVANÝCH
+                // úhrad. Dokladům BEZ bankovního párování (hotovost, ruční „označit zaplaceno")
+                // zkratka zůstává — jinak by se z nich staly trvale otevřené položky.
+                $paidByStatusAsOf = (string) $r['status'] === 'paid'
+                    && $r['paid_at'] !== null
+                    && substr((string) $r['paid_at'], 0, 10) <= $asOf
+                    && (int) $r['matches_after_as_of'] === 0;
+                $advance = round((float) $r['advance_on_account'], 2);
+                return [
+                    'doc_type'       => 'purchase_invoice',
+                    'doc_id'         => (int) $r['doc_id'],
+                    'doc_no'         => (string) $r['doc_no'],
+                    'issue_date'     => (string) $r['issue_date'],
+                    'due_date'       => (string) $r['due_date'],
+                    'status'         => (string) $r['status'],
+                    'partner_id'     => (int) $r['partner_id'],
+                    'partner_name'   => (string) $r['partner_name'],
+                    'currency_code'  => (string) $r['currency_code'],
+                    'booked_signed'  => round((float) $r['booked_signed'], 2),
+                    'foreign_signed' => round((float) $r['foreign_signed'], 2),
+                    // status='paid' je autoritativní až od paid_at; jinak se poměr skládá z kanálů,
+                    // kterými se přijatá faktura umí vyrovnat: banka (payment_matches, KNOWN GAP H3)
+                    // a oba zápočty ({@see PurchaseSettledExpr::offsetSettledAsOf}). Zálohová PF
+                    // uhrazená přímo na 321 (bez 314) vstupuje do poměru zrcadlově k vydané větvi.
+                    'paid_ratio'     => $this->paidRatio(
+                        $paidByStatusAsOf,
+                        (float) $r['paid_from_matches'] + (float) $r['settled_by_offsets'] + $advance,
+                        (float) $r['amount_to_pay'] + $advance,
+                    ),
+                ];
+            },
+            $limit,
+        );
     }
 
     /**
