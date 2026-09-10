@@ -25,6 +25,10 @@ final class DocumentBackfill
      *        fn(zpracováno, celkem, čítače) — hlášení průběhu pro běh na pozadí
      *        ({@see \MyInvoice\Service\Accounting\PostingBackfillJobService}). Průvodce
      *        aktivací ho nepotřebuje: má vlastní fáze a hlásí je po nich.
+     * @param bool $onlyUnposted jen doklady BEZ aktivního zápisu (doúčtování). Bez něj se
+     *        existující zápis přepíše (`postDocument` → `rewriteExisting`) — to potřebuje
+     *        průvodce aktivací pro zúčtování záloh, ne doúčtování: přepis vrací hlavičku
+     *        (popis, posted_at/by) na generické hodnoty a smaže ruční úpravy zápisu.
      */
     public function run(
         int $supplierId,
@@ -36,6 +40,7 @@ final class DocumentBackfill
         ?callable $isCancelled = null,
         bool $settlementsOnly = false,
         ?callable $onProgress = null,
+        bool $onlyUnposted = false,
     ): array {
         $pdo = $this->db->pdo();
         $emit = static function (string $line) use ($onLog): void {
@@ -67,10 +72,8 @@ final class DocumentBackfill
         }
         $invStmt = $pdo->prepare(
             "SELECT i.id, i.varsymbol AS doc_no, i.issue_date, i.tax_date,
-                    COALESCE(i.tax_date, i.issue_date) AS entry_date,
-                    c.company_name AS party
+                    COALESCE(i.tax_date, i.issue_date) AS entry_date
                FROM invoices i
-          LEFT JOIN clients c ON c.id = i.client_id
               WHERE i.supplier_id = :sid
                 AND i.status NOT IN ('draft','cancelled')
                 AND i.invoice_type IN (" . implode(', ', $invoiceTypePlaceholders) . "){$dateWhere}"
@@ -81,6 +84,13 @@ final class DocumentBackfill
                                AND parent.supplier_id = i.supplier_id
                                AND parent.invoice_type = 'proforma'
                         )"
+                    : '')
+                . ($onlyUnposted
+                    ? " AND NOT EXISTS (
+                            SELECT 1 FROM journal_entries je
+                             WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice'
+                               AND je.source_id = i.id AND je.reversed_by IS NULL
+                        )"
                     : '') . "
            ORDER BY entry_date, i.id"
         );
@@ -89,10 +99,8 @@ final class DocumentBackfill
 
         $piStmt = $pdo->prepare(
             "SELECT pi.id, pi.vendor_invoice_number AS doc_no, pi.issue_date, pi.tax_date,
-                    COALESCE(pi.tax_date, pi.issue_date) AS entry_date,
-                    c.company_name AS party
+                    COALESCE(pi.tax_date, pi.issue_date) AS entry_date
                FROM purchase_invoices pi
-          LEFT JOIN clients c ON c.id = pi.vendor_id
               WHERE pi.supplier_id = :sid
                 AND pi.status IN ('received','booked','paid'){$dateWhere}
                 AND pi.document_kind <> 'advance'"
@@ -102,6 +110,13 @@ final class DocumentBackfill
                              WHERE adv.id = pi.advance_purchase_invoice_id
                                AND adv.supplier_id = pi.supplier_id
                                AND adv.document_kind = 'advance'
+                        )"
+                    : '')
+                . ($onlyUnposted
+                    ? " AND NOT EXISTS (
+                            SELECT 1 FROM journal_entries je
+                             WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice'
+                               AND je.source_id = pi.id AND je.reversed_by IS NULL
                         )"
                     : '') . "
            ORDER BY entry_date, pi.id"
@@ -164,13 +179,12 @@ final class DocumentBackfill
                     $this->periods->ensureOpenPeriodFor($supplierId, $entryDate);
                     $ensuredYears[$yearKey] = true;
                 }
-                $party = trim((string) ($doc['party'] ?? ''));
+                // Popis záměrně nepředáváme: postDocument ho složí přes defaultDescription()
+                // podle typu dokladu (dobropis, DDKP, penalizace…) stejně jako automatika.
                 $entryId = $this->posting->postDocument($supplierId, $sourceType, $id, $lines, [
                     'entry_date' => $entryDate,
                     'document_date' => $doc['issue_date'] ?? null,
                     'document_no' => $doc['doc_no'] ?: null,
-                    'description' => ($sourceType === 'invoice' ? 'Vydaná faktura' : 'Přijatá faktura')
-                        . ' ' . ($doc['doc_no'] ?: ('#' . $id)) . ($party !== '' ? ' — ' . $party : ''),
                     'posted' => !$asDrafts,
                 ]);
 

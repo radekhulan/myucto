@@ -110,6 +110,8 @@ final class PostingBackfillJobService
                         ]);
                     }
                 },
+                // Doúčtování, ne přeúčtování: zaúčtovaný doklad se nepřepisuje.
+                onlyUnposted: true,
             );
 
             if ($logBuffer !== '') {

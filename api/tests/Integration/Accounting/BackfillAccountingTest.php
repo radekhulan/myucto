@@ -6,10 +6,13 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\Accounting\Activation\DocumentBackfill;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingBackfillJobService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
@@ -35,6 +38,8 @@ final class BackfillAccountingTest extends TestCase
     private AccountingPeriodRepository $periods;
     private DocumentBackfill $backfill;
     private PendingBackfillCounter $pending;
+    private PostingBackfillJobService $job;
+    private ImportJobRepository $jobs;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -56,6 +61,8 @@ final class BackfillAccountingTest extends TestCase
             $this->periods = $container->get(AccountingPeriodRepository::class);
             $this->backfill = $container->get(DocumentBackfill::class);
             $this->pending = $container->get(PendingBackfillCounter::class);
+            $this->job     = $container->get(PostingBackfillJobService::class);
+            $this->jobs    = $container->get(ImportJobRepository::class);
             $seeder        = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -180,6 +187,9 @@ final class BackfillAccountingTest extends TestCase
             self::assertSame(1, $this->sourceEntryCount('invoice', $id));
         }
         self::assertSame($before, $this->pending->count($this->supplierId, self::YEAR . '-01-01')['invoices']);
+        self::assertStringStartsWith('Vydaný dobropis', $this->sourceDescription('invoice', $ids[0]));
+        self::assertStringStartsWith('Daňový doklad k přijaté platbě', $this->sourceDescription('invoice', $ids[1]));
+        self::assertStringStartsWith('Penalizační faktura', $this->sourceDescription('invoice', $ids[2]));
 
         $this->backfill->run($this->supplierId, null, self::YEAR, false);
         foreach ($ids as $id) {
@@ -296,7 +306,47 @@ final class BackfillAccountingTest extends TestCase
         self::assertSame(1, $this->sourceEntryCount('invoice', $finalId), 'Druhý průchod přepíše původní zápis in-place.');
     }
 
+    public function testPostingBackfillJobPostsOnlyUnpostedDocuments(): void
+    {
+        $clientId = $this->client('Doúčtování s.r.o.');
+        $postedId = $this->sale('FV-BF-2098-P', $clientId, 1000.00, 210.00, 21.00);
+        $entryId = $this->posting->postDocument($this->supplierId, 'invoice', $postedId,
+            $this->posting->buildFromInvoice($this->supplierId, $postedId), [
+                'entry_date' => self::YEAR . '-06-15',
+                'posted_at' => self::YEAR . '-06-16 08:00:00',
+                'posted_by' => $this->userId,
+            ]);
+        $this->db->pdo()->prepare('UPDATE journal_entries SET description = ? WHERE id = ?')
+            ->execute(['Ručně upravený popis', $entryId]);
+        $before = $this->entryHeader($entryId);
+
+        $unpostedId = $this->sale('FV-BF-2098-N', $clientId, 500.00, 105.00, 21.00);
+
+        $jobId = $this->jobs->create($this->supplierId, 'document_backfill',
+            ['from' => null, 'year' => self::YEAR, 'dry_run' => false], $this->userId);
+        try {
+            $this->job->run($jobId);
+        } finally {
+            @unlink(RuntimePaths::storage('posting-backfill/' . $this->supplierId) . '/' . $jobId . '.json');
+        }
+
+        self::assertSame($before, $this->entryHeader($entryId), 'Doúčtování nesmí přepsat už zaúčtovaný doklad.');
+        self::assertSame(1, $this->sourceEntryCount('invoice', $unpostedId), 'Nezaúčtovaný doklad se zaúčtuje.');
+        self::assertSame(1, (int) $this->jobs->findById($jobId)['created_count']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** @return array<string,mixed> */
+    private function entryHeader(int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT description, document_no, document_date, posted_at, posted_by, row_version
+               FROM journal_entries WHERE id = ?'
+        );
+        $stmt->execute([$entryId]);
+        return (array) $stmt->fetch(PDO::FETCH_ASSOC);
+    }
 
     private function entryCount(): int
     {
@@ -312,6 +362,16 @@ final class BackfillAccountingTest extends TestCase
         );
         $stmt->execute([$this->supplierId, $sourceType, $sourceId]);
         return (int) $stmt->fetchColumn();
+    }
+
+    private function sourceDescription(string $sourceType, int $sourceId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT description FROM journal_entries
+              WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL'
+        );
+        $stmt->execute([$this->supplierId, $sourceType, $sourceId]);
+        return (string) $stmt->fetchColumn();
     }
 
     private function sourceAccountAmount(string $sourceType, int $sourceId, string $accountCode, string $side): float
