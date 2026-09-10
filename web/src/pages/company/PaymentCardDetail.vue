@@ -196,7 +196,6 @@ const actions = computed<ActionItem[]>(() => [
     run: verify, disabled: busy.value,
     show: canWrite.value && !!card.value && !card.value.is_verified && !card.value.archived,
   },
-  { key: 'back', label: t('payment_cards.back'), icon: 'table', tier: 'secondary', variant: 'neutral', to: { name: 'payment-cards' } },
   {
     key: 'archive', label: t('payment_cards.archive'), icon: 'archive', tier: 'overflow', variant: 'warning',
     run: archive, disabled: busy.value, show: canWrite.value && !!card.value && !card.value.archived,
@@ -210,6 +209,7 @@ const INPUT = 'h-9 w-full px-3 border border-neutral-300 rounded-md text-sm bg-s
   <div>
     <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
       <div class="min-w-0">
+        <RouterLink :to="{ name: 'payment-cards' }" class="mb-1 inline-block text-sm text-primary-700 hover:underline">← {{ t('payment_cards.back') }}</RouterLink>
         <h1 class="text-2xl font-semibold truncate">
           {{ isNew ? t('payment_cards.new_title') : (card?.label || t('payment_cards.edit_title')) }}
         </h1>
