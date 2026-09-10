@@ -1,10 +1,28 @@
 # 83a. Přechod z Money S3
 
-**Cesta: `Nákup → Přechod z Money S3`**
+**Cesta: `Systém → Přechod z Money S3`**
 
 Průvodce převede účetní agendu z Money S3 do firmy v MyÚčtu. Vstupem je záloha
 agendy, kterou si firma nebo účetní vytvoří v Money funkcí *Zálohovat agendu*
 (soubor `.lz`). Záloha se jen čte, instalace Money se převodem nijak nemění.
+
+Položka je v menu Systém, které vidí administrátor. Jiný uživatel s potřebnými
+oprávněními otevře průvodce přímým odkazem `/imports/money-s3`.
+
+### Co je soubor zálohy agendy
+
+- Záloha agendy je jeden soubor s příponou `.lz`, který Money S3 vytvoří
+  funkcí *Zálohovat agendu*. Jméno obsahuje IČO firmy a číslo agendy, například
+  `12345678ag001.lz`.
+- Uvnitř je obyčejný ZIP s datovými soubory agendy (`*.DAT`), rozdělenými po
+  účetních rocích, a se základními údaji o agendě (název, IČO, verze Money).
+  Jedna záloha obsahuje všechny roky agendy.
+- Soubor nahrajte tak, jak ho Money vytvořilo, nerozbalený. Přijímá se i stejný
+  soubor s příponou `.zip`.
+- Elektronický archiv dokumentů z Money záloha nepřenese (Money ho ukládá
+  šifrovaně). Skeny dokladů připojíte zvlášť v `Dokumenty → Skeny k dokladům`.
+- Záloha obsahuje celé účetnictví firmy. Nahraný soubor aplikace po 7 dnech bez
+  práce s převodem sama smaže.
 
 Průvodce vidí a zkoušku nanečisto spouští uživatel s oprávněním
 `utilities.import` pro zápis. Ostrý převod zapisuje účetní deník, mění nastavení

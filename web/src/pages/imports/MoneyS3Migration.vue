@@ -18,8 +18,9 @@ import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
  */
 const TOKEN_KEY = 'myucto.moneyS3.token'
 
-const { t } = useI18n()
+const { t, tm, rt } = useI18n()
 const toast = useToast()
+const fileHelpItems = computed(() => (tm('money_s3.file_help_items') as unknown[]).map(item => rt(item as Parameters<typeof rt>[0])))
 const auth = useAuthStore()
 
 const currentStep = ref(1)
@@ -285,6 +286,12 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
       <template v-else-if="currentStep === 1">
         <h2 class="mb-1 text-lg font-semibold">{{ t('money_s3.upload_title') }}</h2>
         <p class="mb-4 max-w-3xl text-sm text-neutral-500">{{ t('money_s3.upload_hint') }}</p>
+        <div class="mb-5 max-w-3xl rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm" data-testid="backup-file-help">
+          <h3 class="mb-2 font-medium text-neutral-700">{{ t('money_s3.file_help_title') }}</h3>
+          <ul class="list-disc space-y-1 pl-5 text-neutral-600">
+            <li v-for="(item, i) in fileHelpItems" :key="i">{{ item }}</li>
+          </ul>
+        </div>
         <label class="block max-w-xl text-sm font-medium">
           {{ t('money_s3.choose_file') }}
           <input type="file" accept=".lz,.zip" class="mt-1 block w-full rounded-md border border-neutral-300 px-3 py-2 text-sm" data-testid="backup-input" @change="onFile" />
