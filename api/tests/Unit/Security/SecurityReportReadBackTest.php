@@ -16,14 +16,23 @@ final class SecurityReportReadBackTest extends TestCase
     {
         $pdo = new PDO('sqlite::memory:');
         $columns = ['fueled_date', 'fueled_time', 'fuel_type', 'quantity', 'unit', 'unit_price', 'amount_without_vat', 'amount_vat', 'amount_with_vat', 'currency', 'odometer', 'station', 'source', 'receipt_number', 'raw_text', 'note', 'created_at'];
-        $pdo->exec('CREATE TABLE fuelings (id INTEGER PRIMARY KEY, supplier_id INTEGER, vendor_id INTEGER, car_id INTEGER, source_purchase_invoice_id INTEGER, ' . implode(', ', array_map(static fn (string $c): string => $c . ' TEXT', $columns)) . ')');
-        $pdo->exec('INSERT INTO fuelings (id, supplier_id, vendor_id, car_id, source_purchase_invoice_id) VALUES (1, 1, 2, 2, 2)');
+        $columns = [...$columns, 'car_assigned_by', 'card_last4'];
+        $pdo->exec('CREATE TABLE fuelings (id INTEGER PRIMARY KEY, supplier_id INTEGER, vendor_id INTEGER, car_id INTEGER, source_purchase_invoice_id INTEGER, source_cash_document_id INTEGER, source_bank_transaction_id INTEGER, source_journal_entry_id INTEGER, ' . implode(', ', array_map(static fn (string $c): string => $c . ' TEXT', $columns)) . ')');
+        $pdo->exec('INSERT INTO fuelings (id, supplier_id, vendor_id, car_id, source_purchase_invoice_id, source_cash_document_id, source_bank_transaction_id, source_journal_entry_id) VALUES (1, 1, 2, 2, 2, 2, 2, 2)');
         $pdo->exec('CREATE TABLE clients (id INTEGER PRIMARY KEY, supplier_id INTEGER, company_name TEXT)');
         $pdo->exec("INSERT INTO clients VALUES (2, 2, 'Synthetic private client')");
         $pdo->exec('CREATE TABLE cars (id INTEGER PRIMARY KEY, supplier_id INTEGER, registration TEXT, name TEXT)');
         $pdo->exec("INSERT INTO cars VALUES (2, 2, 'SECRET-2', 'Synthetic private car')");
         $pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, vendor_invoice_number TEXT)');
         $pdo->exec("INSERT INTO purchase_invoices VALUES (2, 2, 'SECRET-PI-2')");
+        $pdo->exec('CREATE TABLE cash_documents (id INTEGER PRIMARY KEY, supplier_id INTEGER, doc_number TEXT)');
+        $pdo->exec("INSERT INTO cash_documents VALUES (2, 2, 'SECRET-CD-2')");
+        $pdo->exec('CREATE TABLE bank_statements (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('INSERT INTO bank_statements VALUES (2, 2)');
+        $pdo->exec('CREATE TABLE bank_transactions (id INTEGER PRIMARY KEY, statement_id INTEGER, posted_at TEXT, amount TEXT)');
+        $pdo->exec("INSERT INTO bank_transactions VALUES (2, 2, '2026-01-02', '-999.00')");
+        $pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, document_no TEXT)');
+        $pdo->exec("INSERT INTO journal_entries VALUES (2, 2, 'SECRET-JE-2')");
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         $repo = new FuelingRepository($db);
@@ -33,6 +42,11 @@ final class SecurityReportReadBackTest extends TestCase
             self::assertNull($row['car_name']);
             self::assertNull($row['car_registration']);
             self::assertNull($row['source_invoice_number']);
+            self::assertNull($row['source_cash_document_number']);
+            self::assertNull($row['source_bank_statement_id']);
+            self::assertNull($row['source_bank_posted_at']);
+            self::assertNull($row['source_bank_amount']);
+            self::assertNull($row['source_journal_entry_number']);
         }
         $pdo->exec('UPDATE clients SET supplier_id = 1');
         self::assertSame('Synthetic private client', $repo->find(1, 1)['vendor_name']);

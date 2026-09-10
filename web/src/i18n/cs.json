@@ -830,7 +830,16 @@
     "from_cash_hint": "Zaúčtované výdajové doklady za pohonné hmoty: partner je čerpací stanice, nebo popis zní na palivo. Úhrady přijatých faktur tu nejsou — jejich tankování se vytěží z faktury. Nové zaúčtované doklady se do knihy jízd propisují samy.",
     "no_fuel_cash_docs": "Žádné pokladní doklady za pohonné hmoty.",
     "fuel_station_badge": "čerpací stanice",
-    "auto_vehicle": "Vozidlo automaticky (SPZ / výchozí)",
+    "auto_vehicle": "Vozidlo automaticky (SPZ / karta / výchozí)",
+    "car_method": {
+      "explicit": "vybráno ručně",
+      "plate": "podle SPZ",
+      "text": "SPZ v textu dokladu",
+      "card": "podle karty •••• {last4}",
+      "card_plain": "podle karty",
+      "default": "výchozí vozidlo"
+    },
+    "car_method_title": "Podle čeho bylo vozidlo přiřazeno",
     "cash_scan_done": "Tankování z pokladního dokladu vytvořeno.",
     "cash_scan_updated": "Tankování už existovalo, doplněny chybějící údaje.",
     "cash_backfill_done": "Vytvořeno {n} tankování z pokladny.",
@@ -23274,7 +23283,10 @@
       "rematch_failed": "Párování se nepodařilo.",
       "open_statement": "Výpis",
       "add_card": "Založit kartu",
-      "truncated": "Zobrazeno prvních {n} plateb. Zužte období."
+      "truncated": "Zobrazeno prvních {n} plateb. Zužte období.",
+      "vehicle_hint": "Vozidlo držitele: {vehicle}",
+      "vehicle_ambiguous": "Držitel karty řídí víc vozidel, vozidlo nelze určit.",
+      "vehicle_hint_title": "Nápověda podle karty a řidiče vozidla"
     }
   }
 }

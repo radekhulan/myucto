@@ -11,6 +11,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\Card\CardPaymentOverview;
+use MyInvoice\Service\Bank\Card\CardPaymentVehicleHints;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Import\AiPdfExtractor;
 use MyInvoice\Service\IpMatcher;
@@ -39,6 +40,7 @@ final class CardPaymentOverviewAction
         private readonly StatementMatcher $matcher,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly CardPaymentVehicleHints $vehicleHints,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -50,7 +52,7 @@ final class CardPaymentOverviewAction
         if ($from > $to) {
             return Json::error($response, 'validation_failed', 'Datum od nesmí být po datu do.', 422);
         }
-        return Json::ok($response, $this->overview->unmatched($supplierId, $from, $to));
+        return Json::ok($response, $this->vehicleHints->annotate($supplierId, $this->overview->unmatched($supplierId, $from, $to)));
     }
 
     public function uploadReceipt(Request $request, Response $response, array $args): Response

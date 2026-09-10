@@ -789,6 +789,17 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Logbook\Fuel\AiFuelStatementParser::class),
                 $c->get(\MyInvoice\Service\Logbook\Fuel\SummaryFuelParser::class),
             ]),
+            // Vozidlo podle platební karty (karta → držitel → jeho vozidlo). VehicleResolver
+            // má `?CardHolderVehicleResolver $byCard = null` a PHP-DI parametr s výchozí
+            // hodnotou nedosadí — bez explicitního bindu by krok „karta" v produkci tiše chyběl.
+            \MyInvoice\Service\Logbook\CardHolderVehicleResolver::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Service\Bank\Card\PaymentCardVehicleResolver::class),
+            \MyInvoice\Service\Logbook\VehicleResolver::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Logbook\VehicleResolver(
+                    $c->get(Connection::class),
+                    $c->get(\MyInvoice\Repository\CarRepository::class),
+                    $c->get(\MyInvoice\Service\Logbook\CardHolderVehicleResolver::class),
+                ),
 
             // Kanál datové schránky. PHP-DI neumí autowire interface → explicitní
             // bind, a je to jediné místo, kde se volba dopravy rozhoduje. Zbytek

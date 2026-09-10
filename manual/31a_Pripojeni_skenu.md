@@ -74,6 +74,9 @@ aplikace nerozhoduje sama a nabídne je jako kandidáty k ručnímu výběru.
   vyhledáváním v Dokumentech podle dodavatele, čísla dokladu nebo částky.
 - Vytěžení se ukládá k obsahu souboru. Stejný sken se znovu nevytěžuje ani v další
   dávce.
+- Účtenka za pohonné hmoty připojená k přijaté faktuře nebo pokladnímu dokladu
+  založí nebo doplní tankování v [knize jízd](32_Kniha_jizd.md), pokud firma knihu
+  jízd vede. Doklad, který tankování už má, se jen doplní.
 
 ## Přehled dávky
 

@@ -26216,6 +26216,8 @@ components:
         id: { type: integer, format: int64 }
         car_id: { type: [integer, "null"] }
         car_registration: { type: [string, "null"] }
+        car_assigned_by: { type: [string, "null"], enum: [explicit, plate, text, card, default, null], description: 'Podle čeho bylo vozidlo přiřazeno (vybrané, SPZ z dokladu, SPZ v textu, platební karta držitele, výchozí vozidlo); null = neuvedeno' }
+        card_last4: { type: [string, "null"], pattern: '^[0-9]{4}$', description: 'Koncovka platební karty z dokladu (nikdy celé číslo)' }
         fueled_date: { type: string, format: date }
         fueled_time: { type: [string, "null"] }
         fuel_type: { type: [string, "null"] }

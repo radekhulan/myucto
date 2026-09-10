@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\CashDocumentRepository;
 use MyInvoice\Repository\FuelingRepository;
+use MyInvoice\Service\Bank\Card\CardNumberMask;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use MyInvoice\Service\Logbook\Fuel\FuelReceiptTextParser;
 use PDO;
@@ -141,11 +142,15 @@ final class CashFuelingService
 
         $description = (string) $doc['description'];
         $parsed = FuelReceiptTextParser::parse($description);
+        // Pokladní doklad nemá pole pro kartu — koncovka se bere jen z maskovaného čísla
+        // v popisu („**** 1234"), nikdy z holých čísel.
+        $cardLast4 = CardNumberMask::last4FromText($description);
         $vehicle = $this->vehicles->resolve($supplierId, [
-            'car_id' => $carId,
-            'plate'  => $parsed['plate'],
-            'text'   => $description,
-            'date'   => (string) $doc['issue_date'],
+            'car_id'     => $carId,
+            'plate'      => $parsed['plate'],
+            'text'       => $description,
+            'card_last4' => $cardLast4,
+            'date'       => (string) $doc['issue_date'],
         ]);
 
         [$amount, $currency] = self::amountOf($doc);
@@ -167,6 +172,8 @@ final class CashFuelingService
 
         $data = [
             'car_id'                  => $vehicle['car_id'],
+            'car_assigned_by'         => $vehicle['method'],
+            'card_last4'              => $cardLast4,
             'fueled_date'             => (string) ($doc['tax_date'] ?? $doc['issue_date']),
             'fuel_type'               => $parsed['fuel_type'],
             'quantity'                => $quantity,
@@ -183,7 +190,7 @@ final class CashFuelingService
             'source_cash_document_id' => $cashDocumentId,
             'receipt_number'          => $doc['doc_number'] ?? null,
             'raw_text'                => $description,
-            'dedup_hash'              => hash('sha256', 'cash|' . $supplierId . '|' . $cashDocumentId),
+            'dedup_hash'              => FuelingDocumentRef::cashDocument($cashDocumentId)->dedupHash($supplierId),
         ];
 
         $r = $this->fuelings->insertScanned($supplierId, $data, $userId);

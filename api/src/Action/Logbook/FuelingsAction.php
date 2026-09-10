@@ -16,6 +16,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Logbook\FuelingLinkCandidates;
 use MyInvoice\Service\Logbook\FuelingOdometerEstimator;
 use MyInvoice\Service\Logbook\FuelingOdometerWarnings;
+use MyInvoice\Service\Logbook\VehicleResolver;
 use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -45,6 +46,7 @@ final class FuelingsAction
         private readonly \MyInvoice\Service\Stock\StockReferenceGuard $stockRefs,
         private readonly FuelingOdometerWarnings $warnings,
         private readonly FuelingLinkCandidates $linkCandidates,
+        private readonly VehicleResolver $vehicles,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -107,6 +109,7 @@ final class FuelingsAction
         }
         $body['source'] = 'manual';
         $id = $this->repo->create($supplierId, $body, $this->userId($request));
+        $this->assignVehicle($supplierId, $id, $body, null);
         $this->log($request, 'fueling.created', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId), 201);
     }
@@ -115,7 +118,8 @@ final class FuelingsAction
     {
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if ($this->repo->find($id, $supplierId) === null) {
+        $before = $this->repo->find($id, $supplierId);
+        if ($before === null) {
             return Json::error($response, 'not_found', 'Tankování nenalezeno.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
@@ -128,6 +132,7 @@ final class FuelingsAction
         // Vazby na doklad mění jen klíče, které klient poslal — ruční úprava údajů
         // tankování (bez vazeb v těle) provenienci nepřepisuje.
         $this->repo->setLinks($id, $supplierId, array_intersect_key($body, array_flip(self::LINK_COLUMNS)));
+        $this->assignVehicle($supplierId, $id, $body, $before);
         $this->log($request, 'fueling.updated', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId));
     }
@@ -191,6 +196,42 @@ final class FuelingsAction
             $badRefs[] = 'source_bank_transaction_id';
         }
         return $badRefs !== [] ? TenantReferenceGuard::message($badRefs) : null;
+    }
+
+    /**
+     * Způsob přiřazení vozidla po ruční úpravě. Vybrané vozidlo = „explicit". Bez vozidla
+     * a s NOVĚ navázaným bankovním pohybem kartou se vozidlo dohledá přes kartu
+     * (karta → držitel → jeho vozidlo); výchozí vozidlo se u ručního záznamu nedosazuje.
+     *
+     * @param array<string,mixed> $body
+     * @param array<string,mixed>|null $before stav před úpravou (null = nový záznam)
+     */
+    private function assignVehicle(int $supplierId, int $id, array $body, ?array $before): void
+    {
+        $carId = $this->intOrNull($body['car_id'] ?? null);
+        $bankTx = array_key_exists('source_bank_transaction_id', $body)
+            ? $this->intOrNull($body['source_bank_transaction_id'])
+            : ($before['source_bank_transaction_id'] ?? null);
+        $bankChanged = $bankTx !== null && $bankTx !== ($before['source_bank_transaction_id'] ?? null);
+        $card = $bankTx !== null ? $this->repo->bankTransactionCard($supplierId, (int) $bankTx) : null;
+        $last4 = $card['card_last4'] ?? null;
+
+        if ($carId !== null) {
+            if ($before === null || $carId !== ($before['car_id'] ?? null)) {
+                $this->repo->setCarAssignment($id, $supplierId, $carId, 'explicit', $last4);
+            } elseif ($last4 !== null) {
+                $this->repo->setCarAssignment($id, $supplierId, $carId, $before['car_assigned_by'] ?? null, $last4);
+            }
+            return;
+        }
+        if ($card !== null && $last4 !== null && ($before === null || $bankChanged)) {
+            $v = $this->vehicles->resolve($supplierId, ['card_last4' => $last4, 'date' => $card['posted_at']], false);
+            $this->repo->setCarAssignment($id, $supplierId, $v['car_id'], $v['method'], $last4);
+            return;
+        }
+        if ($before !== null && ($before['car_id'] ?? null) !== null) {
+            $this->repo->setCarAssignment($id, $supplierId, null, null);
+        }
     }
 
     private function intOrNull(mixed $v): ?int

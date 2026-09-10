@@ -84,6 +84,23 @@ U každé platby jsou akce:
 - **Spárovat** — po potvrzení dokladu spustí párování platby znovu.
 - **Výpis** — otevře bankovní výpis s platbou.
 
+U platby na čerpací stanici (podle obchodníka, např. název sítě stanic nebo
+pohonné hmoty v popisu) se pod obchodníkem zobrazí **vozidlo držitele karty**,
+pokud ho lze určit jednoznačně. Řídí-li držitel víc vozidel, aplikace to napíše
+a vozidlo neurčí.
+
+## Vozidlo podle karty
+
+Karta s držitelem vybraným ze zaměstnanců slouží i [knize jízd](32_Kniha_jizd.md):
+tankování zaplacené kartou (účtenka nebo faktura s koncovkou karty, bankovní
+pohyb kartou, import tankování se sloupcem karty) se přiřadí vozidlu, jehož
+řidičem je držitel karty. Rozhoduje karta platná k datu tankování, takže
+historická tankování zůstanou u tehdejšího držitele i po výměně karty.
+
+Vozidlo se podle karty přiřadí jen tehdy, když na dokladu není SPZ a držitel
+řídí právě jedno aktivní vozidlo. Podrobnosti viz kapitola Kniha jízd, oddíl
+Přiřazení vozidla.
+
 ## Oprávnění
 
 Evidenci karet vidí a upravují uživatelé s oprávněním ke správě bankovních

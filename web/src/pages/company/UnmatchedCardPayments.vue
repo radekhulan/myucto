@@ -54,6 +54,13 @@ function totals(g: CardPaymentGroup): string {
   return Object.entries(g.totals).map(([ccy, sum]) => formatMoney(sum, ccy)).join(' + ')
 }
 
+function vehicleHint(tx: CardPaymentRow): string {
+  const h = tx.vehicle_hint
+  if (!h) return ''
+  if (h.reason !== 'ok' || !h.registration) return t('payment_cards.unmatched.vehicle_ambiguous')
+  return t('payment_cards.unmatched.vehicle_hint', { vehicle: h.registration + (h.car_name ? ` (${h.car_name})` : '') })
+}
+
 function pickReceipt(tx: CardPaymentRow) {
   uploadTarget.value = tx
   fileInput.value?.click()
@@ -172,6 +179,8 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
                 <td class="px-3 py-2 text-xs">
                   <div class="text-neutral-700">{{ tx.counterparty_name || '—' }}</div>
                   <div v-if="tx.description" class="text-neutral-500 truncate max-w-md">{{ tx.description }}</div>
+                  <div v-if="tx.vehicle_hint" class="mt-0.5" :class="tx.vehicle_hint.reason === 'ok' ? 'text-primary-700' : 'text-warning-700'"
+                    :title="t('payment_cards.unmatched.vehicle_hint_title')" data-testid="vehicle-hint">{{ vehicleHint(tx) }}</div>
                 </td>
                 <td class="px-3 py-2">
                   <div class="flex flex-wrap justify-end gap-2">
@@ -210,6 +219,8 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
               <span class="font-medium text-danger-600 whitespace-nowrap">{{ formatMoney(tx.amount, tx.currency) }}</span>
             </div>
             <div class="text-xs text-neutral-700 truncate">{{ tx.counterparty_name || tx.description || '—' }}</div>
+            <div v-if="tx.vehicle_hint" class="text-xs" :class="tx.vehicle_hint.reason === 'ok' ? 'text-primary-700' : 'text-warning-700'"
+              :title="t('payment_cards.unmatched.vehicle_hint_title')">{{ vehicleHint(tx) }}</div>
             <div class="flex flex-wrap gap-2">
               <button v-if="canUpload" type="button" :class="[BTN_BASE, OUTLINE.primary]" class="whitespace-nowrap"
                 :disabled="busyTx !== null" @click="pickReceipt(tx)">

@@ -113,6 +113,9 @@ export interface TripPayload {
 
 export type FuelingSource = 'manual' | 'invoice' | 'axigon' | 'axigon_ai' | 'import' | 'cash'
 
+/** Způsob přiřazení vozidla k tankování. */
+export type FuelingCarMethod = 'explicit' | 'plate' | 'text' | 'card' | 'default'
+
 /** Varianty vazby tankování na doklad, kterým bylo zaplaceno. */
 export type FuelingLinkType = 'purchase_invoice' | 'cash_document' | 'bank_transaction' | 'journal_entry'
 
@@ -121,6 +124,10 @@ export interface Fueling {
   car_id: number | null
   car_registration: string | null
   car_name: string | null
+  /** Podle čeho bylo vozidlo přiřazeno; null = neuvedeno (starší záznam). */
+  car_assigned_by?: FuelingCarMethod | null
+  /** Koncovka platební karty z dokladu. */
+  card_last4?: string | null
   fueled_date: string
   fueled_time: string | null
   fuel_type: string | null

@@ -8,6 +8,7 @@ use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Repository\FuelScanRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Bank\Card\CardNumberMask;
 use MyInvoice\Service\Logbook\Fuel\FuelStatementParserRegistry;
 use MyInvoice\Service\Logbook\Fuel\FuelTransactionEnricher;
 
@@ -31,6 +32,7 @@ final class FuelInvoiceScanner
         private readonly CarRepository $cars,
         private readonly FuelTransactionEnricher $enricher,
         private readonly FuelExpenseReclassifier $reclassifier,
+        private readonly VehicleResolver $vehicles,
     ) {}
 
     /**
@@ -58,22 +60,39 @@ final class FuelInvoiceScanner
         // Doplnění chybějících litrů z položek faktury + fallback data DUZP.
         $result['transactions'] = $this->enricher->enrich($result['transactions'], $invoice);
 
-        // Cílové auto: explicitní → default/jediné → null (bez přiřazení).
-        $targetCarId = $carId ?? $this->cars->defaultCarId($supplierId);
-        if ($carId !== null && $this->cars->find($carId, $supplierId) === null) {
-            $targetCarId = $this->cars->defaultCarId($supplierId);
-        }
+        // Cílové auto: explicitní → SPZ z řádku výpisu → karta dokladu → výchozí/jediné → null.
+        $cardLast4 = CardNumberMask::isValidLast4(isset($invoice['card_last4']) ? (string) $invoice['card_last4'] : null)
+            ? (string) $invoice['card_last4'] : null;
 
         $vendorId = (int) ($invoice['vendor_id'] ?? 0) ?: null;
         $source = self::SOURCE_MAP[$result['parser']] ?? 'invoice';
+
+        // Tankování založené ze skenu účtenky (FuelingFromExtraction) má jiný otisk než
+        // řádky parseru. Dá-li parser jediné tankování, doplní se to ze skenu — jinak by
+        // jedna účtenka byla v knize dvakrát. Výpis s víc tankováními se nehádá.
+        $scanHash = FuelingDocumentRef::purchaseInvoice($invoiceId)->dedupHash($supplierId);
+        $fromScan = array_values(array_filter(
+            $this->fuelings->findByDocumentLink($supplierId, 'source_purchase_invoice_id', $invoiceId),
+            static fn (array $r): bool => $r['dedup_hash'] === $scanHash,
+        ));
+        $singleFuelRow = count(array_filter($result['transactions'], static fn (array $t): bool => !empty($t['is_fuel']))) === 1;
 
         $created = 0; $dupes = 0; $updated = 0; $fuelRows = 0; $ordinal = 0;
         foreach ($result['transactions'] as $t) {
             $ordinal++;
             if (empty($t['is_fuel'])) continue; // jen pohonné hmoty se stanou tankováním
             $fuelRows++;
+            $vehicle = $this->vehicles->resolve($supplierId, [
+                'car_id'     => $carId,
+                'plate'      => $t['plate'] ?? null,
+                'text'       => $t['raw_text'] ?? null,
+                'card_last4' => $cardLast4,
+                'date'       => (string) ($t['fueled_date'] ?? ''),
+            ]);
             $data = [
-                'car_id'                     => $targetCarId,
+                'car_id'                     => $vehicle['car_id'],
+                'car_assigned_by'            => $vehicle['method'],
+                'card_last4'                 => $cardLast4,
                 'fueled_date'                => $t['fueled_date'],
                 'fueled_time'                => $t['fueled_time'] ?? null,
                 'fuel_type'                  => $t['fuel_type'] ?? null,
@@ -93,6 +112,10 @@ final class FuelInvoiceScanner
                 'raw_text'                   => $t['raw_text'] ?? null,
                 'dedup_hash'                 => $this->dedupHash($supplierId, $invoiceId, $t, $ordinal),
             ];
+            if ($fromScan !== [] && $singleFuelRow) {
+                $this->fuelings->fillMissing($fromScan[0]['id'], $supplierId, $data) ? $updated++ : $dupes++;
+                continue;
+            }
             $r = $this->fuelings->insertScanned($supplierId, $data, $userId);
             if ($r > 0) $created++;
             elseif ($r < 0) $updated++;

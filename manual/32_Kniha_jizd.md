@@ -125,6 +125,9 @@ zápis** — a aplikace nabídne doklady kolem data tankování; ty se **shodnou
 jsou nahoře a označené. Seznam zúžíš hledáním (číslo dokladu, partner, popis).
 Vazbu zrušíš tlačítkem **Zrušit vazbu**.
 
+Navážeš-li tankování bez vybraného vozidla na bankovní pohyb kartou, aplikace dohledá
+vozidlo podle karty (viz 32.3.7).
+
 Tankování vytěžené z přijaté faktury má vazbu na fakturu pevnou (vznikla vytěžením).
 V seznamu tankování je u každé vazby **proklik**: na přijatou fakturu, na tisk
 pokladního dokladu, na bankovní výpis nebo na účetní zápis v deníku. Navázat lze jen
@@ -143,7 +146,8 @@ doklad vlastní firmy.
    v seznamu proklikem na fakturu).
 
 Tlačítko **Vytěžit historii** projede zpětně **jen dosud nezpracované** faktury
-od stanic a hromadně z nich vytvoří záznamy. Každá faktura se zpracuje jen
+od stanic a hromadně z nich vytvoří záznamy. Vozidlo se u nich určí automaticky
+(SPZ v řádku výpisu, platební karta dokladu, výchozí vozidlo — viz 32.3.7). Každá faktura se zpracuje jen
 jednou, opakované spuštění nic nezdvojí.
 
 U dokladů s detailním rozpisem (např. **Axigon**) se aplikace pokusí dohledat
@@ -172,7 +176,8 @@ Z popisu dokladu aplikace přečte, co v něm je: **litry** (nebo kWh), **cenu z
 (chybí-li, dopočítá ji z částky), **druh paliva**, **SPZ** a **stav tachometru**
 („Nafta 42,5 l, tach. 98 765, 1AB 2345"). Částka a DPH se převezmou z dokladu.
 **Vozidlo** se přiřadí podle SPZ (bez ohledu na mezery a velikost písmen), jinak
-podle SPZ uvedené kdekoli v popisu, jinak výchozí vozidlo.
+podle SPZ uvedené kdekoli v popisu, jinak podle platební karty, je-li v popisu její
+maskované číslo („karta **** 1234"), jinak výchozí vozidlo (viz 32.3.7).
 
 Tlačítko **Z pokladny** ukáže všechny takové doklady s odznakem **Nová** /
 **Zpracováno**. U každého můžeš zvolit vozidlo (nebo nechat **automaticky**)
@@ -197,7 +202,9 @@ bez_dph, dph, mena, tachometr, stanice, cislo_uctenky, karta, poznamka
 - **datum** a **celkem** (částka vč. DPH) jsou povinné; chybí-li částka, spočítá se
   z litrů a ceny za litr,
 - **spz** přiřadí vozidlo (bez ohledu na mezery a pomlčky); neznámá SPZ je chyba řádku,
-  prázdná znamená výchozí vozidlo,
+  prázdná znamená vozidlo podle karty, jinak výchozí vozidlo,
+- **karta** je koncovka platební karty; uloží se jen poslední čtyři číslice, i kdyby
+  soubor nesl celé číslo karty,
 - **jednotka** l / kWh; u elektromobilu je výchozí kWh.
 
 **Opakovaný import nic nezdvojí.** Každý řádek má otisk z data, času, SPZ, částky,
@@ -220,6 +227,46 @@ u některého vozidla:
 Řada tachometru se posuzuje z celé historie vozidla, filtr roku jen zúží, co se
 vypíše. Tlačítko **Detail** rozbalí konkrétní data a stavy. U dotčených řádků seznamu
 je odznak **⚠ tachometr** / **⚠ DPH** s vysvětlením po najetí myší.
+
+### 32.3.7 Přiřazení vozidla
+
+Když tankování vzniká z dokladu nebo importu, aplikace vozidlo určí sama. Rozhoduje
+první krok, který vozidlo najde:
+
+1. **vozidlo vybrané ručně** (v okně Načíst z faktur / Z pokladny nebo ve formuláři),
+2. **SPZ z dokladu** — porovnává se bez mezer, pomlček a velikosti písmen,
+3. **SPZ uvedená v textu dokladu**,
+4. **platební karta** — karta platná k datu tankování → její držitel (zaměstnanec)
+   → vozidlo, jehož je řidičem (32.1.1). Jen aktivní vozidla; řídí-li držitel víc
+   vozidel, nepřiřadí se podle karty nic, protože nejde poznat, kterým tankoval,
+5. **výchozí vozidlo** firmy (nebo jediné aktivní).
+
+Aby krok s kartou fungoval, veď kartu v [Platebních kartách](92a_Platebni_karty.md)
+s držitelem vybraným ze zaměstnanců a u vozidla vyplň **Řidiče**. Použije se vždy
+jen karta i vozidlo vlastní firmy.
+
+V seznamu tankování je pod SPZ drobně uvedeno, **podle čeho** bylo vozidlo přiřazeno:
+„vybráno ručně", „podle SPZ", „SPZ v textu dokladu", „podle karty •••• 1234" nebo
+„výchozí vozidlo". Tankování založená před zavedením tohoto údaje ho nemají.
+
+### 32.3.8 Tankování ze skenů účtenek
+
+Když [dávka skenů](31a_Pripojeni_skenu.md) připojí sken k přijaté faktuře nebo
+pokladnímu dokladu (sama, nebo po vašem potvrzení), aplikace z vytěžené účtenky
+vytvoří tankování, pokud firma vede knihu jízd a účtenka je tankování:
+
+- některá položka účtenky je pohonná hmota nebo nabíjení (mytí, dálniční známka
+  a podobné služby ne), nebo
+- účtenka položky nemá a dodavatel je čerpací stanice, případně účtenka nese SPZ.
+
+Z účtenky se převezmou datum, částka, litry, cena za litr, druh paliva, stanice,
+SPZ a koncovka platební karty; vozidlo se určí podle 32.3.7. Tankování je navázané
+na doklad, ke kterému se sken připojil.
+
+Jeden doklad dá vždy nejvýš jedno tankování. Když doklad tankování už má (vzniklo
+z pokladního dokladu nebo z faktury od stanice), sken jen **doplní chybějící údaje**,
+vyplněné hodnoty nepřepíše. Stejně tak pozdější **Načíst z faktur** doplní tankování
+vzniklé ze skenu, místo aby založilo druhé.
 
 ## 32.4 Kategorie cest
 

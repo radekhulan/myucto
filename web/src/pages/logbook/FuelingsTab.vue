@@ -182,6 +182,13 @@ function rowLinks(f: Fueling): RowLink[] {
   }
   return out
 }
+function carMethodLabel(f: Fueling): string {
+  if (!f.car_id || !f.car_assigned_by) return ''
+  if (f.car_assigned_by === 'card') {
+    return f.card_last4 ? t('logbook_fuel.car_method.card', { last4: f.card_last4 }) : t('logbook_fuel.car_method.card_plain')
+  }
+  return t(`logbook_fuel.car_method.${f.car_assigned_by}`)
+}
 function odometerWarningText(f: Fueling): string {
   return f.odometer_warning === 'missing' ? t('logbook_fuel.row_missing') : t('logbook_fuel.row_regression')
 }
@@ -624,7 +631,7 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
         <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
           <table class="w-full text-sm table-fixed">
             <colgroup>
-              <col class="w-32" /><col class="w-20" /><col /><col class="w-20" /><col class="w-28" /><col /><col class="w-52" />
+              <col class="w-32" /><col class="w-28" /><col /><col class="w-20" /><col class="w-28" /><col /><col class="w-52" />
             </colgroup>
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
@@ -643,6 +650,7 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
                 <td class="px-3 py-2 font-mono text-xs">
                   <span v-if="f.car_registration">{{ f.car_registration }}</span>
                   <span v-else class="text-warning-600">{{ t('logbook.no_car') }}</span>
+                  <span v-if="carMethodLabel(f)" class="block font-sans text-[11px] text-neutral-400 truncate" :title="t('logbook_fuel.car_method_title')">{{ carMethodLabel(f) }}</span>
                 </td>
                 <td class="px-3 py-2">
                   {{ f.fuel_type || '—' }}
@@ -689,6 +697,7 @@ const WARN_ICON = 'M12 9v4m0 4h.01M10.29 3.86l-8.48 14.7A1 1 0 0 0 2.67 20h18.66
               <span class="truncate">{{ f.station || f.vendor_name || '—' }}</span>
               <span class="font-mono shrink-0">{{ f.car_registration || t('logbook.no_car') }}</span>
             </div>
+            <div v-if="carMethodLabel(f)" class="mt-0.5 text-right text-[11px] text-neutral-400" :title="t('logbook_fuel.car_method_title')">{{ carMethodLabel(f) }}</div>
             <div v-if="f.odometer_warning || f.vat_warning" class="flex flex-wrap gap-1 mt-1">
               <span v-if="f.odometer_warning" class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠ {{ odometerWarningText(f) }}</span>
               <span v-if="f.vat_warning" class="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">⚠ {{ vatWarningText(f) }}</span>

@@ -36,7 +36,10 @@ const overview: Overview = {
       holder: 'Jana Testovací',
       count: 1,
       totals: { CZK: 250 },
-      transactions: [{ id: 41, statement_id: 7, posted_at: '2026-06-12', amount: -250, currency: 'CZK', counterparty_name: 'TESTOVACI OBCHOD', description: null, card_last4: '1111' }],
+      transactions: [{
+        id: 41, statement_id: 7, posted_at: '2026-06-12', amount: -250, currency: 'CZK', counterparty_name: 'TESTOVACI STANICE', description: null, card_last4: '1111',
+        vehicle_hint: { car_id: 5, registration: '1AB 2345', car_name: null, reason: 'ok' },
+      }],
     },
     {
       key: 'last4:2222',
@@ -69,6 +72,13 @@ describe('Platby kartou bez dokladu', () => {
     expect(text).toContain('payment_cards.unmatched.unknown_holder')
     expect(text).toContain('payment_cards.unmatched.add_card')
     expect(m.unmatchedPayments).toHaveBeenCalledOnce()
+  })
+
+  it('u platby na čerpací stanici ukáže vozidlo držitele karty', async () => {
+    const wrapper = await render()
+    const hints = wrapper.findAll('[data-testid="vehicle-hint"]')
+    expect(hints).toHaveLength(1)
+    expect(hints[0].text()).toBe('payment_cards.unmatched.vehicle_hint')
   })
 
   it('spárování znovu načte přehled, když platba našla doklad', async () => {

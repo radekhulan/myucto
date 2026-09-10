@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Logbook;
 
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\FuelingRepository;
+use MyInvoice\Service\Bank\Card\CardNumberMask;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
@@ -149,17 +150,23 @@ final class FuelingImportService
 
         $carRaw = $get('car');
         $fuelType = $get('fuel_type');
+        // Sloupec karty: uloží se jen koncovka, i kdyby soubor nesl celé číslo.
+        $cardLast4 = CardNumberMask::normalizeLast4($get('card'));
         if ($carRaw !== '') {
             $carId = $this->vehicles->carIdByPlate($supplierId, $carRaw);
+            $carMethod = 'plate';
             if ($carId === null) {
                 $car = $this->cars->findByRegistrationOrName($supplierId, $carRaw);
                 $carId = $car !== null ? (int) $car['id'] : null;
+                $carMethod = 'explicit';
             }
             if ($carId === null) {
                 throw new \InvalidArgumentException('Vozidlo „' . $carRaw . '" neexistuje v číselníku.');
             }
         } else {
-            $carId = $this->vehicles->resolve($supplierId, ['card_last4' => $get('card'), 'date' => $date])['car_id'];
+            $vehicle = $this->vehicles->resolve($supplierId, ['card_last4' => $cardLast4, 'date' => $date]);
+            $carId = $vehicle['car_id'];
+            $carMethod = $vehicle['method'];
         }
 
         $unitRaw = $get('unit');
@@ -181,6 +188,8 @@ final class FuelingImportService
 
         return [
             'car_id'             => $carId,
+            'car_assigned_by'    => $carMethod,
+            'card_last4'         => $cardLast4,
             'car_label'          => $carRaw,
             'fueled_date'        => $date,
             'fueled_time'        => $time,
@@ -205,7 +214,7 @@ final class FuelingImportService
     private function preview(array $row): array
     {
         return array_intersect_key($row, array_flip([
-            'car_id', 'car_label', 'fueled_date', 'fueled_time', 'fuel_type', 'quantity', 'unit',
+            'car_id', 'car_assigned_by', 'card_last4', 'car_label', 'fueled_date', 'fueled_time', 'fuel_type', 'quantity', 'unit',
             'unit_price', 'amount_with_vat', 'currency', 'odometer', 'station', 'receipt_number',
         ]));
     }

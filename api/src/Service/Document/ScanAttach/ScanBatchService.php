@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Document\ScanAttach;
 use MyInvoice\Repository\DocumentExtractionRepository;
 use MyInvoice\Repository\ScanBatchRepository;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Service\Logbook\FuelingFromScan;
 
 /**
  * Práce s hotovou dávkou: připojení souboru k dokladu, potvrzení a odmítnutí
@@ -23,6 +24,7 @@ final class ScanBatchService
         private readonly ScanTargetRegistry $targets,
         private readonly DocumentExtractionRepository $extractions,
         private readonly DocumentStorage $storage,
+        private readonly FuelingFromScan $fuelingFromScan,
     ) {}
 
     /**
@@ -52,6 +54,13 @@ final class ScanBatchService
         }
         $path = $this->storage->pathFor($supplierId, (string) $item['sha256'], (string) $item['doc_filename']);
         $target->attach($supplierId, $targetId, (int) $item['document_id'], $path, (string) ($item['doc_original_name'] ?? $item['file_name']));
+
+        // Sken účtenky za PHM → tankování v knize jízd (idempotentně, doklad s tankováním
+        // se jen doplní). Evidenční vrstva: její chyba nesmí zvrátit připojení skenu.
+        try {
+            $this->fuelingFromScan->afterAttach($supplierId, $targetType, $targetId, (int) $item['document_id']);
+        } catch (\Throwable) {
+        }
     }
 
     /**

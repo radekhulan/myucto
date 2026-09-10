@@ -830,7 +830,16 @@
     "from_cash_hint": "Posted expense documents for fuel: the partner is a fuel station or the description reads as fuel. Payments of purchase invoices are not listed — their refuelling comes from the invoice. New posted documents flow into the logbook automatically.",
     "no_fuel_cash_docs": "No cash documents for fuel.",
     "fuel_station_badge": "fuel station",
-    "auto_vehicle": "Vehicle automatically (plate / default)",
+    "auto_vehicle": "Vehicle automatically (plate / card / default)",
+    "car_method": {
+      "explicit": "chosen manually",
+      "plate": "by licence plate",
+      "text": "plate in document text",
+      "card": "by card •••• {last4}",
+      "card_plain": "by card",
+      "default": "default vehicle"
+    },
+    "car_method_title": "How the vehicle was assigned",
     "cash_scan_done": "Refuelling created from the cash document.",
     "cash_scan_updated": "The refuelling already existed, missing details were filled in.",
     "cash_backfill_done": "Created {n} refuellings from the cash desk.",
@@ -23274,7 +23283,10 @@
       "rematch_failed": "Matching failed.",
       "open_statement": "Statement",
       "add_card": "Add card",
-      "truncated": "Showing the first {n} payments. Narrow the period."
+      "truncated": "Showing the first {n} payments. Narrow the period.",
+      "vehicle_hint": "Holder's vehicle: {vehicle}",
+      "vehicle_ambiguous": "The card holder drives several vehicles, the vehicle cannot be determined.",
+      "vehicle_hint_title": "Hint based on the card and the vehicle's driver"
     }
   }
 }

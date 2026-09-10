@@ -73,6 +73,15 @@ export interface CardPaymentRow {
   counterparty_name: string | null
   description: string | null
   card_last4: string
+  /** Platba na čerpací stanici: vozidlo držitele karty (reason ambiguous = víc vozidel). */
+  vehicle_hint?: CardPaymentVehicleHint | null
+}
+
+export interface CardPaymentVehicleHint {
+  car_id: number | null
+  registration: string | null
+  car_name: string | null
+  reason: 'ok' | 'ambiguous'
 }
 
 export interface CardPaymentGroup {

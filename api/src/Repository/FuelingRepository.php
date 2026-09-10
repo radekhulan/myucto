@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\Card\CardNumberMask;
 use PDO;
 
 /**
@@ -14,6 +15,12 @@ use PDO;
 final class FuelingRepository
 {
     private const SOURCES = ['manual', 'invoice', 'axigon', 'axigon_ai', 'import', 'cash'];
+
+    /** Způsob přiřazení vozidla (migrace 1808) — method z VehicleResolver::resolve() bez „none". */
+    public const CAR_METHODS = ['explicit', 'plate', 'text', 'card', 'default'];
+
+    /** Sloupce vazby na doklad, kterým bylo tankování zaplaceno. */
+    private const LINK_KEYS = ['source_purchase_invoice_id', 'source_cash_document_id', 'source_bank_transaction_id', 'source_journal_entry_id'];
 
     /**
      * Vazby na doklad, kterým bylo tankování zaplaceno (migrace 1801) — pokladní doklad,
@@ -162,7 +169,9 @@ final class FuelingRepository
                   quantity   = COALESCE(quantity, VALUES(quantity)),
                   unit_price = COALESCE(unit_price, VALUES(unit_price)),
                   odometer   = COALESCE(odometer, VALUES(odometer)),
+                  car_assigned_by = IF(car_id IS NULL AND VALUES(car_id) IS NOT NULL, VALUES(car_assigned_by), car_assigned_by),
                   car_id     = COALESCE(car_id, VALUES(car_id)),
+                  card_last4 = COALESCE(card_last4, VALUES(card_last4)),
                   source_cash_document_id    = COALESCE(source_cash_document_id, VALUES(source_cash_document_id)),
                   source_bank_transaction_id = COALESCE(source_bank_transaction_id, VALUES(source_bank_transaction_id)),
                   source_journal_entry_id    = COALESCE(source_journal_entry_id, VALUES(source_journal_entry_id))';
@@ -205,9 +214,10 @@ final class FuelingRepository
     public function reassignByInvoice(int $supplierId, int $purchaseInvoiceId, ?int $carId): int
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE fuelings SET car_id = ? WHERE supplier_id = ? AND source_purchase_invoice_id = ?'
+            "UPDATE fuelings SET car_id = ?, car_assigned_by = IF(? IS NULL, NULL, 'explicit')
+              WHERE supplier_id = ? AND source_purchase_invoice_id = ?"
         );
-        $stmt->execute([$carId, $supplierId, $purchaseInvoiceId]);
+        $stmt->execute([$carId, $carId, $supplierId, $purchaseInvoiceId]);
         return $stmt->rowCount();
     }
 
@@ -215,10 +225,113 @@ final class FuelingRepository
     public function reassignByCashDocument(int $supplierId, int $cashDocumentId, ?int $carId): int
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE fuelings SET car_id = ? WHERE supplier_id = ? AND source_cash_document_id = ?'
+            "UPDATE fuelings SET car_id = ?, car_assigned_by = IF(? IS NULL, NULL, 'explicit')
+              WHERE supplier_id = ? AND source_cash_document_id = ?"
         );
-        $stmt->execute([$carId, $supplierId, $cashDocumentId]);
+        $stmt->execute([$carId, $carId, $supplierId, $cashDocumentId]);
         return $stmt->rowCount();
+    }
+
+    /**
+     * Způsob přiřazení vozidla po ruční úpravě / založení (method z VehicleResolver,
+     * NULL = bez vozidla). Koncovku karty mění, jen když ji volající zná.
+     */
+    public function setCarAssignment(int $id, int $supplierId, ?int $carId, ?string $method, ?string $cardLast4 = null): void
+    {
+        $method = $carId !== null && in_array($method, self::CAR_METHODS, true) ? $method : null;
+        $this->db->pdo()->prepare(
+            'UPDATE fuelings SET car_id = ?, car_assigned_by = ?, card_last4 = COALESCE(?, card_last4)
+              WHERE id = ? AND supplier_id = ?'
+        )->execute([$carId, $method, $this->nullableStr($cardLast4, 4), $id, $supplierId]);
+    }
+
+    /**
+     * Tankování navázaná na doklad (vazba = sloupec z whitelistu). Nejvýš pár řádků
+     * — účtenka dá jedno tankování, výpis od stanice desítky.
+     *
+     * @return list<array{id:int, fueled_date:string, amount_with_vat:float, car_id:int|null, dedup_hash:string|null}>
+     */
+    public function findByDocumentLink(int $supplierId, string $column, int $documentId): array
+    {
+        if (!in_array($column, self::LINK_KEYS, true)) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, fueled_date, amount_with_vat, car_id, dedup_hash FROM fuelings
+              WHERE supplier_id = ? AND ' . $column . ' = ?
+              ORDER BY id LIMIT 200'
+        );
+        $stmt->execute([$supplierId, $documentId]);
+        return array_map(static fn (array $r): array => [
+            'id'              => (int) $r['id'],
+            'fueled_date'     => (string) $r['fueled_date'],
+            'amount_with_vat' => (float) $r['amount_with_vat'],
+            'car_id'          => $r['car_id'] !== null ? (int) $r['car_id'] : null,
+            'dedup_hash'      => $r['dedup_hash'] !== null ? (string) $r['dedup_hash'] : null,
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Doplní u existujícího tankování jen CHYBĚJÍCÍ údaje — vyplněné hodnoty nikdy
+     * nepřepíše (stejné pravidlo jako insertScanned při duplicitě). Vrací true, když
+     * se něco doplnilo.
+     *
+     * @param array<string,mixed> $data klíče jako pro insertScanned()
+     */
+    public function fillMissing(int $id, int $supplierId, array $data): bool
+    {
+        $b = $this->bind($supplierId, $data, null);
+        $carMethod = $this->nullableStr($data['car_assigned_by'] ?? null);
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE fuelings
+                SET fueled_time        = COALESCE(fueled_time, ?),
+                    fuel_type          = COALESCE(fuel_type, ?),
+                    quantity           = COALESCE(quantity, ?),
+                    unit_price         = COALESCE(unit_price, ?),
+                    amount_without_vat = COALESCE(amount_without_vat, ?),
+                    amount_vat         = COALESCE(amount_vat, ?),
+                    odometer           = COALESCE(odometer, ?),
+                    station            = COALESCE(station, ?),
+                    vendor_id          = COALESCE(vendor_id, ?),
+                    receipt_number     = COALESCE(receipt_number, ?),
+                    car_assigned_by    = IF(car_id IS NULL AND ? IS NOT NULL, ?, car_assigned_by),
+                    car_id             = COALESCE(car_id, ?),
+                    card_last4         = COALESCE(card_last4, ?),
+                    source_purchase_invoice_id = COALESCE(source_purchase_invoice_id, ?),
+                    source_cash_document_id    = COALESCE(source_cash_document_id, ?),
+                    source_bank_transaction_id = COALESCE(source_bank_transaction_id, ?),
+                    source_journal_entry_id    = COALESCE(source_journal_entry_id, ?)
+              WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([
+            $b[3], $b[4], $b[5], $b[7], $b[8], $b[9], $b[12], $b[13], $b[14], $b[18],
+            $b[1], in_array($carMethod, self::CAR_METHODS, true) ? $carMethod : null,
+            $b[1], $b[27],
+            $b[16], $b[23], $b[24], $b[25],
+            $id, $supplierId,
+        ]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Koncovka karty a datum bankovního pohybu firmy (vlastníka určuje výpis).
+     *
+     * @return array{card_last4:string|null, posted_at:string}|null
+     */
+    public function bankTransactionCard(int $supplierId, int $transactionId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bt.card_last4, bt.posted_at FROM bank_transactions bt
+               JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
+              WHERE bt.id = ? LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $transactionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) return null;
+        return [
+            'card_last4' => $row['card_last4'] !== null ? (string) $row['card_last4'] : null,
+            'posted_at'  => substr((string) $row['posted_at'], 0, 10),
+        ];
     }
 
     /**
@@ -271,8 +384,9 @@ final class FuelingRepository
                   (supplier_id, car_id, fueled_date, fueled_time, fuel_type, quantity, unit, unit_price,
                    amount_without_vat, amount_vat, amount_with_vat, currency, odometer, station, vendor_id,
                    source, source_purchase_invoice_id, source_item_id, receipt_number, raw_text, dedup_hash,
-                   note, created_by, source_cash_document_id, source_bank_transaction_id, source_journal_entry_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                   note, created_by, source_cash_document_id, source_bank_transaction_id, source_journal_entry_id,
+                   car_assigned_by, card_last4)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     }
 
     /** @return list<mixed> Pořadí přesně dle insertSql(). */
@@ -307,6 +421,11 @@ final class FuelingRepository
             $this->nullableInt($data['source_cash_document_id'] ?? null),    // 23
             $this->nullableInt($data['source_bank_transaction_id'] ?? null), // 24
             $this->nullableInt($data['source_journal_entry_id'] ?? null),    // 25
+            // 26 — způsob přiřazení má smysl jen u přiřazeného vozidla
+            $this->nullableInt($data['car_id'] ?? null) !== null && in_array($data['car_assigned_by'] ?? null, self::CAR_METHODS, true)
+                ? (string) $data['car_assigned_by'] : null,
+            CardNumberMask::isValidLast4(isset($data['card_last4']) ? (string) $data['card_last4'] : null)
+                ? (string) $data['card_last4'] : null,                // 27
         ];
     }
 
@@ -337,6 +456,8 @@ final class FuelingRepository
             'car_id'                     => $r['car_id'] !== null ? (int) $r['car_id'] : null,
             'car_registration'           => isset($r['car_registration']) && $r['car_registration'] !== null ? (string) $r['car_registration'] : null,
             'car_name'                   => isset($r['car_name']) && $r['car_name'] !== null ? (string) $r['car_name'] : null,
+            'car_assigned_by'            => isset($r['car_assigned_by']) ? (string) $r['car_assigned_by'] : null,
+            'card_last4'                 => isset($r['card_last4']) ? (string) $r['card_last4'] : null,
             'fueled_date'                => (string) $r['fueled_date'],
             'fueled_time'                => $r['fueled_time'] !== null ? substr((string) $r['fueled_time'], 0, 5) : null,
             'fuel_type'                  => $r['fuel_type'] !== null ? (string) $r['fuel_type'] : null,
