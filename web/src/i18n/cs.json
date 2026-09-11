@@ -23010,6 +23010,7 @@
     "empty": "Zatím žádné zálohy",
     "empty_hint": "Zálohy vytvářejí naplánované úlohy. Zkontrolujte je v Administrace → Naplánované úlohy.",
     "section_summary": "{count} souborů · {size}",
+    "section_summary_latest": "{shown} nejnovějších z {count} · celkem {size}",
     "col_file": "Soubor",
     "col_taken": "Pořízeno",
     "col_size": "Velikost",

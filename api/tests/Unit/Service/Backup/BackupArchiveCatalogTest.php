@@ -65,13 +65,66 @@ final class BackupArchiveCatalogTest extends TestCase
     public function testUnrecognizedArchiveFallsIntoOtherSectionInsteadOfDisappearing(): void
     {
         $this->write('rucni-kopie-pred-migraci.zip');
-        $this->write('jina-instalace-2026-01-01.sql.gz');
+        $this->write('export-bez-data.sql.gz');
 
         $sections = $this->catalog()->sections();
 
         self::assertCount(1, $sections);
         self::assertSame(BackupArchiveCatalog::KIND_OTHER, $sections[0]['kind']);
         self::assertCount(2, $sections[0]['files']);
+    }
+
+    /**
+     * Prefix názvu je jméno databáze v době zálohy. Přejmenovaná databáze nebo
+     * lokální přepnutí na jinou (cfg.local.php) nesmí z automatických záloh
+     * udělat „ostatní" — kategorie se pozná podle tvaru názvu, ne podle prefixu.
+     */
+    public function testKindIsRecognizedEvenWhenPrefixDiffersFromCurrentDatabaseName(): void
+    {
+        $this->write('myucto-2026-09-11_08-00.zip');
+        $this->write('myucto-documents-2026-09-11_02-35.zip');
+        $this->write('myucto-pdf-2026-09-11_02-30.zip');
+        $this->write('myucto-payroll-2026-09-11_02-40.zip');
+        $this->write('myucto-2026-01-01.sql.gz');
+
+        $sections = $this->catalog('myucto_prod2')->sections();
+
+        self::assertSame(
+            [
+                BackupArchiveCatalog::KIND_DATABASE,
+                BackupArchiveCatalog::KIND_DOCUMENTS,
+                BackupArchiveCatalog::KIND_PDF,
+                BackupArchiveCatalog::KIND_PAYROLL,
+            ],
+            array_column($sections, 'kind'),
+        );
+        self::assertSame(2, $sections[0]['total_files']);
+    }
+
+    public function testEachSectionOffersOnlyTheFiveNewestBackups(): void
+    {
+        for ($day = 1; $day <= 7; $day++) {
+            $this->write(sprintf('myucto-2026-09-%02d_02-00.zip', $day));
+        }
+        $this->write('myucto-payroll-2026-09-10_02-40.zip');
+        $this->write('myucto-payroll-2026-09-11_02-40.zip');
+
+        $sections = $this->catalog()->sections();
+
+        self::assertSame(BackupArchiveCatalog::KIND_DATABASE, $sections[0]['kind']);
+        self::assertSame([
+            'myucto-2026-09-07_02-00.zip',
+            'myucto-2026-09-06_02-00.zip',
+            'myucto-2026-09-05_02-00.zip',
+            'myucto-2026-09-04_02-00.zip',
+            'myucto-2026-09-03_02-00.zip',
+        ], array_column($sections[0]['files'], 'name'));
+        self::assertSame(7, $sections[0]['total_files']);
+        self::assertSame(7 * 64, $sections[0]['size_bytes']);
+
+        self::assertSame(BackupArchiveCatalog::KIND_PAYROLL, $sections[1]['kind']);
+        self::assertCount(2, $sections[1]['files']);
+        self::assertSame(2, $sections[1]['total_files']);
     }
 
     /** Pracovní pozůstatky cronů — mezi nimi `.dump.cnf` s heslem k databázi. */
@@ -139,10 +192,10 @@ final class BackupArchiveCatalogTest extends TestCase
         }
     }
 
-    private function catalog(): BackupArchiveCatalog
+    private function catalog(string $dbName = 'myucto'): BackupArchiveCatalog
     {
         return new BackupArchiveCatalog(new Config([
-            'db' => ['name' => 'myucto'],
+            'db' => ['name' => $dbName],
             'cron' => ['backup' => ['output_dir' => $this->dir]],
         ]));
     }

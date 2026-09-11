@@ -23010,6 +23010,7 @@
     "empty": "No backups yet",
     "empty_hint": "Backups are produced by scheduled jobs. Check them in Administration → Scheduled jobs.",
     "section_summary": "{count} files · {size}",
+    "section_summary_latest": "{shown} newest of {count} · {size} total",
     "col_file": "File",
     "col_taken": "Taken",
     "col_size": "Size",

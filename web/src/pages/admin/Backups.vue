@@ -212,12 +212,14 @@ function formatBytes(bytes: number | null): string {
             <p class="text-xs text-neutral-500 mt-0.5">{{ t(`backups.kind_hint.${section.kind}`) }}</p>
           </div>
           <span class="text-xs text-neutral-500 whitespace-nowrap">
-            {{ t('backups.section_summary', { count: section.files.length, size: formatBytes(section.size_bytes) }) }}
+            {{ section.total_files > section.files.length
+              ? t('backups.section_summary_latest', { shown: section.files.length, count: section.total_files, size: formatBytes(section.size_bytes) })
+              : t('backups.section_summary', { count: section.total_files, size: formatBytes(section.size_bytes) }) }}
           </span>
         </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+        <div class="overflow-auto max-h-96">
+          <table class="w-full min-w-[40rem] text-sm">
+            <thead class="sticky top-0 bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
                 <th class="px-4 py-2 text-left font-medium">{{ t('backups.col_file') }}</th>
                 <th class="px-4 py-2 text-left font-medium w-44">{{ t('backups.col_taken') }}</th>
@@ -226,8 +228,8 @@ function formatBytes(bytes: number | null): string {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="file in section.files" :key="file.name">
-                <td class="px-4 py-2 font-mono text-xs break-all">{{ file.name }}</td>
+              <tr v-for="file in section.files" :key="file.name" class="hover:bg-neutral-50">
+                <td class="px-4 py-2 font-mono text-xs whitespace-nowrap">{{ file.name }}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-xs text-neutral-600">
                   {{ formatDateTime(file.taken_at ?? file.modified_at) }}
                 </td>

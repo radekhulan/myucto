@@ -117,7 +117,13 @@ adresáře se zálohami rozdělený do sekcí podle toho, která úloha soubor v
 - **PDF doklady** — vygenerovaná PDF z `cron-backup-pdf`;
 - **Mzdy** — mzdové podklady z `cron-backup-payroll`;
 - **Ostatní** — soubory, které pojmenování automatických záloh neodpovídají,
-  typicky ruční kopie nebo záloha přenesená z jiné instalace.
+  typicky ruční kopie bez data v názvu.
+
+Sekce se pozná podle tvaru názvu souboru, ne podle jména databáze, takže zálohy
+zůstanou ve správné sekci i po přejmenování databáze. V každé sekci je
+k dispozici pět nejnovějších záloh; v záhlaví sekce je vidět, kolik jich na
+disku leží celkem a kolik zabírají místa. Starší zálohy zůstávají na serveru,
+dokud je nesmaže retence.
 
 U každého souboru je čas pořízení a velikost. Pod seznamem je cesta k adresáři
 na serveru, počet záloh a nastavená retence — tedy kolik souborů (nebo dnů)

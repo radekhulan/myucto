@@ -70,8 +70,9 @@ final class BackupDownloadAction
             'encrypted'  => BackupEncryption::passwordFromConfig($this->config) !== '',
             'retention'  => $retention->describe(),
             'kinds'      => BackupArchiveCatalog::KINDS,
+            'latest_per_kind' => BackupArchiveCatalog::LATEST_PER_KIND,
             'sections'   => $sections,
-            'total_files' => array_sum(array_map(static fn (array $s): int => count($s['files']), $sections)),
+            'total_files' => array_sum(array_column($sections, 'total_files')),
             'total_size_bytes' => array_sum(array_column($sections, 'size_bytes')),
         ]);
     }

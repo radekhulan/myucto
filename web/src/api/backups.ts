@@ -24,7 +24,10 @@ export interface BackupFile {
 
 export interface BackupSection {
   kind: BackupKind
+  /** Jen nejnovější zálohy sekce (`latest_per_kind`), od nejnovější. */
   files: BackupFile[]
+  /** Počet a velikost všech záloh sekce na disku, nejen vypsaných. */
+  total_files: number
   size_bytes: number
 }
 
@@ -35,6 +38,7 @@ export interface BackupOverview {
   encrypted: boolean
   retention: string
   kinds: BackupKind[]
+  latest_per_kind: number
   sections: BackupSection[]
   total_files: number
   total_size_bytes: number

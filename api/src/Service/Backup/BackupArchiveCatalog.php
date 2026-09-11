@@ -19,10 +19,13 @@ use MyInvoice\Infrastructure\Config\Config;
  *   {db}-documents-RRRR-MM-DD_HH-MM.zip   cron-backup-documents.php  (dokumenty a přílohy)
  *   {db}-payroll-RRRR-MM-DD_HH-MM.zip     cron-backup-payroll.php    (mzdové podklady)
  *
- * Rozdělení do sekcí se proto počítá z názvu. Co konvenci neodpovídá (ruční kopie,
- * záloha přenesená z jiné instalace, historické `.sql.gz`) se NEZAHAZUJE — skončí
- * v sekci `other`. Tichý filtr by byl horší než nepřehledný seznam: soubor, který
- * v adresáři je a v UI ne, vypadá jako ztracená záloha.
+ * Rozdělení do sekcí se proto počítá z tvaru názvu. Prefix `{db}` se záměrně
+ * nesrovnává s aktuálním `db.name`: je to jméno databáze v době zálohy, a po
+ * přejmenování databáze nebo lokálním přepnutí na jinou (cfg.local.php) by jinak
+ * všechny automatické zálohy spadly do `other`. Co konvenci neodpovídá (ruční
+ * kopie bez data v názvu, cizí export) se NEZAHAZUJE — skončí v sekci `other`.
+ * Tichý filtr by byl horší než nepřehledný seznam: soubor, který v adresáři je
+ * a v UI ne, vypadá jako ztracená záloha.
  *
  * Skryté soubory (tečkou začínající) jsou pracovní pozůstatky cronů — rozdělaný
  * `.{db}-{date}.sql`, `.dump.cnf` s heslem k databázi, `.last-error`. Ty ven
@@ -48,7 +51,16 @@ final class BackupArchiveCatalog
     /** Přípony, které považujeme za zálohu. Vše ostatní v adresáři ignorujeme. */
     private const EXTENSIONS = ['.zip', '.sql.gz', '.sql', '.gz'];
 
-    /** Infix v názvu → sekce. Pořadí nehraje roli, klíče se nepřekrývají. */
+    /**
+     * Kolik nejnovějších záloh sekce nabízí. Retence jich drží víc (při 4× denním
+     * dumpu desítky), ke stažení ale člověk sahá po čerstvé záloze.
+     */
+    public const LATEST_PER_KIND = 5;
+
+    /** `{db}-[infix-]RRRR-MM-DD[_HH-MM].zip`; `.sql.gz` jsou dumpy z doby před ZIPy. */
+    private const CRON_NAME = '/^.+?-(?:(pdf|documents|payroll)-)?\d{4}-\d{2}-\d{2}(?:_\d{2}-\d{2})?\.(?:zip|sql\.gz)$/i';
+
+    /** Infix v názvu → sekce. */
     private const INFIX_KINDS = [
         'pdf'       => self::KIND_PDF,
         'documents' => self::KIND_DOCUMENTS,
@@ -79,7 +91,6 @@ final class BackupArchiveCatalog
             return [];
         }
 
-        $prefix = trim((string) $this->config->get('db.name', ''));
         $items = [];
         foreach (new FilesystemIterator($dir, FilesystemIterator::SKIP_DOTS) as $entry) {
             if (!$entry->isFile()) {
@@ -92,7 +103,7 @@ final class BackupArchiveCatalog
             $mtime = (int) $entry->getMTime();
             $items[] = [
                 'name'        => $name,
-                'kind'        => self::classify($name, $prefix),
+                'kind'        => self::classify($name),
                 'size_bytes'  => (int) $entry->getSize(),
                 'modified_at' => (new DateTimeImmutable('@' . $mtime))
                     ->setTimezone(new \DateTimeZone(date_default_timezone_get()))
@@ -112,11 +123,13 @@ final class BackupArchiveCatalog
     }
 
     /**
-     * Zálohy rozdělené do sekcí, prázdné sekce vynechané.
+     * Zálohy rozdělené do sekcí, prázdné sekce vynechané. Každá sekce nese jen
+     * `$latest` nejnovějších souborů; `total_files` a `size_bytes` popisují celou
+     * sekci, ať je vidět, kolik místa zálohy na disku skutečně zabírají.
      *
-     * @return list<array{kind:string,files:list<array<string,mixed>>,size_bytes:int}>
+     * @return list<array{kind:string,files:list<array<string,mixed>>,total_files:int,size_bytes:int}>
      */
-    public function sections(): array
+    public function sections(int $latest = self::LATEST_PER_KIND): array
     {
         $byKind = [];
         foreach ($this->list() as $file) {
@@ -129,9 +142,10 @@ final class BackupArchiveCatalog
                 continue;
             }
             $sections[] = [
-                'kind'       => $kind,
-                'files'      => $byKind[$kind],
-                'size_bytes' => array_sum(array_column($byKind[$kind], 'size_bytes')),
+                'kind'        => $kind,
+                'files'       => array_slice($byKind[$kind], 0, max(1, $latest)),
+                'total_files' => count($byKind[$kind]),
+                'size_bytes'  => array_sum(array_column($byKind[$kind], 'size_bytes')),
             ];
         }
 
@@ -191,23 +205,14 @@ final class BackupArchiveCatalog
         return false;
     }
 
-    /** Sekce podle názvu souboru; `$prefix` je jméno databáze z konfigurace. */
-    private static function classify(string $name, string $prefix): string
+    /** Sekce podle tvaru názvu souboru; bez infixu zbývá rovnou datum = dump databáze. */
+    private static function classify(string $name): string
     {
-        if ($prefix === '' || !str_starts_with($name, $prefix . '-')) {
+        if (preg_match(self::CRON_NAME, $name, $m) !== 1) {
             return self::KIND_OTHER;
         }
-        $rest = substr($name, strlen($prefix) + 1);
-        foreach (self::INFIX_KINDS as $infix => $kind) {
-            if (str_starts_with($rest, $infix . '-')) {
-                return $kind;
-            }
-        }
-        // Bez infixu zbývá rovnou datum — to je dump databáze. Cokoli jiného je
-        // shoda prefixu náhodou (jiná instalace, ruční kopie) a patří do `other`.
-        return preg_match('/^\d{4}-\d{2}-\d{2}/', $rest) === 1
-            ? self::KIND_DATABASE
-            : self::KIND_OTHER;
+
+        return self::INFIX_KINDS[strtolower($m[1] ?? '')] ?? self::KIND_DATABASE;
     }
 
     /** `…-RRRR-MM-DD[_HH-MM].ext` → `Y-m-d H:i:s`, jinak null. */
