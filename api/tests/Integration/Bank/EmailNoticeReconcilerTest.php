@@ -571,9 +571,7 @@ final class EmailNoticeReconcilerTest extends TestCase
         $this->payments->recordPayment($invA, 1000.00, '2099-06-15', [
             'source' => 'bank', 'bank_transaction_id' => $emailTx1, 'created_by' => $this->userId,
         ]);
-        $this->payments->recordPayment($invA, 1000.00, '2099-06-15', [
-            'source' => 'bank', 'bank_transaction_id' => $emailTx2, 'created_by' => $this->userId,
-        ]);
+        $this->insertHistoricalDuplicatePayment($invA, $emailTx2, 1000.00);
         $this->markTxMatched($emailTx1, $invA, 'manual');
         $this->markTxMatched($emailTx2, $invA, 'manual');
 
@@ -881,9 +879,7 @@ final class EmailNoticeReconcilerTest extends TestCase
         $this->payments->recordPayment($invA, 212.88, '2099-06-15', [
             'source' => 'bank', 'bank_transaction_id' => $emailTx1, 'created_by' => $this->userId,
         ]);
-        $this->payments->recordPayment($invA, 212.88, '2099-06-15', [
-            'source' => 'bank', 'bank_transaction_id' => $emailTx2, 'created_by' => $this->userId,
-        ]);
+        $this->insertHistoricalDuplicatePayment($invA, $emailTx2, 212.88);
         $this->markTxMatched($emailTx1, $invA, 'manual');
         $this->markTxMatched($emailTx2, $invA, 'manual');
 
@@ -892,5 +888,22 @@ final class EmailNoticeReconcilerTest extends TestCase
 
         self::assertNull($result, 'Dvě stejné blokace = nejednoznačné, nepřebírat.');
         self::assertSame(0, $this->paymentCountForTx($gpcTx));
+    }
+
+    /**
+     * Druhá plná bankovní platba na tutéž fakturu (dvojí avízo) jako historická data.
+     * recordPayment() ji dnes odmítne (InvoiceAlreadySettledException), reconciler se
+     * s takovým stavem ale v existujících datech potkat může a musí ho nechat být.
+     */
+    private function insertHistoricalDuplicatePayment(int $invoiceId, int $txId, float $amount): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO invoice_payments
+                (supplier_id, invoice_id, paid_on, amount, currency, source, bank_transaction_id, created_by)
+             SELECT i.supplier_id, i.id, '2099-06-15', ?, cur.code, 'bank', ?, ?
+               FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
+              WHERE i.id = ?"
+        )->execute([$amount, $txId, $this->userId ?: null, $invoiceId]);
+        $this->payments->recompute($invoiceId);
     }
 }

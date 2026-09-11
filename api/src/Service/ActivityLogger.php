@@ -119,6 +119,9 @@ class ActivityLogger
             'client'   => 'SELECT supplier_id FROM clients  WHERE id = ?',
             'project'  => 'SELECT c.supplier_id FROM projects p JOIN clients c ON c.id = p.client_id WHERE p.id = ?',
             'supplier' => 'SELECT id FROM supplier WHERE id = ?',
+            'bank_statement'   => 'SELECT supplier_id FROM bank_statements WHERE id = ?',
+            'bank_transaction' => 'SELECT bs.supplier_id FROM bank_transactions bt
+                                     JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ?',
             default    => null,
         };
         if ($sql === null) return null;

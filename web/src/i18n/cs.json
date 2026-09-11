@@ -16417,7 +16417,7 @@
     "statement_deleted": "Výpis smazán.",
     "statement_delete_failed": "Smazání výpisu selhalo.",
     "delete": "Smazat",
-    "delete_confirm": "Opravdu smazat výpis {name}? Smažou se i jeho transakce a párování s fakturami; status zaplacených faktur zůstane (případně ho zrušte ručně).",
+    "delete_confirm": "Opravdu smazat výpis {name}? Smažou se i jeho transakce. Spárované platby se zruší jako při zrušení párování: faktury se vrátí do stavu podle zbývajících plateb a zaúčtované pohyby se stornují.",
     "delete_done": "Výpis smazán.",
     "delete_failed": "Smazání selhalo.",
     "upload_batch_done": "Hromadný upload: {ok} importováno, {dup} duplicit.",
@@ -16736,6 +16736,7 @@
       "reason_document_not_posted": "předpis faktury není zaúčtovaný",
       "reason_not_double_entry": "firma neúčtuje podvojně",
       "reason_already_paid_verify": "transakce je spárovaná, ale dřívější úhradu faktury nelze bezpečně propojit — ověřte duplicitu",
+      "reason_overpaid_verify": "platby faktury přesahují částku k úhradě — ověřte dvojí úhradu",
       "reason_ambiguous_supplier": "účet výpisu patří více firmám",
       "err_override_not_allowed": "Kontaci vlastního převodu nelze změnit.",
       "col_rule": "Pravidlo",
@@ -21417,6 +21418,7 @@
       "saldo_forbidden": "Saldokontní účet se automaticky neúčtuje.",
       "policy_suggest": "Nastavení automatiky vyžaduje před zaúčtováním potvrzení.",
       "already_paid_verify": "Bankovní transakce je spárovaná s fakturou, která už byla označena jako zaplacená, ale její dřívější úhradu nelze bezpečně propojit s výpisem — ověřte, zda nejde o duplicitu.",
+      "overpaid_verify": "Evidované platby faktury přesahují částku k úhradě, proto se úhrada nezaúčtovala automaticky — ověřte, zda nejde o dvojí úhradu.",
       "unknown": "Položka vyžaduje ruční kontrolu."
     }
   },

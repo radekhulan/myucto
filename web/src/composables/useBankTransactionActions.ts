@@ -24,6 +24,7 @@ const POSTING_REASON_KEYS: Record<string, string> = {
   period_closed: 'bank.posting.err_period_closed',
   not_double_entry: 'bank.posting.reason_not_double_entry',
   already_paid_verify: 'bank.posting.reason_already_paid_verify',
+  overpaid_verify: 'bank.posting.reason_overpaid_verify',
   ambiguous_supplier: 'bank.posting.reason_ambiguous_supplier',
 }
 

@@ -16417,7 +16417,7 @@
     "statement_deleted": "Statement deleted.",
     "statement_delete_failed": "Statement delete failed.",
     "delete": "Delete",
-    "delete_confirm": "Really delete statement {name}? Its transactions and invoice matches will be removed; invoice paid status will remain (clear it manually if needed).",
+    "delete_confirm": "Really delete statement {name}? Its transactions will be deleted too. Matched payments are released as when unmatching: invoices return to the status given by their remaining payments and posted transactions are reversed.",
     "delete_done": "Statement deleted.",
     "delete_failed": "Delete failed.",
     "upload_batch_done": "Batch upload: {ok} imported, {dup} duplicates.",
@@ -16736,6 +16736,7 @@
       "reason_document_not_posted": "the invoice entry is not posted",
       "reason_not_double_entry": "the company does not use double-entry accounting",
       "reason_already_paid_verify": "the transaction is matched, but the invoice's earlier payment cannot be linked safely — check for a duplicate",
+      "reason_overpaid_verify": "the invoice payments exceed the amount due — check for a double payment",
       "reason_ambiguous_supplier": "the statement account belongs to multiple companies",
       "err_override_not_allowed": "The own-transfer posting accounts cannot be changed.",
       "col_rule": "Rule",
@@ -21417,6 +21418,7 @@
       "saldo_forbidden": "Open-item accounts are never auto-posted.",
       "policy_suggest": "The automation policy requires confirmation before posting.",
       "already_paid_verify": "The bank transaction is matched to an invoice that was already marked as paid, but its earlier payment cannot be linked safely to the statement — check whether it is a duplicate.",
+      "overpaid_verify": "The recorded invoice payments exceed the amount due, so the payment was not posted automatically — check whether it is a double payment.",
       "unknown": "This item requires manual review."
     }
   },

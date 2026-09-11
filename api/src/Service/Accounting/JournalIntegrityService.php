@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankTransactionReleaseService;
 use PDO;
 
 /**
@@ -14,8 +15,9 @@ use PDO;
  * force-editem zaúčtovaného dokladu bez re-postu.
  *
  * Kontroly (per supplier v podvojném účetnictví):
- *   - orphan_entry         — aktivní zaúčtovaný zápis (source_type invoice/purchase)
- *                            odkazuje na doklad, který už neexistuje.
+ *   - orphan_entry         — aktivní zaúčtovaný zápis odkazuje na zdroj, který už
+ *                            neexistuje: vydaná/přijatá faktura, pokladní doklad nebo
+ *                            bankovní pohyb (bank, vypořádání a uzavření platby kartou).
  *   - unbalanced_entry     — Σ MD ≠ Σ D na řádcích jednoho zápisu (v haléřích).
  *                            PostingService to jinak vynucuje — pojistka proti
  *                            přímým DB zásahům.
@@ -267,17 +269,31 @@ final class JournalIntegrityService
      */
     private function checkOrphanEntries(int $supplierId): array
     {
+        // Bankovní zápisy (i vypořádání a uzavření platby kartou) mají source_id =
+        // bank_transactions.id bez cizího klíče — smazaný výpis po sobě nechal zápis,
+        // který nic nehlídalo. Výpis nese tenanta; legacy výpis bez supplier_id tenanta
+        // neprozradí, takže se bere jako existující (nález musí být jistý).
+        $bankTypes = implode(',', array_map(
+            static fn (string $t): string => "'{$t}'",
+            BankTransactionReleaseService::TRANSACTION_SOURCE_TYPES,
+        ));
         $sql =
             "FROM journal_entries je
              LEFT JOIN invoices i          ON je.source_type = 'invoice'          AND i.id  = je.source_id AND i.supplier_id = je.supplier_id
              LEFT JOIN purchase_invoices p ON je.source_type = 'purchase_invoice' AND p.id  = je.source_id AND p.supplier_id = je.supplier_id
+             LEFT JOIN cash_documents cd   ON je.source_type = 'cash'             AND cd.id = je.source_id AND cd.supplier_id = je.supplier_id
+             LEFT JOIN bank_transactions bt ON je.source_type IN ({$bankTypes})   AND bt.id = je.source_id
+             LEFT JOIN bank_statements bs  ON bs.id = bt.statement_id
+                                          AND (bs.supplier_id IS NULL OR bs.supplier_id = je.supplier_id)
              WHERE je.supplier_id = :sid
-               AND je.source_type IN ('invoice','purchase_invoice')
+               AND je.source_type IN ('invoice','purchase_invoice','cash',{$bankTypes})
                AND je.source_id IS NOT NULL
                AND je.posted_at IS NOT NULL
                AND je.reversed_by IS NULL
                AND ((je.source_type = 'invoice'          AND i.id IS NULL)
-                 OR (je.source_type = 'purchase_invoice' AND p.id IS NULL))";
+                 OR (je.source_type = 'purchase_invoice' AND p.id IS NULL)
+                 OR (je.source_type = 'cash'             AND cd.id IS NULL)
+                 OR (je.source_type IN ({$bankTypes})    AND bs.id IS NULL))";
         $select =
             "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no, je.entry_date " . $sql
             . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;

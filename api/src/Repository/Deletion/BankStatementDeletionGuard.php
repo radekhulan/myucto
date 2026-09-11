@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository\Deletion;
 
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankTransactionReleaseService;
+
 /**
  * Co brání smazat bankovní výpis.
  *
@@ -21,9 +24,33 @@ namespace MyInvoice\Repository\Deletion;
  * `chk_payroll_payment_match_evidence` vynucuje, že bankovní vazba má obě hodnoty
  * vyplněné zároveň. Součet přes `bank_statement_id` proto pokrývá i transakční
  * větev — a strukturální test hlídá, že to tak zůstane.
+ *
+ * ── Pohyby, které nejdou uvolnit ──────────────────────────────────────────────
+ * Výpis se nemaže naslepo: každý spárovaný nebo zaúčtovaný pohyb se před smazáním
+ * uvolní ({@see BankTransactionReleaseService}), jinak by po sobě nechal platbu
+ * faktury bez vazby a sirotčí zápis v deníku. Pohyb, jehož zápis leží v uzavřeném
+ * nebo zamčeném období (storno nejde), nebo k jehož platbě je vystavený daňový
+ * doklad, smazání zastaví. Tyhle vazby nejsou cizí klíče, proto je registr
+ * {@see blockers()} nezná a ptá se na ně služba uvolnění.
  */
 final class BankStatementDeletionGuard extends ForeignKeyDeletionGuard
 {
+    private const RELEASE_MESSAGES = [
+        'closed_period' => 'Výpis nelze smazat — %d jeho pohybů je zaúčtováno v uzavřeném nebo zamčeném '
+            . 'období a jejich zápisy nejde stornovat. Smazáním by v deníku zůstaly zápisy bez pohybu.',
+        'tax_document' => 'Výpis nelze smazat — k platbám z %d jeho pohybů je vystavený daňový doklad '
+            . 'k přijaté platbě. Nejdřív ho smažte (koncept) nebo stornujte.',
+        'draft_entry' => 'Výpis nelze smazat — %d jeho pohybů má v deníku rozpracovaný (nezaúčtovaný) '
+            . 'zápis. Nejdřív ho v účetním deníku smažte.',
+    ];
+
+    public function __construct(
+        Connection $db,
+        private readonly BankTransactionReleaseService $release,
+    ) {
+        parent::__construct($db);
+    }
+
     protected static function blockers(): array
     {
         return [
@@ -59,11 +86,20 @@ final class BankStatementDeletionGuard extends ForeignKeyDeletionGuard
     public function conflict(int $supplierId, int $statementId): ?DeletionConflict
     {
         $counts = $this->countBlockers($supplierId, $statementId);
-        if ($counts === []) {
-            return null;
+        if ($counts !== []) {
+            return new DeletionConflict('has_dependencies', self::describe($counts), $counts);
         }
 
-        return new DeletionConflict('has_dependencies', self::describe($counts), $counts);
+        $release = $this->release->deletionBlockers($supplierId, $statementId);
+        if ($release === []) {
+            return null;
+        }
+        $sentences = [];
+        foreach ($release as $code => $count) {
+            $sentences[] = sprintf(self::RELEASE_MESSAGES[$code] ?? 'Výpis nelze smazat (%d pohybů).', $count);
+        }
+
+        return new DeletionConflict('transactions_not_releasable', implode(' ', $sentences), $release);
     }
 
     /**

@@ -119,6 +119,7 @@ final class BankIgnoreNoteTest extends TestCase
         $pdo->method('beginTransaction')->willReturnCallback(fn () => $sqlite->beginTransaction());
         $pdo->method('commit')->willReturnCallback(fn () => $sqlite->commit());
         $pdo->method('rollBack')->willReturnCallback(fn () => $sqlite->rollBack());
+        $pdo->method('inTransaction')->willReturnCallback(fn () => $sqlite->inTransaction());
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         $reflection = new \ReflectionClass(BankStatementAction::class);
@@ -136,6 +137,13 @@ final class BankIgnoreNoteTest extends TestCase
             $posting->method('releaseMatch')->willThrowException(new \MyInvoice\Service\Accounting\PostingException('period_closed', 'Test closed period', 409));
         }
         $reflection->getProperty('bankPosting')->setValue($action, $posting);
+        $reflection->getProperty('release')->setValue($action, new \MyInvoice\Service\Bank\BankTransactionReleaseService(
+            $db,
+            $payments,
+            $posting,
+            // Zrušení párování se politiky automatiky neptá (jen předběžná kontrola smazání výpisu).
+            (new \ReflectionClass(\MyInvoice\Service\Accounting\AutoPostingPolicyService::class))->newInstanceWithoutConstructor(),
+        ));
         $matchReflection = new \ReflectionClass(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class);
         $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/bank-transactions/1/unmatch')

@@ -23,6 +23,9 @@ use MyInvoice\Service\Bank\StatementReconciliationException;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Bank\BankTransactionReleaseException;
+use MyInvoice\Service\Bank\BankTransactionReleaseService;
+use MyInvoice\Service\Invoice\InvoiceAlreadySettledException;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
@@ -108,8 +111,46 @@ final class BankStatementAction
         private readonly BankStatementDeletionGuard $deletionGuard,
         // H-02: skenování adresáře na serveru je ve spravované instalaci zamčené.
         private readonly ManagedModeGuard $managed,
+        // Uvolnění pohybu (zrušení párování i smazání výpisu) — jediné místo.
+        private readonly BankTransactionReleaseService $release,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
+
+    /**
+     * Atomický blok, který respektuje otevřenou transakci volajícího (savepoint).
+     * Vrací true, když transakci založil sám.
+     */
+    private static function beginAtomic(\PDO $pdo, string $savepoint): bool
+    {
+        if ($pdo->inTransaction()) {
+            $pdo->exec('SAVEPOINT ' . $savepoint);
+            return false;
+        }
+        $pdo->beginTransaction();
+        return true;
+    }
+
+    private static function commitAtomic(\PDO $pdo, bool $own, string $savepoint): void
+    {
+        if ($own) {
+            $pdo->commit();
+        } else {
+            $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+        }
+    }
+
+    private static function rollbackAtomic(\PDO $pdo, bool $own, string $savepoint): void
+    {
+        if (!$pdo->inTransaction()) {
+            return;
+        }
+        if ($own) {
+            $pdo->rollBack();
+            return;
+        }
+        $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+        $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+    }
 
     public function scan(Request $request, Response $response): Response
     {
@@ -1175,12 +1216,15 @@ final class BankStatementAction
     /**
      * DELETE /api/bank-statements/{id}
      *
-     * Smaže výpis vč. transakcí (ON DELETE CASCADE) a payment_matches (CASCADE
-     * přes bank_transactions). NEresetuje status faktur — ty zůstávají paid
-     * (manuální cleanup u faktur, kterých se to týká, je doménou uživatele).
+     * Smaže výpis vč. transakcí (ON DELETE CASCADE). Každý spárovaný nebo zaúčtovaný
+     * pohyb se předtím ve STEJNÉ transakci uvolní jako při „Zrušit spárování"
+     * ({@see BankTransactionReleaseService}): bankovní zápis se stornuje, platba
+     * faktury zruší a stav faktury přepočte z plateb. Bez toho zůstala platba bez
+     * vazby a zápis v deníku jako sirotek a opětovný import téhož výpisu zaúčtoval
+     * úhradu podruhé. Když storno nejde (uzavřené/zamčené období), smazání se zastaví.
      *
-     * Blokující vazby (mzdové doklady o vyplacení, RESTRICT) drží
-     * {@see BankStatementDeletionGuard} — kontrola předem i odchyt FK výjimky.
+     * Blokující vazby (mzdové doklady o vyplacení, RESTRICT) i pohyby, které nejde
+     * uvolnit, drží {@see BankStatementDeletionGuard} — kontrola předem i odchyt výjimek.
      */
     public function delete(Request $request, Response $response, array $args): Response
     {
@@ -1250,9 +1294,27 @@ final class BankStatementAction
             return Json::error($response, $conflict->code, $conflict->message, 409, $conflict->toErrorExtra());
         }
 
+        $userId = isset($user['id']) ? (int) $user['id'] : null;
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+        $savepoint = 'bank_statement_delete';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
+            $released = 0;
+            foreach ($this->release->releasableTransactionIds($sid, $id) as $txId) {
+                $this->release->release($sid, $txId, BankTransactionReleaseService::MODE_DELETE, $userId ?: null);
+                $released++;
+            }
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
+            $this->logger->log('bank.statement_deleted', $userId ?: null, 'bank_statement', $id, [
+                'file_name'             => $fileName,
+                'released_transactions' => $released,
+            ], $ip, $request->getHeaderLine('User-Agent'), $sid);
+            self::commitAtomic($pdo, $own, $savepoint);
+        } catch (BankTransactionReleaseException $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            return Json::error($response, $e->errorCode, 'Výpis nelze smazat — ' . $e->getMessage(), $e->httpStatus);
         } catch (\PDOException $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
             // Druhá půlka pojistky: vazba vznikla mezi kontrolou a mazáním, nebo
             // ukazuje z tabulky, která v registru chybí. Ani tehdy nesmí uživatel
             // dostat 500 se syrovým textem o cizím klíči.
@@ -1260,14 +1322,12 @@ final class BankStatementAction
                 throw $e;
             }
             return Json::error($response, 'has_dependencies', BankStatementDeletionGuard::raceMessage(), 409);
+        } catch (\Throwable $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            throw $e;
         }
 
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $this->logger->log('bank.statement_deleted', $user['id'] ?? null, 'bank_statement', $id, [
-            'file_name' => $fileName,
-        ], $ip, $request->getHeaderLine('User-Agent'));
-
-        return Json::ok($response, ['deleted' => true]);
+        return Json::ok($response, ['deleted' => true, 'released_transactions' => $released]);
     }
 
     /**
@@ -2649,7 +2709,8 @@ final class BankStatementAction
             );
         }
 
-        $pdo->beginTransaction();
+        $savepoint = 'bank_tx_manual_match';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
             $pdo->prepare(
                 "UPDATE bank_transactions
@@ -2717,9 +2778,14 @@ final class BankStatementAction
                       WHERE id = ?"
                 )->execute([$statementId, $statementId]);
             }
-            $pdo->commit();
+            self::commitAtomic($pdo, $own, $savepoint);
+        } catch (InvoiceAlreadySettledException $e) {
+            // Faktura už je plně uhrazená (třeba platbou, která po smazání výpisu ztratila
+            // vazbu na pohyb) — druhá platba by ji přeplatila a zápis odúčtoval 311 podruhé.
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            return Json::error($response, InvoiceAlreadySettledException::CODE, $e->getMessage(), 409);
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            self::rollbackAtomic($pdo, $own, $savepoint);
             return Json::error($response, 'match_failed', 'Manuální párování selhalo: ' . $e->getMessage(), 500);
         }
 
@@ -2735,7 +2801,7 @@ final class BankStatementAction
             'final_draft_id'  => $finalDraftId,
             'partial_payment' => $partialPayment,
             'tax_document_id' => $taxDocId,
-        ], $ip, $request->getHeaderLine('User-Agent'));
+        ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
         if ($finalDraftId !== null) {
             $this->logger->log('proforma.final_issued', $userId ?: null, 'invoice', $invoiceId, [
                 'final_invoice_id' => $finalDraftId,
@@ -2982,7 +3048,8 @@ final class BankStatementAction
         $finalDraftIds = [];
         $taxDocumentIds = [];
         $paidInvoiceIds = [];
-        $pdo->beginTransaction();
+        $savepoint = 'bank_tx_manual_split';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
             // Anti-TOCTOU (race → přeplacení): zamkni faktury a přepočti zbytky POD ZÁMKEM.
             // Souběžná platba (jiná tx / dvojklik / cron rematch) by jinak mohla fakturu
@@ -3009,7 +3076,7 @@ final class BankStatementAction
                 }
                 $rem = $lockedRem[$iid] ?? 0.0;
                 if ($rem <= 0) {
-                    $pdo->rollBack();
+                    self::rollbackAtomic($pdo, $own, $savepoint);
                     return Json::error($response, 'state_changed',
                         'Stav faktur se mezitím změnil (faktura už nemá co uhradit). Zkus párování znovu.', 409);
                 }
@@ -3017,7 +3084,7 @@ final class BankStatementAction
                     $rem, (string) $byId[$iid]['currency'], (float) ($byId[$iid]['exchange_rate'] ?: 0), $txCcy
                 );
                 if ($conv === null) {
-                    $pdo->rollBack();
+                    self::rollbackAtomic($pdo, $own, $savepoint);
                     return Json::error($response, 'currency_mismatch',
                         "Fakturu #$iid nelze převést do měny platby (chybí kurz).", 409);
                 }
@@ -3025,7 +3092,7 @@ final class BankStatementAction
                 $sumLocked += $conv;
             }
             if ($newCount > 0 && abs(round($sumLocked, 2) - $txAmount) > $tol) {
-                $pdo->rollBack();
+                self::rollbackAtomic($pdo, $own, $savepoint);
                 return Json::error($response, 'state_changed',
                     'Stav faktur se mezitím změnil (součet už nesedí na částku platby). Zkus párování znovu.', 409);
             }
@@ -3077,11 +3144,12 @@ final class BankStatementAction
                       WHERE id = ?"
                 )->execute([$statementId, $statementId]);
             }
-            $pdo->commit();
+            self::commitAtomic($pdo, $own, $savepoint);
+        } catch (InvoiceAlreadySettledException $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            return Json::error($response, InvoiceAlreadySettledException::CODE, $e->getMessage(), 409);
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            self::rollbackAtomic($pdo, $own, $savepoint);
             return Json::error($response, 'match_failed', 'Sloučené párování selhalo: ' . $e->getMessage(), 500);
         }
 
@@ -3092,7 +3160,7 @@ final class BankStatementAction
             'paid_at'         => $postedAt,
             'final_draft_ids' => array_values($finalDraftIds),
             'tax_document_ids' => array_values($taxDocumentIds),
-        ], $ip, $request->getHeaderLine('User-Agent'));
+        ], $ip, $request->getHeaderLine('User-Agent'), $sid);
 
         // Děkovné e-maily za úhradu — per faktura, best-effort (selhání nesmí rozbít spárování).
         foreach ($paidInvoiceIds as $iid) {
@@ -3202,7 +3270,7 @@ final class BankStatementAction
             'purchase_invoice_id' => $purchaseInvoiceId,
             'paid_at'             => $postedAt,
             'amount'              => $absAmount,
-        ], $ip, $request->getHeaderLine('User-Agent'));
+        ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
 
         return Json::ok($response, [
             'matched'             => true,
@@ -3242,7 +3310,6 @@ final class BankStatementAction
 
         $statementId = (int) $tx['statement_id'];
         $invoiceId = $tx['matched_invoice_id'] !== null ? (int) $tx['matched_invoice_id'] : 0;
-        $postedAt = (string) ($tx['posted_at'] ?? '');
 
         // Supplier scope check — fakturu (pokud byla spárována) ověř proti aktuálnímu supplier.
         // Pokud transakce nebyla spárovaná (jen 'ignored'), ověř scope přes statement → currencies.
@@ -3259,143 +3326,29 @@ final class BankStatementAction
         }
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
-        $purchaseStmt = $pdo->prepare(
-            'SELECT purchase_invoice_id FROM payment_matches
-              WHERE bank_transaction_id = ? AND supplier_id = ? AND purchase_invoice_id IS NOT NULL'
-        );
-        $purchaseStmt->execute([$txId, $supplierId]);
-        $purchaseInvoiceIds = array_values(array_unique(array_map('intval', $purchaseStmt->fetchAll(\PDO::FETCH_COLUMN) ?: [])));
 
-        // Guard (#89): k platbě této transakce existuje nestornovaný daňový doklad
-        // k přijaté platbě — odpárování by rozbilo daňovou stopu. Nejdřív doklad
-        // smazat (koncept) nebo stornovat, pak teprve rušit spárování.
-        $tdGuard = $pdo->prepare(
-            "SELECT COUNT(*)
-               FROM invoice_payments p
-               JOIN invoices td ON td.id = p.tax_document_invoice_id
-              WHERE p.bank_transaction_id = ? AND td.status <> 'cancelled'"
-        );
-        $tdGuard->execute([$txId]);
-        if ((int) $tdGuard->fetchColumn() > 0) {
-            return Json::error(
-                $response,
-                'has_tax_document',
-                'K platbě z této transakce je vystavený daňový doklad k přijaté platbě. Nejdřív ho smaž (koncept) nebo stornuj.',
-                409,
-            );
-        }
-
-        $pdo->beginTransaction();
+        $savepoint = 'bank_tx_unmatch';
+        $own = self::beginAtomic($pdo, $savepoint);
         try {
-            if ($this->matchV2 !== null) {
-                try {
-                    $this->matchV2->recordUnmatch($txId, $supplierId, $userId);
-                } catch (\Throwable) {
-                }
+            try {
+                $this->matchV2->recordUnmatch($txId, $supplierId, $userId);
+            } catch (\Throwable) {
             }
-            // Automatizace: stornuj případné zaúčtování (reverse + detach) v téže transakci,
-            // aby zápis nezůstal viset bez párování. Zavřené období → 409, unmatch se nedokončí.
-            // Platba kartou přes mezičlen: stornuje se jen vypořádání s dokladem, bankovní
-            // zápis 378.x/221 zůstává (viz BankPostingService::releaseMatch).
-            if ($this->bankPosting !== null) {
-                try {
-                    $this->bankPosting->releaseMatch(SupplierGuard::currentId($request), $txId, [
-                        'user_id' => $userId ?: null,
-                        'reason' => 'unmatch',
-                    ]);
-                } catch (\MyInvoice\Service\Accounting\PostingException $pe) {
-                    if ($pe->errorCode !== 'not_found') {
-                        $pdo->rollBack();
-                        return Json::error($response, $pe->errorCode, $pe->getMessage(), 409);
-                    }
-                }
-            }
-
-            $pdo->prepare(
-                "UPDATE bank_transactions
-                    SET matched_invoice_id = NULL,
-                        match_status       = 'unmatched',
-                        ignore_note        = NULL,
-                        matched_at         = NULL,
-                        matched_by         = NULL
-                  WHERE id = ?"
-            )->execute([$txId]);
-
-            // Evidence plateb (#89): smaž platbu založenou touto transakcí — service
-            // přepočítá paid_total a případně vrátí fakturu ze stavu 'paid' (sent/issued).
-            $deletedPayment = $this->payments->deleteForBankTransaction($txId);
-
-            $pdo->prepare('DELETE FROM payment_matches WHERE bank_transaction_id = ? AND supplier_id = ?')
-                ->execute([$txId, $supplierId]);
-            foreach ($purchaseInvoiceIds as $purchaseInvoiceId) {
-                $hasPosting = $pdo->prepare(
-                    "SELECT 1 FROM journal_entries
-                      WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?
-                        AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1"
-                );
-                $hasPosting->execute([$supplierId, $purchaseInvoiceId]);
-                $restoredStatus = $hasPosting->fetchColumn() === false ? 'received' : 'booked';
-                $pdo->prepare(
-                    "UPDATE purchase_invoices pi
-                        SET pi.status = ?, pi.paid_at = NULL
-                      WHERE pi.id = ? AND pi.supplier_id = ? AND pi.status = 'paid' AND pi.paid_at = ?
-                        AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = pi.id)"
-                )->execute([$restoredStatus, $purchaseInvoiceId, $supplierId, $postedAt]);
-            }
-
-            // Legacy heuristika pro spárování z dob před evidencí plateb (žádný payment
-            // řádek): pokud byla faktura označena jako paid s paid_at = posted_at této
-            // transakce a nemá jinou stále spárovanou transakci, vrať ji na 'issued'.
-            // (Konzervativní — neměníme stav, který někdo nastavil ručně později.)
-            if (!$deletedPayment && $invoiceId > 0 && $postedAt !== '') {
-                $other = $pdo->prepare(
-                    "SELECT COUNT(*) FROM bank_transactions
-                      WHERE matched_invoice_id = ?
-                        AND match_status IN ('auto_exact', 'auto_partial', 'manual')
-                        AND id <> ?"
-                );
-                $other->execute([$invoiceId, $txId]);
-                $stillMatched = (int) $other->fetchColumn();
-                if ($stillMatched === 0) {
-                    $rev = $pdo->prepare(
-                        "UPDATE invoices
-                            SET status = 'issued', paid_at = NULL
-                          WHERE id = ?
-                            AND status = 'paid'
-                            AND paid_at = ?"
-                    );
-                    $rev->execute([$invoiceId, $postedAt]);
-                    if ($rev->rowCount() > 0) {
-                        // Backfill 'legacy' platba (migrace 0108) odpovídá tomuto
-                        // historickému spárování — smaž a přepočti paid_total, jinak
-                        // by faktura zůstala issued s plným paid_total (nekonzistence).
-                        $pdo->prepare(
-                            "DELETE FROM invoice_payments WHERE invoice_id = ? AND source = 'legacy'"
-                        )->execute([$invoiceId]);
-                        $pdo->prepare(
-                            'UPDATE invoices i
-                                SET i.paid_total = (SELECT COALESCE(SUM(p.amount), 0)
-                                                      FROM invoice_payments p WHERE p.invoice_id = i.id)
-                              WHERE i.id = ?'
-                        )->execute([$invoiceId]);
-                    }
-                }
-            }
-
-            if ($statementId > 0) {
-                $pdo->prepare(
-                    "UPDATE bank_statements
-                        SET matched_count = (
-                            SELECT COUNT(*) FROM bank_transactions
-                             WHERE statement_id = ?
-                               AND match_status IN ('auto_exact', 'auto_partial', 'manual')
-                        )
-                      WHERE id = ?"
-                )->execute([$statementId, $statementId]);
-            }
-            $pdo->commit();
+            // Storno/odpojení zápisu, zrušení platby, vazby na přijatou fakturu a přepočet
+            // stavu dokladů — sdílené se smazáním výpisu. Zavřené období nebo daňový
+            // doklad k platbě → 409, zrušení párování se nedokončí.
+            $released = $this->release->release(
+                $supplierId,
+                $txId,
+                BankTransactionReleaseService::MODE_UNMATCH,
+                $userId ?: null,
+            );
+            self::commitAtomic($pdo, $own, $savepoint);
+        } catch (BankTransactionReleaseException $e) {
+            self::rollbackAtomic($pdo, $own, $savepoint);
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
-            $pdo->rollBack();
+            self::rollbackAtomic($pdo, $own, $savepoint);
             return Json::error($response, 'unmatch_failed', 'Zrušení spárování selhalo: ' . $e->getMessage(), 500);
         }
 
@@ -3403,7 +3356,8 @@ final class BankStatementAction
         $this->logger->log('bank.tx_unmatch', $userId ?: null, 'bank_transaction', $txId, [
             'previous_invoice_id' => $invoiceId ?: null,
             'previous_status'     => $tx['match_status'] ?? null,
-        ], $ip, $request->getHeaderLine('User-Agent'));
+            'journal'             => $released['journal'],
+        ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
 
         return Json::ok($response, ['unmatched' => true]);
     }
@@ -3475,7 +3429,7 @@ final class BankStatementAction
             'note'                => $note,
             'previous_status'     => $previousStatus,
             'previous_invoice_id' => $previousInvoiceId,
-        ], $ip, $request->getHeaderLine('User-Agent'));
+        ], $ip, $request->getHeaderLine('User-Agent'), SupplierGuard::currentId($request));
 
         return Json::ok($response, ['ignored' => true, 'ignore_note' => $note]);
     }

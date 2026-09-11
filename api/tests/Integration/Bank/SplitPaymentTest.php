@@ -262,11 +262,13 @@ final class SplitPaymentTest extends TestCase
 
     public function testSamePairTwiceRejectedByUniqueIndex(): void
     {
-        $this->payments->recordPayment($this->invoiceA, 1000.00, '2099-06-15', [
+        // Částečné platby: druhou platbu na plně uhrazenou fakturu odmítne už pravidlo
+        // pro bankovní platbu (InvoiceAlreadySettledException), tady jde o unikátní index.
+        $this->payments->recordPayment($this->invoiceA, 400.00, '2099-06-15', [
             'source' => 'bank', 'bank_transaction_id' => $this->transactionId, 'created_by' => $this->userId,
         ]);
         $this->expectException(\PDOException::class);
-        $this->payments->recordPayment($this->invoiceA, 1000.00, '2099-06-15', [
+        $this->payments->recordPayment($this->invoiceA, 400.00, '2099-06-15', [
             'source' => 'bank', 'bank_transaction_id' => $this->transactionId, 'created_by' => $this->userId,
         ]);
     }

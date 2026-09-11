@@ -40,6 +40,7 @@ export const AUTOMATION_NOTE_CODES = [
   'saldo_forbidden',
   'policy_suggest',
   'already_paid_verify',
+  'overpaid_verify',
 ] as const
 
 export const AI_SOURCES = ['knn', 'llm'] as const

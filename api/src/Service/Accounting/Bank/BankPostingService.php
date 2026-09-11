@@ -369,6 +369,16 @@ final class BankPostingService
             if ($e->errorCode === 'already_paid_verify') {
                 return $this->paymentMatchSuggestion($supplierId, $tx, 'already_paid_verify');
             }
+            // Přeplacená faktura: nový zápis nevznikne, pohyb jde ke kontrole. Pohyb, který
+            // už zaúčtovaný je (typicky první z obou úhrad), se jen přeskočí — návrh by
+            // vedle živého zápisu visel jako duch ve frontě.
+            if ($e->errorCode === 'overpaid_verify') {
+                $live = $this->journal->findBySource($supplierId, 'bank', $txId);
+                if ($live !== null && ($live['reversed_by'] ?? null) === null) {
+                    return ['action' => 'skipped', 'reason' => 'overpaid_verify'];
+                }
+                return $this->paymentMatchSuggestion($supplierId, $tx, 'overpaid_verify');
+            }
             // Nejistá křížová měna (dvojí konverze / hrubá odchylka kurzu / proforma) →
             // blokovaný návrh k ručnímu ověření (ne tichý skip). Čistý případ „CZK faktura
             // uhrazená přes cizoměnový účet" se zaúčtuje automaticky (viz buildIncomingCrossCurrencyFx).
@@ -550,6 +560,7 @@ final class BankPostingService
         $purchaseRefundAllocations = $purchaseRefunds->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         // Legacy fallback matched_invoice_id (M1).
+        $usedFallback = false;
         if ($allocations === [] && $tx['matched_invoice_id'] !== null) {
             $inv = $this->loadInvoice($supplierId, (int) $tx['matched_invoice_id']);
             if ($inv !== null && (string) $inv['status'] === 'paid') {
@@ -557,10 +568,12 @@ final class BankPostingService
                 throw new PostingException('already_paid_verify', 'Faktura je označená jako uhrazená bez evidované platby.');
             }
             $allocations = [['invoice_id' => (int) $tx['matched_invoice_id'], 'amount' => $absAmount]];
+            $usedFallback = true;
         }
         if ($allocations === [] && $purchaseRefundAllocations === []) {
             throw new PostingException('document_not_posted', 'Spárovaná příchozí platba nemá alokaci na fakturu.');
         }
+        $this->assertInvoicesNotOverpaid($supplierId, $allocations, $usedFallback);
 
         $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
         $bankAcc = $cashAccount ?? ($rule['debit_account_code'] ?? '221');
@@ -606,6 +619,49 @@ final class BankPostingService
 
         $this->appendRounding($lines, $absAmount - round($allocSum, 2));
         return ['lines' => $lines];
+    }
+
+    /**
+     * Pojistka proti dvojí úhradě: když evidované platby faktury přesahují částku
+     * k úhradě, úhrada se neúčtuje automaticky (druhý zápis 221/311 by odúčtoval
+     * pohledávku podruhé), ale skončí v návrhu ke kontrole. Alokace z párování bez
+     * evidované platby (fallback) se k platbám přičte — faktura, kterou už kryjí
+     * jiné platby, pak neprojde ani tudy.
+     *
+     * @param list<array<string,mixed>> $allocations
+     */
+    private function assertInvoicesNotOverpaid(int $supplierId, array $allocations, bool $fallback): void
+    {
+        $tolerance = self::ROUNDING_TOLERANCE_CENTS / 100;
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.amount_to_pay,
+                    (SELECT COALESCE(SUM(p.amount), 0) FROM invoice_payments p WHERE p.invoice_id = i.id) AS paid
+               FROM invoices i
+              WHERE i.id = ? AND i.supplier_id = ? AND i.invoice_type IN ('invoice', 'proforma')"
+        );
+        foreach ($allocations as $a) {
+            $invoiceId = (int) $a['invoice_id'];
+            $stmt->execute([$invoiceId, $supplierId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row === false) {
+                continue;
+            }
+            $due = max(0.0, (float) $row['amount_to_pay']);
+            $paid = (float) $row['paid'];
+            if ($fallback) {
+                $overpaid = $a['amount'] === null
+                    ? $paid >= $due - $tolerance
+                    : $paid + (float) $a['amount'] > $due + $tolerance;
+            } else {
+                $overpaid = $paid > $due + $tolerance;
+            }
+            if ($overpaid) {
+                throw new PostingException(
+                    'overpaid_verify',
+                    'Faktura #' . $invoiceId . ' má evidované platby vyšší než částku k úhradě — ověřte, zda nejde o dvojí úhradu.',
+                );
+            }
+        }
     }
 
     /**
@@ -964,6 +1020,7 @@ final class BankPostingService
         if ($allocations === []) {
             throw new PostingException('document_not_posted', 'Spárovaná příchozí cizoměnová platba nemá alokaci na fakturu.');
         }
+        $this->assertInvoicesNotOverpaid($supplierId, $allocations, $usedFallback);
 
         // Křížová měna: měna transakce ≠ měna faktury. Čistý případ „CZK faktura uhrazená přes
         // cizoměnový účet" (reálné inkaso AVYX — EUR na korunovou fakturu; saldokonto nativně
@@ -1423,7 +1480,7 @@ final class BankPostingService
             'confidence'          => 1.00,
             'operation_type'      => OperationType::BANK_PAYMENT_MATCHED,
             'status'              => in_array($note, ['period_closed', 'cross_currency'], true)
-                ? 'blocked' : ($note === 'already_paid_verify' ? 'needs_input' : 'pending'),
+                ? 'blocked' : (in_array($note, ['already_paid_verify', 'overpaid_verify'], true) ? 'needs_input' : 'pending'),
         ]);
         return ['action' => 'suggested', 'reason' => $note, 'suggestion_id' => $res['id']];
     }

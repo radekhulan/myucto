@@ -148,6 +148,20 @@ V seznamu výpisů lze protistranu vyhledat psaním do filtru. Nabídka ukazuje
 nejvýše 50 shod; další najdeš upřesněním hledání. Vybraná protistrana zůstává
 součástí odkazu i uloženého filtru.
 
+**Smazání výpisu** (jen administrátor) smaže výpis i s jeho transakcemi. Každý
+spárovaný pohyb se předtím uvolní stejně jako při **Zrušit spárování**: platba
+vzniklá párováním se z faktury odebere, faktura se vrátí do stavu podle
+zbývajících plateb a zaúčtovaný pohyb se v podvojném účetnictví stornuje.
+Opětovný import téhož výpisu pak pohyby spáruje a zaúčtuje znovu, bez dvojí
+úhrady. Smazání se odmítne, když by po něm v evidenci něco nesedělo:
+
+- pohyb je zaúčtovaný v uzavřeném nebo zamčeném období, takže jeho zápis nejde
+  stornovat,
+- k platbě z pohybu je vystavený daňový doklad k přijaté platbě (nejdřív ho
+  smaž nebo stornuj),
+- výpis slouží jako doklad o vyplacení mezd nebo je součástí měsíční evidence
+  bankovního API.
+
 ### 28.3.1 Všechny pohyby
 
 Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a
@@ -395,8 +409,18 @@ finalizaci faktury).
 Pokud automatika spárovala chybně:
 
 1. Detail výpisu → najdi transakci → klik **Zrušit párování**.
-2. Faktura → status zpět na předchozí (`sent` / `issued`).
-3. Activity log: `bank.unmatched`.
+2. Platba vzniklá párováním se z faktury odebere a stav faktury se přepočte ze
+   zbývajících plateb. Faktura, kterou kryje jiná platba, zůstává zaplacená;
+   jinak se vrátí na předchozí stav (`sent` / `issued`).
+3. Zaúčtovaný pohyb se stornuje. V uzavřeném nebo zamčeném období storno nejde
+   a párování zůstane beze změny.
+4. Activity log: `bank.tx_unmatch`.
+
+Ruční párování na fakturu, kterou už evidované platby plně kryjí, se odmítne.
+Vyšší platba se na faktuře zaeviduje jen do výše zbývající částky, stejně jako
+u automatického párování. Pokud platby faktury přesto přesahují částku k úhradě,
+úhrada se nezaúčtuje automaticky a čeká ve frontě **K zaúčtování** na kontrolu
+dvojí úhrady.
 
 ## 28.6 Cron — automatický scan
 

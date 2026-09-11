@@ -486,6 +486,42 @@ final class JournalIntegrityServiceTest extends TestCase
         );
     }
 
+    /**
+     * Bankovní zápis nese source_id = bank_transactions.id bez cizího klíče. Smazaný
+     * výpis po sobě nechal živý zápis a kontrola ho neviděla — dvojí úhrada se pak
+     * v deníku nedala dohledat.
+     */
+    public function testOrphanBankEntriesAreDetected(): void
+    {
+        $before = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
+
+        $this->insertBalancedEntry('bank', 1900000000 + $this->supplierId, 50.00);
+        $this->insertBalancedEntry('card_settlement', 1900000001 + $this->supplierId, 30.00);
+
+        $after = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
+        self::assertSame($before + 2, $after);
+    }
+
+    public function testBankEntryOfExistingTransactionIsNotOrphan(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, currency, statement_date)
+             VALUES (?, 'integrity.gpc', ?, '1000000005', 'CZK', ?)"
+        )->execute([$this->supplierId, hash('sha256', uniqid('jit', true)), self::YEAR . '-06-15']);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, ?, 50.00, 'CZK')"
+        )->execute([$statementId, self::YEAR . '-06-15']);
+        $txId = (int) $pdo->lastInsertId();
+
+        $before = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
+        $this->insertBalancedEntry('bank', $txId, 50.00);
+        $after = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
+
+        self::assertSame($before, $after, 'Zápis existujícího pohybu vlastní firmy není sirotek.');
+    }
+
     public function testCheckAndStorePersistsFindingsWithoutTouchingAccountingData(): void
     {
         $this->insertBalancedEntry('invoice', 1900000000 + $this->supplierId, 50.00);

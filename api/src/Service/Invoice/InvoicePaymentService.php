@@ -134,10 +134,18 @@ final class InvoicePaymentService
     /**
      * Zaeviduje platbu (v měně faktury) a přepočítá paid_total + lifecycle status.
      *
+     * Bankovní platba (`source = 'bank'`) se řídí jediným pravidlem pro všechny cesty
+     * párování (automatické, ruční, sloučené, návrhy, iDoklad): na plně uhrazenou
+     * fakturu ji nelze zaevidovat ({@see InvoiceAlreadySettledException}) a vyšší
+     * částka se ořízne na zbývající dluh. Zbývající dluh se počítá pod zámkem faktury
+     * ze součtu plateb, ne z uloženého stavu — faktura s platbou, která ztratila
+     * vazbu na pohyb, může mít stav `issued` a přesto být zaplacená.
+     *
      * @param array{variable_symbol?: ?string, bank_reference?: ?string, note?: ?string,
      *              source?: string, bank_transaction_id?: ?int, created_by?: ?int} $opts
-     * @return array{payment_id: int, became_paid: bool, remaining: float,
+     * @return array{payment_id: int, amount: float, became_paid: bool, remaining: float,
      *               final_draft_id: int|null, tax_document_id: int|null}
+     * @throws InvoiceAlreadySettledException bankovní platba na plně uhrazenou fakturu
      * @throws \RuntimeException při validační chybě (zpráva pro UI)
      */
     public function recordPayment(int $invoiceId, float $amount, string $paidOn, array $opts = []): array
@@ -180,6 +188,9 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
+            if (($opts['source'] ?? '') === 'bank') {
+                $amount = $this->settleableBankAmount($pdo, $invoiceId, $amount);
+            }
             $ins = $pdo->prepare(
                 'INSERT INTO invoice_payments
                    (supplier_id, invoice_id, paid_on, amount, currency,
@@ -236,6 +247,7 @@ final class InvoicePaymentService
 
         return [
             'payment_id'  => $paymentId,
+            'amount'      => $amount,
             'became_paid' => $transition['became_paid'],
             'remaining'   => $transition['remaining'],
             'final_draft_id' => $documents['final_draft_id'],
@@ -467,6 +479,60 @@ final class InvoicePaymentService
             }
         }
         return true;
+    }
+
+    /**
+     * Přepočítá paid_total a stav faktury z evidovaných plateb. Pro cesty, které
+     * stav faktury měnily mimo evidenci plateb (zrušení párování z doby před
+     * evidencí), ať o stavu rozhoduje totéž pravidlo jako po každé platbě.
+     *
+     * @return array{became_paid: bool, became_unpaid: bool, remaining: float, paid_total: float}
+     */
+    public function recompute(int $invoiceId): array
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $transition = $this->recomputeLocked($pdo, $invoiceId);
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $this->afterTransition($invoiceId, $transition);
+        return $transition;
+    }
+
+    /**
+     * Částka bankovní platby, kterou lze na fakturu zaevidovat. Volat UVNITŘ transakce.
+     *
+     * Zamkne fakturu a zbývající dluh spočítá ze součtu plateb. Plně uhrazená faktura
+     * → výjimka; vyšší částka → oříznutí na zbývající dluh (drobný přeplatek do
+     * tolerance párování i přeplatek z ručního párování zůstává mimo saldo faktury
+     * a bankovní zápis ho vyrovná zaokrouhlením, nebo skončí v návrhu ke kontrole).
+     */
+    private function settleableBankAmount(PDO $pdo, int $invoiceId, float $amount): float
+    {
+        $lock = $pdo->prepare('SELECT amount_to_pay FROM invoices WHERE id = ? FOR UPDATE');
+        $lock->execute([$invoiceId]);
+        $due = (float) $lock->fetchColumn();
+
+        $paid = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE invoice_id = ?');
+        $paid->execute([$invoiceId]);
+        $remaining = round($due - (float) $paid->fetchColumn(), 2);
+
+        if ($remaining <= self::TOLERANCE) {
+            throw new InvoiceAlreadySettledException($invoiceId, $remaining);
+        }
+        return min($amount, $remaining);
     }
 
     /**

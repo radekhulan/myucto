@@ -234,6 +234,7 @@ export interface SupplierBankAccount {
 const ERROR_KEYS: Record<string, string> = {
   document_not_posted: 'automation.reason.document_not_posted',
   already_paid_verify: 'automation.reason.already_paid_verify',
+  overpaid_verify: 'automation.reason.overpaid_verify',
   allocation_mismatch: 'activation.skip.allocation_mismatch',
   period_closed:          'bank.posting.err_period_closed',
   period_not_open:        'bank.posting.err_period_closed',

@@ -2965,11 +2965,13 @@ paths:
               schema: { $ref: '#/components/schemas/BankStatementDetail' }
     delete:
       tags: [Bank]
-      summary: Smaže výpis vč. transakcí a payment_matches (admin only)
+      summary: Smaže výpis vč. transakcí; spárované pohyby předtím uvolní (admin only)
       description: |
-        Cascade delete přes FK constraints — smaže transakce výpisu i jejich
-        payment_matches záznamy. Status zaplacených faktur se NEzmění (případný
-        rollback paid→issued je doménou uživatele přes /unmatch endpoint).
+        Každý spárovaný nebo zaúčtovaný pohyb výpisu se ve stejné transakci
+        uvolní jako při `/unmatch`: bankovní zápis se stornuje, platba vzniklá
+        párováním se z faktury odebere a stav faktury se přepočte ze zbývajících
+        plateb. Teprve pak se výpis s transakcemi smaže. Když některý pohyb
+        uvolnit nejde, nesmaže se nic.
 
         Vyžaduje roli `admin`. Účetní (`accountant`) může nahrávat a párovat,
         ale ne mazat (forensic integrity uzávěrek DPH/KH).
@@ -2982,14 +2984,20 @@ paths:
                 type: object
                 properties:
                   deleted: { type: boolean, example: true }
+                  released_transactions:
+                    type: integer
+                    description: Počet pohybů, které se před smazáním uvolnily z párování a zaúčtování.
         '403': { description: "Forbidden — role není admin" }
         '404': { description: "Výpis nenalezen nebo nepatří current supplier" }
         '409':
           description: |
-            Výpis nelze smazat — má živou vazbu z jiné agendy. `has_matches` =
-            avízo-výpis se spárovanými položkami; `has_dependencies` = položky
-            výpisu jsou doklad o vyplacení mezd (`error.blocked_by` uvádí počty
-            po druzích vazby).
+            Výpis nelze smazat. `has_matches` = avízo-výpis se spárovanými
+            položkami; `has_dependencies` = položky výpisu jsou doklad o vyplacení
+            mezd nebo součást evidence bankovního API; `transactions_not_releasable`
+            = pohyb je zaúčtovaný v uzavřeném nebo zamčeném období, k jeho platbě
+            je vystavený daňový doklad nebo má rozpracovaný zápis v deníku
+            (`error.blocked_by` uvádí počty po druzích vazby). Když se vazba objeví
+            až během mazání, vrátí se kód důvodu (`period_closed`, `has_tax_document`).
 
   /api/v1/bank-statements/{id}/export-gpc:
     parameters:
@@ -3168,7 +3176,9 @@ paths:
             (`state_changed`, `invalid_status`), nesedí měna (`currency_mismatch`),
             typ dokladu (`invalid_type`), klient (`client_mismatch`, `no_client`),
             součet u sloučené úhrady (`sum_mismatch`), nebo doklad nemá co uhradit
-            (`nothing_to_pay`, `cannot_reconcile`).
+            (`nothing_to_pay`, `cannot_reconcile`). `invoice_already_settled` =
+            fakturu už evidované platby plně kryjí, druhá platba by ji přeplatila.
+            Platba vyšší než zbývající částka se zaeviduje jen do výše zbytku.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3187,11 +3197,23 @@ paths:
         schema: { type: integer, format: int64 }
     post:
       tags: [Bank]
-      summary: Odpojí transakci od faktury (a vrátí fakturu z paid → issued)
-      description: Vrátí transakci do stavu unmatched a odstraní případnou poznámku k ignorování.
+      summary: Odpojí transakci od faktury a zruší platbu vzniklou párováním
+      description: |
+        Vrátí transakci do stavu unmatched a odstraní případnou poznámku k ignorování.
+        Platba vzniklá párováním se z faktury odebere a stav faktury se přepočte ze
+        zbývajících plateb — fakturu, kterou kryje jiná platba, nechá zaplacenou.
+        Zaúčtovaný pohyb se stornuje.
       responses:
         '200':
           description: OK
+        '409':
+          description: |
+            Zrušení párování odmítnuto — zápis leží v uzavřeném nebo zamčeném období
+            (`period_closed`), nebo je k platbě vystavený daňový doklad k přijaté
+            platbě (`has_tax_document`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/bank-transactions/{id}/ignore:
     parameters:

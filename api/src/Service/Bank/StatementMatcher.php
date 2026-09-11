@@ -594,9 +594,8 @@ final class StatementMatcher
                             $remaining,
                             settleRemaining: true,
                         );
-                        if ($paymentAmount > $remaining && $remaining > 0.0) {
-                            $paymentAmount = $remaining;
-                        }
+                        // Drobný přeplatek ořízne na zbývající dluh až recordPayment() —
+                        // jediné pravidlo pro automatické i ruční párování.
                         $recorded = $this->payments->recordPayment(
                             (int) $inv['id'],
                             $paymentAmount,
