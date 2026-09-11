@@ -11535,6 +11535,7 @@
       "blocked_date_locked": "Účetnictví je zamčené k {date} včetně dneška, takže opravu není kam zapsat. Zámek posuň v nastavení účetnictví (jen admin).",
       "blocked_period_not_open": "Období původního zápisu je „{status}“ a pro dnešek není otevřené účetní období — opravu není kam zapsat. Otevři účetní období v Účetnictví → Uzávěrka.",
       "confirm_date_shift": "Rozumím, že storno i oprava se zaúčtují k {to} místo k původnímu {from}.",
+      "tax_neutral_available": "Rok není uzavřený, zámek drží jen podané DPH. Když jen přesuneš částky mezi účty téže třídy (např. 511 → 518.100) a nezměníš DPH, daňové účty ani daňovou uznatelnost, zápis se přepíše na místě k původnímu datu, bez storna. Jinak vznikne storno a nový zápis a posun data je potřeba potvrdit.",
       "hint": "Zápis musí být vyrovnaný (Σ MD = Σ Dal). Kontrolu podvojnosti, otevřenosti období i zámku k datu dělá server — DPH se přeúčtováním nemění, ta se opravuje editací dokladu."
     },
     "posting_origin": {

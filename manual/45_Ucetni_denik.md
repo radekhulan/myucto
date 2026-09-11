@@ -740,12 +740,27 @@ potvrzení, řekne dialog dopředu a rozhoduje o tom stav účetního období:
 | Stav období | Co se stane |
 |---|---|
 | otevřené a nezamčené | původní zápis se **přepíše** — staré řádky se smažou a zapíšou se nové; číslo i datum zápisu zůstávají |
-| uzavřené, nebo datum spadá pod [zámek k datu](#459-zamek-uctovani-k-datu) | původní zápis se **nemaže**: vznikne **storno** (protizápis) a oprava se zapíše jako nový zápis. Obojí zůstane v deníku kvůli auditu (§ 35 ZoÚ) |
+| otevřený rok, datum pod [zámkem k datu](#459-zamek-uctovani-k-datu), oprava jen přesouvá částky mezi účty téže třídy | původní zápis se **přepíše na místě** k původnímu datu, bez storna (podmínky viz níž) |
+| uzavřené, nebo datum spadá pod zámek a oprava mění víc než účty | původní zápis se **nemaže**: vznikne **storno** (protizápis) a oprava se zapíše jako nový zápis. Obojí zůstane v deníku kvůli auditu (§ 35 ZoÚ) |
 | zápis už někdo stornoval | protizápis se nedělá znovu, jen se zapíše opravený zápis k témuž datu |
 | do žádného otevřeného data se zapsat nedá | operace se **odmítne** s vysvětlením (zámek zasahuje i dnešek, nebo pro dnešek není otevřené období) |
 
 Když do původního data zapsat nejde, storno i oprava padnou na nejbližší otevřené
 datum — dialog to napíše a **vyžádá si potvrzení**. Datum se nikdy neposune samo.
+
+**Přeúčtování v zamčeném datu bez storna.** Zámek k datu se posouvá s podaným
+přiznáním k DPH, chrání tedy DPH, ne kontaci nákladu. Dokud rok není v uzávěrce, zápis
+v zamčeném datu se přepíše na místě, pokud oprava splní všechny podmínky:
+
+- na straně MD i Dal zůstávají stejné celkové částky, mění se jen účty,
+- všechny měněné účty patří do stejné účtové třídy (typicky náklad 511 → 518.100),
+- nemění se žádný účet daní (34x, tedy ani DPH),
+- nemění se daňová uznatelnost (přesun na nedaňovou analytiku .990 jde stornem).
+
+Kontrolu dělá server ještě jednou těsně před zápisem. Když oprava podmínky nesplní,
+postupuje se stornem a novým zápisem jako v tabulce výše. U přijaté faktury se nový
+nákladový účet zapíše i na položku dokladu, pokud se celý náklad přesunul z jednoho
+účtu na jiný. Jinak by ho další úprava dokladu vrátila zpět.
 
 Přeúčtování se týká jen **kontace**. DPH se jím nemění: evidence DPH se počítá z řádků
 dokladu, takže daňový režim se opravuje editací dokladu, ne kontace.

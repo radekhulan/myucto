@@ -1481,7 +1481,9 @@ export interface RepostPlan {
   needs_reversal: boolean
   target_date: string | null
   date_shifted: boolean
-  reason_code: 'period_not_open' | 'date_locked' | 'entry_reversed' | null
+  reason_code: 'period_not_open' | 'date_locked' | 'entry_reversed' | 'tax_neutral_rewrite' | null
+  /** Zamčené datum v otevřeném roce: přesun mezi účty téže třídy bez daňového dopadu se přepíše na místě. */
+  tax_neutral_available: boolean
   lines: Array<{ account_code: string | null; account_name: string | null; side: 'debit' | 'credit'; amount: number }>
 }
 
@@ -1491,6 +1493,7 @@ export interface RepostResult {
   reversal_entry_id: number | null
   entry_date: string
   date_shifted: boolean
+  items_synced: number
 }
 
 export interface RepostPayload {

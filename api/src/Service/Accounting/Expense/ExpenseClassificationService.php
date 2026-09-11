@@ -27,6 +27,9 @@ final class ExpenseClassificationService
     /** @var array<int, array{fuel?:?string, vehicle_repair?:?string}> per-request cache */
     private array $vehicleAccountsCache = [];
 
+    /** @var array<string,string> per-request cache "supplierId|kód" => účet, na který se účtuje */
+    private array $analyticCache = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly ExpenseClassificationRuleRepository $rules,
@@ -43,7 +46,7 @@ final class ExpenseClassificationService
         float $unitPrice,
         int $year,
     ): ?ExpenseKindSuggestion {
-        return $this->classifier->classify(
+        return $this->withTenantAnalytic($supplierId, $this->classifier->classify(
             $description,
             $vendorName,
             $vendorClientId,
@@ -52,7 +55,7 @@ final class ExpenseClassificationService
             $this->rulesForPrice($supplierId, $unitPrice),
             $this->vehicleAccounts($supplierId),
             $this->catalog->active(),
-        );
+        ));
     }
 
     /** @param list<array<string,mixed>> $rules */
@@ -75,7 +78,7 @@ final class ExpenseClassificationService
                     && !($max !== null && $price > (float) $max);
             },
         ));
-        return $this->classifier->classify(
+        return $this->withTenantAnalytic($supplierId, $this->classifier->classify(
             $description,
             $vendorName,
             $vendorClientId,
@@ -85,6 +88,71 @@ final class ExpenseClassificationService
             $this->vehicleAccounts($supplierId),
             $this->catalog->active(),
             true,
+        ));
+    }
+
+    /**
+     * Syntetický účet → analytika, na kterou se u firmy skutečně účtuje.
+     *
+     * Klasifikátor zná jen účty ČÚS (511 u oprav, 548 u pojištění), osnova firmy je ale
+     * často vede analyticky. Zápis na syntetiku, která analytiky má, pak v hlavní knize
+     * visí vedle svých dětí (reálně: faktura za údržbu softwaru skončila na holém 511
+     * vedle 511.100 a 511.900). Jedinou analytiku přesměruje už
+     * PostingService::singleAnalyticMap(); tady se řeší i víc analytik: přednost má ta,
+     * kterou firma používá v předkontacích, jinak první daňová analytika v pořadí osnovy.
+     * Nedaňová analytika se nevybírá nikdy, tu přiřazuje až daňový příznak dokladu.
+     *
+     * Účet, který syntetikou není nebo analytiky nemá, se vrací beze změny.
+     */
+    public function analyticForExpenseAccount(int $supplierId, string $code): string
+    {
+        if (preg_match('/^[0-9]{3}$/', $code) !== 1) {
+            return $code;
+        }
+        $key = $supplierId . '|' . $code;
+        if (isset($this->analyticCache[$key])) {
+            return $this->analyticCache[$key];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT c.account_code
+               FROM chart_of_accounts p
+               JOIN chart_of_accounts c ON c.supplier_id = p.supplier_id AND c.parent_id = p.id
+              WHERE p.supplier_id = ? AND p.account_code = ?
+                AND c.is_active = 1
+                AND c.tax_deductibility = 'deductible'
+                AND c.account_code REGEXP '^[0-9]{3}[.][0-9]{1,6}$'
+              ORDER BY EXISTS (
+                        SELECT 1 FROM posting_rules r
+                         WHERE r.supplier_id = c.supplier_id AND r.is_active = 1
+                           AND (r.debit_account_code = c.account_code OR r.credit_account_code = c.account_code)
+                       ) DESC,
+                       c.account_code ASC
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $code]);
+        $analytic = $stmt->fetchColumn();
+
+        return $this->analyticCache[$key] = $analytic === false ? $code : (string) $analytic;
+    }
+
+    private function withTenantAnalytic(int $supplierId, ?ExpenseKindSuggestion $s): ?ExpenseKindSuggestion
+    {
+        if ($s === null || $s->accountCode === null) {
+            return $s;
+        }
+        $account = $this->analyticForExpenseAccount($supplierId, $s->accountCode);
+        if ($account === $s->accountCode) {
+            return $s;
+        }
+
+        return new ExpenseKindSuggestion(
+            $s->kind,
+            $s->confidence,
+            $s->reason . ' (analytika ' . $account . ')',
+            $s->source,
+            $account,
+            $s->nonDeductible,
+            $s->ruleId,
         );
     }
 

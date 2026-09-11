@@ -153,6 +153,65 @@ final class ExpenseKindClassifierTest extends TestCase
     }
 
     /**
+     * Údržba SOFTWARU je IT služba (518 přes předkontaci služeb), ne opravy a udržování.
+     * Reálný text z faktury, která se kvůli „údržba" zaúčtovala na 511.
+     */
+    #[DataProvider('softwareMaintenanceTexts')]
+    public function testSoftwareMaintenanceIsServiceNotRepair(string $text): void
+    {
+        $s = $this->c->classify($text, 'Dodavatel s.r.o.', null, 205320.0, self::LIMIT);
+
+        self::assertNotNull($s);
+        self::assertSame(ExpenseKind::Service, $s->kind);
+        self::assertNull($s->accountCode, 'IT služba nesmí adresně mířit na 511, účet určí předkontace služeb.');
+        self::assertTrue($s->isAutoApplicable());
+    }
+
+    /**
+     * Katalog běží před vestavěnými slovy. Veto musí platit i pro něj — tudy 511.100
+     * reálně prošlo i poté, co ho měla vestavěná větev.
+     */
+    public function testSoftwareMaintenanceVetoAppliesToCatalogToo(): void
+    {
+        $catalog = [[
+            'concept_key' => 'repair', 'polarity' => 'positive', 'locale' => 'cs', 'phrase' => 'udrzba',
+            'expense_kind' => 'service', 'target_account_code' => '511', 'confidence' => 0.9,
+        ]];
+
+        $it = $this->c->classify(
+            'Údržba, servis a podpora softwarového řešení', 'Dodavatel s.r.o.', null, 205320.0, self::LIMIT, [], [], $catalog,
+        );
+        self::assertNotNull($it);
+        self::assertNull($it->accountCode);
+        self::assertSame(ExpenseKind::Service, $it->kind);
+
+        $repair = $this->c->classify('Údržba klimatizace', 'Dodavatel s.r.o.', null, 5000.0, self::LIMIT, [], [], $catalog);
+        self::assertSame('511', $repair?->accountCode, 'Opravdová údržba zůstává na 511.');
+    }
+
+    /** Firemní pravidlo je vědomé rozhodnutí — IT veto ho nepřebíjí. */
+    public function testSoftwareVetoDoesNotOverrideTenantRule(): void
+    {
+        $rules = [[
+            'id' => 7, 'name' => 'Podpora SW na opravy', 'is_active' => true, 'expense_kind' => 'service',
+            'description_contains' => 'podpora', 'target_account_code' => '511.900',
+        ]];
+
+        $s = $this->c->classify('Údržba a podpora softwaru', 'Dodavatel s.r.o.', null, 1000.0, self::LIMIT, $rules);
+
+        self::assertSame('511.900', $s?->accountCode);
+    }
+
+    /** @return iterable<array{string}> */
+    public static function softwareMaintenanceTexts(): iterable
+    {
+        yield ['Údržba, servis a podpora softwarového řešení pro spedici a preferované dopravce, 08 / 2026'];
+        yield ['Údržba webové aplikace'];
+        yield ['Údržba informačního systému'];
+        yield ['Oprava chyb v aplikaci'];
+    }
+
+    /**
      * Konfigurovatelnost: pravidlo tenanta (fromRules) má přednost před vestavěným keyword účtem.
      * Tenant s vlastní analytikou 511100 pro autoservis přebije default 511.
      */

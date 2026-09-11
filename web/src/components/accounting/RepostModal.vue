@@ -81,7 +81,7 @@ watch(() => [props.open, props.docId], ([open]) => { if (open) load() }, { immed
 const canSubmit = computed(() =>
   !!plan.value && !blocked.value && !loading.value && !saving.value
   && (editorRef.value?.valid ?? false)
-  && (!plan.value.date_shifted || confirmShift.value))
+  && (!plan.value.date_shifted || confirmShift.value || plan.value.tax_neutral_available))
 
 async function submit(): Promise<void> {
   if (!canSubmit.value) return
@@ -143,6 +143,9 @@ async function submit(): Promise<void> {
               status: plan.period_status ?? '',
               date: plan.locked_until ? formatDate(plan.locked_until) : '',
             }) }}
+          </p>
+          <p v-if="plan.tax_neutral_available" class="mt-1">
+            {{ t('accounting.repost.tax_neutral_available') }}
           </p>
         </div>
 

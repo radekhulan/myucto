@@ -269,8 +269,16 @@ final class PostingService
             // Datum <= locked_until je zamčené (podané DPH přiznání / ruční zámek). Zámek je
             // tvrdá brána bez bypassu z requestu (§35) — opravu zamčeného zápisu řeší storno
             // protizápisem do otevřeného data (viz reverse()), ne obcházení tohoto zámku.
+            //
+            // Jediná výjimka: přepis EXISTUJÍCÍHO zápisu, který jen přesouvá částky mezi účty
+            // téže třídy bez daňového dopadu ({@see TaxNeutralReclassification}). Zámek chrání
+            // podané DPH a to se tím nemění. Flag `tax_neutral_rewrite` nastavuje výhradně
+            // DocumentRepostService a sám nic nepovolí — podmínky se ověřují znovu níž,
+            // pod zámkem řádku zápisu (assertTaxNeutralRewrite).
             $lockedUntil = $this->lockedUntilForUpdate($supplierId);
-            if ($lockedUntil !== null && $entryDate <= $lockedUntil) {
+            $dateLocked = $lockedUntil !== null && $entryDate <= $lockedUntil;
+            $taxNeutralRewrite = $dateLocked && !empty($meta['tax_neutral_rewrite']);
+            if ($dateLocked && !$taxNeutralRewrite) {
                 throw new PostingException(
                     'date_locked',
                     'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
@@ -319,6 +327,10 @@ final class PostingService
                     );
                 }
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId);
+                if ($taxNeutralRewrite) {
+                    $this->assertTaxNeutralRewrite($supplierId, $existing, $entryDate, $resolved);
+                    $resolved = self::carryOverLineTrace($existing['lines'], $resolved);
+                }
                 $entryId = $this->rewriteExisting(
                     $supplierId,
                     $existing,
@@ -326,6 +338,7 @@ final class PostingService
                     $resolved,
                     $allowClosing,
                     isset($meta['expected_row_version']) ? (int) $meta['expected_row_version'] : null,
+                    $taxNeutralRewrite,
                 );
                 $auditPayload = [
                     'source_type' => $sourceType,
@@ -335,6 +348,14 @@ final class PostingService
                     'after'       => ['posted_at' => $header['posted_at'], 'lines' => $resolved],
                 ];
             } else {
+                if ($taxNeutralRewrite) {
+                    // Výjimka ze zámku platí jen pro přepis zápisu, který už existuje.
+                    throw new PostingException(
+                        'date_locked',
+                        'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
+                            . ' a doklad nemá zápis, který by se dal přepsat — nový zápis do zamčeného data nelze.',
+                    );
+                }
                 try {
                     $entryId = $this->journal->insert($header, $resolved);
                 } catch (\PDOException $e) {
@@ -638,6 +659,7 @@ final class PostingService
         array $resolved,
         bool $allowClosing = false,
         ?int $expectedRowVersion = null,
+        bool $taxNeutralRewrite = false,
     ): int
     {
         $entryId = (int) $existing['id'];
@@ -660,10 +682,11 @@ final class PostingService
 
         // B8: re-post do zamčeného data se odmítne stejně jako u zavřeného období —
         // hlídá se PŮVODNÍ datum zápisu (existing.entry_date). Oprava zamčeného zápisu
-        // se dělá výhradně přes storno + nový zápis do otevřeného data.
+        // se dělá výhradně přes storno + nový zápis do otevřeného data. Výjimkou je daňově
+        // neutrální přesun mezi účty, který postDocument ověřil (assertTaxNeutralRewrite).
         $lockedUntil = $this->lockedUntil($supplierId);
         $origDate = (string) ($existing['entry_date'] ?? '');
-        if ($lockedUntil !== null && $origDate !== '' && $origDate <= $lockedUntil) {
+        if (!$taxNeutralRewrite && $lockedUntil !== null && $origDate !== '' && $origDate <= $lockedUntil) {
             throw new PostingException(
                 'date_locked',
                 'Zápis #' . $entryId . ' má datum ' . $origDate . ' v uzamčeném období (zámek k '
@@ -685,6 +708,73 @@ final class PostingService
 
         $this->journal->replace($entryId, $header, $resolved);
         return $entryId;
+    }
+
+    /**
+     * Pojistka k výjimce ze zámku k datu. Přepis na místě smí jen týž zápis, k témuž datu,
+     * a jen když {@see TaxNeutralReclassification} potvrdí, že se mění pouze účty v rámci
+     * třídy bez daňového dopadu. Ověřuje se tady znovu, pod zámkem řádku zápisu: flag od
+     * volajícího sám nestačí a mezi náhledem a potvrzením se zápis mohl změnit.
+     *
+     * @param array<string,mixed> $existing zápis včetně načtených 'lines'
+     * @param list<array{account_id:int, side:string, amount:float}> $resolved
+     */
+    private function assertTaxNeutralRewrite(int $supplierId, array $existing, string $entryDate, array $resolved): void
+    {
+        $reason = null;
+        if ((string) ($existing['entry_date'] ?? '') !== $entryDate) {
+            $reason = 'oprava by změnila datum zápisu';
+        } else {
+            $violation = TaxNeutralReclassification::violation(
+                $existing['lines'] ?? [],
+                $resolved,
+                $this->accounts->idToAccountMap($supplierId),
+            );
+            $reason = $violation === null ? null : TaxNeutralReclassification::describe($violation);
+        }
+        if ($reason !== null) {
+            throw new PostingException(
+                'date_locked',
+                'Zápis #' . (int) $existing['id'] . ' má datum ' . $entryDate . ' v uzamčeném období. Na místě ho lze '
+                    . 'přepsat jen přesunem mezi účty téže třídy bez daňového dopadu, ale ' . $reason
+                    . '. Oprava přes storno + nový zápis do otevřeného data.',
+            );
+        }
+    }
+
+    /**
+     * Při daňově neutrálním přepisu se mění jen účet. Cizoměnová stopa saldokontních
+     * řádků a středisko se proto přenesou z původních řádků, které zůstaly beze změny
+     * (týž účet, strana i částka) — jinak by přepis tiše smazal podklad kurzových rozdílů.
+     *
+     * @param list<array<string,mixed>> $existingLines
+     * @param list<array<string,mixed>> $resolved
+     * @return list<array<string,mixed>>
+     */
+    private static function carryOverLineTrace(array $existingLines, array $resolved): array
+    {
+        $pool = $existingLines;
+        foreach ($resolved as $i => $line) {
+            foreach ($pool as $j => $old) {
+                if ((int) $old['account_id'] !== (int) $line['account_id']
+                    || (string) $old['side'] !== (string) $line['side']
+                    || self::cents($old['amount']) !== self::cents($line['amount'])
+                ) {
+                    continue;
+                }
+                if (!isset($line['currency_code']) && ($old['currency_code'] ?? null) !== null) {
+                    $resolved[$i]['currency_code'] = $old['currency_code'];
+                    $resolved[$i]['fx_rate'] = $old['fx_rate'] ?? null;
+                    $resolved[$i]['amount_foreign'] = $old['amount_foreign'] ?? null;
+                }
+                if (($line['cost_center'] ?? null) === null && ($old['cost_center'] ?? null) !== null) {
+                    $resolved[$i]['cost_center'] = $old['cost_center'];
+                }
+                unset($pool[$j]);
+                break;
+            }
+        }
+        return $resolved;
     }
 
     // ── build helpers (vrací řádky; zápis dělá postDocument → jednotkově testovatelné) ──
@@ -1472,7 +1562,8 @@ final class PostingService
         if ($account === null || !($account['is_active'] ?? false)) {
             throw new PostingException('invalid_override', 'Navržený účet není aktivní v účtové osnově firmy.', 422);
         }
-        return $code;
+        // Syntetika s analytikami se na náklad nepoužívá (klasifikátor zná jen „511").
+        return $this->expenseClassification->analyticForExpenseAccount($supplierId, $code);
     }
 
     /**

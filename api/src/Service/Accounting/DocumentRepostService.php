@@ -28,6 +28,10 @@ use MyInvoice\Service\ActivityLogger;
  *   - **otevřené a nezamčené období** → `replace`: existující zápis se přepíše na místě
  *     (postDocument → rewriteExisting: staré řádky se smažou, zapíšou se nové). Číslo
  *     zápisu i datum zůstávají, takže odkazy na doklad drží.
+ *   - **zamčené datum, ale jen přesun mezi účty** téže třídy bez daňového dopadu
+ *     ({@see TaxNeutralReclassification}) → taky `replace`. Zámek k datu chrání podané
+ *     DPH a to se přesunem nákladu z 511 na 518 nemění. Uzavřené období (uzávěrka roku)
+ *     tahle výjimka neotevírá.
  *   - **zamčené / uzavřené období, nebo už stornovaný zápis** → `reverse`: původní
  *     zápis se NEMAŽE, stornuje se protizápisem a opravená kontace jde novým zápisem.
  *     Obojí zůstává v deníku kvůli auditu (§35 ZoÚ).
@@ -61,17 +65,23 @@ final class DocumentRepostService
      * Co se s dokladem stane, kdyby se přeúčtoval teď. Čte, nezapisuje — dialog z toho
      * staví hlášku a předvyplní řádky.
      *
+     * Bez `$lines` (náhled v dialogu) rozhodnutí nezná opravené řádky, proto u zamčeného
+     * data vrací `tax_neutral_available`: pokud oprava bude jen přesunem mezi účty, zápis
+     * se přepíše na místě. S řádky (potvrzení) už je rozhodnutí definitivní.
+     *
      * @param 'invoice'|'purchase_invoice'|'bank' $sourceType
+     * @param list<array{account_code:string, side:string, amount:float}>|null $lines opravené řádky
      *
      * @return array{entry_id:int, entry_date:string, document_no:?string, description:?string,
      *               period_status:?string, locked_until:?string, strategy:string,
      *               needs_reversal:bool, target_date:?string, date_shifted:bool,
-     *               reason_code:?string, already_reversed:bool,
+     *               reason_code:?string, already_reversed:bool, tax_neutral_available:bool,
+     *               tax_neutral_violation:?string,
      *               lines:list<array{account_code:?string, account_name:?string, side:string, amount:float}>}
      *
      * @throws PostingException doklad není zaúčtovaný
      */
-    public function plan(int $supplierId, string $sourceType, int $docId): array
+    public function plan(int $supplierId, string $sourceType, int $docId, ?array $lines = null): array
     {
         $entry = $this->journal->findBySource($supplierId, $sourceType, $docId);
         if ($entry === null) {
@@ -88,16 +98,18 @@ final class DocumentRepostService
         $period = $this->periods->findById($supplierId, (int) $entry['period_id']);
         $periodStatus = $period === null ? null : (string) $period['status'];
         $lockedUntil = $this->lockedUntil($supplierId);
+        $violation = $lines === null ? null : $this->taxNeutralViolation($supplierId, $entryId, $lines);
 
         $plan = [
-            'entry_id'         => $entryId,
-            'entry_date'       => $entryDate,
-            'document_no'      => $entry['document_no'] === null ? null : (string) $entry['document_no'],
-            'description'      => $entry['description'] === null ? null : (string) $entry['description'],
-            'period_status'    => $periodStatus,
-            'locked_until'     => $lockedUntil,
-            'already_reversed' => $alreadyReversed,
-            'lines'            => $this->describeLines($supplierId, $entryId),
+            'entry_id'              => $entryId,
+            'entry_date'            => $entryDate,
+            'document_no'           => $entry['document_no'] === null ? null : (string) $entry['document_no'],
+            'description'           => $entry['description'] === null ? null : (string) $entry['description'],
+            'period_status'         => $periodStatus,
+            'locked_until'          => $lockedUntil,
+            'already_reversed'      => $alreadyReversed,
+            'tax_neutral_violation' => $violation,
+            'lines'                 => $this->describeLines($supplierId, $entryId),
         ];
 
         $today = date('Y-m-d');
@@ -110,6 +122,7 @@ final class DocumentRepostService
             $lockedUntil,
             $todayPeriod === null ? null : (string) $todayPeriod['status'],
             $today,
+            $lines === null ? null : $violation === null,
         );
     }
 
@@ -124,9 +137,12 @@ final class DocumentRepostService
      * @param bool        $alreadyReversed    původní zápis už někdo stornoval
      * @param ?string     $periodStatus       stav období PŮVODNÍHO zápisu (null = období chybí)
      * @param ?string     $todayPeriodStatus  stav období pro dnešek (null = žádné, provisioner ho otevře)
+     * @param ?bool       $taxNeutralLines    opravené řádky jsou jen přesun mezi účty bez daňového
+     *                                        dopadu ({@see TaxNeutralReclassification}); null = řádky
+     *                                        ještě nejsou známé (náhled)
      *
      * @return array{strategy:string, needs_reversal:bool, target_date:?string,
-     *               date_shifted:bool, reason_code:?string}
+     *               date_shifted:bool, reason_code:?string, tax_neutral_available:bool}
      */
     public static function decide(
         bool $alreadyReversed,
@@ -135,19 +151,26 @@ final class DocumentRepostService
         ?string $lockedUntil,
         ?string $todayPeriodStatus,
         string $today,
+        ?bool $taxNeutralLines = null,
     ): array {
         $entryDateLocked = self::locked($entryDate, $lockedUntil);
+
+        // Zámek k datu je posunutý podaným DPH, ne uzávěrkou roku. Přesun mezi účty
+        // téže třídy bez daňového dopadu podané přiznání nemění, takže se smí přepsat
+        // na místě. Uzavřené období ani stornovaný zápis tahle výjimka neotevírá.
+        $taxNeutralAvailable = !$alreadyReversed && $periodStatus === 'open' && $entryDateLocked;
 
         // Přepsat na místě lze jen zápis, který ještě nikdo nestornoval a jehož vlastní
         // datum je pořád „živé". Obě podmínky vynucuje i PostingService::rewriteExisting —
         // tady se jen ptáme dopředu, ať uživatel nedostane chybu až po potvrzení.
-        if (!$alreadyReversed && $periodStatus === 'open' && !$entryDateLocked) {
+        if (!$alreadyReversed && $periodStatus === 'open' && (!$entryDateLocked || $taxNeutralLines === true)) {
             return [
-                'strategy'       => self::STRATEGY_REPLACE,
-                'needs_reversal' => false,
-                'target_date'    => $entryDate,
-                'date_shifted'   => false,
-                'reason_code'    => null,
+                'strategy'              => self::STRATEGY_REPLACE,
+                'needs_reversal'        => false,
+                'target_date'           => $entryDate,
+                'date_shifted'          => false,
+                'reason_code'           => $entryDateLocked ? 'tax_neutral_rewrite' : null,
+                'tax_neutral_available' => $taxNeutralAvailable,
             ];
         }
 
@@ -164,31 +187,34 @@ final class DocumentRepostService
         $entryDatePostable = !$entryDateLocked && ($periodStatus === null || $periodStatus === 'open');
         if ($entryDatePostable) {
             return [
-                'strategy'       => self::STRATEGY_REVERSE,
-                'needs_reversal' => !$alreadyReversed,
-                'target_date'    => $entryDate,
-                'date_shifted'   => false,
-                'reason_code'    => $reasonCode,
+                'strategy'              => self::STRATEGY_REVERSE,
+                'needs_reversal'        => !$alreadyReversed,
+                'target_date'           => $entryDate,
+                'date_shifted'          => false,
+                'reason_code'           => $reasonCode,
+                'tax_neutral_available' => $taxNeutralAvailable,
             ];
         }
 
         $todayLocked = self::locked($today, $lockedUntil);
         if ($todayLocked || !($todayPeriodStatus === null || $todayPeriodStatus === 'open')) {
             return [
-                'strategy'       => self::STRATEGY_BLOCKED,
-                'needs_reversal' => !$alreadyReversed,
-                'target_date'    => null,
-                'date_shifted'   => false,
-                'reason_code'    => $todayLocked ? 'date_locked' : 'period_not_open',
+                'strategy'              => self::STRATEGY_BLOCKED,
+                'needs_reversal'        => !$alreadyReversed,
+                'target_date'           => null,
+                'date_shifted'          => false,
+                'reason_code'           => $todayLocked ? 'date_locked' : 'period_not_open',
+                'tax_neutral_available' => $taxNeutralAvailable,
             ];
         }
 
         return [
-            'strategy'       => self::STRATEGY_REVERSE,
-            'needs_reversal' => !$alreadyReversed,
-            'target_date'    => $today,
-            'date_shifted'   => $today !== $entryDate,
-            'reason_code'    => $reasonCode,
+            'strategy'              => self::STRATEGY_REVERSE,
+            'needs_reversal'        => !$alreadyReversed,
+            'target_date'           => $today,
+            'date_shifted'          => $today !== $entryDate,
+            'reason_code'           => $reasonCode,
+            'tax_neutral_available' => $taxNeutralAvailable,
         ];
     }
 
@@ -214,7 +240,8 @@ final class DocumentRepostService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float}> $lines
      * @param array<string,mixed> $meta audit kontext (user_id, ip, user_agent) + description
      *
-     * @return array{strategy:string, entry_id:int, reversal_entry_id:?int, entry_date:string, date_shifted:bool}
+     * @return array{strategy:string, entry_id:int, reversal_entry_id:?int, entry_date:string,
+     *               date_shifted:bool, items_synced:int}
      *
      * @throws PostingException nelze přeúčtovat (blocked / neodsouhlasený posun data)
      */
@@ -240,7 +267,7 @@ final class DocumentRepostService
 
             // Plán se počítá ZNOVU uvnitř transakce: mezi náhledem a potvrzením mohla
             // proběhnout uzávěrka nebo cizí storno a rozhodnutí by se rozešlo se stavem.
-            $plan = $this->plan($supplierId, $sourceType, $docId);
+            $plan = $this->plan($supplierId, $sourceType, $docId, $lines);
 
             if ($plan['strategy'] === self::STRATEGY_BLOCKED) {
                 throw new PostingException(
@@ -254,10 +281,14 @@ final class DocumentRepostService
                 );
             }
             if ($plan['date_shifted'] && !$confirmDateShift) {
+                $why = $plan['tax_neutral_available'] && $plan['tax_neutral_violation'] !== null
+                    ? ' Přepsat zápis na místě nejde, protože '
+                        . TaxNeutralReclassification::describe((string) $plan['tax_neutral_violation']) . '.'
+                    : '';
                 throw new PostingException(
                     'repost_date_shift_confirmation_required',
                     'Původní datum ' . $plan['entry_date'] . ' je uzavřené nebo zamčené, takže storno i oprava '
-                        . 'padnou na ' . (string) $plan['target_date'] . '. Potvrď posun data.',
+                        . 'padnou na ' . (string) $plan['target_date'] . '.' . $why . ' Potvrď posun data.',
                     409,
                     ['entry_date' => $plan['entry_date'], 'target_date' => $plan['target_date']],
                 );
@@ -272,9 +303,16 @@ final class DocumentRepostService
                 ]);
             }
 
-            $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, array_merge($meta, [
-                'entry_date' => $targetDate,
-            ]));
+            $postMeta = array_merge($meta, ['entry_date' => $targetDate]);
+            if ($plan['reason_code'] === 'tax_neutral_rewrite') {
+                // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
+                $postMeta['tax_neutral_rewrite'] = true;
+            }
+            $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $postMeta);
+
+            $itemsSynced = $sourceType === 'purchase_invoice'
+                ? $this->syncPurchaseItemAccounts($supplierId, $docId, $plan['lines'], $lines)
+                : 0;
 
             $this->activity->log(
                 'accounting.reposted',
@@ -285,12 +323,14 @@ final class DocumentRepostService
                     'source_type'        => $sourceType,
                     'source_id'          => $docId,
                     'strategy'           => $plan['strategy'],
+                    'reason_code'        => $plan['reason_code'],
                     'original_entry_id'  => $plan['entry_id'],
                     'reversal_entry_id'  => $reversalId,
                     'original_entry_date' => $plan['entry_date'],
                     'entry_date'         => $targetDate,
                     'before'             => $plan['lines'],
                     'after'              => $lines,
+                    'items_synced'       => $itemsSynced,
                 ],
                 $meta['ip'] ?? null,
                 $meta['user_agent'] ?? null,
@@ -307,6 +347,7 @@ final class DocumentRepostService
                 'reversal_entry_id' => $reversalId,
                 'entry_date'        => $targetDate,
                 'date_shifted'      => (bool) $plan['date_shifted'],
+                'items_synced'      => $itemsSynced,
             ];
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
@@ -314,6 +355,99 @@ final class DocumentRepostService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Opravené řádky proti zápisu v deníku: NULL = jen přesun mezi účty bez daňového
+     * dopadu, jinak kód důvodu z {@see TaxNeutralReclassification}. Kódy účtů se
+     * překládají TÍMŽ přesměrem syntetiky na jedinou analytiku jako při zápisu, jinak
+     * by „518" proti zapsanému „518.100" vypadalo jako změna účtu.
+     *
+     * @param list<array{account_code:string, side:string, amount:float}> $lines
+     */
+    private function taxNeutralViolation(int $supplierId, int $entryId, array $lines): ?string
+    {
+        $codeMap = $this->accounts->codeToIdMap($supplierId);
+        $after = [];
+        foreach ($lines as $line) {
+            $code = $this->posting->redirectedAccountCode($supplierId, (string) ($line['account_code'] ?? ''));
+            if (!isset($codeMap[$code])) {
+                return TaxNeutralReclassification::UNKNOWN_ACCOUNT;
+            }
+            $after[] = [
+                'account_id' => $codeMap[$code]['id'],
+                'side'       => (string) ($line['side'] ?? ''),
+                'amount'     => (float) ($line['amount'] ?? 0),
+            ];
+        }
+
+        return TaxNeutralReclassification::violation(
+            $this->journal->linesForEntry($entryId, $supplierId),
+            $after,
+            $this->accounts->idToAccountMap($supplierId),
+        );
+    }
+
+    /**
+     * Přenese přeúčtovaný nákladový účet i na položky přijaté faktury.
+     *
+     * Zaúčtování přijaté faktury se staví z `purchase_invoice_items.expense_account_code`.
+     * Kdyby na položce zůstal starý účet, vrátila by ho do deníku každá další úprava
+     * dokladu nebo doúčtování, a detail faktury by ukazoval jiný účet než deník.
+     *
+     * Přenáší se jen jednoznačný případ: na straně MD zmizel právě jeden nákladový účet
+     * a stejná částka přibyla na právě jednom jiném nákladovém účtu. Rozdělení nákladu
+     * na víc účtů se na položky rozpočítat nedá a zůstane na účetní.
+     *
+     * @param list<array{account_code:?string, side:string, amount:float}> $before
+     * @param list<array{account_code:string, side:string, amount:float}> $after
+     */
+    private function syncPurchaseItemAccounts(int $supplierId, int $docId, array $before, array $after): int
+    {
+        $debits = [];
+        foreach ([[$before, -1], [$after, 1]] as [$lines, $sign]) {
+            foreach ($lines as $line) {
+                if (($line['side'] ?? '') !== 'debit' || ($line['account_code'] ?? null) === null) {
+                    continue;
+                }
+                $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code']);
+                $debits[$code] = ($debits[$code] ?? 0) + $sign * (int) round(((float) $line['amount']) * 100.0);
+            }
+        }
+        $removed = array_keys(array_filter($debits, static fn (int $c): bool => $c < 0));
+        $added = array_keys(array_filter($debits, static fn (int $c): bool => $c > 0));
+        if (count($removed) !== 1 || count($added) !== 1) {
+            return 0;
+        }
+        [$from, $to] = [(string) $removed[0], (string) $added[0]];
+        if ($debits[$from] + $debits[$to] !== 0 || !str_starts_with($from, '5') || !str_starts_with($to, '5')) {
+            return 0;
+        }
+        $stillOnFrom = array_filter(
+            $after,
+            fn (array $l): bool => ($l['side'] ?? '') === 'debit'
+                && $this->posting->redirectedAccountCode($supplierId, (string) $l['account_code']) === $from,
+        );
+        if ($stillOnFrom !== []) {
+            return 0;
+        }
+
+        // Položka může nést syntetiku, ze které se při zápisu stala analytika (511 → 511.100).
+        $candidates = [$from];
+        if (str_contains($from, '.')) {
+            $candidates[] = substr($from, 0, 3);
+        }
+        $in = implode(', ', array_fill(0, count($candidates), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+                SET pii.expense_account_code = ?, pii.expense_rule_id = NULL,
+                    pii.expense_classification_source = NULL
+              WHERE pi.id = ? AND pi.supplier_id = ? AND pii.expense_account_code IN ({$in})"
+        );
+        $stmt->execute([$to, $docId, $supplierId, ...$candidates]);
+
+        return $stmt->rowCount();
     }
 
     /** Zámek účetnictví k datu (§35 soft-close) — zamčené je datum <= locked_until. */

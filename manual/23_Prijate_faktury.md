@@ -716,7 +716,9 @@ viz [§ 45.8.3](45_Ucetni_denik.md#4583-podle-ceho-se-uctovalo).
 
 Sekce má u každého živého zápisu i tlačítko **Přeúčtovat** (jen admin/účetní), které
 otevře řádky existujícího zápisu k opravě. Podle stavu období se zápis buď přepíše,
-nebo stornuje a zapíše znovu; celý postup i chování v zamčeném období popisuje
+nebo stornuje a zapíše znovu. Přesun nákladu mezi účty téže třídy (např. 511 → 518.100)
+se přepíše na místě i v měsíci zamčeném podaným DPH, dokud rok není v uzávěrce. Celý
+postup i chování v zamčeném období popisuje
 [§ 45.8.2](45_Ucetni_denik.md#4582-preuctovani-z-dokladu-sekce-zauctovani).
 
 ## 23.4 Scan inbox — automatický import z adresáře

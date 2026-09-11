@@ -118,6 +118,61 @@ final class DocumentRepostDecisionTest extends TestCase
     }
 
     /**
+     * Zámek k datu posunuje podané DPH, ne uzávěrka roku. Přesun mezi účty téže třídy bez
+     * daňového dopadu (511 → 518.100) se proto přepíše na místě, bez storna a posunu data.
+     */
+    public function testTaxNeutralChangeRewritesInPlaceDespiteDateLock(): void
+    {
+        $d = DocumentRepostService::decide(false, 'open', '2026-07-31', '2026-07-31', 'open', self::TODAY, true);
+
+        self::assertSame(DocumentRepostService::STRATEGY_REPLACE, $d['strategy']);
+        self::assertFalse($d['needs_reversal']);
+        self::assertSame('2026-07-31', $d['target_date']);
+        self::assertFalse($d['date_shifted']);
+        self::assertSame('tax_neutral_rewrite', $d['reason_code']);
+        self::assertTrue($d['tax_neutral_available']);
+    }
+
+    /** Náhled bez řádků neslibuje přepis, jen oznámí, že přepis je u zamčeného data možný. */
+    public function testPreviewInLockedDateOnlyAnnouncesTaxNeutralOption(): void
+    {
+        $d = DocumentRepostService::decide(false, 'open', '2026-07-31', '2026-07-31', 'open', self::TODAY);
+
+        self::assertSame(DocumentRepostService::STRATEGY_REVERSE, $d['strategy']);
+        self::assertTrue($d['tax_neutral_available']);
+    }
+
+    /** Oprava s daňovým dopadem v zamčeném datu jde pořád stornem. */
+    public function testNonNeutralChangeInLockedDateStillReverses(): void
+    {
+        $d = DocumentRepostService::decide(false, 'open', '2026-07-31', '2026-07-31', 'open', self::TODAY, false);
+
+        self::assertSame(DocumentRepostService::STRATEGY_REVERSE, $d['strategy']);
+        self::assertSame('date_locked', $d['reason_code']);
+        self::assertTrue($d['date_shifted']);
+    }
+
+    /** Uzávěrka roku je hranice, kterou daňově neutrální přepis nikdy nepřekročí (§35 ZoÚ). */
+    public function testTaxNeutralNeverOpensClosedPeriod(): void
+    {
+        foreach (['closing', 'closed', 'approved'] as $status) {
+            $d = DocumentRepostService::decide(false, $status, '2025-11-30', '2025-12-31', 'open', self::TODAY, true);
+
+            self::assertSame(DocumentRepostService::STRATEGY_REVERSE, $d['strategy'], $status);
+            self::assertFalse($d['tax_neutral_available'], $status);
+        }
+    }
+
+    /** Stornovaný zápis se nepřepisuje ani daňově neutrálně. */
+    public function testTaxNeutralNeverRewritesReversedEntry(): void
+    {
+        $d = DocumentRepostService::decide(true, 'open', '2026-07-31', '2026-07-31', 'open', self::TODAY, true);
+
+        self::assertNotSame(DocumentRepostService::STRATEGY_REPLACE, $d['strategy']);
+        self::assertFalse($d['tax_neutral_available']);
+    }
+
+    /**
      * Chybějící období není překážka — PostingService si ho přes provisioner otevře.
      * Kdyby se tu vyhodnotilo jako „zavřené", odmítla by se i oprava naimportované
      * historie, kterou zapsat jde.

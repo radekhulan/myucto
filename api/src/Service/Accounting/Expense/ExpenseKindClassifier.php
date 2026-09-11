@@ -141,6 +141,19 @@ final class ExpenseKindClassifier
     ];
 
     /**
+     * ÚDRŽBA SOFTWARU NENÍ OPRAVA. „Údržba, servis a podpora softwarového řešení" je IT
+     * služba (518), ne opravy a udržování (511). Reálný nález: měsíční paušál za podporu
+     * aplikace se kvůli slovu „údržba" automaticky zaúčtoval na 511. Veto platí jen na
+     * REPAIR_STRONG — pojištění ani servis vozidla IT slova nenesou.
+     */
+    private const IT_SERVICE = [
+        'softwar', 'aplikac', 'informacn', 'hosting', 'server', 'webov', 'cloud', 'saas',
+        'databaz', 'helpdesk', 'programov', 'licenc',
+        // katalog nese i en/de „maintenance"/„Wartung"
+        'application', 'applikation', 'website', 'webseite', 'datenbank', 'database',
+    ];
+
+    /**
      * OPRAVA VOZIDLA — podmnožina oprav, která smí jít na analytiku servisu vozidel
      * (např. 511.100). Oddělené od obecných oprav schválně: „oprava střechy" je taky 511,
      * ale na analytiku VOZIDEL nepatří. Bez nastavené analytiky se chová stejně jako
@@ -180,6 +193,24 @@ final class ExpenseKindClassifier
 
         if ($suggestion === null) {
             return null;
+        }
+
+        // IT VETO NA OPRAVY. Katalog i vestavěná slova posílají „údržbu" na 511, ale údržba
+        // a podpora softwaru je služba (518). Veto je tady, za oběma zdroji, protože katalog
+        // běží PŘED vestavěnými slovy — dokud bylo jen ve vestavěné větvi, faktura za podporu
+        // aplikace prošla katalogem a skončila na 511.100 dál. Pravidla firmy veto nemění:
+        // ta jsou vědomé rozhodnutí účetní.
+        if ($suggestion->source !== 'rule'
+            && $suggestion->accountCode !== null
+            && str_starts_with($suggestion->accountCode, self::REPAIR_ACCOUNT)
+            && ($it = $this->firstHit($text, self::IT_SERVICE)) !== null
+        ) {
+            $suggestion = new ExpenseKindSuggestion(
+                ExpenseKind::Service,
+                self::CONF_STRONG,
+                $suggestion->reason . '; text ale obsahuje „' . $it . '" ⇒ údržba softwaru je IT služba, ne oprava',
+                $suggestion->source,
+            );
         }
 
         // POJISTKA NA ANALYTIKU PHM. Pravidla tenanta se běžně matchují jen podle

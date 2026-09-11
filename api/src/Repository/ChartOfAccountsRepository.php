@@ -204,19 +204,27 @@ final class ChartOfAccountsRepository
     }
 
     /**
-     * Mapa id => {code, name} pro obohacení řádků deníku o kód/název účtu.
+     * Mapa id => {code, name, account_type, tax_deductibility} pro obohacení řádků deníku
+     * o kód/název účtu. Typ a daňová uznatelnost slouží
+     * {@see \MyInvoice\Service\Accounting\TaxNeutralReclassification}.
      *
-     * @return array<int,array{code:string,name:string}>
+     * @return array<int,array{code:string,name:string,account_type:string,tax_deductibility:string}>
      */
     public function idToAccountMap(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, account_code, name FROM chart_of_accounts WHERE supplier_id = ?'
+            'SELECT id, account_code, name, account_type, tax_deductibility
+               FROM chart_of_accounts WHERE supplier_id = ?'
         );
         $stmt->execute([$supplierId]);
         $map = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $map[(int) $r['id']] = ['code' => (string) $r['account_code'], 'name' => (string) $r['name']];
+            $map[(int) $r['id']] = [
+                'code'              => (string) $r['account_code'],
+                'name'              => (string) $r['name'],
+                'account_type'      => (string) $r['account_type'],
+                'tax_deductibility' => (string) $r['tax_deductibility'],
+            ];
         }
         return $map;
     }
