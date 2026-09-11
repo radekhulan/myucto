@@ -144,7 +144,7 @@ async function submit(): Promise<void> {
               date: plan.locked_until ? formatDate(plan.locked_until) : '',
             }) }}
           </p>
-          <p v-if="plan.tax_neutral_available" class="mt-1">
+          <p v-if="plan.tax_neutral_available && plan.strategy !== 'replace'" class="mt-1">
             {{ t('accounting.repost.tax_neutral_available') }}
           </p>
         </div>

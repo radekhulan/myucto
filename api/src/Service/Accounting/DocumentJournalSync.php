@@ -191,6 +191,9 @@ final class DocumentJournalSync
             'document_no' => $existing['document_no'] ?? null,
             'description' => $existing['description'] ?? null,
             'posted' => true,
+            // Datum zamčené podaným DPH: přepis projde jen jako daňově neutrální přesun,
+            // podmínky ověří PostingService (TaxNeutralReclassification). Jinak date_locked.
+            'tax_neutral_rewrite' => true,
         ];
         return $this->posting->postDocument($supplierId, $sourceType, $sourceId, $lines, $postMeta);
     }

@@ -18,9 +18,11 @@ namespace MyInvoice\Service\Accounting;
  * (obě strany se porovnávají v haléřích, per účet a stranu):
  *   - na každé straně (MD / Dal) se celkem nic nemění, jen se částka přesouvá mezi účty,
  *   - žádný měněný účet není daňový (34x: DPH, daň z příjmů, ostatní daně),
- *   - všechny měněné účty patří do TÉŽE účtové třídy (5 ↔ 5, ne 5 ↔ 0),
- *   - nemění se daňová uznatelnost: na každé straně sedí součet daňových i nedaňových
- *     účtů zvlášť, takže 518.100 → 518.990 projde jen jako storno.
+ *   - když je za rok už PODANÉ přiznání k dani z příjmů, navíc:
+ *       - všechny měněné účty patří do TÉŽE účtové třídy (5 ↔ 5, ne 5 ↔ 3),
+ *       - nemění se daňová uznatelnost (518.100 → 518.990 jde jen stornem).
+ *     Dokud přiznání podané není, mění se tím jen základ daně, který se teprve spočítá
+ *     (typicky časové rozlišení 518 → 381 u dodatečně doplněné faktury).
  *
  * Uzavřené účetní období (uzávěrka roku) tahle třída neřeší. To hlídá volající a platí
  * tam bez výjimky §35 ZoÚ. Je to čistá funkce, aby ji mohly zavolat obě strany téže
@@ -49,10 +51,11 @@ final class TaxNeutralReclassification
      * @param list<array{account_id:int, side:string, amount:float|int|string}> $before řádky v deníku
      * @param list<array{account_id:int, side:string, amount:float|int|string}> $after  opravené řádky
      * @param array<int, array{code:string, account_type?:string, tax_deductibility?:string}> $accounts
+     * @param bool $incomeTaxFiled přiznání k dani z příjmů za rok zápisu už je podané
      *
      * @return ?string NULL = daňově neutrální přesun (nebo žádná změna), jinak kód důvodu
      */
-    public static function violation(array $before, array $after, array $accounts): ?string
+    public static function violation(array $before, array $after, array $accounts, bool $incomeTaxFiled = true): ?string
     {
         $diff = [];
         foreach ([[$before, -1], [$after, 1]] as [$lines, $sign]) {
@@ -92,6 +95,9 @@ final class TaxNeutralReclassification
             if ($cents !== 0) {
                 return self::AMOUNTS_CHANGED;
             }
+        }
+        if (!$incomeTaxFiled) {
+            return null;
         }
         if (count($classes) > 1) {
             return self::ACCOUNT_CLASS_CHANGED;

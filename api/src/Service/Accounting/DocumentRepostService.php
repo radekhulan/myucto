@@ -98,7 +98,7 @@ final class DocumentRepostService
         $period = $this->periods->findById($supplierId, (int) $entry['period_id']);
         $periodStatus = $period === null ? null : (string) $period['status'];
         $lockedUntil = $this->lockedUntil($supplierId);
-        $violation = $lines === null ? null : $this->taxNeutralViolation($supplierId, $entryId, $lines);
+        $violation = $lines === null ? null : $this->taxNeutralViolation($supplierId, $entryId, $entryDate, $lines);
 
         $plan = [
             'entry_id'              => $entryId,
@@ -365,7 +365,7 @@ final class DocumentRepostService
      *
      * @param list<array{account_code:string, side:string, amount:float}> $lines
      */
-    private function taxNeutralViolation(int $supplierId, int $entryId, array $lines): ?string
+    private function taxNeutralViolation(int $supplierId, int $entryId, string $entryDate, array $lines): ?string
     {
         $codeMap = $this->accounts->codeToIdMap($supplierId);
         $after = [];
@@ -385,6 +385,7 @@ final class DocumentRepostService
             $this->journal->linesForEntry($entryId, $supplierId),
             $after,
             $this->accounts->idToAccountMap($supplierId),
+            $this->posting->incomeTaxFiledForYear($supplierId, (int) substr($entryDate, 0, 4)),
         );
     }
 

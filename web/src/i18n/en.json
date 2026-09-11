@@ -11535,7 +11535,7 @@
       "blocked_date_locked": "The books are locked up to {date}, today included, so there is nowhere to write the correction. An admin can move the lock in accounting settings.",
       "blocked_period_not_open": "The original entry sits in a “{status}” period and there is no open accounting period for today — there is nowhere to write the correction. Open a period in Accounting → Closing.",
       "confirm_date_shift": "I understand that the reversal and the correction will be posted on {to} instead of the original {from}.",
-      "tax_neutral_available": "The year is not closed, the lock only protects the filed VAT return. If you only move amounts between accounts of the same class (e.g. 511 → 518.100) without changing VAT, tax accounts or tax deductibility, the entry is rewritten in place on its original date, without a reversal. Otherwise a reversal and a new entry are posted and the date shift has to be confirmed.",
+      "tax_neutral_available": "The year is not closed, the lock only protects the filed VAT return. If you only move amounts between accounts (e.g. 511 → 518.100) without changing VAT, tax accounts or the totals, the entry is rewritten in place on its original date, without a reversal. Once the income tax return for the year is filed, only within the same account class and without changing tax deductibility. Otherwise a reversal and a new entry are posted and the date shift has to be confirmed.",
       "hint": "The entry must balance (Σ debit = Σ credit). Double entry, period status and the date lock are enforced by the server — re-posting does not change VAT, that is corrected by editing the document."
     },
     "posting_origin": {

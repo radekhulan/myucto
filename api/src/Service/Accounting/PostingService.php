@@ -729,6 +729,7 @@ final class PostingService
                 $existing['lines'] ?? [],
                 $resolved,
                 $this->accounts->idToAccountMap($supplierId),
+                $this->incomeTaxFiledForYear($supplierId, (int) substr($entryDate, 0, 4)),
             );
             $reason = $violation === null ? null : TaxNeutralReclassification::describe($violation);
         }
@@ -740,6 +741,25 @@ final class PostingService
                     . '. Oprava přes storno + nový zápis do otevřeného data.',
             );
         }
+    }
+
+    /**
+     * Je za rok podané přiznání k dani z příjmů (DPPO / DPFO)? Do té doby smí daňově
+     * neutrální přepis měnit i třídu účtu a daňovou uznatelnost — základ daně se teprve
+     * spočítá ({@see TaxNeutralReclassification}). Veřejné kvůli DocumentRepostService,
+     * který se ptá dopředu v náhledu.
+     */
+    public function incomeTaxFiledForYear(int $supplierId, int $year): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM tax_submissions
+              WHERE supplier_id = ? AND period_year = ? AND form_code IN ('dppdp9', 'dpfdp7')
+                AND (status IN ('submitted', 'accepted') OR submitted_at IS NOT NULL)
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $year]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

@@ -108,6 +108,31 @@ final class TaxNeutralReclassificationTest extends TestCase
         self::assertNull(R::violation(self::purchase(1), $after, self::ACCOUNTS));
     }
 
+    /**
+     * Dokud není podané přiznání k dani z příjmů, smí se měnit i třída a uznatelnost:
+     * reálný případ je dodatečně doplněné časové rozlišení 518 → 381.
+     */
+    public function testUnfiledIncomeTaxAllowsClassAndDeductibilityChange(): void
+    {
+        self::assertNull(R::violation(self::purchase(1), self::purchase(6), self::ACCOUNTS, false));
+        self::assertNull(R::violation(self::purchase(2), self::purchase(3), self::ACCOUNTS, false));
+    }
+
+    /** DPH a částky jsou nedotknutelné i bez podaného přiznání k dani z příjmů. */
+    public function testUnfiledIncomeTaxStillProtectsVatAndAmounts(): void
+    {
+        self::assertSame(
+            R::TAX_ACCOUNT_CHANGED,
+            R::violation(self::purchase(1), self::purchase(1, 40000.00), self::ACCOUNTS, false),
+        );
+        $after = [
+            ['account_id' => 1, 'side' => 'debit', 'amount' => 200000.00],
+            ['account_id' => 4, 'side' => 'debit', 'amount' => 43117.20],
+            ['account_id' => 5, 'side' => 'credit', 'amount' => 243117.20],
+        ];
+        self::assertSame(R::AMOUNTS_CHANGED, R::violation(self::purchase(1), $after, self::ACCOUNTS, false));
+    }
+
     public function testClosingAccountIsRejected(): void
     {
         self::assertSame(

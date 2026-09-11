@@ -753,10 +753,13 @@ přiznáním k DPH, chrání tedy DPH, ne kontaci nákladu. Dokud rok není v uz
 v zamčeném datu se přepíše na místě, pokud oprava splní všechny podmínky:
 
 - na straně MD i Dal zůstávají stejné celkové částky, mění se jen účty,
-- všechny měněné účty patří do stejné účtové třídy (typicky náklad 511 → 518.100),
 - nemění se žádný účet daní (34x, tedy ani DPH),
-- nemění se daňová uznatelnost (přesun na nedaňovou analytiku .990 jde stornem).
+- je-li za rok už podané přiznání k dani z příjmů, navíc: všechny měněné účty patří
+  do stejné účtové třídy (typicky náklad 511 → 518.100) a nemění se daňová uznatelnost
+  (přesun na nedaňovou analytiku .990 jde stornem).
 
+Dokud přiznání k dani z příjmů podané není, projde tedy i přesun mezi třídami, například
+dodatečně doplněné časové rozlišení 518 → 381 při opravě přijaté faktury.
 Kontrolu dělá server ještě jednou těsně před zápisem. Když oprava podmínky nesplní,
 postupuje se stornem a novým zápisem jako v tabulce výše. U přijaté faktury se nový
 nákladový účet zapíše i na položku dokladu, pokud se celý náklad přesunul z jednoho
