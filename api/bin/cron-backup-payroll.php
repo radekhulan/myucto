@@ -36,6 +36,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Backup\BackupLocation;
 use MyInvoice\Service\Backup\PayrollBackupArchiveLayout;
 use MyInvoice\Service\Cron\BackupEncryption;
 use MyInvoice\Service\Cron\CronRun;
@@ -48,14 +49,7 @@ $db = new Connection($config);
 $run = CronRun::start($db->pdo(), 'cron-backup-payroll');
 
 // Resolve backup output dir — stejné pořadí jako ostatní zálohy (issue #34).
-$backupDir = (string) $config->get('cron.backup.output_dir', '');
-if ($backupDir === '') {
-    $backupDir = (string) $config->get('storage.backup_dir', '');
-}
-if ($backupDir === '') {
-    $dataDir = (string) (getenv('MYINVOICE_DATA_DIR') ?: '');
-    $backupDir = $dataDir !== '' ? rtrim($dataDir, '/\\') . '/storage/backup' : $rootDir . '/storage/backup';
-}
+$backupDir = BackupLocation::resolve($config);
 if (!is_dir($backupDir)) @mkdir($backupDir, 0755, true);
 
 if (!class_exists(ZipArchive::class)) {

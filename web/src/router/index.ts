@@ -180,6 +180,8 @@ const superadminRouteNames = new Set([
   // takže sem patří ze stejného důvodu jako aktivace a diagnostika:
   // deny-by-default guard by je jinak tiše přesměroval na homepage.
   'admin-instance-export', 'hosting',
+  // Adresář se zálohami je celá instalace, ne jedna firma — čte /api/admin/backups.
+  'admin-backups',
 ])
 
 const adminPlusRouteNames = new Set(['admin-suppliers'])

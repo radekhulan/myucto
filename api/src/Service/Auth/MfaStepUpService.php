@@ -21,6 +21,14 @@ final class MfaStepUpService
     /** Vygenerování nové sady záložních kódů — stará se tím nevratně zahodí. */
     public const OPERATION_RECOVERY_CODES = 'mfa.recovery_codes';
 
+    /**
+     * MyÚčto: zobrazení hesla, kterým jsou šifrované zálohy (`cron.backup.password`).
+     * Kdo ho zná, otevře dump celé databáze i archiv všech dokladů — takže sem
+     * patří stejný jednorázový proof jako k podpisovému certifikátu. Heslo se
+     * neukazuje samo od sebe ani přihlášenému správci.
+     */
+    public const OPERATION_BACKUP_PASSWORD = 'backup.password';
+
     public static function domainActivationOperation(int $domainId): string
     {
         if ($domainId < 1) throw new \InvalidArgumentException('Neplatné ID domény.');
@@ -59,6 +67,7 @@ final class MfaStepUpService
             && $operation !== self::OPERATION_PASSKEY_REGISTER
             && $operation !== self::OPERATION_EPO_CERTIFICATE
             && $operation !== self::OPERATION_RECOVERY_CODES
+            && $operation !== self::OPERATION_BACKUP_PASSWORD
             && !$isPasskeyRevoke
             && !$isDomainActivation
         ) {

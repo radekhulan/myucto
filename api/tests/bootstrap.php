@@ -68,6 +68,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/FuelingRepository.php',
     '*/api/src/Repository/InvoiceRepository.php',
     '*/api/src/Repository/PasskeyCredentialRepository.php',
+    '*/api/src/Service/Auth/SensitiveOperationReauth.php',
     '*/api/src/Repository/PayrollEmployeeRepository.php',
     '*/api/src/Repository/PayrollMonthlyRecordRepository.php',
     '*/api/src/Repository/PostingRuleRepository.php',

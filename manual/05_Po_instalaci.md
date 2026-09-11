@@ -99,12 +99,40 @@ Oba režimy nekombinuj, jinak by se některé úlohy spouštěly dvakrát.
 Detaily v `cmd/README.md`.
 
 **Šifrování záloh:** volitelné heslo `cron.backup.password` v `cfg.php`
-zašifruje všechny tři typy ZIP záloh (DB dump, PDF dokladů, sekce Dokumenty)
-algoritmem AES-256. Pro rozbalení použijte 7-Zip, WinRAR nebo `unzip -P` —
+zašifruje všechny typy ZIP záloh (DB dump, PDF dokladů, sekce Dokumenty, mzdové
+podklady) algoritmem AES-256. Pro rozbalení použijte 7-Zip, WinRAR nebo `unzip -P` —
 vestavěný Průzkumník Windows šifrované AES-256 archivy neumí otevřít. Šifruje
 se obsah souborů, názvy souborů uvnitř archivu zůstávají čitelné. Pokud je
 heslo nastavené a PHP šifrování nepodporuje (libzip < 1.2), záloha se záměrně
 nevytvoří a úloha skončí chybou — nešifrovaná záloha by vznikla jen omylem.
+
+### 5.5.1 Stažení záloh z aplikace
+
+Hotové zálohy si správce instalace stáhne v nabídce **Systém → Stažení záloh**,
+aniž by potřeboval přístup k serveru přes SSH nebo FTP. Stránka ukazuje obsah
+adresáře se zálohami rozdělený do sekcí podle toho, která úloha soubor vyrobila:
+
+- **Databáze** — úplný dump databáze z `cron-backup`;
+- **Dokumenty a přílohy** — nahrané soubory a bankovní výpisy z `cron-backup-documents`;
+- **PDF doklady** — vygenerovaná PDF z `cron-backup-pdf`;
+- **Mzdy** — mzdové podklady z `cron-backup-payroll`;
+- **Ostatní** — soubory, které pojmenování automatických záloh neodpovídají,
+  typicky ruční kopie nebo záloha přenesená z jiné instalace.
+
+U každého souboru je čas pořízení a velikost. Pod seznamem je cesta k adresáři
+na serveru, počet záloh a nastavená retence — tedy kolik souborů (nebo dnů)
+zpět se drží, než je úloha smaže.
+
+Jsou-li zálohy šifrované, stránka nabídne **Zobrazit heslo**. Heslo se
+nezobrazuje samo od sebe ani přihlášenému správci: nejdřív se musíte znovu
+ověřit passkeyem, nebo přihlašovacím heslem a kódem z autentikátoru, máte-li ho
+zapnutý. Každé odhalení se zapisuje do protokolu činnosti — kdo a kdy, samotné
+heslo nikdy. Pokud zálohy šifrované nejsou, stránka to řekne nahlas: soubor bez
+hesla otevře celé účetnictví komukoli, kdo se k němu dostane.
+
+Stránka je doplněk **Kompletního exportu dat** (§ 88.6.2), ne jeho náhrada.
+Export je jednorázový balíček aktuálního stavu jedné firmy na vyžádání, tady
+leží historie automatických záloh celé instalace.
 
 > 💡 **Relativní cesty v `cfg.php`.** Cestové klíče (`cron.backup.output_dir`,
 > `storage.*`, `logging.path`, archivy přijatých/importovaných dokladů, DKIM)

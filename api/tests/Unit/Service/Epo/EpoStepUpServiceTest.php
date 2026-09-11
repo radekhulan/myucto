@@ -14,6 +14,7 @@ use MyInvoice\Service\Auth\MfaStepUpProof;
 use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\OneTimeTokenException;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Auth\SensitiveOperationReauth;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\Epo\EpoStepUpService;
@@ -72,7 +73,7 @@ final class EpoStepUpServiceTest extends TestCase
         $crypto->method('decrypt')->willReturn($secret);
         $hasher = $this->createStub(PasswordHasher::class);
         $hasher->method('verify')->willReturn(true);
-        $service = new EpoStepUpService($db, $totp, $crypto, $this->createStub(ActivityLogger::class), new IpMatcher(), $hasher, $this->createStub(BruteForceGuard::class), $this->createStub(MfaStepUpService::class));
+        $service = new EpoStepUpService(new SensitiveOperationReauth($db, $totp, $crypto, $this->createStub(ActivityLogger::class), new IpMatcher(), $hasher, $this->createStub(BruteForceGuard::class), $this->createStub(MfaStepUpService::class)));
         return [$service, $totp, $db, $secret];
     }
 
@@ -218,7 +219,7 @@ final class EpoStepUpServiceTest extends TestCase
 
         unset($passkeyCount);
 
-        return new EpoStepUpService(
+        return new EpoStepUpService(new SensitiveOperationReauth(
             $db,
             $this->createMock(TotpService::class),
             $this->createMock(SecretEncryption::class),
@@ -227,6 +228,6 @@ final class EpoStepUpServiceTest extends TestCase
             $hasher ?? $this->createMock(PasswordHasher::class),
             $bruteForce,
             $stepUp ?? $this->createMock(MfaStepUpService::class),
-        );
+        ));
     }
 }

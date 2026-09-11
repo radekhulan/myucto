@@ -30,6 +30,7 @@ use MyInvoice\Action\Approval\RequestApprovalTestAction;
 use MyInvoice\Action\Approval\UpdateApprovalStatusAction;
 use MyInvoice\Action\Admin\ExportAction;
 use MyInvoice\Action\Admin\ImportAction;
+use MyInvoice\Action\Admin\BackupDownloadAction;
 use MyInvoice\Action\Export\InstanceExportAction;
 use MyInvoice\Action\Admin\Import\StartIdokladImportAction;
 use MyInvoice\Action\Admin\Import\StartFakturoidImportAction;
@@ -2362,6 +2363,14 @@ final class Routes
         $app->get    ('/api/admin/instance-export/{id:[0-9]+}/download',   [InstanceExportAction::class, 'download']);
         $app->post   ('/api/admin/instance-export/{id:[0-9]+}/cancel',     [InstanceExportAction::class, 'cancel']);
         $app->delete ('/api/admin/instance-export/{id:[0-9]+}',            [InstanceExportAction::class, 'delete']);
+
+        // Stažení automatických záloh (cron-backup*.php) z prohlížeče. Doplněk
+        // kompletního exportu: ten dělá balíček jedné firmy na vyžádání, tohle
+        // zpřístupňuje historii záloh celé instalace, která dosud šla jen přes SSH.
+        // Heslo k šifrovaným ZIPům se odhaluje až proti čerstvému ověření (POST).
+        $app->get    ('/api/admin/backups',                                   [BackupDownloadAction::class, 'list']);
+        $app->post   ('/api/admin/backups/password',                          [BackupDownloadAction::class, 'revealPassword']);
+        $app->get    ('/api/admin/backups/download/{name:[A-Za-z0-9._-]{1,255}}', [BackupDownloadAction::class, 'download']);
 
         // iDoklad API import (fáze 2a) — credentials + background job lifecycle
         $app->get    ('/api/admin/imports/idoklad/credentials', [IdokladCredentialsAction::class, 'status']);

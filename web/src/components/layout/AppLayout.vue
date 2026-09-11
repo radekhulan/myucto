@@ -772,6 +772,9 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/activation/purchase', label: t('nav.purchase_subscription'), icon: ICONS.coin },
           // Kompletní export dat firmy — stažení všeho v jednom archivu (H-14).
           { to: '/admin/instance-export', label: t('nav.instance_export'),     icon: ICONS.exports, dividerBefore: true },
+          // Automatické zálohy ke stažení — protějšek exportu: ne balíček na vyžádání,
+          // ale historie toho, co crony odkládají samy.
+          { to: '/admin/backups', label: t('nav.backups'), icon: ICONS.tax_archive },
           // Převod celé agendy z Money S3 — protějšek exportu: data dovnitř. I pro firmu
           // v daňové evidenci (převod ji přepne).
           { to: '/imports/money-s3', label: t('nav.money_s3_migration'), icon: ICONS.imports, permission: 'utilities.import' as PermissionKey, access: 'write' as const },

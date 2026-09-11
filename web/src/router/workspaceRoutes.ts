@@ -418,6 +418,9 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Kompletní export dat firmy (H-14) — stažení všeho v jednom archivu, pro archivaci
       // i pro odchod ze služby. API je pod /api/admin/, tedy admin only.
       { path: 'admin/instance-export',  name: 'admin-instance-export', component: () => import('@/pages/admin/InstanceExport.vue'), meta: { superadminOnly: true } },
+      // Stažení automatických záloh — historie toho, co odkládají noční crony.
+      // Adresář se zálohami je celá instalace, ne jedna firma, takže superadmin only.
+      { path: 'admin/backups',          name: 'admin-backups',         component: () => import('@/pages/admin/Backups.vue'),        meta: { superadminOnly: true } },
       // Hosting (H-31) — shrnutí spravovaného provozu: tarif, místo, platnost, kam napsat.
       // Data jsou z /api/license/status (admin only), takže i routa je superadmin only.
       // V menu se položka objeví JEN při `app.managed`; na self-hosted instalaci se

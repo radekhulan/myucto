@@ -37,6 +37,7 @@
     "approval_inbox",
     "attachment_check",
     "automation",
+    "backups",
     "bank",
     "bank_accounts",
     "bank_connection",
@@ -128,6 +129,7 @@
       "approval_inbox",
       "attachment_check",
       "automation",
+      "backups",
       "bank",
       "bank_accounts",
       "bank_connection",
@@ -964,6 +966,9 @@
     ],
     "admin-instance-export": [
       "instance_export"
+    ],
+    "admin-backups": [
+      "backups"
     ],
     "profile-password": [
       "domain_login",
