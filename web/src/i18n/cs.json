@@ -8394,6 +8394,7 @@
           "social": "V uložené mzdě chybí úplný výpočet sociálního pojištění, účast na pojištění nebo vyměřovací základ.",
           "absence_dates": "V podkladech je absence s neplatným začátkem nebo koncem.",
           "absence_overlap": "Vyloučené doby se překrývají nebo jejich počet překračuje dobu pracovního vztahu.",
+          "income_month": "V měsíci nebyl zúčtován žádný započitatelný příjem a z evidovaných nepřítomností nejde rozhodnout, zda je měsíc dobou pojištění (nemoc spolu s neplaceným volnem, měsíc porodu nebo měsíc bez příjmu i bez nepřítomnosti).",
           "unknown": "Přípravu evidenčního listu zastavila chyba, kterou musí posoudit podpora."
         },
         "steps": {
@@ -8409,6 +8410,7 @@
           "social": "Otevřete mzdy označeného měsíce. Ověřte, že zahrnují správný vztah a úplné odvody, proveďte potřebnou opravu a schvalte aktuální revizi. Potom evidenční list připravte znovu. Již správné mzdy ani přijatá podání neopravujte jen kvůli varování.",
           "absence_dates": "Otevřete Absence tohoto vztahu a zkontrolujte data a překryvy ve vykazovaném období. Opravte pouze chybně evidované záznamy, následně přepočítejte a schvalte dotčené mzdy. Pokud souběh absencí odpovídá skutečnosti, nemažte jej kvůli kontrole a kontaktujte podporu.",
           "absence_overlap": "Otevřete Absence tohoto vztahu a zkontrolujte data a překryvy ve vykazovaném období. Opravte pouze chybně evidované záznamy, následně přepočítejte a schvalte dotčené mzdy. Pokud souběh absencí odpovídá skutečnosti, nemažte jej kvůli kontrole a kontaktujte podporu.",
+          "income_month": "Otevřete Absence tohoto vztahu a ověřte nepřítomnosti v označeném měsíci. Chybí-li evidovaná nepřítomnost nebo zapomenutá mzda, doplňte ji a mzdu přepočítejte. Pokud evidence odpovídá skutečnosti, rozhoduje zákon jen o celém měsíci a aplikace ho nevyhodnotí sama; takový měsíc zpracujte ručně a nic kvůli kontrole neupravujte.",
           "unknown": "Kontaktujte podporu a přiložte vykazovaný rok, pracovní vztah a technické podrobnosti níže. Údaje zaměstnance ani schválené mzdy kvůli této chybě neměňte naslepo."
         }
       },

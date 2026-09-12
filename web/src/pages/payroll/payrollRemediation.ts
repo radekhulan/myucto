@@ -31,6 +31,7 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_absence_overlap_unsupported: 'absence_overlap',
   eldp_ppm_expected_childbirth_missing: 'absence_dates',
   eldp_ppm_childbirth_missing: 'absence_dates',
+  eldp_insurance_month_without_income: 'income_month',
   eldp_source_hash_mismatch: 'integrity',
   eldp_source_invalid: 'integrity',
   eldp_xml_snapshot_mismatch: 'integrity',
@@ -51,7 +52,7 @@ export function eldpRemediation(blocker: EldpBlocker, selectedEmploymentId: numb
     path = `/payroll/people?employment=${employmentId}`
       + (kind === 'activity' ? '&panel=employment_terms&field=activity_code' : '')
     action = 'terms'
-  } else if (['absence_dates', 'absence_overlap'].includes(kind) && hasEmployment) {
+  } else if (['absence_dates', 'absence_overlap', 'income_month'].includes(kind) && hasEmployment) {
     path = `/payroll/absences?employment=${employmentId}&tab=absences`
       + (period ? `&period=${period}` : '')
     action = 'absences'

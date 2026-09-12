@@ -8394,6 +8394,7 @@
           "social": "Saved payroll lacks a complete social insurance calculation, insurance participation or assessment base.",
           "absence_dates": "An absence has an invalid start or end date.",
           "absence_overlap": "Excluded periods overlap or exceed the employment duration.",
+          "income_month": "No countable income was paid in the month and the recorded absences cannot decide whether the month is an insurance period (sickness combined with unpaid leave, the month of childbirth, or a month with neither income nor absence).",
           "unknown": "A preparation error must be investigated by support."
         },
         "steps": {
@@ -8409,6 +8410,7 @@
           "social": "Open payroll for the indicated month. Verify that it includes the correct employment and complete contributions, make any necessary correction and approve the current revision. Prepare the record again. Do not correct already accurate payroll or accepted submissions solely because of this warning.",
           "absence_dates": "Open this employment’s absences and check dates and overlaps for the reporting period. Correct only erroneous records, then recalculate and approve affected payroll. If overlapping absences are accurate, do not remove them just to pass validation; contact support.",
           "absence_overlap": "Open this employment’s absences and check dates and overlaps for the reporting period. Correct only erroneous records, then recalculate and approve affected payroll. If overlapping absences are accurate, do not remove them just to pass validation; contact support.",
+          "income_month": "Open this employment’s absences and verify the absences in the indicated month. If an absence or forgotten pay is missing, add it and recalculate payroll. If the records are accurate, the law decides only about the whole month and the application cannot resolve it; process that month manually and do not change anything just to pass validation.",
           "unknown": "Contact support with the reporting year, employment and technical details below. Do not change employee data or approved payroll blindly because of this error."
         }
       },
