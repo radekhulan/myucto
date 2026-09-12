@@ -416,6 +416,47 @@ final class PayrollTimeApiTest extends TestCase
     }
 
     /**
+     * Pokyny MPSV k 10260: u dohody se uvede předpokládaný rozsah pracovní
+     * doby v měsíci. Bez rozvrhu je nejlepším předpokladem odpracovaná doba,
+     * s rozvrhem jeho plán přes trvání vztahu. Dřív se navrhovala nula,
+     * protože dohoda nemá evidenční interval.
+     */
+    public function testAgreementSuggestsExpectedWorkingTimeAsAgreedFund(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments
+                SET relation_type = 'dpp'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $this->employmentId]);
+        $entry = $this->saveEntry(monthVersion: 0);
+        self::assertSame(201, $entry->getStatusCode(), (string) $entry->getBody());
+
+        $withoutCalendar = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ))['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('7.5', $withoutCalendar['suggestions']['agreed_fund_hours']);
+        self::assertSame('99', $withoutCalendar['suggestions']['weekly_work_hours']);
+        self::assertSame(0, $withoutCalendar['suggestions']['evidence_days']);
+        self::assertSame([], $withoutCalendar['issues']);
+
+        $calendar = $this->action->calendar(
+            $this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+                ->withParsedBody($this->calendarPayload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $calendar->getStatusCode(), (string) $calendar->getBody());
+        $withCalendar = $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ))['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('168', $withCalendar['suggestions']['agreed_fund_hours']);
+    }
+
+    /**
      * Pokyny MPSV k 10261: kdo není v pracovním poměru, nezapočítává se do
      * povinného podílu OZP a má „missingovou hodnotu 99". Návrh ji musí
      * nabídnout a potvrzení jinou hodnotu nepřijme.

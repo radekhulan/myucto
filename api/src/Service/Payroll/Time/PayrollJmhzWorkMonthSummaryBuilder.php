@@ -167,11 +167,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $period,
             $periodEnd,
         );
-        [$agreedMinutes, $calendarIssues] = self::requiresShiftCalendar(
-            $employment['relation_type'],
-        )
-            ? self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo)
-            : [0, []];
+        [$worked, $entryIssues] = self::workedMinutes($entries, $periodStart);
+        [$agreedMinutes, $calendarIssues] = match (true) {
+            !self::requiresShiftCalendar($employment['relation_type']) => [0, []],
+            self::isAgreement($employment['relation_type']) =>
+                self::agreementFundMinutes($employment, $period, $periodEnd, $calendars, $worked),
+            default => self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo),
+        };
         $employmentIssues = ($employment['term_values_consistent'] ?? false) === true
             ? []
             : [[
@@ -190,7 +192,6 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 break;
             }
         }
-        [$worked, $entryIssues] = self::workedMinutes($entries, $periodStart);
         $source = [
             'schema_version' => self::DERIVATION_VERSION,
             'specification' => self::specification(),
@@ -790,9 +791,29 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         \DateTimeImmutable $period,
         \DateTimeImmutable $periodEnd,
     ): array {
-        if (in_array($employment['relation_type'], ['dpp', 'dpc'], true)) {
+        if (self::isAgreement($employment['relation_type'])) {
             return [null, null, 0];
         }
+
+        return self::employmentInterval($employment, $period, $periodEnd);
+    }
+
+    private static function isAgreement(mixed $relationType): bool
+    {
+        return in_array($relationType, ['dpp', 'dpc'], true);
+    }
+
+    /**
+     * Průnik trvání vztahu s měsícem, bez ohledu na evidenční stav.
+     *
+     * @param array<string,mixed> $employment
+     * @return array{?\DateTimeImmutable,?\DateTimeImmutable,int}
+     */
+    private static function employmentInterval(
+        array $employment,
+        \DateTimeImmutable $period,
+        \DateTimeImmutable $periodEnd,
+    ): array {
         $startRaw = $employment['actual_start_date'] ?? $employment['start_date'];
         if (!is_string($startRaw) || $startRaw === '') {
             return [null, null, 0];
@@ -806,6 +827,38 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             return [null, null, 0];
         }
         return [$start, $end, $start->diff($end)->days + 1];
+    }
+
+    /**
+     * Sjednaný fond (10260) u dohody.
+     *
+     * Pokyny MPSV: „v případě zaměstnanců pracujících na základě dohody
+     * o pracích konaných mimo pracovní poměr se uvede předpokládaný rozsah
+     * pracovní doby v příslušném měsíci včetně plánované dovolené". Dohoda
+     * nemá evidenční interval (10265 = 0), takže se plán směn sčítá přes
+     * trvání vztahu v měsíci. Bez jednoznačného rozvrhu je nejlepším
+     * předpokladem odpracovaná doba — návrh potvrzuje účetní jako každý jiný
+     * a dohoda bez rozvrhu kvůli němu nesmí zůstat neschválitelná.
+     *
+     * @param array<string,mixed> $employment
+     * @param list<array<string,mixed>> $calendars
+     * @param array{minutes:int,days:int,overtime_minutes:int} $worked
+     * @return array{int,list<array<string,string>>}
+     */
+    private static function agreementFundMinutes(
+        array $employment,
+        \DateTimeImmutable $period,
+        \DateTimeImmutable $periodEnd,
+        array $calendars,
+        array $worked,
+    ): array {
+        [$from, $to] = self::employmentInterval($employment, $period, $periodEnd);
+        if ($from === null || $calendars === []) {
+            return [$worked['minutes'], []];
+        }
+        [$planned, $issues] = self::agreedFundMinutes($calendars, $from, $to);
+
+        return $issues === [] ? [$planned, []] : [$worked['minutes'], []];
     }
 
     /**
