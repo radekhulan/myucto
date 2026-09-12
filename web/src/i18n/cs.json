@@ -3762,6 +3762,12 @@
           "none": "Ne, nikdo další děti nevyživuje",
           "present": "Ano, vyživuje je i jiná osoba"
         },
+        "credit_status": {
+          "claimed": "Zaměstnanec",
+          "claimed_by_other": "Jiná osoba v domácnosti (pořadí N)"
+        },
+        "order_claimed_by_other": "Pořadí {order} v domácnosti · uplatňuje jiná osoba",
+        "credit_claimed_by_other": "Zvýhodnění uplatňuje jiná osoba v domácnosti, u tohoto zaměstnance se neuplatní.",
         "blockers": {
           "relation_not_child": "Měsíční zvýhodnění náleží jen dítěti.",
           "evidence_unverified": "Chybí doklad k nároku — zvýhodnění se neuplatní.",
@@ -3789,7 +3795,10 @@
           "student": "Zletilé dítě soustavně studuje (do 26 let)",
           "note": "Poznámka",
           "child_order": "Pořadí dítěte",
-          "child_order_hint": "Pořadí určuje výši zvýhodnění a je vlastností uplatnění u tohoto poplatníka, ne vlastností dítěte.",
+          "child_order_hint": "Pořadí dítěte ve společně hospodařící domácnosti. Určuje výši zvýhodnění a počítají se do něj i děti, které uplatňuje druhý rodič.",
+          "credit_status": "Zvýhodnění na dítě uplatňuje",
+          "credit_status_hint": "Uplatňuje-li dítě druhý rodič, zadejte ho s pořadím, které v domácnosti má. Do hlášení pro ČSSZ půjde s kódem N a ostatní děti tak dostanou správnou sazbu.",
+          "other_caregiver_required_hint": "Uveďte osobu, která zvýhodnění na toto dítě uplatňuje. ČSSZ ji v měsíčním hlášení vyžaduje.",
           "reason": "Důvod uplatnění",
           "evidence_status": "Stav doložení",
           "evidence_reference": "Odkaz na doklad (volitelné)",

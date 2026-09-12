@@ -835,6 +835,90 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
+    /**
+     * Dítě „N" (10440): první dítě domácnosti uplatňuje partner, zaměstnanec
+     * druhé. Podání musí projít XSD a kontrolami 110 (pořadí 2 jen spolu
+     * s nižším pořadím nebo „N") a 127 (u 10453 = ANO jmenovaná osoba).
+     * Protipříklad bez „N" ukazuje, že kontrola 110 stejné podání odmítne.
+     */
+    public function testChildClaimedByOtherIsSerializedAsNAndPassesControls110And127(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $claimed = $payload['people'][0]['child_credit_evidence']['children'][0];
+        $claimed['order'] = 2;
+        $payload['people'][0]['child_credit_evidence'] = [
+            'other_household_caregiver_status' => 'present',
+            'other_household_caregivers' => [[
+                'given_name' => 'Petr',
+                'family_name' => 'Novák',
+                'birth_date' => '1990-04-11',
+            ]],
+            'children' => [
+                [
+                    'reference' => 'dependant-2',
+                    'identity' => [
+                        'given_name' => 'Eva',
+                        'family_name' => 'Nováková',
+                        'birth_date' => '2013-01-01',
+                    ],
+                    'order' => 1,
+                    'ztp_p' => false,
+                    'credit_claimed' => false,
+                ],
+                $claimed,
+            ],
+        ];
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertStringContainsString('<form:poradi>N</form:poradi>', $xml);
+        self::assertStringContainsString('<form:poradi>2</form:poradi>', $xml);
+        self::assertStringContainsString('<form:vyzivujeJinaOsoba>true</form:vyzivujeJinaOsoba>', $xml);
+        self::assertSame([], $this->failedControls($xml, [110, 127]));
+
+        $withoutN = $this->payloadWithChildCredit();
+        $withoutN['people'][0]['child_credit_evidence']['children'][0]['order'] = 2;
+        $gapXml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($withoutN),
+            $this->envelope(),
+        )['xml'];
+
+        self::assertSame([110], $this->failedControls($gapXml, [110, 127]));
+    }
+
+    /**
+     * @param list<int> $controlIds
+     * @return list<int>
+     */
+    private function failedControls(string $xml, array $controlIds): array
+    {
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate($xml, new JmhzControlContext('2026-08-14', schemaValidated: true));
+        $evaluated = [];
+        $failed = [];
+        foreach ($report->findings as $finding) {
+            if (!in_array($finding->controlId, $controlIds, true)) {
+                continue;
+            }
+            $evaluated[$finding->controlId] = true;
+            if ($finding->outcome === \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome::Failed) {
+                $failed[$finding->controlId] = true;
+            }
+        }
+        self::assertSame(
+            $controlIds,
+            array_values(array_intersect($controlIds, array_keys($evaluated))),
+            'Obě kontroly se musí na formulář skutečně vyhodnotit.',
+        );
+        ksort($failed);
+
+        return array_keys($failed);
+    }
+
     /** @return array<string,mixed> */
     private function payloadWithChildCredit(): array
     {

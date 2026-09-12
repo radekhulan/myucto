@@ -160,6 +160,64 @@ final class PayrollDependantValidatorTest extends TestCase
         self::assertSame('1990-04-11', $result['other_caregiver_birth_date']);
     }
 
+    public function testMissingCreditStatusMeansTheEmployeeClaims(): void
+    {
+        self::assertSame(
+            'claimed',
+            $this->validator->validateClaim($this->claim())['credit_status'],
+        );
+    }
+
+    /**
+     * Dítě „N": pořadí v domácnosti drží, zvýhodnění uplatňuje jiná osoba,
+     * kterou nárok jmenuje (10453 = ANO, kontrola 127).
+     */
+    public function testClaimedByOtherIsAccepted(): void
+    {
+        $result = $this->validator->validateClaim($this->claimedByOther());
+
+        self::assertSame('claimed_by_other', $result['credit_status']);
+        self::assertFalse($result['other_claimant_excluded']);
+        self::assertSame('present', $result['other_household_caregiver_status']);
+    }
+
+    public function testClaimedByOtherCannotClaimThatNobodyElseClaims(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('nikdo jiný neuplatňuje');
+        $this->validator->validateClaim(
+            $this->claimedByOther(['other_claimant_excluded' => true]),
+        );
+    }
+
+    public function testClaimedByOtherRequiresTheOtherCaregiver(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('uveďte tu osobu');
+        $this->validator->validateClaim($this->claimedByOther([
+            'other_household_caregiver_status' => 'none',
+            'other_caregiver_given_name' => null,
+            'other_caregiver_family_name' => null,
+            'other_caregiver_birth_date' => null,
+        ]));
+    }
+
+    public function testClaimedByOtherRequiresSharedHousehold(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('společně hospodařící domácnosti');
+        $this->validator->validateClaim(
+            $this->claimedByOther(['shared_household_confirmed' => false]),
+        );
+    }
+
+    public function testUnknownCreditStatusIsRejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('„Zvýhodnění uplatňuje“');
+        $this->validator->validateClaim($this->claim(['credit_status' => 'partner']));
+    }
+
     public function testClaimOrderMustBePositive(): void
     {
         $input = $this->claim(['child_order' => 0]);
@@ -230,5 +288,21 @@ final class PayrollDependantValidatorTest extends TestCase
             'effective_from' => '2026-01-01',
             'effective_to' => null,
         ];
+    }
+
+    /**
+     * @param array<string,mixed> $overrides
+     * @return array<string,mixed>
+     */
+    private function claimedByOther(array $overrides = []): array
+    {
+        return $overrides + $this->claim([
+            'credit_status' => 'claimed_by_other',
+            'other_claimant_excluded' => false,
+            'other_household_caregiver_status' => 'present',
+            'other_caregiver_given_name' => 'Petr',
+            'other_caregiver_family_name' => 'Novák',
+            'other_caregiver_birth_date' => '1990-04-11',
+        ]);
     }
 }

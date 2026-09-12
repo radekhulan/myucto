@@ -354,6 +354,95 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         self::assertSame([], $result['children']);
     }
 
+    /**
+     * § 35c odst. 1 a 9: první dítě domácnosti uplatňuje jiná osoba, zaměstnanec
+     * druhé. Dítě „N" drží pořadí 1, takže mezera nevzniká; do částky nejde,
+     * roční JMHZ ho ale musí uvést (10451).
+     */
+    public function testChildClaimedByOtherFillsTheOrderGap(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [
+                $this->childRow(
+                    'child-a',
+                    1,
+                    '2020-01-01',
+                    null,
+                    otherExcluded: 0,
+                    creditStatus: 'claimed_by_other',
+                ),
+                $this->childRow('child-b', 2, '2020-01-01', null),
+            ],
+            self::YEAR,
+        );
+
+        self::assertSame([], $result['blockers']);
+        self::assertCount(1, $result['children']);
+        self::assertSame('child-b', $result['children'][0]->childReference);
+        self::assertSame(2, $result['children'][0]->order);
+        self::assertSame(
+            [['child_reference' => 'child-a', 'order' => 1, 'months' => range(1, 12)]],
+            $result['claimed_by_other'],
+        );
+    }
+
+    /** Bez dítěte „N" je samotné druhé dítě mezerou v pořadí. */
+    public function testSecondChildAloneStillBlocks(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [$this->childRow('child-b', 2, '2020-01-01', null)],
+            self::YEAR,
+        );
+
+        self::assertSame(
+            [AnnualSettlementBlocker::ChildClaimConflict->value],
+            self::codes($result['blockers']),
+        );
+    }
+
+    /** Kdo uvádí jen děti „N", zvýhodnění nemá — nic se nepočítá ani neblokuje. */
+    public function testOnlyChildrenClaimedByOtherYieldNothing(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [$this->childRow(
+                'child-a',
+                2,
+                '2020-01-01',
+                null,
+                otherExcluded: 0,
+                creditStatus: 'claimed_by_other',
+            )],
+            self::YEAR,
+        );
+
+        self::assertSame([], $result['blockers']);
+        self::assertSame([], $result['children']);
+        self::assertSame([], $result['claimed_by_other']);
+    }
+
+    /** Dítě „N" nesmí zároveň tvrdit, že zvýhodnění nikdo jiný neuplatňuje. */
+    public function testChildClaimedByOtherWithExclusionBlocks(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [
+                $this->childRow(
+                    'child-a',
+                    1,
+                    '2020-01-01',
+                    null,
+                    creditStatus: 'claimed_by_other',
+                ),
+                $this->childRow('child-b', 2, '2020-01-01', null),
+            ],
+            self::YEAR,
+        );
+
+        self::assertContains(
+            AnnualSettlementBlocker::ChildClaimConflict->value,
+            self::codes($result['blockers']),
+        );
+    }
+
     /** @return array<string,mixed> */
     private function creditRow(
         string $kind,
@@ -379,10 +468,12 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         int $sharedHousehold = 1,
         int $otherExcluded = 1,
         string $evidence = 'verified',
+        string $creditStatus = 'claimed',
     ): array {
         return [
             'child_reference' => $reference,
             'child_order' => $order,
+            'credit_status' => $creditStatus,
             'ztp_p' => $ztpP,
             'evidence_status' => $evidence,
             'shared_household_confirmed' => $sharedHousehold,

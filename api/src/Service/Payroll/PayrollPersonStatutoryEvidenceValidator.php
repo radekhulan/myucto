@@ -493,7 +493,7 @@ final class PayrollPersonStatutoryEvidenceValidator
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
         $this->assertEvidenceAllowed($status === 'verified', $evidence, 'zvýhodnění na dítě');
 
-        return $this->baseInterval($row) + [
+        $normalized = $this->baseInterval($row) + [
             'child_reference' => $this->canonical($row, 'child_reference'),
             'child_order' => $this->positiveInt($row, 'child_order'),
             'ztp_p' => $this->bool($row, 'ztp_p'),
@@ -505,6 +505,43 @@ final class PayrollPersonStatutoryEvidenceValidator
             'other_claimant_excluded' => $this->bool($row, 'other_claimant_excluded'),
             'evidence_reference' => $evidence,
         ] + $this->taxChildOtherCaregiver($row);
+
+        return $normalized + $this->taxChildCreditStatus($row, $normalized);
+    }
+
+    /**
+     * Dítě s pořadím „N" (migrace 1818): drží pořadí v domácnosti, zvýhodnění
+     * na ně uplatňuje jiná osoba.
+     *
+     * Klíč `credit_status` se do snímku zapisuje JEN u „N". Uplatňované dítě
+     * zůstává ve snímku bajtově stejné jako před migrací — jinak by se u všech
+     * dosavadních zaměstnanců s dětmi změnil otisk vstupu mzdové revize, aniž
+     * by se změnilo cokoli, co výpočet čte. Chybějící klíč proto čtenáři
+     * vykládají jako `claimed`.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $normalized
+     * @return array<string,string>
+     */
+    private function taxChildCreditStatus(array $row, array $normalized): array
+    {
+        $status = ($row['credit_status'] ?? null) === null
+            ? 'claimed'
+            : $this->enum($row, 'credit_status', ['claimed', 'claimed_by_other']);
+        if ($status === 'claimed') {
+            return [];
+        }
+        if ($normalized['other_claimant_excluded'] === true
+            || $normalized['shared_household_confirmed'] !== true
+            || $normalized['other_household_caregiver_status'] !== 'present'
+        ) {
+            throw new InvalidArgumentException(
+                'Dítě, na které zvýhodnění uplatňuje jiná osoba, musí mít potvrzenou'
+                . ' společnou domácnost a jmenovanou jinou vyživující osobu.',
+            );
+        }
+
+        return ['credit_status' => $status];
     }
 
     /**

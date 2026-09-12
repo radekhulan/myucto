@@ -73,6 +73,7 @@ function response(overrides: Partial<PayrollDependantsResponse> = {}): PayrollDe
         id: 91,
         child_reference: 'dependant-7',
         child_order: 1,
+        credit_status: 'claimed',
         claim_reason: 'own_household',
         ztp_p: false,
         evidence_status: 'unverified',
@@ -249,6 +250,54 @@ describe('PayrollPersonDependantsPanel', () => {
 
     expect(wrapper.find('[data-test="dependant-error"]').text())
       .toContain('Pořadí dítěte 1 už je obsazené.')
+  })
+
+  it('dítě „N" skryje tvrzení, že nikdo jiný neuplatňuje, a pošle jinou osobu', async () => {
+    mocks.createPersonDependantClaim.mockResolvedValue(response())
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
+    await wrapper.find('[data-test="add-claim-7"]').trigger('click')
+
+    expect(wrapper.find('[data-test="claim-other-claimant-excluded"]').exists()).toBe(true)
+    await wrapper.find('[data-test="claim-credit-status-claimed_by_other"]').trigger('change')
+
+    expect(wrapper.find('[data-test="claim-other-claimant-excluded"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="claim-other-caregiver-required"]').exists()).toBe(true)
+    await wrapper.find('[data-test="claim-caregiver-given-name"]').setValue('Petr')
+    await wrapper.find('[data-test="claim-caregiver-family-name"]').setValue('Novák')
+    await wrapper.find('[data-test="claim-caregiver-birth-date"]').setValue('1990-04-11')
+    await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-01-01')
+    await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.createPersonDependantClaim).toHaveBeenCalledWith(21, 7, expect.objectContaining({
+      credit_status: 'claimed_by_other',
+      other_claimant_excluded: false,
+      shared_household_confirmed: true,
+      other_household_caregiver_status: 'present',
+      other_caregiver_given_name: 'Petr',
+      other_caregiver_family_name: 'Novák',
+      other_caregiver_birth_date: '1990-04-11',
+      ztp_p: false,
+    }))
+  })
+
+  it('u nároku „N" ukáže, že zvýhodnění uplatňuje jiná osoba', async () => {
+    const base = response()
+    base.dependants[0].claims[0] = {
+      ...base.dependants[0].claims[0],
+      credit_status: 'claimed_by_other',
+      blockers: [],
+    }
+    mocks.personDependants.mockResolvedValue(base)
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.find('tbody [aria-expanded]').trigger('click')
+
+    const claim = wrapper.find('[data-test="claim-91"]')
+    expect(claim.text()).toContain('payroll.people.dependants.order_claimed_by_other')
+    expect(claim.text()).toContain('payroll.people.dependants.credit_claimed_by_other')
   })
 
   it('hides write actions without permission', async () => {

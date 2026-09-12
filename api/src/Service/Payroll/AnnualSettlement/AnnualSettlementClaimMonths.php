@@ -144,9 +144,21 @@ final class AnnualSettlementClaimMonths
     }
 
     /**
+     * Roční protějšek {@see \MyInvoice\Service\Payroll\IncomeTax\MonthlyEmploymentIncomeTaxCalculator}
+     * — obě větve musí o pořadí rozhodovat stejně.
+     *
+     * Pořadí se určuje za společně hospodařící domácnost (§ 35c odst. 1), a to
+     * včetně dětí s „N" (`credit_status = claimed_by_other`), na které
+     * zvýhodnění uplatňuje jiná osoba. Ty proto vstupují do kontroly pořadí,
+     * ale ne do částky: v `children` jsou jen děti s aspoň jedním uplatněným
+     * měsícem, děti uvedené jen s „N" vrací zvlášť `claimed_by_other` — roční
+     * JMHZ je musí uvést s maskou „N" (10451), aby pořadí ostatních dětí
+     * nestálo na mezeře.
+     *
      * @param list<array<string,mixed>> $rows řádky payroll_person_tax_child_claims
      * @return array{
      *   children:list<AnnualSettlementChildMonths>,
+     *   claimed_by_other:list<array{child_reference:string,order:int,months:list<int>}>,
      *   blockers:list<AnnualSettlementBlocker>
      * }
      */
@@ -170,11 +182,18 @@ final class AnnualSettlementClaimMonths
                 $blockers[] = AnnualSettlementBlocker::ChildEvidenceUnverified;
                 continue;
             }
+            $creditStatus = (string) ($row['credit_status'] ?? 'claimed');
+            if (!in_array($creditStatus, ['claimed', 'claimed_by_other'], true)) {
+                $blockers[] = AnnualSettlementBlocker::ChildClaimConflict;
+                continue;
+            }
+            $claimedByOther = $creditStatus === 'claimed_by_other';
             // § 38l odst. 3 písm. c) a § 35c odst. 9: bez potvrzení o společně
             // hospodařící domácnosti a bez vyloučení souběžného uplatnění druhým
-            // poplatníkem nárok doložený není.
+            // poplatníkem nárok doložený není. U dítěte „N" zvýhodnění druhý
+            // poplatník uplatňuje — tam se naopak vyloučení tvrdit nesmí.
             if ((int) ($row['shared_household_confirmed'] ?? 0) !== 1
-                || (int) ($row['other_claimant_excluded'] ?? 0) !== 1
+                || (int) ($row['other_claimant_excluded'] ?? 0) !== ($claimedByOther ? 0 : 1)
             ) {
                 $blockers[] = AnnualSettlementBlocker::ChildClaimConflict;
                 continue;
@@ -186,10 +205,19 @@ final class AnnualSettlementClaimMonths
             }
             $ztpP = (int) ($row['ztp_p'] ?? 0) === 1;
             if (!isset($byChild[$reference])) {
-                $byChild[$reference] = ['orders' => [], 'months' => [], 'ztp_p' => []];
+                $byChild[$reference] = [
+                    'orders' => [],
+                    'months' => [],
+                    'ztp_p' => [],
+                    'other_months' => [],
+                ];
             }
             $byChild[$reference]['orders'][$order] = true;
             foreach ($covered as $month) {
+                if ($claimedByOther) {
+                    $byChild[$reference]['other_months'][$month] = true;
+                    continue;
+                }
                 $byChild[$reference]['months'][$month] = true;
                 if ($ztpP) {
                     $byChild[$reference]['ztp_p'][$month] = true;
@@ -199,6 +227,7 @@ final class AnnualSettlementClaimMonths
 
         ksort($byChild);
         $children = [];
+        $claimedByOtherChildren = [];
         $orders = [];
         foreach ($byChild as $reference => $data) {
             // Pořadí pro určení výše (§ 35c odst. 1) musí být v rámci roku
@@ -213,7 +242,22 @@ final class AnnualSettlementClaimMonths
                 $blockers[] = AnnualSettlementBlocker::ChildClaimConflict;
                 continue;
             }
+            // Týž měsíc nemůže být uplatněný a zároveň „N".
+            if (array_intersect_key($data['months'], $data['other_months']) !== []) {
+                $blockers[] = AnnualSettlementBlocker::ChildClaimConflict;
+                continue;
+            }
             $orders[$order] = true;
+            if ($data['months'] === []) {
+                $otherMonths = array_map('intval', array_keys($data['other_months']));
+                sort($otherMonths);
+                $claimedByOtherChildren[] = [
+                    'child_reference' => (string) $reference,
+                    'order' => $order,
+                    'months' => $otherMonths,
+                ];
+                continue;
+            }
             $claimedMonths = array_map('intval', array_keys($data['months']));
             sort($claimedMonths);
             $ztpPClaimedMonths = array_map('intval', array_keys($data['ztp_p']));
@@ -230,13 +274,20 @@ final class AnnualSettlementClaimMonths
 
         // Pořadí musí tvořit souvislou řadu od jedné — stejná kontrola jako
         // v měsíční větvi (`tax-child-order-gap`). Mezera znamená, že se buď
-        // na dítě zapomnělo, nebo je pořadí špatně; obojí mění částku.
+        // na dítě zapomnělo, nebo je pořadí špatně; obojí mění částku. Kdo
+        // žádné dítě neuplatňuje, zvýhodnění nemá a pořadí se neposuzuje.
         ksort($orders);
-        if ($orders !== [] && array_keys($orders) !== range(1, count($orders))) {
+        if ($children !== []
+            && array_keys($orders) !== range(1, count($orders))
+        ) {
             $blockers[] = AnnualSettlementBlocker::ChildClaimConflict;
         }
 
-        return ['children' => $children, 'blockers' => self::unique($blockers)];
+        return [
+            'children' => $children,
+            'claimed_by_other' => $children === [] ? [] : $claimedByOtherChildren,
+            'blockers' => self::unique($blockers),
+        ];
     }
 
     /**

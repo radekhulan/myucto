@@ -846,6 +846,11 @@ class AnnualTaxCertificateSnapshotBuilder
             'statutory_evidence.income_tax.child_claims',
         ) as $claim) {
             $claim = $this->object($claim, 'child_claims[]');
+            // Dítě „N" drží jen pořadí v domácnosti; zvýhodnění na ně
+            // uplatňuje jiná osoba, takže do řádku 11 potvrzení nepatří.
+            if (($claim['credit_status'] ?? 'claimed') === 'claimed_by_other') {
+                continue;
+            }
             $reference = $claim['child_reference'] ?? null;
             $order = $claim['child_order'] ?? null;
             if (!is_string($reference)

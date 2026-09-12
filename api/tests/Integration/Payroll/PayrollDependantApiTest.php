@@ -397,6 +397,124 @@ final class PayrollDependantApiTest extends TestCase
         );
     }
 
+    /**
+     * § 35c odst. 9 a pokyny MPSV k 10440: oba rodiče jsou u téhož
+     * zaměstnavatele. První dítě uplatňuje první rodič, druhý rodič ho uvádí
+     * s „N" a sám uplatňuje druhé dítě — se sazbou DRUHÉHO dítěte. Dřív druhý
+     * rodič dítě zapsat nesměl a pořadí 2 bez pořadí 1 zastavilo mzdu.
+     */
+    public function testBothParentsOfOneEmployerRecordTheSameChildWithOrderN(): void
+    {
+        $first = $this->createChild();
+        self::assertSame(200, $this->postClaim($first, $this->claim())->getStatusCode());
+
+        $sharedChild = $this->dependantIdByName(
+            $this->post($this->supplierId, $this->secondEmployeeId, $this->child()),
+            'Syntetické Dítě A',
+        );
+        $response = $this->postClaimFor(
+            $this->secondEmployeeId,
+            $sharedChild,
+            $this->claimedByOtherClaim(),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        $ownChild = $this->dependantIdByName(
+            $this->post($this->supplierId, $this->secondEmployeeId, $this->child([
+                'full_name' => 'Syntetické Dítě B',
+                'birth_date' => '2015-02-02',
+                'birth_number' => self::CHILD_B,
+                'student' => false,
+                'existence_from' => '2015-02-02',
+            ])),
+            'Syntetické Dítě B',
+        );
+        $response = $this->postClaimFor(
+            $this->secondEmployeeId,
+            $ownChild,
+            $this->claim(['child_order' => 2] + $this->otherCaregiver()),
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        $snapshot = $this->statutory->snapshot(
+            $this->supplierId,
+            $this->secondEmployeeId,
+            '2026-06-30',
+        );
+        self::assertIsArray($snapshot);
+        $rows = $snapshot['income_tax']['child_claims'];
+        self::assertCount(2, $rows);
+        self::assertSame('claimed_by_other', $rows[0]['credit_status']);
+        self::assertArrayNotHasKey('credit_status', $rows[1]);
+
+        $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-06-30',
+            employeeReference: 'synthetic-employee',
+            relationships: [new EmploymentRelationshipTaxInput(
+                'employment',
+                'synthetic-payer',
+                EmploymentRelationshipKind::Employment,
+                [new IncomeTaxComponent('synthetic-income', 4_000_000)],
+            )],
+            declarations: [new TaxDeclarationEvidence(
+                TaxDeclarationStatus::Signed,
+                '2026-01-01',
+                null,
+                'document:tax-declaration',
+            )],
+            residence: new TaxResidenceEvidence(
+                TaxResidence::CzechResident,
+                '2026-01-01',
+                null,
+                'document:tax-residence',
+            ),
+            childClaims: array_map(
+                static fn (array $row): TaxChildClaim => new TaxChildClaim(
+                    (string) $row['child_reference'],
+                    (int) $row['child_order'],
+                    (bool) $row['ztp_p'],
+                    (string) $row['effective_from'],
+                    $row['effective_to'] === null ? null : (string) $row['effective_to'],
+                    TaxEvidenceStatus::from((string) $row['evidence_status']),
+                    (bool) $row['shared_household_confirmed'],
+                    (bool) $row['other_claimant_excluded'],
+                    (string) $row['evidence_reference'],
+                    ($row['credit_status'] ?? 'claimed') === 'claimed',
+                ),
+                $rows,
+            ),
+        ));
+
+        self::assertSame([], $result->issues);
+        self::assertSame(186_000, $result->claimedChildCreditMinorUnits);
+    }
+
+    /** Dva rodiče, kteří oba tvrdí, že dítě uplatňuje ten druhý, jsou rozpor. */
+    public function testSameChildCannotBeMarkedClaimedByOtherByBothParents(): void
+    {
+        $first = $this->createChild();
+        self::assertSame(
+            200,
+            $this->postClaim($first, $this->claimedByOtherClaim())->getStatusCode(),
+        );
+
+        $second = $this->dependantIdByName(
+            $this->post($this->supplierId, $this->secondEmployeeId, $this->child()),
+            'Syntetické Dítě A',
+        );
+        $response = $this->postClaimFor(
+            $this->secondEmployeeId,
+            $second,
+            $this->claimedByOtherClaim(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString(
+            'Zvýhodnění musí jeden z nich uplatňovat',
+            (string) $this->json($response)['error']['message'],
+        );
+    }
+
     public function testChangeAfterApprovedRevisionCreatesNewVersionAndKeepsHistory(): void
     {
         $dependantId = $this->createChild();
@@ -675,6 +793,55 @@ final class PayrollDependantApiTest extends TestCase
             'effective_from' => '2026-01-01',
             'effective_to' => null,
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function otherCaregiver(): array
+    {
+        return [
+            'other_household_caregiver_status' => 'present',
+            'other_caregiver_given_name' => 'Syntetický',
+            'other_caregiver_family_name' => 'Poplatník',
+            'other_caregiver_birth_date' => '1980-01-01',
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function claimedByOtherClaim(): array
+    {
+        return $this->claim([
+            'credit_status' => 'claimed_by_other',
+            'other_claimant_excluded' => false,
+        ] + $this->otherCaregiver());
+    }
+
+    private function dependantIdByName(Response $response, string $fullName): int
+    {
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        foreach ($this->json($response)['dependants'] as $dependant) {
+            if ($dependant['full_name'] === $fullName) {
+                return (int) $dependant['id'];
+            }
+        }
+        self::fail("Vyživovaná osoba {$fullName} chybí.");
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function postClaimFor(int $employeeId, int $dependantId, array $payload): Response
+    {
+        return $this->action->createClaim(
+            $this->request(
+                'POST',
+                $this->supplierId,
+                "/api/payroll/people/{$employeeId}/dependants/{$dependantId}/claims",
+                $payload,
+            ),
+            new Response(),
+            [
+                'id' => (string) $employeeId,
+                'dependantId' => (string) $dependantId,
+            ],
+        );
     }
 
     /** @param array<string,mixed> $overrides */

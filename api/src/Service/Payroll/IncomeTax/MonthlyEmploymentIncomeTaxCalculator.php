@@ -529,7 +529,20 @@ final class MonthlyEmploymentIncomeTaxCalculator
         ];
     }
 
-    /** @return array{amount:int,issues:list<string>} */
+    /**
+     * Daňové zvýhodnění na děti podle § 35c.
+     *
+     * Pořadí se určuje za společně hospodařící domácnost, proto se kontrola
+     * pořadí (souvislá řada, žádné dvojí obsazení) dělá přes VŠECHNY děti
+     * domácnosti včetně těch s „N", na které zvýhodnění uplatňuje jiná osoba.
+     * Částka vzniká jen z dětí, které uplatňuje tento poplatník, a to sazbou
+     * podle jejich pořadí v domácnosti.
+     *
+     * Zaměstnanec, který v měsíci uvádí jen děti „N", zvýhodnění neuplatňuje
+     * vůbec — vrací se nula bez překážky, stejně jako bez dětí.
+     *
+     * @return array{amount:int,issues:list<string>}
+     */
     private function resolveChildren(
         MonthlyEmploymentIncomeTaxInput $input,
         ?TaxDeclarationEvidence $declaration,
@@ -539,6 +552,13 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $input->childClaims,
             static fn (TaxChildClaim $claim): bool => $claim->isEffective($input->calculationDate),
         ));
+        $claimed = array_values(array_filter(
+            $active,
+            static fn (TaxChildClaim $claim): bool => $claim->creditClaimed,
+        ));
+        if ($claimed === []) {
+            return ['amount' => 0, 'issues' => []];
+        }
         $issues = [];
         $orders = [];
         $references = [];
@@ -549,7 +569,9 @@ final class MonthlyEmploymentIncomeTaxCalculator
             if (!$claim->sharedHouseholdConfirmed) {
                 $issues[] = 'tax-child-shared-household-unverified';
             }
-            if (!$claim->otherClaimantExcluded) {
+            // U dítěte „N" druhý poplatník zvýhodnění uplatňuje právě podle
+            // § 35c odst. 9 — souběh tu je vyřešený tím, kdo ho uplatňuje.
+            if ($claim->creditClaimed && !$claim->otherClaimantExcluded) {
                 $issues[] = 'tax-child-concurrent-claim-unresolved';
             }
             if (isset($orders[$claim->order])) {
@@ -575,7 +597,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
         }
 
         $amount = 0;
-        foreach ($active as $claim) {
+        foreach ($claimed as $claim) {
             $credit = $policy->money(
                 ChildCreditRateKey::forOrder($claim->order),
             );

@@ -1580,8 +1580,15 @@ final class JmhzScenario1DocumentResolver
         $applied = $tax['applied_child_credit_minor_units'] ?? null;
         $frozen = $this->object($evidence);
         $children = $this->rows($frozen['children'] ?? null);
+        // Dítě „N" (`credit_claimed = false`) nese jen pořadí v domácnosti,
+        // zvýhodnění na ně uplatňuje jiná osoba. Samo o sobě blok nezakládá:
+        // kdo uvádí jen děti „N", zvýhodnění neuplatňuje a blok se nepíše.
+        $claimedChildren = array_values(array_filter(
+            $children,
+            static fn (array $child): bool => ($child['credit_claimed'] ?? true) !== false,
+        ));
         if (!is_int($claimed) || $claimed <= 0) {
-            if ($children !== []) {
+            if ($claimedChildren !== []) {
                 // Zmrazený nárok bez částky znamená, že se podklad a výpočet
                 // rozešly — vykázat jedno z toho by zakrylo, které je špatně.
                 $blockers[] = $this->blocker(
@@ -1616,7 +1623,7 @@ final class JmhzScenario1DocumentResolver
 
             return null;
         }
-        if ($children === []) {
+        if ($claimedChildren === []) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_child_credit_source_inconsistent',
                 'person',
@@ -1661,10 +1668,13 @@ final class JmhzScenario1DocumentResolver
             $caregivers[] = $caregiver;
         }
         // Kontrola 127 (blocking): u 10453 = ANO musí být jiná osoba
-        // pojmenovaná (10431, 10432, 10433/10434).
+        // pojmenovaná (10431, 10432, 10433/10434). Dítě „N" samo tvrdí, že
+        // zvýhodnění uplatňuje jiná osoba v téže domácnosti, takže 10453 musí
+        // být ANO a ta osoba jmenovaná.
         if ($caregivers === null
             || ($status === 'present' && $caregivers === [])
             || ($status === 'none' && $caregivers !== [])
+            || ($status !== 'present' && count($claimedChildren) !== count($children))
         ) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_child_credit_caregiver_identity_missing',
@@ -1701,10 +1711,17 @@ final class JmhzScenario1DocumentResolver
             // a každé další": katalog kontrol MH u kontroly 110 výslovně
             // říká, že čtvrté a další dítě má pořadí 3. Kolizi hlídá ČSSZ jen
             // u pořadí 1 a 2, trojka se opakovat smí.
+            //
+            // Dítě „N" má v evidenci pořadí v domácnosti (musí být platné),
+            // ale do podání jde jako „N" — pokyny MPSV k 10440: dítě ve
+            // společné domácnosti, na které poplatník zvýhodnění neuplatňuje,
+            // „musí uvést s kódem N". Díky němu projde kontrola 110 u dítěte
+            // s pořadím 2 nebo 3, jehož nižší pořadí uplatňuje druhý rodič.
+            $creditClaimed = ($child['credit_claimed'] ?? true) !== false;
             $reportedOrder = is_int($order) ? min($order, 3) : null;
             if ($reportedOrder === null
                 || $reportedOrder < 1
-                || ($reportedOrder < 3 && isset($orders[$reportedOrder]))
+                || ($creditClaimed && $reportedOrder < 3 && isset($orders[$reportedOrder]))
             ) {
                 $blockers[] = $this->blocker(
                     'jmhz_scenario1_child_order_unsupported',
@@ -1715,7 +1732,9 @@ final class JmhzScenario1DocumentResolver
 
                 return null;
             }
-            $orders[$reportedOrder] = true;
+            if ($creditClaimed) {
+                $orders[$reportedOrder] = true;
+            }
             $normalized[] = [
                 'identity' => [
                     'given_name' => trim((string) $identity['given_name']),
@@ -1723,7 +1742,7 @@ final class JmhzScenario1DocumentResolver
                     'birth_date' => $identity['birth_date'],
                 ],
                 'ztp_p' => ($child['ztp_p'] ?? null) === true,
-                'order' => (string) $reportedOrder,
+                'order' => $creditClaimed ? (string) $reportedOrder : 'N',
             ];
         }
 

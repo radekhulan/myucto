@@ -419,12 +419,20 @@ final class AnnualTaxSettlementService
         if (!$this->settlements->childJmhzEvidenceIsComplete(
             $supplierId,
             $employeeId,
-            array_map(
-                static fn (AnnualSettlementChildMonths $child): string => $child->childReference,
-                $children['children'],
-            ),
+            [
+                ...array_map(
+                    static fn (AnnualSettlementChildMonths $child): string => $child->childReference,
+                    $children['children'],
+                ),
+                ...array_column($children['claimed_by_other'], 'child_reference'),
+            ],
             $requestRow,
-        )) {
+        )
+            // Dítě „N" tvrdí, že zvýhodnění uplatňuje jiná osoba v téže
+            // domácnosti — roční JMHZ (10453) ji pak musí jmenovat.
+            || ($children['claimed_by_other'] !== []
+                && ($requestRow['other_household_caregiver_status'] ?? null) !== 'present')
+        ) {
             $blockers[] = AnnualSettlementBlocker::ChildJmhzEvidenceIncomplete;
         }
 
@@ -483,12 +491,19 @@ final class AnnualTaxSettlementService
         );
 
         $result = $this->calculator->calculate($input, $rates, $this->unique($blockers));
+        $childRows = $this->childRows($result);
+        if ($childRows !== []) {
+            $childRows = [
+                ...$childRows,
+                ...$this->claimedByOtherChildRows($children['claimed_by_other']),
+            ];
+        }
 
         return [
             'result' => $result,
             'request' => $requestPayload,
             'credit_rows' => $this->creditRows($result),
-            'child_rows' => $this->childRows($result),
+            'child_rows' => $childRows,
             'certificates' => self::certificateRows($certificates),
             'already_settled' => $settled,
         ];
@@ -631,6 +646,37 @@ final class AnnualTaxSettlementService
                     $child['ztp_p_claimed_months'] ?? null,
                 ) ? array_values($child['ztp_p_claimed_months']) : [],
                 'amount_minor_units' => (int) ($child['amount_minor_units'] ?? 0),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Děti „N" pro roční JMHZ: uvádí se u nich pořadí „N" ve všech měsících
+     * (10451), aby pořadí uplatněných dětí netvořilo mezeru. Částka je nula
+     * a do výpočtu nevstupují.
+     *
+     * @param list<array{child_reference:string,order:int,months:list<int>}> $children
+     * @return list<array<string,mixed>>
+     */
+    private function claimedByOtherChildRows(array $children): array
+    {
+        $rows = [];
+        foreach ($children as $child) {
+            $rows[] = [
+                'label' => sprintf(
+                    '%d. dítě (zvýhodnění uplatňuje jiná osoba)',
+                    $child['order'],
+                ),
+                'child_reference' => $child['child_reference'],
+                'order' => $child['order'],
+                'months' => 0,
+                'claimed_months' => [],
+                'ztp_p_months' => 0,
+                'ztp_p_claimed_months' => [],
+                'amount_minor_units' => 0,
+                'credit_claimed' => false,
             ];
         }
 

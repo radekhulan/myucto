@@ -561,6 +561,7 @@ final class PayrollDependantRepository
                         'dependant_id' => $dependantId,
                         'claim_id' => $id,
                         'child_order' => $data['child_order'],
+                        'credit_status' => $data['credit_status'],
                         'ztp_p' => $data['ztp_p'],
                         'effective_from' => $data['effective_from'],
                         'effective_to' => $data['effective_to'],
@@ -676,7 +677,8 @@ final class PayrollDependantRepository
                 );
                 $update = $this->db->pdo()->prepare(
                     'UPDATE payroll_person_tax_child_claims
-                        SET child_order = ?, claim_reason = ?, ztp_p = ?,
+                        SET child_order = ?, credit_status = ?,
+                            claim_reason = ?, ztp_p = ?,
                             evidence_status = ?, evidence_reference = ?,
                             shared_household_confirmed = ?,
                             other_claimant_excluded = ?,
@@ -691,6 +693,7 @@ final class PayrollDependantRepository
                 );
                 $update->execute([
                     $data['child_order'],
+                    $data['credit_status'],
                     $data['claim_reason'],
                     (int) $data['ztp_p'],
                     $data['evidence_status'],
@@ -729,6 +732,7 @@ final class PayrollDependantRepository
                         'dependant_id' => $dependantId,
                         'claim_id' => $claimId,
                         'child_order' => $data['child_order'],
+                        'credit_status' => $data['credit_status'],
                         'effective_to' => $data['effective_to'],
                     ],
                     $ip,
@@ -843,13 +847,13 @@ final class PayrollDependantRepository
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_person_tax_child_claims
                 (supplier_id, employee_id, dependant_id, child_reference,
-                 child_order, claim_reason, ztp_p, evidence_status,
+                 child_order, credit_status, claim_reason, ztp_p, evidence_status,
                  shared_household_confirmed, other_claimant_excluded,
                  other_household_caregiver_status, other_caregiver_given_name,
                  other_caregiver_family_name, other_caregiver_birth_date,
                  effective_from, effective_to, evidence_reference,
                  created_by, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $insert->execute([
             $supplierId,
@@ -857,6 +861,7 @@ final class PayrollDependantRepository
             $dependantId,
             $this->childReference($dependantId),
             $data['child_order'],
+            $data['credit_status'],
             $data['claim_reason'],
             (int) $data['ztp_p'],
             $data['evidence_status'],
@@ -980,6 +985,11 @@ final class PayrollDependantRepository
         }
 
         if ($dependant['birth_number_hash'] !== null) {
+            // § 35c odst. 9: v jednom měsíci smí dítě uplatnit jen jeden
+            // poplatník. Oba rodiče u téhož zaměstnavatele ale mít totéž dítě
+            // v evidenci smí — jeden ho uplatňuje, druhý ho uvádí s „N". Kolizí
+            // je proto jen dvojice se STEJNÝM stavem: dva uplatňující, nebo dva,
+            // kteří oba tvrdí, že uplatňuje ten druhý.
             $shared = $this->db->pdo()->prepare(
                 'SELECT claim.id
                    FROM payroll_person_tax_child_claims claim
@@ -989,6 +999,7 @@ final class PayrollDependantRepository
                   WHERE claim.supplier_id = ?
                     AND claim.employee_id <> ?
                     AND person.birth_number_hash = ?
+                    AND claim.credit_status = ?
                     AND claim.superseded_by_id IS NULL
                     AND claim.effective_from <= ?
                     AND COALESCE(claim.effective_to, ?) >= ?
@@ -998,14 +1009,19 @@ final class PayrollDependantRepository
                 $supplierId,
                 $employeeId,
                 $dependant['birth_number_hash'],
+                $data['credit_status'],
                 $to,
                 self::OPEN_END,
                 $data['effective_from'],
             ]);
             if ($shared->fetchColumn() !== false) {
                 throw new \InvalidArgumentException(
-                    'Totéž dítě už ve stejném období uplatňuje jiný poplatník'
-                    . ' u tohoto zaměstnavatele.',
+                    $data['credit_status'] === 'claimed_by_other'
+                        ? 'Totéž dítě už ve stejném období uvádí jiný poplatník'
+                            . ' u tohoto zaměstnavatele jako uplatňované někým jiným.'
+                            . ' Zvýhodnění musí jeden z nich uplatňovat.'
+                        : 'Totéž dítě už ve stejném období uplatňuje jiný poplatník'
+                            . ' u tohoto zaměstnavatele.',
                 );
             }
         }
@@ -1055,6 +1071,7 @@ final class PayrollDependantRepository
     private function substantiveChange(array $claim, array $data): bool
     {
         return (int) $claim['child_order'] !== $data['child_order']
+            || (string) ($claim['credit_status'] ?? 'claimed') !== $data['credit_status']
             || (bool) $claim['ztp_p'] !== $data['ztp_p']
             || (string) $claim['evidence_status'] !== $data['evidence_status']
             || ($claim['evidence_reference'] === null
@@ -1130,8 +1147,8 @@ final class PayrollDependantRepository
         int $claimId,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, child_order, claim_reason, ztp_p, evidence_status,
-                    evidence_reference, shared_household_confirmed,
+            'SELECT id, child_order, credit_status, claim_reason, ztp_p,
+                    evidence_status, evidence_reference, shared_household_confirmed,
                     other_claimant_excluded, other_household_caregiver_status,
                     other_caregiver_given_name, other_caregiver_family_name,
                     other_caregiver_birth_date,
@@ -1155,8 +1172,8 @@ final class PayrollDependantRepository
     private function claimRows(int $supplierId, int $employeeId): array
     {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, dependant_id, child_reference, child_order, claim_reason,
-                    ztp_p, evidence_status, evidence_reference,
+            'SELECT id, dependant_id, child_reference, child_order, credit_status,
+                    claim_reason, ztp_p, evidence_status, evidence_reference,
                     shared_household_confirmed, other_claimant_excluded,
                     other_household_caregiver_status, other_caregiver_given_name,
                     other_caregiver_family_name, other_caregiver_birth_date,
@@ -1192,6 +1209,8 @@ final class PayrollDependantRepository
         $from = (string) $claim['effective_from'];
         $to = $claim['effective_to'] === null ? null : (string) $claim['effective_to'];
         $reference = $this->referenceMonth($effectiveOn, $from, $to);
+        $creditStatus = (string) ($claim['credit_status'] ?? 'claimed');
+        $claimedByOther = $creditStatus === 'claimed_by_other';
 
         $blockers = [];
         if (!in_array($relation, PayrollDependantValidator::CHILD_RELATIONS, true)) {
@@ -1203,7 +1222,9 @@ final class PayrollDependantRepository
         if (!(bool) $claim['shared_household_confirmed']) {
             $blockers[] = 'shared_household_unconfirmed';
         }
-        if (!(bool) $claim['other_claimant_excluded']) {
+        // U dítěte „N" je souběh s druhým poplatníkem samotný smysl záznamu,
+        // ne překážka.
+        if (!$claimedByOther && !(bool) $claim['other_claimant_excluded']) {
             $blockers[] = 'other_claimant_not_excluded';
         }
         if (!$this->hasSignedDeclaration($supplierId, $employeeId, $reference)) {
@@ -1222,6 +1243,7 @@ final class PayrollDependantRepository
             'id' => (int) $claim['id'],
             'child_reference' => (string) $claim['child_reference'],
             'child_order' => (int) $claim['child_order'],
+            'credit_status' => $creditStatus,
             'claim_reason' => $claim['claim_reason'] === null
                 ? null
                 : (string) $claim['claim_reason'],
@@ -1254,11 +1276,13 @@ final class PayrollDependantRepository
             'row_version' => (int) $claim['row_version'],
             'is_frozen' => $frozenThrough !== null && $from <= $frozenThrough,
             'blockers' => $blockers,
-            'credit' => $this->preview->monthly(
-                (int) $claim['child_order'],
-                (bool) $claim['ztp_p'],
-                $reference,
-            ),
+            'credit' => $claimedByOther
+                ? $this->preview->claimedByOther()
+                : $this->preview->monthly(
+                    (int) $claim['child_order'],
+                    (bool) $claim['ztp_p'],
+                    $reference,
+                ),
         ];
     }
 

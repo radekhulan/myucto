@@ -465,7 +465,14 @@ final class AnnualSettlementSnapshotBuilder
             $claimedMonths = self::monthVector($row['claimed_months'] ?? null);
             $ztpMonths = self::monthVector($row['ztp_p_claimed_months'] ?? null);
             $order = self::positiveIntValue($row['order'] ?? null, 'child.order');
-            if ($order < 1 || $order > 20 || $claimedMonths === []) {
+            // Dítě „N": zvýhodnění uplatňuje jiná osoba, uplatněný měsíc nemá
+            // žádný a maska 10451 je proto celá „N".
+            $creditClaimed = ($row['credit_claimed'] ?? true) !== false;
+            if (!$creditClaimed) {
+                $claimedMonths = [];
+                $ztpMonths = [];
+            }
+            if ($order < 1 || $order > 20 || ($creditClaimed && $claimedMonths === [])) {
                 throw new \DomainException(
                     'Roční zúčtování nemá přesný měsíční vektor dítěte.',
                 );

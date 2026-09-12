@@ -1665,12 +1665,20 @@ final class JmhzPreparationSnapshotBuilder
                     'birth_date' => (string) ($claim['other_caregiver_birth_date'] ?? ''),
                 ];
             }
-            $children[] = [
+            $child = [
                 'reference' => $reference,
                 'identity' => $identities[$reference] ?? null,
                 'order' => $order,
                 'ztp_p' => ($claim['ztp_p'] ?? null) === true,
             ];
+            // Dítě „N" (10440): pořadí v domácnosti drží, zvýhodnění na ně
+            // uplatňuje jiná osoba. Klíč se píše JEN u něj, aby zmrazené
+            // podklady s uplatněnými dětmi zůstaly beze změny; chybějící
+            // klíč resolver čte jako uplatněné dítě.
+            if (($claim['credit_status'] ?? 'claimed') === 'claimed_by_other') {
+                $child['credit_claimed'] = false;
+            }
+            $children[] = $child;
         }
         usort(
             $children,

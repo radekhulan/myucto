@@ -756,6 +756,109 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    /**
+     * Pokyny MPSV k 10440: dítě ve společné domácnosti, na které zvýhodnění
+     * uplatňuje jiná osoba, se uvádí s kódem „N". Díky němu je dítě s pořadím
+     * 2 v podání bez mezery a 10453 musí být ANO se jmenovanou osobou.
+     */
+    public function testChildClaimedByOtherIsReportedWithOrderN(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $payload['people'][0]['child_credit_evidence'] = $this->claimedByOtherEvidence();
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($this->preparation(), $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertSame([], array_values(array_filter(
+            array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+            static fn (string $code): bool => str_contains($code, 'child'),
+        )));
+        $childCredit = $resolution->candidate?->payload['people'][0]['summary']['child_credit'];
+        self::assertTrue($childCredit['other_household_caregiver']);
+        self::assertSame(['N', '2'], array_column($childCredit['children'], 'order'));
+    }
+
+    /** Kdo uvádí jen děti „N", zvýhodnění neuplatňuje — blok se nepíše a nic neblokuje. */
+    public function testOnlyChildrenClaimedByOtherWriteNoChildBlock(): void
+    {
+        $payload = $this->preparation()->payload;
+        $payload['people'][0]['employments'][0]['term']['tax_declaration_signed'] = true;
+        $evidence = $this->claimedByOtherEvidence();
+        $evidence['children'] = [$evidence['children'][0]];
+        $payload['people'][0]['child_credit_evidence'] = $evidence;
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($this->preparation(), $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertNotContains(
+            'jmhz_scenario1_child_credit_source_inconsistent',
+            array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+        );
+        self::assertNull(
+            $resolution->candidate?->payload['people'][0]['summary']['child_credit'] ?? null,
+        );
+    }
+
+    /** Dítě „N" bez jmenované jiné osoby by neprošlo kontrolou 127. */
+    public function testChildClaimedByOtherWithoutNamedCaregiverBlocks(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $evidence = $this->claimedByOtherEvidence();
+        $evidence['other_household_caregiver_status'] = 'none';
+        $evidence['other_household_caregivers'] = [];
+        $payload['people'][0]['child_credit_evidence'] = $evidence;
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($this->preparation(), $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_child_credit_caregiver_identity_missing',
+            array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function claimedByOtherEvidence(): array
+    {
+        return [
+            'other_household_caregiver_status' => 'present',
+            'other_household_caregivers' => [[
+                'given_name' => 'Petr',
+                'family_name' => 'Novák',
+                'birth_date' => '1988-06-06',
+            ]],
+            'children' => [
+                [
+                    'reference' => 'dependant-1',
+                    'identity' => [
+                        'given_name' => 'Eva',
+                        'family_name' => 'Nováková',
+                        'birth_date' => '2013-01-01',
+                    ],
+                    'order' => 1,
+                    'ztp_p' => false,
+                    'credit_claimed' => false,
+                ],
+                [
+                    'reference' => 'dependant-2',
+                    'identity' => [
+                        'given_name' => 'Jana',
+                        'family_name' => 'Nováková',
+                        'birth_date' => '2015-02-02',
+                    ],
+                    'order' => 2,
+                    'ztp_p' => false,
+                ],
+            ],
+        ];
+    }
+
     public function testChildCreditRequiresValidFrozenBirthDate(): void
     {
         foreach ([null, '', '2015-02-30', 'invalid'] as $date) {

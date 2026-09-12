@@ -571,9 +571,9 @@ final class PayrollAnnualSettlementRepository
         int $taxYear,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT child_reference, child_order, ztp_p, evidence_status,
-                    shared_household_confirmed, other_claimant_excluded,
-                    effective_from, effective_to
+            'SELECT child_reference, child_order, credit_status, ztp_p,
+                    evidence_status, shared_household_confirmed,
+                    other_claimant_excluded, effective_from, effective_to
                FROM payroll_person_tax_child_claims
               WHERE supplier_id = ? AND employee_id = ?
                 AND effective_from <= ?

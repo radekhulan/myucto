@@ -24,6 +24,7 @@ use InvalidArgumentException;
  * }
  * @phpstan-type ClaimInput array{
  *   child_order:int,
+ *   credit_status:string,
  *   claim_reason:?string,
  *   evidence_status:string,
  *   evidence_reference:?string,
@@ -62,6 +63,13 @@ final class PayrollDependantValidator
     /** JMHZ 10453: vyživuje tytéž děti i jiná osoba v téže domácnosti. */
     public const OTHER_CAREGIVER_STATUSES = ['unknown', 'none', 'present'];
 
+    /**
+     * Kdo zvýhodnění na dítě uplatňuje. `claimed_by_other` = dítě s pořadím
+     * „N" (JMHZ 10440): drží pořadí v domácnosti, zvýhodnění uplatňuje jiná
+     * osoba a tomuto zaměstnanci z něj nevzniká žádná částka.
+     */
+    public const CREDIT_STATUSES = ['claimed', 'claimed_by_other'];
+
     private const OTHER_CAREGIVER_FIELDS = [
         'other_caregiver_given_name',
         'other_caregiver_family_name',
@@ -96,6 +104,7 @@ final class PayrollDependantValidator
         'ztp_p' => 'Držitel průkazu ZTP/P',
         'student' => 'Studium',
         'child_order' => 'Pořadí dítěte',
+        'credit_status' => 'Zvýhodnění uplatňuje',
         'claim_reason' => 'Důvod nároku',
         'evidence_status' => 'Doloženost nároku',
         'evidence_reference' => 'Odkaz na doklad',
@@ -211,23 +220,64 @@ final class PayrollDependantValidator
             $reason = $this->enum($input, 'claim_reason', self::CLAIM_REASONS);
         }
 
+        $creditStatus = ($input['credit_status'] ?? null) === null
+            ? 'claimed'
+            : $this->enum($input, 'credit_status', self::CREDIT_STATUSES);
+        $sharedHousehold = $this->bool($input, 'shared_household_confirmed');
+        $otherClaimantExcluded = $this->bool($input, 'other_claimant_excluded');
+        $otherCaregiver = $this->otherCaregiver($input);
+        if ($creditStatus === 'claimed_by_other') {
+            $this->assertClaimedByOther(
+                $sharedHousehold,
+                $otherClaimantExcluded,
+                $otherCaregiver['other_household_caregiver_status'],
+            );
+        }
+
         return [
             'child_order' => $order,
+            'credit_status' => $creditStatus,
             'claim_reason' => $reason,
             'evidence_status' => $status,
             'evidence_reference' => $reference,
-            'shared_household_confirmed' => $this->bool(
-                $input,
-                'shared_household_confirmed',
-            ),
-            'other_claimant_excluded' => $this->bool(
-                $input,
-                'other_claimant_excluded',
-            ),
+            'shared_household_confirmed' => $sharedHousehold,
+            'other_claimant_excluded' => $otherClaimantExcluded,
             'ztp_p' => $this->bool($input, 'ztp_p'),
             'effective_from' => $from,
             'effective_to' => $to,
-        ] + $this->otherCaregiver($input);
+        ] + $otherCaregiver;
+    }
+
+    /**
+     * Dítě „N" (§ 35c odst. 9, pokyny MPSV k 10440): pořadí se určuje za
+     * společně hospodařící domácnost, zvýhodnění na dítě ale uplatňuje někdo
+     * jiný. Takový nárok tedy nemůže zároveň tvrdit, že „nikdo jiný
+     * neuplatňuje", a musí tu jinou osobu jmenovat — ČSSZ ji u 10453 = ANO
+     * vyžaduje kontrolou 127.
+     */
+    private function assertClaimedByOther(
+        bool $sharedHousehold,
+        bool $otherClaimantExcluded,
+        string $caregiverStatus,
+    ): void {
+        if (!$sharedHousehold) {
+            throw new InvalidArgumentException(
+                'Dítě, na které zvýhodnění uplatňuje jiná osoba, se uvádí jen'
+                . ' ve společně hospodařící domácnosti — potvrďte ji.',
+            );
+        }
+        if ($otherClaimantExcluded) {
+            throw new InvalidArgumentException(
+                'Zvýhodnění na toto dítě uplatňuje jiná osoba, nárok proto'
+                . ' nemůže zároveň tvrdit, že je nikdo jiný neuplatňuje.',
+            );
+        }
+        if ($caregiverStatus !== 'present') {
+            throw new InvalidArgumentException(
+                'U dítěte, na které zvýhodnění uplatňuje jiná osoba, uveďte'
+                . ' tu osobu (jméno, příjmení a datum narození).',
+            );
+        }
     }
 
     /**

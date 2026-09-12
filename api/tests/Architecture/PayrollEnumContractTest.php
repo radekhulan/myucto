@@ -212,6 +212,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
         'payroll.ts::PayrollDependantCaregiverStatus'
             => 'db:payroll_person_tax_child_claims.other_household_caregiver_status',
+        'payroll.ts::PayrollDependantCreditStatus'
+            => 'db:payroll_person_tax_child_claims.credit_status',
         'payroll.ts::PayrollStatutoryEvidenceSection'
             => 'const:MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository::EDITABLE_SECTIONS',
         'payroll.ts::PayrollPersonAccountVerificationSource'

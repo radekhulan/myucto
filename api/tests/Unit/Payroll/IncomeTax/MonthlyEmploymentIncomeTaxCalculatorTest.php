@@ -484,6 +484,92 @@ final class MonthlyEmploymentIncomeTaxCalculatorTest extends TestCase
         self::assertContains('tax-child-concurrent-claim-unresolved', $result->issues);
     }
 
+    /**
+     * § 35c odst. 1 a 9: první dítě domácnosti uplatňuje partner, zaměstnanec
+     * uplatňuje druhé. Dítě „N" drží pořadí 1, takže mezera nevzniká a druhé
+     * dítě dostane sazbu druhého dítěte (1 860 Kč), ne prvního.
+     */
+    public function testChildClaimedByOtherFillsTheOrderGapAndKeepsSecondChildRate(): void
+    {
+        $result = $this->calculator()->calculate($this->childInput([
+            $this->childClaimedByOther('child-a', 1),
+            $this->child('child-b', 2, false),
+        ]));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(186_000, $result->claimedChildCreditMinorUnits);
+    }
+
+    /** Bez dítěte „N" zůstává samotné druhé dítě mezerou v pořadí. */
+    public function testSecondChildWithoutClaimedByOtherStillHasOrderGap(): void
+    {
+        $result = $this->calculator()->calculate($this->childInput([
+            $this->child('child-b', 2, false),
+        ]));
+
+        self::assertSame(TaxCalculationStatus::ManualReview, $result->status);
+        self::assertContains('tax-child-order-gap', $result->issues);
+    }
+
+    /**
+     * Zaměstnanec, který uvádí jen děti „N", zvýhodnění neuplatňuje vůbec —
+     * mzda se kvůli tomu nesmí zastavit.
+     */
+    public function testOnlyChildrenClaimedByOtherYieldNoCreditAndNoIssue(): void
+    {
+        $result = $this->calculator()->calculate($this->childInput([
+            $this->childClaimedByOther('child-a', 1),
+        ]));
+
+        self::assertSame(TaxCalculationStatus::Calculated, $result->status);
+        self::assertSame([], $result->issues);
+        self::assertSame(0, $result->claimedChildCreditMinorUnits);
+    }
+
+    /** Dítě „N" drží pořadí — nikdo jiný v domácnosti ho mít nesmí. */
+    public function testChildClaimedByOtherCannotShareOrderWithClaimedChild(): void
+    {
+        $result = $this->calculator()->calculate($this->childInput([
+            $this->childClaimedByOther('child-a', 1),
+            $this->child('child-b', 1, false),
+        ]));
+
+        self::assertSame(TaxCalculationStatus::ManualReview, $result->status);
+        self::assertContains('tax-child-order-conflict', $result->issues);
+    }
+
+    /** @param list<TaxChildClaim> $children */
+    private function childInput(array $children): MonthlyEmploymentIncomeTaxInput
+    {
+        return new MonthlyEmploymentIncomeTaxInput(
+            calculationDate: '2026-08-31',
+            employeeReference: 'synthetic-employee',
+            relationships: [
+                $this->relationship('employment', EmploymentRelationshipKind::Employment, 4_000_000),
+            ],
+            declarations: [$this->signedDeclaration()],
+            residence: $this->czechResidence(),
+            childClaims: $children,
+        );
+    }
+
+    private function childClaimedByOther(string $reference, int $order): TaxChildClaim
+    {
+        return new TaxChildClaim(
+            $reference,
+            $order,
+            false,
+            '2026-01-01',
+            null,
+            TaxEvidenceStatus::Verified,
+            true,
+            false,
+            'synthetic-child-evidence',
+            creditClaimed: false,
+        );
+    }
+
     public function testAnnualAccumulatorNeverSilentlyAddsExternalCertificate(): void
     {
         $result = $this->calculator()->calculate(new MonthlyEmploymentIncomeTaxInput(

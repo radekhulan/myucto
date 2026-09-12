@@ -5491,10 +5491,17 @@ export interface PayrollDependantCredit {
 /** JMHZ 10453: vyživuje tytéž děti v téže domácnosti i jiná osoba. */
 export type PayrollDependantCaregiverStatus = 'unknown' | 'none' | 'present'
 
+/**
+ * Kdo zvýhodnění na dítě uplatňuje. `claimed_by_other` = dítě s pořadím „N"
+ * (JMHZ 10440): drží pořadí v domácnosti, zvýhodnění uplatňuje jiná osoba.
+ */
+export type PayrollDependantCreditStatus = 'claimed' | 'claimed_by_other'
+
 export interface PayrollDependantClaim {
   id: number
   child_reference: string
   child_order: number
+  credit_status: PayrollDependantCreditStatus
   claim_reason: PayrollDependantClaimReason | null
   ztp_p: boolean
   evidence_status: 'verified' | 'unverified'
@@ -5557,6 +5564,7 @@ export interface PayrollDependantPayload {
 
 export interface PayrollDependantClaimPayload {
   child_order: number
+  credit_status: PayrollDependantCreditStatus
   claim_reason: PayrollDependantClaimReason | null
   evidence_status: 'verified' | 'unverified'
   evidence_reference: string | null

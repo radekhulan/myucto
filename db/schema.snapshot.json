@@ -801,7 +801,8 @@
         "1813_invoice_counter_floor.sql",
         "1814_gopay_payout_account_default.sql",
         "1815_drop_leftover_migration_procedures.sql",
-        "1816_payroll_work_summary_compensatory_time_off.sql"
+        "1816_payroll_work_summary_compensatory_time_off.sql",
+        "1818_payroll_child_claim_credit_status.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -12595,6 +12596,7 @@
                 "claim_reason": "varchar(500) NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_status": "enum('claimed','claimed_by_other') NOT NULL DEFAULT 'claimed'",
                 "dependant_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "effective_from": "date NOT NULL",
                 "effective_to": "date NULL DEFAULT NULL",
@@ -12634,6 +12636,7 @@
                 "fk_pp_tax_child_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
+                "chk_pp_tax_child_credit_status": "`credit_status` = 'claimed' or `credit_status` = 'claimed_by_other' and `other_claimant_excluded` = 0 and `shared_household_confirmed` = 1 and `other_household_caregiver_status` = 'present'",
                 "chk_pp_tax_child_evidence": "`evidence_status` = 'verified' or `evidence_reference` is null",
                 "chk_pp_tax_child_flags": "`ztp_p` in (0,1) and `shared_household_confirmed` in (0,1) and `other_claimant_excluded` in (0,1)",
                 "chk_pp_tax_child_interval": "`effective_to` is null or `effective_to` >= `effective_from`",

@@ -268,6 +268,54 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
         self::assertSame('dependant-7', $evidence['child_claims'][0]['child_reference']);
     }
 
+    /**
+     * Dítě „N" zvýhodnění u tohoto plátce nezakládá (uplatňuje ho jiná osoba),
+     * do řádku 11 potvrzení proto nepatří. Bez opravy ho kontrola doložení
+     * odmítla kvůli chybějícímu „nikdo jiný neuplatňuje" a potvrzení nevzniklo.
+     */
+    public function testChildClaimedByOtherIsNotACertificateChild(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'supportedInputEvidence',
+        );
+        $input = self::inputPerson();
+        $input['statutory_evidence']['income_tax']['child_claims'] = [
+            [
+                'child_reference' => 'dependant-7',
+                'child_order' => 1,
+                'credit_status' => 'claimed_by_other',
+                'ztp_p' => false,
+                'evidence_status' => 'verified',
+                'shared_household_confirmed' => true,
+                'other_claimant_excluded' => false,
+            ],
+            [
+                'child_reference' => 'dependant-8',
+                'child_order' => 2,
+                'ztp_p' => false,
+                'evidence_status' => 'verified',
+                'shared_household_confirmed' => true,
+                'other_claimant_excluded' => true,
+            ],
+        ];
+
+        $evidence = $method->invoke(
+            $builder,
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
+        );
+
+        self::assertSame(
+            [['child_reference' => 'dependant-8', 'child_order' => 2, 'ztp_p' => false]],
+            $evidence['child_claims'],
+        );
+    }
+
     public function testAcceptsDocumentedEeaNonresidentWithoutResidentOnlyCredits(): void
     {
         $builder = (new \ReflectionClass(

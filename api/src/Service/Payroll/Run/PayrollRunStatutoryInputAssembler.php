@@ -2198,6 +2198,17 @@ final class PayrollRunStatutoryInputAssembler
                 );
                 continue;
             }
+            // Chybějící `credit_status` = uplatňované dítě: snímek ho nese jen
+            // u dítěte „N" (PayrollPersonStatutoryEvidenceValidator).
+            $creditStatus = $row['credit_status'] ?? 'claimed';
+            if (!in_array($creditStatus, ['claimed', 'claimed_by_other'], true)) {
+                $this->issue(
+                    'income_tax',
+                    'tax_child_evidence_invalid',
+                    $personReference,
+                );
+                continue;
+            }
             try {
                 $result[] = new TaxChildClaim(
                     $this->requiredString($row['child_reference'] ?? null),
@@ -2213,6 +2224,7 @@ final class PayrollRunStatutoryInputAssembler
                         $row['other_claimant_excluded'] ?? null,
                     ),
                     $this->nullableString($row['evidence_reference'] ?? null),
+                    $creditStatus === 'claimed',
                 );
             } catch (\InvalidArgumentException|\UnexpectedValueException) {
                 $this->issue(

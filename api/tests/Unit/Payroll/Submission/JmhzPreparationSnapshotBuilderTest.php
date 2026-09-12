@@ -964,6 +964,64 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertSame('unknown', $evidence['other_household_caregiver_status']);
     }
 
+    /**
+     * Dítě „N" se zmrazí i s identitou a příznakem `credit_claimed = false`,
+     * aby ho resolver vykázal s pořadím „N". Uplatněné dítě příznak nenese —
+     * dosavadní zmrazené podklady tak zůstávají beze změny.
+     */
+    public function testChildClaimedByOtherIsFrozenAsNotClaimed(): void
+    {
+        $caregiver = [
+            'other_household_caregiver_status' => 'present',
+            'other_caregiver_given_name' => 'Petr',
+            'other_caregiver_family_name' => 'Novák',
+            'other_caregiver_birth_date' => '1988-06-06',
+        ];
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(childClaims: [
+                [
+                    'child_reference' => 'dependant-9',
+                    'child_order' => 2,
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                ] + $caregiver,
+                [
+                    'child_reference' => 'dependant-8',
+                    'child_order' => 1,
+                    'credit_status' => 'claimed_by_other',
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => false,
+                ] + $caregiver,
+            ]),
+            [],
+            [],
+            childIdentitySources: [11 => [
+                'dependant-9' => [
+                    'given_name' => 'Jana',
+                    'family_name' => 'Nováková',
+                    'birth_date' => '2015-02-02',
+                ],
+                'dependant-8' => [
+                    'given_name' => 'Eva',
+                    'family_name' => 'Nováková',
+                    'birth_date' => '2013-01-01',
+                ],
+            ]],
+        );
+
+        $evidence = $snapshot->payload['people'][0]['child_credit_evidence'];
+        self::assertSame('present', $evidence['other_household_caregiver_status']);
+        self::assertSame(['dependant-8', 'dependant-9'], array_column($evidence['children'], 'reference'));
+        self::assertFalse($evidence['children'][0]['credit_claimed']);
+        self::assertArrayNotHasKey('credit_claimed', $evidence['children'][1]);
+    }
+
     /** @param list<array<string,mixed>>|null $childClaims */
     private function source(
         bool $tamperedComponent = false,

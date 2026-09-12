@@ -3762,6 +3762,12 @@
           "none": "No, nobody else supports the children",
           "present": "Yes, another person supports them"
         },
+        "credit_status": {
+          "claimed": "Employee",
+          "claimed_by_other": "Another person in the household (order N)"
+        },
+        "order_claimed_by_other": "Order {order} in the household · claimed by another person",
+        "credit_claimed_by_other": "Another person in the household claims the credit; it is not applied for this employee.",
         "blockers": {
           "relation_not_child": "The monthly credit belongs to a child only.",
           "evidence_unverified": "The claim has no document — the credit will not be applied.",
@@ -3789,7 +3795,10 @@
           "student": "The adult child studies continuously (up to age 26)",
           "note": "Note",
           "child_order": "Child order",
-          "child_order_hint": "The order drives the credit amount and belongs to the claim of this taxpayer, not to the child.",
+          "child_order_hint": "The child's order in the shared household. It drives the credit amount and also counts children claimed by the other parent.",
+          "credit_status": "The child credit is claimed by",
+          "credit_status_hint": "If the other parent claims the child, enter the child with its order in the household. It is reported to ČSSZ with code N so the other children get the correct rate.",
+          "other_caregiver_required_hint": "Name the person who claims the credit for this child. ČSSZ requires it in the monthly report.",
           "reason": "Reason for the claim",
           "evidence_status": "Documentation status",
           "evidence_reference": "Document reference (optional)",

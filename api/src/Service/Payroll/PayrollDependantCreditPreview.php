@@ -65,6 +65,27 @@ final class PayrollDependantCreditPreview
     }
 
     /**
+     * Dítě s pořadím „N": zvýhodnění uplatňuje jiná osoba v domácnosti, u
+     * tohoto zaměstnance z něj nevzniká nic. Nula je tu výsledek, ne neznámo.
+     *
+     * @return array{
+     *   status:string,
+     *   rate_key:?string,
+     *   monthly_credit_minor_units:?int,
+     *   manual_review_reason:?string
+     * }
+     */
+    public function claimedByOther(): array
+    {
+        return [
+            'status' => self::STATUS_CALCULATED,
+            'rate_key' => null,
+            'monthly_credit_minor_units' => 0,
+            'manual_review_reason' => null,
+        ];
+    }
+
+    /**
      * @return array{
      *   status:string,
      *   rate_key:?string,

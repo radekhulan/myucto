@@ -9,6 +9,7 @@ import {
   type PayrollDependantClaimPayload,
   type PayrollDependantCaregiverStatus,
   type PayrollDependantClaimReason,
+  type PayrollDependantCreditStatus,
   type PayrollDependantPayload,
   type PayrollDependantRelation,
   type PayrollDependantsResponse,
@@ -45,6 +46,7 @@ const CLAIM_REASONS: PayrollDependantClaimReason[] = [
   'study_continues',
   'other',
 ]
+const CREDIT_STATUSES: PayrollDependantCreditStatus[] = ['claimed', 'claimed_by_other']
 
 const loading = ref(true)
 const saving = ref(false)
@@ -72,6 +74,7 @@ const dependantForm = reactive({
 
 const claimForm = reactive({
   child_order: 1,
+  credit_status: 'claimed' as PayrollDependantCreditStatus,
   claim_reason: 'own_household' as PayrollDependantClaimReason,
   evidence_status: 'verified' as 'verified' | 'unverified',
   evidence_reference: '',
@@ -108,6 +111,7 @@ const caregiverOptions = computed<{ value: PayrollDependantCaregiverStatus; labe
 ]))
 const editingDependant = computed(() =>
   dependants.value.find(item => item.id === editingDependantId.value) ?? null)
+const claimedByOther = computed(() => claimForm.credit_status === 'claimed_by_other')
 
 const listActions = computed<ActionItem[]>(() => [{
   key: 'add-dependant',
@@ -192,6 +196,7 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   editingDependantId.value = dependant.id
   editingClaimId.value = claim?.id ?? null
   claimForm.child_order = claim?.child_order ?? nextOrder()
+  claimForm.credit_status = claim?.credit_status ?? 'claimed'
   claimForm.claim_reason = claim?.claim_reason ?? 'own_household'
   claimForm.evidence_status = claim?.evidence_status ?? 'verified'
   claimForm.evidence_reference = claim?.evidence_reference ?? ''
@@ -205,6 +210,25 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   claimForm.effective_from = claim?.effective_from ?? monthStart(dependant.existence_from)
   claimForm.effective_to = claim?.effective_to ?? ''
   claimForm.row_version = claim?.row_version ?? 0
+}
+
+/*
+ * Dítě „N": pořadí v domácnosti drží, zvýhodnění uplatňuje jiná osoba. Takový
+ * nárok nemůže tvrdit „nikdo jiný neuplatňuje" a musí tu osobu jmenovat
+ * (JMHZ 10453 = ANO), proto se odpovědi při přepnutí nastaví samy. Záměrně
+ * jen při přepnutí uživatelem, ne přes `watch` — ten by při otevření
+ * uloženého nároku přepsal jeho načtené hodnoty.
+ */
+function setCreditStatus(status: PayrollDependantCreditStatus): void {
+  if (claimForm.credit_status === status) return
+  claimForm.credit_status = status
+  if (status === 'claimed_by_other') {
+    claimForm.other_claimant_excluded = false
+    claimForm.shared_household_confirmed = true
+    claimForm.other_household_caregiver_status = 'present'
+  } else {
+    claimForm.other_claimant_excluded = true
+  }
 }
 
 function closeEditor(): void {
@@ -257,13 +281,14 @@ function dependantPayload(): PayrollDependantPayload {
 function claimPayload(): PayrollDependantClaimPayload {
   const payload: PayrollDependantClaimPayload = {
     child_order: Number(claimForm.child_order),
+    credit_status: claimForm.credit_status,
     claim_reason: claimForm.claim_reason,
     evidence_status: claimForm.evidence_status,
     evidence_reference: claimForm.evidence_status === 'verified'
       ? claimForm.evidence_reference.trim() || null
       : null,
     shared_household_confirmed: claimForm.shared_household_confirmed,
-    other_claimant_excluded: claimForm.other_claimant_excluded,
+    other_claimant_excluded: claimedByOther.value ? false : claimForm.other_claimant_excluded,
     other_household_caregiver_status: claimForm.other_household_caregiver_status,
     other_caregiver_given_name: claimForm.other_household_caregiver_status === 'present'
       ? claimForm.other_caregiver_given_name.trim() || null
@@ -274,7 +299,9 @@ function claimPayload(): PayrollDependantClaimPayload {
     other_caregiver_birth_date: claimForm.other_household_caregiver_status === 'present'
       ? claimForm.other_caregiver_birth_date || null
       : null,
-    ztp_p: claimForm.ztp_p,
+    // U dítěte „N" se dvojnásobek neuplatňuje; ZTP/P se jen převezme z karty
+    // dítěte, protože ho měsíční hlášení u každého dítěte uvádí (10439).
+    ztp_p: claimedByOther.value ? (editingDependant.value?.ztp_p ?? false) : claimForm.ztp_p,
     effective_from: claimForm.effective_from,
     effective_to: claimForm.effective_to === '' ? null : claimForm.effective_to,
   }
@@ -382,7 +409,16 @@ function periodLabel(from: string, to: string | null): string {
     : t('payroll.people.dependants.period_closed', { from, to })
 }
 
+function claimOrderLabel(claim: PayrollDependantClaim): string {
+  return claim.credit_status === 'claimed_by_other'
+    ? t('payroll.people.dependants.order_claimed_by_other', { order: claim.child_order })
+    : t('payroll.people.dependants.order', { order: claim.child_order })
+}
+
 function creditLabel(claim: PayrollDependantClaim): string {
+  if (claim.credit_status === 'claimed_by_other') {
+    return t('payroll.people.dependants.credit_claimed_by_other')
+  }
   if (claim.credit.status !== 'calculated' || claim.credit.monthly_credit_minor_units === null) {
     return t('payroll.people.dependants.credit_manual_review')
   }
@@ -487,7 +523,8 @@ function creditLabel(claim: PayrollDependantClaim): string {
                       <div class="flex flex-wrap items-start justify-between gap-2">
                         <div class="min-w-0">
                           <p class="text-sm font-medium text-neutral-900">
-                            {{ t('payroll.people.dependants.order', { order: claim.child_order }) }}
+                            {{ claimOrderLabel(claim) }}
+                            <span v-if="claim.credit_status === 'claimed_by_other'" class="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">N</span>
                             <span v-if="claim.ztp_p" class="ml-2 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700">ZTP/P</span>
                           </p>
                           <p class="mt-0.5 text-xs text-neutral-500">{{ periodLabel(claim.effective_from, claim.effective_to) }}</p>
@@ -568,7 +605,10 @@ function creditLabel(claim: PayrollDependantClaim): string {
               {{ t('payroll.people.dependants.spouse_annual_only') }}
             </p>
             <article v-for="claim in dependant.claims" :key="claim.id" class="min-w-0 rounded-lg border border-neutral-200 p-3">
-              <p class="text-sm font-medium text-neutral-900">{{ t('payroll.people.dependants.order', { order: claim.child_order }) }}</p>
+              <p class="text-sm font-medium text-neutral-900">
+                {{ claimOrderLabel(claim) }}
+                <span v-if="claim.credit_status === 'claimed_by_other'" class="ml-2 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600">N</span>
+              </p>
               <p class="mt-0.5 break-words text-xs text-neutral-500">{{ periodLabel(claim.effective_from, claim.effective_to) }}</p>
               <p class="mt-0.5 break-words text-xs text-neutral-600">{{ creditLabel(claim) }}</p>
               <ul v-if="claim.blockers.length > 0" class="mt-2 space-y-1">
@@ -651,6 +691,24 @@ function creditLabel(claim: PayrollDependantClaim): string {
       </div>
 
       <div v-else class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <fieldset class="sm:col-span-2 lg:col-span-3" data-test="claim-credit-status">
+          <legend :class="labelClass">{{ t('payroll.people.dependants.form.credit_status') }}</legend>
+          <div class="mt-1 flex flex-wrap gap-x-6 gap-y-2">
+            <label v-for="status in CREDIT_STATUSES" :key="status" class="flex items-center gap-2 text-sm text-neutral-700">
+              <input
+                type="radio"
+                name="claim-credit-status"
+                :value="status"
+                :checked="claimForm.credit_status === status"
+                class="border-neutral-300 text-payroll-600"
+                :data-test="`claim-credit-status-${status}`"
+                @change="setCreditStatus(status)"
+              >
+              {{ t(`payroll.people.dependants.credit_status.${status}`) }}
+            </label>
+          </div>
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.credit_status_hint') }}</span>
+        </fieldset>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.child_order') }} <RequiredMark />
           <input v-model.number="claimForm.child_order" required type="number" min="1" max="20" step="1" :class="inputClass" data-test="claim-order">
@@ -684,7 +742,7 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <DateInput v-model="claimForm.effective_to" :class="inputClass" data-test="claim-effective-to" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.effective_to_hint') }}</span>
         </label>
-        <label class="flex items-center gap-2 text-sm text-neutral-700">
+        <label v-if="!claimedByOther" class="flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="claimForm.ztp_p" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
           {{ t('payroll.people.dependants.form.claim_ztp_p') }}
         </label>
@@ -692,15 +750,18 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <input v-model="claimForm.shared_household_confirmed" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
           {{ t('payroll.people.dependants.form.shared_household') }}
         </label>
-        <label class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="claimForm.other_claimant_excluded" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
+        <label v-if="!claimedByOther" class="flex items-center gap-2 text-sm text-neutral-700">
+          <input v-model="claimForm.other_claimant_excluded" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="claim-other-claimant-excluded">
           {{ t('payroll.people.dependants.form.other_claimant_excluded') }}
         </label>
-        <label :class="labelClass">
+        <label v-if="!claimedByOther" :class="labelClass">
           {{ t('payroll.people.dependants.form.other_household_caregiver') }}<RequiredMark />
           <SearchableSelect v-model="claimForm.other_household_caregiver_status" class="mt-1" :options="caregiverOptions" :clearable="false" accent="payroll" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.other_household_caregiver_hint') }}</span>
         </label>
+        <p v-else class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-3" data-test="claim-other-caregiver-required">
+          {{ t('payroll.people.dependants.form.other_caregiver_required_hint') }}
+        </p>
         <template v-if="claimForm.other_household_caregiver_status === 'present'">
           <label :class="labelClass">
             {{ t('payroll.people.dependants.form.other_caregiver_given_name') }}<RequiredMark />

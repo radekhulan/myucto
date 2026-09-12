@@ -160,8 +160,11 @@ maskované a odkrýt je lze pouze auditovaným odhalením citlivých údajů.
 Samotná evidence osoby ještě nezakládá nárok. Ten vzniká až **uplatněním**
 s vlastním obdobím účinnosti, kde uvedeš:
 
-- **pořadí dítěte** — určuje výši zvýhodnění a patří k uplatnění u konkrétního
-  poplatníka, ne k dítěti; dvě děti nesmí mít v jednom měsíci stejné pořadí;
+- **kdo zvýhodnění uplatňuje** — zaměstnanec, nebo jiná osoba ve společně
+  hospodařící domácnosti (dítě s pořadím **N**, viz níže);
+- **pořadí dítěte** — pořadí dítěte ve společně hospodařící domácnosti; určuje
+  výši zvýhodnění a počítají se do něj i děti, které uplatňuje druhý rodič;
+  dvě děti nesmí mít v jednom měsíci stejné pořadí;
 - **ZTP/P** — zvýhodnění za dítě s průkazem ZTP/P je dvojnásobné a zaškrtnout
   je lze jen tehdy, je-li ZTP/P vedeno i u samotné osoby;
 - **důvod a stav ověření** — podepsané prohlášení poplatníka musí být platné
@@ -179,10 +182,25 @@ Jméno a příjmení dítěte zadávej i zvlášť, ne jen v jednom poli — mě
 hlášení pro ČSSZ je vykazuje odděleně a aplikace celé jméno sama nedělí.
 Rodné číslo ani datum narození dítěte se do měsíčního hlášení neodesílají.
 
+**Dítě uplatňované jinou osobou (pořadí N).** Pořadí dítěte se určuje za celou
+domácnost a v jednom měsíci smí dítě uplatnit jen jeden z rodičů. Uplatňuje-li
+zaměstnanec například jen druhé dítě, protože první uplatňuje partner, zapiš
+i první dítě a u uplatnění zvol **Jiná osoba v domácnosti (pořadí N)** s jeho
+pořadím v domácnosti (1). Takové dítě nezakládá žádnou částku, ale drží pořadí,
+takže druhé dítě dostane sazbu druhého dítěte a mzda se nezastaví na mezeře
+v pořadí. U dítěte s pořadím N musí být potvrzená společná domácnost a uvedená
+osoba, která zvýhodnění uplatňuje (jméno, příjmení, datum narození); tvrzení
+„druhý poplatník neuplatňuje" se u něj nevyplňuje. Do měsíčního hlášení pro
+ČSSZ jde dítě s kódem N a otázka na jinou vyživující osobu s odpovědí ano,
+v ročním zúčtování s kódem N ve všech měsících. Uvádí-li zaměstnanec jen děti
+s pořadím N, zvýhodnění na děti neuplatňuje vůbec.
+
 Aplikace nedovolí dvě překrývající se uplatnění na totéž dítě u jednoho
 poplatníka ani uplatnění mimo období, kdy je osoba vedena jako vyživovaná.
 Uplatňuje-li totéž dítě (rozpoznané podle rodného čísla) ve stejném měsíci jiný
-zaměstnanec téže firmy, uložení se odmítne.
+zaměstnanec téže firmy, uložení se odmítne. Výjimkou jsou oba rodiče u téže
+firmy: jeden dítě uplatňuje a druhý ho uvádí s pořadím N. Odmítne se naopak,
+když ho oba uvádějí s pořadím N — zvýhodnění musí jeden z nich uplatňovat.
 
 Sazby zvýhodnění se berou z legislativního rulesetu. Pokud pro dané období
 žádná účinná sazba neexistuje, aplikace částku neodhaduje — označí nárok

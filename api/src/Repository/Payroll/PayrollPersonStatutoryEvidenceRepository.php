@@ -82,8 +82,8 @@ final class PayrollPersonStatutoryEvidenceRepository
             ],
             'child_claims' => [
                 'table' => 'payroll_person_tax_child_claims',
-                'columns' => 'id, child_reference, child_order, ztp_p,
-                            evidence_status, shared_household_confirmed,
+                'columns' => 'id, child_reference, child_order, credit_status,
+                            ztp_p, evidence_status, shared_household_confirmed,
                             other_claimant_excluded,
                             other_household_caregiver_status,
                             other_caregiver_given_name,
