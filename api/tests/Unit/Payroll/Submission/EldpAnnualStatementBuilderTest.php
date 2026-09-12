@@ -282,6 +282,63 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         ];
     }
 
+    /**
+     * § 11 odst. 2: celý červen neplaceného volna bez příjmu není dobou
+     * pojištění. Sekce pokračuje s kódem, ale měsíc přidá nula dnů a nulový
+     * základ. Dřív se započítal jako třicet dnů pojištění.
+     */
+    public function testMonthWithoutIncomeBecauseOfUnpaidLeaveAddsNoInsuranceDays(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[5] = $this->revision(
+            2025,
+            6,
+            absences: [[
+                'id' => 9310,
+                'absence_type' => 'unpaid_leave',
+                'date_from' => '2025-06-01',
+                'date_to' => '2025-06-30',
+            ]],
+            baseMinor: 0,
+        );
+
+        $sections = $this->build($revisions)->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame('1++', $sections[0]['code']);
+        self::assertSame(335, $sections[0]['insurance_days']);
+        self::assertSame(110_000, $sections[0]['assessment_base_czk']);
+        self::assertSame(0, $sections[0]['excluded_days_total']);
+    }
+
+    public function testMonthWithoutIncomeMixingSicknessAndUnpaidLeaveBlocks(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[5] = $this->revision(
+            2025,
+            6,
+            absences: [
+                [
+                    'id' => 9311,
+                    'absence_type' => 'unpaid_leave',
+                    'date_from' => '2025-06-01',
+                    'date_to' => '2025-06-15',
+                ],
+                [
+                    'id' => 9312,
+                    'absence_type' => 'dpn',
+                    'date_from' => '2025-06-16',
+                    'date_to' => '2025-06-30',
+                ],
+            ],
+            baseMinor: 0,
+        );
+
+        $this->expectException(EldpValidationException::class);
+        $this->expectExceptionMessage('§ 11 odst. 2');
+        $this->build($revisions);
+    }
+
     public function testDeductedDaysMustBeConfirmedExplicitly(): void
     {
         $confirmation = $this->confirmation();
@@ -598,6 +655,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         ?string $employmentStart = null,
         ?string $employmentEnd = null,
         array $absences = [],
+        int $baseMinor = 1_000_000,
     ): array {
         $periodStart = sprintf('%04d-%02d-01', $year, $month);
         $input = [
@@ -647,8 +705,8 @@ final class EldpAnnualStatementBuilderTest extends TestCase
                                 'status' => 'participates',
                                 'reason_codes' => [],
                             ],
-                            'assessment_base_minor_units' => 1_000_000,
-                            'capped_assessment_base_minor_units' => 1_000_000,
+                            'assessment_base_minor_units' => $baseMinor,
+                            'capped_assessment_base_minor_units' => $baseMinor,
                         ]],
                     ],
                 ],

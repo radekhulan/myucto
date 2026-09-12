@@ -62,24 +62,6 @@ final class JmhzEldpEvidenceBuilder
         'employer_obstacle' => ['employer_obstacle_millihours'],
     ];
 
-    /**
-     * Nepřítomnosti BEZ započitatelného příjmu.
-     *
-     * Rozhodují o tom, jestli měsíc vůbec je dobou pojištění: podle § 11
-     * odst. 2 zákona č. 155/1995 Sb. se za dobu pojištění nepovažuje
-     * kalendářní měsíc, ve kterém nebyly dosaženy příjmy započitatelné do
-     * vyměřovacího základu, nešlo-li o omluvné důvody podle § 16 odst. 4 věty
-     * třetí písm. a). V ELDP se takový měsíc značí znakem „X" a jeho dny se do
-     * úhrnu nezapočítávají — což jednosekční ordinary řez neumí vyjádřit.
-     *
-     * @var list<string>
-     */
-    private const INCOME_LESS_ABSENCE_TYPES = [
-        'parental',
-        'unpaid_leave',
-        'unexcused',
-    ];
-
     /** Bloky 10277–10280 pokryté ordinary řezem, v pořadí pracovního souhrnu. */
     private const UNWORKED_FIELDS = [
         'dpn_without_employer_compensation_millihours',
@@ -790,26 +772,16 @@ final class JmhzEldpEvidenceBuilder
         bool $participates,
         int $uncappedBase,
     ): bool {
-        if (!$participates || $uncappedBase > 0) {
+        if (!$participates) {
             return false;
         }
-        $incomeLess = false;
-        $excused = false;
-        foreach ($absences as $absence) {
-            if (in_array(
-                is_array($absence) ? ($absence['absence_type'] ?? null) : null,
-                self::INCOME_LESS_ABSENCE_TYPES,
-                true,
-            )) {
-                $incomeLess = true;
-            } else {
-                $excused = true;
-            }
-        }
-        if ($incomeLess === $excused) {
+        $status = EldpExcludedPeriodDeriver::insuranceMonthStatus($absences, $uncappedBase);
+        if ($status === EldpExcludedPeriodDeriver::MONTH_MIXED
+            || $status === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED
+        ) {
             $this->invalid(
                 'jmhz_eldp_insurance_month_without_income',
-                $incomeLess
+                $status === EldpExcludedPeriodDeriver::MONTH_MIXED
                     ? 'Měsíc bez započitatelného příjmu kombinuje omluvnou'
                         . ' nepřítomnost s nepřítomností bez příjmu; § 11 odst. 2'
                         . ' zákona č. 155/1995 Sb. rozhoduje jen o celém měsíci.'
@@ -818,7 +790,7 @@ final class JmhzEldpEvidenceBuilder
             );
         }
 
-        return $incomeLess;
+        return $status === EldpExcludedPeriodDeriver::MONTH_OUTSIDE_INSURANCE;
     }
 
     /**

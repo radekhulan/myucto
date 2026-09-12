@@ -621,6 +621,27 @@ final class EldpAnnualStatementBuilder
             return null;
         }
         /** @var list<array<string,mixed>> $absences */
+        /*
+         * § 11 odst. 2 zákona č. 155/1995 Sb.: měsíc bez započitatelného
+         * příjmu kvůli nepřítomnosti bez příjmu není dobou pojištění. Sekce
+         * pokračuje se svým kódem, ale měsíc do ní přidá nula dnů — tak ho
+         * vykazuje i měsíční hlášení a přijatá hlášení jiných systémů. Dřív
+         * se započítal jako plný měsíc pojištění.
+         */
+        $monthStatus = EldpExcludedPeriodDeriver::insuranceMonthStatus($absences, $uncapped);
+        if ($monthStatus === EldpExcludedPeriodDeriver::MONTH_MIXED
+            || $monthStatus === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED
+        ) {
+            $blockers[] = [
+                'code' => 'eldp_insurance_month_without_income',
+                'message' => "Za {$label} nebyl zúčtován započitatelný příjem a § 11 odst. 2"
+                    . ' zákona č. 155/1995 Sb. z evidovaných nepřítomností nerozhodne,'
+                    . ' zda je měsíc dobou pojištění.',
+                'detail' => ['period_start' => $periodStart],
+            ];
+
+            return null;
+        }
         $excluded = $this->excludedPeriods->derive(
             $absences,
             $insuranceFrom,
@@ -635,7 +656,9 @@ final class EldpAnnualStatementBuilder
         if ($excluded['blockers'] !== []) {
             return null;
         }
-        $days = EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo);
+        $days = $monthStatus === EldpExcludedPeriodDeriver::MONTH_OUTSIDE_INSURANCE
+            ? 0
+            : EldpExcludedPeriodDeriver::inclusiveDays($insuranceFrom, $insuranceTo);
         if ($excluded['total'] > $days) {
             $blockers[] = [
                 'code' => 'eldp_excluded_days_exceed_period',

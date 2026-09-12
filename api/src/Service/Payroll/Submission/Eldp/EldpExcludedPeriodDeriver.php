@@ -85,6 +85,62 @@ final class EldpExcludedPeriodDeriver
     ];
 
     /**
+     * Nepřítomnosti BEZ započitatelného příjmu, u kterých měsíc bez příjmu
+     * podle § 11 odst. 2 zákona č. 155/1995 Sb. není dobou pojištění.
+     *
+     * @var list<string>
+     */
+    public const INCOME_LESS_TYPES = ['unpaid_leave', 'unexcused', 'parental'];
+
+    public const MONTH_INSURED = 'insured';
+    public const MONTH_OUTSIDE_INSURANCE = 'outside_insurance';
+    public const MONTH_MIXED = 'mixed';
+    public const MONTH_UNEXPLAINED = 'unexplained';
+
+    /**
+     * Je měsíc účastného vztahu dobou pojištění? Jediné místo rozhodnutí
+     * pro měsíční hlášení i roční evidenční list.
+     *
+     * § 11 odst. 2 zákona č. 155/1995 Sb.: za dobu pojištění se nepovažuje
+     * kalendářní měsíc, ve kterém nebyly dosaženy příjmy započitatelné do
+     * vyměřovacího základu, nešlo-li o omluvné důvody podle § 16 odst. 4
+     * věty třetí písm. a). Měsíc s příjmem je dobou pojištění vždy; měsíc bez
+     * příjmu jen tehdy, když ho vysvětlují výhradně omluvné nepřítomnosti
+     * (nemoc, ošetřovné). Výhradně nepřítomnosti bez příjmu = mimo dobu
+     * pojištění. Zákon rozhoduje o CELÉM měsíci, takže jejich souběh
+     * a nulový příjem bez jakékoli nepřítomnosti nerozhodne a volající musí
+     * zastavit.
+     *
+     * @param list<array<string,mixed>> $absences
+     */
+    public static function insuranceMonthStatus(array $absences, int $uncappedBaseMinor): string
+    {
+        if ($uncappedBaseMinor > 0) {
+            return self::MONTH_INSURED;
+        }
+        $incomeLess = false;
+        $excused = false;
+        foreach ($absences as $absence) {
+            if (in_array(
+                is_array($absence) ? ($absence['absence_type'] ?? null) : null,
+                self::INCOME_LESS_TYPES,
+                true,
+            )) {
+                $incomeLess = true;
+            } else {
+                $excused = true;
+            }
+        }
+
+        return match (true) {
+            $incomeLess && $excused => self::MONTH_MIXED,
+            $incomeLess => self::MONTH_OUTSIDE_INSURANCE,
+            $excused => self::MONTH_INSURED,
+            default => self::MONTH_UNEXPLAINED,
+        };
+    }
+
+    /**
      * Druhy absence, které dobu pojištění ani vyloučenou dobu nemění.
      *
      * `compensatory_time_off` je tu proto, že pojistný vztah po dobu čerpání
