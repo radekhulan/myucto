@@ -180,7 +180,6 @@
     "error_date": "Příkaz má datum v minulosti. Připrav nový příkaz s aktuálním datem splatnosti.",
     "error_payment_unavailable": "Toto bankovní napojení neumožňuje odesílat příkazy. U KB+ chybí klíč BatchDA; příkaz nahraj do banky ručně.",
     "title": "Přímé napojení na banku",
-    "testing_notice": "Přímé napojení na banky je v testovacím režimu. Pokud používáte účet u některé z uvedených bank, kontaktujte nás prosím pro společné ověření připojení.",
     "intro": "Načítejte pohyby a předávejte platební příkazy přímo bance. Dostupné funkce se liší podle banky.",
     "available": "Dostupné",
     "unavailable": "Zatím nedostupné",

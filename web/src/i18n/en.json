@@ -180,7 +180,6 @@
     "error_date": "The payment date is in the past. Prepare a new order with a current payment date.",
     "error_payment_unavailable": "This bank connection cannot send payment orders. The KB+ connection has no BatchDA key; upload the order to the bank manually.",
     "title": "Direct bank connection",
-    "testing_notice": "Direct bank connections are in testing mode. If you use an account with any of the listed banks, please contact us to verify the connection together.",
     "intro": "Import transactions and submit payment orders directly to your bank. Available features depend on the bank.",
     "available": "Available",
     "unavailable": "Not available yet",

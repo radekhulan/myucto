@@ -749,3 +749,136 @@ hromadně.
   poplatek 200 Kč, na účet dorazí 9 800 Kč. MyÚčto může nabídnout sloučené
   párování celé dávky a po potvrzení připraví návrh vyváženého zápisu s poplatkem
   na účtu 568; bez kontroly jej samo nezaúčtuje.
+
+## 28.9 Přímé napojení na banku (API)
+
+Kromě ručního nahrání GPC/ABO nebo PDF ([§ 28.2](#282-upload-vypisu-do-myucto))
+umí MyÚčto pro vybrané banky stahovat pohyby přímo přes bankovní API a u
+většiny z nich i předávat platební příkazy. Napojení se zakládá na stránce
+**Peníze → Bankovní účty**, záložka **Měny a účty**, v sekci **Přímé napojení
+na banku** u konkrétního měnového účtu. Podrobný postup založení pro každou
+banku (přístupové údaje, certifikáty, OAuth souhlas) je v
+[§ 29.1.3](29_Bankovni_ucty.md#2913-prime-napojeni-na-banku). Tahle sekce
+shrnuje, co napojení jako celek umí, jaké má limity a jak je to bezpečnostně
+řešené.
+
+### 28.9.1 Podporované banky
+
+| Banka | Kód | Technologie | Pohyby | Odeslání příkazu |
+|---|---|---|---|---|
+| **KB Business (KB+)** | 0100 | Extra služba API Business — OAuth2, ADAA (pohyby) + BATCHDA (dávky) | ano | ano, jen s klíčem BATCHDA |
+| **Fio banka** (ČR i SR) | 2010, 8330 | API token vázaný na konkrétní účet | ano | ano |
+| **ČSOB** | 0300 | CEB Business Connector — číslo smlouvy + komunikační certifikát | ano | ano |
+| **Raiffeisenbank** | 5500 | Premium API — Client ID + certifikát | ano | ano |
+| **Česká spořitelna** | 0800 | Premium Accounts API v3 — OAuth2 Authorization Code | ano | ne (zatím neimplementováno) |
+| **Banka CREDITAS** | 2250 | Bearer token, volitelně mTLS certifikát | ano | ano |
+
+Přehled bank se v sekci zobrazuje vždy; v seznamu účtů pod ním se nabízí jen
+účet, jehož kód banky konektor podporuje — ostatní účty tam nejsou vidět.
+Každý měnový účet má vlastní přístupové údaje a vlastní stav napojení
+(aktivní / pozastavené / odpojené).
+
+### 28.9.2 Co napojení dělá s pohyby
+
+Stažené pohyby se ukládají jako `bank_api` a slučují do **jednoho měsíčního
+výpisu** pro danou firmu, účet, kód banky a měnu — opakované načtení stejného
+období doplní tentýž výpis, překrývající se pohyby se nezapočítají podruhé.
+Dál se s nimi pracuje úplně stejně jako s nahraným GPC: párování na faktury
+([§ 28.4.2](#2842-manualni-parovani)), automatické zaúčtování v podvojném
+účetnictví ([§ 28.7](#287-automaticke-zauctovani-sparovanych-plateb-jen-podvojne-ucetnictvi))
+i pravidla pro opakované platby. Pokud pro tentýž účet a měsíc později
+nahraješ úplný GPC, nahradí API přehled jako hlavní výpis a zachová párování
+i zaúčtování ([§ 29.1.3](29_Bankovni_ucty.md#2913-prime-napojeni-na-banku)).
+
+Načítání má bezpečnostní meze:
+
+- **ruční načtení** — nejvýše **31 dní** včetně krajních dnů,
+- **automatické pokračování** (prázdné pole *Od data*) — naváže 3 dny před
+  posledním úspěšně načteným datem (překryv kvůli pozdě zaúčtovaným pohybům);
+  u zcela nového napojení stáhne posledních 14 dní,
+- pokud by mezi posledním načtením a dneškem vznikla mezera delší než **89 dní**,
+  automatické pokračování to odmítne (`history_gap`) a je potřeba mezeru
+  dohnat ručním načtením po částech,
+- konkrétní banka může mít vlastní dodatečné omezení (např. Raiffeisenbank
+  vrací pohyby jen za posledních 90 dní, KB+ tarif Plus/Pro omezuje frekvenci
+  dotazů na jednou za 61, resp. 10 minut).
+
+### 28.9.3 Automatická synchronizace (cron)
+
+Ruční tlačítko **Načíst pohyby** u účtu není jediná cesta — cron
+`cmd/cron-bank-connections.{sh,cmd}` (spouští
+`php api/bin/cron-bank-connections.php`) projde všechny aktivní napojení se
+zadanými přístupovými údaji a zavolá pro každé automatické pokračování
+posledního načtení. Pokud žádné napojení není aktivní, běh se přeskočí. Cron
+neřeší nic navíc oproti manuálnímu tlačítku — jen ho spouští za tebe
+pravidelně, typicky **každých 30 minut** (`*/30 * * * *`). Nastavení plánovače
+je v [playbooku automatizačních skriptů](../cmd/README.md).
+
+### 28.9.4 Odeslání platebního příkazu
+
+Napojení s podporou příkazů (viz tabulka výše) umí místo exportu KPC/PDF
+předat připravený příkaz z **Nákup → Platební příkazy** přímo bance k
+autorizaci ([§ 29.1.4](29_Bankovni_ucty.md#2914-odeslani-prikazu-do-banky)).
+Platí pro to vždy:
+
+- jen **tuzemské příkazy v CZK** — slovenské EUR příkazy (Fio SR) přímé
+  odeslání zatím nepodporuje,
+- odeslání **nepotvrzuje úhradu ani platbu neautorizuje** — příkaz je nutné
+  zkontrolovat a potvrdit v internetovém bankovnictví; skutečnou úhradu
+  prokáže až bankovní pohyb,
+- výsledek odeslání (přijato / odmítnuto / nejasné) blokuje opětovné odeslání
+  téhož příkazu; při nejasném výsledku nejdřív ověř stav v bance, než
+  vytvoříš další platbu,
+- u KB+ jde o dávku max. **100 plateb** najednou (BATCHDA); u ostatních bank
+  se limity řídí jejich vlastním API.
+
+### 28.9.5 Zabezpečení přístupových údajů
+
+Tokeny, API klíče, hesla k certifikátům i OAuth tokeny se ukládají výhradně
+na serveru, **šifrované** (AES-256-GCM, envelope s kontextem konkrétního
+napojení — dodavatel + účet), a do prohlížeče se po uložení už nevrací; ve
+formulářích se needitují, jen nahrazují. Šifrovací klíč
+(`app.secret_encryption_key`, resp. proměnná prostředí `MYINVOICE_SECRET_KEY`)
+musí nastavit správce instalace — bez něj napojení nejde vůbec dokončit.
+Klientské certifikáty (`.p12`/`.pfx`) mají limit **24 KiB** a jejich privátní
+klíč se při komunikaci s bankou používá jen v paměti procesu, nikdy se
+neukládá rozšifrovaný na disk. Certifikátová napojení (ČSOB, Raiffeisenbank,
+KB+, volitelně CREDITAS) vyžadují na serveru PHP cURL s podporou klientského
+certifikátu v paměti a rozšíření OpenSSL.
+
+### 28.9.6 KB Business (KB+) — rozšíření o odesílání dávek (BATCHDA)
+
+Napojení KB+ běží nad stejným základem jako ostatní API KB — registrací
+aplikace (Software Statement) a OAuth2 tokeny. Nad tímto základem MyÚčto
+používá **ADAA** pro čtení pohybů a volitelně **BATCHDA** pro odeslání
+platebních dávek; STATDA (stažení originálních souborů výpisu) a NOTDA
+(notifikace) konektor nevyužívá.
+
+Klíč **BATCHDA** vyžaduje navíc OAuth scope **`bpisp`** vedle základního
+`adaa`. MyÚčto o něj žádá bance automaticky, podle toho, jestli při založení
+nebo obnovení napojení vyplníš pole **API klíč BatchDA**:
+
+- **pole je prázdné** → registrace i souhlas se žádají jen se scope `adaa`;
+  napojení pak umí výhradně čtení pohybů a odeslání příkazu aplikace odmítne
+  dřív, než by cokoli poslala bance (`payment_submission_unavailable`) —
+  příkaz je pak potřeba nahrát do KB ručně,
+- **pole je vyplněné** → registrace se žádá se scope `adaa bpisp` a
+  následný souhlas v bance zahrnuje i oprávnění k odesílání dávek.
+
+Pokud jsi aplikaci u KB zaregistroval(a) dřív jen pro čtení a klíč BATCHDA
+získáš později, přidání dávkového oprávnění k existujícímu napojení řeší
+tlačítko **Zadat klíče znovu** u účtu ([§ 29.1.3](29_Bankovni_ucty.md#2913-prime-napojeni-na-banku)) —
+vyplníš všech pět položek znovu (Client Registration, OAuth, ADAA, BATCHDA,
+certifikát) a projdeš registraci i souhlas v KB od začátku, tentokrát se
+scope `bpisp` navíc. To odpovídá tomu, jak rozšíření scope řeší banka: buď
+rozšířením registrace aplikace o `bpisp` (má-li dosud jen `adaa`), nebo — má-li
+aplikace `bpisp` už zaregistrovaný — vyžádáním nového autorizačního kódu s
+rozšířeným scope; MyÚčto obojí prochází stejným tokem registrace a souhlasu,
+takže žádný ruční zásah do OAuth mimo formulář napojení není potřeba.
+
+Stav, zda dané napojení dávky odeslat umí, ukazuje sekce napojení přímo u
+účtu — pokud klíč BATCHDA chybí, zobrazí se u připojeného účtu upozornění, že
+odesílání příkazů není aktivní a příkaz je nutné do banky nahrát ručně;
+čtení pohybů tím není nijak omezené. Odeslaná dávka je omezená na nejvýše
+**100 plateb**; příjem dávky bankou opět **není autorizace ani úhrada** — tu
+je vždy nutné dokončit v internetovém bankovnictví.

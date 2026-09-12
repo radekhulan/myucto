@@ -104,9 +104,8 @@ se zachováním odkazu, párování a zaúčtování. Nové pohyby se doplní.
 Pokud GPC některé evidované pohyby neobsahuje, zůstanou v měsíčním přehledu;
 neúplný dokument je uložený jako podklad.
 
-Na záložce **Měny a účty** je pod seznamem účtů sekce **Přímé napojení na banku**.
-Napojení je v testovacím režimu. Pokud používáš účet u některé z uvedených
-bank, kontaktuj nás pro společné ověření připojení. U názvů bank se nezobrazuje
+Na záložce **Měny a účty** je pod seznamem účtů sekce **Přímé napojení na banku**
+(podrobně v kapitole 28, oddíl Přímé napojení na banku). U názvů bank se nezobrazuje
 označení dostupnosti; seznam účtů obsahuje pouze účty podporované konektorem.
 Každý měnový účet má vlastní nastavení a přístupové údaje. Načítání pohybů podporuje
 Fio ČR (kód **2010**) i Fio SR (kód **8330**) přes stejné API. Slovenský účet

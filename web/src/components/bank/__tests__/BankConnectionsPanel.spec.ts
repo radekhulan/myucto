@@ -26,7 +26,6 @@ describe('Bank connections panel', () => {
     expect(wrapper.find('section').exists()).toBe(true)
     expect(wrapper.findAllComponents({ name: 'BankConnectionAccount' }).map(row => row.props('account').id)).toEqual([1, 4])
     expect(wrapper.text()).toContain('ČSOB')
-    expect(wrapper.find('[role="note"]').text()).toContain('bank_connection.testing_notice')
     expect(wrapper.text()).not.toContain('bank_connection.available')
     expect(wrapper.text()).not.toContain('bank_connection.unavailable')
     await wrapper.setProps({ accounts: [{ id: 2, bank_code: '0300' }] as CurrencyAccount[] })

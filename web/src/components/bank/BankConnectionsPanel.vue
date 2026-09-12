@@ -42,7 +42,6 @@ onMounted(load)
     <header class="px-5 py-3 border-b border-neutral-200">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('bank_connection.title') }}</h2>
       <p class="text-sm text-neutral-600 mt-1">{{ t('bank_connection.intro') }}</p>
-      <p role="note" class="mt-3 rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ t('bank_connection.testing_notice') }}</p>
     </header>
     <div v-if="error" class="p-4 space-y-2" role="alert">
       <p class="text-sm text-danger-600">{{ error }}</p>
