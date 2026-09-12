@@ -192,6 +192,64 @@ final class BankConnectionServiceTest extends TestCase
         self::assertSame(0, $importer->calls);
     }
 
+    /**
+     * KB ADAA vrací 429 při opakovaném stažení nezměněných dat dřív než za
+     * 61 minut. Cron běží po 30 minutách, takže spojení s takovým odstupem
+     * se automaticky nevolá, dokud neuplyne.
+     */
+    public function testAutomaticSyncSkipsConnectionInsideBankMinimumInterval(): void
+    {
+        $connector = new PacedSyncConnector(3660);
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->method('enabledWithCredentials')->willReturn([
+            array_replace($this->connection(), ['provider' => 'kb_plus', 'seconds_since_last_sync' => 1800]),
+        ]);
+        $h['connections']->expects(self::never())->method('recordSyncError');
+
+        $summary = $h['service']->syncAll();
+
+        self::assertSame(0, $connector->downloadCalls);
+        self::assertSame(1, $summary['skipped']);
+        self::assertSame(0, $summary['errors']);
+    }
+
+    public function testAutomaticSyncRunsOnceBankMinimumIntervalElapsed(): void
+    {
+        $connector = new PacedSyncConnector(3660);
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->method('enabledWithCredentials')->willReturn([
+            array_replace($this->connection(), ['provider' => 'kb_plus', 'seconds_since_last_sync' => 4000]),
+        ]);
+
+        $summary = $h['service']->syncAll();
+
+        self::assertSame(1, $connector->downloadCalls);
+        self::assertSame(1, $summary['succeeded']);
+        self::assertSame(0, $summary['skipped']);
+    }
+
+    /**
+     * Omezení četnosti banky (429) není vada spojení: stav spojení se nemění
+     * a cron ho počítá jako přeskočené, ne jako chybu.
+     */
+    public function testBankRateLimitIsNeitherConnectionErrorNorCronError(): void
+    {
+        $connector = new SyncConnector(static function (): string {
+            throw new BankConnectorException(BankConnectorException::RATE_LIMITED, 'safe');
+        });
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->method('enabledWithCredentials')->willReturn([$this->connection()]);
+        $h['connections']->expects(self::never())->method('recordSyncError');
+
+        $summary = $h['service']->syncAll();
+
+        self::assertSame(1, $summary['skipped']);
+        self::assertSame(0, $summary['errors']);
+    }
+
     public function testAmbiguousStatementDuplicateRequiresManualReconciliation(): void
     {
         $connector = new SyncConnector();
@@ -300,7 +358,7 @@ final class BankConnectionServiceTest extends TestCase
 
     /** @return array<string,mixed> */
     private function harness(
-        SyncConnector $connector,
+        BankConnector $connector,
         RecordingStatementImporter $importer,
         array $connection,
         string $statementAccount = '1000000005',
@@ -400,6 +458,36 @@ final class SyncConnector implements BankConnector
         #[\SensitiveParameter] string $abo,
     ): array {
         throw new \LogicException('Payment submit nebyl v sync testu očekáván.');
+    }
+}
+
+final class PacedSyncConnector implements BankConnector, \MyInvoice\Service\Bank\Connector\BankConnectorSyncPacing
+{
+    public int $downloadCalls = 0;
+
+    public function __construct(private readonly int $intervalSeconds) {}
+
+    public function provider(): string
+    {
+        return 'kb_plus';
+    }
+
+    public function downloadStatement(#[\SensitiveParameter] string $token, string $from, string $to): string
+    {
+        $this->downloadCalls++;
+        return 'SYNTHETIC-GPC';
+    }
+
+    public function submitPaymentOrder(
+        #[\SensitiveParameter] string $token,
+        #[\SensitiveParameter] string $abo,
+    ): array {
+        throw new \LogicException('Payment submit nebyl v sync testu očekáván.');
+    }
+
+    public function minimumAutomaticSyncIntervalSeconds(): int
+    {
+        return $this->intervalSeconds;
     }
 }
 

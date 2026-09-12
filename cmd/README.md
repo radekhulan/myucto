@@ -139,7 +139,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-backup-documents` | 1× denně | 02:35 (po PDF backupu) |
 | `cron-backup-payroll` | 1× denně | 02:40 (po Dokumentech) |
 | `cron-bank-scan` | každých 15–30 minut | `*/30 * * * *` |
-| `cron-bank-connections` | každých 30 minut (jen když je zapnutý aspoň jeden konektor) | `*/30 * * * *` |
+| `cron-bank-connections` | každých 15 minut (jen když je zapnutý aspoň jeden konektor; KB+ se sám stahuje nejvýš jednou za 61 minut) | `*/15 * * * *` |
 | `cron-bank-email-notices` | každých 30 minut (jen když je zapnutá aspoň jedna IMAP schránka) | `*/30 * * * *` |
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
@@ -229,7 +229,7 @@ schtasks /create /tn "MyUcto BackupPDF" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cr
 schtasks /create /tn "MyUcto BackupDocs" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-documents.cmd" /sc daily /st 02:35 /ru SYSTEM
 schtasks /create /tn "MyUcto BackupPayroll" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-backup-payroll.cmd" /sc daily /st 02:40 /ru SYSTEM
 schtasks /create /tn "MyUcto BankScan"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-scan.cmd"      /sc minute /mo 30 /ru SYSTEM
-schtasks /create /tn "MyUcto BankConnections" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-connections.cmd" /sc minute /mo 30 /ru SYSTEM
+schtasks /create /tn "MyUcto BankConnections" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-connections.cmd" /sc minute /mo 15 /ru SYSTEM
 schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-bank-email-notices.cmd" /sc minute /mo 30 /ru SYSTEM
 schtasks /create /tn "MyUcto PurchaseInbox" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scan-purchase-inbox.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto Reminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:00 /ru SYSTEM
@@ -295,7 +295,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  35  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-documents.sh
  40  2  *   *   *    /var/www/myucto.cz/cmd/cron-backup-payroll.sh
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-scan.sh
-*/30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-connections.sh
+*/15 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-connections.sh
 */30 *  *   *   *    /var/www/myucto.cz/cmd/cron-bank-email-notices.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
  0  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-reminders.sh

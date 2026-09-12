@@ -18946,6 +18946,7 @@
     "freq_hourly_0600_0800": "hourly from 06:00 to 08:00",
     "freq_every_1_min": "every minute",
     "freq_every_10_min": "every 10 min",
+    "freq_every_15_min": "every 15 min",
     "freq_every_30_min": "every 30 min",
     "freq_hourly_15": "hourly at minute 15",
     "freq_weekdays_0900": "Mon–Fri at 09:00",

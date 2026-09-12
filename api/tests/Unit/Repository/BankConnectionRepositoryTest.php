@@ -77,6 +77,30 @@ final class BankConnectionRepositoryTest extends TestCase
         self::assertNull($repository->findWithCredentialById(1, 202));
     }
 
+    /**
+     * Odstup od posledního pokusu se počítá ze dvou časů databáze (last_sync_at
+     * a CURRENT_TIMESTAMP), aby na něm nezáleželo časové pásmo PHP. Z něj cron
+     * pozná, že KB+ ještě nesmí volat.
+     */
+    public function testInternalRowCarriesSecondsSinceLastSyncFromDatabaseClock(): void
+    {
+        $this->pdo->exec("INSERT INTO currencies VALUES (11, 1, 'CZK', 'Synthetic', 1, '1000000005', '0100', NULL)");
+        $this->pdo->exec("INSERT INTO bank_connections
+            (id, supplier_id, currency_id, provider, token_ciphertext, enabled, last_sync_at, created_at, updated_at)
+            VALUES (101, 1, 11, 'kb_plus', 'enc:v2:synthetic', 1, datetime('now', '-1800 seconds'), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+        $this->pdo->exec("INSERT INTO currencies VALUES (12, 1, 'EUR', 'Synthetic EUR', 1, '1000000005', '0100', NULL)");
+        $this->pdo->exec("INSERT INTO bank_connections
+            (id, supplier_id, currency_id, provider, token_ciphertext, enabled, created_at, updated_at)
+            VALUES (102, 1, 12, 'kb_plus', 'enc:v2:synthetic', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+
+        $rows = (new BankConnectionRepository($this->db))->enabledWithCredentials();
+
+        self::assertCount(2, $rows);
+        self::assertEqualsWithDelta(1800, $rows[0]['seconds_since_last_sync'], 2);
+        self::assertNull($rows[1]['seconds_since_last_sync']);
+        self::assertArrayNotHasKey('db_now', $rows[0]);
+    }
+
     public function testDuplicateAndAmbiguousSubmissionRemainTerminalAndTenantScoped(): void
     {
         $repository = new BankPaymentOrderSubmissionRepository($this->db);

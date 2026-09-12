@@ -172,11 +172,14 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Po 15 minutách: banky bez omezení se aktualizují častěji a KB+,
+                // která stažení nezměněných dat pouští jen jednou za 61 minut,
+                // si odstup drží sama (BankConnectorSyncPacing).
                 'script' => 'cron-bank-connections',
                 'requires_usage' => CronJobGate::USAGE_BANK_CONNECTIONS,
-                'recommended' => 'every_30_min',
-                'linux_cron' => '*/30 * * * *',
-                'windows_schtasks' => '/sc minute /mo 30',
+                'recommended' => 'every_15_min',
+                'linux_cron' => '*/15 * * * *',
+                'windows_schtasks' => '/sc minute /mo 15',
                 'max_age_hours' => 4,
                 'weekdays_only' => false,
                 'critical' => false,

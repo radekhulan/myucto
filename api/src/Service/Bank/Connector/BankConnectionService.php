@@ -244,7 +244,11 @@ final class BankConnectionService
                     ['reconciliation_candidates' => $e->candidates],
                 );
             } catch (BankConnectorOperationException $e) {
-                $this->connections->recordSyncError($supplierId, $connectionId, $e->errorCode);
+                // Omezení četnosti banky (429) i vlastní odstup volání nejsou vada
+                // spojení: pokus se jen opakuje později, stav spojení se nemění.
+                if (!self::isRateLimit($e->errorCode)) {
+                    $this->connections->recordSyncError($supplierId, $connectionId, $e->errorCode);
+                }
                 throw $e;
             } catch (\Throwable $e) {
                 $this->connections->recordSyncError($supplierId, $connectionId, 'bank_sync_failed');
@@ -255,9 +259,17 @@ final class BankConnectionService
 
     public function syncAll(): array
     {
-        $summary = ['processed' => 0, 'succeeded' => 0, 'errors' => 0, 'details' => []];
+        $summary = ['processed' => 0, 'succeeded' => 0, 'skipped' => 0, 'errors' => 0, 'details' => []];
         foreach ($this->connections->enabledWithCredentials() as $connection) {
             $summary['processed']++;
+            if ($this->pacedOut($connection)) {
+                $summary['skipped']++;
+                $summary['details'][] = [
+                    'connection_id' => (int) $connection['id'],
+                    'skipped' => 'minimum_sync_interval',
+                ];
+                continue;
+            }
             try {
                 $result = $this->sync(
                     (int) $connection['supplier_id'],
@@ -270,6 +282,14 @@ final class BankConnectionService
                     'transactions' => (int) ($result['import_result']['transactions'] ?? 0),
                 ];
             } catch (BankConnectorOperationException $e) {
+                if (self::isRateLimit($e->errorCode)) {
+                    $summary['skipped']++;
+                    $summary['details'][] = [
+                        'connection_id' => (int) $connection['id'],
+                        'skipped' => $e->errorCode,
+                    ];
+                    continue;
+                }
                 $summary['errors']++;
                 $summary['details'][] = [
                     'connection_id' => (int) $connection['id'],
@@ -278,6 +298,34 @@ final class BankConnectionService
             }
         }
         return $summary;
+    }
+
+    private static function isRateLimit(string $errorCode): bool
+    {
+        return in_array($errorCode, [BankConnectorException::RATE_LIMITED, 'bank_rate_limited'], true);
+    }
+
+    /**
+     * Banka s omezenou četností stahování (BankConnectorSyncPacing) se
+     * automaticky nevolá dřív, než od posledního pokusu uplyne její odstup.
+     * Neznámý konektor ani spojení bez předchozího pokusu se nepřeskakuje.
+     *
+     * @param array<string,mixed> $connection
+     */
+    private function pacedOut(array $connection): bool
+    {
+        $elapsed = $connection['seconds_since_last_sync'] ?? null;
+        if (!is_int($elapsed) || $elapsed < 0) {
+            return false;
+        }
+        try {
+            $connector = $this->connectors->get((string) $connection['provider']);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $connector instanceof BankConnectorSyncPacing
+            && $elapsed < $connector->minimumAutomaticSyncIntervalSeconds();
     }
 
     /** @return array{0:string,1:string} */

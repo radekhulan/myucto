@@ -199,6 +199,7 @@ final class BankConnectionRepository
                        bc.verified_account_number, bc.verified_bank_code, bc.verified_currency,
                        bc.validated_at, bc.sync_watermark_date, bc.last_sync_at,
                        bc.last_sync_status, bc.last_sync_error_code,
+                       CURRENT_TIMESTAMP AS db_now,
                        bc.created_at, bc.updated_at,
                        c.code AS account_code, c.label AS account_label, c.is_active,
                        c.account_number, c.bank_code, c.iban
@@ -214,6 +215,12 @@ final class BankConnectionRepository
         $row['enabled'] = (bool) $row['enabled'];
         $row['has_token'] = (bool) $row['has_token'];
         $row['is_active'] = isset($row['is_active']) ? (bool) $row['is_active'] : false;
+        // Oba časy pocházejí z databáze (last_sync_at i db_now = CURRENT_TIMESTAMP),
+        // takže rozdíl nezávisí na časovém pásmu PHP.
+        $lastSync = isset($row['last_sync_at']) && $row['last_sync_at'] !== '' ? strtotime((string) $row['last_sync_at']) : false;
+        $dbNow = isset($row['db_now']) ? strtotime((string) $row['db_now']) : false;
+        $row['seconds_since_last_sync'] = $lastSync !== false && $dbNow !== false ? $dbNow - $lastSync : null;
+        unset($row['db_now']);
         return $row;
     }
 

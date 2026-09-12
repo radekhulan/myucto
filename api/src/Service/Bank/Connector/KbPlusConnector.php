@@ -4,14 +4,31 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank\Connector;
 
-final class KbPlusConnector implements StructuredBankConnector, BankConnectorCredentialKeyProvider, BankPaymentCapabilityProvider
+final class KbPlusConnector implements
+    StructuredBankConnector,
+    BankConnectorCredentialKeyProvider,
+    BankPaymentCapabilityProvider,
+    BankConnectorSyncPacing
 {
+    /**
+     * ADAA v2 (GET /accounts/{accountId}/transactions) vrací 429 „Unchanged data
+     * download limit reached … Limit: 1 download per 61 minutes“. Cron běží
+     * častěji (typicky po 15 minutách), takže bez odstupu by u účtu bez nových
+     * pohybů většina běhů skončila odmítnutím.
+     */
+    private const MINIMUM_SYNC_INTERVAL_SECONDS = 61 * 60;
+
     public function __construct(
         private readonly KbPlusApiClient $api,
         private readonly KbPlusCredentialVault $vault,
         private readonly KbPlusTransactionParser $parser,
         private readonly KbPlusAboBatchMapper $batchMapper,
     ) {}
+
+    public function minimumAutomaticSyncIntervalSeconds(): int
+    {
+        return self::MINIMUM_SYNC_INTERVAL_SECONDS;
+    }
 
     public function provider(): string
     {

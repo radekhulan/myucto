@@ -18946,6 +18946,7 @@
     "freq_hourly_0600_0800": "každou hodinu mezi 06:00 a 08:00",
     "freq_every_1_min": "každou minutu",
     "freq_every_10_min": "každých 10 min",
+    "freq_every_15_min": "každých 15 min",
     "freq_every_30_min": "každých 30 min",
     "freq_hourly_15": "každou hodinu v 15. minutě",
     "freq_weekdays_0900": "Po–Pá v 09:00",

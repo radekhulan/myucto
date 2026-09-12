@@ -811,8 +811,16 @@ Ruční tlačítko **Načíst pohyby** u účtu není jediná cesta — cron
 zadanými přístupovými údaji a zavolá pro každé automatické pokračování
 posledního načtení. Pokud žádné napojení není aktivní, běh se přeskočí. Cron
 neřeší nic navíc oproti manuálnímu tlačítku — jen ho spouští za tebe
-pravidelně, typicky **každých 30 minut** (`*/30 * * * *`). Nastavení plánovače
+pravidelně, typicky **každých 15 minut** (`*/15 * * * *`). Nastavení plánovače
 je v [playbooku automatizačních skriptů](../cmd/README.md).
+
+Některé banky omezují, jak často lze pohyby stahovat. **KB+** povoluje stažení
+nezměněných dat nejvýš jednou za 61 minut, jinak dotaz odmítne. Cron proto
+napojení KB+ zavolá až po uplynutí 61 minut od posledního pokusu a mezitím ho
+přeskočí. Nové pohyby z KB+ se tak v aplikaci objeví nejpozději zhruba za
+hodinu. Když banka dotaz kvůli četnosti odmítne, napojení se neoznačí jako
+chybné a další běh to zkusí znovu. Ruční tlačítko **Načíst pohyby** tímto
+odstupem omezené není.
 
 ### 28.9.4 Odeslání platebního příkazu
 
