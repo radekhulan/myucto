@@ -22,7 +22,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
     {
         $revisions = $this->wholeYear(2025);
         $revisions[2] = $this->revision(2025, 3, absences: [[
-            'id' => 9001, 'absence_type' => 'ppm',
+            'id' => 9001, 'absence_type' => 'other',
             'date_from' => '2025-03-05', 'date_to' => '2025-03-09',
         ]]);
         try {
@@ -183,36 +183,72 @@ final class EldpAnnualStatementBuilderTest extends TestCase
      * Vyloučenou dobou je podle § 16 odst. 4 věty třetí písm. a) zákona
      * č. 155/1995 Sb. jen doba PŘED PORODEM (a nejdříve od osmého týdne před
      * očekávaným dnem porodu); zbytek podpůrčí doby vyloučenou dobou není.
-     * Bez dne porodu ve zmrazeném snapshotu by modul vykázal celou podpůrčí
-     * dobu a nadhodnotil osobní vyměřovací základ — tedy i důchod.
+     *
+     * Syntetický rok: PPM od 1. 4. 2025, očekávaný porod 20. 5., porod 18. 5.
+     * Duben je celý před porodem (30 dnů 10359, bez příjmu, ale omluvný, takže
+     * dobou pojištění zůstává). V květnu je 17 dnů před porodem a zúčtovaný
+     * příjem. Červen až listopad jsou po porodu bez příjmu, a tedy podle § 11
+     * odst. 2 mimo dobu pojištění s nulou dnů.
      */
-    public function testMaternityBlocksBecauseOnlyThePreBirthPartIsExcluded(): void
+    public function testMaternityCountsOnlyThePreBirthPartAndPostBirthMonthsAddNoDays(): void
+    {
+        $statement = $this->build($this->maternityYear());
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame(31 + 28 + 31 + 30 + 31 + 31, $sections[0]['insurance_days']);
+        self::assertSame(50_000, $sections[0]['assessment_base_czk']);
+        self::assertSame(47, $sections[0]['excluded_days']['penezitaPomocMaterstvi']);
+        self::assertSame(47, $sections[0]['excluded_days_total']);
+        $provenance = array_column($sections[0]['excluded_days_provenance'], null, 'period_start');
+        self::assertSame('2025-05-17', $provenance['2025-05-01']['counted_to']);
+        self::assertSame(17, $provenance['2025-05-01']['days']);
+        self::assertArrayNotHasKey('2025-06-01', $provenance);
+
+        $xml = (new EldpXmlSerializer())->serialize($statement);
+        self::assertStringContainsString('<penezitaPomocMaterstvi>47</penezitaPomocMaterstvi>', $xml);
+        self::assertStringContainsString('<vylouceneDobyCelkem>47</vylouceneDobyCelkem>', $xml);
+        (new EldpXmlValidator())->validate($statement, $xml);
+    }
+
+    /** Měsíc porodu bez příjmu je souběh omluvné a neomluvné části. */
+    public function testMaternityBirthMonthWithoutIncomeBlocks(): void
+    {
+        $revisions = $this->maternityYear();
+        $revisions[4] = $this->revision(2025, 5, absences: [$this->maternityAbsence()], baseMinor: 0);
+
+        $this->expectException(EldpValidationException::class);
+        $this->expectExceptionMessage('§ 11 odst. 2');
+        $this->build($revisions);
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function maternityYear(): array
     {
         $revisions = $this->wholeYear(2025);
-        $revisions[5] = $this->revision(
-            2025,
-            6,
-            absences: [[
-                'id' => 9100,
-                'absence_type' => 'ppm',
-                'date_from' => '2025-06-02',
-                'date_to' => '2025-06-06',
-            ]],
-        );
-
-        try {
-            $this->build($revisions);
-            self::fail('PPM nesmí projít jako vyloučená doba v celé podpůrčí době.');
-        } catch (EldpValidationException $exception) {
-            self::assertStringContainsString('před porodem', $exception->getMessage());
-            self::assertStringContainsString('#9100', $exception->getMessage());
-            self::assertStringContainsString('červen 2025', $exception->getMessage());
-            self::assertSame(
-                'eldp_absence_kind_unsupported',
-                $exception->blockers[0]['code'],
+        foreach (range(4, 11) as $month) {
+            $revisions[$month - 1] = $this->revision(
+                2025,
+                $month,
+                absences: [$this->maternityAbsence()],
+                baseMinor: $month === 5 ? 1_000_000 : 0,
             );
-            self::assertSame(9100, $exception->blockers[0]['detail']['absence_id']);
         }
+
+        return $revisions;
+    }
+
+    /** @return array<string,mixed> */
+    private function maternityAbsence(): array
+    {
+        return [
+            'id' => 9100,
+            'absence_type' => 'ppm',
+            'date_from' => '2025-04-01',
+            'date_to' => '2025-11-30',
+            'expected_childbirth_date' => '2025-05-20',
+            'childbirth_date' => '2025-05-18',
+        ];
     }
 
     public function testCompensatoryTimeOffIsNeutralAndDoesNotBlockTheStatement(): void

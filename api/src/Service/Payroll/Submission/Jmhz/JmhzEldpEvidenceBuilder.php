@@ -29,10 +29,9 @@ final class JmhzEldpEvidenceBuilder
      * ({@see \MyInvoice\Service\Payroll\Time\PayrollJmhzAbsenceHoursDeriver}).
      * Jen tak jde jeden zmrazený zdroj ověřit druhým.
      *
-     * Blokovat dál zůstává `ppm` (vyloučenou dobou je jen předporodní část a
-     * den porodu aplikace neeviduje — viz {@see EldpExcludedPeriodDeriver})
-     * a nerozlišené „jiné". Náhradní volno za přesčas doplňuje až souhrn v5
-     * (viz absenceWorkSummaryFields()).
+     * Blokovat dál zůstává nerozlišené „jiné". Peněžitou pomoc v mateřství
+     * umí až souhrn v3 (hodinový blok `maternity_millihours`), náhradní volno
+     * za přesčas až souhrn v5 (viz absenceWorkSummaryFields()).
      */
     private const ABSENCE_WORK_SUMMARY_FIELDS = [
         'vacation' => ['vacation_millihours'],
@@ -55,6 +54,7 @@ final class JmhzEldpEvidenceBuilder
      * ničemu ověřit — u v2 zůstávají fail-closed přesně jako dřív.
      */
     private const V3_ABSENCE_WORK_SUMMARY_FIELDS = [
+        'ppm' => ['maternity_millihours'],
         'paternity' => ['paternity_millihours'],
         'parental' => ['parental_millihours'],
         'unpaid_leave' => ['unpaid_leave_millihours'],
@@ -81,6 +81,9 @@ final class JmhzEldpEvidenceBuilder
     private const V3_UNWORKED_FIELDS = [
         'employee_obstacle_paid_millihours',
         'employer_obstacle_millihours',
+        // PPM vyplácí ČSSZ, zaměstnavatel za ni nic neplatí, takže do 10276
+        // nepatří, jen do úhrnu 10275.
+        'maternity_millihours',
         'paternity_millihours',
         'parental_millihours',
         'unpaid_leave_millihours',
@@ -117,8 +120,18 @@ final class JmhzEldpEvidenceBuilder
             'dpn_without_employer_compensation_millihours',
         ],
         'osetrovaniClenaRodiny' => ['care_millihours'],
+        'penezitaPomocMaterstvi' => ['maternity_millihours'],
         'otcovska' => ['paternity_millihours'],
     ];
+
+    /**
+     * Atributy, u kterých příčná kontrola platí jen jedním směrem: den ⇒ hodiny.
+     *
+     * 10359 nese jen PŘEDPORODNÍ část peněžité pomoci v mateřství, kdežto
+     * hodinový blok pracovního souhrnu celou nepřítomnost. Měsíc po porodu
+     * proto legitimně vykazuje hodiny PPM bez jediného vyloučeného dne.
+     */
+    private const ONE_WAY_EXCLUDED_ATTRIBUTES = ['penezitaPomocMaterstvi'];
 
     /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
     private ?array $specManifest = null;
@@ -186,7 +199,13 @@ final class JmhzEldpEvidenceBuilder
             ->diff(new \DateTimeImmutable($insuranceTo))->days + 1;
         $absences = $entry['absences'] ?? null;
         $outsideInsurance = is_array($absences) && array_is_list($absences)
-            && $this->monthOutsideInsurancePeriod($absences, $participates, $assessmentBaseMinor);
+            && $this->monthOutsideInsurancePeriod(
+                $absences,
+                $participates,
+                $assessmentBaseMinor,
+                $insuranceFrom,
+                $insuranceTo,
+            );
         $confirmation = [
             'insurance_from' => $insuranceFrom,
             'insurance_to' => $insuranceTo,
@@ -296,7 +315,6 @@ final class JmhzEldpEvidenceBuilder
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
         $participates = $this->participationMode($relationType, $relationship, $employmentId);
         $uncappedBase = $this->nonNegativeInt($relationship['assessment_base_minor_units'] ?? null, 'assessment_base_minor_units');
-        $outsideInsurance = $this->monthOutsideInsurancePeriod($absences, $participates, $uncappedBase);
         $cappedBase = $this->nonNegativeInt($relationship['capped_assessment_base_minor_units'] ?? null, 'capped_assessment_base_minor_units');
         if ($uncappedBase % 100 !== 0 || intdiv($uncappedBase, 100) > 9_999_999_999) {
             $this->invalid('jmhz_eldp_assessment_base_not_whole_czk', 'Vyměřovací základ ELDP musí být celé Kč v rozsahu XSD.');
@@ -337,6 +355,15 @@ final class JmhzEldpEvidenceBuilder
         ) {
             $this->invalid('jmhz_eldp_interval_invalid', 'Interval ELDP musí přesně odpovídat průniku pracovního vztahu s vykazovaným měsícem.');
         }
+        // Až nad ověřeným intervalem: u PPM rozhoduje, které dny měsíce leží
+        // před porodem, a to se dá říct jen o intervalu, který odpovídá vztahu.
+        $outsideInsurance = $this->monthOutsideInsurancePeriod(
+            $absences,
+            $participates,
+            $uncappedBase,
+            $insuranceFrom,
+            $insuranceTo,
+        );
         $insured = $participates && !$outsideInsurance;
         $days = $insured
             ? $this->positiveInt($confirmation['insurance_days'] ?? null, 'insurance_days')
@@ -774,7 +801,8 @@ final class JmhzEldpEvidenceBuilder
      * Dvě situace zákon z podkladů jednoznačně nerozhodne, a proto zastaví:
      * nula bez jakékoli nepřítomnosti (chybí důvod, proč příjem nevznikl)
      * a souběh omluvné nepřítomnosti s nepřítomností bez příjmu v témž měsíci
-     * (§ 11 odst. 2 zná jen celý měsíc).
+     * (§ 11 odst. 2 zná jen celý měsíc). Peněžitá pomoc v mateřství je omluvná
+     * jen před porodem, takže měsíc porodu bez příjmu je právě takový souběh.
      *
      * @param list<array<string,mixed>> $absences
      */
@@ -782,11 +810,18 @@ final class JmhzEldpEvidenceBuilder
         array $absences,
         bool $participates,
         int $uncappedBase,
+        string $intervalFrom,
+        string $intervalTo,
     ): bool {
         if (!$participates) {
             return false;
         }
-        $status = EldpExcludedPeriodDeriver::insuranceMonthStatus($absences, $uncappedBase);
+        $status = EldpExcludedPeriodDeriver::insuranceMonthStatus(
+            $absences,
+            $uncappedBase,
+            $intervalFrom,
+            $intervalTo,
+        );
         if ($status === EldpExcludedPeriodDeriver::MONTH_MIXED
             || $status === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED
         ) {
@@ -807,9 +842,9 @@ final class JmhzEldpEvidenceBuilder
     /**
      * Druh nepřítomnosti musí být takový, který ordinary řez umí doložit
      * z obou zmrazených zdrojů zároveň. Kontrola stojí PŘED pracovním
-     * souhrnem záměrně: u nedoloženého druhu (peněžitá pomoc v mateřství,
-     * náhradní volno, „jiné") má účetní vidět, že vadí DRUH nepřítomnosti, ne
-     * až rozpor v hodinách, který je jen jeho následkem.
+     * souhrnem záměrně: u nedoloženého druhu („jiné", nebo druh, pro který
+     * starší verze souhrnu nemá hodinový blok) má účetní vidět, že vadí DRUH
+     * nepřítomnosti, ne až rozpor v hodinách, který je jen jeho následkem.
      *
      * @param list<array<string,mixed>> $absences
      */
@@ -825,10 +860,11 @@ final class JmhzEldpEvidenceBuilder
                     'jmhz_eldp_absences_unsupported',
                     'Ordinary ELDP automaticky podporuje jen nepřítomnost doloženou'
                         . ' zároveň vyloučenými dobami i pracovním souhrnem:'
-                        . ' dovolenou, nemoc, karanténu, ošetřovné, otcovskou,'
-                        . ' rodičovskou, neplacené volno, neomluvenou absenci,'
-                        . ' překážky v práci a náhradní volno za přesčas'
-                        . ' (to až v pracovním souhrnu schváleném po jeho zavedení).',
+                        . ' dovolenou, nemoc, karanténu, ošetřovné, peněžitou pomoc'
+                        . ' v mateřství, otcovskou, rodičovskou, neplacené volno,'
+                        . ' neomluvenou absenci, překážky v práci a náhradní volno'
+                        . ' za přesčas (to až v pracovním souhrnu schváleném po jeho'
+                        . ' zavedení).',
                 );
             }
         }
@@ -1087,10 +1123,9 @@ final class JmhzEldpEvidenceBuilder
             $days = $excluded['components'][$attribute] ?? 0;
             $fields = self::EXCLUDED_ATTRIBUTE_FIELDS[$attribute] ?? null;
             if ($fields === null) {
-                // 10359 PPM a 10536 § 16 odst. 4 písm. j) nemají v ordinary
-                // řezu povolený druh nepřítomnosti, takže sem nemají jak
-                // přitéct; nenulová hodnota by znamenala, že se výčty druhů
-                // rozešly.
+                // 10536 § 16 odst. 4 písm. j) nemá v ordinary řezu povolený
+                // druh nepřítomnosti, takže sem nemá jak přitéct; nenulová
+                // hodnota by znamenala, že se výčty druhů rozešly.
                 if ($days !== 0) {
                     $this->invalid(
                         'jmhz_eldp_excluded_days_unsupported',
@@ -1103,7 +1138,10 @@ final class JmhzEldpEvidenceBuilder
             foreach ($fields as $field) {
                 $hours += $values[$field] ?? 0;
             }
-            if (($days > 0) !== ($hours > 0)) {
+            $mismatch = in_array($attribute, self::ONE_WAY_EXCLUDED_ATTRIBUTES, true)
+                ? $days > 0 && $hours <= 0
+                : ($days > 0) !== ($hours > 0);
+            if ($mismatch) {
                 $this->invalid(
                     'jmhz_eldp_excluded_days_unsupported',
                     "Vyloučená doba {$attribute} ({$days} dnů) neodpovídá neodpracovaným"

@@ -128,6 +128,8 @@ const absenceForm = reactive({
   absence_type: 'vacation',
   date_from: monthStart,
   date_to: monthStart,
+  expected_childbirth_date: '',
+  childbirth_date: '',
   timezone_name: 'Europe/Prague',
   partial_first_hours: null as number | null,
   partial_last_hours: null as number | null,
@@ -250,6 +252,40 @@ const needsAverage = computed(() =>
   ['vacation', 'dpn', 'quarantine', 'employee_obstacle', 'employer_obstacle']
     .includes(absenceForm.absence_type),
 )
+/*
+ * Peněžitá pomoc v mateřství je vyloučenou dobou evidenčního listu jen před
+ * porodem. Očekávaný den porodu je proto povinný hned při zápisu, skutečný se
+ * doplní, až porod nastane, i u schválené nepřítomnosti.
+ */
+const isMaternity = computed(() => absenceForm.absence_type === 'ppm')
+const childbirthEditing = ref<number | null>(null)
+const childbirthDraft = ref('')
+
+function canRecordChildbirth(item: PayrollAbsence) {
+  return item.absence_type === 'ppm'
+    && !item.childbirth_date
+    && (item.status === 'requested' || item.status === 'approved')
+}
+
+function openChildbirth(item: PayrollAbsence) {
+  childbirthEditing.value = item.id
+  childbirthDraft.value = ''
+}
+
+async function recordChildbirth(item: PayrollAbsence) {
+  if (!childbirthDraft.value) return
+  saving.value = true
+  try {
+    await payrollAbsenceApi.recordChildbirth(item.id, item.row_version, childbirthDraft.value)
+    childbirthEditing.value = null
+    toast.success(t('payroll_absence.absences.childbirth_recorded'))
+    await loadData()
+  } catch (error: any) {
+    showPayrollError(error, t('payroll_absence.messages.save_failed'))
+  } finally {
+    saving.value = false
+  }
+}
 /*
  * Co bude chybět při SCHVÁLENÍ. Dovolená, DPN a překážky se počítají
  * z průměrného výdělku, takže bez něj nemá server z čeho počítat náhradu —
@@ -511,6 +547,8 @@ async function createAbsence() {
       absence_type: absenceForm.absence_type as AbsenceType,
       date_from: absenceForm.date_from,
       date_to: absenceForm.date_to,
+      expected_childbirth_date: isMaternity.value ? (absenceForm.expected_childbirth_date || null) : null,
+      childbirth_date: isMaternity.value ? (absenceForm.childbirth_date || null) : null,
       timezone_name: absenceForm.timezone_name,
       partial_first_minutes: hoursToMinutes(absenceForm.partial_first_hours, {
         nullable: true,
@@ -1155,6 +1193,28 @@ onMounted(async () => {
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.to') }}</span>
             <DateInput v-model="absenceForm.date_to" required :class="fieldClass" />
           </label>
+          <template v-if="isMaternity">
+            <label>
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.expected_childbirth') }}</span>
+              <DateInput
+                v-model="absenceForm.expected_childbirth_date"
+                data-test="absence-expected-childbirth"
+                required
+                :class="fieldClass"
+              />
+            </label>
+            <label>
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.childbirth') }}</span>
+              <DateInput
+                v-model="absenceForm.childbirth_date"
+                data-test="absence-childbirth"
+                :class="fieldClass"
+              />
+            </label>
+            <p class="text-xs text-neutral-500 sm:col-span-2" data-test="absence-childbirth-hint">
+              {{ t('payroll_absence.absences.childbirth_hint') }}
+            </p>
+          </template>
           <div v-if="needsAverage">
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.average') }}</span>
             <SearchableSelect
@@ -1324,6 +1384,20 @@ onMounted(async () => {
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div><dt class="text-neutral-500">{{ t('payroll_absence.period') }}</dt><dd class="font-medium text-neutral-900">{{ formatDate(item.date_from) }} – {{ formatDate(item.date_to) }}</dd></div>
               <div><dt class="text-neutral-500">{{ t('payroll_absence.absences.average') }}</dt><dd class="font-medium text-neutral-900">{{ money(item.average_hourly_minor) }}</dd></div>
+              <template v-if="item.absence_type === 'ppm'">
+                <div>
+                  <dt class="text-neutral-500">{{ t('payroll_absence.absences.expected_childbirth') }}</dt>
+                  <dd class="font-medium text-neutral-900">
+                    {{ item.expected_childbirth_date ? formatDate(item.expected_childbirth_date) : t('payroll_absence.absences.childbirth_missing') }}
+                  </dd>
+                </div>
+                <div data-test="absence-childbirth-value">
+                  <dt class="text-neutral-500">{{ t('payroll_absence.absences.childbirth') }}</dt>
+                  <dd class="font-medium text-neutral-900">
+                    {{ item.childbirth_date ? formatDate(item.childbirth_date) : t('payroll_absence.absences.childbirth_missing') }}
+                  </dd>
+                </div>
+              </template>
             </dl>
             <p v-if="item.note" class="mt-3 text-sm text-neutral-600">{{ item.note }}</p>
             <div v-if="item.correction_pending" class="mt-3 rounded-lg bg-warning-50 p-2 text-xs text-warning-800">
@@ -1358,6 +1432,40 @@ onMounted(async () => {
                   {{ t('common.cancel') }}
                 </button>
               </div>
+            </div>
+            <div v-if="canWrite && canRecordChildbirth(item)" class="mt-4" data-test="childbirth-record">
+              <div v-if="childbirthEditing === item.id" class="flex flex-wrap items-end gap-2">
+                <label class="min-w-0 flex-1">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.childbirth') }}</span>
+                  <DateInput v-model="childbirthDraft" data-test="childbirth-date" required :class="fieldClass" />
+                </label>
+                <button
+                  type="button"
+                  :class="btnFilled('primary')"
+                  data-test="childbirth-save"
+                  :disabled="saving || !childbirthDraft"
+                  @click="recordChildbirth(item)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+                  {{ t('payroll_absence.absences.record_childbirth_save') }}
+                </button>
+                <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="childbirthEditing = null">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+                  {{ t('common.cancel') }}
+                </button>
+                <p class="w-full text-xs text-neutral-500">{{ t('payroll_absence.absences.record_childbirth_once') }}</p>
+              </div>
+              <button
+                v-else
+                type="button"
+                :class="btnOutline('primary')"
+                data-test="childbirth-open"
+                :disabled="saving"
+                @click="openChildbirth(item)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>
+                {{ t('payroll_absence.absences.record_childbirth') }}
+              </button>
             </div>
             <div v-if="canWrite && item.status === 'requested'" class="mt-4 flex flex-wrap gap-2">
               <button :class="btnFilled('success')" :disabled="saving" @click="decide(item, 'approved')">

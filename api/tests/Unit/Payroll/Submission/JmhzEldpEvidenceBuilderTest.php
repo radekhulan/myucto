@@ -433,19 +433,111 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
     }
 
     /**
-     * PPM blokuje i nad souhrnem v3, a to úmyslně: vyloučenou dobou je podle
-     * § 16 odst. 4 věty třetí písm. a) zákona č. 155/1995 Sb. jen část před
-     * porodem (atribut 10359 se tak i jmenuje) a den porodu aplikace neeviduje.
+     * PPM před porodem: vyloučenou dobou 10359 je průnik s intervalem od
+     * začátku osmého týdne před očekávaným porodem (25. 6. 2026) do dne před
+     * porodem. Porod v červenci nenastal, měsíc končí před očekávaným dnem
+     * (20. 8.), takže se počítá 7.–31. 7. Příjem za 1.–6. 7. nechává plnou
+     * dobu pojištění.
      */
-    public function testKeepsMaternityLeaveFailClosedEvenOnTheNewerWorkSummary(): void
+    public function testDerivesPreBirthMaternityAsExcludedDays(): void
     {
-        $source = $this->absenceSource('ppm', '2026-07-07', '2026-07-18', [
-            'maternity_millihours' => 40_000,
-        ]);
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->maternitySource('2026-07-07', '2026-12-31', '2026-08-20', null, 144_000);
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(25, $section['excluded_days']['penezitaPomocMaterstvi']);
+        self::assertSame(25, $section['excluded_days_total']);
+        self::assertSame('2026-07-31', $section['excluded_days_provenance'][0]['counted_to']);
+        // Předporodní PPM zakládá dny s vyplacenou dávkou, které zaměstnavatel
+        // nezná, takže rozpad § 18 odst. 7 zůstává neuvedený (10357 > 0).
+        self::assertNull($section['section18_days_total']);
+    }
+
+    /**
+     * Měsíc po porodu bez příjmu: mimo dobu pojištění (§ 11 odst. 2), nula
+     * vyloučených dnů. Hodiny PPM v pracovním souhrnu bez vyloučeného dne jsou
+     * legitimní, protože příčná kontrola je u 10359 jen jednosměrná.
+     */
+    public function testPostBirthMaternityMonthWithoutIncomeIsOutsideInsurance(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->withZeroAssessmentBase(
+            $this->maternitySource('2026-05-01', '2026-12-31', '2026-06-20', '2026-06-15', 184_000),
+        );
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(0, $section['insurance_days']);
+        self::assertSame('1++', $section['code']);
+        self::assertSame(0, $section['assessment_base_czk']);
+        self::assertSame(0, $section['excluded_days_total']);
+        self::assertSame(0, $section['excluded_days']['penezitaPomocMaterstvi']);
+    }
+
+    public function testBirthMonthWithoutIncomeStops(): void
+    {
+        $source = $this->withZeroAssessmentBase(
+            $this->maternitySource('2026-06-01', '2026-12-31', '2026-07-20', '2026-07-15', 176_000),
+        );
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('§ 11 odst. 2');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    /** Bez dne porodu nerozhodne měsíc, který sahá na očekávaný den porodu. */
+    public function testMaternityMonthReachingExpectedBirthNeedsTheBirthDate(): void
+    {
+        $source = $this->maternitySource('2026-06-01', '2026-12-31', '2026-07-20', null, 176_000);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('vyloučené doby');
+        $builder = new JmhzEldpEvidenceBuilder();
+        $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+    }
+
+    /** Souhrn v2 hodinový blok PPM nemá, takže PPM tam zůstává fail-closed. */
+    public function testKeepsMaternityFailClosedOnTheOlderWorkSummary(): void
+    {
+        $source = $this->maternitySource('2026-07-07', '2026-12-31', '2026-08-20', null, 144_000);
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']
+            ['derivation_version'] = 'jmhz-work-month.v2';
+        $source = $this->withInput($source, $input);
 
         $this->expectException(JmhzEldpEvidenceException::class);
         $this->expectExceptionMessage('dovolenou, nemoc, karanténu, ošetřovné');
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    /** @return array<string,mixed> */
+    private function maternitySource(
+        string $from,
+        string $to,
+        string $expected,
+        ?string $childbirth,
+        int $millihours,
+    ): array {
+        $source = $this->absenceSource('ppm', $from, $to, ['maternity_millihours' => $millihours]);
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['absences'][0]['expected_childbirth_date'] = $expected;
+        $input['people'][0]['employments'][0]['absences'][0]['childbirth_date'] = $childbirth;
+
+        return $this->withInput($source, $input);
     }
 
     /**

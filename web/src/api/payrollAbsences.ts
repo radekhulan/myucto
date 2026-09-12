@@ -47,6 +47,10 @@ export interface PayrollAbsence {
   absence_type: AbsenceType
   date_from: string
   date_to: string
+  /** Jen u `ppm`: od něj se odvozuje předporodní část (vyloučená doba ELDP). */
+  expected_childbirth_date?: string | null
+  /** Jen u `ppm`; doplňuje se jednou, i po schválení (`recordChildbirth`). */
+  childbirth_date?: string | null
   partial_first_minutes: number | null
   partial_last_minutes: number | null
   average_snapshot_id: number | null
@@ -74,6 +78,8 @@ export interface AbsencePayload {
   absence_type: AbsenceType
   date_from: string
   date_to: string
+  expected_childbirth_date: string | null
+  childbirth_date: string | null
   timezone_name: string
   partial_first_minutes: number | null
   partial_last_minutes: number | null
@@ -211,6 +217,11 @@ export const payrollAbsenceApi = {
   cancel: (id: number, rowVersion: number) =>
     api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/cancel`, {
       row_version: rowVersion,
+    }).then(response => response.data.absence),
+  recordChildbirth: (id: number, rowVersion: number, childbirthDate: string) =>
+    api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/childbirth`, {
+      row_version: rowVersion,
+      childbirth_date: childbirthDate,
     }).then(response => response.data.absence),
   averages: (employmentId: number) =>
     api.get<{ snapshots: AverageSnapshot[] }>('/payroll/time/averages', {

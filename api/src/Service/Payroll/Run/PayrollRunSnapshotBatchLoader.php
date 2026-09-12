@@ -182,6 +182,7 @@ final class PayrollRunSnapshotBatchLoader
     ): array {
         return $this->grouped($this->fetch(
             'SELECT id, absence_type, date_from, date_to,
+                    expected_childbirth_date, childbirth_date,
                     partial_first_minutes, partial_last_minutes, timezone_name,
                     compensation_policy, average_snapshot_id, decided_at,
                     employment_id AS ' . self::GROUP_KEY . '

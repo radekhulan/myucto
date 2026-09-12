@@ -802,6 +802,7 @@
         "1814_gopay_payout_account_default.sql",
         "1815_drop_leftover_migration_procedures.sql",
         "1816_payroll_work_summary_compensatory_time_off.sql",
+        "1817_payroll_absence_childbirth_dates.sql",
         "1818_payroll_child_claim_credit_status.sql"
     ],
     "tables": {
@@ -6550,6 +6551,9 @@
             "columns": {
                 "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other') NOT NULL",
                 "average_snapshot_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "childbirth_date": "date NULL DEFAULT NULL",
+                "childbirth_recorded_at": "datetime NULL DEFAULT NULL",
+                "childbirth_recorded_by": "int(10) unsigned NULL DEFAULT NULL",
                 "compensation_policy": "enum('none','average_100','average_custom','dpn','statutory_manual_review') NOT NULL DEFAULT 'statutory_manual_review'",
                 "compensation_rate_basis_points": "smallint(5) unsigned NULL DEFAULT NULL",
                 "correction_pending": "tinyint(1) NOT NULL DEFAULT 0",
@@ -6559,6 +6563,7 @@
                 "decided_at": "datetime NULL DEFAULT NULL",
                 "decided_by": "int(10) unsigned NULL DEFAULT NULL",
                 "employment_id": "bigint(20) unsigned NOT NULL",
+                "expected_childbirth_date": "date NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "varchar(1000) NULL DEFAULT NULL",
                 "partial_first_minutes": "int(10) unsigned NULL DEFAULT NULL",
@@ -6583,6 +6588,8 @@
                 "fk_payroll_absence_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
+                "chk_payroll_absence_childbirth_ppm_only": "`absence_type` = 'ppm' or `expected_childbirth_date` is null and `childbirth_date` is null",
+                "chk_payroll_absence_childbirth_recorded": "`childbirth_recorded_at` is null or `childbirth_date` is not null",
                 "chk_payroll_absence_correction": "`correction_pending` in (0,1)",
                 "chk_payroll_absence_interval": "`date_to` >= `date_from`",
                 "chk_payroll_absence_partial_first": "`partial_first_minutes` is null or `partial_first_minutes` > 0",

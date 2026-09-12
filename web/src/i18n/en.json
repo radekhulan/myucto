@@ -21911,7 +21911,15 @@
       "average_required_hint": "Pick the average earnings the compensation is calculated from — the absence cannot be created without it.",
       "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Averages tab and come back here.",
       "average_awaiting_approval": "An average earning for this relation has been calculated but is awaiting approval. Approve it on the Averages tab and come back.",
-      "go_to_averages": "Go to Averages"
+      "go_to_averages": "Go to Averages",
+      "expected_childbirth": "Expected date of birth",
+      "childbirth": "Date of birth",
+      "childbirth_hint": "Only the part of maternity benefit before the birth is an excluded period of the insurance record. You can add the date of birth later, once it happens.",
+      "childbirth_missing": "Not filled in",
+      "record_childbirth": "Add date of birth",
+      "record_childbirth_save": "Save date of birth",
+      "record_childbirth_once": "The date of birth can be added only once. To correct a wrong date, cancel the absence and record it again.",
+      "childbirth_recorded": "The date of birth has been added."
     },
     "dpn": {
       "insurance": "Sickness insurance participation confirmed",

@@ -628,7 +628,12 @@ final class EldpAnnualStatementBuilder
          * vykazuje i měsíční hlášení a přijatá hlášení jiných systémů. Dřív
          * se započítal jako plný měsíc pojištění.
          */
-        $monthStatus = EldpExcludedPeriodDeriver::insuranceMonthStatus($absences, $uncapped);
+        $monthStatus = EldpExcludedPeriodDeriver::insuranceMonthStatus(
+            $absences,
+            $uncapped,
+            $insuranceFrom,
+            $insuranceTo,
+        );
         if ($monthStatus === EldpExcludedPeriodDeriver::MONTH_MIXED
             || $monthStatus === EldpExcludedPeriodDeriver::MONTH_UNEXPLAINED
         ) {

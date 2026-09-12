@@ -216,11 +216,29 @@ takový měsíc započítá stejně, tedy s nulou dnů pojištění. Celý měs�
 ošetřovného je naopak omluvný důvod, takže zůstává dobou pojištění s plným
 počtem dnů a nulovým základem.
 
-Bezpečně zablokované zůstávají dva případy. **Peněžitá pomoc v mateřství**,
-protože vyloučenou dobou je jen její část před porodem a den porodu aplikace
-neeviduje. A měsíc bez příjmu, ve kterém se **omluvná nepřítomnost (nemoc)
-potkala s nepřítomností bez příjmu** (neplacené volno); zákon rozhoduje jen
-o celém měsíci. Obojí vyřiďte ručně mimo aplikaci.
+Projde i **peněžitá pomoc v mateřství**. Při jejím zápisu vyplňte
+**očekávaný den porodu**, ten je povinný. Jakmile porod nastane, použijte
+u nepřítomnosti tlačítko **Doplnit den porodu**. Jde to i u schválené
+nepřítomnosti, ale jen jednou: den porodu vstupuje do podaných hlášení, takže
+chybný údaj opravíte zrušením nepřítomnosti a novým zápisem.
+
+Vyloučenou dobou evidenčního listu je jen část od začátku osmého týdne před
+očekávaným dnem porodu do dne, který porodu předcházel. Den porodu a doba po
+něm vyloučenou dobou nejsou; měsíc po porodu bez započitatelného příjmu se
+podle § 11 odst. 2 zákona č. 155/1995 Sb. vykáže s nulou dnů pojištění.
+Měsíc, který sahá na očekávaný den porodu nebo za něj, se bez doplněného dne
+porodu nesestaví.
+
+Před porodem nelze na peněžitou pomoc nastoupit dřív než od začátku osmého
+týdne před očekávaným dnem porodu. Začíná-li nepřítomnost až porodem nebo po
+něm (předčasný porod, převzetí dítěte do péče, druhá část podpůrčí doby
+zapsaná zvlášť), vyplňte den porodu dítěte rovnou při zápisu.
+
+Bezpečně zablokovaný zůstává měsíc bez příjmu, ve kterém se **omluvná
+nepřítomnost potkala s nepřítomností bez příjmu**: nemoc s neplaceným volnem,
+nebo měsíc porodu, kdy je peněžitá pomoc před porodem omluvná a po něm už ne.
+Zákon rozhoduje jen o celém měsíci, takový měsíc proto vyřiďte ručně mimo
+aplikaci.
 
 > [!IMPORTANT]
 > Nové zacházení se svátkem a spodní hranice průměrného výdělku platí od

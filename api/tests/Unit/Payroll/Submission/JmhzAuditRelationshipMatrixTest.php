@@ -507,6 +507,47 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         }
     }
 
+    /**
+     * Předporodní peněžitá pomoc v mateřství v měsíčním hlášení: 10359 se
+     * zapíše do `form:vylouceneDny`, projde XSD a kontrola 121
+     * (10357 = 10358 + 10359 + 10360 + 10362 + 10536) i 329 ji přijmou.
+     */
+    public function testPreBirthMaternitySerializesIntoExcludedDaysAndPassesControl121(): void
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 0,
+            'penezitaPomocMaterstvi' => 20,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['excluded_days_total'] = 20;
+        unset($section);
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        )['xml'];
+        $compact = preg_replace('/>\s+</', '><', $xml) ?? '';
+
+        self::assertStringContainsString('<form:penezitaPomocMaterstvi>20</form:penezitaPomocMaterstvi>', $compact);
+        self::assertStringContainsString('<form:vylouceneDobyCelkem>20</form:vylouceneDobyCelkem>', $compact);
+
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $verdicts = array_values(array_filter(
+            $report->findings,
+            static fn (JmhzControlFinding $finding): bool => in_array($finding->controlId, [121, 329], true),
+        ));
+        self::assertNotSame([], $verdicts, 'Kontroly 121 a 329 se musí vyhodnotit.');
+        foreach ($verdicts as $verdict) {
+            self::assertNotSame(JmhzControlOutcome::Failed, $verdict->outcome, "Kontrola {$verdict->controlId}");
+        }
+    }
+
     /** @return list<string> */
     private function blockerCodes(JmhzScenario1Resolution $resolution): array
     {

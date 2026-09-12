@@ -166,6 +166,107 @@ final class PayrollAbsenceValidatorTest extends TestCase
         self::assertSame(2027, $entitlement['leave_year']);
     }
 
+    public function testMaternityRequiresTheExpectedChildbirthDate(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('očekávaný den porodu povinný');
+        $this->validator()->absence($this->maternity(['expected_childbirth_date' => null]));
+    }
+
+    public function testMaternityKeepsBothDatesAndTheBirthIsOptional(): void
+    {
+        $withoutBirth = $this->validator()->absence($this->maternity());
+        $withBirth = $this->validator()->absence($this->maternity(['childbirth_date' => '2026-06-18']));
+
+        self::assertSame('2026-06-20', $withoutBirth['expected_childbirth_date']);
+        self::assertNull($withoutBirth['childbirth_date']);
+        self::assertSame('2026-06-18', $withBirth['childbirth_date']);
+        self::assertSame('none', $withBirth['compensation_policy']);
+    }
+
+    /** § 32 odst. 1 písm. a) a § 34 odst. 1 písm. a) zákona č. 187/2006 Sb. */
+    public function testMaternityCannotStartBeforeTheEighthWeekBeforeExpectedBirth(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nejdříve 2026-04-25');
+        $this->validator()->absence($this->maternity(['date_from' => '2026-04-24']));
+    }
+
+    public function testMaternityMayStartOnTheEighthWeekBeforeExpectedBirth(): void
+    {
+        $data = $this->validator()->absence($this->maternity(['date_from' => '2026-04-25']));
+
+        self::assertSame('2026-04-25', $data['date_from']);
+    }
+
+    /** Porod před osmým týdnem: nástup dnem porodu (§ 34 odst. 1 písm. b)). */
+    public function testMaternityStartingOnAPrematureBirthIsAllowed(): void
+    {
+        $data = $this->validator()->absence($this->maternity([
+            'date_from' => '2026-03-02',
+            'childbirth_date' => '2026-03-02',
+        ]));
+
+        self::assertSame('2026-03-02', $data['childbirth_date']);
+    }
+
+    /** Převzetí dítěte do péče po porodu (§ 34 odst. 1 písm. c)). */
+    public function testChildbirthMayPrecedeTheAbsence(): void
+    {
+        $data = $this->validator()->absence($this->maternity([
+            'date_from' => '2026-07-01',
+            'childbirth_date' => '2026-06-18',
+        ]));
+
+        self::assertSame('2026-06-18', $data['childbirth_date']);
+    }
+
+    public function testChildbirthDatesAreRefusedOutsideMaternity(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('jen u peněžité pomoci v mateřství');
+        $this->validator()->absence([
+            'employment_id' => 1,
+            'absence_type' => 'parental',
+            'date_from' => '2026-07-01',
+            'date_to' => '2026-07-31',
+            'expected_childbirth_date' => '2026-06-20',
+        ]);
+    }
+
+    public function testRecordedChildbirthMustBeAValidDateOnMaternity(): void
+    {
+        $absence = ['absence_type' => 'ppm', 'expected_childbirth_date' => '2026-06-20'];
+
+        self::assertSame('2026-06-18', $this->validator()->childbirthDate($absence, '2026-06-18'));
+        try {
+            $this->validator()->childbirthDate(['absence_type' => 'dpn'] + $absence, '2026-06-18');
+            self::fail('Den porodu nepatří k nemoci.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('jen u peněžité pomoci', $exception->getMessage());
+        }
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Den porodu musí být platné datum');
+        $this->validator()->childbirthDate($absence, '2026-02-30');
+    }
+
+    /**
+     * @param array<string,mixed> $overrides
+     * @return array<string,mixed>
+     */
+    private function maternity(array $overrides = []): array
+    {
+        return [
+            'employment_id' => 1,
+            'absence_type' => 'ppm',
+            'date_from' => '2026-05-01',
+            'date_to' => '2026-11-30',
+            'expected_childbirth_date' => '2026-06-20',
+            'childbirth_date' => null,
+            ...$overrides,
+        ];
+    }
+
     private function validator(): PayrollAbsenceValidator
     {
         return new PayrollAbsenceValidator(CzechPayrollRulesets2026::provider());

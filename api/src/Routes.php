@@ -1914,6 +1914,7 @@ final class Routes
             $g->post('/time/absences', [PayrollAbsenceAction::class, 'create']);
             $g->post('/time/absences/{id:[0-9]+}/decision', [PayrollAbsenceAction::class, 'decision']);
             $g->post('/time/absences/{id:[0-9]+}/cancel', [PayrollAbsenceAction::class, 'cancel']);
+            $g->post('/time/absences/{id:[0-9]+}/childbirth', [PayrollAbsenceAction::class, 'childbirth']);
             $g->get('/time/averages', [PayrollAbsenceAction::class, 'averages']);
             // Konkrétní cesta musí předcházet `{id}` routám níž — jinak by
             // `suggestion` spadlo do parametru. Je to čtení: návrh vstupů

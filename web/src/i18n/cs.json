@@ -21911,7 +21911,15 @@
       "average_required_hint": "Vyberte průměrný výdělek, ze kterého se náhrada spočítá — bez něj nepřítomnost založit nejde.",
       "average_missing_for_relation": "Pro tento vztah není spočítaný žádný průměrný výdělek. Spočítejte ho na záložce Průměry a vraťte se sem.",
       "average_awaiting_approval": "Průměrný výdělek pro tento vztah spočítaný je, ale čeká na schválení. Schvalte ho na záložce Průměry a vraťte se sem.",
-      "go_to_averages": "Přejít na Průměry"
+      "go_to_averages": "Přejít na Průměry",
+      "expected_childbirth": "Očekávaný den porodu",
+      "childbirth": "Den porodu",
+      "childbirth_hint": "Vyloučenou dobou evidenčního listu je jen část peněžité pomoci před porodem. Den porodu můžete doplnit později, až nastane.",
+      "childbirth_missing": "Nedoplněno",
+      "record_childbirth": "Doplnit den porodu",
+      "record_childbirth_save": "Uložit den porodu",
+      "record_childbirth_once": "Den porodu jde doplnit jen jednou. Chybný údaj opravíte zrušením nepřítomnosti a novým zápisem.",
+      "childbirth_recorded": "Den porodu je doplněný."
     },
     "dpn": {
       "insurance": "Potvrzena účast na nemocenském pojištění",

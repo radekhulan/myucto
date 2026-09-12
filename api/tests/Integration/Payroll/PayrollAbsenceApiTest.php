@@ -1156,6 +1156,126 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertStringContainsString('neplacené volno', $message);
     }
 
+    /**
+     * Peněžitá pomoc v mateřství nese očekávaný den porodu a den porodu se
+     * doplní později, i ke schválené nepřítomnosti. Doplnit jde jednou:
+     * vstupuje do vyloučených dob podaných hlášení.
+     */
+    public function testMaternityStoresBirthDatesAndRecordsTheBirthOnce(): void
+    {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody($this->maternityPayload()),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+        self::assertSame('2026-06-20', $absence['expected_childbirth_date']);
+        self::assertNull($absence['childbirth_date']);
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $approvedAbsence = $this->json($approved)['absence'];
+
+        $recorded = $this->action->childbirth(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $approvedAbsence['row_version'],
+                'childbirth_date' => '2026-06-18',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $recorded->getStatusCode(), (string) $recorded->getBody());
+        $withBirth = $this->json($recorded)['absence'];
+        self::assertSame('2026-06-18', $withBirth['childbirth_date']);
+        self::assertSame('approved', $withBirth['status']);
+        self::assertSame($this->userId, $withBirth['childbirth_recorded_by']);
+        self::assertNotNull($withBirth['childbirth_recorded_at']);
+        self::assertSame($approvedAbsence['row_version'] + 1, $withBirth['row_version']);
+        // Mzdu PPM nemění, takže oprava běhu se tím nevyvolává.
+        self::assertFalse($withBirth['correction_pending']);
+
+        $stale = $this->action->childbirth(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $approvedAbsence['row_version'],
+                'childbirth_date' => '2026-06-19',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(409, $stale->getStatusCode());
+
+        $again = $this->action->childbirth(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $withBirth['row_version'],
+                'childbirth_date' => '2026-06-19',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(422, $again->getStatusCode());
+        self::assertStringContainsString('už doplněný', (string) $again->getBody());
+    }
+
+    public function testMaternityWithoutExpectedBirthIsRefused(): void
+    {
+        $payload = $this->maternityPayload();
+        unset($payload['expected_childbirth_date']);
+
+        $response = $this->action->create(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('očekávaný den porodu', (string) $response->getBody());
+    }
+
+    public function testChildbirthCannotBeRecordedOnAnotherAbsenceKind(): void
+    {
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody([
+                ...$this->absencePayload(0),
+                'absence_type' => 'unpaid_leave',
+                'average_snapshot_id' => null,
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $absence = $this->json($created)['absence'];
+
+        $response = $this->action->childbirth(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'childbirth_date' => '2026-06-18',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('jen u peněžité pomoci', (string) $response->getBody());
+    }
+
+    /** @return array<string,mixed> */
+    private function maternityPayload(): array
+    {
+        return [
+            ...$this->absencePayload(0),
+            'absence_type' => 'ppm',
+            'date_from' => '2026-05-01',
+            'date_to' => '2026-11-30',
+            'average_snapshot_id' => null,
+            'expected_childbirth_date' => '2026-06-20',
+        ];
+    }
+
     private function createAbsence(int $averageId): Response
     {
         return $this->action->create(

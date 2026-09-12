@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   createLeaveEntry: vi.fn(),
   leaveEntitlementCandidates: vi.fn(),
   createAutomaticEntitlements: vi.fn(),
+  recordChildbirth: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -41,6 +42,7 @@ vi.mock('@/api/payrollAbsences', () => ({
     createEntitlement: m.createEntitlement,
     leaveEntitlementCandidates: m.leaveEntitlementCandidates,
     createAutomaticEntitlements: m.createAutomaticEntitlements,
+    recordChildbirth: m.recordChildbirth,
   },
 }))
 
@@ -64,6 +66,14 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 import AbsenceManagement from '@/pages/payroll/AbsenceManagement.vue'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
+import DateInput from '@/components/ui/DateInput.vue'
+
+// DateInput má `inheritAttrs: false`, takže `data-test` nesedí na kořeni
+// komponenty a hledá se přes `$attrs`.
+function dateInput(wrapper: VueWrapper<any>, testId: string) {
+  return wrapper.findAllComponents(DateInput)
+    .find(input => (input.vm.$attrs as Record<string, unknown>)['data-test'] === testId)
+}
 
 function absence(overrides: Record<string, unknown> = {}) {
   return {
@@ -411,6 +421,92 @@ describe('AbsenceManagement', () => {
     expect(m.createAbsence).toHaveBeenCalled()
     expect(m.createAbsence.mock.calls.at(-1)?.[0])
       .toMatchObject({ average_snapshot_id: null })
+    wrapper.unmount()
+  })
+
+  /*
+   * Peněžitá pomoc v mateřství je vyloučenou dobou evidenčního listu jen
+   * před porodem, takže bez očekávaného dne porodu nejde zapsat. Skutečný den
+   * porodu je nepovinný, doplní se, až nastane.
+   */
+  it('u PPM žádá očekávaný den porodu a pošle oba dny porodu', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    expect(dateInput(wrapper, 'absence-expected-childbirth')).toBeUndefined()
+
+    ;(wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>)
+      .vm.$emit('update:modelValue', 'ppm')
+    await flushPromises()
+    const expected = dateInput(wrapper, 'absence-expected-childbirth')
+    expect(expected).toBeDefined()
+    expect(expected!.props('required')).toBe(true)
+    expect(dateInput(wrapper, 'absence-childbirth')!.props('required')).toBe(false)
+    expected!.vm.$emit('update:modelValue', '2026-06-20')
+    await flushPromises()
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({
+      absence_type: 'ppm',
+      expected_childbirth_date: '2026-06-20',
+      childbirth_date: null,
+    }))
+    wrapper.unmount()
+  })
+
+  it('u jiného druhu než PPM dny porodu neposílá', async () => {
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="absence-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({
+      absence_type: 'vacation',
+      expected_childbirth_date: null,
+      childbirth_date: null,
+    }))
+    wrapper.unmount()
+  })
+
+  it('doplní den porodu i ke schválené PPM', async () => {
+    m.absencesPage.mockResolvedValue(absencesPage([absence({
+      absence_type: 'ppm',
+      status: 'approved',
+      expected_childbirth_date: '2026-06-20',
+      childbirth_date: null,
+      average_snapshot_id: null,
+      average_hourly_minor: null,
+      row_version: 3,
+    })]))
+    m.recordChildbirth.mockResolvedValue({ id: 44 })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    await wrapper.get('[data-test="childbirth-open"]').trigger('click')
+    expect(wrapper.get('[data-test="childbirth-save"]').attributes('disabled')).toBeDefined()
+    dateInput(wrapper, 'childbirth-date')!.vm.$emit('update:modelValue', '2026-06-18')
+    await flushPromises()
+    await wrapper.get('[data-test="childbirth-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.recordChildbirth).toHaveBeenCalledWith(44, 3, '2026-06-18')
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll_absence.absences.childbirth_recorded')
+    wrapper.unmount()
+  })
+
+  it('u PPM s doplněným dnem porodu už doplnění nenabízí', async () => {
+    m.absencesPage.mockResolvedValue(absencesPage([absence({
+      absence_type: 'ppm',
+      status: 'approved',
+      expected_childbirth_date: '2026-06-20',
+      childbirth_date: '2026-06-18',
+    })]))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="childbirth-open"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="absence-childbirth-value"]').text())
+      .not.toContain('payroll_absence.absences.childbirth_missing')
     wrapper.unmount()
   })
 

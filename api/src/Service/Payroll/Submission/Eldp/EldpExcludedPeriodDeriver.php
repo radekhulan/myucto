@@ -19,7 +19,16 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * |-----------------------|-------------------------------------|
  * | `dpn`, `quarantine`   | 10358 dočasná pracovní neschopnost  |
  * | `ocr`,`long_term_care`| 10360 ošetřovné / dlouhodobé ošetř. |
+ * | `ppm` (jen před porodem) | 10359 peněžitá pomoc v mateřství |
  * | `paternity`           | 10362 otcovská                      |
+ *
+ * Peněžitá pomoc v mateřství je vyloučenou dobou jen PŘED porodem: „doby před
+ * porodem, po kterou nebyla vykonávána výdělečná činnost z důvodu
+ * těhotenství, nejdříve však od začátku osmého týdne před očekávaným dnem
+ * porodu do dne, který bezprostředně předcházel dni porodu" (§ 16 odst. 4
+ * věta třetí písm. a) zákona č. 155/1995 Sb.). Počítá se proto jen průnik
+ * s intervalem viz {@see ppmPreBirthWindow()}; den porodu ani doba po něm
+ * vyloučenou dobou nejsou.
  *
  * Součet 10357 = 10358 + 10359 + 10360 + 10362 + 10536 podle *Pravidel podání
  * JMHZ a souvisejících procesů* verze 1.4.4, kapitola 4 (ELDP).
@@ -55,7 +64,9 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  *
  * ## Co je fail-closed a proč
  *
- * - `ppm` — vyloučenou dobou je jen předporodní část, viz {@see UNSUPPORTED_TYPES}.
+ * - `ppm` bez očekávaného dne porodu, nebo s nevyplněným dnem porodu
+ *   v intervalu, který sahá na očekávaný den porodu nebo za něj, viz
+ *   {@see ppmPreBirthWindow()}.
  * - `other` — nerozlišený druh.
  *
  * ## Co se z principu nevyplňuje
@@ -81,8 +92,18 @@ final class EldpExcludedPeriodDeriver
         'quarantine' => 'docasNeschopnost',
         'ocr' => 'osetrovaniClenaRodiny',
         'long_term_care' => 'osetrovaniClenaRodiny',
+        // Jen předporodní část, interval zužuje ppmPreBirthWindow().
+        'ppm' => 'penezitaPomocMaterstvi',
         'paternity' => 'otcovska',
     ];
+
+    /**
+     * Začátek osmého týdne před očekávaným dnem porodu: sedm celých týdnů
+     * a den, kterým osmý týden začíná, tedy 56 dnů před očekávaným dnem.
+     * Tutéž hranici pro nástup na PPM stanoví § 32 odst. 1 písm. a) a § 34
+     * odst. 1 písm. a) zákona č. 187/2006 Sb.
+     */
+    public const PPM_PRE_BIRTH_DAYS = 56;
 
     /**
      * Nepřítomnosti BEZ započitatelného příjmu, u kterých měsíc bez příjmu
@@ -111,21 +132,40 @@ final class EldpExcludedPeriodDeriver
      * a nulový příjem bez jakékoli nepřítomnosti nerozhodne a volající musí
      * zastavit.
      *
+     * Peněžitá pomoc v mateřství je omluvný důvod jen do dne předcházejícího
+     * porodu (tentýž odkaz § 11 odst. 2 na § 16 odst. 4 písm. a)); den porodu
+     * a doba po něm jsou nepřítomnost bez příjmu. Proto se rozhoduje nad
+     * intervalem měsíce `[$intervalFrom, $intervalTo]` týmž výpočtem, který
+     * odvozuje atribut 10359 ({@see ppmPreBirthWindow()}). Měsíc, ve kterém se
+     * porod stal, obsahuje obojí a zastaví se jako souběh.
+     *
+     * PPM, u které se předporodní část určit nedá (chybí očekávaný den porodu
+     * nebo nevyplněný den porodu), se tu počítá jako omluvná: odvození
+     * vyloučených dob ji pak zastaví blokátorem, který účetní řekne, co doplnit.
+     * Tady by stejný stav vyšel jen jako obecný souběh.
+     *
      * @param list<array<string,mixed>> $absences
      */
-    public static function insuranceMonthStatus(array $absences, int $uncappedBaseMinor): string
-    {
+    public static function insuranceMonthStatus(
+        array $absences,
+        int $uncappedBaseMinor,
+        string $intervalFrom,
+        string $intervalTo,
+    ): string {
         if ($uncappedBaseMinor > 0) {
             return self::MONTH_INSURED;
         }
         $incomeLess = false;
         $excused = false;
         foreach ($absences as $absence) {
-            if (in_array(
-                is_array($absence) ? ($absence['absence_type'] ?? null) : null,
-                self::INCOME_LESS_TYPES,
-                true,
-            )) {
+            $type = is_array($absence) ? ($absence['absence_type'] ?? null) : null;
+            if ($type === 'ppm') {
+                [$preBirth, $postBirth] = self::ppmExcusedSplit($absence, $intervalFrom, $intervalTo);
+                $excused = $excused || $preBirth;
+                $incomeLess = $incomeLess || $postBirth;
+                continue;
+            }
+            if (in_array($type, self::INCOME_LESS_TYPES, true)) {
                 $incomeLess = true;
             } else {
                 $excused = true;
@@ -196,30 +236,6 @@ final class EldpExcludedPeriodDeriver
 
     /** Druhy absence, u kterých modul nemá doložený způsob výpočtu. */
     private const UNSUPPORTED_TYPES = [
-        /*
-         * Peněžitá pomoc v mateřství se na vyloučené doby NEPŘEVÁDÍ celá.
-         *
-         * Vyloučenou dobou je podle § 16 odst. 4 věty třetí písm. a) zákona
-         * č. 155/1995 Sb. jen doba PŘED PORODEM — „doby před porodem, po
-         * kterou nebyla vykonávána výdělečná činnost z důvodu těhotenství,
-         * nejdříve však od začátku osmého týdne před očekávaným dnem porodu do
-         * dne, který bezprostředně předcházel dni porodu". Totéž říká i název
-         * atributu 10359 v datovém slovníku JMHZ: „Počet dnů čerpání peněžité
-         * pomoci v mateřství (do dne předcházejícímu porodu)".
-         *
-         * Zbytek podpůrčí doby PPM (typicky 28 nebo 37 týdnů po porodu)
-         * vyloučenou dobou NENÍ; hodnotí se mimo ELDP jako péče o dítě do 4 let
-         * a měsíce bez příjmu se krátí znakem „X" podle § 11 odst. 2.
-         *
-         * Rozdělit jedno na druhé jde jen podle DNE PORODU, případně podle
-         * očekávaného dne porodu. Ani jeden aplikace neeviduje, takže by celou
-         * podpůrčí dobu vykázala jako vyloučenou a nadhodnotila osobní
-         * vyměřovací základ — chyba, která mění důchod. Dokud den porodu není
-         * ve zmrazeném snapshotu, musí PPM rozhodnout mzdová účetní ručně.
-         */
-        'ppm' => 'vyloučenou dobou je jen část peněžité pomoci v mateřství před porodem'
-            . ' (§ 16 odst. 4 věta třetí písm. a) zákona č. 155/1995 Sb.)'
-            . ' a den porodu aplikace neeviduje',
         'other' => 'nerozlišený druh absence',
     ];
 
@@ -366,6 +382,24 @@ final class EldpExcludedPeriodDeriver
                     ],
                 ];
                 continue;
+            }
+            if ($type === 'ppm') {
+                $preBirth = self::ppmPreBirthWindow($absence, $countedFrom, $countedTo);
+                if ($preBirth['missing'] !== null) {
+                    $blockers[] = self::ppmBlocker(
+                        $preBirth['missing'],
+                        $absenceId,
+                        $periodLabel,
+                        $absence['expected_childbirth_date'] ?? null,
+                    );
+                    continue;
+                }
+                if ($preBirth['window'] === null) {
+                    // Celý průnik leží po porodu (nebo před osmým týdnem):
+                    // vyloučenou dobou není ani den.
+                    continue;
+                }
+                [$countedFrom, $countedTo] = $preBirth['window'];
             }
             $days = self::inclusiveDays($countedFrom, $countedTo);
             $overlap = self::claim($claimedDays, $countedFrom, $days);
@@ -532,6 +566,114 @@ final class EldpExcludedPeriodDeriver
             'derivable' => $undecidable === [],
             'undecidable_types' => $undecidable,
             'provenance' => $provenance,
+        ];
+    }
+
+    /**
+     * Předporodní část peněžité pomoci v mateřství uvnitř `[$countedFrom,
+     * $countedTo]`. Je to jediné místo, které ji určuje, pro vyloučené doby
+     * (10359) i pro rozhodnutí o době pojištění podle § 11 odst. 2.
+     *
+     * Vyloučenou dobou je průnik s intervalem [očekávaný den porodu − 56 dnů,
+     * den porodu − 1 den] (§ 16 odst. 4 věta třetí písm. a) zákona
+     * č. 155/1995 Sb.). Den porodu ani doba po něm do průniku nepatří.
+     *
+     * Nevyplněný den porodu znamená „do konce vykazovaného intervalu k porodu
+     * nedošlo": mzdová účetní hlásí měsíc zpětně, takže porod, který se v něm
+     * stal, už zná a doplní ho. Tenhle výklad se ale připouští JEN pro interval,
+     * který končí před očekávaným dnem porodu. Interval, který na očekávaný
+     * den sahá nebo za něj, bez dne porodu nerozhodne (porod v něm s velkou
+     * pravděpodobností proběhl) a vrátí se `missing = childbirth_date`. Jinak
+     * by zapomenutý den porodu tiše vykázal jako vyloučenou dobu i celé měsíce
+     * po porodu a nadhodnotil osobní vyměřovací základ.
+     *
+     * @param array<string,mixed> $absence
+     * @return array{window:array{0:string,1:string}|null,missing:'expected_childbirth_date'|'childbirth_date'|null}
+     */
+    public static function ppmPreBirthWindow(array $absence, string $countedFrom, string $countedTo): array
+    {
+        $expected = self::date($absence['expected_childbirth_date'] ?? null);
+        if ($expected === null) {
+            return ['window' => null, 'missing' => 'expected_childbirth_date'];
+        }
+        $childbirth = self::date($absence['childbirth_date'] ?? null);
+        if ($childbirth === null && $countedTo >= $expected) {
+            return ['window' => null, 'missing' => 'childbirth_date'];
+        }
+        $from = max(
+            $countedFrom,
+            (new \DateTimeImmutable($expected))
+                ->modify('-' . self::PPM_PRE_BIRTH_DAYS . ' days')->format('Y-m-d'),
+        );
+        $to = $childbirth === null
+            ? $countedTo
+            : min($countedTo, (new \DateTimeImmutable($childbirth))->modify('-1 day')->format('Y-m-d'));
+
+        return ['window' => $from <= $to ? [$from, $to] : null, 'missing' => null];
+    }
+
+    /**
+     * Rozpad PPM v intervalu na omluvnou předporodní část a na dny bez příjmu.
+     *
+     * @return array{0:bool,1:bool} [má omluvné dny, má dny bez příjmu]
+     */
+    private static function ppmExcusedSplit(mixed $absence, string $intervalFrom, string $intervalTo): array
+    {
+        if (!is_array($absence)) {
+            return [true, false];
+        }
+        $from = self::date($absence['date_from'] ?? null);
+        $to = self::date($absence['date_to'] ?? null);
+        if ($from === null || $to === null || $from > $to) {
+            // Vadný interval zastaví derive() blokátorem, který ho pojmenuje.
+            return [true, false];
+        }
+        $countedFrom = max($from, $intervalFrom);
+        $countedTo = min($to, $intervalTo);
+        if ($countedFrom > $countedTo) {
+            return [false, false];
+        }
+        $preBirth = self::ppmPreBirthWindow($absence, $countedFrom, $countedTo);
+        if ($preBirth['missing'] !== null) {
+            return [true, false];
+        }
+        if ($preBirth['window'] === null) {
+            return [false, true];
+        }
+
+        return [
+            true,
+            self::inclusiveDays($countedFrom, $countedTo)
+                > self::inclusiveDays($preBirth['window'][0], $preBirth['window'][1]),
+        ];
+    }
+
+    /** @return array{code:string,message:string,detail:array<string,mixed>} */
+    private static function ppmBlocker(
+        string $missing,
+        int $absenceId,
+        string $periodLabel,
+        mixed $expected,
+    ): array {
+        $detail = ['absence_id' => $absenceId, 'absence_type' => 'ppm', 'period' => $periodLabel];
+        if ($missing === 'expected_childbirth_date') {
+            return [
+                'code' => 'eldp_ppm_expected_childbirth_missing',
+                'message' => "Peněžitá pomoc v mateřství #{$absenceId} v období {$periodLabel} nemá"
+                    . ' očekávaný den porodu, takže nejde určit, od kdy je vyloučenou dobou'
+                    . ' (§ 16 odst. 4 věta třetí písm. a) zákona č. 155/1995 Sb.).'
+                    . ' Zrušte ji a zapište znovu s očekávaným dnem porodu.',
+                'detail' => $detail,
+            ];
+        }
+
+        return [
+            'code' => 'eldp_ppm_childbirth_missing',
+            'message' => "Peněžitá pomoc v mateřství #{$absenceId} v období {$periodLabel} sahá na"
+                . ' očekávaný den porodu ' . (is_string($expected) ? $expected : '') . ' nebo za něj'
+                . ' a nemá doplněný den porodu. Vyloučenou dobou je jen část do dne, který'
+                . ' porodu předcházel. Doplňte u nepřítomnosti den porodu.',
+            'detail' => $detail + ['expected_childbirth_date' => $expected],
         ];
     }
 

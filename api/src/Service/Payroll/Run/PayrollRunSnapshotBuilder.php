@@ -1831,7 +1831,16 @@ final class PayrollRunSnapshotBuilder
     private function absences(array $rows): array
     {
         return array_map(
+            /*
+             * Dny porodu nese jen PPM, protože jen z nich evidenční list
+             * odvozuje předporodní část (10359). U ostatních druhů by klíče
+             * byly vždy null a jen by přepsaly otisk každého zmrazeného vstupu.
+             */
             static fn (array $row): array => [
+                ...(($row['absence_type'] ?? null) === 'ppm' ? [
+                    'expected_childbirth_date' => $row['expected_childbirth_date'] ?? null,
+                    'childbirth_date' => $row['childbirth_date'] ?? null,
+                ] : []),
                 'id' => (int) $row['id'],
                 'absence_type' => (string) $row['absence_type'],
                 'date_from' => (string) $row['date_from'],

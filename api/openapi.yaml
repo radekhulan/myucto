@@ -21198,6 +21198,14 @@ components:
           enum: [vacation, dpn, quarantine, ocr, long_term_care, ppm, paternity, parental, unpaid_leave, employee_obstacle, employer_obstacle, compensatory_time_off, unexcused, other]
         date_from: { type: string, format: date }
         date_to: { type: string, format: date }
+        expected_childbirth_date:
+          type: [string, "null"]
+          format: date
+          description: Očekávaný den porodu. Povinný u `ppm`, u ostatních druhů prázdný.
+        childbirth_date:
+          type: [string, "null"]
+          format: date
+          description: Den porodu. Jen u `ppm`, nepovinný; lze ho doplnit později.
         timezone_name: { type: string, default: Europe/Prague }
         partial_first_minutes: { type: [integer, "null"], minimum: 0 }
         partial_last_minutes: { type: [integer, "null"], minimum: 0 }

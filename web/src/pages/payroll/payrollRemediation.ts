@@ -29,6 +29,8 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_absence_kind_unsupported: 'unsupported',
   eldp_absence_kind_unknown: 'integrity',
   eldp_absence_overlap_unsupported: 'absence_overlap',
+  eldp_ppm_expected_childbirth_missing: 'absence_dates',
+  eldp_ppm_childbirth_missing: 'absence_dates',
   eldp_source_hash_mismatch: 'integrity',
   eldp_source_invalid: 'integrity',
   eldp_xml_snapshot_mismatch: 'integrity',

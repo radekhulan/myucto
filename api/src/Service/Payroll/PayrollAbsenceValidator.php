@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
 
 final class PayrollAbsenceValidator
 {
@@ -52,6 +53,7 @@ final class PayrollAbsenceValidator
         }
         PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $from);
         PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $to);
+        [$expectedChildbirth, $childbirth] = $this->childbirthDates($type, $from, $body);
         $timezone = trim((string) ($body['timezone_name'] ?? 'Europe/Prague'));
         try {
             new \DateTimeZone($timezone);
@@ -110,6 +112,8 @@ final class PayrollAbsenceValidator
             'absence_type' => $type,
             'date_from' => $from,
             'date_to' => $to,
+            'expected_childbirth_date' => $expectedChildbirth,
+            'childbirth_date' => $childbirth,
             'timezone_name' => $timezone,
             'partial_first_minutes' => $this->nullablePositiveInt(
                 $body['partial_first_minutes'] ?? null,
@@ -132,6 +136,106 @@ final class PayrollAbsenceValidator
             },
             'average_snapshot_id' => $averageId,
         ];
+    }
+
+    /**
+     * Den porodu doplňovaný k už zapsané peněžité pomoci v mateřství.
+     *
+     * @param array<string,mixed> $absence uložená absence
+     */
+    public function childbirthDate(array $absence, mixed $value): string
+    {
+        if (($absence['absence_type'] ?? null) !== 'ppm') {
+            throw new \InvalidArgumentException(
+                'Den porodu se doplňuje jen u peněžité pomoci v mateřství.',
+            );
+        }
+        if (!is_string($absence['expected_childbirth_date'] ?? null)) {
+            throw new \InvalidArgumentException(
+                'Nepřítomnost nemá očekávaný den porodu, ke kterému by šel den porodu doplnit. '
+                . 'Zrušte ji a zapište znovu i s očekávaným dnem porodu.',
+            );
+        }
+        if (self::blank($value)) {
+            throw new \InvalidArgumentException('Den porodu je povinný.');
+        }
+
+        return $this->date($value, 'childbirth_date');
+    }
+
+    /**
+     * Očekávaný a skutečný den porodu. Vyplňují se jen u peněžité pomoci
+     * v mateřství.
+     *
+     * Očekávaný den porodu je povinný: bez něj nejde určit, od kdy je PPM
+     * vyloučenou dobou evidenčního listu (§ 16 odst. 4 věta třetí písm. a)
+     * zákona č. 155/1995 Sb.). Skutečný den porodu je nepovinný: zapisuje se
+     * typicky dopředu a porod se doplní, až nastane.
+     *
+     * Den porodu SMÍ ležet před začátkem nepřítomnosti. Nástup na PPM po
+     * porodu je zákonný případ (převzetí dítěte do péče, § 34 odst. 1
+     * písm. c) zákona č. 187/2006 Sb.) a stejně tak druhá část podpůrčí doby
+     * zapsaná zvlášť. Bez dne porodu by u nich výpočet vyloučených dob neměl
+     * podle čeho poznat, že před porodem není ani den.
+     *
+     * @param array<string,mixed> $body
+     * @return array{0:?string,1:?string}
+     */
+    private function childbirthDates(string $type, string $from, array $body): array
+    {
+        $expectedRaw = $body['expected_childbirth_date'] ?? null;
+        $childbirthRaw = $body['childbirth_date'] ?? null;
+        if ($type !== 'ppm') {
+            if (!self::blank($expectedRaw) || !self::blank($childbirthRaw)) {
+                throw new \InvalidArgumentException(
+                    'Očekávaný den porodu a den porodu se vyplňují jen u peněžité pomoci v mateřství.',
+                );
+            }
+
+            return [null, null];
+        }
+        if (self::blank($expectedRaw)) {
+            throw new \InvalidArgumentException(
+                'U peněžité pomoci v mateřství je očekávaný den porodu povinný, bez něj nejde '
+                . 'určit, která část je vyloučenou dobou evidenčního listu.',
+            );
+        }
+        $expected = $this->date($expectedRaw, 'expected_childbirth_date');
+        $childbirth = self::blank($childbirthRaw) ? null : $this->date($childbirthRaw, 'childbirth_date');
+        self::assertMaternityStart($from, $expected, $childbirth);
+
+        return [$expected, $childbirth];
+    }
+
+    /**
+     * Na PPM před porodem se nastupuje nejdříve od začátku osmého týdne před
+     * očekávaným dnem porodu: § 32 odst. 1 písm. a) zákona č. 187/2006 Sb.
+     * („před porodem má v době nejdříve od počátku osmého týdne před
+     * očekávaným dnem porodu nárok … těhotná pojištěnka") a § 34 odst. 1
+     * písm. a). Dřívější začátek je zákonný jen tehdy, když nepřítomnost
+     * začíná až porodem nebo po něm (§ 34 odst. 1 písm. b) a c)).
+     */
+    private static function assertMaternityStart(string $from, string $expected, ?string $childbirth): void
+    {
+        $earliest = (new \DateTimeImmutable($expected))
+            ->modify('-' . EldpExcludedPeriodDeriver::PPM_PRE_BIRTH_DAYS . ' days')
+            ->format('Y-m-d');
+        if ($from >= $earliest || ($childbirth !== null && $from >= $childbirth)) {
+            return;
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            'Peněžitou pomoc v mateřství před porodem nelze čerpat dřív než od začátku osmého '
+            . 'týdne před očekávaným dnem porodu (§ 32 odst. 1 písm. a) a § 34 odst. 1 zákona '
+            . 'č. 187/2006 Sb.). Při očekávaném porodu %s je to nejdříve %s.',
+            $expected,
+            $earliest,
+        ));
+    }
+
+    private static function blank(mixed $value): bool
+    {
+        return $value === null || (is_string($value) && trim($value) === '');
     }
 
     /** @param array<string,mixed> $body @return array<string,mixed> */
@@ -252,6 +356,8 @@ final class PayrollAbsenceValidator
         'applicable_quarter' => 'Čtvrtletí',
         'date_from' => 'Datum od',
         'date_to' => 'Datum do',
+        'expected_childbirth_date' => 'Očekávaný den porodu',
+        'childbirth_date' => 'Den porodu',
         'effective_date' => 'Datum účinnosti',
         'leave_entitlement_weeks' => 'Nárok na dovolenou v týdnech',
         'compensation_rate_basis_points' => 'Sazba náhrady',

@@ -148,13 +148,17 @@ final class PayrollAbsenceRepository
                     (string) $data['date_from'],
                 );
             }
+            $childbirth = $data['childbirth_date'] ?? null;
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_absences
                     (supplier_id, employment_id, absence_type, date_from, date_to,
+                     expected_childbirth_date, childbirth_date,
+                     childbirth_recorded_by, childbirth_recorded_at,
                      timezone_name, partial_first_minutes, partial_last_minutes, note,
                      compensation_policy, compensation_rate_basis_points,
                      average_snapshot_id, support_status, status, requested_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, IF(? IS NULL, NULL, NOW()),
+                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
                 $supplierId,
@@ -162,6 +166,10 @@ final class PayrollAbsenceRepository
                 $data['absence_type'],
                 $data['date_from'],
                 $data['date_to'],
+                $data['expected_childbirth_date'] ?? null,
+                $childbirth,
+                $childbirth === null ? null : $userId,
+                $childbirth,
                 $data['timezone_name'],
                 $data['partial_first_minutes'],
                 $data['partial_last_minutes'],
@@ -302,6 +310,104 @@ final class PayrollAbsenceRepository
 
         return $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Zrušená absence nebyla nalezena.');
+    }
+
+    /**
+     * Doplní den porodu k peněžité pomoci v mateřství, i ke schválené.
+     *
+     * PPM se zapisuje dopředu a porod nastane až v jejím průběhu, takže den
+     * porodu je jediný údaj absence, který se po schválení doplňuje. Mzdu
+     * nemění (PPM vyplácí ČSSZ), mění ale vyloučené doby evidenčního listu.
+     *
+     * Rozhodnutí: den porodu jde doplnit JEDNOU a pak se už nemění. Z něj se
+     * odvozuje atribut 10359 měsíčního hlášení a evidenčního listu; tichý
+     * přepis by rozešel už podaná hlášení s evidencí, aniž by to kdokoli
+     * viděl. Opravit překlep jde zrušením nepřítomnosti a novým zápisem, kde
+     * zrušení nechá dohledatelnou stopu.
+     *
+     * `correction_pending` se tu záměrně NEROZSVĚCUJE. Příznak zhasíná jen
+     * opravná revize měsíce, do kterého se celá absence vejde
+     * ({@see PayrollRunRepository::clearAbsenceCorrectionPending()}), a PPM
+     * trvá měsíce, takže rozsvícený by zablokoval pracovní souhrn i uzávěrku roku
+     * napořád. Měsíce před porodem se doplněním navíc nemění: bez dne porodu
+     * se hlásit dají jen ty, které končí před očekávaným dnem porodu.
+     *
+     * Uzávěrka roku se respektuje stejně jako u schválení a zrušení.
+     *
+     * @return array<string,mixed>
+     */
+    public function recordChildbirth(
+        int $supplierId,
+        int $id,
+        int $expectedVersion,
+        string $childbirthDate,
+        ?int $userId,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $absence = $this->find($supplierId, $id)
+                ?? throw new \InvalidArgumentException('Absence nebyla nalezena.');
+            $this->yearClose->assertOpenForDateRange(
+                $supplierId,
+                (string) $absence['date_from'],
+                (string) $absence['date_to'],
+            );
+            $stmt = $pdo->prepare(
+                "UPDATE payroll_absences
+                    SET childbirth_date = ?, childbirth_recorded_by = ?,
+                        childbirth_recorded_at = NOW(), row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND absence_type = 'ppm'
+                    AND status IN ('requested', 'approved')
+                    AND expected_childbirth_date IS NOT NULL
+                    AND childbirth_date IS NULL"
+            );
+            $stmt->execute([$childbirthDate, $userId, $supplierId, $id, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) {
+                $this->throwChildbirthNotRecordable($supplierId, $id, $expectedVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->find($supplierId, $id)
+            ?? throw new \RuntimeException('Absence s doplněným dnem porodu nebyla nalezena.');
+    }
+
+    private function throwChildbirthNotRecordable(int $supplierId, int $id, int $expectedVersion): never
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT row_version, status, absence_type, childbirth_date, expected_childbirth_date
+               FROM payroll_absences WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \InvalidArgumentException('Absence nebyla nalezena.');
+        }
+        if ((int) $row['row_version'] !== $expectedVersion) {
+            throw new PayrollAbsenceConflictException((int) $row['row_version']);
+        }
+        throw new \InvalidArgumentException(match (true) {
+            $row['absence_type'] !== 'ppm' => 'Den porodu se doplňuje jen u peněžité pomoci v mateřství.',
+            $row['childbirth_date'] !== null => 'Den porodu je už doplněný (' . $row['childbirth_date']
+                . ') a nemění se, protože vstupuje do podaných hlášení. Je-li chybný, zrušte '
+                . 'nepřítomnost a zapište ji znovu.',
+            $row['expected_childbirth_date'] === null => 'Nepřítomnost nemá očekávaný den porodu. '
+                . 'Zrušte ji a zapište znovu i s očekávaným dnem porodu.',
+            default => 'Den porodu lze doplnit jen k nepřítomnosti, která čeká na schválení '
+                . 'nebo je schválená.',
+        });
     }
 
     /** @return array<string,mixed>|null */
@@ -655,7 +761,7 @@ final class PayrollAbsenceRepository
             'id', 'supplier_id', 'employment_id', 'partial_first_minutes',
             'partial_last_minutes', 'compensation_rate_basis_points',
             'average_snapshot_id', 'average_hourly_minor', 'average_year',
-            'average_quarter', 'row_version',
+            'average_quarter', 'row_version', 'childbirth_recorded_by',
         ] as $key) {
             $row[$key] = $row[$key] === null ? null : (int) $row[$key];
         }
