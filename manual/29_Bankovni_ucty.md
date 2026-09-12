@@ -216,12 +216,14 @@ Registrace aplikace a následné udělení přístupu k účtu probíhá přes O
 Technické klíče nenahrazují smlouvu o API službě ani souhlas majitele účtu.
 Před prvním připojením správce na developer portálu KB připraví API klíče
 pro služby **Client Registration**, **OAuth** a **ADAA** (účty a pohyby).
-Klíč **BATCHDA** (platební dávky) je nepovinný. Pokud portál BATCHDA
-pro KB+ nenabízí, nech jeho pole prázdné: připojení pak slouží jen
+Platební dávky (**BATCHDA**) samostatný API klíč nepotřebují, autorizuje je
+přístupový token se scope `bpisp`. Chceš-li odesílat příkazy, zaškrtni
+při připojení **Chci i hromadné platby**; bez toho připojení slouží jen
 k načítání pohybů a odeslání příkazu aplikace odmítne dřív, než cokoli
-předá bance, takže příkaz nahraješ do banky ručně. Až bude BATCHDA
-k dispozici, zvol u účtu **Zadat klíče znovu**, vyplň všechny klíče
-a uděl nový souhlas. Potřebuješ také kvalifikovaný certifikát
+předá bance. Hromadné platby jde doplnit později přes **Zadat klíče znovu**
+(rozšíří registraci o `bpisp`) nebo, má-li registrace `bpisp` už povolený,
+přes **Zahájit nové ověření v KB+**. Podrobně v kapitole 28, oddíl Přímé
+napojení na banku. Potřebuješ také kvalifikovaný certifikát
 v souboru `.p12` nebo `.pfx` včetně soukromého klíče a jeho heslo, pokud
 je chráněný. Samotné číslo účtu nebo jeden API klíč k připojení nestačí.
 

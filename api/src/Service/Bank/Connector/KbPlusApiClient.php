@@ -23,6 +23,12 @@ final class KbPlusApiClient
 
     public function __construct(private readonly ClientInterface $http) {}
 
+    /** BATCHDA autorizuje access token; dávky smí jen souhlas se scope bpisp. */
+    public static function grantsBatchPayments(string $scope): bool
+    {
+        return in_array('bpisp', preg_split('/\s+/', trim($scope)) ?: [], true);
+    }
+
     /** @param array<string,mixed> $credentials */
     public function authorizationUrl(#[\SensitiveParameter] array $credentials, string $state): string
     {
@@ -249,17 +255,24 @@ final class KbPlusApiClient
         if (strlen($payload) > self::MAX_RESPONSE_BYTES) {
             throw $this->invalidPaymentOrder('KB+ dávka je příliš velká.');
         }
+        if (!self::grantsBatchPayments((string) ($credentials['scope'] ?? ''))) {
+            throw $this->invalidToken('Souhlas KB+ nezahrnuje oprávnění bpisp pro dávky.');
+        }
+        $apiKey = $this->batchApiKey($credentials);
 
         $headers = [
             'Accept' => 'application/json',
             'Authorization' => 'Bearer ' . $this->accessToken($accessToken),
-            'apiKey' => $this->credential($credentials, 'batchda_api_key', 16384),
             'Content-Type' => 'application/json',
             'x-correlation-id' => $this->correlationId(),
             'x-exchange-identification' => $exchangeId,
             'x-batch-processing-mode' => $processingMode,
             'User-Agent' => 'MyUcto-KBPlus-Connector/1.0',
         ];
+        if ($apiKey !== null) {
+            $headers['apiKey'] = $apiKey;
+            $headers['x-api-key'] = $apiKey;
+        }
         if ($instructionName !== null) {
             $headers['x-instruction-name'] = $instructionName;
         }
@@ -500,6 +513,21 @@ final class KbPlusApiClient
             throw $this->invalidToken('Konfigurace KB+ OAuth není úplná.');
         }
         return $value;
+    }
+
+    /**
+     * BATCHDA v3 autorizuje jen access token (OpenAPI definice žádnou hlavičku
+     * s klíčem nezná, technický manuál vede x-api-key jako nepovinný
+     * identifikátor). Klíč se proto posílá jen tehdy, když ho správce pro
+     * BATCHDA výslovně zadal; klíč ADAA do jiné služby vědomě neodchází.
+     *
+     * @param array<string,mixed> $credentials
+     */
+    private function batchApiKey(#[\SensitiveParameter] array $credentials): ?string
+    {
+        return trim((string) ($credentials['batchda_api_key'] ?? '')) !== ''
+            ? $this->credential($credentials, 'batchda_api_key', 16384)
+            : null;
     }
 
     /** @param array<string,mixed> $credentials */

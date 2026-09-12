@@ -19,7 +19,7 @@ const registration: KbPlusOnboardingStatus = {
   required_fields: ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key', 'certificate_p12', 'certificate_password'],
   registration_fields: ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key', 'batchda_api_key', 'certificate_p12', 'certificate_password'],
   optional_fields: ['batchda_api_key', 'certificate_password'],
-  capabilities: { statement_import: true, payment_batch_submission: false },
+  capabilities: { statement_import: true, payment_batch_submission: false, payment_batch_status: 'not_registered' },
 }
 async function open(status: Partial<KbPlusOnboardingStatus> = {}, canWrite = true) {
   m.status.mockResolvedValue({ ...registration, ...status })
@@ -73,6 +73,7 @@ describe('KB+ onboarding', () => {
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
       client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
       adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: 'synthetic-batchda_api_key', certificate_p12: 'AQID', certificate_password: '',
+      payment_batches: false,
     })
     expect(m.navigate).toHaveBeenCalledExactlyOnceWith('https://api-gateway.kb.cz/client-registration-ui/v2/saml/register?request=synthetic')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
@@ -97,6 +98,7 @@ describe('KB+ onboarding', () => {
     const wrapper = await open({ required_fields: [] })
     expect(wrapper.text()).toContain('kb_plus.existing_client_hint')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect(wrapper.find('input[name="payment_batches"]').exists()).toBe(false)
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {})
@@ -179,14 +181,47 @@ describe('KB+ onboarding', () => {
     expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
       client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
       adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: '', certificate_p12: 'AQID', certificate_password: '',
+      payment_batches: false,
     })
   })
-  it('explains missing batch submission and offers re-entering keys', async () => {
-    const wrapper = await open({ status: 'connected', required_fields: [] })
-    expect(wrapper.text()).toContain('kb_plus.batch_unavailable')
+  it('requests payment batches without a separate BatchDA key', async () => {
+    const wrapper = await open()
+    await fill(wrapper, ['client_registration_api_key', 'oauth_api_key', 'adaa_api_key'])
+    const checkbox = wrapper.find('input[name="payment_batches"]')
+    expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.text()).toContain('kb_plus.payment_batches')
+    await checkbox.setValue(true)
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(m.start).toHaveBeenCalledExactlyOnceWith(3, {
+      client_registration_api_key: 'synthetic-client_registration_api_key', oauth_api_key: 'synthetic-oauth_api_key',
+      adaa_api_key: 'synthetic-adaa_api_key', batchda_api_key: '', certificate_p12: 'AQID', certificate_password: '',
+      payment_batches: true,
+    })
+  })
+  it('explains a read-only registration and preselects batches when keys are re-entered', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [], capabilities: { statement_import: true, payment_batch_submission: false, payment_batch_status: 'registration_scope_missing' } })
+    expect(wrapper.text()).toContain('kb_plus.batch_unavailable_registration')
     expect(wrapper.find('input[name="batchda_api_key"]').exists()).toBe(false)
     await wrapper.findAll('button').find(item => item.text() === 'kb_plus.reenter_keys')!.trigger('click')
     expect(wrapper.find('input[name="batchda_api_key"]').exists()).toBe(true)
     expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+    expect((wrapper.find('input[name="payment_batches"]').element as HTMLInputElement).checked).toBe(true)
+  })
+  it('asks only for a new consent when the registration already has bpisp', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [], capabilities: { statement_import: true, payment_batch_submission: false, payment_batch_status: 'authorization_scope_missing' } })
+    expect(wrapper.text()).toContain('kb_plus.batch_unavailable_authorization')
+    expect(wrapper.text()).not.toContain('kb_plus.batch_unavailable_registration')
+    expect(wrapper.find('button[type="submit"]').text()).toBe('kb_plus.restart')
+  })
+  it('does not claim a reason it cannot verify', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [], capabilities: { statement_import: true, payment_batch_submission: false, payment_batch_status: 'unknown' } })
+    expect(wrapper.text()).toContain('kb_plus.batch_unavailable')
+    expect(wrapper.text()).not.toContain('kb_plus.batch_unavailable_registration')
+    expect(wrapper.text()).not.toContain('kb_plus.batch_unavailable_authorization')
+  })
+  it('hides the batch warning once the connection can submit batches', async () => {
+    const wrapper = await open({ status: 'connected', required_fields: [], capabilities: { statement_import: true, payment_batch_submission: true, payment_batch_status: 'available' } })
+    expect(wrapper.text()).not.toContain('kb_plus.batch_unavailable')
   })
 })

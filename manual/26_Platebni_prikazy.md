@@ -182,7 +182,7 @@ ani při odmítnutém nebo nejasném výsledku. Smazání nemění stav faktur a
 jejich označení k úhradě a nezruší platbu, kterou jsi do banky nahrál ručně.
 
 Pro aktivně propojený účet Fio ČR (2010), ČSOB (0300), Raiffeisenbank (5500),
-Banky CREDITAS (2250) nebo KB+ (0100, jen s klíčem BATCHDA) lze tuzemský příkaz v CZK také
+Banky CREDITAS (2250) nebo KB+ (0100, jen se souhlasem pro hromadné platby) lze tuzemský příkaz v CZK také
 **odeslat přímo do banky**, pokud napojení má potřebná oprávnění.
 Napojení Fio SR (8330) zatím slouží k načítání pohybů, nikoli k přímému odesílání EUR příkazů.
 Akce **Připravit příkaz pro banku** příkaz uloží bez označení faktur jako

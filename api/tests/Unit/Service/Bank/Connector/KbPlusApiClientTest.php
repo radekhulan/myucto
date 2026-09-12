@@ -263,6 +263,7 @@ final class KbPlusApiClientTest extends TestCase
         self::assertSame('https://api.kb.cz/directapi/batchda/v3/batchPayments', (string) $history[0]['request']->getUri());
         self::assertSame('Bearer ' . self::ACCESS_TOKEN, $history[0]['request']->getHeaderLine('Authorization'));
         self::assertSame('synthetic-batchda-key-0001', $history[0]['request']->getHeaderLine('apiKey'));
+        self::assertSame('synthetic-batchda-key-0001', $history[0]['request']->getHeaderLine('x-api-key'));
         self::assertSame('synthetic-0001', $history[0]['request']->getHeaderLine('x-exchange-identification'));
         self::assertSame('BATCH', $history[0]['request']->getHeaderLine('x-batch-processing-mode'));
         self::assertSame('Syntetická dávka', $history[0]['request']->getHeaderLine('x-instruction-name'));
@@ -282,7 +283,7 @@ final class KbPlusApiClientTest extends TestCase
 
         try {
             $client->submitPaymentBatch(
-                $this->credentials(),
+                $this->credentials(['scope' => 'adaa bpisp']),
                 self::ACCESS_TOKEN,
                 $this->batch([$this->payment('SYNTHETIC-001'), $this->payment('SYNTHETIC-002')]),
             );
@@ -319,7 +320,7 @@ final class KbPlusApiClientTest extends TestCase
 
         try {
             $client->submitPaymentBatch(
-                $this->credentials(),
+                $this->credentials(['scope' => 'adaa bpisp']),
                 self::ACCESS_TOKEN,
                 $this->batch([$this->payment()]),
             );
@@ -329,6 +330,57 @@ final class KbPlusApiClientTest extends TestCase
             self::assertTrue($e->ambiguousPaymentOutcome);
         }
         self::assertCount(1, $history);
+    }
+
+    /**
+     * BATCHDA autorizuje jen token se scope bpisp. Bez samostatného klíče
+     * BATCHDA se žádná hlavička s klíčem nepošle — klíč ADAA do jiné služby
+     * neodchází.
+     */
+    public function testBatchWithoutSeparateKeyAuthorisesByBpispTokenOnly(): void
+    {
+        $history = [];
+        $client = $this->client([new Response(200, [], $this->json(
+            $this->batchResponse('ACTC', 1, 0),
+        ))], $history);
+
+        $client->submitPaymentBatch(
+            $this->credentials(['batchda_api_key' => '', 'scope' => 'adaa bpisp']),
+            self::ACCESS_TOKEN,
+            $this->batch([$this->payment()]),
+        );
+
+        self::assertSame('Bearer ' . self::ACCESS_TOKEN, $history[0]['request']->getHeaderLine('Authorization'));
+        self::assertFalse($history[0]['request']->hasHeader('apiKey'));
+        self::assertFalse($history[0]['request']->hasHeader('x-api-key'));
+    }
+
+    public function testBatchWithoutBpispConsentIsRejectedBeforeAnyHttpRequest(): void
+    {
+        $history = [];
+        $client = $this->client([], $history);
+
+        try {
+            $client->submitPaymentBatch(
+                $this->credentials(['scope' => 'adaa']),
+                self::ACCESS_TOKEN,
+                $this->batch([$this->payment()]),
+            );
+            self::fail('Bez souhlasu bpisp se dávka nesmí odeslat.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::INVALID_TOKEN, $e->errorCode);
+            self::assertFalse($e->ambiguousPaymentOutcome);
+        }
+        self::assertSame([], $history);
+    }
+
+    public function testRecognisesBatchConsentOnlyForExactBpispScope(): void
+    {
+        self::assertTrue(KbPlusApiClient::grantsBatchPayments('adaa bpisp'));
+        self::assertTrue(KbPlusApiClient::grantsBatchPayments(" bpisp\tadaa "));
+        self::assertFalse(KbPlusApiClient::grantsBatchPayments('adaa'));
+        self::assertFalse(KbPlusApiClient::grantsBatchPayments('adaa bpisp-extra'));
+        self::assertFalse(KbPlusApiClient::grantsBatchPayments(''));
     }
 
     /** @param list<mixed> $queue @param array<int,array<string,mixed>> $history */

@@ -39,7 +39,9 @@ final class KbPlusOnboardingService
         $connection = $this->connections->findPublicByCurrency($supplierId, $currencyId);
         $client = $this->oauth->client($supplierId);
         $flow = $this->oauth->publicStatus($supplierId, $currencyId);
-        $status = $connection !== null && $connection['provider'] === 'kb_plus' && $connection['has_token']
+        $connected = $connection !== null && $connection['provider'] === 'kb_plus' && $connection['has_token'];
+        $batch = $this->batchSubmission($supplierId, $currencyId, $client, $connected);
+        $status = $connected
             ? 'connected'
             : ($flow === null ? ($client === null ? 'not_registered' : 'registered')
                 : ((in_array($flow['status'], ['pending', 'processing'], true))
@@ -56,7 +58,8 @@ final class KbPlusOnboardingService
             'optional_fields' => self::OPTIONAL_FIELDS,
             'capabilities' => [
                 'statement_import' => true,
-                'payment_batch_submission' => $this->batchSubmissionAvailable($supplierId, $client),
+                'payment_batch_submission' => $batch === 'available',
+                'payment_batch_status' => $batch,
             ],
             'expires_at' => in_array($status, ['registration_pending', 'authorization_pending'], true)
                 ? $this->isoDateTime($flow['expires_at'] ?? null) : null,
@@ -81,6 +84,8 @@ final class KbPlusOnboardingService
                 $client = $this->decryptClient($supplierId, (string) $clientRow['credentials_ciphertext']);
                 return $this->startOAuth($supplierId, $currencyId, $userId, $client);
             }
+            $batches = $this->paymentBatchesRequested($input);
+            unset($input['payment_batches']);
             $credentials = $this->registrationInput($input);
             try {
                 $statement = $this->calls->call(
@@ -95,11 +100,12 @@ final class KbPlusOnboardingService
                     'client_name' => 'MyÚčto.cz',
                     'client_name_en' => 'MyUcto.cz',
                     'redirect_uris' => [$this->oauthCallback($supplierId)],
-                    'scopes' => $this->scopes($credentials),
+                    'scopes' => $this->scopes($credentials + ['payment_batches' => $batches]),
                 ], $state);
                 $secret = $this->encodeSecret([
                     'state' => $state,
                     'encryption_key' => $begin['encryption_key'],
+                    'payment_batches' => $batches,
                     'oauth_api_key' => $credentials['oauth_api_key'],
                     'adaa_api_key' => $credentials['adaa_api_key'],
                     'batchda_api_key' => $credentials['batchda_api_key'],
@@ -335,28 +341,64 @@ final class KbPlusOnboardingService
     }
 
     /**
-     * KB+ zatím BATCHDA nenabízí všem; bez jeho klíče se registruje jen čtení,
-     * jinak by KB odmítla scope bpisp a registrace by nešla dokončit.
+     * BATCHDA stojí na stejné registraci a tokenech jako ADAA, jen se scope bpisp.
+     * Ten se žádá, když si správce dávky výslovně zvolí nebo vyplní klíč BATCHDA;
+     * jinak zůstane registrace jen pro čtení, protože scope bez sjednané služby KB odmítne.
      *
      * @param array<string,mixed> $keys
      * @return list<string>
      */
     private function scopes(#[\SensitiveParameter] array $keys): array
     {
-        return trim((string) ($keys['batchda_api_key'] ?? '')) === '' ? ['adaa'] : ['adaa', 'bpisp'];
+        return ($keys['payment_batches'] ?? false) === true || trim((string) ($keys['batchda_api_key'] ?? '')) !== ''
+            ? ['adaa', 'bpisp']
+            : ['adaa'];
     }
 
-    private function batchSubmissionAvailable(int $supplierId, ?array $client): bool
+    private function paymentBatchesRequested(array $input): bool
     {
-        if ($client === null) {
-            return false;
+        $value = $input['payment_batches'] ?? false;
+        if (!is_bool($value)) {
+            throw new BankConnectorOperationException('kb_plus_registration_input_invalid');
+        }
+        return $value;
+    }
+
+    /**
+     * Rozšíření o dávky má u KB dvě cesty: registrace bez bpisp se musí zopakovat
+     * (Zadat klíče znovu), registrace s bpisp potřebuje jen nový souhlas.
+     *
+     * @return 'available'|'not_registered'|'registration_scope_missing'|'authorization_scope_missing'|'unknown'
+     */
+    private function batchSubmission(int $supplierId, int $currencyId, ?array $client, bool $connected): string
+    {
+        if ($client !== null) {
+            try {
+                $credentials = $this->decryptClient($supplierId, (string) $client['credentials_ciphertext']);
+            } catch (BankConnectorOperationException) {
+                return 'unknown';
+            }
+            if (!KbPlusApiClient::grantsBatchPayments((string) ($credentials['scope'] ?? ''))) {
+                return 'registration_scope_missing';
+            }
+        }
+        if (!$connected) {
+            return $client === null ? 'not_registered' : 'available';
+        }
+        $row = $this->connections->findWithCredentialByCurrency($supplierId, $currencyId);
+        $stored = (string) ($row['token_ciphertext'] ?? '');
+        if ($row === null || !str_starts_with($stored, 'enc:v2:')) {
+            return 'unknown';
         }
         try {
-            $credentials = $this->decryptClient($supplierId, (string) $client['credentials_ciphertext']);
-        } catch (BankConnectorOperationException) {
-            return false;
+            $token = $this->vault->decode($this->secrets->decryptFor(
+                $stored,
+                KbPlusCredentialVault::context($supplierId, (int) $row['id']),
+            ));
+        } catch (\Throwable) {
+            return 'unknown';
         }
-        return trim((string) ($credentials['batchda_api_key'] ?? '')) !== '';
+        return KbPlusApiClient::grantsBatchPayments((string) $token['scope']) ? 'available' : 'authorization_scope_missing';
     }
 
     /** @return array<string,mixed> */

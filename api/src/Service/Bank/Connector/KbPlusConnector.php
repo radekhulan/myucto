@@ -85,7 +85,7 @@ final class KbPlusConnector implements StructuredBankConnector, BankConnectorCre
     public function submitPaymentOrder(#[\SensitiveParameter] string $token, #[\SensitiveParameter] string $abo): array
     {
         if (!$this->canSubmitPaymentOrder($token)) {
-            throw new BankConnectorException('payment_submission_unavailable', 'Připojení KB+ nemá klíč BATCHDA.');
+            throw new BankConnectorException('payment_submission_unavailable', 'Souhlas KB+ nezahrnuje oprávnění bpisp pro dávky.');
         }
         $access = $this->vault->access($token);
         $batch = $this->batchMapper->map($abo, (string) $access['credentials']['account_iban']);
@@ -99,6 +99,6 @@ final class KbPlusConnector implements StructuredBankConnector, BankConnectorCre
 
     public function canSubmitPaymentOrder(#[\SensitiveParameter] string $credential): bool
     {
-        return trim((string) $this->vault->decode($credential)['batchda_api_key']) !== '';
+        return KbPlusApiClient::grantsBatchPayments((string) $this->vault->decode($credential)['scope']);
     }
 }

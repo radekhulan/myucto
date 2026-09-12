@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { apiErrorCode } from '@/api/errors'
-import { kbPlusCredentialFields, kbPlusOnboardingApi, type KbPlusCredentials, type KbPlusOnboardingStatus } from '@/api/kbPlusOnboarding'
+import { kbPlusCredentialFields, kbPlusOnboardingApi, type KbPlusCredentials, type KbPlusOnboardingStatus, type KbPlusStartRequest } from '@/api/kbPlusOnboarding'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { formatDateTime } from '@/composables/useFormat'
 import { kbPlusErrorKey, navigateToKbPlus } from '@/utils/kbPlusOnboarding'
@@ -20,6 +20,7 @@ const busy = ref(false)
 const error = ref('')
 const submitted = ref(false)
 const reenter = ref(false)
+const paymentBatches = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const certificateName = ref('')
 const certificateReading = ref(false)
@@ -42,6 +43,12 @@ const statusKey = computed(() => {
   const status = state.value?.status ?? 'not_registered'
   return `kb_plus.status_${['not_registered', 'registered', 'registration_pending', 'authorization_pending', 'connected', 'expired'].includes(status) ? status : 'not_registered'}`
 })
+const batchUnavailableKey = computed(() => {
+  const reason = state.value?.capabilities.payment_batch_status
+  if (reason === 'registration_scope_missing') return 'kb_plus.batch_unavailable_registration'
+  if (reason === 'authorization_scope_missing') return 'kb_plus.batch_unavailable_authorization'
+  return 'kb_plus.batch_unavailable'
+})
 
 function emptyFields(): KbPlusCredentials {
   return { client_registration_api_key: '', oauth_api_key: '', adaa_api_key: '', batchda_api_key: '', certificate_p12: '', certificate_password: '' }
@@ -52,6 +59,10 @@ function clearCredentials() {
   certificateName.value = ''
   certificateReading.value = false
   if (fileInput.value) fileInput.value.value = ''
+}
+function startReentry() {
+  reenter.value = true
+  paymentBatches.value = state.value?.capabilities.payment_batch_status === 'registration_scope_missing'
 }
 async function load(notify = false) {
   const version = ++requestVersion
@@ -102,8 +113,9 @@ async function start() {
   busy.value = true
   error.value = ''
   const version = requestVersion
-  const credentials: Partial<KbPlusCredentials> = {}
+  const credentials: KbPlusStartRequest = {}
   for (const field of required.value) credentials[field] = field === 'certificate_password' ? fields.value[field] : fields.value[field].trim()
+  if (required.value.length) credentials.payment_batches = paymentBatches.value
   try {
     const result = await kbPlusOnboardingApi.start(props.currencyId, credentials)
     if (version !== requestVersion || !props.canWrite) return
@@ -125,6 +137,7 @@ watch(() => props.currencyId, () => {
   busy.value = false
   submitted.value = false
   reenter.value = false
+  paymentBatches.value = false
   void load()
 }, { immediate: true })
 watch(() => props.canWrite, value => { if (!value) clearCredentials() })
@@ -161,7 +174,7 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
       </div>
       <p v-if="!knownRequirements" class="text-sm text-danger-600" role="alert">{{ t('kb_plus.error_generic') }}</p>
       <p v-if="pending" class="text-sm text-warning-700">{{ t('kb_plus.pending_hint') }}</p>
-      <p v-if="state.status !== 'not_registered' && !state.capabilities.payment_batch_submission" class="text-sm text-neutral-600">{{ t('kb_plus.batch_unavailable') }}</p>
+      <p v-if="state.status !== 'not_registered' && !state.capabilities.payment_batch_submission" class="text-sm text-neutral-600">{{ t(batchUnavailableKey) }}</p>
       <form v-if="canWrite && state.server_ready && !state.blockers.length && knownRequirements && !submitted" class="space-y-3" @submit.prevent="start">
         <div v-if="required.length" class="grid sm:grid-cols-2 gap-3">
           <label v-for="field in apiKeyFields.filter(value => required.includes(value))" :key="field" class="text-sm">
@@ -182,11 +195,18 @@ onBeforeUnmount(() => { requestVersion++; clearCredentials() })
           <label v-if="required.includes('certificate_password')" class="text-sm">{{ t('kb_plus.field_certificate_password') }}
             <input v-model="fields.certificate_password" name="certificate_password" type="password" autocomplete="new-password" maxlength="1024" class="w-full h-9 px-3 mt-1 border border-neutral-300 rounded-md bg-surface" :disabled="busy" />
           </label>
+          <label class="text-sm sm:col-span-2 flex items-start gap-2">
+            <input v-model="paymentBatches" name="payment_batches" type="checkbox" class="mt-0.5" :disabled="busy" />
+            <span>
+              <span class="font-medium">{{ t('kb_plus.payment_batches') }}</span>
+              <span class="block text-xs text-neutral-500">{{ t('kb_plus.payment_batches_hint') }}</span>
+            </span>
+          </label>
           <p class="text-xs text-neutral-500 sm:col-span-2">{{ t('kb_plus.credentials_hint') }}</p>
         </div>
         <div v-else class="space-y-2">
           <p class="text-sm text-neutral-600">{{ t('kb_plus.existing_client_hint') }}</p>
-          <button v-if="state.registration_fields?.length" type="button" :class="btnOutline('neutral')" :disabled="busy" @click="reenter = true">
+          <button v-if="state.registration_fields?.length" type="button" :class="btnOutline('neutral')" :disabled="busy" @click="startReentry">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>
             {{ t('kb_plus.reenter_keys') }}
           </button>

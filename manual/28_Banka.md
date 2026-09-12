@@ -766,7 +766,7 @@ shrnuje, co napojení jako celek umí, jaké má limity a jak je to bezpečnostn
 
 | Banka | Kód | Technologie | Pohyby | Odeslání příkazu |
 |---|---|---|---|---|
-| **KB Business (KB+)** | 0100 | Extra služba API Business — OAuth2, ADAA (pohyby) + BATCHDA (dávky) | ano | ano, jen s klíčem BATCHDA |
+| **KB Business (KB+)** | 0100 | Extra služba API Business — OAuth2, ADAA (pohyby) + BATCHDA (dávky) | ano | ano, se souhlasem `bpisp` (§ 28.9.6) |
 | **Fio banka** (ČR i SR) | 2010, 8330 | API token vázaný na konkrétní účet | ano | ano |
 | **ČSOB** | 0300 | CEB Business Connector — číslo smlouvy + komunikační certifikát | ano | ano |
 | **Raiffeisenbank** | 5500 | Premium API — Client ID + certifikát | ano | ano |
@@ -848,37 +848,52 @@ certifikátu v paměti a rozšíření OpenSSL.
 
 ### 28.9.6 KB Business (KB+) — rozšíření o odesílání dávek (BATCHDA)
 
-Napojení KB+ běží nad stejným základem jako ostatní API KB — registrací
-aplikace (Software Statement) a OAuth2 tokeny. Nad tímto základem MyÚčto
-používá **ADAA** pro čtení pohybů a volitelně **BATCHDA** pro odeslání
-platebních dávek; STATDA (stažení originálních souborů výpisu) a NOTDA
-(notifikace) konektor nevyužívá.
+Napojení KB+ stojí na registraci aplikace u KB (Software Statement) a na
+OAuth2 tokenech. Stejný základ mají všechna API KB. MyÚčto nad ním čte pohyby
+přes **ADAA** a volitelně odesílá platební dávky přes **BATCHDA**; STATDA
+(stažení originálních souborů výpisu) a NOTDA (notifikace) konektor nevyužívá.
 
-Klíč **BATCHDA** vyžaduje navíc OAuth scope **`bpisp`** vedle základního
-`adaa`. MyÚčto o něj žádá bance automaticky, podle toho, jestli při založení
-nebo obnovení napojení vyplníš pole **API klíč BatchDA**:
+Hromadné platby **nepotřebují samostatný API klíč BATCHDA**. Dávku autorizuje
+access token, který banka vydá se scope **`bpisp`**. Tento scope musí mít
+registrace aplikace i souhlas udělený k účtu. Pole **klíč BATCHDA** ve
+formuláři je nepovinné a na developer portálu KB ho běžně nezískáš. Vyplň ho
+jen tehdy, když ti ho KB výslovně vydala; pak se k dávce přiloží jako
+identifikátor volajícího. Bez něj MyÚčto posílá dávku jen s tokenem a klíč ADAA
+do služby dávek neposílá.
 
-- **pole je prázdné** → registrace i souhlas se žádají jen se scope `adaa`;
-  napojení pak umí výhradně čtení pohybů a odeslání příkazu aplikace odmítne
-  dřív, než by cokoli poslala bance (`payment_submission_unavailable`) —
-  příkaz je pak potřeba nahrát do KB ručně,
-- **pole je vyplněné** → registrace se žádá se scope `adaa bpisp` a
-  následný souhlas v bance zahrnuje i oprávnění k odesílání dávek.
+**Zapnutí u nového napojení.** Ve formuláři napojení u účtu
+([§ 29.1.3](29_Bankovni_ucty.md#2913-prime-napojeni-na-banku)) zaškrtni
+**Chci i hromadné platby (BATCHDA)**. Registrace aplikace se pak u KB žádá se
+scope `adaa` a `bpisp` a navazující souhlas v KB zahrnuje i oprávnění
+k odesílání dávek. Bez zaškrtnutí (a bez vyplněného klíče BATCHDA) se aplikace
+registruje jen se scope `adaa` a napojení umí výhradně čtení pohybů. Volbu
+zapni jen tehdy, když tvoje varianta Extra služby API Business dávky zahrnuje;
+jinak KB registraci se scope `bpisp` odmítne.
 
-Pokud jsi aplikaci u KB zaregistroval(a) dřív jen pro čtení a klíč BATCHDA
-získáš později, přidání dávkového oprávnění k existujícímu napojení řeší
-tlačítko **Zadat klíče znovu** u účtu ([§ 29.1.3](29_Bankovni_ucty.md#2913-prime-napojeni-na-banku)) —
-vyplníš všech pět položek znovu (Client Registration, OAuth, ADAA, BATCHDA,
-certifikát) a projdeš registraci i souhlas v KB od začátku, tentokrát se
-scope `bpisp` navíc. To odpovídá tomu, jak rozšíření scope řeší banka: buď
-rozšířením registrace aplikace o `bpisp` (má-li dosud jen `adaa`), nebo — má-li
-aplikace `bpisp` už zaregistrovaný — vyžádáním nového autorizačního kódu s
-rozšířeným scope; MyÚčto obojí prochází stejným tokem registrace a souhlasu,
-takže žádný ruční zásah do OAuth mimo formulář napojení není potřeba.
+**Rozšíření existujícího napojení.** Sekce napojení u účtu ukáže, proč dávky
+nejdou, a podle toho vede na jednu ze dvou cest, kterými rozšíření řeší banka:
 
-Stav, zda dané napojení dávky odeslat umí, ukazuje sekce napojení přímo u
-účtu — pokud klíč BATCHDA chybí, zobrazí se u připojeného účtu upozornění, že
-odesílání příkazů není aktivní a příkaz je nutné do banky nahrát ručně;
-čtení pohybů tím není nijak omezené. Odeslaná dávka je omezená na nejvýše
-**100 plateb**; příjem dávky bankou opět **není autorizace ani úhrada** — tu
-je vždy nutné dokončit v internetovém bankovnictví.
+- **aplikace je u KB zaregistrovaná jen se scope `adaa`** → zvol **Zadat klíče
+  znovu**, vyplň klíče Client Registration, OAuth a ADAA, vyber certifikát
+  a nech zaškrtnuté **Chci i hromadné platby** (při opakovaném zadání je volba
+  předvyplněná). MyÚčto vystaví nový Software Statement, pošle bance
+  registrační požadavek se scope `adaa` a `bpisp` a hned po registraci tě
+  provede novým souhlasem v KB,
+- **aplikace má `bpisp` zaregistrovaný, ale udělený souhlas ho nezahrnuje** →
+  stačí **Zahájit nové ověření v KB+**. Aplikace si vyžádá nový autorizační
+  kód se scope `adaa bpisp`; klíče se znovu nezadávají.
+
+Registraci i souhlas musí v KB potvrdit tentýž uživatel (klient KB), jinak
+banka tokeny nevydá.
+
+**Platnost souhlasu.** Access token platí jen několik minut a MyÚčto ho
+průběžně obnovuje refresh tokenem. Refresh token platí 12 měsíců. Po jeho
+vypršení přestane fungovat čtení pohybů i odesílání dávek a je potřeba
+**Zahájit nové ověření v KB+**; novou registraci aplikace to nevyžaduje.
+
+Když napojení dávky odeslat neumí, zobrazí se u účtu upozornění s důvodem
+a odeslání příkazu aplikace odmítne dřív, než cokoli předá bance
+(`payment_submission_unavailable`). Příkaz pak nahraješ do KB ručně; čtení
+pohybů tím omezené není. Odeslaná dávka má nejvýše **100 plateb** a její
+příjem bankou **není autorizace ani úhrada**. Tu je vždy nutné dokončit
+v internetovém bankovnictví.

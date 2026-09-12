@@ -33,7 +33,7 @@ final class KbPlusConnectorTest extends TestCase
         $this->connector = new KbPlusConnector($this->api, $this->vault, new KbPlusTransactionParser(), new KbPlusAboBatchMapper());
     }
 
-    public function testConnectionWithoutBatchKeyRefusesPaymentsBeforeCallingBank(): void
+    public function testReadOnlyConsentRefusesPaymentsBeforeCallingBank(): void
     {
         $this->api->expects(self::never())->method('submitPaymentBatch');
         $this->api->expects(self::never())->method('refreshAccessToken');
@@ -42,14 +42,29 @@ final class KbPlusConnectorTest extends TestCase
         self::assertFalse($this->connector->canSubmitPaymentOrder($token));
         try {
             $this->connector->submitPaymentOrder($token, 'SYNTHETIC-ABO');
-            self::fail('Bez klíče BATCHDA se příkaz nesmí předat bance.');
+            self::fail('Bez souhlasu bpisp se příkaz nesmí předat bance.');
         } catch (BankConnectorException $e) {
             self::assertSame('payment_submission_unavailable', $e->errorCode);
             self::assertFalse($e->ambiguousPaymentOutcome);
         }
     }
 
-    public function testConnectionWithBatchKeyCanSubmitPayments(): void
+    public function testSeparateBatchKeyWithoutBpispConsentStillRefusesPayments(): void
+    {
+        $this->api->expects(self::never())->method('submitPaymentBatch');
+        $token = $this->vault->encode($this->credentials('synthetic-batchda-key', 'adaa'));
+
+        self::assertFalse($this->connector->canSubmitPaymentOrder($token));
+    }
+
+    public function testBpispConsentEnablesPaymentsWithoutSeparateBatchKey(): void
+    {
+        $token = $this->vault->encode($this->credentials('', 'adaa bpisp'));
+
+        self::assertTrue($this->connector->canSubmitPaymentOrder($token));
+    }
+
+    public function testBpispConsentWithSeparateBatchKeyCanSubmitPayments(): void
     {
         $token = $this->vault->encode($this->credentials('synthetic-batchda-key', 'adaa bpisp'));
 

@@ -244,11 +244,13 @@ final class KbPlusOnboardingServiceTest extends TestCase
 
     /** @param list<string> $scopes */
     #[\PHPUnit\Framework\Attributes\DataProvider('batchScopes')]
-    public function testRegistrationScopesFollowBatchKey(string $batchKey, array $scopes): void
+    public function testRegistrationScopesFollowBatchChoiceOrKey(string $batchKey, ?bool $paymentBatches, array $scopes): void
     {
         $this->oauth->method('account')->willReturn($this->account());
         $this->oauth->method('client')->willReturn(null);
-        $this->registrationClient->method('createSoftwareStatement')->willReturn('eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl');
+        $this->registrationClient->expects(self::once())->method('createSoftwareStatement')
+            ->with(self::callback(static fn (array $credentials): bool => !array_key_exists('payment_batches', $credentials)), self::anything())
+            ->willReturn('eyJhbGciOiJIUzI1NiJ9.e30.c2lnbmF0dXJl');
         $this->registration->expects(self::once())->method('begin')
             ->with(self::anything(), self::callback(static fn (array $application): bool => $application['scopes'] === $scopes), self::anything())
             ->willReturnCallback(static fn (string $statement, array $application, string $state): array => [
@@ -256,17 +258,67 @@ final class KbPlusOnboardingServiceTest extends TestCase
                 'state' => $state,
                 'encryption_key' => base64_encode(str_repeat('K', 32)),
             ]);
-        $this->secrets->method('encryptFor')->willReturn('enc:v2:synthetic');
+        $expectedFlag = $paymentBatches === true ? '"payment_batches":true' : '"payment_batches":false';
+        $this->secrets->expects(self::once())->method('encryptFor')
+            ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, $expectedFlag)), self::anything())
+            ->willReturn('enc:v2:synthetic');
+        $input = ['batchda_api_key' => $batchKey] + $this->registrationInput();
+        if ($paymentBatches !== null) {
+            $input['payment_batches'] = $paymentBatches;
+        }
 
-        $result = $this->service->start(7, 11, 5, ['batchda_api_key' => $batchKey] + $this->registrationInput());
+        $result = $this->service->start(7, 11, 5, $input);
 
         self::assertSame('registration_pending', $result['status']);
     }
 
     public static function batchScopes(): iterable
     {
-        yield 'bez BATCHDA jen čtení' => ['  ', ['adaa']];
-        yield 's BATCHDA i dávky' => ['synthetic-batchda-key', ['adaa', 'bpisp']];
+        yield 'bez volby a bez klíče jen čtení' => ['  ', null, ['adaa']];
+        yield 'dávky nezvolené jen čtení' => ['', false, ['adaa']];
+        yield 'dávky zvolené bez klíče BATCHDA' => ['', true, ['adaa', 'bpisp']];
+        yield 'samostatný klíč BATCHDA stále zapíná dávky' => ['synthetic-batchda-key', false, ['adaa', 'bpisp']];
+    }
+
+    public function testNonBooleanPaymentBatchChoiceIsRejectedBeforeBank(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->oauth->method('client')->willReturn(null);
+        $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
+        $this->oauth->expects(self::never())->method('replacePending');
+
+        try {
+            $this->service->start(7, 11, 5, ['payment_batches' => 'yes'] + $this->registrationInput());
+            self::fail('Volba dávek musí být boolean.');
+        } catch (BankConnectorOperationException $e) {
+            self::assertSame('kb_plus_registration_input_invalid', $e->errorCode);
+        }
+    }
+
+    public function testRegistrationCallbackWithBatchChoiceExpectsBpispWithoutBatchKey(): void
+    {
+        $state = str_repeat('p', 43);
+        $this->oauth->method('currencyForState')->willReturn(11);
+        $this->oauth->method('claim')->willReturn(['stage' => 'registration'] + $this->session($state));
+        $this->secrets->method('decryptFor')->willReturn(json_encode([
+            'state' => $state, 'encryption_key' => base64_encode(str_repeat('K', 32)), 'payment_batches' => true,
+            'oauth_api_key' => 'synthetic-oauth-key', 'adaa_api_key' => 'synthetic-adaa-key',
+            'batchda_api_key' => '', 'redirect_uri' => 'https://example.invalid/callback',
+        ], JSON_THROW_ON_ERROR));
+        $this->registration->expects(self::once())->method('complete')
+            ->with(self::anything(), $state, 'https://example.invalid/callback', ['adaa', 'bpisp'], self::anything())
+            ->willReturn([
+                'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-client-secret',
+                'scope' => 'adaa bpisp', 'client_id_issued_at' => 1,
+            ]);
+        $this->secrets->method('encryptFor')->willReturn('enc:v2:synthetic');
+        $this->api->expects(self::once())->method('authorizationUrl')
+            ->with(self::callback(static fn (array $client): bool => $client['scope'] === 'adaa bpisp'), self::anything())
+            ->willReturn('https://login.kb.cz/autfe/ssologin?state=synthetic');
+
+        $result = $this->service->completeRegistration(7, 5, $state, ['salt' => 'synthetic', 'encryptedData' => 'synthetic']);
+
+        self::assertSame('authorization_pending', $result['status']);
     }
 
     public function testRegistrationCallbackWithoutBatchKeyExpectsReadOnlyScope(): void
@@ -294,13 +346,13 @@ final class KbPlusOnboardingServiceTest extends TestCase
         self::assertSame('authorization_pending', $result['status']);
     }
 
-    public function testRegisteredClientWithoutBatchKeyReportsReadOnlyCapabilityAndAllowsReentry(): void
+    public function testReadOnlyRegistrationReportsMissingRegistrationScopeAndAllowsReentry(): void
     {
         $this->oauth->method('account')->willReturn($this->account());
         $this->connections->method('findPublicByCurrency')->willReturn(null);
         $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
         $this->oauth->method('publicStatus')->willReturn(null);
-        $this->secrets->method('decryptFor')->willReturn(json_encode(['batchda_api_key' => ''], JSON_THROW_ON_ERROR));
+        $this->secrets->method('decryptFor')->willReturn(json_encode(['batchda_api_key' => 'synthetic-batchda-key', 'scope' => 'adaa'], JSON_THROW_ON_ERROR));
 
         $status = $this->service->status(7, 11);
 
@@ -309,6 +361,53 @@ final class KbPlusOnboardingServiceTest extends TestCase
         self::assertContains('batchda_api_key', $status['registration_fields']);
         self::assertContains('batchda_api_key', $status['optional_fields']);
         self::assertFalse($status['capabilities']['payment_batch_submission']);
+        self::assertSame('registration_scope_missing', $status['capabilities']['payment_batch_status']);
+    }
+
+    public function testBpispRegistrationWithoutBatchKeyOffersBatchesBeforeConsent(): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('findPublicByCurrency')->willReturn(null);
+        $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
+        $this->oauth->method('publicStatus')->willReturn(null);
+        $this->secrets->method('decryptFor')->willReturn(json_encode(['batchda_api_key' => '', 'scope' => 'adaa bpisp'], JSON_THROW_ON_ERROR));
+
+        $status = $this->service->status(7, 11);
+
+        self::assertTrue($status['capabilities']['payment_batch_submission']);
+        self::assertSame('available', $status['capabilities']['payment_batch_status']);
+    }
+
+    /** @param 'available'|'authorization_scope_missing' $expected */
+    #[\PHPUnit\Framework\Attributes\DataProvider('connectedConsents')]
+    public function testConnectedAccountReportsWhetherGrantedConsentIncludesBpisp(string $tokenScope, string $expected): void
+    {
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('findPublicByCurrency')->willReturn(['provider' => 'kb_plus', 'has_token' => true]);
+        $this->connections->expects(self::once())->method('findWithCredentialByCurrency')->with(7, 11)
+            ->willReturn(['id' => 19, 'token_ciphertext' => 'enc:v2:connection']);
+        $this->oauth->method('client')->willReturn(['credentials_ciphertext' => 'enc:v2:client']);
+        $this->oauth->method('publicStatus')->willReturn(null);
+        $this->secrets->method('decryptFor')->willReturnCallback(static fn (string $stored, string $context): string =>
+            $context === KbPlusCredentialVault::context(7, 19)
+                ? '{"synthetic":"connection"}'
+                : json_encode(['batchda_api_key' => '', 'scope' => 'adaa bpisp'], JSON_THROW_ON_ERROR)
+        );
+        $this->vault->expects(self::once())->method('decode')->with('{"synthetic":"connection"}')
+            ->willReturn(['scope' => $tokenScope]);
+
+        $status = $this->service->status(7, 11);
+
+        self::assertSame('connected', $status['status']);
+        self::assertSame($expected === 'available', $status['capabilities']['payment_batch_submission']);
+        self::assertSame($expected, $status['capabilities']['payment_batch_status']);
+        self::assertStringNotContainsString('synthetic', json_encode($status, JSON_THROW_ON_ERROR));
+    }
+
+    public static function connectedConsents(): iterable
+    {
+        yield 'souhlas jen ke čtení čeká na nový autorizační kód' => ['adaa', 'authorization_scope_missing'];
+        yield 'souhlas s bpisp umí dávky' => ['adaa bpisp', 'available'];
     }
 
     /** @return array<string,mixed> */
