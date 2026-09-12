@@ -968,14 +968,21 @@ final class JmhzScenario1DocumentResolver
             $employmentId,
             $blockers,
         );
-        $base = $cappedBase === 0 ? null : $cappedBase;
-        $letter = $base === null ? null : match ($relationship['employer_rate_category'] ?? null) {
+        // Nulový základ se vynechává jen u neúčastného vztahu. Účastný vztah
+        // bez příjmu (měsíc mimo dobu pojištění, celý měsíc nemoci) ho nese
+        // jako nulu: ČSSZ chybějící 10477 bere jako nulu a poměřuje s ním
+        // pojistné (chyba 20315), a přijatá hlášení ho v takovém měsíci píší.
+        $base = $cappedBase === 0
+            && ($participation['status'] ?? null) !== 'participates'
+                ? null
+                : $cappedBase;
+        $letter = $base === null || $base === 0 ? null : match ($relationship['employer_rate_category'] ?? null) {
             'ordinary' => 'a',
             'rescue_and_company_fire_service' => 'b',
             'risk_employment' => 'c',
             default => null,
         };
-        if ($base !== null && $letter === null) {
+        if ($base !== null && $base > 0 && $letter === null) {
             $blockers[] = $this->blocker(
                 'jmhz_employer_rate_category_unverified',
                 'employment',
@@ -1317,9 +1324,15 @@ final class JmhzScenario1DocumentResolver
 
                 return null;
             }
-            if (!is_int($order) || $order < 1 || $order > 3 || isset($orders[$order])) {
-                // Číselník 10440 zná jen 1, 2, 3 a N; čtvrté dítě v pořadí
-                // ani duplicitu formulář vyjádřit neumí.
+            // Číselník 10440 zná 1, 2, 3 a N, přičemž 3 znamená „třetí
+            // a každé další": katalog kontrol MH u kontroly 110 výslovně
+            // říká, že čtvrté a další dítě má pořadí 3. Kolizi hlídá ČSSZ jen
+            // u pořadí 1 a 2, trojka se opakovat smí.
+            $reportedOrder = is_int($order) ? min($order, 3) : null;
+            if ($reportedOrder === null
+                || $reportedOrder < 1
+                || ($reportedOrder < 3 && isset($orders[$reportedOrder]))
+            ) {
                 $blockers[] = $this->blocker(
                     'jmhz_scenario1_child_order_unsupported',
                     'person',
@@ -1329,7 +1342,7 @@ final class JmhzScenario1DocumentResolver
 
                 return null;
             }
-            $orders[$order] = true;
+            $orders[$reportedOrder] = true;
             $normalized[] = [
                 'identity' => [
                     'given_name' => trim((string) $identity['given_name']),
@@ -1337,7 +1350,7 @@ final class JmhzScenario1DocumentResolver
                     'birth_date' => $identity['birth_date'],
                 ],
                 'ztp_p' => ($child['ztp_p'] ?? null) === true,
-                'order' => (string) $order,
+                'order' => (string) $reportedOrder,
             ];
         }
 
@@ -1427,46 +1440,25 @@ final class JmhzScenario1DocumentResolver
             'disability_extended' => 'disability_extended',
             'ztp_p' => 'ztp_p',
         ];
-        if ($claimed !== $applied) {
-            /*
-             * Částečné uplatnění (záloha před slevou je nižší než nárok) je
-             * u hrubé mzdy pod ~17 200 Kč běžný stav, ne výjimka — částečné
-             * úvazky, dohody s prohlášením, měsíc s nemocí. Blokovat kvůli
-             * němu hlášení celé firmy nelze.
-             *
-             * Vykazuje se UPLATNĚNÁ částka: 10299 leží v XSD uvnitř bloku
-             * „Výpočet zálohy na daň", takže nese to, co do výpočtu skutečně
-             * vstoupilo — vykázaný nárok by s 10298 a 10305 aritmeticky
-             * neseděl. Rozdělit krácení mezi VÍC druhů slev ale zákon
-             * neurčuje, takže tam blokace zůstává.
-             */
-            $claimedKinds = [];
-            foreach ($kindsByKey as $key => $kind) {
-                $minor = $breakdown[$kind] ?? null;
-                if (is_int($minor) && $minor !== 0) {
-                    $claimedKinds[$key] = $minor;
-                }
-            }
-            if (count($claimedKinds) !== 1 || $applied > $claimed || $applied < 0) {
-                $blockers[] = $this->blocker(
-                    'jmhz_scenario1_partial_tax_credit_unsupported',
-                    'person',
-                    $employeeId,
-                    ['10299', '10300', '10301', '10302'],
-                );
-
-                return $empty;
-            }
-            $result = $empty;
-            $result[array_key_first($claimedKinds)] = $this->wholeCzk(
-                $applied,
-                '10299',
+        /*
+         * 10299–10302 nesou NÁROK na slevu podle prohlášení, ne částku, která
+         * se do zálohy vešla. Částečné uplatnění (záloha před slevou je nižší
+         * než nárok) je u nízkého příjmu běžný stav a výsledek krácení nese
+         * 10305. Přijatá hlášení tří různých mzdových systémů vykazují
+         * u zálohy 1 800 Kč slevu 2 570 Kč a 10305 nulu, a v měsíci bez
+         * příjmu slevu i bez bloku zálohy. Žádná kontrola ČSSZ výši slevy
+         * s 10298 a 10305 nepoměřuje (244 a 245 hlídají jen přítomnost bez
+         * prohlášení), takže rozpad nároku po druzích se nemusí krátit.
+         */
+        if ($applied > $claimed || $applied < 0) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_tax_credit_breakdown_unavailable',
                 'person',
                 $employeeId,
-                $blockers,
+                ['10299', '10300', '10301', '10302'],
             );
 
-            return $result;
+            return $empty;
         }
         $result = $empty;
         $total = 0;

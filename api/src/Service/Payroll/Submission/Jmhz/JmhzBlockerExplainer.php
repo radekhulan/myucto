@@ -24,7 +24,8 @@ final class JmhzBlockerExplainer
             . 'výdělek a zaměstnanec v rozhodném období neodpracoval zákonné minimum '
             . 'dnů, takže se skutečný průměr spočítat nedá. Podle § 355 zákoníku práce '
             . 'se v takovém případě použije pravděpodobný výdělek, který stanoví '
-            . 'zaměstnavatel — aplikace ho vymyslet nesmí.',
+            . 'zaměstnavatel — aplikace ho vymyslet nesmí. Spodní hranicí je '
+            . 'minimální mzda; nižší hodnotu výpočet průměru sám zvýší.',
         /*
          * Názvy polí jsou DOSLOVA ty z formuláře (`payroll.people.jmhz_identity`
          * v `web/src/i18n/cs.json`) a ze slovníku
@@ -155,8 +156,9 @@ final class JmhzBlockerExplainer
             . 'na kartě pracovního vztahu vyplňte v části „Průměrný výdělek" pole '
             . '„Pravděpodobný hodinový výdělek" a jeho odůvodnění (z čeho jste ho '
             . 'stanovili — obvyklá výše složek mzdy nebo odměna srovnatelných '
-            . 'zaměstnanců) a uložte novou revizi podmínek. Pak se v Mzdy → Absence '
-            . 'a průměry průměr nabídne k založení a schválení.',
+            . 'zaměstnanců) a uložte novou revizi podmínek. Nemáte-li podklad, '
+            . 'uveďte minimální hodinovou mzdu, tak postupují i jiné mzdové systémy. '
+            . 'Pak se v Mzdy → Absence a průměry průměr nabídne k založení a schválení.',
         'jmhz_verified_boolean_missing' => 'Otevřete Mzdy → Zaměstnanci, na kartě pracovního vztahu v části Evidence pro ČSSZ zvolte u všech tří otázek Ano nebo Ne a uložte.',
         'jmhz_work_month_not_approved' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',
         'jmhz_work_summary_v2_missing' => 'Otevřete Mzdy → Pracovní doba a měsíc schvalte.',

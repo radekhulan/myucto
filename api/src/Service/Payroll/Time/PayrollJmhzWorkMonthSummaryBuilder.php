@@ -96,6 +96,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      */
     private const STATUTORY_WEEKLY_MINUTES = 2400;
 
+    /** Pokyny MPSV k 10261: „missingová hodnota 99", viz weeklyWorkMissingValue(). */
+    private const WEEKLY_WORK_MISSING_VALUE = '99';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollCalendarFundService $fund,
@@ -202,12 +205,15 @@ final class PayrollJmhzWorkMonthSummaryBuilder
 
         return [
             'derivation_version' => self::DERIVATION_VERSION,
+            'relation_type' => $employment['relation_type'],
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
                 'standard_fund_hours' => $this->standardFundSuggestion($periodStart),
                 'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
-                'weekly_work_hours' => $employment['weekly_hours'],
+                'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
+                    ? self::WEEKLY_WORK_MISSING_VALUE
+                    : $employment['weekly_hours'],
                 'evidence_days' => $evidenceDays,
                 'worked_hours' => self::minutesSuggestion($worked['minutes']),
                 'worked_days' => $worked['days'],
@@ -420,6 +426,15 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             99999999,
             'worked_hours',
         );
+        if (self::weeklyWorkMissingValue($preview['relation_type'] ?? null)
+            && $values['weekly_work_centihours'] !== 9900
+        ) {
+            throw new \InvalidArgumentException(
+                'U dohody a člena orgánu se stanovená týdenní pracovní doba'
+                    . ' neuvádí; podle pokynů MPSV k 10261 patří do hlášení'
+                    . ' hodnota 99.',
+            );
+        }
         /*
          * Přesčas je částí odpracovaných hodin (10269 je rozpad 10268), takže
          * ho nesmí přerůst. Hodiny 10268 jde v dialogu přepsat, dny a přesčas
@@ -956,6 +971,22 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         return $fraction === 0
             ? (string) $whole
             : rtrim(sprintf('%d.%03d', $whole, $fraction), '0');
+    }
+
+    /**
+     * Stanovená týdenní doba (10261) se sbírá pro povinný podíl OZP a jen
+     * u zaměstnanců v pracovním poměru. Kdo se do podílu nezapočítává, má
+     * podle pokynů MPSV „missingovou hodnotu 99" — vzorové příklady ji tak
+     * uvádějí u dohod a přijatá hlášení jiných systémů i u jednatele.
+     * Zaměstnání malého rozsahu je pracovní poměr, tam patří skutečná doba.
+     */
+    private static function weeklyWorkMissingValue(mixed $relationType): bool
+    {
+        return in_array(
+            $relationType,
+            ['dpp', 'dpc', 'partner_dependent', 'statutory_body'],
+            true,
+        );
     }
 
     private static function requiresShiftCalendar(string $relationType): bool

@@ -1254,7 +1254,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                         'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
                         'standard_fund_hours' => $preview['suggestions']['agreed_fund_hours'],
                         'agreed_fund_hours' => $preview['suggestions']['agreed_fund_hours'],
-                        'weekly_work_hours' => '40',
+                        'weekly_work_hours' => $preview['suggestions']['weekly_work_hours'] ?? '40',
                         'worked_hours' => $preview['suggestions']['worked_hours'],
                         'unworked_hours_occurred' => false,
                         'work_obstacles_occurred' => false,

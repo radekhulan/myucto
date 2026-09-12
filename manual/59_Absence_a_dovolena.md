@@ -199,12 +199,19 @@ Aby šly dny doložit, ptá se potvrzení pracovní doby u těchto absencí nav�
 jejich hodiny — pole se ale objeví **jen u druhu, který v měsíci opravdu je**,
 takže běžný měsíc žádné pole navíc nemá.
 
+**Měsíc, ve kterém rodičovská, neplacené volno nebo neomluvená absence
+nenechaly žádný započitatelný příjem**, se podle § 11 odst. 2 zákona
+č. 155/1995 Sb. za dobu pojištění nepovažuje. Hlášení ho vykáže s kódem
+činnosti, nulou dnů pojištění a nulovým vyměřovacím základem; dny neplaceného
+volna uvede jako vyloučené dny pro nemocenské dávky. Celý měsíc nemoci nebo
+ošetřovného je naopak omluvný důvod, takže zůstává dobou pojištění s plným
+počtem dnů a nulovým základem.
+
 Bezpečně zablokované zůstávají dva případy. **Peněžitá pomoc v mateřství**,
 protože vyloučenou dobou je jen její část před porodem a den porodu aplikace
-neeviduje. A **měsíc, ve kterém rodičovská, neplacené volno nebo neomluvená
-absence nenechaly žádný započitatelný příjem** — takový měsíc se za dobu
-pojištění nepovažuje a evidenční list ho značí zvláštním způsobem, který běžný
-profil vyjádřit neumí. Obojí vyřiďte ručně mimo aplikaci.
+neeviduje. A měsíc bez příjmu, ve kterém se **omluvná nepřítomnost (nemoc)
+potkala s nepřítomností bez příjmu** (neplacené volno); zákon rozhoduje jen
+o celém měsíci. Obojí vyřiďte ručně mimo aplikaci.
 
 > [!IMPORTANT]
 > Nové zacházení se svátkem a spodní hranice průměrného výdělku platí od

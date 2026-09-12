@@ -540,15 +540,123 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
 
     /**
      * Měsíc bez započitatelného příjmu se podle § 11 odst. 2 zákona
-     * č. 155/1995 Sb. za dobu pojištění nepovažuje a ELDP ho značí znakem „X".
-     * Jednosekční běžný řez to vyjádřit neumí, takže musí zastavit — jinak by
-     * vykázal dny pojištění, které podle zákona nevznikly.
+     * č. 155/1995 Sb. za dobu pojištění nepovažuje. Hlášení ho vyjádří sekcí
+     * s kódem a nulou dnů i základu, jako přijatá hlášení jiných systémů.
+     * Vyloučené dny § 18 odst. 7 se vykazují dál: nemocenské pojištění trvá.
      */
-    public function testKeepsParentalLeaveFailClosedInMonthWithoutIncome(): void
+    public function testWholeMonthOfUnpaidLeaveIsReportedAsZeroInsuranceDays(): void
     {
-        $source = $this->absenceSource('parental', '2026-07-01', '2026-07-31', [
-            'parental_millihours' => 160_000,
-        ]);
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->withZeroAssessmentBase($this->absenceSource(
+            'unpaid_leave',
+            '2026-07-01',
+            '2026-07-31',
+            ['unpaid_leave_millihours' => 184_000],
+        ));
+
+        $confirmation = $builder->deriveOrdinaryConfirmation(7, 101, $source);
+        $section = $builder->build(7, 101, $source, $confirmation)
+            ->payload['eldp_sections'][0];
+
+        self::assertSame(0, $section['insurance_days']);
+        self::assertSame('1++', $section['code']);
+        self::assertSame('2026-07-01', $section['valid_from']);
+        self::assertSame('2026-07-31', $section['valid_to']);
+        self::assertSame(0, $section['assessment_base_czk']);
+        self::assertSame(0, $section['excluded_days_total']);
+        self::assertSame(31, $section['section18_days_total']);
+        self::assertSame(31, $section['section18_days']['omluvenaNepritomnost']);
+    }
+
+    /**
+     * Rodičovská ve formě celého měsíce bez příjmu je týž případ § 11
+     * odst. 2. Rozpad § 18 se pro ni z podkladů odvodit nedá, takže zůstává
+     * neuvedený (viz EldpExcludedPeriodDeriver::deriveSection18()).
+     */
+    public function testWholeMonthOfParentalLeaveIsReportedAsZeroInsuranceDays(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->withZeroAssessmentBase($this->absenceSource(
+            'parental',
+            '2026-07-01',
+            '2026-07-31',
+            ['parental_millihours' => 160_000],
+        ));
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(0, $section['insurance_days']);
+        self::assertSame('1++', $section['code']);
+        self::assertSame(0, $section['assessment_base_czk']);
+        self::assertNull($section['section18_days_total']);
+    }
+
+    /**
+     * Celý měsíc nemoci je omluvný důvod podle § 16 odst. 4 věty třetí
+     * písm. a): dobou pojištění zůstává s plným počtem dnů, vyloučenou dobou
+     * a nulovým základem. Dřív ho odmítla kontrola kladného základu.
+     */
+    public function testWholeMonthOfSicknessKeepsInsuranceDaysWithZeroBase(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->withZeroAssessmentBase($this->absenceSource(
+            'dpn',
+            '2026-07-01',
+            '2026-07-31',
+            [
+                'dpn_with_employer_compensation_millihours' => 80_000,
+                'dpn_without_employer_compensation_millihours' => 104_000,
+            ],
+            paidMillihours: 80_000,
+        ));
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['assessment_base_czk']);
+        self::assertSame(31, $section['excluded_days_total']);
+        self::assertSame(31, $section['excluded_days']['docasNeschopnost']);
+    }
+
+    public function testMonthWithoutIncomeMixingExcusedAndIncomeLessAbsenceStops(): void
+    {
+        $source = $this->withZeroAssessmentBase($this->absenceSource(
+            'unpaid_leave',
+            '2026-07-01',
+            '2026-07-15',
+            ['unpaid_leave_millihours' => 88_000],
+        ));
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['absences'][] = [
+            'id' => 911,
+            'absence_type' => 'dpn',
+            'date_from' => '2026-07-16',
+            'date_to' => '2026-07-31',
+        ];
+        $source = $this->withZeroAssessmentBase($this->withInput($source, $input));
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('§ 11 odst. 2');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @return array<string,mixed>
+     */
+    private function withZeroAssessmentBase(array $source): array
+    {
         $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($result);
         $relationship = &$result['people'][0]['statutory']['social_insurance']['relationships'][0];
@@ -561,9 +669,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
             $source['revision']['result_snapshot_json'],
         );
 
-        $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('§ 11 odst. 2');
-        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+        return $source;
     }
 
     /**
@@ -674,7 +780,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $confirmation['assessment_base_czk'] = 0;
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('kladné celé číslo');
+        $this->expectExceptionMessage('evidovanou nepřítomnost');
         (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $confirmation);
     }
 

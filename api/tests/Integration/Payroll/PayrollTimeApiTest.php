@@ -415,6 +415,51 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame(0, (int) $revision['worked_millihours']);
     }
 
+    /**
+     * Pokyny MPSV k 10261: kdo není v pracovním poměru, nezapočítává se do
+     * povinného podílu OZP a má „missingovou hodnotu 99". Návrh ji musí
+     * nabídnout a potvrzení jinou hodnotu nepřijme.
+     */
+    public function testStatutoryWeeklyWorkIsSuggestedAndRequiredAsMissingValue(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments
+                SET relation_type = 'partner_dependent'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $overview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        $item = $this->json($overview)['items'][0];
+        $preview = $item['jmhz_work_summary']['preview'];
+        self::assertSame('99', $preview['suggestions']['weekly_work_hours']);
+
+        $rejected = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $item['month']['row_version'],
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+                        'standard_fund_hours' => '0',
+                        'agreed_fund_hours' => '0',
+                        'weekly_work_hours' => '40',
+                        'worked_hours' => '0',
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
+                        'confirmation_note' => '',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(422, $rejected->getStatusCode());
+        self::assertSame(0, $this->countRows('payroll_jmhz_work_month_revisions'));
+    }
+
     public function testJmhzConditionalWorkBlocksAreExplicitAndFailClosed(): void
     {
         $calendar = $this->action->calendar(

@@ -144,34 +144,24 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
 
     /**
      * Zaměstnanec s podepsaným prohlášením a zálohou nižší než sleva na
-     * poplatníka (hrubá mzda 12 000 Kč: záloha 1 800 < sleva 2 570). Výpočet
-     * uplatní jen 1 800, resolver vidí claimed != applied a blokuje.
+     * poplatníka (hrubá mzda 12 000 Kč: záloha 1 800 < sleva 2 570). 10299
+     * nese nárok, krácení nese 10305 — tak to vykazují přijatá hlášení tří
+     * různých mzdových systémů.
      */
-    /**
-     * Jediná nárokovaná sleva se při částečném uplatnění vykazuje uplatněnou
-     * částkou — 10299 leží v XSD uvnitř bloku „Výpočet zálohy na daň", takže
-     * nese to, co do výpočtu skutečně vstoupilo. Hlášení se blokovat nesmí:
-     * hrubá mzda pod ~17 200 Kč s prohlášením je zcela běžný stav.
-     */
-    public function testPartiallyAppliedSingleTaxCreditIsReportedAsApplied(): void
+    public function testPartiallyAppliedSingleTaxCreditIsReportedAsClaim(): void
     {
         $resolution = $this->resolutionFor($this->partialCreditPayload());
 
-        self::assertNotContains(
-            'jmhz_scenario1_partial_tax_credit_unsupported',
-            $this->blockerCodes($resolution),
-        );
-
         $xml = (new JmhzScenario1XmlValidator())->dryRun($resolution, $this->envelope())['xml'];
-        self::assertStringContainsString('<form:zakladniSleva>1800</form:zakladniSleva>', $xml);
+        self::assertStringContainsString('<form:zakladniSleva>2570</form:zakladniSleva>', $xml);
+        self::assertStringContainsString('<form:danZalohaPoSleve>0</form:danZalohaPoSleve>', $xml);
     }
 
     /**
-     * Víc druhů slev při částečném uplatnění zůstává blokované: zákon
-     * neurčuje, která z nich se zkrátila, a rozdělit ji odhadem by znamenalo
-     * vykázat nedoložený údaj.
+     * Víc druhů slev při částečném uplatnění se nedělí odhadem, protože
+     * dělit se nemusí: každý druh nese svůj nárok.
      */
-    public function testPartiallyAppliedMultipleTaxCreditsStayBlocked(): void
+    public function testPartiallyAppliedMultipleTaxCreditsAreReportedAsClaims(): void
     {
         $payload = $this->partialCreditPayload();
         $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
@@ -183,9 +173,12 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         $tax['advance_tax']['non_refundable_credits_minor_units'] = 300_000;
         unset($tax);
 
-        self::assertContains(
-            'jmhz_scenario1_partial_tax_credit_unsupported',
-            $this->blockerCodes($this->resolutionFor($payload)),
+        $resolution = $this->resolutionFor($payload);
+        $xml = (new JmhzScenario1XmlValidator())->dryRun($resolution, $this->envelope())['xml'];
+        self::assertStringContainsString('<form:zakladniSleva>2570</form:zakladniSleva>', $xml);
+        self::assertStringContainsString(
+            '<form:zakladniSlevaInvalidita12>430</form:zakladniSlevaInvalidita12>',
+            $xml,
         );
     }
 
@@ -319,15 +312,20 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
     /**
      * Podlimitní DPP (8 000 Kč, neúčastná na SP) s podepsaným prohlášením:
      * záloha 1 200 je nižší než sleva 2 570, takže se sleva uplatní jen zčásti.
-     * Po opravě N-03 to hlášení blokovat nesmí a 10299 nese uplatněnou částku.
+     * Hlášení to blokovat nesmí a 10299 nese nárok.
      */
     public function testSubLimitDppWithDeclarationPassesWithPartialCredit(): void
     {
         $withDeclaration = $this->subLimitDppPayload(declarationSigned: true, claimTaxpayerCredit: true);
+        $resolution = $this->resolutionFor($withDeclaration);
 
         self::assertNotContains(
-            'jmhz_scenario1_partial_tax_credit_unsupported',
-            $this->blockerCodes($this->resolutionFor($withDeclaration)),
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
+            $this->blockerCodes($resolution),
+        );
+        self::assertSame(
+            2570,
+            $resolution->candidate?->payload['people'][0]['summary']['tax_credits_czk']['basic'],
         );
     }
 

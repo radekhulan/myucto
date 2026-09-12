@@ -201,12 +201,15 @@ final class JmhzEldpEvidenceBuilder
         );
         $insuranceDays = (new \DateTimeImmutable($insuranceFrom))
             ->diff(new \DateTimeImmutable($insuranceTo))->days + 1;
+        $absences = $entry['absences'] ?? null;
+        $outsideInsurance = is_array($absences) && array_is_list($absences)
+            && $this->monthOutsideInsurancePeriod($absences, $participates, $assessmentBaseMinor);
         $confirmation = [
             'insurance_from' => $insuranceFrom,
             'insurance_to' => $insuranceTo,
             'valid_from' => $participates ? $insuranceFrom : null,
             'valid_to' => $participates ? $insuranceTo : null,
-            'insurance_days' => $participates ? $insuranceDays : 0,
+            'insurance_days' => $participates && !$outsideInsurance ? $insuranceDays : 0,
             'code' => $participates ? $activityCode . '++' : null,
             'assessment_base_czk' => $participates ? intdiv($assessmentBaseMinor, 100) : null,
             'in03_active' => false,
@@ -310,7 +313,7 @@ final class JmhzEldpEvidenceBuilder
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
         $participates = $this->participationMode($relationType, $relationship, $employmentId);
         $uncappedBase = $this->nonNegativeInt($relationship['assessment_base_minor_units'] ?? null, 'assessment_base_minor_units');
-        $this->assertInsuranceMonthHasIncome($absences, $participates, $uncappedBase);
+        $outsideInsurance = $this->monthOutsideInsurancePeriod($absences, $participates, $uncappedBase);
         $cappedBase = $this->nonNegativeInt($relationship['capped_assessment_base_minor_units'] ?? null, 'capped_assessment_base_minor_units');
         if ($uncappedBase % 100 !== 0 || intdiv($uncappedBase, 100) > 9_999_999_999) {
             $this->invalid('jmhz_eldp_assessment_base_not_whole_czk', 'Vyměřovací základ ELDP musí být celé Kč v rozsahu XSD.');
@@ -351,23 +354,33 @@ final class JmhzEldpEvidenceBuilder
         ) {
             $this->invalid('jmhz_eldp_interval_invalid', 'Interval ELDP musí přesně odpovídat průniku pracovního vztahu s vykazovaným měsícem.');
         }
-        $days = $participates
+        $insured = $participates && !$outsideInsurance;
+        $days = $insured
             ? $this->positiveInt($confirmation['insurance_days'] ?? null, 'insurance_days')
             : $this->nonNegativeInt($confirmation['insurance_days'] ?? null, 'insurance_days');
         $inclusiveDays = (new \DateTimeImmutable($insuranceFrom))
             ->diff(new \DateTimeImmutable($insuranceTo))->days + 1;
-        if (($participates && $days !== $inclusiveDays) || (!$participates && $days !== 0)) {
+        if (($insured && $days !== $inclusiveDays) || (!$insured && $days !== 0)) {
             $this->invalid('jmhz_eldp_days_mismatch', 'Počet dnů ELDP neodpovídá inkluzivnímu intervalu.');
         }
         $excluded = $this->excludedPeriods($absences, $insuranceFrom, $insuranceTo, $days);
-        $section18 = $this->section18Periods($absences, $insuranceFrom, $insuranceTo, $days);
+        // Měsíc mimo dobu pojištění vztah a jeho nemocenské pojištění neruší,
+        // takže vyloučené dny § 18 odst. 7 se v něm vykazují dál — přijatá
+        // hlášení mají u celého měsíce neplaceného volna 31 dnů při nule dnů
+        // pojištění. U neúčastného vztahu naopak není co vylučovat.
+        $section18 = $this->section18Periods(
+            $absences,
+            $insuranceFrom,
+            $insuranceTo,
+            $participates ? $inclusiveDays : 0,
+        );
         $this->assertWorkSummaryConsistency(
             $workSummary,
             $days,
             $relationType,
             $absences,
             $excluded,
-            $participates ? $days : $inclusiveDays,
+            $insured ? $days : $inclusiveDays,
             $summaryVersion,
         );
         $code = $confirmation['code'] ?? null;
@@ -378,7 +391,14 @@ final class JmhzEldpEvidenceBuilder
                 $this->invalid('jmhz_eldp_code_activity_mismatch', 'Kód ELDP neodpovídá činnosti pracovního vztahu.');
             }
             $entryMetadata = $this->codebook()->requireValue('kod_eldp', $code);
-            $confirmedBase = $this->positiveInt($confirmedBase, 'assessment_base_czk');
+            // Nulový základ u účastného vztahu je legitimní: měsíc mimo dobu
+            // pojištění, nebo měsíc celý v omluvné nepřítomnosti (nemoc,
+            // ošetřovné), který dobou pojištění zůstává. Který z nich nastal,
+            // rozhodl `monthOutsideInsurancePeriod()`; nula bez vysvětlující
+            // nepřítomnosti tam už zastavila.
+            $confirmedBase = $uncappedBase === 0
+                ? $this->nonNegativeInt($confirmedBase, 'assessment_base_czk')
+                : $this->positiveInt($confirmedBase, 'assessment_base_czk');
             if ($confirmedBase * 100 !== $uncappedBase) {
                 $this->invalid('jmhz_eldp_assessment_base_mismatch', 'Potvrzený základ ELDP neodpovídá zákonnému výsledku.');
             }
@@ -750,41 +770,55 @@ final class JmhzEldpEvidenceBuilder
      * písm. a)". V ELDP se takový měsíc značí znakem „X" a jeho dny se do
      * úhrnu „Dny" nezapočítávají.
      *
-     * Jednosekční ordinary řez tohle vyjádřit neumí — vždy staví jednu sekci
-     * s kódem a plným počtem dnů. Rodičovská, neplacené volno a neomluvená
-     * absence jsou přitom právě ty nepřítomnosti, u kterých měsíc bez příjmu
-     * reálně nastává. Nulový vyměřovací základ je proto tvrdá zastávka: dál by
-     * řez vykázal dny pojištění, které podle zákona nevznikly.
+     * Měsíční hlášení to vyjadřuje sekcí s kódem a intervalem vztahu, ale
+     * s nulou dnů a nulovým základem. Tak ho vykázala přijatá hlášení dvou
+     * různých mzdových systémů (celý měsíc neplaceného volna u HPP).
      *
      * Nemoc, karanténa ani ošetřovné sem nepatří — jsou omluvným důvodem podle
      * § 16 odst. 4 věty třetí písm. a), takže měsíc dobou pojištění zůstává
-     * i bez příjmu.
+     * i bez příjmu, s plným počtem dnů a nulovým základem.
+     *
+     * Dvě situace zákon z podkladů jednoznačně nerozhodne, a proto zastaví:
+     * nula bez jakékoli nepřítomnosti (chybí důvod, proč příjem nevznikl)
+     * a souběh omluvné nepřítomnosti s nepřítomností bez příjmu v témž měsíci
+     * (§ 11 odst. 2 zná jen celý měsíc).
      *
      * @param list<array<string,mixed>> $absences
      */
-    private function assertInsuranceMonthHasIncome(
+    private function monthOutsideInsurancePeriod(
         array $absences,
         bool $participates,
         int $uncappedBase,
-    ): void {
+    ): bool {
         if (!$participates || $uncappedBase > 0) {
-            return;
+            return false;
         }
+        $incomeLess = false;
+        $excused = false;
         foreach ($absences as $absence) {
             if (in_array(
-                $absence['absence_type'] ?? null,
+                is_array($absence) ? ($absence['absence_type'] ?? null) : null,
                 self::INCOME_LESS_ABSENCE_TYPES,
                 true,
             )) {
-                $this->invalid(
-                    'jmhz_eldp_insurance_month_without_income',
-                    'Měsíc bez započitatelného příjmu se podle § 11 odst. 2 zákona'
-                        . ' č. 155/1995 Sb. za dobu pojištění nepovažuje a ELDP ho'
-                        . ' značí znakem „X"; běžný řez umí jen měsíc, ve kterém'
-                        . ' byl zúčtován příjem.',
-                );
+                $incomeLess = true;
+            } else {
+                $excused = true;
             }
         }
+        if ($incomeLess === $excused) {
+            $this->invalid(
+                'jmhz_eldp_insurance_month_without_income',
+                $incomeLess
+                    ? 'Měsíc bez započitatelného příjmu kombinuje omluvnou'
+                        . ' nepřítomnost s nepřítomností bez příjmu; § 11 odst. 2'
+                        . ' zákona č. 155/1995 Sb. rozhoduje jen o celém měsíci.'
+                    : 'Účastný vztah nemá v měsíci započitatelný příjem ani'
+                        . ' evidovanou nepřítomnost, která by to vysvětlila.',
+            );
+        }
+
+        return $incomeLess;
     }
 
     /**
@@ -929,8 +963,9 @@ final class JmhzEldpEvidenceBuilder
         int $insuranceDays,
     ): ?array {
         if ($insuranceDays === 0) {
-            // Neúčastný vztah (dohoda pod hranicí, měsíc bez započitatelného
-            // příjmu) nemá dobu pojištění, ze které by šlo den vyloučit.
+            // Neúčastný vztah (dohoda pod hranicí) nemocensky pojištěný není,
+            // takže z jeho rozhodného období není co vyloučit. Volající sem
+            // u účastného vztahu posílá dny intervalu, ne dny pojištění.
             return null;
         }
         $derived = (new EldpExcludedPeriodDeriver())->deriveSection18(

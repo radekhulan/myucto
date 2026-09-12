@@ -55,6 +55,9 @@ se pak otevře k doplnění zbytku osobního profilu.
 
 Týdenní pracovní doba je součástí zakládacího formuláře. Zadejte skutečný
 úvazek hned při založení, aby první interval podmínek odpovídal realitě.
+U dohod (DPP, DPČ), společníka a člena statutárního orgánu se stanovená
+týdenní doba do měsíčního hlášení neuvádí: podle pokynů MPSV tam patří
+hodnota 99 a potvrzení pracovní doby ji předvyplní i vyžaduje.
 Automatický nárok dovolené tuto sjednanou dobu převezme; není nutné ji znovu
 opisovat v agendě absencí. Firemní výměra dovolené platí všem vztahům. Pole
 **Výjimka z výměry dovolené** vyplňte jen tam, kde má konkrétní vztah jiný

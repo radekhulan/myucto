@@ -483,11 +483,10 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     }
 
     /**
-     * Jediná nárokovaná sleva se při částečném uplatnění nedělí odhadem —
-     * není co dělit. Vykáže se uplatněná částka, protože 10299 je součástí
-     * bloku „Výpočet zálohy na daň" a musí sedět na 10298 a 10305.
+     * 10299 nese nárok podle prohlášení, ne částku, která se vešla do zálohy;
+     * krácení nese 10305. Tak to vykazují přijatá hlášení jiných systémů.
      */
-    public function testPartiallyAppliedSingleTaxCreditIsReportedAsApplied(): void
+    public function testPartiallyAppliedSingleTaxCreditIsReportedAsClaim(): void
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $this->withPayload(
@@ -504,21 +503,21 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
 
         self::assertNotContains(
-            'jmhz_scenario1_partial_tax_credit_unsupported',
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
             $codes,
         );
         self::assertSame(
-            150,
+            2570,
             $resolution->candidate?->payload['people'][0]['summary']
                 ['tax_credits_czk']['basic'],
         );
     }
 
     /**
-     * U víc druhů slev zákon neurčuje, která se zkrátila — tam blokace platí
-     * dál a rozpad se odhadem nedoplňuje.
+     * U víc druhů slev se krácení nerozděluje odhadem, protože každý druh
+     * nese svůj nárok a krácení je jen v 10305.
      */
-    public function testPartiallyAppliedMultipleTaxCreditsAreBlockedInsteadOfSplitByGuess(): void
+    public function testPartiallyAppliedMultipleTaxCreditsAreReportedAsClaims(): void
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
             $this->withPayload(
@@ -535,13 +534,79 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             $resolution->blockers,
         );
 
-        self::assertContains(
-            'jmhz_scenario1_partial_tax_credit_unsupported',
+        self::assertNotContains(
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
             $codes,
         );
-        self::assertNull(
+        self::assertSame(
+            ['basic' => 2570, 'disability_basic' => 430, 'disability_extended' => null, 'ztp_p' => null],
             $resolution->candidate?->payload['people'][0]['summary']
-                ['tax_credits_czk']['basic'],
+                ['tax_credits_czk'],
+        );
+    }
+
+    public function testAppliedCreditAboveClaimIsRefused(): void
+    {
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload(
+                $this->preparation(),
+                $this->payloadWithCredits(257_000, 300_000, [
+                    'taxpayer' => 257_000,
+                ]),
+            ),
+            $this->pvpoj(),
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_tax_credit_breakdown_unavailable',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+    }
+
+    /**
+     * Katalog kontrol MH u kontroly 110: čtvrté a další dítě má pořadí 3,
+     * a kolize se hlídá jen u pořadí 1 a 2.
+     */
+    public function testFourthChildIsReportedWithOrderThree(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $children = [];
+        foreach ([1, 2, 3, 4] as $order) {
+            $children[] = [
+                'reference' => 'dependant-' . $order,
+                'identity' => [
+                    'given_name' => 'Dítě' . ['', 'A', 'B', 'C', 'D'][$order],
+                    'family_name' => 'Nováková',
+                    'birth_date' => '2015-02-0' . $order,
+                ],
+                'order' => $order,
+                'ztp_p' => false,
+            ];
+        }
+        $payload['people'][0]['child_credit_evidence']['children'] = $children;
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($this->preparation(), $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertNotContains(
+            'jmhz_scenario1_child_order_unsupported',
+            array_map(
+                static fn ($blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+        self::assertSame(
+            ['1', '2', '3', '3'],
+            array_column(
+                $resolution->candidate?->payload['people'][0]['summary']
+                    ['child_credit']['children'] ?? [],
+                'order',
+            ),
         );
     }
 
@@ -641,9 +706,26 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             ['children' => [[
                 'reference' => 'dependant-1',
                 'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková', 'birth_date' => '2015-02-02'],
-                'order' => 4,
+                'order' => 0,
                 'ztp_p' => false,
             ]]],
+            'jmhz_scenario1_child_order_unsupported',
+        ];
+        yield 'dvě děti s pořadím 2' => [
+            ['children' => [
+                [
+                    'reference' => 'dependant-1',
+                    'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková', 'birth_date' => '2015-02-02'],
+                    'order' => 2,
+                    'ztp_p' => false,
+                ],
+                [
+                    'reference' => 'dependant-2',
+                    'identity' => ['given_name' => 'Petr', 'family_name' => 'Novák', 'birth_date' => '2017-03-03'],
+                    'order' => 2,
+                    'ztp_p' => false,
+                ],
+            ]],
             'jmhz_scenario1_child_order_unsupported',
         ];
     }
