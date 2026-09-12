@@ -492,27 +492,32 @@ final readonly class JmhzContentCorrectionSubmissionService
             throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava nemá úplný firemní set formulářů.');
         }
         foreach ($people as $person) {
+            // Formulář je za pracovní vztah, osoba v souběhu jich má víc.
             $employments = is_array($person) ? ($person['employments'] ?? null) : null;
-            if (!is_array($employments) || count($employments) !== 1 || !is_array($employments[0])) {
-                throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava nemá právě jeden formulář na osobu.');
+            if (!is_array($employments) || $employments === [] || !array_is_list($employments)) {
+                throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava nemá formulář osoby.');
             }
-            $employment = $employments[0];
-            $identity = is_array($employment['identity'] ?? null) ? $employment['identity'] : [];
             $employeeId = $person['employee_id'] ?? null;
-            $employmentId = $employment['employment_id'] ?? null;
-            $externalId = $identity['employment_external_identifier'] ?? null;
-            $personId = $identity['person_external_identifier'] ?? null;
-            if (!is_int($employeeId) || !is_int($employmentId)
-                || !is_string($externalId) || $externalId === ''
-                || !is_string($personId) || $personId === '' || isset($forms[$externalId])
-            ) {
-                throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava obsahuje nejednoznačnou identitu formuláře.');
+            foreach ($employments as $employment) {
+                if (!is_array($employment)) {
+                    throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava nemá formulář osoby.');
+                }
+                $identity = is_array($employment['identity'] ?? null) ? $employment['identity'] : [];
+                $employmentId = $employment['employment_id'] ?? null;
+                $externalId = $identity['employment_external_identifier'] ?? null;
+                $personId = $identity['person_external_identifier'] ?? null;
+                if (!is_int($employeeId) || !is_int($employmentId)
+                    || !is_string($externalId) || $externalId === ''
+                    || !is_string($personId) || $personId === '' || isset($forms[$externalId])
+                ) {
+                    throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava obsahuje nejednoznačnou identitu formuláře.');
+                }
+                $forms[$externalId] = [
+                    'employee_id' => $employeeId,
+                    'employment_id' => $employmentId,
+                    'person_external_identifier' => $personId,
+                ];
             }
-            $forms[$externalId] = [
-                'employee_id' => $employeeId,
-                'employment_id' => $employmentId,
-                'person_external_identifier' => $personId,
-            ];
         }
         ksort($forms, SORT_STRING);
 

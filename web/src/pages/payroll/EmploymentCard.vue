@@ -1251,6 +1251,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               :disabled="!canEditTerms || busy"
               class="rounded border-neutral-300 text-payroll-600"
               data-test="terms-is-primary"
+              data-a1-field="is_primary"
             >
             {{ t('payroll.people.primary') }}
           </label>

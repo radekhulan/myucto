@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 final class JmhzScenario1DocumentResolver
@@ -218,7 +219,13 @@ final class JmhzScenario1DocumentResolver
             $officeId,
             $blockers,
         );
-        if (count($people) > 1500) {
+        // Formulář osoby vzniká za každý pracovněprávní vztah, ne za osobu —
+        // limit balíku se proto počítá ze vztahů.
+        $formCount = 0;
+        foreach ($people as $person) {
+            $formCount += count($this->rows($person['employments'] ?? null));
+        }
+        if ($formCount > 1500) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_form_limit_exceeded',
                 'revision',
@@ -245,26 +252,35 @@ final class JmhzScenario1DocumentResolver
                 ? $person['employee_id']
                 : null;
             $employments = $this->rows($person['employments'] ?? null);
-            // Ordinary evidence se zmrazuje per pracovní vztah; scénář 1 už výš
-            // blokuje osobu s víc vztahy, takže se bere evidence toho jediného.
+            /*
+             * Ordinary evidence se zmrazuje per pracovní vztah a úplná musí být
+             * u KAŽDÉHO vztahu osoby, protože každý vztah je samostatný
+             * formulář. Příznak srážek 10116 ale patří do souhrnných dat
+             * zaměstnance, která nese jen formulář primárního vztahu, takže se
+             * čte z evidence právě toho vztahu. Odvozuje se za osobu
+             * (JmhzOrdinaryEvidenceBuilder::resolveWageDeductionsRecorded()),
+             * všechny vztahy téže osoby ho proto nesou stejný.
+             */
             $personEvidence = [];
             foreach ($employments as $employmentRow) {
                 $employmentKey = $employmentRow['employment_id'] ?? null;
-                if (is_int($employmentKey) && isset($ordinaryEvidence[$employmentKey])) {
-                    $personEvidence = $ordinaryEvidence[$employmentKey];
-                    break;
+                $evidence = is_int($employmentKey)
+                    ? ($ordinaryEvidence[$employmentKey] ?? null)
+                    : null;
+                if ($evidence === null) {
+                    $ordinaryEvidenceComplete = false;
+                    continue;
+                }
+                if ($personEvidence === []
+                    || ($this->object($employmentRow['employment'] ?? null)['is_primary'] ?? null) === true
+                ) {
+                    $personEvidence = $evidence;
                 }
             }
-            if ($personEvidence === []) {
+            if ($employments === []) {
                 $ordinaryEvidenceComplete = false;
-            }
-            if (count($employments) !== 1) {
-                $blockers[] = $this->blocker(
-                    'jmhz_scenario1_multiple_employments_unsupported',
-                    'person',
-                    $employeeId,
-                    ['10286', '10344', '10370', '10371', '10481', '10482', '10495'],
-                );
+            } else {
+                $this->inspectPrimaryEmployment($employments, $employeeId, $blockers);
             }
             $personSummary = $this->object($person['person_summary'] ?? null);
             $annual = $this->annualSummary(
@@ -313,6 +329,20 @@ final class JmhzScenario1DocumentResolver
             $advanceTaxCzk = $this->advanceTaxCzk($tax, $employeeId, $blockers);
             $withholdingTaxCzk = $this->withholdingTaxCzk($tax, $employeeId, $blockers);
             $taxCreditsCzk = $this->taxCreditsCzk($tax, $employeeId, $blockers);
+            $taxableIncomeCzk = $this->relationshipTaxableIncomeCzk(
+                $tax,
+                $employments,
+                $advanceTaxCzk['taxable_income'],
+                $employeeId,
+                $blockers,
+            );
+            $socialEmploymentId = $this->socialContributionEmployment(
+                $employments,
+                $social,
+                $payslip,
+                $employeeId,
+                $blockers,
+            );
             $declarationSigned = null;
 
             $normalizedEmployments = [];
@@ -349,14 +379,7 @@ final class JmhzScenario1DocumentResolver
                         ['10239', '10502'],
                     );
                 }
-                if (($employmentSource['is_primary'] ?? null) !== true) {
-                    $blockers[] = $this->blocker(
-                        'jmhz_primary_employment_unresolved',
-                        'person',
-                        $employeeId,
-                        ['10495'],
-                    );
-                } else {
+                if (($employmentSource['is_primary'] ?? null) === true) {
                     // 10419 nese SDZ, a ta se vyplňuje jednou za zaměstnance na
                     // primárním PPV. Proto se prohlášení čte z účinného termu
                     // právě toho vztahu, ne z prvního v pořadí.
@@ -442,6 +465,14 @@ final class JmhzScenario1DocumentResolver
                         $blockers,
                     ),
                     'primary' => $employmentSource['is_primary'] ?? null,
+                    // 10535 za TENTO vztah; viz relationshipTaxableIncomeCzk().
+                    'taxable_income_czk' => is_int($employmentId)
+                        ? ($taxableIncomeCzk[$employmentId] ?? null)
+                        : null,
+                    // Pojistné osoby (10370, 10481) nese nejvýš jeden formulář;
+                    // viz socialContributionEmployment().
+                    'reports_social_contributions' => count($employments) === 1
+                        || ($employmentId !== null && $employmentId === $socialEmploymentId),
                     'identity' => [
                         'person_external_identifier' => $personIdentifier['value'] ?? null,
                         'employment_external_identifier' => $employmentIdentifier['value'] ?? null,
@@ -700,8 +731,8 @@ final class JmhzScenario1DocumentResolver
                 'variable_symbol' => $variableSymbol,
                 'year' => (int) substr($preparation->periodStart, 0, 4),
                 'month' => $month,
-                'individual_form_count' => count($normalizedPeople),
-                'total_form_count' => count($normalizedPeople) + 2,
+                'individual_form_count' => $formCount,
+                'total_form_count' => $formCount + 2,
             ],
             'employer' => [
                 'source' => $preparation->payload['employer_summary']['employer'] ?? null,
@@ -920,6 +951,204 @@ final class JmhzScenario1DocumentResolver
             );
         }
         return $result;
+    }
+
+    /**
+     * Primární pracovněprávní vztah (10495).
+     *
+     * Souhrnná data zaměstnance se vyplňují jednou za osobu, a to právě na
+     * formuláři primárního vztahu (kontrola 248). Osoba proto musí mít PRÁVĚ
+     * JEDEN vztah s `true`. Vedlejší vztah (`false`) je legitimní souběh;
+     * blokuje jen nerozhodnutý údaj nebo jiný počet primárních vztahů.
+     *
+     * @param list<array<string,mixed>> $employments
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function inspectPrimaryEmployment(
+        array $employments,
+        ?int $employeeId,
+        array &$blockers,
+    ): void {
+        $primaryCount = 0;
+        $resolved = true;
+        foreach ($employments as $employment) {
+            $flag = $this->object($employment['employment'] ?? null)['is_primary'] ?? null;
+            if (!is_bool($flag)) {
+                $resolved = false;
+            } elseif ($flag) {
+                $primaryCount++;
+            }
+        }
+        if (!$resolved || $primaryCount !== 1) {
+            $blockers[] = $this->blocker(
+                'jmhz_primary_employment_unresolved',
+                'person',
+                $employeeId,
+                ['10495'],
+            );
+        }
+    }
+
+    /**
+     * Zdanitelný příjem (10535) po pracovních vztazích, v celých Kč podle
+     * `employment_id`.
+     *
+     * Záloha na daň se počítá za OSOBU (§ 38h ZDP) a její základ 10297 nese
+     * souhrn na primárním formuláři. 10535 ale stojí v každém formuláři
+     * zvlášť a vykazuje příjem TOHO vztahu, takže se bere z rozpadu výsledku
+     * daně po vztazích. `taxable_base_minor_units` je součet složek se
+     * zdaňovaným příjmem (osvobozené do něj nevstupují) a do základu zálohy
+     * vstupuje jen u vztahu v režimu zálohy. Vztah zdaněný srážkou (§ 6 odst. 4)
+     * do základu zálohy nepatří a vykazuje nulu, stejně jako dosud osoba
+     * zdaněná výhradně srážkou.
+     *
+     * Součet přes vztahy se musí rovnat základu zálohy osoby na haléř. Jinak by
+     * 10535 formulářů neodpovídal souhrnu a rozpor se zmrazeným výsledkem by se
+     * v XML už nedohledal.
+     *
+     * Výsledek daně bez rozpadu po vztazích (starší zmrazená revize) se u osoby
+     * s jediným vztahem vykáže jako dosud, základem osoby. U víc vztahů se
+     * rozdělit nedá a hlášení se zablokuje.
+     *
+     * @param array<string,mixed> $tax
+     * @param list<array<string,mixed>> $employments
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<int,?int>
+     */
+    private function relationshipTaxableIncomeCzk(
+        array $tax,
+        array $employments,
+        ?int $personTaxableIncomeCzk,
+        ?int $employeeId,
+        array &$blockers,
+    ): array {
+        $employmentIds = [];
+        foreach ($employments as $employment) {
+            if (is_int($employment['employment_id'] ?? null)) {
+                $employmentIds[] = $employment['employment_id'];
+            }
+        }
+        $unavailable = function () use ($employeeId, &$blockers): array {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_income_tax_result_not_calculated',
+                'person',
+                $employeeId,
+                ['10535'],
+            );
+
+            return [];
+        };
+        $relationships = $tax['relationships'] ?? null;
+        if (!is_array($relationships)
+            || !array_is_list($relationships)
+            || $relationships === []
+        ) {
+            if (count($employments) === 1 && count($employmentIds) === 1) {
+                return [$employmentIds[0] => $personTaxableIncomeCzk];
+            }
+
+            return $unavailable();
+        }
+        $advanceByReference = [];
+        $advanceTotal = 0;
+        foreach ($relationships as $relationship) {
+            $row = is_array($relationship) ? $relationship : [];
+            $reference = $row['relationship_reference'] ?? null;
+            $base = $row['taxable_base_minor_units'] ?? null;
+            $regime = $row['regime'] ?? null;
+            if (!is_string($reference)
+                || !is_int($base)
+                || !is_string($regime)
+                || array_key_exists($reference, $advanceByReference)
+            ) {
+                return $unavailable();
+            }
+            $minor = $regime === TaxRegime::Advance->value ? $base : 0;
+            $advanceByReference[$reference] = $minor;
+            $advanceTotal += $minor;
+        }
+        $advance = $this->object($tax['advance_tax'] ?? null);
+        if (($advance['taxable_income_minor_units'] ?? null) !== $advanceTotal) {
+            return $unavailable();
+        }
+        $result = [];
+        foreach ($employmentIds as $employmentId) {
+            $minor = $advanceByReference["employment:{$employmentId}"] ?? null;
+            if ($minor === null) {
+                return $unavailable();
+            }
+            $result[$employmentId] = $this->wholeCzk(
+                $minor,
+                '10535',
+                'employment',
+                $employmentId,
+                $blockers,
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * Pracovní vztah, na jehož formuláři se vykáže pojistné osoby
+     * (10370, 10481). `null` = žádný vztah osoby s víc vztahy.
+     *
+     * Výsledek sociálního pojištění je jen za OSOBU: pojistné se počítá
+     * z úhrnu vyměřovacích základů účastných vztahů a na vztahy se nerozpadá.
+     * Na formulář ho proto jde přiřadit jen tehdy, když je v měsíci účastný
+     * NEJVÝŠ JEDEN vztah. Celé pojistné pak patří jemu a ostatní vztahy
+     * (typicky dohoda pod rozhodným příjmem) pojistné nevykazují. Kontrola 12
+     * ČSSZ porovnává úhrn 10028 pojistné části se součtem 10370 přes
+     * formuláře, takže se pojistné nesmí objevit dvakrát ani ztratit.
+     *
+     * Víc účastných vztahů najednou by vyžadovalo pojistné rozpočítat, a to
+     * výsledek nedokládá. Hlášení se zablokuje, místo aby se pojistné dělilo
+     * odhadem. Totéž platí pro nenulové pojistné bez účastného vztahu.
+     *
+     * U osoby s jediným vztahem se nic nemění, pojistné nese ten vztah.
+     *
+     * @param list<array<string,mixed>> $employments
+     * @param array<string,mixed> $social
+     * @param array<string,mixed> $payslip
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function socialContributionEmployment(
+        array $employments,
+        array $social,
+        array $payslip,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?int {
+        if (count($employments) <= 1) {
+            return null;
+        }
+        $participating = [];
+        foreach ($employments as $employment) {
+            $participation = $this->object(
+                $this->object($employment['insurance'] ?? null)['participation'] ?? null,
+            );
+            if (($participation['status'] ?? null) === 'participates') {
+                $participating[] = $employment['employment_id'] ?? null;
+            }
+        }
+        if (count($participating) === 1 && is_int($participating[0])) {
+            return $participating[0];
+        }
+        $employeeSocial = $social['employee_contribution_minor_units'] ?? null;
+        $employerSocial = $this->employerSocialMinor($social, $payslip);
+        if ($participating !== []
+            || (is_int($employeeSocial) && $employeeSocial !== 0)
+            || (is_int($employerSocial) && $employerSocial !== 0)
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_concurrent_participation_unsupported',
+                'person',
+                $employeeId,
+                ['10370', '10481'],
+            );
+        }
+
+        return null;
     }
 
     /**

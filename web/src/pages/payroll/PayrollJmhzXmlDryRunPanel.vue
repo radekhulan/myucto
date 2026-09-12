@@ -257,6 +257,23 @@ function blockerTarget(
   if (!te(`payroll.submissions.overview.jmhz_dry_run_blockers.${blocker.code}`)) return '/admin/support'
   const identity = identityTarget(blocker, entityId)
   if (identity !== null) return identity
+  if (blocker.code === 'jmhz_primary_employment_unresolved') {
+    // Hlavní vztah se volí na kartě vztahu. Nález míří na osobu, a u souběhu
+    // by bez konkrétního vztahu doskok nevěděl, kterou kartu otevřít.
+    const employment = entityId === null
+      ? undefined
+      : blocker.entity_type === 'employment'
+        ? remediationEmployments.value.find(item => item.id === entityId)
+        : remediationEmployments.value.find(item => item.employee_id === entityId)
+    const scope = employment !== undefined
+      ? { person: String(employment.employee_id), employment: String(employment.id) }
+      : entityId === null
+        ? {}
+        : blocker.entity_type === 'employment'
+          ? { employment: String(entityId) }
+          : { person: String(entityId) }
+    return { name: 'payroll-people', query: { ...scope, panel: 'employment_terms', field: 'is_primary' } }
+  }
   if (['effective_term_missing', 'jmhz_scenario_activity_code_missing', 'jmhz_employer_part_time_discount_reason_missing', 'jmhz_employer_part_time_discount_working_time_missing'].includes(blocker.code)) {
     const field = blocker.code === 'jmhz_scenario_activity_code_missing' ? 'activity_code'
       : blocker.code === 'jmhz_employer_part_time_discount_reason_missing' ? 'social_part_time_discount_reason'

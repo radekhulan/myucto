@@ -75,7 +75,15 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_child_identity_incomplete' => 'U vyživovaného dítěte chybí jméno, příjmení nebo platné datum narození.',
         'jmhz_scenario1_child_order_unsupported' => 'Pořadí vyživovaného dítěte je mimo číselník měsíčního hlášení.',
         'jmhz_scenario1_withholding_tax_unsupported' => 'Srážková daň není pro tento profil JMHZ připravená.',
-        'jmhz_scenario1_multiple_employments_unsupported' => 'Více pracovních vztahů není pro tento profil JMHZ připraveno.',
+        /*
+         * Souběh vztahů sám o sobě podání neblokuje (HPP + dohoda pod
+         * rozhodným příjmem se vykáže). Výsledek sociálního pojištění je ale
+         * jen za osobu, takže ho jde přiřadit jen jedinému účastnému vztahu.
+         */
+        'jmhz_scenario1_concurrent_participation_unsupported' => 'Zaměstnanec má v měsíci víc souběžných pracovních '
+            . 'vztahů účastných na sociálním pojištění (nebo pojistné bez účastného vztahu). Pojistné je vypočtené '
+            . 'za osobu a každý formulář hlášení ho musí nést za svůj vztah; rozpočítat ho mezi víc účastných '
+            . 'vztahů aplikace zatím neumí a odhadem ho dělit nesmí.',
         'jmhz_scenario1_annual_fields_unsupported' => 'Chybí povinné roční údaje JMHZ.',
         'jmhz_annual_evidence_source_missing' => 'Chybí zmrazená roční evidence zaměstnance pro předchozí zdaňovací období.',
         'jmhz_annual_request_source_missing' => 'Není doloženo, zda zaměstnanec požádal o roční zúčtování.',
@@ -194,6 +202,12 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_child_credit_caregiver_identity_missing' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby a doplňte jméno, příjmení a datum narození jiné vyživující osoby.',
         'jmhz_scenario1_child_identity_incomplete' => 'Otevřete Mzdy → Zaměstnanci → Vyživované osoby, zkontrolujte jméno, příjmení a datum narození dítěte a připravte hlášení znovu.',
         'jmhz_preparation_not_ready' => 'Otevřete test JMHZ a postupně doplňte zvýrazněné skupiny údajů.',
+        'jmhz_primary_employment_unresolved' => 'Otevřete Mzdy → Zaměstnanci a na kartě pracovního vztahu '
+            . 'označte právě jeden vztah osoby jako hlavní; ostatní souběžné vztahy nechte jako vedlejší.',
+        'jmhz_scenario1_concurrent_participation_unsupported' => 'Hlášení za tento měsíc podejte ručně '
+            . 'přes ePortál ČSSZ, pojistné rozepište po vztazích podle mzdových listů a součet musí sedět '
+            . 's přehledem o výši pojistného. Zkontrolujte také v Mzdy → Mzdové běhy, zda je účast na '
+            . 'pojištění u vztahů vyhodnocená správně.',
         'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
     ];
 

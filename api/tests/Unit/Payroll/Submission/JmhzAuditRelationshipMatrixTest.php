@@ -508,6 +508,172 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         return $payload;
     }
 
+    /**
+     * Souběh HPP a podlimitní DPP u jedné osoby (v přijatých hlášeních jiného
+     * systému 12 z 24 lidí). Formulář vzniká za každý vztah, souhrnná data
+     * zaměstnance nese jen primární (kontrola 248) a sčítají oba vztahy.
+     * 10535 je zdanitelný příjem vztahu a jejich součet je základ zálohy
+     * v souhrnu. Pojistné nese jen účastný vztah (kontrola 12).
+     */
+    public function testConcurrentEmploymentsProduceOneFormPerRelationship(): void
+    {
+        $resolution = $this->resolutionFor($this->concurrentPayload());
+        self::assertSame([], $this->blockerCodes($resolution));
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $resolution,
+            $this->concurrentEnvelope(),
+        )['xml'];
+
+        self::assertSame(2, substr_count($xml, '</formularOsoby>'));
+        self::assertSame(1, substr_count($xml, '<form:souhrnDataZec>'));
+        self::assertStringContainsString('<primarniPpv>false</primarniPpv>', $xml);
+        self::assertStringContainsString('<formularePocetCelkem>4</formularePocetCelkem>', $xml);
+        self::assertStringContainsString('<form:zuctovanoCelkem>9000</form:zuctovanoCelkem>', $xml);
+        self::assertSame(1, substr_count($xml, '<form:zakladDane>9000</form:zakladDane>'));
+        self::assertSame(1, substr_count($xml, '<form:zakladDane>1000</form:zakladDane>'));
+        self::assertSame(1, substr_count($xml, '<form:zakladDane>8000</form:zakladDane>'));
+        self::assertSame(1, substr_count($xml, '<form:pojisteniZamestnanec>'));
+
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $failed = array_values(array_filter(
+            $report->findings,
+            static fn (JmhzControlFinding $finding): bool =>
+                in_array($finding->controlId, [12, 248], true)
+                && $finding->outcome === JmhzControlOutcome::Failed,
+        ));
+        self::assertSame([], $failed);
+    }
+
+    public function testConcurrentParticipatingEmploymentsBlockInsteadOfSplittingContributions(): void
+    {
+        $payload = $this->concurrentPayload();
+        $payload['people'][0]['employments'][1]['insurance']['participation']['status'] = 'participates';
+
+        self::assertContains(
+            'jmhz_scenario1_concurrent_participation_unsupported',
+            $this->blockerCodes($this->resolutionFor($payload)),
+        );
+    }
+
+    public function testConcurrentEmploymentsNeedExactlyOnePrimary(): void
+    {
+        $payload = $this->concurrentPayload();
+        $payload['people'][0]['employments'][1]['employment']['is_primary'] = true;
+
+        self::assertContains(
+            'jmhz_primary_employment_unresolved',
+            $this->blockerCodes($this->resolutionFor($payload)),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function concurrentPayload(): array
+    {
+        $payload = $this->payload();
+        $person = &$payload['people'][0];
+        $person['person_summary']['totals']['jmhz_amount_minor'] = 900_000;
+        $tax = &$person['person_summary']['statutory']['income_tax'];
+        $tax['relationships'] = [
+            [
+                'relationship_reference' => 'employment:101',
+                'kind' => 'employment',
+                'taxable_base_minor_units' => 100_000,
+                'regime' => 'advance',
+                'withholding_group' => null,
+            ],
+            [
+                'relationship_reference' => 'employment:102',
+                'kind' => 'dpp',
+                'taxable_base_minor_units' => 800_000,
+                'regime' => 'advance',
+                'withholding_group' => null,
+            ],
+        ];
+        $tax['advance_tax']['taxable_income_minor_units'] = 900_000;
+        $tax['advance_tax']['rounded_tax_base_minor_units'] = 900_000;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 135_000;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 135_000;
+        unset($tax);
+        $net = &$person['person_summary']['statutory']['net_pay'];
+        $net['relationships'][] = ['relationship_id' => 'employment:102'];
+        $net['net_before_deductions_minor_units'] = 753_400;
+        $net['net_payable_minor_units'] = 753_400;
+        unset($net);
+        $person['employments'][0]['term']['tax_declaration_signed'] = true;
+
+        $dpp = $person['employments'][0];
+        $dpp['employment_id'] = 102;
+        $dpp['identity']['jmhz_employment_external_identifier']['value'] = '2000000000000000000002';
+        $dpp['employment']['is_primary'] = false;
+        $dpp['employment']['relation_type'] = 'dpp';
+        $dpp['term']['activity_code'] = 'T';
+        $dpp['term']['jmhz_relationship_detail_code'] = null;
+        $dpp['scenario_resolution'] = [
+            'scenario_key' => 'scenario_1',
+            'activity_code' => 'T',
+            'relationship_detail_code' => null,
+        ];
+        $dpp['eldp']['eldp_sections'] = [[
+            'ordinal' => 1,
+            'code' => null,
+            'valid_from' => null,
+            'valid_to' => null,
+            'insurance_days' => 0,
+            'assessment_base_czk' => null,
+            'excluded_days' => null,
+            'deducted_days' => null,
+        ]];
+        $dpp['work_month']['jmhz_work_summary']['values']['evidence_days'] = 0;
+        $dpp['work_month']['jmhz_work_summary']['values']['weekly_work_centihours'] = 9_900;
+        $dpp['work_month']['jmhz_work_summary']['values']['worked_millihours'] = 40_000;
+        $dpp['earnings_by_attribute_minor'] = [
+            '10328' => 800_000, '10329' => 800_000, '10330' => 0, '10331' => 0,
+        ];
+        $dpp['insurance'] = [
+            'relationship_id' => 'employment:102',
+            'kind' => 'dpp',
+            'participation' => [
+                'relationship_id' => 'employment:102',
+                'status' => 'does_not_participate',
+                'participation_income_minor_units' => 800_000,
+            ],
+            'assessment_base_minor_units' => 800_000,
+            'capped_assessment_base_minor_units' => 0,
+            'employer_rate_category' => 'ordinary',
+        ];
+        $person['employments'][] = $dpp;
+        unset($person);
+        $payload['ordinary_evidence'][] = [
+            'scope' => ['employee_id' => 11, 'employment_id' => 102],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
+        $payload['source_versions']['ordinary_evidence'][] = [
+            'employment_id' => 102,
+            'id' => 602,
+            'source_manifest_sha256' => str_repeat('4', 64),
+            'snapshot_fingerprint' => str_repeat('6', 64),
+        ];
+
+        return $payload;
+    }
+
+    private function concurrentEnvelope(): JmhzSubmissionEnvelope
+    {
+        return JmhzSubmissionEnvelope::create(
+            '0195e2c4-1a2b-7c3d-8e4f-5a6b7c8d9e0f',
+            [
+                101 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E10',
+                102 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E11',
+            ],
+            '2026-08-05T09:30:00Z',
+            'MyÚčto.cz',
+            '5.6.0',
+        );
+    }
+
     private function envelope(): JmhzSubmissionEnvelope
     {
         return JmhzSubmissionEnvelope::create(

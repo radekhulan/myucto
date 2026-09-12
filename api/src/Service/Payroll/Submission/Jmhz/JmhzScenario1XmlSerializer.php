@@ -126,7 +126,7 @@ final class JmhzScenario1XmlSerializer
     ): string {
         $payload = $document->payload;
         $this->assertProfile($payload, $envelope);
-        $people = $this->correctionPeople($payload, $envelope, $plan);
+        $forms = $this->correctionPeople($payload, $envelope, $plan);
 
         $dom = new DOMDocument('1.0', 'UTF-8');
         $dom->formatOutput = true;
@@ -152,7 +152,7 @@ final class JmhzScenario1XmlSerializer
             $dom,
             $payload,
             $envelope,
-            count($people)
+            count($forms)
                 + ($plan->includeSummary ? 1 : 0)
                 + ($plan->includePvpoj ? 1 : 0),
         ));
@@ -162,7 +162,7 @@ final class JmhzScenario1XmlSerializer
         if ($plan->includePvpoj) {
             $root->appendChild($this->pvpoj($dom, $payload));
         }
-        $root->appendChild($this->correctionForms($dom, $people, $envelope, $plan));
+        $root->appendChild($this->correctionForms($dom, $forms, $envelope, $plan));
 
         $xml = $dom->saveXML();
         if ($xml === false) {
@@ -214,7 +214,8 @@ final class JmhzScenario1XmlSerializer
                 'Podání musí obsahovat alespoň jednu platnou součást.',
             );
         }
-        if (count($people) > 1500) {
+        $formCount = count($this->employmentForms($people));
+        if ($formCount > 1500) {
             $this->invalid(
                 'jmhz_xml_form_limit_exceeded',
                 'Nad 1500 součástí je dělení podání povinné; serializér zatím staví jen jeden balík.',
@@ -232,7 +233,7 @@ final class JmhzScenario1XmlSerializer
             JmhzSubmissionFlagMatrix::TYPE_REGULAR,
             true,
             true,
-            array_fill(0, count($people), JmhzSubmissionFlagMatrix::TYPE_REGULAR),
+            array_fill(0, $formCount, JmhzSubmissionFlagMatrix::TYPE_REGULAR),
         );
     }
 
@@ -276,7 +277,8 @@ final class JmhzScenario1XmlSerializer
         $this->text($dom, $node, JmhzSchemaCatalog::NS_PODANI, 'balikyPocet', (string) $envelope->packageCount);
         // Počítá se ze skutečně vypsaných součástí plus souhrn a PVPOJ, ne
         // z hodnoty uložené v dokumentu — jinak by se obě vrstvy mohly rozejít.
-        $formCount = count($people) + 2;
+        // Součást vzniká za pracovní vztah, takže osoba v souběhu jich má víc.
+        $formCount = count($this->employmentForms($people)) + 2;
         if ($formCount > 1502) {
             $this->invalid(
                 'jmhz_xml_form_limit_exceeded',
@@ -532,16 +534,7 @@ final class JmhzScenario1XmlSerializer
         JmhzSubmissionEnvelope $envelope,
     ): DOMElement {
         $node = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'formulareOsob');
-        foreach ($people as $person) {
-            $summary = $this->object($person['summary'] ?? null);
-            $employments = $this->rows($person['employments'] ?? null);
-            if (count($employments) !== 1) {
-                $this->invalid(
-                    'jmhz_xml_multiple_employments_unsupported',
-                    'První profil staví právě jednu součást na osobu.',
-                );
-            }
-            $employment = $employments[0];
+        foreach ($this->employmentForms($people) as [$summary, $employment]) {
             $form = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'formularOsoby');
             $header = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'hlavicka');
             $employmentId = $employment['employment_id'] ?? null;
@@ -569,19 +562,53 @@ final class JmhzScenario1XmlSerializer
     }
 
     /**
+     * Formuláře osob v pořadí podání: jeden za každý pracovněprávní vztah,
+     * spolu se souhrnem jeho osoby.
+     *
+     * Souhrnná data zaměstnance jsou za osobu a nese je jen formulář
+     * primárního vztahu (kontrola 248), takže každá osoba musí mít právě jeden
+     * primární vztah. Resolver to hlídá blokátorem; tady je to pojistka, aby se
+     * souhrn nikdy nevypsal dvakrát ani nechyběl.
+     *
      * @param list<array<string,mixed>> $people
+     * @return list<array{0:array<string,mixed>,1:array<string,mixed>}>
+     */
+    private function employmentForms(array $people): array
+    {
+        $forms = [];
+        foreach ($people as $person) {
+            $summary = $this->object($person['summary'] ?? null);
+            $primaryCount = 0;
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                if ($this->bool($employment['primary'] ?? null, '10495')) {
+                    $primaryCount++;
+                }
+                $forms[] = [$summary, $employment];
+            }
+            if ($primaryCount !== 1) {
+                $this->invalid(
+                    'jmhz_xml_primary_employment_invalid',
+                    'Každá osoba musí mít právě jeden primární pracovněprávní vztah,'
+                        . ' na kterém se vykazují souhrnná data zaměstnance.',
+                );
+            }
+        }
+
+        return $forms;
+    }
+
+    /**
+     * @param list<array{0:array<string,mixed>,1:array<string,mixed>}> $forms
      */
     private function correctionForms(
         DOMDocument $dom,
-        array $people,
+        array $forms,
         JmhzSubmissionEnvelope $envelope,
         JmhzContentCorrectionPlan $plan,
     ): DOMElement {
         $node = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'formulareOsob');
-        foreach ($people as $person) {
-            $summary = $this->object($person['summary'] ?? null);
-            $employment = $this->rows($person['employments'] ?? null)[0];
-            $employmentId = $employment['employment_id'];
+        foreach ($forms as [$summary, $employment]) {
+            $employmentId = $employment['employment_id'] ?? null;
             if (!is_int($employmentId)) {
                 $this->invalid(
                     'jmhz_content_correction_employment_invalid',
@@ -627,8 +654,12 @@ final class JmhzScenario1XmlSerializer
     }
 
     /**
+     * Formuláře vybrané plánem obsahové opravy. Plán je po pracovních
+     * vztazích, takže u osoby v souběhu se může opravovat jen jeden z jejích
+     * formulářů.
+     *
      * @param array<string,mixed> $payload
-     * @return list<array<string,mixed>>
+     * @return list<array{0:array<string,mixed>,1:array<string,mixed>}>
      */
     private function correctionPeople(
         array $payload,
@@ -642,15 +673,8 @@ final class JmhzScenario1XmlSerializer
             );
         }
         $selected = [];
-        foreach ($this->rows($payload['people'] ?? null) as $person) {
-            $employments = $this->rows($person['employments'] ?? null);
-            if (count($employments) !== 1) {
-                $this->invalid(
-                    'jmhz_xml_multiple_employments_unsupported',
-                    'První profil staví právě jednu součást na osobu.',
-                );
-            }
-            $employmentId = $employments[0]['employment_id'] ?? null;
+        foreach ($this->employmentForms($this->rows($payload['people'] ?? null)) as [$summary, $employment]) {
+            $employmentId = $employment['employment_id'] ?? null;
             if (!is_int($employmentId)) {
                 continue;
             }
@@ -659,7 +683,7 @@ final class JmhzScenario1XmlSerializer
                 continue;
             }
             $correction->assertEnvelopeGuid($envelope->formGuid($employmentId));
-            $selected[] = $person;
+            $selected[] = [$summary, $employment];
         }
         if (count($selected) !== count($plan->forms)) {
             $this->invalid(
@@ -682,11 +706,15 @@ final class JmhzScenario1XmlSerializer
     ): DOMElement {
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:bezPriznaku');
         $node->appendChild($this->identification($dom, $employment));
-        $node->appendChild($this->employeeSummary($dom, $summary));
+        // `souhrnDataZec` (XSD minOccurs=0) nese jen formulář primárního
+        // vztahu — kontrola 248; vedlejší vztah ho nemá vůbec.
+        if ($this->bool($employment['primary'] ?? null, '10495')) {
+            $node->appendChild($this->employeeSummary($dom, $summary));
+        }
         $node->appendChild($this->insurance($dom, $summary, $employment));
         $node->appendChild($this->position($dom, $employment));
         $node->appendChild($this->workMonth($dom, $employment));
-        $node->appendChild($this->income($dom, $summary));
+        $node->appendChild($this->income($dom, $summary, $employment));
         $node->appendChild($this->wage($dom, $employment));
 
         return $node;
@@ -732,10 +760,12 @@ final class JmhzScenario1XmlSerializer
         }
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:cinnostKS');
         $node->appendChild($this->identification($dom, $employment));
-        $node->appendChild($this->employeeSummary($dom, $summary, true));
+        if ($this->bool($employment['primary'] ?? null, '10495')) {
+            $node->appendChild($this->employeeSummary($dom, $summary, true));
+        }
         $node->appendChild($this->insurance($dom, $summary, $employment, true));
         $node->appendChild($this->position($dom, $employment));
-        $node->appendChild($this->income($dom, $summary));
+        $node->appendChild($this->income($dom, $summary, $employment));
 
         return $node;
     }
@@ -1645,11 +1675,16 @@ final class JmhzScenario1XmlSerializer
         }
         $node->appendChild($list);
 
+        // Pojistné je výsledek za OSOBU a nese ho nejvýš jeden její formulář
+        // (JmhzScenario1DocumentResolver::socialContributionEmployment()), jinak
+        // by kontrola 12 napočítala 10370 dvakrát. Dokument bez příznaku vznikl
+        // v době, kdy měla osoba vždy jen jeden formulář.
+        $reportsSocial = ($employment['reports_social_contributions'] ?? true) === true;
         foreach ([
             'form:pojisteniZamestnanec' => ['employee_social_czk', '10370'],
             'form:pojisteniZamestnavatel' => ['employer_social_czk', '10481'],
         ] as $element => [$key, $attributeId]) {
-            if (!is_int($summary[$key] ?? null) || $amount === null) {
+            if (!$reportsSocial || !is_int($summary[$key] ?? null) || $amount === null) {
                 continue;
             }
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
@@ -1997,10 +2032,20 @@ final class JmhzScenario1XmlSerializer
         return $node;
     }
 
-    /** @param array<string,mixed> $summary */
-    private function income(DOMDocument $dom, array $summary): DOMElement
+    /**
+     * 10535 je zdanitelný příjem TOHOTO vztahu; resolver ho bere z rozpadu
+     * výsledku daně po vztazích a součet přes formuláře osoby se rovná
+     * základu zálohy v souhrnu. Dokument bez per-vztahové hodnoty vznikl
+     * v době, kdy měla osoba vždy jen jeden formulář, a tam je to základ osoby.
+     *
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function income(DOMDocument $dom, array $summary, array $employment): DOMElement
     {
-        $advance = $this->object($summary['advance_tax_czk'] ?? null);
+        $taxableIncome = array_key_exists('taxable_income_czk', $employment)
+            ? $employment['taxable_income_czk']
+            : ($this->object($summary['advance_tax_czk'] ?? null)['taxable_income'] ?? null);
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prijem');
         $tax = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:dan');
         $this->text(
@@ -2008,7 +2053,7 @@ final class JmhzScenario1XmlSerializer
             $tax,
             JmhzSchemaCatalog::NS_FORM,
             'form:zakladDane',
-            (string) $this->int($advance['taxable_income'] ?? null, '10535'),
+            (string) $this->int($taxableIncome, '10535'),
         );
         $node->appendChild($tax);
 
