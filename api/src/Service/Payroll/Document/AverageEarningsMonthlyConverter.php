@@ -349,8 +349,17 @@ final class AverageEarningsMonthlyConverter
                 'Evidence daňového prohlášení k měsíci zjištění není ověřená.',
             );
         }
-        $children = $incomeTax['child_claims'] ?? [];
-        if (is_array($children) && $children !== []) {
+        // Dítě „N" (`credit_status = claimed_by_other`) zvýhodnění u tohoto
+        // zaměstnance nezakládá — uplatňuje ho jiná osoba — takže čistý
+        // výdělek nijak neovlivní a potvrzení kvůli němu stát nemusí.
+        $children = is_array($incomeTax['child_claims'] ?? null)
+            ? array_filter(
+                $incomeTax['child_claims'],
+                static fn (mixed $claim): bool => !is_array($claim)
+                    || ($claim['credit_status'] ?? 'claimed') !== 'claimed_by_other',
+            )
+            : [];
+        if ($children !== []) {
             throw new EmploymentExitReadinessException(
                 'average_earnings_child_credit_not_supported',
                 'Zaměstnanec uplatňuje daňové zvýhodnění na dítě. Jeho '

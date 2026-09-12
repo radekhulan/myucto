@@ -427,6 +427,37 @@ final class EmploymentExitDocumentServiceTest extends TestCase
     }
 
     /**
+     * Dítě „N" zvýhodnění u zaměstnance nezakládá (uplatňuje ho jiná osoba
+     * v domácnosti), čistý výdělek tedy neovlivní a potvrzení kvůli němu stát
+     * nesmí. Dřív ho zastavil každý řádek nároku na dítě.
+     */
+    public function testAverageEarningsCertificateIgnoresChildClaimedByOther(): void
+    {
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+        $this->insertTaxDeclaration('signed');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_child_claims
+                (supplier_id, employee_id, child_reference, child_order,
+                 credit_status, ztp_p, evidence_status, shared_household_confirmed,
+                 other_claimant_excluded, other_household_caregiver_status,
+                 other_caregiver_given_name, other_caregiver_family_name,
+                 other_caregiver_birth_date, effective_from, evidence_reference)
+             VALUES (?, ?, "CHILD-1", 1, "claimed_by_other", 0, "verified", 1, 0,
+                     "present", "Petr", "Syntetický", "1985-05-05", "2022-04-01",
+                     "synthetic-child-evidence")',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        )['average_earnings_certificate'];
+        self::assertNotSame(
+            'average_earnings_child_credit_not_supported',
+            $readiness['readiness_code'] ?? null,
+        );
+    }
+
+    /**
      * W30 / C-13 + C-14 — zápočtový list se SONDUJE a jeho vada NEBLOKUJE
      * potvrzení pro Úřad práce.
      *
