@@ -3299,6 +3299,7 @@
         "parental": "Rodičovská dovolená",
         "unpaid_leave": "Neplacené volno",
         "unexcused": "Neomluvená absence",
+        "compensatory_time_off": "Náhradní volno za přesčas",
         "required_missing": "Vyplňte „{field}“ — bez toho souhrn pracovní doby nevznikne.",
         "conditional_missing": "Odpovězte na obě otázky výše.",
         "issues_blocked": "Nejdřív vyřešte nálezy vypsané výše. S nimi souhrn pracovní doby neuložíme.",

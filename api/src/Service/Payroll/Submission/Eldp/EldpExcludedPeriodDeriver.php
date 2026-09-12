@@ -35,7 +35,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
  * `vacation` (dovolená se proplácí a pojištění běží dál), `employer_obstacle`
  * a `employee_obstacle` (překážky v práci s náhradou mzdy, která je součástí
  * vyměřovacího základu), `compensatory_time_off` (náhradní volno za přesčas
- * podle § 114 odst. 3 zákoníku práce), `unpaid_leave`, `unexcused` a
+ * podle § 114 odst. 1 zákoníku práce), `unpaid_leave`, `unexcused` a
  * `parental`. Podrobné odůvodnění u konstanty {@see NEUTRAL_TYPES}.
  *
  * Výčet § 16 odst. 4 věty třetí písm. a) je uzavřený, takže „netvoří vyloučenou
@@ -255,21 +255,27 @@ final class EldpExcludedPeriodDeriver
     /**
      * Druh nepřítomnosti → složka § 18 odst. 7, do které se jeho dny počítají.
      *
-     * Jediný jednoznačný případ, který zmrazený snapshot unese: neplacené
-     * volno je omluvená nepřítomnost, za kterou nenáleží náhrada příjmu
-     * (10473, „neplacené volno, stávka" v datovém slovníku). Stávku aplikace
-     * jako druh nepřítomnosti nezná.
+     * Neplacené volno je omluvená nepřítomnost, za kterou nenáleží náhrada
+     * příjmu (10473, „neplacené volno, stávka" v datovém slovníku). Stávku
+     * aplikace jako druh nepřítomnosti nezná.
+     *
+     * Náhradní volno za přesčas je týž případ: § 18 odst. 7 písm. a) mluví
+     * o „kalendářních dnech omluvené nepřítomnosti …, za které zaměstnanci
+     * nenáleží náhrada příjmu", a za dobu čerpání náhradního volna mzda ani
+     * náhrada nepřísluší (§ 114 odst. 1 zákoníku práce; aplikace ho proto
+     * mzdově vede jako neplacené).
      */
     private const SECTION18_ATTRIBUTES = [
         'unpaid_leave' => 'omluvenaNepritomnost',
+        'compensatory_time_off' => 'omluvenaNepritomnost',
     ];
 
     /**
      * Druhy nepřítomnosti, které vyloučený den podle § 18 odst. 7 netvoří.
      *
-     * - `vacation`, `employer_obstacle`, `employee_obstacle`,
-     *   `compensatory_time_off` — náhrada příjmu (nebo nekrácená mzda) náleží,
-     *   takže o vyloučený den nejde už z návětí § 18 odst. 7.
+     * - `vacation`, `employer_obstacle`, `employee_obstacle` — náhrada příjmu
+     *   (nebo nekrácená mzda) náleží, takže o vyloučený den nejde už
+     *   z návětí § 18 odst. 7.
      * - `unexcused` — neomluvená absence není OMLUVENÁ nepřítomnost.
      *
      * @var list<string>
@@ -278,7 +284,6 @@ final class EldpExcludedPeriodDeriver
         'vacation',
         'employer_obstacle',
         'employee_obstacle',
-        'compensatory_time_off',
         'unexcused',
     ];
 

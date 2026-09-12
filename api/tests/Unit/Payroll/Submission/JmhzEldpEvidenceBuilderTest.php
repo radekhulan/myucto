@@ -652,6 +652,56 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
     }
 
     /**
+     * Náhradní volno za přesčas: hodiny jdou jen do úhrnu 10275 (mzda za ně
+     * nepřísluší, § 114 odst. 1 ZP), vyloučenou dobou ELDP není, ale celé dny
+     * jsou vyloučenými dny § 18 odst. 7 písm. a). Umí to až souhrn v5.
+     */
+    public function testCompensatoryTimeOffPassesOnVersionFiveWorkSummary(): void
+    {
+        $builder = new JmhzEldpEvidenceBuilder();
+        $source = $this->compensatoryTimeOffSource('jmhz-work-month.v5');
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(0, $section['excluded_days_total']);
+        self::assertSame(2, $section['section18_days_total']);
+        self::assertSame(2, $section['section18_days']['omluvenaNepritomnost']);
+    }
+
+    public function testCompensatoryTimeOffStaysBlockedOnOlderWorkSummary(): void
+    {
+        $source = $this->compensatoryTimeOffSource('jmhz-work-month.v4');
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('Ordinary ELDP automaticky podporuje');
+        $builder = new JmhzEldpEvidenceBuilder();
+        $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+    }
+
+    /** @return array<string,mixed> */
+    private function compensatoryTimeOffSource(string $version): array
+    {
+        $source = $this->absenceSource(
+            'compensatory_time_off',
+            '2026-07-13',
+            '2026-07-14',
+            ['compensatory_time_off_millihours' => 16_000],
+        );
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']
+            ['derivation_version'] = $version;
+
+        return $this->withInput($source, $input);
+    }
+
+    /**
      * @param array<string,mixed> $source
      * @return array<string,mixed>
      */

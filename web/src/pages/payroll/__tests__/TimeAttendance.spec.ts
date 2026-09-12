@@ -647,6 +647,7 @@ describe('TimeAttendance', () => {
         parental_hours: null,
         unpaid_leave_hours: null,
         unexcused_hours: null,
+        compensatory_time_off_hours: null,
         confirmation_note: '',
       },
     })
@@ -824,6 +825,7 @@ describe('TimeAttendance', () => {
               parental_hours: '16',
               unpaid_leave_hours: null,
               unexcused_hours: null,
+              compensatory_time_off_hours: null,
             },
             issues: [],
             requires_unworked_hours_followup: true,

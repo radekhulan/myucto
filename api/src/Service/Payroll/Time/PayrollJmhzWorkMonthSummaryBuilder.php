@@ -13,7 +13,7 @@ use PDO;
 
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
-    public const DERIVATION_VERSION = 'jmhz-work-month.v4';
+    public const DERIVATION_VERSION = 'jmhz-work-month.v5';
 
     /**
      * Neodpracované hodiny bez vlastního atributu hlášení.
@@ -49,7 +49,29 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     public const VERSIONS_WITH_LOCAL_EVIDENCE = [
         'jmhz-work-month.v3',
         'jmhz-work-month.v4',
+        'jmhz-work-month.v5',
     ];
+
+    /**
+     * Hodiny čerpaného náhradního volna za práci přesčas (§ 114 odst. 1 ZP).
+     *
+     * Za dobu čerpání mzda nepřísluší (u měsíční mzdy se krátí), takže hodiny
+     * patří jen do úhrnu 10275, ne do 10276 („s náhradou či nekrácením
+     * mzdy"), a vlastní blok 10277–10280 nemají. Nese je až v5: přidat klíč
+     * do starší verze by změnilo obsahový otisk už zmrazených souhrnů.
+     *
+     * @var list<string>
+     */
+    private const COMPENSATORY_TIME_OFF_FIELDS = ['compensatory_time_off_millihours'];
+
+    /** Verze souhrnu, které nesou {@see COMPENSATORY_TIME_OFF_FIELDS}. */
+    public const VERSIONS_WITH_COMPENSATORY_TIME_OFF = ['jmhz-work-month.v5'];
+
+    /** @return list<string> */
+    public static function compensatoryTimeOffFields(): array
+    {
+        return self::COMPENSATORY_TIME_OFF_FIELDS;
+    }
 
     /**
      * Rozpad odpracované doby: dny (10267) a přesčas (10269).
@@ -72,7 +94,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     ];
 
     /** Verze souhrnu, které nesou {@see WORKED_BREAKDOWN_FIELDS}. */
-    public const VERSIONS_WITH_WORKED_BREAKDOWN = ['jmhz-work-month.v4'];
+    public const VERSIONS_WITH_WORKED_BREAKDOWN = ['jmhz-work-month.v4', 'jmhz-work-month.v5'];
 
     /** @return list<string> */
     public static function localEvidenceFields(): array
@@ -307,6 +329,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'parental_hours' => $derived['minutes']['parental'],
             'unpaid_leave_hours' => $derived['minutes']['unpaid_leave'],
             'unexcused_hours' => $derived['minutes']['unexcused'],
+            'compensatory_time_off_hours' => $derived['minutes']['compensatory_time_off'],
         ];
         $suggestions = [];
         $expressible = true;
@@ -509,6 +532,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $input['unexcused_hours'] ?? null,
                 'unexcused_hours',
             ),
+            'compensatory_time_off_millihours' => self::nullableScaledDecimal(
+                $input['compensatory_time_off_hours'] ?? null,
+                'compensatory_time_off_hours',
+            ),
         ];
         self::validateConditionalValues(
             $unworkedHoursOccurred,
@@ -567,7 +594,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
              * nepletly s bloky 10275–10280.
              */
             'local_evidence' => array_fill_keys(
-                self::LOCAL_EVIDENCE_FIELDS,
+                [...self::LOCAL_EVIDENCE_FIELDS, ...self::COMPENSATORY_TIME_OFF_FIELDS],
                 $unworkedHoursOccurred
                     ? 'explicit_confirmation'
                     : 'not_applicable_by_IN07',
@@ -1126,7 +1153,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
          * 10275. Bez IN07 tedy nesmí být vyplněné ani ony, jinak by úhrn
          * a rozpad tvrdily každý něco jiného.
          */
-        $unworkedFields = array_merge($unworkedFields, self::LOCAL_EVIDENCE_FIELDS);
+        $unworkedFields = array_merge(
+            $unworkedFields,
+            self::LOCAL_EVIDENCE_FIELDS,
+            self::COMPENSATORY_TIME_OFF_FIELDS,
+        );
         if (!$unworkedHoursOccurred) {
             foreach ($unworkedFields as $field) {
                 if ($values[$field] !== null) {

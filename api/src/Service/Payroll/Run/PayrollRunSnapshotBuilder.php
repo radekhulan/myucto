@@ -1624,6 +1624,7 @@ final class PayrollRunSnapshotBuilder
                 'jmhz-work-month.v2',
                 'jmhz-work-month.v3',
                 'jmhz-work-month.v4',
+                'jmhz-work-month.v5',
             ];
             if (in_array(
                 $derivationVersion,
@@ -1663,6 +1664,16 @@ final class PayrollRunSnapshotBuilder
                     $conditionalFields = array_merge(
                         $conditionalFields,
                         PayrollJmhzWorkMonthSummaryBuilder::localEvidenceFields(),
+                    );
+                }
+                if (in_array(
+                    $derivationVersion,
+                    PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_COMPENSATORY_TIME_OFF,
+                    true,
+                )) {
+                    $conditionalFields = array_merge(
+                        $conditionalFields,
+                        PayrollJmhzWorkMonthSummaryBuilder::compensatoryTimeOffFields(),
                     );
                 }
                 foreach ($conditionalFields as $field) {
@@ -1729,6 +1740,7 @@ final class PayrollRunSnapshotBuilder
                         'jmhz-work-month.v2',
                         'jmhz-work-month.v3',
                         'jmhz-work-month.v4',
+                        'jmhz-work-month.v5',
                     ],
                     true,
                 )

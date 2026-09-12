@@ -40,7 +40,7 @@ enum PayrollWageReplacementTitle: string
 
     /**
      * Doba, za kterou mzda ani náhrada nepřísluší: neplacené volno, náhradní
-     * volno za přesčas (§ 114 odst. 3 ZP — přesčas se už zaplatil dosaženou
+     * volno za přesčas (§ 114 odst. 1 ZP — přesčas se už zaplatil dosaženou
      * mzdou, volnem se nahrazuje jen příplatek), neomluvené zameškání a
      * nerozlišené „jiné".
      */

@@ -63,7 +63,7 @@ final class PayrollAbsenceValidator
             'vacation' => 'average_100',
             'employee_obstacle', 'employer_obstacle' => 'statutory_manual_review',
             // Náhradní volno: za dobu jeho čerpání mzda nepřísluší
-            // (§ 114 odst. 3 zákoníku práce) — přesčas se už zaplatil mzdou,
+            // (§ 114 odst. 1 zákoníku práce) — přesčas se už zaplatil mzdou,
             // volnem se nahrazuje jen příplatek. Proto `none`, ne přehlédnutí.
             'compensatory_time_off' => 'none',
             // Za neomluveně zameškanou dobu mzda ani náhrada nepřísluší —

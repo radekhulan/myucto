@@ -30,8 +30,9 @@ final class JmhzEldpEvidenceBuilder
      * Jen tak jde jeden zmrazený zdroj ověřit druhým.
      *
      * Blokovat dál zůstává `ppm` (vyloučenou dobou je jen předporodní část a
-     * den porodu aplikace neeviduje — viz {@see EldpExcludedPeriodDeriver}),
-     * `compensatory_time_off` a nerozlišené „jiné".
+     * den porodu aplikace neeviduje — viz {@see EldpExcludedPeriodDeriver})
+     * a nerozlišené „jiné". Náhradní volno za přesčas doplňuje až souhrn v5
+     * (viz absenceWorkSummaryFields()).
      */
     private const ABSENCE_WORK_SUMMARY_FIELDS = [
         'vacation' => ['vacation_millihours'],
@@ -280,7 +281,7 @@ final class JmhzEldpEvidenceBuilder
         if (!is_array($workSummary)
             || !in_array(
                 $workSummary['derivation_version'] ?? null,
-                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4'],
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4', 'jmhz-work-month.v5'],
                 true,
             )
             || !is_int($workSummary['id'] ?? null)
@@ -717,6 +718,16 @@ final class JmhzEldpEvidenceBuilder
      */
     private static function unworkedFields(string $summaryVersion): array
     {
+        if (self::carriesCompensatoryTimeOff($summaryVersion)) {
+            // Náhradní volno nemá vlastní blok hlášení a do 10276 nepatří
+            // (mzda za ně nepřísluší), vstupuje jen do úhrnu 10275.
+            return array_merge(
+                self::UNWORKED_FIELDS,
+                self::V3_UNWORKED_FIELDS,
+                ['compensatory_time_off_millihours'],
+            );
+        }
+
         return self::carriesV3Blocks($summaryVersion)
             ? array_merge(self::UNWORKED_FIELDS, self::V3_UNWORKED_FIELDS)
             : array_merge(self::UNWORKED_FIELDS, [
@@ -815,8 +826,9 @@ final class JmhzEldpEvidenceBuilder
                     'Ordinary ELDP automaticky podporuje jen nepřítomnost doloženou'
                         . ' zároveň vyloučenými dobami i pracovním souhrnem:'
                         . ' dovolenou, nemoc, karanténu, ošetřovné, otcovskou,'
-                        . ' rodičovskou, neplacené volno, neomluvenou absenci'
-                        . ' a překážky v práci.',
+                        . ' rodičovskou, neplacené volno, neomluvenou absenci,'
+                        . ' překážky v práci a náhradní volno za přesčas'
+                        . ' (to až v pracovním souhrnu schváleném po jeho zavedení).',
                 );
             }
         }
@@ -835,9 +847,15 @@ final class JmhzEldpEvidenceBuilder
     {
         return in_array(
             $summaryVersion,
-            ['jmhz-work-month.v3', 'jmhz-work-month.v4'],
+            ['jmhz-work-month.v3', 'jmhz-work-month.v4', 'jmhz-work-month.v5'],
             true,
         );
+    }
+
+    /** Nese souhrn hodiny náhradního volna za přesčas (od v5)? */
+    private static function carriesCompensatoryTimeOff(string $summaryVersion): bool
+    {
+        return $summaryVersion === 'jmhz-work-month.v5';
     }
 
     /**
@@ -847,9 +865,14 @@ final class JmhzEldpEvidenceBuilder
      */
     private static function absenceWorkSummaryFields(string $summaryVersion): array
     {
-        return self::carriesV3Blocks($summaryVersion)
+        $fields = self::carriesV3Blocks($summaryVersion)
             ? self::ABSENCE_WORK_SUMMARY_FIELDS + self::V3_ABSENCE_WORK_SUMMARY_FIELDS
             : self::ABSENCE_WORK_SUMMARY_FIELDS;
+        if (self::carriesCompensatoryTimeOff($summaryVersion)) {
+            $fields['compensatory_time_off'] = ['compensatory_time_off_millihours'];
+        }
+
+        return $fields;
     }
 
     /**

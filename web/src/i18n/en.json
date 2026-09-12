@@ -3299,6 +3299,7 @@
         "parental": "Parental leave",
         "unpaid_leave": "Unpaid leave",
         "unexcused": "Unexcused absence",
+        "compensatory_time_off": "Compensatory time off for overtime",
         "required_missing": "Fill in “{field}” — without it the working-time summary cannot be created.",
         "conditional_missing": "Answer both questions above.",
         "issues_blocked": "Resolve the issues listed above first. The working-time summary cannot be saved with them.",

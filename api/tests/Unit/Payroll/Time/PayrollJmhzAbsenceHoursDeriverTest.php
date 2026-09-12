@@ -165,7 +165,7 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
     }
 
     /**
-     * Náhradní volno za přesčas se do žádného rozpadu hlášení nezapíše.
+     * Nerozlišená „jiná" nepřítomnost se do žádného rozpadu hlášení nezapíše.
      * Návrh by v součtu 10275 tiše chyběl, takže se nenavrhuje vůbec nic.
      */
     public function testUndocumentedAbsenceKindSuggestsNothing(): void
@@ -174,7 +174,7 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
         $absences->expects(self::never())->method('publishedShiftSegments');
 
         $derived = $this->derive($absences, [
-            $this->absence(7, 'compensatory_time_off', '2026-09-03', '2026-09-04'),
+            $this->absence(7, 'other', '2026-09-03', '2026-09-04'),
         ]);
 
         self::assertFalse($derived['supported']);
@@ -228,6 +228,12 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
             'rodičovská dovolená' => ['parental', 'parental', 'parental_hours'],
             'neplacené volno' => ['unpaid_leave', 'unpaid_leave', 'unpaid_leave_hours'],
             'neomluvená absence' => ['unexcused', 'unexcused', 'unexcused_hours'],
+            // § 114 odst. 1 ZP: za dobu čerpání mzda nepřísluší, do 10276 nepatří.
+            'náhradní volno za přesčas' => [
+                'compensatory_time_off',
+                'compensatory_time_off',
+                'compensatory_time_off_hours',
+            ],
         ];
     }
 

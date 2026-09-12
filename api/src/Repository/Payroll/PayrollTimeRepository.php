@@ -1423,9 +1423,10 @@ final class PayrollTimeRepository
                  employer_obstacle_millihours,
                  maternity_millihours, paternity_millihours, parental_millihours,
                  unpaid_leave_millihours, unexcused_millihours,
+                 compensatory_time_off_millihours,
                  confirmation_note, provenance_json, summary_sha256,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $specification = PayrollTimeValue::row(
             $summary['specification'] ?? null,
@@ -1489,6 +1490,8 @@ final class PayrollTimeRepository
             $values['parental_millihours'] ?? null,
             $values['unpaid_leave_millihours'] ?? null,
             $values['unexcused_millihours'] ?? null,
+            // Náhradní volno nese až v5; starší souhrn ho v `values` nemá.
+            $values['compensatory_time_off_millihours'] ?? null,
             PayrollTimeValue::string(
                 $summary['confirmation_note'] ?? null,
                 'confirmation_note',

@@ -199,6 +199,14 @@ Aby šly dny doložit, ptá se potvrzení pracovní doby u těchto absencí nav�
 jejich hodiny — pole se ale objeví **jen u druhu, který v měsíci opravdu je**,
 takže běžný měsíc žádné pole navíc nemá.
 
+Projde i **náhradní volno za přesčas**. Za dobu jeho čerpání mzda nepřísluší
+(§ 114 odst. 1 zákoníku práce), takže jeho hodiny vstupují jen do celkového
+počtu neodpracovaných hodin, ne mezi hodiny s náhradou mzdy. Vyloučenou dobou
+evidenčního listu není, celé dny náhradního volna se ale vykazují jako
+vyloučené dny pro nemocenské dávky (omluvená nepřítomnost bez náhrady příjmu).
+Platí to pro měsíce, jejichž pracovní doba se potvrdí po zavedení této
+podpory; dřív potvrzený měsíc je potřeba znovu otevřít a potvrdit.
+
 **Měsíc, ve kterém rodičovská, neplacené volno nebo neomluvená absence
 nenechaly žádný započitatelný příjem**, se podle § 11 odst. 2 zákona
 č. 155/1995 Sb. za dobu pojištění nepovažuje. Hlášení ho vykáže s kódem

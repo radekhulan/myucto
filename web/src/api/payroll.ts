@@ -1102,6 +1102,8 @@ export interface PayrollJmhzWorkSummaryPreview {
     parental_hours: string | null
     unpaid_leave_hours: string | null
     unexcused_hours: string | null
+    /** Náhradní volno za přesčas: jen do úhrnu 10275, mzda za ně nepřísluší. */
+    compensatory_time_off_hours: string | null
   }
   issues: Array<{ code: string; message: string }>
   requires_unworked_hours_followup: boolean
@@ -1133,6 +1135,7 @@ export interface PayrollJmhzWorkSummaryRevision {
   parental_millihours: number | null
   unpaid_leave_millihours: number | null
   unexcused_millihours: number | null
+  compensatory_time_off_millihours: number | null
   approved_at: string
 }
 
@@ -1157,6 +1160,7 @@ export interface PayrollJmhzWorkSummaryApproval {
   parental_hours: string | null
   unpaid_leave_hours: string | null
   unexcused_hours: string | null
+  compensatory_time_off_hours: string | null
   confirmation_note?: string
 }
 

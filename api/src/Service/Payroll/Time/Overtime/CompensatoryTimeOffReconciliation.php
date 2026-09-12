@@ -14,7 +14,7 @@ namespace MyInvoice\Service\Payroll\Time\Overtime;
  *
  * | evidence | klíč | zdroj pravdy pro |
  * |---|---|---|
- * | `payroll_absences` typu `compensatory_time_off` | den ČERPÁNÍ | docházka, fond pracovní doby, mzda (§ 114 odst. 3 — za dobu čerpání mzda nepřísluší) |
+ * | `payroll_absences` typu `compensatory_time_off` | den ČERPÁNÍ | docházka, fond pracovní doby, mzda (§ 114 odst. 1 — za dobu čerpání mzda nepřísluší) |
  * | `payroll_overtime_compensations` | den PŘESČASU | vyrovnávací období podle § 93 odst. 4 (odst. 5 z něj vyjímá přesčas, za který bylo poskytnuto náhradní volno) |
  *
  * Sjednotit je nejde: absence den přesčasu nenese a jeden den čerpání může
@@ -30,7 +30,7 @@ namespace MyInvoice\Service\Payroll\Time\Overtime;
  * Porovnává se PŘÍTOMNOST za měsíc, ne minuty: rozsah čerpání v minutách plyne
  * až z fondu kalendáře daného dne, kdežto kompenzace nese minuty přesčasu.
  * Sečíst je proti sobě a rovnat by znamenalo tvrdit rovnost, kterou zákon
- * neříká — § 114 odst. 3 mluví o volnu „v rozsahu práce konané přesčas", ale
+ * neříká — § 114 odst. 1 mluví o volnu „v rozsahu práce konané přesčas", ale
  * poskytnuté v dohodnutém termínu, klidně po částech.
  */
 final readonly class CompensatoryTimeOffReconciliation

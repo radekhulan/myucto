@@ -46,8 +46,8 @@ use PDO;
  * ## Fail-closed
  *
  * Navrhuje se jen to, co je doložené. Jakmile měsíc obsahuje absenci, jejíž
- * druh nemá v hlášení doložený rozpad (náhradní volno za přesčas, nerozlišené
- * „jiné"), nebo absenci, která ještě není schválená, vrátí se `supported = false` a
+ * druh nemá v hlášení doložený rozpad (nerozlišené „jiné"), nebo absenci,
+ * která ještě není schválená, vrátí se `supported = false` a
  * nenavrhne se NIC. Částečný návrh by v součtu 10275 tiše chyběl a hlášení by
  * bylo nepravdivé; prázdný dialog je proti tomu jen práce navíc.
  */
@@ -76,6 +76,7 @@ final class PayrollJmhzAbsenceHoursDeriver
         'parental' => 0,
         'unpaid_leave' => 0,
         'unexcused' => 0,
+        'compensatory_time_off' => 0,
     ];
 
     /**
@@ -103,6 +104,9 @@ final class PayrollJmhzAbsenceHoursDeriver
         'parental' => 'parental',
         'unpaid_leave' => 'unpaid_leave',
         'unexcused' => 'unexcused',
+        // Náhradní volno za přesčas: mzda za dobu čerpání nepřísluší
+        // (§ 114 odst. 1 ZP), takže hodiny jdou jen do úhrnu 10275, ne do 10276.
+        'compensatory_time_off' => 'compensatory_time_off',
     ];
 
     public function __construct(

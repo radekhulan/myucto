@@ -664,7 +664,7 @@ final class PayrollTimeApiTest extends TestCase
         $stored->execute([$this->supplierId, $this->employmentId]);
         $revision = $stored->fetch(PDO::FETCH_ASSOC);
         self::assertIsArray($revision);
-        self::assertSame('jmhz-work-month.v4', $revision['derivation_version']);
+        self::assertSame('jmhz-work-month.v5', $revision['derivation_version']);
         self::assertSame(1, (int) $revision['conditional_blocks_confirmed']);
         self::assertSame(1, (int) $revision['unworked_hours_occurred']);
         self::assertSame(1, (int) $revision['work_obstacles_occurred']);

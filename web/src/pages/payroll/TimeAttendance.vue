@@ -222,6 +222,7 @@ const approvalRareAbsences = ref<Record<string, string>>({
   parental: '',
   unpaid_leave: '',
   unexcused: '',
+  compensatory_time_off: '',
 })
 const RARE_ABSENCE_BLOCKS = [
   { key: 'maternity', absenceType: 'ppm', suggestion: 'maternity_hours' },
@@ -229,6 +230,7 @@ const RARE_ABSENCE_BLOCKS = [
   { key: 'parental', absenceType: 'parental', suggestion: 'parental_hours' },
   { key: 'unpaid_leave', absenceType: 'unpaid_leave', suggestion: 'unpaid_leave_hours' },
   { key: 'unexcused', absenceType: 'unexcused', suggestion: 'unexcused_hours' },
+  { key: 'compensatory_time_off', absenceType: 'compensatory_time_off', suggestion: 'compensatory_time_off_hours' },
 ] as const
 const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
@@ -1103,6 +1105,7 @@ async function approve() {
         parental_hours: optionalHours(approvalRareAbsences.value.parental),
         unpaid_leave_hours: optionalHours(approvalRareAbsences.value.unpaid_leave),
         unexcused_hours: optionalHours(approvalRareAbsences.value.unexcused),
+        compensatory_time_off_hours: optionalHours(approvalRareAbsences.value.compensatory_time_off),
         confirmation_note: approvalNote.value.trim(),
       },
     })
@@ -1278,6 +1281,7 @@ async function approveSelected() {
           parental_hours: null,
           unpaid_leave_hours: null,
           unexcused_hours: null,
+          compensatory_time_off_hours: null,
           confirmation_note: note,
         },
       })

@@ -123,6 +123,7 @@ final class AverageEarningDerivationService
         'jmhz-work-month.v2',
         'jmhz-work-month.v3',
         'jmhz-work-month.v4',
+        'jmhz-work-month.v5',
     ];
 
     /**

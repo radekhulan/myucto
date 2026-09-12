@@ -1485,7 +1485,7 @@ final class JmhzPreparationSnapshotBuilder
             || ($timeMonth['jmhz_work_summary_status'] ?? null) !== 'frozen_work_summary'
             || !in_array(
                 $summary['derivation_version'] ?? null,
-                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4'],
+                ['jmhz-work-month.v2', 'jmhz-work-month.v3', 'jmhz-work-month.v4', 'jmhz-work-month.v5'],
                 true,
             )
         ) {
