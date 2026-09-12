@@ -491,11 +491,13 @@ final class PayslipDocumentSnapshotMapper
                 }
             }
         }
-        if ($incomeLines === []) {
-            throw new \DomainException(
-                'Vypočtená osoba nemá žádnou zmrazenou příjmovou složku.',
-            );
-        }
+        /*
+         * Páska bez příjmových řádků je platná: měsíc celého neplaceného volna
+         * nebo PPM nemá příjem, ale srážky (třeba doplatek zdravotního
+         * pojištění do minima) a hlášení ano. Výpočet takový vztah pustí jen
+         * s nepřítomností, která měsíc bez vstupu vysvětluje (viz
+         * PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained()).
+         */
         if ($accountPairs === []) {
             $first = reset($snapshotEmployments);
             if (!is_array($first)) {

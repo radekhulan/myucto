@@ -1110,9 +1110,16 @@ final class JmhzEldpEvidenceBuilder
                 );
             }
         }
+        /*
+         * 10276 je v XSD nepovinné a souhrn nulu navrhuje jako nevyplněnou
+         * (viz PayrollJmhzWorkMonthSummaryBuilder::conditionalSuggestions()).
+         * Měsíc jen s nepřítomností bez náhrady mzdy (náhradní volno,
+         * neplacené volno, PPM) proto nese 10276 prázdné, ne nulu.
+         */
+        $reportedPaid = $values['unworked_paid_millihours'] ?? null;
         if ($total <= 0
             || ($values['unworked_total_millihours'] ?? null) !== $total
-            || ($values['unworked_paid_millihours'] ?? null) !== $paid
+            || ($paid === 0 ? !in_array($reportedPaid, [null, 0], true) : $reportedPaid !== $paid)
         ) {
             $this->invalid(
                 'jmhz_eldp_work_summary_mismatch',

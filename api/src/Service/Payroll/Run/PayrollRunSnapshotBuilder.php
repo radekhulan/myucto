@@ -363,14 +363,17 @@ final class PayrollRunSnapshotBuilder
                     );
                 }
             }
+            $absences = $this->absences($absenceRows[$employmentId] ?? []);
             if ($inputs === []) {
                 // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
-                // složky je většinou chyba zadání, ale legitimní důvody existují
-                // (celý měsíc neplaceného volna, spící dohoda), takže se to nedá
-                // rozhodnout automaticky — musí to odklepnout člověk. Do MZ-01-W07
-                // to ale byla past: workflow na nevyřešeném overridu zastavilo
-                // `approve` a cesta, jak override udělit, neexistovala. Vede k němu
+                // složky je většinou chyba zadání (zapomenutá mzda), takže ho
+                // musí odklepnout člověk přes
                 // {@see \MyInvoice\Service\Payroll\Run\PayrollRunValidationOverrideService}.
+                // Když měsíc bez vstupu vysvětluje schválená nepřítomnost bez
+                // náhrady od zaměstnavatele (celé neplacené volno, PPM, nemoc za
+                // oknem náhrady), rozhodla už evidence absencí: varování zůstává
+                // vidět, ale potvrzovat ho znovu by byl krok navíc bez informace.
+                // Pravidlo je totéž, podle kterého výpočet takový vztah pustí.
                 $validations[] = new PayrollRunValidation(
                     'warning',
                     'employment_without_inputs',
@@ -381,10 +384,9 @@ final class PayrollRunSnapshotBuilder
                         (string) $row['full_name'],
                     ),
                     '/payroll/components',
-                    true,
+                    !PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained($absences),
                 );
             }
-            $absences = $this->absences($absenceRows[$employmentId] ?? []);
             foreach ($this->discountValidations(
                 $row,
                 $discountIntentRows[$employmentId] ?? null,

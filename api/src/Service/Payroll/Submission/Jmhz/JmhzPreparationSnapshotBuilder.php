@@ -1692,10 +1692,19 @@ final class JmhzPreparationSnapshotBuilder
         }
         ksort($unique);
 
+        /*
+         * Nezodpovězený nárok (`unknown`) vedle zodpovězeného není rozpor:
+         * otázka míří na TUTÉŽ domácnost, takže odpověď u jednoho nároku platí
+         * pro všechny. Typicky jde o dítě „N", u kterého je jiná osoba povinná,
+         * a vlastní dítě, u kterého účetní otázku nevyplnila.
+         */
+        if (count($statuses) > 1) {
+            unset($statuses['unknown']);
+        }
+
         return [
-            // Nároky se ptají po TÉŽE domácnosti, takže se odpovědi nesmí
-            // rozcházet. Rozpor se nesjednocuje, jen zmrazí — rozhodnout ho
-            // musí účetní, ne serializér.
+            // Odporující si odpovědi (`none` proti `present`) se nesjednocují,
+            // jen zmrazí — rozhodnout je musí účetní, ne serializér.
             'other_household_caregiver_status' => match (true) {
                 $children === [] => 'none',
                 count($statuses) > 1 => 'inconsistent',

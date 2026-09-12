@@ -8,7 +8,14 @@ use InvalidArgumentException;
 
 final readonly class SocialInsuranceRelationshipInput
 {
-    /** @var non-empty-list<SocialAssessmentComponent> */
+    /**
+     * Prázdný seznam = měsíc bez příjmu, který vysvětluje nepřítomnost bez
+     * náhrady od zaměstnavatele (neplacené volno, PPM, nemoc za oknem
+     * náhrady). Vztah trvá a musí se spočítat i vykázat s nulovým základem;
+     * pouští ho jen PayrollRunStatutoryInputAssembler::monthWithoutInputsExplained().
+     *
+     * @var list<SocialAssessmentComponent>
+     */
     public array $components;
     public SocialParticipationAggregationGroup $participationAggregationGroup;
 
@@ -44,9 +51,9 @@ final readonly class SocialInsuranceRelationshipInput
         if ($agreedMonthlyIncomeMinorUnits !== null && $agreedMonthlyIncomeMinorUnits < 0) {
             throw new InvalidArgumentException('Agreed monthly income cannot be negative.');
         }
-        if (!array_is_list($components) || $components === []) {
+        if (!array_is_list($components)) {
             throw new InvalidArgumentException(
-                'Social insurance relationship components must be a non-empty list.',
+                'Social insurance relationship components must be a list.',
             );
         }
         foreach ($components as $component) {

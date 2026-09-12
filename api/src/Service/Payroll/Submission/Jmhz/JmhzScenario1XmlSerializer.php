@@ -918,9 +918,12 @@ final class JmhzScenario1XmlSerializer
          * `null` znamená NEUVEDENO — příprava zmrazená dřív, než se úhrn
          * odvozoval. Nula by tvrdila, že zaměstnanec žádný osvobozený příjem
          * neměl, což z takového řezu neplyne.
+         *
+         * Kontrola 283: při nulovém úhrnu 10286 nesmí být 10289 vyplněné ani
+         * nulou; měsíc bez příjmu ho proto vynechá stejně jako přijatá hlášení.
          */
         $exemptIncome = $summary['exempt_income_czk'] ?? null;
-        if ($exemptIncome !== null) {
+        if ($exemptIncome !== null && $incomeTotal !== 0) {
             $exemptIncome = $this->int($exemptIncome, '10289');
             if ($exemptIncome > $incomeTotal) {
                 $this->invalid(
@@ -1986,7 +1989,14 @@ final class JmhzScenario1XmlSerializer
             'form:pocet',
             $this->decimal($values['worked_millihours'] ?? null, 3, '10268'),
         );
-        if (($values['overtime_millihours'] ?? null) !== null) {
+        /*
+         * Kontrola 282: při nulových odpracovaných hodinách (10268) nesmí být
+         * rozpad (10269–10274) vyplněný ani nulou. Měsíc celého neplaceného
+         * volna nebo PPM proto rozpad vynechá; přijatá hlášení to tak mají.
+         */
+        if (($values['overtime_millihours'] ?? null) !== null
+            && ($values['worked_millihours'] ?? null) !== 0
+        ) {
             // Kontrola ČSSZ hlídá, že přesčas není vyšší než odpracované
             // hodiny — je to jejich PODMNOŽINA, ne přičtený čas navíc.
             $overtime = $this->int($values['overtime_millihours'], '10269');

@@ -82,7 +82,9 @@ final readonly class PayslipDocumentData
             throw new \InvalidArgumentException('The first payslip renderer version supports CZK only.');
         }
 
-        $this->assertLineList($incomeLines, 'Income lines', false);
+        // Měsíc bez příjmu (celé neplacené volno, PPM) má pásku bez
+        // příjmových řádků, ale se srážkami; viz PayslipDocumentSnapshotMapper.
+        $this->assertLineList($incomeLines, 'Income lines', true);
         $this->assertLineList($otherDeductionLines, 'Other deduction lines', true);
 
         if (!in_array($incomeDetailStatus, [

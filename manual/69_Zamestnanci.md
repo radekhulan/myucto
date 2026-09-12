@@ -242,6 +242,14 @@ při souběhu zvolil pro doplatek jiného zaměstnavatele. Rozklad pojistného u
 schválené mzdy pak ukazuje i to, jestli hodnota vznikla zápisem, nebo odvozením
 ze zákona. Volba **neověřeno** dál znamená ruční posouzení.
 
+Minimální vyměřovací základ se krátí sám podle schválených nepřítomností, nic se
+k tomu nezadává. O dny nemoci, karantény, ošetřování člena rodiny a dlouhodobého
+ošetřovného se minimum poměrně snižuje (§ 3 odst. 9 písm. b) zákona č. 592/1992
+Sb.). Za dny peněžité pomoci v mateřství a rodičovské dovolené platí pojistné
+stát (§ 7 odst. 1 písm. d) zákona č. 48/1997 Sb.), takže se minimum za ně
+nepoužije; trvá-li to celý měsíc, doplatek nevzniká vůbec. Neplacené volno ani
+neomluvená absence minimum nesnižují a doplatek za ně hradí zaměstnanec.
+
 Ověřené hodnoty (český nebo zahraniční režim, ověřená pojišťovna, platný A1)
 jsou rozhodnutím uživatele. **Odkaz na podklad je všude volitelný**: lze zvolit
 typický podklad nebo přes volbu **Jiné** zapsat konkrétní číslo dokladu (písmena,

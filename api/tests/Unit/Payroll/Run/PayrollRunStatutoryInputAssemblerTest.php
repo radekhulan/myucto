@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
+use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpEmployerSelection;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibility;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumTopUpResponsibilitySource;
@@ -963,6 +964,92 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         $snapshot['people'][0]['statutory_evidence']['income_tax']['credit_claims'] = [];
 
         return $snapshot;
+    }
+
+    /**
+     * § 3 odst. 9 písm. b) zák. 592/1992 (nemoc, karanténa, ošetřování) a
+     * § 7 odst. 1 písm. d) zák. 48/1997 (PPM, rodičovská — platí stát):
+     * schválená nepřítomnost snižuje minimum zdravotního pojištění sama.
+     * Dřív šlo snížení jen z ruční evidence, ke které nevedla žádná cesta,
+     * takže měsíc s nemocí dorovnával pojistné do plného minima.
+     */
+    public function testApprovedSicknessAndMaternityReduceTheHealthMinimum(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            ['id' => 501, 'absence_type' => 'dpn', 'date_from' => '2026-05-28', 'date_to' => '2026-06-12'],
+            ['id' => 502, 'absence_type' => 'ppm', 'date_from' => '2026-06-20', 'date_to' => '2026-12-31'],
+            ['id' => 503, 'absence_type' => 'unpaid_leave', 'date_from' => '2026-06-15', 'date_to' => '2026-06-16'],
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNotNull($bundle->healthInsurance);
+        $reductions = array_map(
+            static fn ($reduction): array => [
+                $reduction->from,
+                $reduction->to,
+                $reduction->reason,
+                $reduction->evidenceReference,
+            ],
+            $bundle->healthInsurance->people[0]->minimumReductions,
+        );
+        // Interval se ořízne na měsíc; neplacené volno minimum nesnižuje.
+        self::assertContains(
+            ['2026-06-01', '2026-06-12', HealthMinimumReductionReason::SicknessCareOrQuarantine, 'absence:501'],
+            $reductions,
+        );
+        self::assertContains(
+            ['2026-06-20', '2026-06-30', HealthMinimumReductionReason::StateInsured, 'absence:502'],
+            $reductions,
+        );
+        self::assertCount(2, $reductions);
+    }
+
+    /**
+     * Celý měsíc neplaceného volna nemá co zadat do vstupů. Výpočet ho proto
+     * pustí s prázdným seznamem složek místo blokace „chybí mzdová složka“.
+     */
+    public function testMonthWithoutInputsExplainedByAbsenceIsCalculated(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $employment = &$snapshot['people'][0]['employments'][0];
+        $employment['inputs'] = [];
+        $employment['absences'] = [
+            ['id' => 510, 'absence_type' => 'unpaid_leave', 'date_from' => '2026-06-01', 'date_to' => '2026-06-30'],
+        ];
+        unset($employment);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], array_map(
+            static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+            $bundle->issues,
+        ));
+        self::assertNotNull($bundle->socialInsurance);
+        self::assertSame([], $bundle->socialInsurance->people[0]->relationships[0]->components);
+        self::assertNotNull($bundle->healthInsurance);
+        self::assertSame([], $bundle->healthInsurance->people[0]->relationships[0]->components);
+    }
+
+    /** Bez nepřítomnosti, která by to vysvětlila, je chybějící vstup dál zapomenutá mzda. */
+    public function testMonthWithoutInputsAndWithoutAbsenceStillBlocks(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'] = [];
+        $snapshot['people'][0]['employments'][0]['absences'] = [
+            ['id' => 511, 'absence_type' => 'vacation', 'date_from' => '2026-06-01', 'date_to' => '2026-06-05'],
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertContains(
+            'social_insurance|payroll_component_missing',
+            array_map(
+                static fn ($issue): string => "{$issue->domain}|{$issue->code}",
+                $bundle->issues,
+            ),
+        );
     }
 
     /** @return array<string,mixed> */

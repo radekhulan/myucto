@@ -544,8 +544,9 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
             $periodStart,
+            $snapshot['absences'] ?? null,
         );
-        if ($components === []) {
+        if ($components === [] && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)) {
             return null;
         }
 
@@ -1006,11 +1007,14 @@ final class PayrollRunStatutoryInputAssembler
             $responsibility = $declared;
         }
 
-        $reductions = $this->healthReductions(
-            $healthEvidence['minimum_reductions'] ?? null,
-            $personReference,
-            $periodEnd,
-        );
+        $reductions = [
+            ...$this->healthReductions(
+                $healthEvidence['minimum_reductions'] ?? null,
+                $personReference,
+                $periodEnd,
+            ),
+            ...self::absenceHealthReductions($employments, $periodStart, $periodEnd),
+        ];
         $otherEmployers = $this->healthOtherEmployers(
             $healthEvidence['other_employer_bases'] ?? null,
             $personReference,
@@ -1198,8 +1202,9 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
             $periodStart,
+            $snapshot['absences'] ?? null,
         );
-        if ($components === []) {
+        if ($components === [] && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)) {
             return null;
         }
 
@@ -1467,8 +1472,9 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
             $periodStart,
+            $snapshot['absences'] ?? null,
         );
-        if ($components === []) {
+        if ($components === [] && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)) {
             return null;
         }
 
@@ -1717,12 +1723,14 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $relationshipReference,
         string $periodStart,
+        mixed $absences = null,
     ): array {
         $inputs = $this->componentInputs(
             $raw,
             'social_insurance',
             $personReference,
             $relationshipReference,
+            $absences,
         );
         $result = [];
         foreach ($inputs as $input) {
@@ -1774,12 +1782,14 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $relationshipReference,
         string $periodStart,
+        mixed $absences = null,
     ): array {
         $inputs = $this->componentInputs(
             $raw,
             'health_insurance',
             $personReference,
             $relationshipReference,
+            $absences,
         );
         $result = [];
         foreach ($inputs as $input) {
@@ -1831,12 +1841,14 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $relationshipReference,
         string $periodStart,
+        mixed $absences = null,
     ): array {
         $inputs = $this->componentInputs(
             $raw,
             'income_tax',
             $personReference,
             $relationshipReference,
+            $absences,
         );
         $result = [];
         foreach ($inputs as $input) {
@@ -1893,14 +1905,59 @@ final class PayrollRunStatutoryInputAssembler
         return $result;
     }
 
+    /**
+     * Měsíc bez jediného vstupu je pojistka proti zapomenuté mzdě, proto
+     * blokuje. Výjimkou je vztah, u kterého nepřítomnost bez náhrady od
+     * zaměstnavatele vysvětluje, proč vstup chybí: celý měsíc neplaceného
+     * volna, rodičovské, PPM, nemoci za oknem náhrady nebo náhradního volna.
+     * Tam uživatel nemá co zadat a běh musel stát. Zda je takový měsíc dobou
+     * pojištění, rozhoduje dál ELDP
+     * ({@see \MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver::insuranceMonthStatus()}).
+     * Dovolená a překážky v práci mezi výjimkami nejsou: jejich schválení
+     * vždy zakládá vstup náhrady mzdy.
+     */
+    private const ABSENCES_EXPLAINING_MONTH_WITHOUT_INPUTS = [
+        ...\MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver::INCOME_LESS_TYPES,
+        'ppm',
+        'paternity',
+        'dpn',
+        'quarantine',
+        'ocr',
+        'long_term_care',
+        'compensatory_time_off',
+    ];
+
+    /** Jediné pravidlo i pro varování `employment_without_inputs` v PayrollRunSnapshotBuilder. */
+    public static function monthWithoutInputsExplained(mixed $absences): bool
+    {
+        if (!is_array($absences) || !array_is_list($absences)) {
+            return false;
+        }
+        foreach ($absences as $absence) {
+            if (is_array($absence) && in_array(
+                $absence['absence_type'] ?? null,
+                self::ABSENCES_EXPLAINING_MONTH_WITHOUT_INPUTS,
+                true,
+            )) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /** @return list<array<string,mixed>> */
     private function componentInputs(
         mixed $raw,
         string $domain,
         string $personReference,
         string $relationshipReference,
+        mixed $absences = null,
     ): array {
         $inputs = $this->list($raw);
+        if ($inputs === [] && $this->monthWithoutInputsExplained($absences)) {
+            return [];
+        }
         if ($inputs === null || $inputs === []) {
             $this->issue(
                 $domain,
@@ -1999,6 +2056,73 @@ final class PayrollRunStatutoryInputAssembler
             $valid = false;
         }
         return $valid;
+    }
+
+    /**
+     * Schválené nepřítomnosti, které ze zákona snižují minimální vyměřovací
+     * základ zdravotního pojištění.
+     *
+     * - § 3 odst. 9 písm. b) zák. č. 592/1992 Sb.: pracovní volno pro
+     *   důležité osobní překážky v práci — nemoc, karanténa, ošetřování
+     *   a dlouhodobé ošetřování (§ 191 a § 191a ZP).
+     * - § 3 odst. 8 písm. d) a odst. 9 písm. c) téhož zákona ve spojení
+     *   s § 7 odst. 1 písm. d) zák. č. 48/1997 Sb.: za ženu na mateřské,
+     *   osobu na rodičovské dovolené a příjemce PPM platí pojistné stát; za
+     *   celý měsíc minimum neplatí, za část se poměrně snižuje.
+     *
+     * Neplacené volno ani neomluvená absence minimum nesnižují (doplatek hradí
+     * zaměstnanec). Otcovská se zatím neodvozuje: zákon ji výslovně
+     * nejmenuje a obecné osobní překážky zůstávají mimo automatiku.
+     *
+     * Dřív se snížení četlo JEN z ruční evidence, ke které nevedla žádná
+     * obrazovka ani API. Měsíc s nemocí nebo PPM proto dorovnával pojistné do
+     * plného minima.
+     *
+     * @param list<mixed> $employments
+     * @return list<HealthMinimumReductionInterval>
+     */
+    private static function absenceHealthReductions(
+        array $employments,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $reasons = [
+            'dpn' => HealthMinimumReductionReason::SicknessCareOrQuarantine,
+            'quarantine' => HealthMinimumReductionReason::SicknessCareOrQuarantine,
+            'ocr' => HealthMinimumReductionReason::SicknessCareOrQuarantine,
+            'long_term_care' => HealthMinimumReductionReason::SicknessCareOrQuarantine,
+            'ppm' => HealthMinimumReductionReason::StateInsured,
+            'parental' => HealthMinimumReductionReason::StateInsured,
+        ];
+        $result = [];
+        foreach ($employments as $employment) {
+            $absences = is_array($employment) ? ($employment['absences'] ?? null) : null;
+            if (!is_array($absences) || !array_is_list($absences)) {
+                continue;
+            }
+            foreach ($absences as $absence) {
+                if (!is_array($absence)) {
+                    continue;
+                }
+                $reason = $reasons[$absence['absence_type'] ?? ''] ?? null;
+                $from = $absence['date_from'] ?? null;
+                $to = $absence['date_to'] ?? null;
+                $id = $absence['id'] ?? null;
+                if ($reason === null || !is_string($from) || !is_string($to) || !is_int($id)
+                    || $from > $periodEnd || $to < $periodStart
+                ) {
+                    continue;
+                }
+                $result[] = new HealthMinimumReductionInterval(
+                    max($from, $periodStart),
+                    min($to, $periodEnd),
+                    $reason,
+                    "absence:{$id}",
+                );
+            }
+        }
+
+        return $result;
     }
 
     /** @return list<HealthMinimumReductionInterval> */

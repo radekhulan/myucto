@@ -207,7 +207,7 @@ final class JmhzScenario1ControlEvaluator
         return [
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 110, 112, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
+            103, 109, 110, 112, 113, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
             150, 151, 153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 215,
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
@@ -377,6 +377,7 @@ final class JmhzScenario1ControlEvaluator
             99 => $this->eldpValidityWithinPeriod($projection),
             109 => $this->atMostIncome($projection, '10416'),
             110 => $this->monthlyChildOrdersAreContinuous($projection),
+            113 => $this->otherHouseholdCaregiverBirthIdentifier($projection),
             114 => $this->monthlyChildHasBirthIdentifier($projection),
             127 => $this->otherHouseholdCaregiverComplete($projection),
             128 => $this->monthlyChildCreditComplete($projection),
@@ -2997,6 +2998,34 @@ final class JmhzScenario1ControlEvaluator
                         || (!isset($caregiver['10433']) && !isset($caregiver['10434']))
                     ) {
                         return 'Jiná vyživující osoba nemá úplné jméno a datum narození nebo rodné číslo.';
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 113: jiná vyživující osoba ve společné domácnosti musí mít
+     * rodné číslo (10434) nebo datum narození (10433). Dřív neměla
+     * implementaci, a protože je blokující, zastavila každé podání s dítětem
+     * „N" nebo s vyplněnou jinou vyživující osobou.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function otherHouseholdCaregiverBirthIdentifier(
+        JmhzAttributeProjection $projection,
+    ): array {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                foreach ($form->groupedBy(
+                    ['10431', '10432', '10433', '10434'],
+                    self::MONTHLY_CHILD_DEPTH,
+                ) as $caregiver) {
+                    if (!isset($caregiver['10433']) && !isset($caregiver['10434'])) {
+                        return 'Chybí rodné číslo nebo datum narození jiné vyživující osoby ve společně hospodařící domácnosti.';
                     }
                 }
 

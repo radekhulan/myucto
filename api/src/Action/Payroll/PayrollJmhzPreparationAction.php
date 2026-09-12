@@ -6,8 +6,12 @@ namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
@@ -29,6 +33,9 @@ final class PayrollJmhzPreparationAction
     public function __construct(
         private readonly JmhzPreparationSnapshotService $service,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollComponentJmhzMappingDefaults $mappingDefaults,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     /** @param array{revisionId:string} $args */
@@ -59,6 +66,7 @@ final class PayrollJmhzPreparationAction
                 422,
             );
         }
+        $this->applyDefaultComponentMappings($request);
         try {
             $result = $this->service->freeze(
                 $this->currentSupplierId($request),
@@ -90,6 +98,37 @@ final class PayrollJmhzPreparationAction
         )
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Výchozí zařazení jednoznačných složek do JMHZ se doplní i tady, ne jen
+     * při otevření obrazovky zařazení. Náhradu mzdy za dovolenou a při DPN
+     * zakládá aplikace sama při schválení absence; bez tohoto kroku příprava
+     * zastavila firmu, jejíž účetní obrazovku zařazení nikdy neotevřela, na
+     * „složka nemá zařazení" u složky, kterou sama nezaložila. Doplňuje se
+     * jen tam, kde žádná volba ještě není (viz PayrollComponentJmhzMappingDefaults).
+     */
+    private function applyDefaultComponentMappings(Request $request): void
+    {
+        $supplierId = $this->currentSupplierId($request);
+        foreach ($this->mappingDefaults->apply($supplierId) as $mapping) {
+            $this->logger->log(
+                'payroll.component_jmhz_mapping.default_applied',
+                $this->userId($request),
+                'payroll_component_definition',
+                PayrollTimeValue::int($mapping['component_definition_id'] ?? null, 'component_definition_id'),
+                [
+                    'mapping_id' => PayrollTimeValue::int($mapping['id'] ?? null, 'mapping_id'),
+                    'target_attribute_id' => $mapping['target_attribute_id'] ?? null,
+                    'source' => 'jmhz_preparation',
+                ],
+                $this->ipMatcher->clientIpFromRequest(
+                    PayrollTimeValue::row($request->getServerParams(), 'server_params'),
+                ),
+                $request->getHeaderLine('User-Agent'),
+                $supplierId,
+            );
+        }
     }
 
     private function authorize(Request $request, Response $response): ?Response

@@ -965,6 +965,88 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
     }
 
     /**
+     * Dítě „N" má jinou vyživující osobu povinně, vlastní dítě ji často
+     * nevyplněnou. Otázka míří na tutéž domácnost, takže nezodpovězený nárok
+     * odpověď nepopírá a hlášení nesmí skončit na rozporu.
+     */
+    public function testUnansweredClaimDoesNotContradictOtherCaregiverOfTheHousehold(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(childClaims: [
+                [
+                    'child_reference' => 'dependant-9',
+                    'child_order' => 2,
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                    'other_household_caregiver_status' => 'unknown',
+                ],
+                [
+                    'child_reference' => 'dependant-8',
+                    'child_order' => 1,
+                    'credit_status' => 'claimed_by_other',
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => false,
+                    'other_household_caregiver_status' => 'present',
+                    'other_caregiver_given_name' => 'Petr',
+                    'other_caregiver_family_name' => 'Novák',
+                    'other_caregiver_birth_date' => '1988-06-06',
+                ],
+            ]),
+            [],
+            [],
+        );
+
+        $evidence = $snapshot->payload['people'][0]['child_credit_evidence'];
+        self::assertSame('present', $evidence['other_household_caregiver_status']);
+        self::assertCount(1, $evidence['other_household_caregivers']);
+    }
+
+    /** Odpovědi „ne" a „ano" u téže domácnosti si odporují dál. */
+    public function testContradictingCaregiverAnswersStayInconsistent(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(childClaims: [
+                [
+                    'child_reference' => 'dependant-9',
+                    'child_order' => 2,
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                    'other_household_caregiver_status' => 'none',
+                ],
+                [
+                    'child_reference' => 'dependant-8',
+                    'child_order' => 1,
+                    'ztp_p' => false,
+                    'evidence_status' => 'verified',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                    'other_household_caregiver_status' => 'present',
+                    'other_caregiver_given_name' => 'Petr',
+                    'other_caregiver_family_name' => 'Novák',
+                    'other_caregiver_birth_date' => '1988-06-06',
+                ],
+            ]),
+            [],
+            [],
+        );
+
+        self::assertSame(
+            'inconsistent',
+            $snapshot->payload['people'][0]['child_credit_evidence']['other_household_caregiver_status'],
+        );
+    }
+
+    /**
      * Dítě „N" se zmrazí i s identitou a příznakem `credit_claimed = false`,
      * aby ho resolver vykázal s pořadím „N". Uplatněné dítě příznak nenese —
      * dosavadní zmrazené podklady tak zůstávají beze změny.

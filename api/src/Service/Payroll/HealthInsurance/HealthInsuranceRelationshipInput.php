@@ -9,7 +9,12 @@ use InvalidArgumentException;
 
 final readonly class HealthInsuranceRelationshipInput
 {
-    /** @var non-empty-list<HealthAssessmentComponent> */
+    /**
+     * Prázdný seznam = měsíc bez příjmu vysvětlený nepřítomností; viz
+     * {@see \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceRelationshipInput::$components}.
+     *
+     * @var list<HealthAssessmentComponent>
+     */
     public array $components;
 
     /** @param array<mixed> $components */
@@ -57,9 +62,9 @@ final readonly class HealthInsuranceRelationshipInput
                 'DPP and DPČ post-termination income must be attributed to the agreement end month.',
             );
         }
-        if (!array_is_list($components) || $components === []) {
+        if (!array_is_list($components)) {
             throw new InvalidArgumentException(
-                'Health insurance relationship components must be a non-empty list.',
+                'Health insurance relationship components must be a list.',
             );
         }
         foreach ($components as $component) {

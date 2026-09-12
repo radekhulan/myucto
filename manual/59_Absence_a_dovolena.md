@@ -216,6 +216,15 @@ takový měsíc započítá stejně, tedy s nulou dnů pojištění. Celý měs�
 ošetřovného je naopak omluvný důvod, takže zůstává dobou pojištění s plným
 počtem dnů a nulovým základem.
 
+Do mzdových vstupů se za takový měsíc nic nezadává, ani nulová mzda. Mzdový
+běh vztah spočítá i bez jediné mzdové složky, pokud v měsíci leží schválená
+nepřítomnost bez náhrady mzdy od zaměstnavatele (neplacené volno, rodičovská,
+neomluvená absence, peněžitá pomoc v mateřství, otcovská, nemoc nebo
+ošetřovné, náhradní volno). Varování „pracovní vztah nemá v období žádnou
+schválenou mzdovou složku“ se pak jen zobrazí a nevyžaduje potvrzení výjimky.
+Bez takové nepřítomnosti zůstává potvrzení výjimky povinné, protože jde
+nejspíš o zapomenutou mzdu.
+
 Projde i **peněžitá pomoc v mateřství**. Při jejím zápisu vyplňte
 **očekávaný den porodu**, ten je povinný. Jakmile porod nastane, použijte
 u nepřítomnosti tlačítko **Doplnit den porodu**. Jde to i u schválené

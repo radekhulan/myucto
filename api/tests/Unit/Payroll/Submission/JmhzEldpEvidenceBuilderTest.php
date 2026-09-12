@@ -766,6 +766,32 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(2, $section['section18_days']['omluvenaNepritomnost']);
     }
 
+    /**
+     * Měsíc jen s nepřítomností bez náhrady mzdy nese 10276 nevyplněné:
+     * souhrn nulu navrhuje jako prázdnou a XSD prvek nevyžaduje. Dřív to ELDP
+     * odmítlo jako nesouhlasné úhrny a hlášení se nesestavilo.
+     */
+    public function testUnpaidOnlyAbsenceAcceptsUnfilledPaidHours(): void
+    {
+        $source = $this->compensatoryTimeOffSource('jmhz-work-month.v5');
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']
+            ['values']['unworked_paid_millihours'] = null;
+        $source = $this->withInput($source, $input);
+        $builder = new JmhzEldpEvidenceBuilder();
+
+        $section = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        )->payload['eldp_sections'][0];
+
+        self::assertSame(31, $section['insurance_days']);
+        self::assertSame(2, $section['section18_days']['omluvenaNepritomnost']);
+    }
+
     public function testCompensatoryTimeOffStaysBlockedOnOlderWorkSummary(): void
     {
         $source = $this->compensatoryTimeOffSource('jmhz-work-month.v4');
