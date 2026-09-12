@@ -82,6 +82,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/catalog/facets$#',
         '#^/api/catalog/exports$#',
         '#^/api/catalog/exports/[0-9]+/download$#',
+        '#^/api/catalog/changes$#',
         '#^/api/price-list-items(/|$)#',
         // Mzdy - pouze úzký personální a vstupní kontrakt. Uzávěrky, schválení
         // běhů, platby, dokumenty a podání nemají v allowlistu žádnou cestu.

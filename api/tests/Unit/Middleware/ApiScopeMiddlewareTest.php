@@ -25,6 +25,13 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame(403, $this->middleware()->process($this->bearer('POST', '/api/stock/items/42/neighbors/apply', 'read'), $this->okHandler())->getStatusCode());
     }
 
+    public function testBearerReadCanGetCatalogChangeFeed(): void
+    {
+        self::assertSame(204, $this->middleware()->process($this->bearer('GET', '/api/catalog/changes', 'read'), $this->okHandler())->getStatusCode());
+        self::assertSame(403, $this->middleware()->process($this->bearer('POST', '/api/catalog/changes', 'read'), $this->okHandler())->getStatusCode());
+        self::assertSame(403, $this->middleware()->process($this->bearer('GET', '/api/catalog/changes/1', 'read'), $this->okHandler())->getStatusCode());
+    }
+
     public function testSessionRequestPassesThroughEvenOnAdminPath(): void
     {
         // Non-bearer (session) request — ApiScope ho neřeší vůbec.
