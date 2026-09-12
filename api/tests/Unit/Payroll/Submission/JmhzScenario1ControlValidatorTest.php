@@ -1325,6 +1325,110 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
+    /**
+     * Sleva pracujícího důchodce (§ 7d a § 7e ZPSZ) se vykazuje příznakem
+     * 10490 a výší 10491 u součásti a úhrny 10485 až 10487 v pojistné části.
+     * Když sedí, projdou všechny kontroly, které se na ni vážou.
+     */
+    public function testWorkingPensionerDiscountPassesEveryControl(): void
+    {
+        $report = $this->validate(JmhzXmlSample::withEmployeeDiscount());
+
+        self::assertSame([], $this->failedIds($report));
+        foreach ([4, 12, 170, 208, 209, 213, 275, 297] as $controlId) {
+            self::assertSame(
+                JmhzControlOutcome::Passed,
+                $this->finding($report, $controlId)->outcome,
+                "Kontrola {$controlId} neproběhla nad slevou pracujícího důchodce.",
+            );
+        }
+    }
+
+    /**
+     * Kontrola 209 — úhrn slev 10487 je součet slev 10491 za součásti. Sleva
+     * o korunu jinde projde tolerancí kontroly 170, ale ne touhle.
+     */
+    public function testEmployeeDiscountTotalMustMatchTheSumOfForms(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                employeeDiscount: JmhzXmlSample::employeeDiscountBlock(66),
+            ),
+            pvpoj: JmhzXmlSample::employeeDiscountPvpoj(),
+        ));
+
+        self::assertContains(209, $this->failedIds($report));
+        self::assertNotContains(170, $this->failedIds($report));
+    }
+
+    /**
+     * Kontrola 213 — úhrn vyměřovacích základů zaměstnanců se slevou 10486
+     * je součet 10477 součástí s 10490 = ANO.
+     */
+    public function testEmployeeDiscountBaseMustMatchTheSumOfClaimingForms(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                employeeDiscount: JmhzXmlSample::employeeDiscountBlock(),
+            ),
+            pvpoj: JmhzXmlSample::employeeDiscountPvpoj(base: 900),
+        ));
+
+        self::assertContains(213, $this->failedIds($report));
+    }
+
+    /**
+     * Kontrola 297 — počet zaměstnanců se slevou 10485 nesmí převýšit počet
+     * součástí, které slevu uplatňují.
+     */
+    public function testEmployeeDiscountHeadcountCannotExceedClaimingForms(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                employeeDiscount: JmhzXmlSample::employeeDiscountBlock(),
+            ),
+            pvpoj: JmhzXmlSample::employeeDiscountPvpoj(headcount: 2),
+        ));
+
+        self::assertContains(297, $this->failedIds($report));
+    }
+
+    /** Kontrola 208 — výše slevy 10491 jen při 10490 = ANO. */
+    public function testEmployeeDiscountAmountWithoutFlagIsRefused(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                employeeDiscount: JmhzXmlSample::employeeDiscountBlock(claimed: false),
+            ),
+            pvpoj: JmhzXmlSample::employeeDiscountPvpoj(),
+        ));
+
+        self::assertContains(208, $this->failedIds($report));
+    }
+
+    /** Kontrola 275 — sleva pracujícího důchodce a sezónní sleva se vylučují. */
+    public function testWorkingPensionerAndSeasonalDiscountsAreExclusive(): void
+    {
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form(
+                '1000000001',
+                '2000000000000000000001',
+                employeeDiscount: JmhzXmlSample::employeeDiscountBlock(orchard: true),
+            ),
+            pvpoj: JmhzXmlSample::employeeDiscountPvpoj(),
+        ));
+
+        self::assertContains(275, $this->failedIds($report));
+    }
+
     /** @return list<int> */
     private function failedIds(JmhzControlEvaluationReport $report): array
     {

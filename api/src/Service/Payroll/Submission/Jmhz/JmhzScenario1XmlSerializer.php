@@ -1705,21 +1705,31 @@ final class JmhzScenario1XmlSerializer
          * podmíněný interakcí, a `slevaZamestnanceType` je má oba v jednom
          * bloku před slevou zaměstnavatele.
          *
-         * „Ne" tady není dopočtená nula. Příprava se zastaví hned, jakmile je
-         * sleva zaměstnance nenulová
-         * ({@see JmhzPreparationSnapshotBuilder::inspectDiscounts()},
-         * `jmhz_employee_social_discount_unsupported`), takže do serializace se
-         * dostane jen měsíc, ve kterém se ani jedna sleva neuplatňuje.
+         * 10490 = ANO a výši slevy 10491 nese jen vztah, kterému resolver
+         * slevu přiřadil
+         * ({@see JmhzScenario1DocumentResolver::employeeSocialDiscount()}):
+         * tentýž, který nese pojistné osoby. Ostatní vztahy vykazují NE.
+         * Pořadí prvků určuje `slevaZamestnanceType`: příznak, výše slevy,
+         * teprve potom příznak ovocnářů.
          *
-         * Vykázat to je nutné, ne kosmetické: kontrola 297 poměřuje počet
+         * Vykázat příznak je nutné i jako NE: kontrola 297 poměřuje počet
          * zaměstnanců v `pvpoj:slevyZamestnancu` s počtem vztahů, u nichž je
          * 10490 = ANO, a kontrola 213 stejně tak úhrn vyměřovacích základů.
          * Mlčení na formulářích při vyplněné pojistné části je proto rozpor
          * uvnitř jednoho podání.
          *
-         * AŽ blokace padne, musí se sem číst skutečný stav vztahu — hodnota
-         * `true` se nikdy nesmí objevit u obou zároveň (kontrola 275).
+         * 10546 zůstává NE: sezónní slevu běžný profil nepodporuje a příprava
+         * ji potvrdit nedovolí. ANO u obou na jednom formuláři zakazuje
+         * kontrola 275 a resolver takovou kombinaci zablokuje dřív.
          */
+        $employeeDiscount = $this->object($employment['employee_social_discount'] ?? null);
+        if ($employeeDiscount !== [] && !$reportsSocial) {
+            $this->invalid(
+                'jmhz_xml_employee_social_discount_misplaced',
+                'Slevu na pojistném zaměstnance smí nést jen formulář,'
+                    . ' který vykazuje pojistné osoby.',
+            );
+        }
         $employeeDiscounts = $this->node(
             $dom,
             JmhzSchemaCatalog::NS_FORM,
@@ -1730,8 +1740,32 @@ final class JmhzScenario1XmlSerializer
             $employeeDiscounts,
             JmhzSchemaCatalog::NS_FORM,
             'form:slevaZamestnanceEvidovana',
-            'false',
+            $employeeDiscount === [] ? 'false' : 'true',
         );
+        if ($employeeDiscount !== []) {
+            $discountCzk = $this->int($employeeDiscount['amount_czk'] ?? null, '10491');
+            // 10490 = ANO jen při nenulové slevě; nula s příznakem by tvrdila
+            // uplatněnou slevu, která se neuplatnila.
+            if ($discountCzk === 0) {
+                $this->invalid(
+                    'jmhz_xml_employee_social_discount_zero',
+                    'Sleva na pojistném zaměstnance s příznakem ANO nesmí být nulová.',
+                );
+            }
+            $amountNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:slevaZamestnance',
+            );
+            $this->text(
+                $dom,
+                $amountNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:vyseSlevy',
+                (string) $discountCzk,
+            );
+            $employeeDiscounts->appendChild($amountNode);
+        }
         $this->text(
             $dom,
             $employeeDiscounts,

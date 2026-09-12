@@ -249,6 +249,22 @@ nebo doplatku zdravotního pojištění za celý měsíc nemoci — vykáže se 
 průchodný tvar; ve mzdové evidenci zůstává skutečná částka beze změny. Rozdíl
 proti evidenci proto vzniká záměrně a hlášení kvůli němu neblokujeme.
 
+**Sleva na pojistném pracujícího důchodce** (§ 7d a § 7e zákona č. 589/1992 Sb.)
+se v měsíčním hlášení vykazuje sama. U zaměstnance, kterému mzdový běh slevu
+spočítal, nese formulář příznak **Sleva na pojistném zaměstnance = ANO** a výši
+slevy, tedy 6,5 % z vyměřovacího základu zaokrouhlených na celé koruny nahoru.
+Pojistná část hlášení uvádí počet zaměstnanců se slevou, úhrn jejich
+vyměřovacích základů a úhrn slev, a o úhrn slev snižuje pojistné k úhradě.
+Pojistné zaměstnance na formuláři zůstává **před slevou** (7,1 % ze základu),
+stejně jako pojistné za zaměstnance v pojistné části. Nárok se zadává v zákonné
+evidenci osoby (viz [Zaměstnanci](69_Zamestnanci.md#6982-zakonna-evidence-osoby)).
+
+Má-li důchodce u firmy víc souběžných vztahů, slevu nese jen formulář vztahu,
+který nese i pojistné osoby; ostatní vztahy uvádějí příznak NE. Když je v měsíci
+účastných na pojištění víc vztahů najednou, hlášení se zablokuje stejně jako
+u pojistného a podává se ručně přes ePortál ČSSZ. Slevu pracujícího důchodce
+a sezónní slevu na pojistném nelze na jednom vztahu uplatnit současně.
+
 ## 68.7 Návaznosti
 
 Identifikátory nastavte v [Nastavení mezd](73_Nastaveni_mezd.md). Firemní přístupy, ruční inbox a odchozí zprávy popisuje kapitola [Datová schránka](93_Datova_schranka.md), globální registraci pro odesílání správcem systému pak [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md). Zdrojová data pocházejí z [mzdového běhu](63_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](76_Retencni_lhuty.md).

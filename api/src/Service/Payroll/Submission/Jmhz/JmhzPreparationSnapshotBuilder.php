@@ -1078,16 +1078,19 @@ final class JmhzPreparationSnapshotBuilder
             );
             return null;
         }
+        /*
+         * Sleva pracujícího důchodce (§ 7d a § 7e ZPSZ) přípravu neblokuje.
+         * Částka je součástí zmrazeného výsledku osoby (`person_summary`)
+         * a na formulář ji přiřadí resolver jedinému vztahu, který nese
+         * pojistné osoby
+         * ({@see JmhzScenario1DocumentResolver::employeeSocialDiscount()}).
+         * Tady se jen hlídá, že výsledek částku opravdu nese — chybějící
+         * údaj není nula.
+         */
         $employeeDiscount = $social['working_pensioner_discount_minor_units'] ?? null;
         if (!is_int($employeeDiscount) || $employeeDiscount < 0) {
             $issues[] = $this->issue(
                 'jmhz_social_result_not_calculated',
-                'employment',
-                $employmentId,
-            );
-        } elseif ($employeeDiscount > 0) {
-            $issues[] = $this->issue(
-                'jmhz_employee_social_discount_unsupported',
                 'employment',
                 $employmentId,
             );

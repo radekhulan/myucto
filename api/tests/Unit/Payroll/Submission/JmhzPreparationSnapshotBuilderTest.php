@@ -693,6 +693,59 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
     }
 
     /**
+     * Sleva pracujícího důchodce (§ 7d a § 7e ZPSZ) přípravu neblokuje.
+     * Částka zůstává ve zmrazeném výsledku osoby a na formulář ji přiřadí
+     * resolver vztahu, který nese pojistné osoby.
+     */
+    public function testWorkingPensionerDiscountNoLongerBlocksPreparation(): void
+    {
+        $codes = $this->readinessCodes(
+            $this->sourceWithWorkingPensionerDiscount(6_500),
+        );
+
+        self::assertNotContains('jmhz_employee_social_discount_unsupported', $codes);
+        self::assertNotContains('jmhz_social_result_not_calculated', $codes);
+    }
+
+    /**
+     * Chybějící částka slevy není nula: výsledek, který ji nenese, zůstává
+     * nevypočteným výsledkem.
+     */
+    public function testMissingWorkingPensionerDiscountIsNotReadAsZero(): void
+    {
+        self::assertContains(
+            'jmhz_social_result_not_calculated',
+            $this->readinessCodes($this->sourceWithWorkingPensionerDiscount(null)),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function sourceWithWorkingPensionerDiscount(?int $discount): array
+    {
+        $source = $this->source();
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        if ($discount === null) {
+            unset($result['people'][0]['statutory']['social_insurance']
+                ['working_pensioner_discount_minor_units']);
+        } else {
+            $result['people'][0]['statutory']['social_insurance']
+                ['working_pensioner_discount_minor_units'] = $discount;
+        }
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        return $source;
+    }
+
+    /**
      * @param array<string,mixed> $source
      * @return list<string>
      */

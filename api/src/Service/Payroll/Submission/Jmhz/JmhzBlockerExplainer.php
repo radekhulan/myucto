@@ -128,6 +128,11 @@ final class JmhzBlockerExplainer
         'jmhz_employer_part_time_discount_working_time_missing' => 'Chybí sjednaná kratší týdenní pracovní doba.',
         'jmhz_employer_part_time_discount_working_time_unresolved' => 'Sjednanou kratší týdenní pracovní dobu nelze vykázat.',
         'jmhz_employer_part_time_discount_activity_unsupported' => 'Sleva za kratší úvazek neodpovídá druhu pracovního vztahu.',
+        'jmhz_employee_social_discount_relationship_unresolved' => 'Slevu na pojistném pracujícího důchodce nelze '
+            . 'přiřadit pracovnímu vztahu: vztah, který nese pojistné osoby, není účastný na pojištění nebo má '
+            . 'jiný vyměřovací základ, než ze kterého je sleva vypočtená.',
+        'jmhz_employee_social_discount_exclusive' => 'U jednoho pracovního vztahu se sbíhá sleva pracujícího '
+            . 'důchodce se sezónní slevou na pojistném; obě současně uplatnit nelze.',
         'jmhz_xml_identity_name_incomplete' => 'Zaměstnanec se hlásí jménem, protože mu ČSSZ zatím nepřidělila OIČ ani ID PPV, a k tomu chybí příjmení, jméno, datum narození, datum nástupu nebo druh činnosti.',
     ];
 
@@ -208,6 +213,11 @@ final class JmhzBlockerExplainer
             . 'přes ePortál ČSSZ, pojistné rozepište po vztazích podle mzdových listů a součet musí sedět '
             . 's přehledem o výši pojistného. Zkontrolujte také v Mzdy → Mzdové běhy, zda je účast na '
             . 'pojištění u vztahů vyhodnocená správně.',
+        'jmhz_employee_social_discount_relationship_unresolved' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte '
+            . 'účast pracovních vztahů na sociálním pojištění; nesedí-li, hlášení za tento měsíc podejte ručně '
+            . 'přes ePortál ČSSZ.',
+        'jmhz_employee_social_discount_exclusive' => 'Opravte buď potvrzení sezónní slevy v Mzdová podání → JMHZ, '
+            . 'nebo slevu pracujícího důchodce v zákonné evidenci osoby (Mzdy → Zaměstnanci).',
         'jmhz_xml_identity_name_incomplete' => 'Otevřete Mzdy → Zaměstnanci a na kartě zaměstnance a jeho pracovního vztahu doplňte jméno, příjmení, datum narození, den nástupu a druh činnosti; OIČ ani ID PPV shánět nemusíte, ta přidělí ČSSZ až v protokolu o přijetí.',
     ];
 

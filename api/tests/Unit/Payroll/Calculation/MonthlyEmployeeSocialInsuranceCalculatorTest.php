@@ -36,6 +36,24 @@ final class MonthlyEmployeeSocialInsuranceCalculatorTest extends TestCase
         self::assertSame(28_700, $result->employeeContributionMinorUnits);
     }
 
+    /**
+     * § 7e odst. 1 ZPSZ: sleva 6,5 % z vyměřovacího základu se zaokrouhluje
+     * na celé koruny nahoru i tehdy, když by obchodní zaokrouhlení šlo dolů.
+     * 10 001 Kč × 6,5 % = 650,065 Kč, sleva je tedy 651 Kč; pojistné
+     * 10 001 Kč × 7,1 % = 710,071 Kč se zaokrouhlí na 711 Kč samostatně.
+     */
+    public function testWorkingPensionerDiscountRoundsUpToWholeCzk(): void
+    {
+        $result = $this->calculator()->calculate(
+            '2026-08-03',
+            new MonthlyEmployeeSocialInsuranceInput(1_000_100, 0, true, true),
+        );
+
+        self::assertSame(71_100, $result->employeeContributionBeforeDiscountMinorUnits);
+        self::assertSame(65_100, $result->workingPensionerDiscountMinorUnits);
+        self::assertSame(6_000, $result->employeeContributionMinorUnits);
+    }
+
     public function testAppliesRemainingAnnualMaximumAndZeroesNonParticipatingIncome(): void
     {
         $nearMaximum = $this->calculator()->calculate(

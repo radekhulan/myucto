@@ -354,6 +354,159 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertStringContainsString('<form:dnyEvidencniStav>0</form:dnyEvidencniStav>', $xml);
     }
 
+    /**
+     * Pracující důchodce (§ 7d a § 7e ZPSZ): sleva 6,5 % ze základu 1 000 Kč
+     * je 65 Kč. Formulář nese 10490 = ANO a 10491 = 65 a pojistné zaměstnance
+     * 10370 zůstává PŘED slevou (71 Kč), protože pojistná část vykazuje 10028
+     * také před slevou a slevu odečítá až v pojistném k úhradě. Dřív příprava
+     * slevu blokovala a serializér psal 10490 natvrdo „ne".
+     */
+    public function testWorkingPensionerDiscountIsReportedOnTheFormAndPassesItsControls(): void
+    {
+        $resolution = $this->resolutionFor($this->pensionerPayload());
+        self::assertSame([], $this->blockerCodes($resolution));
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun($resolution, $this->envelope())['xml'];
+        $compact = preg_replace('/>\s+</', '><', $xml) ?? '';
+
+        self::assertStringContainsString(
+            '<form:slevaZamestnance><form:slevaZamestnanceEvidovana>true</form:slevaZamestnanceEvidovana>'
+                . '<form:slevaZamestnance><form:vyseSlevy>65</form:vyseSlevy></form:slevaZamestnance>'
+                . '<form:slevaZamestnanceOvoZelEvidovana>false</form:slevaZamestnanceOvoZelEvidovana>'
+                . '</form:slevaZamestnance>',
+            $compact,
+        );
+        self::assertStringContainsString(
+            '<form:pojisteniZamestnanec><form:socialniPojisteni>71</form:socialniPojisteni>',
+            $compact,
+        );
+        self::assertStringContainsString(
+            '<pvpoj:slevyZamestnancu><pvpoj:pocetZamestnancu>1</pvpoj:pocetZamestnancu>'
+                . '<pvpoj:uhrnVymerovacichZakladu>1000</pvpoj:uhrnVymerovacichZakladu>'
+                . '<pvpoj:pojistneSleva>65</pvpoj:pojistneSleva></pvpoj:slevyZamestnancu>',
+            $compact,
+        );
+
+        $this->assertControlsPassed($xml, [4, 12, 170, 208, 209, 213, 275, 297]);
+    }
+
+    /**
+     * Souběh HPP a podlimitní DPP: slevu nese jen formulář, který nese
+     * pojistné osoby. Druhý vztah vykazuje 10490 = NE, jinak by kontroly
+     * 209 a 213 napočítaly slevu i základ dvakrát.
+     */
+    public function testPensionerDiscountStaysOnTheFormThatCarriesContributions(): void
+    {
+        $payload = $this->concurrentPayload();
+        $this->claimPensionerDiscount($payload);
+        $resolution = $this->resolutionFor($payload);
+        self::assertSame([], $this->blockerCodes($resolution));
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $resolution,
+            $this->concurrentEnvelope(),
+        )['xml'];
+
+        self::assertSame(1, substr_count(
+            $xml,
+            '<form:slevaZamestnanceEvidovana>true</form:slevaZamestnanceEvidovana>',
+        ));
+        self::assertSame(1, substr_count(
+            $xml,
+            '<form:slevaZamestnanceEvidovana>false</form:slevaZamestnanceEvidovana>',
+        ));
+        self::assertSame(1, substr_count($xml, '<form:vyseSlevy>65</form:vyseSlevy>'));
+        $this->assertControlsPassed($xml, [12, 209, 213, 275, 297]);
+    }
+
+    /**
+     * Sleva je vypočtená ze základu OSOBY. Když se základ vztahu, který
+     * nese pojistné, od něj liší, sleva vztahu není známá a odhadem se
+     * nepřiřadí.
+     */
+    public function testPensionerDiscountWithDifferentRelationshipBaseBlocks(): void
+    {
+        $payload = $this->pensionerPayload();
+        $payload['people'][0]['employments'][0]['insurance']['capped_assessment_base_minor_units'] = 90_000;
+
+        self::assertContains(
+            'jmhz_employee_social_discount_relationship_unresolved',
+            $this->blockerCodes($this->resolutionFor($payload)),
+        );
+    }
+
+    /** Kontrola 275: 10490 a 10546 nesmí být na jednom formuláři obě ANO. */
+    public function testPensionerDiscountTogetherWithSeasonalDiscountBlocks(): void
+    {
+        $payload = $this->pensionerPayload();
+        $payload['ordinary_evidence'][0]['attribute_values']['10546'] = true;
+
+        self::assertContains(
+            'jmhz_employee_social_discount_exclusive',
+            $this->blockerCodes($this->resolutionFor($payload)),
+        );
+    }
+
+    /**
+     * 10370 je pojistné před slevou. Výsledek, který ho nenese, ho při
+     * nenulové slevě nedoloží — dopočítat ho z pojistného po slevě by bylo
+     * odhadem.
+     */
+    public function testPensionerDiscountWithoutContributionBeforeDiscountBlocks(): void
+    {
+        $payload = $this->pensionerPayload();
+        unset($payload['people'][0]['person_summary']['statutory']['social_insurance']
+            ['employee_contribution_before_discount_minor_units']);
+
+        self::assertContains(
+            'jmhz_scenario1_social_result_not_calculated',
+            $this->blockerCodes($this->resolutionFor($payload)),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function pensionerPayload(): array
+    {
+        $payload = $this->payload();
+        $this->claimPensionerDiscount($payload);
+
+        return $payload;
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function claimPensionerDiscount(array &$payload): void
+    {
+        $statutory = &$payload['people'][0]['person_summary']['statutory'];
+        $statutory['social_insurance']['employee_contribution_before_discount_minor_units'] = 7_100;
+        $statutory['social_insurance']['working_pensioner_discount_minor_units'] = 6_500;
+        $statutory['social_insurance']['employee_contribution_minor_units'] = 600;
+        $statutory['net_pay']['net_before_deductions_minor_units'] += 6_500;
+        $statutory['net_pay']['net_payable_minor_units'] += 6_500;
+        unset($statutory);
+    }
+
+    /** @param list<int> $controlIds */
+    private function assertControlsPassed(string $xml, array $controlIds): void
+    {
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        foreach ($controlIds as $controlId) {
+            $findings = array_values(array_filter(
+                $report->findings,
+                static fn (JmhzControlFinding $finding): bool => $finding->controlId === $controlId,
+            ));
+            self::assertNotSame([], $findings, "Kontrola {$controlId} se nevyhodnotila.");
+            foreach ($findings as $finding) {
+                self::assertSame(
+                    JmhzControlOutcome::Passed,
+                    $finding->outcome,
+                    "Kontrola {$controlId} neprošla.",
+                );
+            }
+        }
+    }
+
     /** @return list<string> */
     private function blockerCodes(JmhzScenario1Resolution $resolution): array
     {
@@ -721,6 +874,10 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
     {
         $social = $payload['people'][0]['person_summary']['statutory']['social_insurance'];
         $employee = (int) $social['employee_contribution_minor_units'];
+        // Pojistná část vykazuje pojistné za zaměstnance před slevou (10028)
+        // a slevu pracujících důchodců odečítá až v pojistném k úhradě.
+        $employeeBefore = (int) ($social['employee_contribution_before_discount_minor_units'] ?? $employee);
+        $discount = (int) ($social['working_pensioner_discount_minor_units'] ?? 0);
         $employer = (int) $social['employer_contribution_minor_units'];
         $base = intdiv((int) $social['capped_assessment_base_minor_units'], 100);
         $values = [
@@ -728,11 +885,18 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
                 'zakladZamestnavateleA' => $base > 0 ? $base : null,
                 'pojistneZamestnavateleA' => $base > 0 ? intdiv($employer, 100) : null,
                 'pojistneZamestnavateleCelkem' => intdiv($employer, 100),
-                'pojistneZamestnance' => intdiv($employee, 100),
-                'pojistneCelkem' => intdiv($employee + $employer, 100),
+                'pojistneZamestnance' => intdiv($employeeBefore, 100),
+                'pojistneCelkem' => intdiv($employeeBefore + $employer, 100),
             ], static fn (?int $value): bool => $value !== null),
             'pojistneUhrada' => intdiv($employee + $employer, 100),
         ];
+        if ($discount > 0) {
+            $values['slevyZamestnancu'] = [
+                'pocetZamestnancu' => 1,
+                'uhrnVymerovacichZakladu' => $base,
+                'pojistneSleva' => intdiv($discount, 100),
+            ];
+        }
 
         return new JmhzPvpojPreview(
             7,

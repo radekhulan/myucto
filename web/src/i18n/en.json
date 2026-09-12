@@ -5838,6 +5838,8 @@
           "jmhz_scenario1_deductions_unsupported": "Wage deductions are not supported by this profile yet.",
           "jmhz_scenario1_withholding_tax_unsupported": "Withholding tax is not supported by this profile yet.",
           "jmhz_scenario1_concurrent_participation_unsupported": "In this month the employee has more than one concurrent relationship participating in social insurance. Contributions are calculated per person and the application cannot split them between several participating relationships yet. File this month's report manually through the ČSSZ ePortal.",
+          "jmhz_employee_social_discount_relationship_unresolved": "The working pensioner's social insurance discount cannot be assigned to an employment: the relationship that carries the person's contributions does not participate in insurance or has a different assessment base than the one the discount was calculated from. Check participation of the relationships in Payroll → Payroll runs.",
+          "jmhz_employee_social_discount_exclusive": "One employment combines the working pensioner discount with the seasonal social insurance discount. Both cannot be applied at the same time; correct one of them.",
           "jmhz_scenario1_annual_fields_unsupported": "Annual attributes are not supported by this profile yet.",
           "jmhz_scenario1_pvpoj_unavailable": "The insurance part of the submission is missing.",
           "jmhz_scenario1_pvpoj_source_mismatch": "The insurance part does not match the selected CSSZ registration. Refresh the overview and check the payroll-office assignment.",

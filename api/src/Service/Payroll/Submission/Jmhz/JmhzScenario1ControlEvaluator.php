@@ -209,11 +209,11 @@ final class JmhzScenario1ControlEvaluator
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 114, 118, 121, 124, 127, 128, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
             150, 151, 153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
-            204, 207, 208, 215,
+            204, 207, 208, 209, 213, 215,
             191, 192, 193, 211, 216, 227, 229, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 265, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
-            296, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
+            296, 297, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
             335, 341, 342, 354, 355,
         ];
     }
@@ -399,6 +399,8 @@ final class JmhzScenario1ControlEvaluator
                 'source_row_9',
             ),
             208 => $this->onlyWithFlag($projection, '10491', '10490'),
+            209 => $this->employeeDiscountMatchesForms($projection),
+            213 => $this->employeeDiscountBaseMatchesForms($projection),
             215 => $this->monthlyChildUnderTwentySix($projection),
             216 => $this->assessmentBaseSum($projection),
             270 => $this->employeeDiscountTolerance(
@@ -413,6 +415,7 @@ final class JmhzScenario1ControlEvaluator
             275 => $this->discountsAreExclusive($projection),
             284 => $this->assessmentBaseComponentPresence($projection),
             296 => $this->orchardDiscountOnlyOnDpp($projection),
+            297 => $this->employeeDiscountHeadcountWithinForms($projection),
             328 => $this->emptyWhenZero(
                 $projection,
                 '10375',
@@ -3212,6 +3215,124 @@ final class JmhzScenario1ControlEvaluator
                 return "Atribut {$amountId} smí být vyplněn jen při uplatněné slevě ({$flagId}).";
             },
         );
+    }
+
+    /**
+     * Kontrola 209 — úhrn slev pracujících důchodců v pojistné části (10487)
+     * se musí rovnat součtu slev (10491) na formulářích. Sleva se podle
+     * pokynů zaokrouhluje u každého vztahu zvlášť, takže úhrn je součet
+     * zaokrouhlených částek, ne procento z úhrnu základů (to hlídá tolerance
+     * kontroly 170).
+     *
+     * Neuvedený blok `slevyZamestnancu` je doloženě nula: pojistná část ho
+     * nese jen tehdy, když se sleva uplatňuje (viz `insurancePayable()`).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employeeDiscountMatchesForms(JmhzAttributeProjection $projection): array
+    {
+        $total = $projection->pvpoj()->integer('10487');
+        $sum = 0;
+        $seen = 0;
+        foreach ($projection->forms() as $form) {
+            $amount = $form->integer('10491');
+            if ($amount === null) {
+                continue;
+            }
+            ++$seen;
+            $sum += $amount;
+        }
+        if ($total === null && $seen === 0) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        $reported = $total ?? 0;
+        if ($reported !== $sum) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Úhrn slev na pojistném zaměstnanců {$reported} Kč neodpovídá součtu"
+                    . " slev za jednotlivé součásti {$sum} Kč.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    /**
+     * Kontrola 213 — úhrn vyměřovacích základů zaměstnanců se slevou
+     * pracujícího důchodce (10486) se rovná součtu základů (10477) těch
+     * součástí, které mají 10490 = ANO. Stejná konstrukce jako kontrola 207
+     * u slevy zaměstnavatele.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employeeDiscountBaseMatchesForms(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $total = $projection->pvpoj()->integer('10486');
+        $sum = 0;
+        $claimed = 0;
+        foreach ($projection->forms() as $form) {
+            if ($form->boolean('10490') !== true) {
+                continue;
+            }
+            ++$claimed;
+            $sum += $form->integer('10477') ?? 0;
+        }
+        if ($total === null && $claimed === 0) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        if ($total === null) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Slevu pracujícího důchodce vykazuje {$claimed} součástí, ale pojistná"
+                    . ' část úhrn jejich vyměřovacích základů neuvádí.',
+            )];
+        }
+        if ($total !== $sum) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Úhrn vyměřovacích základů zaměstnanců se slevou {$total} Kč neodpovídá"
+                    . " součtu za součásti se slevou {$sum} Kč.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
+    }
+
+    /**
+     * Kontrola 297 — počet zaměstnanců se slevou pracujícího důchodce (10485)
+     * nesmí převýšit počet pojistných vztahů, u nichž je 10490 = ANO. Nerovnost,
+     * ne rovnost: osoba se počítá jednou, i kdyby slevu uplatňovala z víc
+     * zaměstnání.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employeeDiscountHeadcountWithinForms(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $headcount = $projection->pvpoj()->integer('10485');
+        if ($headcount === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_PVPOJ)];
+        }
+        $claimed = 0;
+        foreach ($projection->forms() as $form) {
+            if ($form->boolean('10490') === true) {
+                ++$claimed;
+            }
+        }
+        if ($headcount > $claimed) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_PVPOJ,
+                null,
+                "Počet zaměstnanců se slevou pracujícího důchodce {$headcount} je vyšší"
+                    . " než počet součástí, které slevu uplatňují ({$claimed}).",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_PVPOJ)];
     }
 
     /**

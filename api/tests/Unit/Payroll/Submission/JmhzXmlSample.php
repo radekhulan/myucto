@@ -118,6 +118,69 @@ final class JmhzXmlSample
             XML;
     }
 
+    /**
+     * Podání se slevou pracujícího důchodce (§ 7d a § 7e ZPSZ). Sleva je
+     * 6,5 % z vyměřovacího základu 1 000 Kč zaokrouhlených nahoru, tedy 65 Kč.
+     * Pojistné zaměstnance (10370, 10028) se vykazuje před slevou a sleva se
+     * odečítá až v pojistném k úhradě.
+     */
+    public static function withEmployeeDiscount(): string
+    {
+        return self::document(
+            self::form(
+                '1000000001',
+                '2000000000000000000001',
+                employeeDiscount: self::employeeDiscountBlock(),
+            ),
+            pvpoj: self::employeeDiscountPvpoj(),
+        );
+    }
+
+    public static function employeeDiscountBlock(
+        ?int $amount = 65,
+        bool $claimed = true,
+        bool $orchard = false,
+    ): string {
+        $flag = $claimed ? 'true' : 'false';
+        $orchardFlag = $orchard ? 'true' : 'false';
+        $amountXml = $amount === null
+            ? ''
+            : "\n                        <form:slevaZamestnance>"
+                . "\n                          <form:vyseSlevy>{$amount}</form:vyseSlevy>"
+                . "\n                        </form:slevaZamestnance>";
+
+        return <<<XML
+                      <form:slevaZamestnance>
+                        <form:slevaZamestnanceEvidovana>{$flag}</form:slevaZamestnanceEvidovana>{$amountXml}
+                        <form:slevaZamestnanceOvoZelEvidovana>{$orchardFlag}</form:slevaZamestnanceOvoZelEvidovana>
+                      </form:slevaZamestnance>
+            XML;
+    }
+
+    public static function employeeDiscountPvpoj(
+        int $headcount = 1,
+        int $base = 1_000,
+        int $discount = 65,
+    ): string {
+        $payable = 319 - $discount;
+
+        return <<<XML
+                <pvpoj:pojistne>
+                  <pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleA>248</pvpoj:pojistneZamestnavateleA>
+                  <pvpoj:pojistneZamestnavateleCelkem>248</pvpoj:pojistneZamestnavateleCelkem>
+                  <pvpoj:pojistneZamestnance>71</pvpoj:pojistneZamestnance>
+                  <pvpoj:pojistneCelkem>319</pvpoj:pojistneCelkem>
+                </pvpoj:pojistne>
+                <pvpoj:slevyZamestnancu>
+                  <pvpoj:pocetZamestnancu>{$headcount}</pvpoj:pocetZamestnancu>
+                  <pvpoj:uhrnVymerovacichZakladu>{$base}</pvpoj:uhrnVymerovacichZakladu>
+                  <pvpoj:pojistneSleva>{$discount}</pvpoj:pojistneSleva>
+                </pvpoj:slevyZamestnancu>
+                <pvpoj:pojistneUhrada>{$payable}</pvpoj:pojistneUhrada>
+            XML;
+    }
+
     public static function defaultPvpoj(): string
     {
         return <<<'XML'
@@ -178,9 +241,11 @@ final class JmhzXmlSample
         bool $primary = true,
         ?string $eldp = null,
         string $discount = '',
+        string $employeeDiscount = '',
     ): string {
         $primaryFlag = $primary ? 'true' : 'false';
         $discount = $discount === '' ? '' : "\n{$discount}";
+        $employeeDiscount = $employeeDiscount === '' ? '' : "\n{$employeeDiscount}";
         $eldp ??= <<<'XML'
                       <form:eldp>
                         <form:kod>1++</form:kod>
@@ -243,7 +308,7 @@ final class JmhzXmlSample
                       </form:pojisteniZamestnanec>
                       <form:pojisteniZamestnavatel>
                         <form:socialniPojisteni>248</form:socialniPojisteni>
-                      </form:pojisteniZamestnavatel>{$discount}
+                      </form:pojisteniZamestnavatel>{$employeeDiscount}{$discount}
                     </form:pojisteni>
                     <form:vykonavanaPozice>
                       <form:mistoVykonuPrace>
