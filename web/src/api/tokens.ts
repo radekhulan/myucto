@@ -1,4 +1,5 @@
 import { api } from './client'
+import { authApi } from './auth'
 
 export interface ApiToken {
   id: number
@@ -89,8 +90,22 @@ export interface CreateTokenResult {
 export const tokensApi = {
   list: () => api.get<{ tokens: ApiToken[] }>('/auth/tokens').then((r) => r.data.tokens),
 
-  create: (payload: CreateTokenPayload) =>
-    api.post<CreateTokenResult>('/auth/tokens', payload).then((r) => r.data),
+  create: async (payload: CreateTokenPayload, expectedUserId: number): Promise<CreateTokenResult> => {
+    try {
+      return (await api.post<CreateTokenResult>('/auth/tokens', payload)).data
+    } catch (error: any) {
+      if (error?.response?.status !== 403
+        || error?.response?.data?.error?.code !== 'csrf_failed'
+        || !expectedUserId) throw error
+
+      // Jiná karta mohla mezitím obnovit přihlašovací cookie. Odmítnutý POST
+      // nic nevytvořil; nové CSRF načti až z aktuální relace a před opakováním
+      // ověř, že stále patří stejnému uživateli.
+      const session = await authApi.me()
+      if (session.user.id !== expectedUserId) throw error
+      return (await api.post<CreateTokenResult>('/auth/tokens', payload)).data
+    }
+  },
 
   revoke: (id: number) => api.delete(`/auth/tokens/${id}`),
 

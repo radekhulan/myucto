@@ -158,7 +158,7 @@ async function submitCreate() {
       allow_payroll_submission_docs: form.value.allow_payroll_submission_docs,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
-    })
+    }, auth.user?.id ?? 0)
     // Heslo nedržíme v paměti déle, než je nutné.
     form.value.password = ''
     passkeyStepUpToken.value = ''
