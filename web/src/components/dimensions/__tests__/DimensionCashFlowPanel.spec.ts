@@ -45,7 +45,7 @@ describe('DimensionCashFlowPanel', () => {
     const accounts = w.findAll('[data-test="cf-account"]').map(tr => tr.text())
     expect(accounts).toHaveLength(3)
     expect(accounts[0]).toContain('311')
-    await w.find('[data-test="cf-financing"]').trigger('click')
+    expect(w.find('[data-test="cf-financing"]').exists()).toBe(false)
     expect(w.findAll('[data-test="cf-account"]')).toHaveLength(3)
   })
 
