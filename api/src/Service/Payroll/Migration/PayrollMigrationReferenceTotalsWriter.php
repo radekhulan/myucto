@@ -24,7 +24,7 @@ final class PayrollMigrationReferenceTotalsWriter
      * pojmenované zdroje jsou jen ty, pro které v aplikaci běží vlastní feeder.
      * `jmhz` plní import přijatých měsíčních hlášení (migrace 1892).
      */
-    public const SOURCES = ['pamica', 'pohoda', 'money_s3', 'other', 'jmhz'];
+    public const SOURCES = ['pamica', 'pohoda', 'money_s3', 'other', 'stereo_nx', 'jmhz'];
     public const SOURCE_JMHZ = 'jmhz';
 
     public function __construct(private readonly Connection $db) {}

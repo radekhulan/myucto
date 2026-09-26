@@ -30,6 +30,7 @@ final class PayrollPostingMapProposalService
     /**
      * @param ?int $year rok exportu, ze kterého návrh vznikl
      * @param ?string $reference název nebo otisk exportu
+     * @param bool $preserveConfirmed potvrzený návrh tohoto zdroje se při opakování nepřepíše
      * @return array<string,mixed>|null uložený návrh, nebo `null`, když tabulka
      *         návrhů v instalaci ještě není (starší DB před migrací 1852)
      */
@@ -38,6 +39,7 @@ final class PayrollPostingMapProposalService
         PayrollLegacyPostingSource $source,
         ?int $year = null,
         ?string $reference = null,
+        bool $preserveConfirmed = false,
     ): ?array {
         $rows = $source->postingRows();
         if ($rows === [] || !$this->proposals->available()) {
@@ -55,7 +57,7 @@ final class PayrollPostingMapProposalService
             $accounts,
         );
 
-        return $this->proposals->store($supplierId, $source->sourceKey(), $proposal, $year, $reference);
+        return $this->proposals->store($supplierId, $source->sourceKey(), $proposal, $year, $reference, $preserveConfirmed);
     }
 
     /**

@@ -116,6 +116,20 @@ final class StereoNxBackup
         yield from $this->database->table($table)->rows();
     }
 
+    /** Historické sazby patří programu, nikoli vybrané firmě. Starší záloha je nemusí obsahovat.
+     * @return list<array<string,mixed>> */
+    public function payrollRates(): array
+    {
+        $global = Nx1Database::fromZip($this->path, 'DataPrg/GDATA/', $this->password);
+        if (!$global->hasTable('Gparrok')) return [];
+        $table = $global->table('Gparrok');
+        $rows = iterator_to_array($table->rows(), false);
+        if (count($rows) !== $table->declaredRowCount()) {
+            throw new StereoNxException('payroll_rates_decode', 'Tabulku historických mzdových sazeb nelze úplně načíst.');
+        }
+        return $rows;
+    }
+
     /** Schéma a počty, nikdy hodnoty firemních řádků ani výjimky obsahující jejich obsah.
      * @return array<string,array{status:string,declared_rows:?int,decoded_rows:int,fields:array<string,string>}> */
     public function inventory(): array

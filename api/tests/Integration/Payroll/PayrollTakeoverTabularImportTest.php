@@ -118,6 +118,21 @@ final class PayrollTakeoverTabularImportTest extends TestCase
         self::assertSame('other', (string) $stored['source']);
     }
 
+    /** Stereo NX smí označovat jen řádky ověřené čtečkou zálohy. */
+    public function testManualImportCannotClaimStereoNxSource(): void
+    {
+        $csv = $this->csv([$this->row('2026-06')]);
+        foreach (['preview', 'apply'] as $operation) {
+            try {
+                $this->imports->{$operation}($this->supplierId, 'stereo_nx', 'csv', 'prevzate.csv', $csv);
+                self::fail("Ruční {$operation} nesmí vydávat mzdu za import Stereo NX.");
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame('Zdroj Stereo NX lze převzít jen ze zálohy Stereo NX.', $e->getMessage());
+            }
+        }
+        self::assertSame(0, $this->storedCount());
+    }
+
     /** Vadný řádek shodí náhled i zápis — do databáze se nedostane nic. */
     public function testInvalidRowIsRejectedAndNothingIsApplied(): void
     {

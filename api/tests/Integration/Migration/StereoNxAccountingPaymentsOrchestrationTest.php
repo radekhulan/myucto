@@ -12,6 +12,7 @@ use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticNx1Archive;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxAccountingTables;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxTables;
+use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxPayrollTables;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -119,30 +120,65 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         self::assertFalse($checked['criteria']['total']['K1']);
     }
 
-    public function testPayrollSourceTablesRemainUntransferredWithAccountingJournal(): void
+    public function testHistoricalPayrollSharesDryRunTransactionAndDoesNotPostAgain(): void
     {
-        $tables = self::tables();
-        $tables['MZAMEST'] = [['Prac' => 'SYN-1', 'KrestniJmeno' => 'Jana']];
-        $tables['MMzdy'] = [['Klic' => 1, 'Prac' => 'SYN-1', 'HrubaMzda' => 25000.0]];
-        $backup = $this->backup($tables);
+        $this->assertHistoricalPayroll(false);
+    }
+
+    public function testHistoricalPayrollInitializesMissingStartAndRollsItBackInDryRun(): void
+    {
+        $this->assertHistoricalPayroll(true);
+    }
+
+    private function assertHistoricalPayroll(bool $missingStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
+        if (!$missingStart) $pdo->prepare('INSERT INTO payroll_module_state (supplier_id, status, start_period, activated_by, activated_at)
+            VALUES (?, "setup", "2026-02-01", ?, NOW())')->execute([$this->supplierId, $this->userId]);
+        $pdo->prepare('INSERT INTO payroll_offices (supplier_id, code, name, social_security_variable_symbol, is_active)
+            VALUES (?, "SYN", "Syntetická účtárna", "1234567890", 1)')->execute([$this->supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_office_registration_versions
+            (supplier_id, office_id, effective_from, social_security_variable_symbol, source_reference)
+            VALUES (?, ?, "2020-01-01", "1234567890", "synthetic:stereo")')->execute([$this->supplierId, $officeId]);
+        $pdo->prepare('INSERT INTO payroll_employer_settings (supplier_id, default_office_id, social_security_office_code)
+            VALUES (?, ?, "P")')->execute([$this->supplierId, $officeId]);
+        $payroll = SyntheticStereoNxPayrollTables::tables();
+        $rates = $payroll['Gparrok'];
+        unset($payroll['Gparrok']);
+        $payroll['MZAMEST'][0] += ['KrestniJmeno' => 'Jana', 'Prijmeni' => 'Vzorová',
+            'Vyrazen' => false, 'TydUvazHod' => 40.0, 'MesTarif' => 10000.0, 'HodTarif' => 0.0];
+        $backup = $this->backup(array_replace(self::tables(), $payroll));
+        $zip = new \ZipArchive();
+        self::assertTrue($zip->open($this->files[array_key_last($this->files)]));
+        $zip->addFromString('DataPrg/GDATA/Gparrok.nx1', SyntheticNx1Archive::table($rates));
+        $zip->close();
 
         $before = $this->snapshot();
         $dry = $this->importer->run($backup, $this->supplierId, $this->userId, true, true);
         self::assertTrue($dry['ok'], json_encode($dry['errors']));
+        self::assertSame(1, $dry['written']['historical_payroll_created']);
+        if ($missingStart) {
+            self::assertSame('2026-02', $dry['payroll_setup']['start_period']);
+            self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_module_state WHERE supplier_id=?'));
+        }
         self::assertSame($before, $this->snapshot());
-        self::assertContains(['table' => 'MZAMEST', 'count' => 1, 'reason' => 'payroll_not_transferred'], $dry['not_transferred']);
-        self::assertContains(['table' => 'MMzdy', 'count' => 1, 'reason' => 'payroll_not_transferred'], $dry['not_transferred']);
-        self::assertSame(1, $dry['counts']['employee_cards_not_transferred']);
-        self::assertSame(1, $dry['counts']['payroll_months_not_transferred']);
-        self::assertContains('payroll_not_transferred', array_column($dry['warnings'], 'code'));
-        self::assertTrue($dry['partial']);
-
         $actual = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
         self::assertTrue($actual['ok'], json_encode($actual['errors']));
-        self::assertGreaterThan(0, $this->scalar('SELECT COUNT(*) FROM journal_entries WHERE supplier_id=?'));
-        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_employees WHERE supplier_id=?'));
-        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_migration_reference_totals WHERE supplier_id=?'));
-        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_posting_map_proposals WHERE supplier_id=?'));
+        self::assertSame(1, $actual['written']['historical_payroll_created']);
+        $startQuery = $pdo->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id=?');
+        $startQuery->execute([$this->supplierId]);
+        self::assertSame('2026-02-01', $startQuery->fetchColumn());
+        self::assertSame(0, $actual['written']['historical_payroll_skipped']);
+        self::assertNotContains('historical_payroll_skipped', array_column($actual['warnings'], 'code'));
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_runs WHERE supplier_id=?'));
+        self::assertSame(0, $this->scalar("SELECT COUNT(*) FROM journal_entries WHERE supplier_id=? AND source_type='payroll'"));
+        $after = $this->snapshot();
+        $repeat = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
+        self::assertTrue($repeat['ok'], json_encode($repeat['errors']));
+        self::assertSame(1, $repeat['written']['historical_payroll_existing']);
+        self::assertSame($after, $this->snapshot());
     }
 
     public function testSourceMovementEntriesSurviveRepeatAndLaterBackfill(): void

@@ -559,6 +559,9 @@ const importProtocol = computed(() => importReport.value ? asProtocol(importRepo
       <template v-if="importReport">
         <p v-if="importReport.date_bounds" class="mb-4 text-sm text-neutral-600">{{ t('stereo_nx.date_bounds', importReport.date_bounds) }}</p>
         <MoneyS3Protocol v-if="importProtocol" :run="importProtocol" prefix="stereo_nx" />
+        <div v-if="importReport.ok && importReport.database_writes && ((importReport.written?.historical_payroll_created ?? 0) + (importReport.written?.historical_payroll_existing ?? 0) > 0)" class="mt-4 flex flex-wrap gap-2">
+          <RouterLink to="/payroll/imports?tab=takeover" :class="btnOutline('neutral')" class="whitespace-nowrap" data-testid="stereo-payroll-link"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.eye" /></svg>{{ t('stereo_nx.open_payroll') }}</RouterLink>
+        </div>
         <section v-if="reviewLinks.length" class="mt-5" data-testid="stereo-review-links">
           <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stereo_nx.open_review_records') }}</h4>
           <ul class="space-y-2 text-sm">

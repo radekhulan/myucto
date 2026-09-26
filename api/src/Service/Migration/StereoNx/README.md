@@ -47,7 +47,8 @@ přímé, bez extrakce na disk. Testovací ZIPy obsahují pouze syntetická data
 CLI inspektor je stále pouze kontrola zdroje: `ready_for_import: false` a
 `mode: source_inspection`. Databázovou zkoušku provádí průvodce v aplikaci.
 
-Volba `--accounting` přidává kontrolu deníku vůči účtové osnově. Zdrojový rok a datum účetního případu
+Volba `--accounting` přidává kontrolu deníku vůči účtové osnově a kontrolu
+vazeb zaměstnanců na mzdové měsíce. Zdrojový rok a datum účetního případu
 se zachovávají samostatně. Rozdíl roku je upozornění; kontace se časově řadí
 podle `KdyUcPripad`, což bylo ověřeno proti oběma ročním předvahám Stereo
 po jednotlivých účtech a stranách MD/Dal. Identita řádku
@@ -103,12 +104,43 @@ je nutná kontrola cizoměnových zůstatků.
 bez dalšího automatického zaúčtování. Datum každého dokladu i pohybu se
 kontroluje přes `StereoNxTargetDates`, i když leží mimo data účetního deníku.
 
-`StereoNxAssets` a `StereoNxInventory` přebírají ověřené karty majetku
-s historickými odpisy, sklady, skladové karty a vozidla. Zaměstnanci a mzdové
-úhrny se zatím nepřevádějí; protokol vypíše počty nepřevedených mzdových
-tabulek a účetní kontace mezd zůstanou v převzatém deníku. Nejasné technické
-zhodnocení, skladové stavy, leasing a další nepodporované agendy se vykazují
-odděleně. Částečný převod nemaže zálohu. Neověřené hodnoty se nedoplňují odhadem.
+`StereoNxAssets`, `StereoNxEmployees` a `StereoNxInventory` přebírají ověřené
+karty majetku s historickými odpisy, zaměstnance s pracovními vztahy, sklady,
+skladové karty a vozidla. Mzdy bez úplných složek a ověřeného období,
+nejasné technické zhodnocení, skladové stavy, leasing a další nepodporované
+agendy se výslovně vykazují jako nepřevedené. Částečný převod nemaže zálohu.
+Neověřené hodnoty se nedoplňují odhadem.
+
+### Historické mzdy
+
+`StereoNxPayrollMonths` převádí doložený standardní HPP ze `MMzdy` na měsíční
+reference; `StereoNxPayrollWriter` je ukládá přes společný
+`PayrollMigrationReferenceTotalsWriter` pod samostatným zdrojem `stereo_nx`.
+Hranici převzatých měsíců určuje `PayrollHistoricalPeriodService`; import
+ji neposouvá a nevytváří mzdové běhy, platby ani další kontace.
+
+Mapování hrubé a čisté mzdy, srážek a dobírky bylo ověřeno na podrobných
+páskách a měsíční rekapitulaci. `StravPO` je osvobozený stravenkový paušál;
+`Dobirka` je částka k výplatě, nikoli součet `NaUcet` a `VHotovosti`.
+`TypDan=Z` odpovídá záloze na daň; ostatní kódy nejsou odhadovány.
+Zaměstnavatelské pojistné se v podporovaném jednoduchém případě rekonstruuje
+z globální `DataPrg/GDATA/Gparrok`, podle platnosti k mzdovému měsíci.
+Sociální částka na historické pásce je zaokrouhlena nahoru za každou osobu;
+zdravotní částka je zaokrouhlené celkové pojistné minus zdrojová zaměstnanecká
+část. Nejde o nový výpočet dnešního odvodu zaměstnavatele. Souběhy, doplatky,
+slevy a jiné neověřené varianty se odmítají, nikoli doplňují nulou.
+
+Reference zachovávají oddělenou čistou mzdu, srážky a dobírku. Historická
+srážka není karta exekuce; počáteční kumulace se touto cestou nezakládají.
+Zdrojové klíče a otisky brání změně již převzaté mzdy i dvojímu převodu;
+cílová osoba a pracovní vztah musejí patřit vybrané firmě.
+
+Návrh mzdových předkontací vzniká pouze z řádků `Cdenik` v účetní řadě
+`MPARZPR.DoklRadaU`, jejichž text i dvojice účtů souhlasí s pojmenovanou
+zaměstnaneckou kontací `MPARUCT` (`TypPar=1`). Rozlišují se hrubá mzda,
+pojistné obou stran, zálohová a srážková daň a doložené exekuce a ostatní
+srážky. Neznámé texty a rozporné kontace nevytvářejí doporučení. Návrh musí
+potvrdit účetní; opakovaný převod již potvrzený návrh Stereo nepřepíše.
 
 Výklad prázdné země jako ČR je explicitní volbou průvodce. Označení EU bez
 konkrétního státu zůstává neurčené. Kvůli povinnému cílovému `country_id`
@@ -184,6 +216,14 @@ zdrojovému deníku porovnávají `TrialBalanceReconciliation` a
 `ReconciliationCriteria`. Karty majetku používají společné služby majetku,
 `SmallAssetCard` a `MigratedDepreciation`; neověřené vyřazení zůstává
 konceptem, nepředává se jako doložené `MigratedDisposal`.
+
+Mzdy používají `PayrollTakeoverRecord`, personální DTO, společné personální
+a pracovněprávní zapisovače a `PayrollMigrationReferenceTotalsWriter`.
+`PayrollMigrationModuleSetup` plánuje a doplňuje chybějící nastavení modulu;
+zkouška vrací i jeho změny. `StereoNxPayrollPostingMap` implementuje
+`PayrollLegacyPostingSource` jen pro kontace doložené současně MPARUCT,
+MPARZPR a Cdenik. `PayrollPostingMapProposalService` ukládá návrh s volbou
+zachovat potvrzený výsledek; výchozí chování ostatních převodů se nemění.
 
 Karty skladů, zásob a vozidel zapisuje obecný `MigratedInventoryWriter` přes
 repozitáře příslušných evidencí, bez tvorby skladových pohybů nebo jízd.

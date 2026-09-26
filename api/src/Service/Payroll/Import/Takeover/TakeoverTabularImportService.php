@@ -539,6 +539,10 @@ final class TakeoverTabularImportService
         if ($normalized === '') {
             return 'other';
         }
+        // Tento zdroj smí vzniknout jen z ověřené zálohy a její importní mapy.
+        if ($normalized === 'stereo_nx') {
+            throw new \InvalidArgumentException('Zdroj Stereo NX lze převzít jen ze zálohy Stereo NX.');
+        }
         if (!in_array($normalized, PayrollMigrationReferenceTotalsWriter::SOURCES, true)) {
             throw new \InvalidArgumentException('Neznámý zdroj převzatých mezd.');
         }

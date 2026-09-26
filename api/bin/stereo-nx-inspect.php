@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
 use MyInvoice\Service\Migration\StereoNx\StereoNxAccountingJournalPlan;
+use MyInvoice\Service\Migration\StereoNx\StereoNxPayrollPlan;
 use MyInvoice\Service\Migration\StereoNx\StereoNxException;
 use MyInvoice\Service\Migration\StereoNx\StereoNxPaymentReconciliation;
 use MyInvoice\Service\Migration\StereoNx\StereoNxPurchaseRecap;
@@ -33,6 +34,7 @@ try {
     $readable = !array_any($tables, static fn (array $table): bool => $table['status'] !== 'ok');
     $payments = $readable ? StereoNxPaymentReconciliation::check($backup->rows('Cpz'), $backup->rows('CBankap'), $backup->rows('CPokl')) : null;
     $accounting = null;
+    $payroll = null;
     if (array_key_exists('accounting', $options) && $readable) {
         $journalPlan = StereoNxAccountingJournalPlan::build(
             iterator_to_array($backup->rows('Cdenik'), false),
@@ -43,6 +45,7 @@ try {
             'blocker_counts' => array_count_values(array_column($journalPlan['blockers'], 'code')),
             'warning_counts' => array_count_values(array_column($journalPlan['warnings'], 'code'))];
         unset($journalPlan);
+        $payroll = StereoNxPayrollPlan::build($backup);
     }
     $purchases = null;
     if (array_key_exists('purchases', $options) && $readable) {
@@ -79,9 +82,11 @@ try {
         'payments' => $payments,
         'purchase_recap' => $purchases,
         'accounting_journal' => $accounting,
+        'payroll_relations' => $payroll,
         'limitations' => ['Kontrola zdroje není zkouška importu nanečisto. Databázovou zkoušku a převod spusťte v průvodci Stereo NX v aplikaci.'],
     ], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), PHP_EOL;
     exit($readable && ($payments['ok'] ?? false) && ($accounting === null || $accounting['ok'])
+        && ($payroll === null || $payroll['ok'])
         && ($purchases === null || ($purchases['errors'] === [] && $purchases['with_items_unmapped'] === 0)) ? 0 : 1);
 } catch (StereoNxException $e) {
     fwrite(STDERR, $e->errorCode . ': ' . $e->getMessage() . PHP_EOL);

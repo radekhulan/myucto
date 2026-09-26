@@ -883,7 +883,8 @@
         "1896_bank_document_series.sql",
         "1898_card_clearing_restore.sql",
         "1899_journal_red_storno.sql",
-        "1900_invoice_rounding_mode.sql"
+        "1900_invoice_rounding_mode.sql",
+        "1901_payroll_migration_stereo_nx_source.sql"
     ],
     "tables": {
         "accounting_archives": {
@@ -11939,7 +11940,7 @@
                 "relationship_end_date": "date NULL DEFAULT NULL",
                 "relationship_start_date": "date NULL DEFAULT NULL",
                 "social_base_minor": "bigint(20) NOT NULL DEFAULT 0",
-                "source": "enum('pamica','pohoda','money_s3','other','jmhz') NOT NULL",
+                "source": "enum('pamica','pohoda','money_s3','other','jmhz','stereo_nx') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_bonus_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
@@ -13846,7 +13847,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "proposal_json": "longtext NOT NULL COLLATE utf8mb4_bin",
-                "source": "enum('pamica','pohoda','money_s3','other') NOT NULL",
+                "source": "enum('pamica','pohoda','money_s3','other','stereo_nx') NOT NULL",
                 "source_reference": "varchar(190) NULL DEFAULT NULL",
                 "source_year": "smallint(5) unsigned NULL DEFAULT NULL",
                 "status": "enum('draft','confirmed') NOT NULL DEFAULT 'draft'",

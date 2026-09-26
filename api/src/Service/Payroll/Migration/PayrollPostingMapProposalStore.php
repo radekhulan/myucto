@@ -15,9 +15,9 @@ use PDO;
  * jiný; předkontace pak potvrzuje účetní ve chvíli, kdy původní soubor už nikdo
  * po ruce nemá. Bez uloženého návrhu by se musel celý export nahrávat znovu.
  *
- * Jeden otevřený návrh na firmu a zdroj (UNIQUE): opakovaný převod téhož exportu
- * návrh přepíše, nezaloží druhý. Potvrzením se návrh nemaže - zůstává jako
- * doklad o tom, z čeho nastavení vzniklo.
+ * Jeden návrh na firmu a zdroj (UNIQUE): opakovaný převod téhož exportu
+ * návrh přepíše, nezaloží druhý. Zdroj může výslovně chránit již potvrzený
+ * návrh; výchozí chování starších převodů zůstává obnovitelný návrh.
  */
 final class PayrollPostingMapProposalStore
 {
@@ -26,7 +26,7 @@ final class PayrollPostingMapProposalStore
      * {@see PayrollMigrationReferenceTotalsWriter::SOURCES}. `other` je obecný
      * zdroj - převzaté zaúčtování není vázané na PAMICU.
      */
-    public const SOURCES = ['pamica', 'pohoda', 'money_s3', 'other'];
+    public const SOURCES = ['pamica', 'pohoda', 'money_s3', 'other', 'stereo_nx'];
 
     public const STATUS_DRAFT = 'draft';
     public const STATUS_CONFIRMED = 'confirmed';
@@ -40,6 +40,7 @@ final class PayrollPostingMapProposalStore
 
     /**
      * Uloží (nebo přepíše) návrh a vrátí ho tak, jak ho čte {@see self::find()}.
+     * Při `$preserveConfirmed` nechá již potvrzený návrh i metadata beze změny.
      *
      * @param array<string,mixed> $proposal výstup {@see PayrollPostingMapProposalBuilder::build()}
      * @return array<string,mixed>
@@ -50,22 +51,33 @@ final class PayrollPostingMapProposalStore
         array $proposal,
         ?int $year = null,
         ?string $sourceReference = null,
+        bool $preserveConfirmed = false,
     ): array {
         $this->assertSource($source);
         $payload = json_encode($proposal, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
 
-        $this->db->pdo()->prepare(
-            'INSERT INTO payroll_posting_map_proposals
-                 (supplier_id, source, status, source_year, source_reference, proposal_json)
-             VALUES (?, ?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE
-                 status = VALUES(status),
+        $confirmed = "status = '" . self::STATUS_CONFIRMED . "'";
+        $update = $preserveConfirmed
+            ? "source_year = IF({$confirmed}, source_year, VALUES(source_year)),
+                 source_reference = IF({$confirmed}, source_reference, VALUES(source_reference)),
+                 proposal_json = IF({$confirmed}, proposal_json, VALUES(proposal_json)),
+                 confirmed_json = IF({$confirmed}, confirmed_json, NULL),
+                 confirmed_at = IF({$confirmed}, confirmed_at, NULL),
+                 confirmed_by = IF({$confirmed}, confirmed_by, NULL),
+                 status = IF({$confirmed}, status, VALUES(status))"
+            : 'status = VALUES(status),
                  source_year = VALUES(source_year),
                  source_reference = VALUES(source_reference),
                  proposal_json = VALUES(proposal_json),
                  confirmed_json = NULL,
                  confirmed_at = NULL,
-                 confirmed_by = NULL',
+                 confirmed_by = NULL';
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_posting_map_proposals
+                 (supplier_id, source, status, source_year, source_reference, proposal_json)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE ' . $update,
         )->execute([$supplierId, $source, self::STATUS_DRAFT, $year, $sourceReference, $payload]);
 
         $stored = $this->find($supplierId, $source);

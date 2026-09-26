@@ -11,6 +11,24 @@ use PHPUnit\Framework\TestCase;
 
 final class SyntheticNx1ArchiveTest extends TestCase
 {
+    public function testPayrollRatesComeFromGlobalArchiveTableRatherThanCompanyTable(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'stereo_rates_');
+        $rates = [['DatumOd' => '2026-01-01', 'SOCPodnikatel' => 23.5]];
+        try {
+            SyntheticNx1Archive::write($path, ['Gparrok' => [['SOCPodnikatel' => 99.0]]],
+                ['ico' => '00000000', 'dic' => 'CZ00000000', 'name' => 'Synthetic', 'vat_payer' => true]);
+            self::assertSame([], StereoNxBackup::open($path, 0)->payrollRates());
+            $zip = new \ZipArchive();
+            self::assertTrue($zip->open($path));
+            $zip->addFromString('DataPrg/GDATA/Gparrok.nx1', SyntheticNx1Archive::table($rates));
+            $zip->close();
+            self::assertSame($rates, StereoNxBackup::open($path, 0)->payrollRates());
+        } finally {
+            unlink($path);
+        }
+    }
+
     public function testDefaultPasswordOpensArchiveWithoutUserInput(): void
     {
         $path = tempnam(sys_get_temp_dir(), 'stereo_default_');

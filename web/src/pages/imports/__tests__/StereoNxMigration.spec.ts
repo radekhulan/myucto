@@ -75,6 +75,21 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks())
 
 describe('Stereo NX migration wizard', () => {
+  it('links historical wages only after a committed transfer', async () => {
+    const written = { historical_payroll_created: 2 }
+    m.run.mockImplementation(async (_token: string, _company: number, mode: string) => mode === 'dry_run'
+      ? { ...dryReport, written } : { ...importReport, written })
+    const wrapper = await mountPage()
+    await reachDryRun(wrapper)
+    expect(wrapper.find('[data-testid="stereo-payroll-link"]').exists()).toBe(false)
+    await primaryButton(wrapper, 'continue').trigger('click')
+    await wrapper.get('[data-testid="stereo-import-confirm"]').setValue(true)
+    await primaryButton(wrapper, 'import').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="stereo-payroll-link"]').attributes('href')).toBe('/payroll/imports?tab=takeover')
+    wrapper.unmount()
+  })
+
   it('links committed review records and never links rolled-back dry-run IDs', async () => {
     const reviews = {
       review_documents: [{ kind: 'purchase', source_key: 'synthetic', document_no: 'TEST', review_codes: ['vat_participation_unassigned'], target_id: 123 }],

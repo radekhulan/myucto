@@ -703,16 +703,30 @@ přeceněním zkontroluj a doplň cizoměnové zůstatky. Bankovní pohyby bez
 doloženého kódu měny se nepřevádějí.
 
 Převod zahrnuje také podporované karty dlouhodobého a drobného majetku,
-historické odpisy, sklady, skladové karty a vozidla. Tyto evidence nevytvářejí další účetní zápisy vedle
+historické odpisy, karty zaměstnanců a pracovní vztahy, sklady, skladové
+karty a vozidla. Tyto evidence nevytvářejí další účetní zápisy vedle
 převzatého deníku. Dostupnost některých evidencí závisí na zapnutých
 modulech cílové firmy.
 
-Karty zaměstnanců, pracovní vztahy ani mzdové údaje se zatím nepřevádějí.
-Protokol uvádí počty naplněných mzdových tabulek, které v cíli nevznikly.
-Mzdové účetní zápisy ze zdrojového `Cdenik` zůstávají v převzatém deníku,
-ale nezakládají mzdové běhy ani personální evidenci. Zálohu uchovejte pro
-pozdější převod mezd.
+Ověřené historické mzdy standardního hlavního pracovního poměru se přebírají
+do **Mzdy → Importy → Převzaté mzdy** se zdrojem Stereo NX. Přenáší se měsíční
+hrubá a čistá mzda, základy a pojistné, zálohová daň, odpracovaná doba,
+sražené částky a dobírka. Odvody zaměstnavatele se rekonstruují podle
+historických sazeb přiložených v záloze a protokol na to upozorní.
+Převod nevytváří nový mzdový výpočet ani další účetní zápisy.
 
+Převod přes společné nastavení mezd doplní chybějící modul, účtárnu a začátek
+vedení mezd na měsíc po posledních zdrojových mzdách, pokud to licence
+a podporované období dovolují. Existující nastavení ani datum nepřepíše.
+Historické mzdy patří před tento začátek; měsíce od něj zpracovává MyÚčto. Chybějící sazby, neúplné údaje nebo nepodporované
+varianty mezd se označí v protokolu a nepřevezmou jako úplné historické mzdy.
+Převzatá srážka je částka již sražená v daném měsíci, nezakládá exekuci ani
+dohodu pro budoucí výpočty. Počáteční roční kumulace se zatím nedoplňují. Z ověřených mzdových kontací
+a parametrů zálohy vzniká návrh předkontací v **Mzdy → Importy**; použije se
+a nastavení teprve po potvrzení účetní. Již potvrzený návrh převod nepřepisuje.
+
+Neúplné údaje dětí, mzdové daňové údaje,
+dovolené a průměry se bez ověřeného významu a období nepřebírají.
 Nepřevádí se leasing, skladové doklady a stavy zásob, objednávky ani
 opakované trasy jako skutečně uskutečněné jízdy. Neověřené technické
 zhodnocení se nepřičítá k ceně majetku. Samostatná kontrolní evidence DPH,
@@ -763,5 +777,6 @@ Volba `--accounting` navíc kontroluje zdrojový účetní deník proti účtov�
 osnově. Vrací souhrn částek v haléřích, rozsah dat a počty nalezených
 problémů. Rozpor mezi datem účetního případu a zdrojovým rokem ohlásí jako
 upozornění. Kontaci časově řadí podle data účetního případu a původní rok
-uchová samostatně. Personální a mzdové záznamy tato kontrola nevyhodnocuje;
-jejich počty a stav převodu uvádí protokol průvodce.
+uchová samostatně. Součástí jsou také počty zaměstnanců a mzdových
+záznamů, kontrola jejich vzájemných vazeb a období. Osobní údaje ani částky
+jednotlivých mezd diagnostika nevypisuje; mzdové výpočty neověřuje.

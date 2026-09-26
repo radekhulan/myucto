@@ -19,6 +19,41 @@ final class PayrollMigrationReconciliationRepository
 {
     public function __construct(private readonly Connection $db) {}
 
+    /** @return array<string,mixed>|null Přesný cíl mapy převodu, včetně identity vztahu. */
+    public function takeoverById(int $supplierId, int $id, string $source): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, employment_id, period_start, external_person_ref, external_relationship_ref
+               FROM payroll_migration_reference_totals
+              WHERE supplier_id = ? AND id = ? AND source = ?',
+        );
+        $statement->execute([$supplierId, $id, $source]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $row;
+    }
+
+    public function takeoverId(int $supplierId, string $source, string $period, string $relationshipRef): ?int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_migration_reference_totals
+              WHERE supplier_id = ? AND source = ? AND period_start = ? AND external_relationship_ref = ?',
+        );
+        $statement->execute([$supplierId, $source, $period . '-01', $relationshipRef]);
+        $id = $statement->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
+    public function hasTakeoverCollision(int $supplierId, int $employmentId, string $source, string $period, string $relationshipRef): bool
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_migration_reference_totals
+              WHERE supplier_id = ? AND period_start = ?
+                AND (employment_id = ? OR (source = ? AND external_relationship_ref = ?)) LIMIT 1',
+        );
+        $statement->execute([$supplierId, $period . '-01', $employmentId, $source, $relationshipRef]);
+        return $statement->fetchColumn() !== false;
+    }
+
     /**
      * Převzaté úhrny, granularita pracovní vztah × měsíc.
      *

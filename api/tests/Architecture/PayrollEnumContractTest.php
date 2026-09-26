@@ -598,6 +598,8 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const I18N_DOMAIN = [
+        'payroll.migration_reconciliation.source_name'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter::SOURCES',
         'payroll.runs.status'   => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.runs.commands' => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.runs.outcome'  => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
@@ -878,6 +880,20 @@ final class PayrollEnumContractTest extends TestCase
                 . 'Legitimní rozdíl (čistě klientský stav) patří do CLIENT_ONLY_UNIONS i s důvodem.',
             implode("\n  ", $offences),
         ));
+    }
+
+    /** Zdroj převzatých mezd musí přijmout finální DB schéma i klient. */
+    public function testPayrollMigrationSourcesMirrorDatabaseEnum(): void
+    {
+        $expected = $this->domain('const:MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter::SOURCES');
+        $actual = $this->columnDomain('payroll_migration_reference_totals.source');
+        sort($expected);
+        sort($actual);
+
+        self::assertNotEmpty($actual);
+        self::assertContains('jmhz', $actual);
+        self::assertContains('stereo_nx', $actual);
+        self::assertSame($expected, $actual);
     }
 
     /**
