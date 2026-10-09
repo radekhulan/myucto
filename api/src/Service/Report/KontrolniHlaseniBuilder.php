@@ -585,17 +585,20 @@ final class KontrolniHlaseniBuilder
     }
 
     /**
-     * Přidá opravné doklady podle § 43 do oddílů KH za období PŮVODNÍHO plnění (do téhož
-     * období je zařazuje přiznání, takže následné KH sedí s dodatečným přiznáním).
-     * Řádky a částky bere z {@see Section43Service::periodCorrections()} — týž zdroj jako
-     * DPHDP3 a Kniha DPH. Oprava, která na řádek přiznání nepatří (bez nároku, přenesení
-     * daně), do KH nejde.
+     * Zapracuje opravy podle § 43 do oddílů KH za období PŮVODNÍHO plnění (do téhož období
+     * je zařazuje přiznání, takže následné KH sedí s dodatečným přiznáním). Řádky a částky
+     * bere z {@see Section43Service::periodCorrections()}, týž zdroj jako DPHDP3 a Kniha DPH.
+     * Oprava, která na řádek přiznání nepatří (bez nároku, přenesení daně), do KH nejde.
      *
-     * Oddíl: opravný doklad k plnění vykázanému jednotlivě (A.4/B.2) jde do A.4/B.2 bez
-     * ohledu na výši opravy; jinak rozhoduje limit 10 000 Kč (§ 101e) na celkové částce
-     * opravy a DIČ protistrany, stejně jako u ostatních dokladů. Evidenční číslo je číslo
-     * opravného dokladu (§ 45 odst. 1 písm. f), datum povinnosti přiznat daň je datum
-     * původního plnění.
+     * Pokyny GFŘ (KH Časté dotazy, oddíl IX, oprava výše daně podle § 43): v následném KH
+     * se plnění uvede tak, „jak mělo být uvedeno správně", s evidenčním číslem opravného
+     * daňového dokladu a datem původního plnění. Původní řádek se proto nahradí opraveným
+     * (původní částky + oprava) a oddíl se určí stejným pravidlem jako u každého dokladu
+     * ({@see reportedIndividually()}) z OPRAVENÉ celkové částky. Opravný doklad § 42 je naproti
+     * tomu samostatné plnění a posuzuje se jeho vlastní částka ({@see buildSections()}).
+     *
+     * Když původní doklad v KH období není (vyřazený řádek, jiné období odpočtu), jde oprava
+     * samostatným řádkem s rozdílem a s upozorněním.
      *
      * @param list<array<string,mixed>> $a4 by-ref
      * @param array<string,mixed> $a5 by-ref
@@ -610,14 +613,6 @@ final class KontrolniHlaseniBuilder
             return;
         }
         $itemThreshold = $this->taxConstants->khItemThreshold($year);
-        $individual = [];
-        foreach ([[$a4, 'sale'], [$b2, 'purchase']] as [$list, $source]) {
-            foreach ($list as $row) {
-                if (($row['source'] ?? null) === $source && isset($row['invoice_id'])) {
-                    $individual[$source . ':' . (int) $row['invoice_id']] = true;
-                }
-            }
-        }
 
         foreach ($rows as $c) {
             if ($c['dphdp3_line'] === null) {
@@ -625,50 +620,136 @@ final class KontrolniHlaseniBuilder
             }
             $isSale = $c['source_type'] === 'invoice';
             $isBasic = $c['rate_kind'] === 'basic';
-            $base21 = $isBasic ? $c['base'] : 0.0; $vat21 = $isBasic ? $c['vat'] : 0.0;
-            $base12 = $isBasic ? 0.0 : $c['base']; $vat12 = $isBasic ? 0.0 : $c['vat'];
-            if (self::isNilKhAmount($base21, $vat21, $base12, $vat12)) {
+            $amounts = [
+                'base21' => $isBasic ? $c['base'] : 0.0, 'vat21' => $isBasic ? $c['vat'] : 0.0,
+                'base12' => $isBasic ? 0.0 : $c['base'], 'vat12' => $isBasic ? 0.0 : $c['vat'],
+            ];
+            if (self::isNilKhAmount($amounts['base21'], $amounts['vat21'], $amounts['base12'], $amounts['vat12'])) {
                 continue;
             }
+            $label = $c['source_doc_number'] !== '' ? $c['source_doc_number'] : '#' . $c['source_id'];
             $docNumber = (string) ($c['corrective_doc_number'] ?? '');
             if ($docNumber === '') {
                 $docNumber = $c['source_doc_number'];
-                $warnings[] = 'Oprava §43 k dokladu ' . ($c['source_doc_number'] !== '' ? $c['source_doc_number'] : '#' . $c['source_id'])
+                $warnings[] = 'Oprava §43 k dokladu ' . $label
                     . ' nemá číslo opravného dokladu, v KH je uvedena pod číslem původního dokladu.';
             }
-            $dic = self::cleanDic($c['counterparty_dic']);
-            $hasDic = $dic !== '';
-            $individually = $hasDic && (
-                isset($individual[($isSale ? 'sale' : 'purchase') . ':' . $c['source_id']])
-                || abs($base21 + $vat21 + $base12 + $vat12) > $itemThreshold
-            );
-            $meta = ['source' => $isSale ? 'sale' : 'purchase', 'document_kind' => null,
-                     'invoice_id' => $c['source_id'], 'counterparty_name' => '', 'internal_number' => null,
-                     's43_id' => $c['id']];
-            $amounts = ['base21' => $base21, 'vat21' => $vat21, 'base12' => $base12, 'vat12' => $vat12];
-            if ($isSale) {
-                $row = ['varsymbol' => $docNumber, 'tax_date' => $c['source_tax_date'], 'counterparty_dic' => $dic]
-                    + $amounts + ['kh_regime_code' => '0', 'kh_bad_debt' => 'N', 'kh_attribute_conflict' => false] + $meta;
-                if ($individually) {
-                    $a4[] = $row;
-                } else {
-                    $a5['count']++;
-                    foreach ($amounts as $k => $v) { $a5[$k] += $v; }
-                    $a5['docs'][] = $row;
+            $source = $isSale ? 'sale' : 'purchase';
+            $numberKey = $isSale ? 'varsymbol' : 'vendor_invoice_number';
+
+            $original = $isSale ? self::takeOriginalRow($a4, $a5, $source, $c['source_id'])
+                                : self::takeOriginalRow($b2, $b3, $source, $c['source_id']);
+            if ($original !== null) {
+                $row = $original;
+                foreach ($amounts as $k => $v) {
+                    $row[$k] = (float) ($row[$k] ?? 0.0) + $v;
                 }
+                // Bez čísla opravného dokladu zůstává číslo, pod kterým plnění v KH je
+                // (původní, nebo opravného dokladu dřívější opravy téhož plnění).
+                if ((string) ($c['corrective_doc_number'] ?? '') !== '') {
+                    $row[$numberKey] = $docNumber;
+                }
+                // Celková částka opraveného plnění — oprava nekrácená poměrem, stejně jako
+                // celková částka dokladu, ze které se limit posuzuje u každého dokladu.
+                $row['kh_total_czk'] = (float) ($original['kh_total_czk'] ?? 0.0) + $c['base_delta'] + $c['vat_delta'];
+                $row['s43_ids'] = array_merge($original['s43_ids'] ?? [], [$c['id']]);
             } else {
-                $row = ['vendor_invoice_number' => $docNumber, 'tax_date' => $c['source_tax_date'], 'counterparty_dic' => $dic]
-                    + $amounts + ['is_pomer' => $c['is_pomer'], 'parent_vendor_invoice_number' => null,
-                                  'kh_bad_debt' => 'N', 'kh_attribute_conflict' => false] + $meta;
-                if ($individually) {
-                    $b2[] = $row;
-                } else {
-                    $b3['count']++;
-                    foreach ($amounts as $k => $v) { $b3[$k] += $v; }
-                    $b3['docs'][] = $row;
-                }
+                $warnings[] = 'Původní doklad ' . $label . ' opravy §43 v KH za toto období není, '
+                    . 'oprava je uvedena samostatným řádkem s rozdílem.';
+                $row = [$numberKey => $docNumber, 'tax_date' => $c['source_tax_date'],
+                        'counterparty_dic' => self::cleanDic($c['counterparty_dic'])]
+                    + $amounts
+                    + ($isSale
+                        ? ['kh_regime_code' => '0', 'kh_bad_debt' => 'N', 'kh_attribute_conflict' => false]
+                        : ['is_pomer' => $c['is_pomer'], 'parent_vendor_invoice_number' => null,
+                           'kh_bad_debt' => 'N', 'kh_attribute_conflict' => false])
+                    + ['source' => $source, 'document_kind' => null, 'invoice_id' => $c['source_id'],
+                       'counterparty_name' => '', 'internal_number' => null, 's43_id' => $c['id'],
+                       'kh_total_czk' => $c['base_delta'] + $c['vat_delta']];
+            }
+
+            $individually = self::reportedIndividually(
+                (float) $row['kh_total_czk'],
+                self::cleanDic($row['counterparty_dic'] ?? ''),
+                $row['kh_bad_debt'] ?? null,
+                $itemThreshold,
+            );
+            if ($isSale) {
+                self::placeRow($a4, $a5, $row, $individually);
+            } else {
+                self::placeRow($b2, $b3, $row, $individually);
             }
         }
+    }
+
+    /**
+     * Vyjme z oddílu KH řádek PŮVODNÍHO dokladu (jednotlivě vykázaný i ze souhrnné věty,
+     * kde zároveň odečte jeho částky). Řádky jiných oprav (§ 46, § 74b, samostatná § 43)
+     * a pokladní doklady za původní doklad nepovažuje.
+     *
+     * @param list<array<string,mixed>> $list by-ref
+     * @param array<string,mixed> $summary by-ref
+     * @return array<string,mixed>|null
+     */
+    private static function takeOriginalRow(array &$list, array &$summary, string $source, int $invoiceId): ?array
+    {
+        $isOriginal = static fn (array $row): bool => ($row['source'] ?? null) === $source
+            && (int) ($row['invoice_id'] ?? 0) === $invoiceId
+            && ($row['document_kind'] ?? null) !== 'cash'
+            && !isset($row['s46_invoice_id']) && !isset($row['s74b_purchase_invoice_id']) && !isset($row['s43_id']);
+        foreach ($list as $i => $row) {
+            if ($isOriginal($row)) {
+                array_splice($list, $i, 1);
+                return $row;
+            }
+        }
+        foreach ($summary['docs'] as $i => $row) {
+            if ($isOriginal($row)) {
+                array_splice($summary['docs'], $i, 1);
+                $summary['count']--;
+                foreach (['base21', 'vat21', 'base12', 'vat12'] as $k) {
+                    $summary[$k] -= (float) ($row[$k] ?? 0.0);
+                }
+                return $row;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Zařadí řádek do jednotlivé věty (A.4/B.2), nebo do souhrnné (A.5/B.3).
+     *
+     * @param list<array<string,mixed>> $list by-ref
+     * @param array<string,mixed> $summary by-ref
+     * @param array<string,mixed> $row
+     */
+    private static function placeRow(array &$list, array &$summary, array $row, bool $individually): void
+    {
+        if ($individually) {
+            $list[] = $row;
+            return;
+        }
+        $summary['count']++;
+        foreach (['base21', 'vat21', 'base12', 'vat12'] as $k) {
+            $summary[$k] += (float) ($row[$k] ?? 0.0);
+        }
+        $summary['docs'][] = $row;
+    }
+
+    /**
+     * Jediné pravidlo, zda tuzemský doklad jde do KH jednotlivě (A.4/B.2), nebo do souhrnné
+     * věty (A.5/B.3). § 101e: jednotlivě jen s DIČ protistrany a buď s celkovou částkou
+     * DOKLADU včetně daně OSTŘE nad limit (přesně 10 000 Kč patří do souhrnu), nebo s opravou
+     * u nedobytné pohledávky (zdph_44 = 'P').
+     *
+     * „Doklad" podle pokynů GFŘ (KH Časté dotazy, oddíl IX): opravný doklad podle § 42 je
+     * samostatné plnění, rozhoduje jeho vlastní částka opravy, bez ohledu na oddíl původního
+     * dokladu. Oprava výše daně podle § 43 se uvádí jako opravené plnění, rozhoduje jeho
+     * opravená celková částka ({@see appendSection43Corrections()}).
+     */
+    public static function reportedIndividually(float $documentTotalCzk, string $dic, ?string $badDebt, float $threshold): bool
+    {
+        return $dic !== '' && ($badDebt === 'P' || abs($documentTotalCzk) > $threshold);
     }
 
     /** Normalizace vstupního data (Y-m-d) — null pokud prázdné/neplatné. */
@@ -1012,6 +1093,10 @@ final class KontrolniHlaseniBuilder
                 if ($key !== null) {
                     $out[$key][$section] = true;
                 }
+                // Opravené plnění § 43 nese i oddíl svých oprav (řádek opravy v Knize DPH).
+                foreach ($row['s43_ids'] ?? [] as $s43Id) {
+                    $out[self::documentSectionKey(['s43_id' => $s43Id])][$section] = true;
+                }
             }
         }
         return $out;
@@ -1290,15 +1375,12 @@ final class KontrolniHlaseniBuilder
 
         foreach ($inv as $g) {
             $taggedBefore = count($invoices);
-            $hasDic = $g['dic'] !== '';
-            // § 101e: „nad 10 000 Kč" = OSTŘE více → přesně 10 000 patří do sumace
-            // A.5/B.3, ne do jednotlivé A.4/B.2. Proto '>' (ne '>=').
-            // Limit se posuzuje podle celkové částky DOKLADU včetně daně. U vyúčtování
-            // zálohy je to částka po odpočtu zálohy (doplatek/přeplatek), protože řádek
-            // odpočtu podle § 37a je položkou téhož dokladu: GFŘ, KH Časté dotazy, oddíl VI
-            // (dodavatel): doplatek 8 470 Kč z plnění 60 500 Kč jde do A.5, přeplatek
+            // Limit 10 000 Kč (§ 101e) posuzuje {@see reportedIndividually()} podle celkové
+            // částky DOKLADU včetně daně; u opravného dokladu § 42 je to jeho vlastní částka.
+            // U vyúčtování zálohy je to částka po odpočtu zálohy (doplatek/přeplatek), protože
+            // řádek odpočtu podle § 37a je položkou téhož dokladu: GFŘ, KH Časté dotazy,
+            // oddíl VI (dodavatel): doplatek 8 470 Kč z plnění 60 500 Kč jde do A.5, přeplatek
             // 15 730 Kč do A.4 („celková hodnota plnění na daňovém dokladu").
-            $overLimit = abs($g['total_czk']) > $itemThreshold;
             // Tuzemská zdanitelná část faktury (může být 0 u čistě RC/osvobozeného dokladu).
             // Faktura může přispět SOUČASNĚ do RC sekce (A.1/B.1/A.2) i do A.4/A.5/B.2/B.3
             // (mixed doklad) — proto žádný `continue`, sekce se vyhodnocují nezávisle.
@@ -1333,8 +1415,9 @@ final class KontrolniHlaseniBuilder
                             'base12' => $g['dom_base12'], 'vat12' => $g['dom_vat12'],
                             'kh_regime_code' => count($regimeCodes) === 1 ? $regimeCodes[0] : null,
                             'kh_bad_debt' => count($badDebtCodes) === 1 ? $badDebtCodes[0] : null,
-                            'kh_attribute_conflict' => count($regimeCodes) > 1 || count($badDebtCodes) > 1] + $meta($g);
-                    if (($overLimit || $row['kh_bad_debt'] === 'P') && $hasDic) {
+                            'kh_attribute_conflict' => count($regimeCodes) > 1 || count($badDebtCodes) > 1,
+                            'kh_total_czk' => $g['total_czk']] + $meta($g);
+                    if (self::reportedIndividually($g['total_czk'], $g['dic'], $row['kh_bad_debt'], $itemThreshold)) {
                         $a4[] = $row;
                         $tag($g, 'A.4', $g['dom_base21'], $g['dom_base12']);
                     } else {
@@ -1389,8 +1472,9 @@ final class KontrolniHlaseniBuilder
                             'document_kind' => $g['document_kind'],
                             'parent_vendor_invoice_number' => $g['parent_vendor_invoice_number'],
                             'kh_bad_debt' => count($badDebtCodes) === 1 ? $badDebtCodes[0] : null,
-                            'kh_attribute_conflict' => count($badDebtCodes) > 1] + $meta($g);
-                    if (($overLimit || $row['kh_bad_debt'] === 'P') && $hasDic) {
+                            'kh_attribute_conflict' => count($badDebtCodes) > 1,
+                            'kh_total_czk' => $g['total_czk']] + $meta($g);
+                    if (self::reportedIndividually($g['total_czk'], $g['dic'], $row['kh_bad_debt'], $itemThreshold)) {
                         $b2[] = $row;
                         $tag($g, 'B.2', $g['dom_base21'], $g['dom_base12']);
                     } else {

@@ -48,6 +48,12 @@ final class Section43Service
      */
     public const ASSESSMENT_PERIOD_YEARS = 3;
 
+    /** Kód výjimky z {@see register()}: oprava by daň zvýšila (§ 43 odst. 1). */
+    public const ERR_TAX_INCREASE = 4301;
+
+    /** Kód výjimky z {@see register()}: přijatý doklad s přenesením daně. */
+    public const ERR_REVERSE_CHARGE = 4302;
+
     public function __construct(
         private readonly Connection $db,
         private readonly TaxConstantsRepository $taxConstants,
@@ -281,9 +287,15 @@ final class Section43Service
             $stmt->execute([$supplierId, $sourceId]);
             $pi = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
             if ((int) ($pi['reverse_charge'] ?? 0) === 1) {
+                // Samovyměřená daň leží podle režimu dokladu na ř. 3–13 (pořízení zboží z JČS,
+                // služba ze zahraničí, § 92a, dovoz) se zrcadlovým odpočtem na ř. 43/44 a v KH
+                // v A.2/B.1 s kódem předmětu plnění. Záznam opravy nese jen sazbovou skupinu,
+                // ne režim, takže řádek ani oddíl z něj jednoznačně určit nejde.
                 throw new \InvalidArgumentException(
-                    'U přijatého dokladu s přenesením daně opravuje příjemce samovyměřenou daň a zrcadlový '
-                        . 'odpočet; tuto opravu evidence § 43 nepodporuje, proveďte ji v dodatečném přiznání.'
+                    'U přijatého dokladu s přenesením daně opravuje příjemce samovyměřenou daň (ř. 3–13) '
+                        . 'a zrcadlový odpočet (ř. 43/44). Evidence oprav § 43 nezná režim plnění, ze kterého '
+                        . 'by řádek určila; opravu uveďte přímo v dodatečném přiznání a následném kontrolním hlášení.',
+                    self::ERR_REVERSE_CHARGE,
                 );
             }
             if (($pi['vat_deduction'] ?? 'full') === 'none') {
@@ -302,6 +314,18 @@ final class Section43Service
             // Nulová oprava není oprava — vznikla by prázdná položka, která by v rozpisu
             // budila dojem, že se něco opravovalo.
             throw new \InvalidArgumentException('Změna daně nesmí být nulová.');
+        }
+        if ($vatDelta > 0) {
+            // § 43 odst. 1: opravu výše daně smí provést jen ten, kdo přiznal daň jinak, než
+            // stanoví zákon, „a tím zvýšil daň na výstupu". Oprava tedy daň jen snižuje
+            // (u přijaté faktury snižuje odpočet). Daň přiznaná v nižší částce se doplňuje
+            // dodatečným přiznáním podle § 141 daňového řádu, ne opravným dokladem § 43.
+            throw new \InvalidArgumentException(
+                'Oprava výše daně podle § 43 ZDPH smí daň jen snížit (u přijaté faktury snížit odpočet). '
+                    . 'Daň přiznanou v nižší částce, než stanoví zákon, doplňte dodatečným daňovým přiznáním '
+                    . 'za období původního plnění podle § 141 daňového řádu.',
+                self::ERR_TAX_INCREASE,
+            );
         }
         if (trim($reason) === '') {
             throw new \InvalidArgumentException('Důvod opravy je povinný — čím byla původní výše daně chybná.');

@@ -88,7 +88,12 @@ final class Section43Action
                 $userId,
             );
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+            $code = match ($e->getCode()) {
+                Section43Service::ERR_TAX_INCREASE   => 's43_tax_increase',
+                Section43Service::ERR_REVERSE_CHARGE => 's43_reverse_charge',
+                default                              => 'validation_failed',
+            };
+            return Json::error($response, $code, $e->getMessage(), 422);
         }
 
         return Json::ok($response, ['id' => $id]);

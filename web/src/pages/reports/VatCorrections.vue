@@ -21,7 +21,7 @@ import {
   type S43RateKind,
   type S79Overview,
 } from '@/api/reports'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -83,6 +83,10 @@ async function save43() {
     toast.error(t('reports.vatCorrections.s43.required'))
     return
   }
+  if (Number(f43.value.vat_delta) > 0) {
+    toast.error(t('reports.vatCorrections.s43.increase_rejected'))
+    return
+  }
   saving.value = true
   try {
     await reportsApi.s43Create({
@@ -94,7 +98,12 @@ async function save43() {
     await load()
     toast.success(t('reports.vatCorrections.saved'))
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    const code = apiErrorCode(e)
+    toast.error(code === 's43_tax_increase'
+      ? t('reports.vatCorrections.s43.increase_rejected')
+      : code === 's43_reverse_charge'
+        ? t('reports.vatCorrections.s43.reverse_charge_rejected')
+        : apiErrorMessage(e))
   } finally {
     saving.value = false
   }
@@ -365,7 +374,7 @@ onMounted(() => {
           </div>
           <div>
             <label class="block text-sm mb-1">{{ t('reports.vatCorrections.col.vat_delta') }}</label>
-            <input v-model.number="f43.vat_delta" type="number" step="0.01"
+            <input v-model.number="f43.vat_delta" type="number" step="0.01" max="0"
                    class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm text-right bg-surface" />
           </div>
         </div>

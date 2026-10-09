@@ -1056,6 +1056,11 @@ final class DphPriznaniBuilder
     {
         $fullThreshold = (int) ($this->constants->forYear($year)['vat_coefficient_full_threshold_pct'] ?? 95);
         $yl = $this->mapper->aggregateForYear($supplierId, $year);
+        // Opravy § 43 jsou součástí řádků přiznání (ř. 1/2, ř. 40k/41k) za období původního
+        // plnění, takže patří i do ročních dat koeficientu a krácené daně ř. 53.
+        foreach ([3, 6, 9, 12] as $quarterEnd) {
+            $yl = $this->withSection43Lines($yl, $supplierId, $year, $quarterEnd, 'quarterly');
+        }
         $base = static fn (string $l): float => (float) ($yl[$l]['base'] ?? 0.0);
 
         $citatel = $base('1') + $base('2')
@@ -1159,11 +1164,31 @@ final class DphPriznaniBuilder
         $periods = $quarterly ? [3, 6, 9, 12] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         foreach ($periods as $m) {
             $lines = $this->mapper->aggregateForDphPriznani($supplierId, $year, $m, $quarterly ? 'quarterly' : 'monthly');
+            // Ř. 52 období obsahuje i opravy § 43 na ř. 40k/41k, stejně jako v build().
+            $lines = $this->withSection43Lines($lines, $supplierId, $year, $m, $quarterly ? 'quarterly' : 'monthly');
             // Per-line round, shodně s build() ř.46 (odp_sum_kr) — viz computeAnnualCoefficient.
             $kr = self::reducedDeductionVat($lines);
             $sum += round($kr * $provisionalPercent / 100);
         }
         return $sum;
+    }
+
+    /**
+     * Přičte k agregátu řádků opravy § 43 za období ({@see Section43Service::periodCorrectionLines()},
+     * týž zdroj jako build()), ať roční koeficient i ř. 53 počítají se stejnými řádky jako podané
+     * přiznání.
+     *
+     * @param array<string, array<string,mixed>> $lines
+     * @return array<string, array<string,mixed>>
+     */
+    private function withSection43Lines(array $lines, int $supplierId, int $year, int $month, string $period): array
+    {
+        foreach ($this->section43->periodCorrectionLines($supplierId, $year, $month, $period)['lines'] as $line => $sum) {
+            $line = (string) $line;
+            $lines[$line]['base'] = (float) ($lines[$line]['base'] ?? 0.0) + $sum['base'];
+            $lines[$line]['vat'] = (float) ($lines[$line]['vat'] ?? 0.0) + $sum['vat'];
+        }
+        return $lines;
     }
 
     /**

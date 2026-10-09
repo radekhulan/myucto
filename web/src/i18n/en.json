@@ -25335,7 +25335,9 @@
         "empty": "No § 43 correction recorded for the selected year.",
         "form_title": "Correction of the tax amount (§ 43 VAT Act)",
         "form_hint": "Enter the period of the ORIGINAL supply; for a received invoice, the period in which you claimed the deduction. For a received invoice the correction adjusts the deduction (lines 40/41), not output tax. The delivery date only determines the earliest date the correction could be made.",
-        "required": "Fill in the document, delivery date and reason."
+        "required": "Fill in the document, delivery date and reason.",
+        "increase_rejected": "A correction of the tax amount under § 43 of the VAT Act may only reduce the tax (for a received invoice, reduce the deduction), so the tax change must be negative. Tax declared lower than the law requires is added in a supplementary tax return for the period of the original supply under § 141 of the Tax Procedure Code.",
+        "reverse_charge_rejected": "For a received document under reverse charge, the recipient corrects the self-assessed tax (lines 3–13) and the mirrored deduction (lines 43/44). The § 43 correction register does not know the supply regime needed to pick the line; enter the correction directly in the supplementary return and the follow-up control statement."
       },
       "s79": {
         "tab": "§ 79 — registration",

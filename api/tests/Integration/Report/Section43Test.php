@@ -37,6 +37,7 @@ final class Section43Test extends TestCase
     private Section43Service $service;
     private \MyInvoice\Service\Report\DphPriznaniBuilder $builder;
     private \MyInvoice\Service\Report\TaxSubmissionArchiver $archiver;
+    private \MyInvoice\Service\Report\KontrolniHlaseniBuilder $kh;
     private int $supplierId = 0;
     private array $invoiceIds = [];
     private int $purchaseInvoiceId = 0;
@@ -56,6 +57,7 @@ final class Section43Test extends TestCase
             // mimo transakci testu a izolovaného dodavatele vůbec neuvidí.
             $this->builder = $c->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
             $this->archiver = $c->get(\MyInvoice\Service\Report\TaxSubmissionArchiver::class);
+            $this->kh = $c->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -122,7 +124,7 @@ final class Section43Test extends TestCase
         [$invoices, $purchaseInvoice] = $this->sourceDocuments($otherSupplier);
         foreach (['invoice' => $invoices[0], 'purchase_invoice' => $purchaseInvoice] as $type => $sourceId) {
             try {
-                $this->service->register($this->supplierId, $type, $sourceId, 2025, 3, 'basic', 0, 21, '2025-04-10', 'Syntetická oprava');
+                $this->service->register($this->supplierId, $type, $sourceId, 2025, 3, 'basic', 0, -21, '2025-04-10', 'Syntetická oprava');
                 self::fail('Cizí zdroj opravy musí být odmítnut.');
             } catch (\InvalidArgumentException $e) {
                 self::assertSame('Zdroj opravy nenalezen.', $e->getMessage());
@@ -135,7 +137,7 @@ final class Section43Test extends TestCase
 
     public function testOwnPurchaseInvoiceSourceIsAccepted(): void
     {
-        $id = $this->service->register($this->supplierId, 'purchase_invoice', $this->purchaseInvoiceId, 2025, 3, 'basic', 0, 21, '2025-04-10', 'Syntetická oprava');
+        $id = $this->service->register($this->supplierId, 'purchase_invoice', $this->purchaseInvoiceId, 2025, 3, 'basic', 0, -21, '2025-04-10', 'Syntetická oprava');
         $stmt = $this->db->pdo()->prepare('SELECT source_id FROM vat_s43_corrections WHERE id = ? AND supplier_id = ?');
         $stmt->execute([$id, $this->supplierId]);
         self::assertSame($this->purchaseInvoiceId, (int) $stmt->fetchColumn());
@@ -163,23 +165,23 @@ final class Section43Test extends TestCase
     /** Sazbová skupina rozhoduje o řádku: základní → ř. 1, snížená → ř. 2 (§ 43 odst. 2). */
     public function testRateKindRoutesToTheCorrectLine(): void
     {
-        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', 1000.0, 210.0, '2025-04-10', 'Doúčtování');
-        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'reduced', 500.0, 60.0, '2025-04-10', 'Doúčtování');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', -1000.0, -210.0, '2025-04-10', 'Chybná sazba');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'reduced', -500.0, -60.0, '2025-04-10', 'Chybná sazba');
 
         $lines = $this->service->periodCorrectionLines($this->supplierId, 2025, 3);
 
-        self::assertEqualsWithDelta(210.0, $lines['basic']['vat'], 0.01);
-        self::assertEqualsWithDelta(60.0, $lines['reduced']['vat'], 0.01);
+        self::assertEqualsWithDelta(-210.0, $lines['basic']['vat'], 0.01);
+        self::assertEqualsWithDelta(-60.0, $lines['reduced']['vat'], 0.01);
     }
 
     /** Opravy téhož období se SČÍTAJÍ — za měsíc jich může být víc. */
     public function testMultipleCorrectionsInPeriodAreSummed(): void
     {
         $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[0], 2025, 3, 'basic', 0.0, -500.0, '2025-04-10', 'A');
-        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'basic', 0.0, 300.0, '2025-04-10', 'B');
+        $this->service->register($this->supplierId, 'invoice', $this->invoiceIds[1], 2025, 3, 'basic', 0.0, -300.0, '2025-04-10', 'B');
 
         self::assertEqualsWithDelta(
-            -200.0,
+            -800.0,
             $this->service->periodCorrectionLines($this->supplierId, 2025, 3)['basic']['vat'],
             0.01,
         );
@@ -275,13 +277,13 @@ final class Section43Test extends TestCase
     {
         $this->service->register(
             $this->supplierId, 'invoice', $this->invoiceIds[0], 2026, 3, 'basic',
-            10000.0, 2100.0, '2026-05-10', 'Doúčtování nesprávně nízké daně',
+            0.0, -2100.0, '2026-05-10', 'Daň uvedena navíc',
         );
 
         $out = $this->builder->build($this->supplierId, 2026, 3, 'monthly');
         $xml = (string) ($out['xml'] ?? '');
         self::assertNotSame('', $xml);
-        self::assertStringContainsString('dan23="2100"', $xml, 'Daň z opravy musí být na ř. 1.');
+        self::assertStringContainsString('dan23="-2100"', $xml, 'Daň z opravy musí být na ř. 1.');
 
         $dom = new \DOMDocument();
         $dom->loadXML($xml);
@@ -378,6 +380,219 @@ final class Section43Test extends TestCase
             static fn (string $w): bool => str_contains($w, '§ 43'),
         )), 'U dodatečného je typ podání správný.');
         self::assertStringContainsString('dapdph_forma="D"', (string) $out['xml']);
+    }
+
+    /**
+     * § 43 odst. 1: opravu smí provést jen ten, kdo daň přiznal jinak, než stanoví zákon,
+     * „a tím zvýšil daň na výstupu". Oprava tedy daň jen snižuje; nižší daň se doplňuje
+     * dodatečným přiznáním podle § 141 DŘ a hláška to musí říct.
+     */
+    public function testTaxIncreaseIsRejectedWithAmendmentHint(): void
+    {
+        foreach (['invoice' => $this->invoiceIds[0], 'purchase_invoice' => $this->purchaseInvoiceId] as $type => $sourceId) {
+            try {
+                $this->service->register($this->supplierId, $type, $sourceId, 2026, 3, 'basic', 1000.0, 210.0, '2026-05-10', 'Doúčtování');
+                self::fail('Oprava zvyšující daň musí být odmítnuta.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame(Section43Service::ERR_TAX_INCREASE, $e->getCode());
+                self::assertStringContainsString('jen snížit', $e->getMessage());
+                self::assertStringContainsString('dodatečným daňovým přiznáním', $e->getMessage());
+                self::assertStringContainsString('§ 141', $e->getMessage());
+            }
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM vat_s43_corrections WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    public function testReverseChargeRejectionExplainsWhy(): void
+    {
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')
+            ->execute([$this->purchaseInvoiceId]);
+        try {
+            $this->service->register($this->supplierId, 'purchase_invoice', $this->purchaseInvoiceId, 2026, 3, 'basic', 0.0, -300.0, '2026-05-10', 'Chybná sazba');
+            self::fail('Přenesení daně musí být odmítnuto.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame(Section43Service::ERR_REVERSE_CHARGE, $e->getCode());
+            self::assertStringContainsString('ř. 43/44', $e->getMessage());
+        }
+    }
+
+    // ── KH: opravené plnění podle pokynů GFŘ ─────────────────────────────────
+
+    /**
+     * Pokyny GFŘ (KH Časté dotazy, oddíl IX, § 43): v následném KH se plnění uvede tak,
+     * „jak mělo být uvedeno správně", s evidenčním číslem opravného dokladu a datem původního
+     * plnění. Původní řádek A.4 proto zmizí a nahradí ho jediný opravený řádek
+     * (10 000 + 1 000), ne dvojice původní řádek + řádek rozdílu.
+     */
+    public function testKhRestatesSaleAsCorrectedSupplyUnderCorrectiveNumber(): void
+    {
+        $invoiceId = $this->seedSale('S43-KH-1', 10000.0, 2100.0);
+        $this->service->register($this->supplierId, 'invoice', $invoiceId, 2099, 3, 'basic', 0.0, -1100.0, '2099-05-10', 'Chybná sazba', 'OD-43-1');
+
+        $rows = $this->khRows('VetaA4', '43434343');
+
+        self::assertCount(1, $rows, 'Opravené plnění je v A.4 jedním řádkem.');
+        self::assertSame('OD-43-1', $rows[0]['c_evid_dd']);
+        self::assertSame('2099-03-10', $rows[0]['dppd_iso']);
+        self::assertSame('10000.00', $rows[0]['zakl_dane1']);
+        self::assertSame('1000.00', $rows[0]['dan1']);
+    }
+
+    /**
+     * Oddíl opraveného plnění určuje jeho OPRAVENÁ celková částka stejným limitem jako
+     * u každého dokladu. Plnění 10 890 Kč bylo v A.4, po opravě má 9 680 Kč, a tedy patří
+     * do A.5. Dřív zůstal původní řádek v A.4 a oprava šla do A.4 za ním.
+     */
+    public function testKhCorrectedSupplyBelowLimitMovesToA5(): void
+    {
+        $invoiceId = $this->seedSale('S43-KH-2', 9000.0, 1890.0);
+        $this->service->register($this->supplierId, 'invoice', $invoiceId, 2099, 3, 'basic', -1000.0, -210.0, '2099-05-10', 'Chybný výpočet', 'OD-43-2');
+
+        self::assertSame([], $this->khRows('VetaA4', '43434343'));
+        $a5 = $this->khRows('VetaA5', null);
+        self::assertCount(1, $a5);
+        self::assertSame('8000.00', $a5[0]['zakl_dane1']);
+        self::assertSame('1680.00', $a5[0]['dan1']);
+    }
+
+    /** Totéž na straně odběratele: B.2 nese opravené plnění pod číslem opravného dokladu. */
+    public function testKhRestatesPurchaseInB2(): void
+    {
+        $purchaseId = $this->seedPurchase('S43-KH-P1', 10000.0, 2100.0, 'full');
+        $this->service->register($this->supplierId, 'purchase_invoice', $purchaseId, 2099, 3, 'basic', 0.0, -1100.0, '2099-05-10', 'Chybná sazba', 'OD-43-P1');
+
+        $rows = $this->khRows('VetaB2', '43434343');
+
+        self::assertCount(1, $rows);
+        self::assertSame('OD-43-P1', $rows[0]['c_evid_dd']);
+        self::assertSame('1000.00', $rows[0]['dan1']);
+    }
+
+    /** Pravidlo limitu (§ 101e) je jedno: částka dokladu ostře nad limit a DIČ, nebo § 46. */
+    public function testKhLimitRuleIsSharedForAllDocuments(): void
+    {
+        $rule = [\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class, 'reportedIndividually'];
+        self::assertTrue($rule(-15000.0, '12345678', 'N', 10000.0), 'Dobropis § 42 nad limit podle vlastní částky.');
+        self::assertFalse($rule(-9000.0, '12345678', 'N', 10000.0), 'Dobropis § 42 pod limit jde do souhrnu.');
+        self::assertFalse($rule(10000.0, '12345678', 'N', 10000.0), 'Přesně 10 000 Kč patří do souhrnu.');
+        self::assertFalse($rule(50000.0, '', 'N', 10000.0), 'Bez DIČ jednotlivě nelze.');
+        self::assertTrue($rule(100.0, '12345678', 'P', 10000.0), 'Oprava § 46 jde jednotlivě vždy.');
+    }
+
+    // ── ř. 53: roční vypořádání koeficientu ──────────────────────────────────
+
+    /**
+     * Oprava § 43 u přijatého dokladu s kráceným nárokem jde na ř. 40k. Roční vypořádání
+     * (ř. 53) proto musí počítat krácenou daň roku včetně ní, jinak se o opravu rozejde
+     * se součtem podaných ř. 52.
+     */
+    public function testAnnualCoefficientIncludesSection43ReducedDeduction(): void
+    {
+        $purchaseId = $this->seedPurchase('S43-KOEF-1', 10000.0, 2100.0, 'reduced');
+        $before = $this->builder->computeAnnualCoefficient($this->supplierId, 2099);
+        self::assertEqualsWithDelta(2100.0, $before['kr_year'], 0.01);
+
+        $this->service->register($this->supplierId, 'purchase_invoice', $purchaseId, 2099, 3, 'basic', 0.0, -1100.0, '2099-05-10', 'Chybná sazba', 'OD-43-K1');
+
+        self::assertSame('40k', $this->service->periodCorrections($this->supplierId, 2099, 3)[0]['dphdp3_line']);
+        $after = $this->builder->computeAnnualCoefficient($this->supplierId, 2099);
+        self::assertEqualsWithDelta(1000.0, $after['kr_year'], 0.01, 'Ř. 53 vychází z krácené daně včetně opravy § 43.');
+    }
+
+    /** @return list<array<string,string>> */
+    private function khRows(string $veta, ?string $dic): array
+    {
+        $xml = (string) ($this->kh->build($this->supplierId, 2099, 3)['xml'] ?? '');
+        self::assertNotSame('', $xml);
+        $dom = new \DOMDocument();
+        $dom->loadXML($xml);
+        $out = [];
+        foreach ($dom->getElementsByTagName($veta) as $v) {
+            $dicAttr = $v->getAttribute('dic_odb') ?: $v->getAttribute('dic_dod');
+            if ($dic !== null && $dicAttr !== $dic) {
+                continue;
+            }
+            $row = [];
+            foreach ($v->attributes as $a) {
+                $row[$a->name] = $a->value;
+            }
+            if (isset($row['dppd'])) {
+                $d = \DateTimeImmutable::createFromFormat('d.m.Y', $row['dppd']);
+                $row['dppd_iso'] = $d !== false ? $d->format('Y-m-d') : $row['dppd'];
+            }
+            $out[] = $row;
+        }
+        return $out;
+    }
+
+    /** @return array{0:int,1:int,2:int,3:int} klient s DIČ, měna, uživatel, sazba 21 % */
+    private function khFixtureIds(): array
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare("SELECT id FROM currencies WHERE supplier_id = ? AND code = 'CZK' ORDER BY id LIMIT 1");
+        $stmt->execute([$this->supplierId]);
+        $currencyId = (int) $stmt->fetchColumn();
+        $stmt = $pdo->prepare("SELECT id FROM clients WHERE supplier_id = ? AND dic = 'CZ43434343' LIMIT 1");
+        $stmt->execute([$this->supplierId]);
+        $clientId = (int) $stmt->fetchColumn();
+        if ($clientId === 0) {
+            $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
+            $pdo->prepare(
+                "INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, dic, currency_default_id, is_customer, is_vendor)
+                 VALUES (?, 'Syntetická protistrana KH §43', 'Testovací 2', 'Praha', '11000', ?, 'CZ43434343', ?, 1, 1)"
+            )->execute([$this->supplierId, $countryId, $currencyId]);
+            $clientId = (int) $pdo->lastInsertId();
+        }
+        $userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        $rateId = (int) $pdo->query('SELECT id FROM vat_rates WHERE rate_percent = 21 ORDER BY id LIMIT 1')->fetchColumn();
+        return [$clientId, $currencyId, $userId, $rateId];
+    }
+
+    private function seedSale(string $number, float $base, float $vat): int
+    {
+        [$clientId, $currencyId, $userId, $rateId] = $this->khFixtureIds();
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO invoices
+                (supplier_id, client_id, varsymbol, invoice_type, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, client_snapshot, supplier_snapshot,
+                 total_without_vat, total_vat, total_with_vat, paid_total, status, created_by)
+             VALUES (?, ?, ?, 'invoice', '2099-03-10', '2099-03-10', '2099-03-24',
+                     ?, 0, '{}', '{}', ?, ?, ?, 0, 'issued', ?)"
+        )->execute([$this->supplierId, $clientId, $number, $currencyId, $base, $vat, $base + $vat, $userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO invoice_items
+                (invoice_id, description, quantity, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
+             VALUES (?, 'Syntetické plnění', 1, ?, ?, 21, ?, ?, ?, 1)"
+        )->execute([$id, $base, $rateId, $base, $vat, $base + $vat]);
+        return $id;
+    }
+
+    private function seedPurchase(string $number, float $base, float $vat, string $deduction): int
+    {
+        [$clientId, $currencyId, $userId, $rateId] = $this->khFixtureIds();
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
+                 due_date, received_at, received_at_source, currency_id, exchange_rate, reverse_charge,
+                 vendor_snapshot, total_without_vat, total_vat, total_with_vat, status,
+                 vat_classification_code, vat_deduction, created_by)
+             VALUES (?, ?, ?, 'invoice', '2099-03-10', '2099-03-10', '2099-03-24', '2099-03-10', 'manual', ?, 1, 0,
+                     '{}', ?, ?, ?, 'received', '40', ?, ?)"
+        )->execute([$this->supplierId, $clientId, $number, $currencyId, $base, $vat, $base + $vat, $deduction, $userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+             VALUES (?, 'Syntetické plnění', 1, 'ks', ?, ?, 21, ?, ?, ?, 0, '40')"
+        )->execute([$id, $base, $rateId, $base, $vat, $base + $vat]);
+        return $id;
     }
 
     /** Bez evidované opravy se chování nemění. */
