@@ -66,7 +66,12 @@ final class PayrollEmploymentCalendarProvisioner
             return self::result(false, self::ISSUE_NOT_IN_PERIOD, null, null, null);
         }
 
-        $versions = $this->repository->calendars($supplierId, $employmentId, $periodStart, $periodEnd);
+        // Verze od začátku měsíce dál, i v pozdějších měsících: převod staršího roku až
+        // po novějším (PAMICA po letech v libovolném pořadí) najde kalendář založený
+        // od novějšího roku a nový musí skončit den před ním. Dřív se hledalo jen
+        // v měsíci, nový kalendář bez konce narazil na překryv a starší měsíce zůstaly
+        // bez fondu (neschválené), na rozdíl od převodu v pořadí let.
+        $versions = $this->repository->calendars($supplierId, $employmentId, $periodStart, '9999-12-31');
         $validTo = null;
         foreach ($versions as $version) {
             $from = PayrollTimeValue::string($version['valid_from'] ?? null, 'valid_from');
@@ -81,7 +86,7 @@ final class PayrollEmploymentCalendarProvisioner
                 );
             }
             if ($from > $firstDay && $validTo === null) {
-                // Pozdější verze v témže měsíci: nový kalendář končí den před ní.
+                // Pozdější verze: nový kalendář končí den před ní.
                 $validTo = (new \DateTimeImmutable($from))->modify('-1 day')->format('Y-m-d');
             }
         }

@@ -67,6 +67,7 @@ final class AnonymizationPolicy
         'password_resets' => 'tokeny pro obnovu hesla',
         'payroll_document_access_codes' => 'přístupové kódy zaměstnanců k dokumentům',
         'payroll_personnel_notes' => 'poznámky personálního spisu, šifrované klíčem osoby',
+        'payroll_takeover_invariant_checks' => 'výsledek kontroly převzetí s osobními čísly zdroje; vznikne znovu dalším převodem',
         'payroll_document_access_links' => 'odkazy zaslané zaměstnancům',
         'payroll_document_access_sessions' => 'relace zaměstnanců',
         'payroll_document_download_grants' => 'jednorázová oprávnění ke stažení',

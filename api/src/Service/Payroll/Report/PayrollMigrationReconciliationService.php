@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverDiscountIntentCheck;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverJmhzFormCheck;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
@@ -30,6 +31,7 @@ final class PayrollMigrationReconciliationService
         private readonly PayrollHistoricalPeriodService $historical,
         private readonly PayrollTakeoverDiscountIntentCheck $discountIntents,
         private readonly PayrollTakeoverJmhzFormCheck $jmhzForms,
+        private readonly PayrollTakeoverInvariants $invariants,
         ?PayrollMigrationReconciliationBuilder $builder = null,
     ) {
         $this->builder = $builder ?? new PayrollMigrationReconciliationBuilder();
@@ -82,6 +84,11 @@ final class PayrollMigrationReconciliationService
             // k opravnému hlášení, převzetí nedrží.
             'jmhz_form_differences' => $this->jmhzForms->check($supplierId, $year),
             ...$this->layers->check($supplierId, $year),
+            // Brána G2: kontroly vlastních dat znovu, kontroly proti zdroji z posledního převodu.
+            'invariants' => [
+                'live' => $this->invariants->live($supplierId, $year),
+                'stored' => $this->invariants->stored($supplierId),
+            ],
         ];
 
         return $report;

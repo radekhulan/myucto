@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import TakeoverEstimatedStartList from './TakeoverEstimatedStartList.vue'
 import TakeoverGapList from './TakeoverGapList.vue'
+import TakeoverInvariantFindings from './TakeoverInvariantFindings.vue'
 import TakeoverJmhzFormFindings from './TakeoverJmhzFormFindings.vue'
 import TakeoverLayerFindings from './TakeoverLayerFindings.vue'
 import { monthRanges, type TakeoverCheck } from './takeoverMonths'
@@ -21,8 +22,11 @@ const { t } = useI18n()
 const estimatedStarts = computed(() => props.check.estimated_starts ?? [])
 const missingDiscountIntents = computed(() => props.check.missing_discount_intents ?? [])
 const jmhzFormDifferences = computed(() => props.check.jmhz_form_differences ?? [])
+const invariantCount = computed(() => (props.check.invariants?.live.length ?? 0)
+  + (props.check.invariants?.stored ?? []).reduce((sum, item) => sum + item.violations.length, 0))
 
 const hasFindings = computed(() => props.check.missing_openings.length > 0
+  || invariantCount.value > 0
   || estimatedStarts.value.length > 0
   || missingDiscountIntents.value.length > 0
   || jmhzFormDifferences.value.length > 0
@@ -33,7 +37,7 @@ const hasFindings = computed(() => props.check.missing_openings.length > 0
 
 <template>
   <section
-    v-if="check.takeover_months.length > 0"
+    v-if="check.takeover_months.length > 0 || invariantCount > 0"
     class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
     data-test="takeover-check"
   >
@@ -45,6 +49,8 @@ const hasFindings = computed(() => props.check.missing_openings.length > 0
     <p v-if="!hasFindings" class="mt-3 text-sm text-success-700" data-test="takeover-check-ok">
       {{ t('payroll.takeover_check.all_ok') }}
     </p>
+
+    <TakeoverInvariantFindings v-if="check.invariants && invariantCount > 0" class="mt-3" :invariants="check.invariants" />
 
     <div
       v-if="check.missing_openings.length > 0"

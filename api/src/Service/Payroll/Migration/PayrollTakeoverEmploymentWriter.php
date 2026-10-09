@@ -150,6 +150,12 @@ final class PayrollTakeoverEmploymentWriter
         if (in_array((string) $employmentRow['status'], ['ended', 'archived', 'no_show'], true)) {
             return ['monthly_wage_ended' => 1];
         }
+        // Totéž platí pro vztah, který podle zdroje skončil dřív, než MyÚčto začne mzdy
+        // počítat, i když ho tenhle převod ukončí až po mzdě: výsledek nesmí záviset na
+        // pořadí převáděných let (novější rok ho ukončí dřív, než přijde starší).
+        if ($this->endedBeforeModuleStart($supplierId, $employment)) {
+            return ['monthly_wage_ended' => 1];
+        }
         $counts = $wages[0]['prorated'] === true ? ['monthly_wage_max' => 1] : [];
         // Sazba, kterou ještě před první verzí podmínek vystřídala další, do vztahu nepatří;
         // jinak by se první verze opravovala tam a zpátky při každém převodu.
@@ -227,6 +233,19 @@ final class PayrollTakeoverEmploymentWriter
         return $written > 0 ? $counts + ['monthly_wage' => $written] : $counts;
     }
 
+    /** Vztah podle zdroje skončil před prvním měsícem, který počítá MyÚčto. */
+    private function endedBeforeModuleStart(int $supplierId, PayrollTakeoverEmployment $employment): bool
+    {
+        if ($employment->end === null) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT start_period FROM payroll_module_state WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $start = $stmt->fetchColumn();
+
+        return is_string($start) && $start !== '' && $employment->end < substr($start, 0, 10);
+    }
+
     /**
      * Verze podmínek platná k datu; před první verzí ta první.
      *
@@ -290,7 +309,9 @@ final class PayrollTakeoverEmploymentWriter
             (string) ($component['valid_from'] ?? '0000-01-01'),
         );
         $upper = null;
-        foreach ([$row['end_date'] ?? null, $component['valid_to'] ?? null] as $limit) {
+        // Skončení ze zdroje platí i tehdy, když ho vztah ve firmě ještě nemá (zapíše ho
+        // tentýž převod až po mzdě); jinak by předpis běžel za konec vztahu.
+        foreach ([$row['end_date'] ?? null, $employment->end, $component['valid_to'] ?? null] as $limit) {
             if (is_string($limit) && ($upper === null || $limit < $upper)) {
                 $upper = $limit;
             }

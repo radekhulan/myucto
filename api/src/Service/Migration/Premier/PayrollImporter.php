@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverDeductionsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
@@ -101,6 +102,7 @@ final class PayrollImporter
         private readonly PayrollMigrationModuleSetup $moduleSetup,
         private readonly PremierPayrollRegistrations $registrations,
         private readonly PremierPayrollSickness $sickness,
+        private readonly PayrollTakeoverInvariants $invariants,
     ) {}
 
     public function import(PremierContext $ctx): void
@@ -240,6 +242,9 @@ final class PayrollImporter
         $this->openingBalances($ctx, $byEmployee, $payroll);
         $this->postingMap($ctx);
         $this->reconcile($ctx, $payroll);
+        // Brána G2: převzaté mzdy proti zdroji, dvojí osoby a překryvy verzí (rozdíl k přijetí).
+        PayrollTakeoverInvariants::report($p, self::STEP,
+            $this->invariants->verify($ctx->supplierId, self::SOURCE, $totals, 0, !$ctx->dryRun));
     }
 
     /**

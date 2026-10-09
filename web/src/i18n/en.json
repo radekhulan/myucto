@@ -1956,6 +1956,19 @@
       "takeover_only_title": "Taken-over wages without an opening balance",
       "takeover_only_hint": "The taken-over wages have the month, the opening balance does not — the annual settlement and the tax statement do not count it.",
       "jmhz_form_title": "JMHZ report filed with different figures than the final wage",
+      "invariants_title": "The transfer violated the takeover check",
+      "invariants_hint": "Each violation is a transfer error, not a warning: the taken-over wages then do not match the source or the employments in MyÚčto. Fix the data and repeat the transfer, or accept the difference deliberately.",
+      "invariants_source": "(transfer {source}, {at})",
+      "invariant_codes": {
+        "takeover_totals_without_employment": "Taken-over wages without an employment",
+        "takeover_relation_missing": "Paid employment from the source is missing in MyÚčto",
+        "takeover_totals_mismatch": "Totals per person and month do not match the source",
+        "takeover_source_rows_skipped": "Source payslips that were not taken over",
+        "takeover_duplicate_person": "Person exists more than once in MyÚčto",
+        "takeover_terms_overlap": "Overlapping versions of employment terms",
+        "takeover_component_overlap": "Overlapping versions of a payroll component",
+        "takeover_recurring_component_overlap": "Overlapping versions of a recurring component"
+      },
       "jmhz_form_hint": "The previous program filed the monthly report before the wage was corrected and never filed a corrective report. The takeover is correct, but the social security administration and the tax authority hold different figures. Consider a corrective report for these people and months. This blocks neither the takeover nor the year close; differences below CZK 1 (up to CZK 2 for health insurance) are rounding and are not reported.",
       "jmhz_form_person": "{name}: the JMHZ report for {period} was filed with different figures than the final wage, consider a corrective report",
       "jmhz_form_reported": "In the report",
@@ -30234,7 +30247,8 @@
       "cancelled": "Cancelled by user",
       "unexpected": "Unexpected error",
       "payroll_sickness": "Sickness and wage compensation",
-      "payroll_posting_map": "Posting rules from the previous program"
+      "payroll_posting_map": "Posting rules from the previous program",
+      "payroll_invariants": "Payroll takeover check"
     },
     "counts": {
       "warehouses": "warehouses",
@@ -30445,6 +30459,8 @@
       "sickness_compensations_failed": "absences without calculated sick pay",
       "reference_totals": "reference payslips stored for comparison",
       "reference_totals_skipped": "payslips without employment identification",
+      "invariant_violations": "takeover check violations",
+      "absences_lone_carer": "lone carer flags added to family member care",
       "posting_map_conflicts": "posting rules in conflict",
       "sickness_absences_approved": "taken-over absences approved",
       "payroll_module_setup": "payroll settings completed",

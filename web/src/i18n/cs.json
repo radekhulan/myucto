@@ -1956,6 +1956,19 @@
       "takeover_only_title": "Převzatá mzda bez počátečního stavu",
       "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne - roční zúčtování ani vyúčtování daně s ním nepočítají.",
       "jmhz_form_title": "Hlášení JMHZ podané s jinými údaji, než má konečná mzda",
+      "invariants_title": "Převod porušil kontrolu převzetí",
+      "invariants_hint": "Každé porušení je chyba převodu, ne upozornění: převzaté mzdy pak nesedí na zdroj nebo na vztahy v MyÚčtu. Opravte data a převod zopakujte, nebo rozdíl vědomě přijměte.",
+      "invariants_source": "(převod {source}, {at})",
+      "invariant_codes": {
+        "takeover_totals_without_employment": "Převzaté mzdy bez pracovního vztahu",
+        "takeover_relation_missing": "Vztah s výplatou ve zdroji chybí v MyÚčtu",
+        "takeover_totals_mismatch": "Součty po osobě a měsíci nesedí na zdroj",
+        "takeover_source_rows_skipped": "Mzdy zdroje, které se nepřevzaly",
+        "takeover_duplicate_person": "Osoba je v MyÚčtu vícekrát",
+        "takeover_terms_overlap": "Překrývající se verze podmínek vztahu",
+        "takeover_component_overlap": "Překrývající se verze mzdové složky",
+        "takeover_recurring_component_overlap": "Překrývající se verze pravidelné složky"
+      },
       "jmhz_form_hint": "Předchozí program podal měsíční hlášení dřív, než se mzda opravila, a opravné hlášení už nepodal. Převzetí je správné, ČSSZ a finanční správa ale mají jiné údaje. Zvažte opravné hlášení za tyto osoby a měsíce. Převod ani uzávěrku to neblokuje; rozdíly menší než 1 Kč (u zdravotního pojistného do 2 Kč) jsou zaokrouhlení a nehlásí se.",
       "jmhz_form_person": "{name}: hlášení JMHZ za {period} bylo podáno s jinými údaji, než má konečná mzda, zvažte opravné hlášení",
       "jmhz_form_reported": "V hlášení",
@@ -30234,7 +30247,8 @@
       "cancelled": "Zrušeno uživatelem",
       "unexpected": "Neočekávaná chyba",
       "payroll_sickness": "Nemocenská a náhrady mzdy",
-      "payroll_posting_map": "Kontace z původního programu"
+      "payroll_posting_map": "Kontace z původního programu",
+      "payroll_invariants": "Kontrola převzetí mezd"
     },
     "counts": {
       "warehouses": "skladů",
@@ -30445,6 +30459,8 @@
       "sickness_compensations_failed": "nepřítomností bez spočítané náhrady mzdy",
       "reference_totals": "převzatých mezd pro srovnání",
       "reference_totals_skipped": "mezd bez identifikace vztahu",
+      "invariant_violations": "porušení kontroly převzetí",
+      "absences_lone_carer": "ošetřovných doplněno o příznak osamělého zaměstnance",
       "posting_map_conflicts": "kontací s rozporem",
       "sickness_absences_approved": "převzatých nepřítomností schváleno",
       "payroll_module_setup": "nastavení mezd doplněno",

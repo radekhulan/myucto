@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRecord;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
 
@@ -51,6 +52,7 @@ final class JmhzTakeoverPlanner
         private readonly PayrollMigrationReferenceTotalsWriter $totalsWriter,
         private readonly PayrollTakeoverEmploymentWriter $employmentWriter,
         private readonly PayrollTakeoverAbsenceWriter $absenceWriter,
+        private readonly PayrollTakeoverInvariants $invariants,
     ) {}
 
     /**
@@ -188,6 +190,14 @@ final class JmhzTakeoverPlanner
             }
         }
         ksort($periods, SORT_STRING);
+        // Brána G2 jako u převodů z jiných programů: porušení se ukáže v náhledu výsledku
+        // i na Kontrole převzetí, nikdy jen tiše v datech.
+        if ($totals !== []) {
+            foreach ($this->invariants->verify($supplierId, PayrollMigrationReferenceTotalsWriter::SOURCE_JMHZ, $totals) as $violation) {
+                $counts['invariant_violations'] = ($counts['invariant_violations'] ?? 0) + 1;
+                $skipped[] = ['period' => $violation['context']['period'] ?? null, 'label' => 'Kontrola převzetí', 'reason' => $violation['text']];
+            }
+        }
         ksort($counts, SORT_STRING);
 
         return [

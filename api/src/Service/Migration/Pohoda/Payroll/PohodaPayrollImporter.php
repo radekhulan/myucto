@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollMigrationModuleSetup;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRepeatedMonth;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverSicknessCompensation;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
@@ -56,6 +57,9 @@ final class PohodaPayrollImporter
     public const STEP_DEDUCTIONS = 'payroll_deductions';
     public const STEP_SICKNESS = 'payroll_sickness';
     public const STEP_POSTING_MAP = 'payroll_posting_map';
+    public const STEP_INVARIANTS = 'payroll_invariants';
+    /** Zdroj převzatých mezd v `payroll_migration_reference_totals`. */
+    private const SOURCE = 'pamica';
     /** Kód kontroly: začátek vedení mezd leží před měsíci, které PAMICA zpracovala. */
     public const START_BEHIND = 'payroll_start_behind_takeover';
     /** Rozhodnutí k začátku vedení mezd: posunout ho za poslední zpracovaný měsíc a pak převést. */
@@ -83,6 +87,7 @@ final class PohodaPayrollImporter
         private readonly PayrollTakeoverSicknessCompensation $sicknessCompensation,
         private readonly PohodaPayrollRegistrations $registrations,
         private readonly PohodaPayrollRelations $relations,
+        private readonly PayrollTakeoverInvariants $invariants,
     ) {}
 
     /**
@@ -158,6 +163,16 @@ final class PohodaPayrollImporter
         ), 'context' => $context];
     }
 
+    private static function outsideEmploymentMessage(string $period, string $number): string
+    {
+        return sprintf(
+            '%s: osobní číslo %s má mzdu zúčtovanou mimo trvání vztahu (typicky doplatek po skončení). '
+            . 'Mzdové vstupy za tento měsíc se k vztahu nezapsaly; převzaté úhrny měsíce u vztahu jsou. '
+            . 'Pokud je doplatek potřeba v MyÚčtu, zadejte ho ručně.',
+            $period, $number,
+        );
+    }
+
     /** `YYYY-MM` → `M/YYYY`. */
     private static function monthLabel(string $period): string
     {
@@ -193,7 +208,7 @@ final class PohodaPayrollImporter
     public static function stepKeys(): array
     {
         return [self::STEP_PREFLIGHT, self::STEP_PROFILE, self::STEP_MONTHS, self::STEP_PEOPLE, self::STEP_JMHZ,
-            self::STEP_DEDUCTIONS, self::STEP_SICKNESS, self::STEP_POSTING_MAP];
+            self::STEP_DEDUCTIONS, self::STEP_SICKNESS, self::STEP_POSTING_MAP, self::STEP_INVARIANTS];
     }
 
     /**
@@ -454,8 +469,16 @@ final class PohodaPayrollImporter
             $protocol->begin(self::STEP_MONTHS);
             // Osoby a vztahy roku dřív než měsíce: druhý vztah téže osoby jde k ní, ne jako
             // nová osoba, a řádek měsíce pak najde svůj vztah podle osobního čísla.
-            $ensured = $this->relations->ensure($supplierId, $userOrNull, PohodaPayrollRelations::read($file, $year, $converter->exportedOn),
+            $sourceRelations = PohodaPayrollRelations::read($file, $year, $converter->exportedOn);
+            $ensured = $this->relations->ensure($supplierId, $userOrNull, $sourceRelations,
                 $protocol, self::STEP_MONTHS, self::MESSAGE_LIMIT);
+            /** @var array<string,string> $sourceEnds osobní číslo => skončení vztahu podle zdroje */
+            $sourceEnds = [];
+            foreach ($sourceRelations as $sourceRelation) {
+                if (is_string($sourceRelation['end'] ?? null)) {
+                    $sourceEnds[mb_strtoupper((string) $sourceRelation['personal_number'])] = $sourceRelation['end'];
+                }
+            }
             foreach ($ensured as $name => $count) {
                 if ($count > 0) {
                     $protocol->count(self::STEP_MONTHS, $name, $count);
@@ -523,6 +546,32 @@ final class PohodaPayrollImporter
                 $workbook = PohodaPayrollConverter::workbook($month);
                 // Otisk dat měsíce, ne souboru: XLSX nese časová razítka a byl by pokaždé jiný.
                 $key = $period . '|' . hash('sha256', (string) json_encode([$month['columns'], $month['rows']], JSON_UNESCAPED_UNICODE));
+                // Mzda zúčtovaná po skončení vztahu podle zdroje (doplatek) nejde do vstupů
+                // ani docházky. Rozhoduje skončení ze zdroje, ne stav vztahu ve firmě: převod
+                // novějšího roku před starším by jinak doplatek zapsal k vztahu, který ještě
+                // nemá zapsané skončení, a výsledek by závisel na pořadí let.
+                $afterEnd = [];
+                $kept = [];
+                foreach ($month['rows'] as $row) {
+                    $end = $sourceEnds[mb_strtoupper((string) ($row['Osobní číslo'] ?? ''))] ?? null;
+                    if ($end !== null && $end < $period . '-01') {
+                        $afterEnd[] = (string) $row['Osobní číslo'];
+                        continue;
+                    }
+                    // Sjednanou mzdu vztahu, který skončil dřív, než MyÚčto mzdy počítá, převod
+                    // nepřenáší (PayrollTakeoverEmploymentWriter::monthlyWage); sešit ji proto
+                    // nenese ani tehdy, když skončení ještě není ve firmě zapsané.
+                    if ($end !== null && !self::countedByModule(substr($end, 0, 7), $moduleStart) && array_key_exists('Měsíční mzda', $row)) {
+                        $row['Měsíční mzda'] = '';
+                        $wageCleared = true;
+                    }
+                    $kept[] = $row;
+                }
+                if ($afterEnd !== [] || ($wageCleared ?? false)) {
+                    $wageCleared = false;
+                    $month['rows'] = $kept;
+                    $workbook = PohodaPayrollConverter::workbook($month);
+                }
                 if (isset($done[$key])) {
                     $protocol->count(self::STEP_MONTHS, 'existing');
                     // Měsíc, který už jednou prošel, se neimportuje znovu - ale schválení
@@ -561,6 +610,16 @@ final class PohodaPayrollImporter
                     }
                     $this->repeatedMonth->reopenWorkMonths($supplierId, $period, $previousBatches, $userOrNull, 'PAMICA', $protocol, self::STEP_MONTHS);
                 }
+                foreach ($afterEnd as $number) {
+                    $protocol->count(self::STEP_MONTHS, 'payslips_outside_employment');
+                    if ($messages++ < self::MESSAGE_LIMIT) {
+                        $protocol->warn(self::STEP_MONTHS, 'payslip_outside_employment', self::outsideEmploymentMessage($period, $number),
+                            ['period' => $period, 'personal_number' => $number]);
+                    }
+                }
+                if ($month['rows'] === []) {
+                    continue;
+                }
                 try {
                     $preview = $this->attendance->preview($supplierId, $period, [$workbook], null, $profileId);
                     $created = 0;
@@ -571,12 +630,9 @@ final class PohodaPayrollImporter
                         if ($person['personal_number'] !== null && $this->employmentExists($supplierId, $person['personal_number'])) {
                             $protocol->count(self::STEP_MONTHS, 'payslips_outside_employment');
                             if ($messages++ < self::MESSAGE_LIMIT) {
-                                $protocol->warn(self::STEP_MONTHS, 'payslip_outside_employment', sprintf(
-                                    '%s: osobní číslo %s má mzdu zúčtovanou mimo trvání vztahu (typicky doplatek po skončení). '
-                                    . 'Mzdové vstupy za tento měsíc se k vztahu nezapsaly; převzaté úhrny měsíce u vztahu jsou. '
-                                    . 'Pokud je doplatek potřeba v MyÚčtu, zadejte ho ručně.',
-                                    $period, $person['personal_number'],
-                                ), ['period' => $period, 'personal_number' => $person['personal_number']]);
+                                $protocol->warn(self::STEP_MONTHS, 'payslip_outside_employment',
+                                    self::outsideEmploymentMessage($period, (string) $person['personal_number']),
+                                    ['period' => $period, 'personal_number' => $person['personal_number']]);
                             }
                             continue;
                         }
@@ -654,7 +710,7 @@ final class PohodaPayrollImporter
                 $records = PohodaPayrollPeople::withSubmittedDiscounts($records, $jmhz['effective'], $year);
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
-                $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn);
+                [$sourceTotals, $sourceSkipped] = $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn);
                 // Náhrady mzdy z hodin docházky až po osobách: stojí na průměrném výdělku,
                 // který zapisuje teprve tenhle krok.
                 // Souhrn měsíce nese dávku, která ho zapsala naposledy se změnou. Opakovaný
@@ -750,6 +806,13 @@ final class PohodaPayrollImporter
                         (int) ($stored['proposal']['summary']['conflict'] ?? 0));
                 }
                 $protocol->finish(self::STEP_POSTING_MAP);
+            }
+
+            // Brána G2: převzaté mzdy proti zdroji a vlastní data proti dvojím osobám
+            // a překryvům verzí. Porušení je rozdíl k přijetí, ne tiché upozornění.
+            if (!$protocol->failed()) {
+                PayrollTakeoverInvariants::report($protocol, self::STEP_INVARIANTS,
+                    $this->invariants->verify($supplierId, self::SOURCE, $sourceTotals ?? [], $sourceSkipped ?? 0, !$dryRun));
             }
         } finally {
             if ($savepoint) {
@@ -1058,10 +1121,12 @@ final class PohodaPayrollImporter
      * se při převodu, ne až při generování sestavy: měsíce po převodu už export nikdo
      * po ruce nemá, a přesně tehdy se historický měsíc přepočítává.
      */
-    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol, ?string $exportedOn): void
+    /** @return array{0:list<PayrollMigrationReferenceTotals>,1:int} úhrny ze zdroje a mzdy, které se do nich nedostaly */
+    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol, ?string $exportedOn): array
     {
         $matched = $this->people->matchedRelations();
         $totals = [];
+        $skipped = 0;
         foreach (PohodaXml::records($file, 'MZ') as $mz) {
             if ((int) PohodaXml::text($mz, 'Rok') !== $year) {
                 continue;
@@ -1085,12 +1150,14 @@ final class PohodaPayrollImporter
                 // Mzda bez platného měsíce nebo bez identifikace vztahu: do sestavy nepatří,
                 // ale ani kvůli ní nemá padnout celý převod.
                 $protocol->count(self::STEP_PEOPLE, 'reference_totals_skipped');
+                $skipped++;
             }
         }
-        if ($totals === []) {
-            return;
+        if ($totals !== []) {
+            $protocol->count(self::STEP_PEOPLE, 'reference_totals', $this->referenceTotals->store($supplierId, self::SOURCE, $totals, basename($file)));
         }
-        $protocol->count(self::STEP_PEOPLE, 'reference_totals', $this->referenceTotals->store($supplierId, 'pamica', $totals, basename($file)));
+
+        return [$totals, $skipped];
     }
 
 }

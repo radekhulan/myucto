@@ -58,6 +58,7 @@ final class PohodaImportJobService extends AbstractImportJobService
         'payroll_deductions' => 'Srážky, exekuce a insolvence',
         'payroll_sickness' => 'Nemocenská a náhrady mzdy',
         'payroll_posting_map' => 'Kontace z původního programu',
+        'payroll_invariants' => 'Kontrola převzetí mezd',
         'small_assets' => 'Drobný majetek',
         'stock' => 'Sklad',
         'reconciliation' => 'Rekonciliace',

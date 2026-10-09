@@ -111,6 +111,9 @@ final class PayrollEnumContractTest extends TestCase
         // Veličiny porovnání převzaté mzdy s přijatým hlášením JMHZ předchozího programu.
         'payrollTakeover.ts::TakeoverJmhzFormMetric'
             => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverJmhzFormCheck::METRIC_NAMES',
+        // Kódy porušení invariantů převzetí (brána G2) na Kontrole převzetí.
+        'payrollTakeover.ts::TakeoverInvariantCode'
+            => 'const:MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants::CODES',
         // Odkud je měsíc roku přechodu. `none` je díra v roce, ne prázdná hodnota —
         // klient, který ji nezná, by ji nakreslil jako „v pořádku".
         'payrollMigrationReconciliation.ts::PayrollTakeoverPresence'

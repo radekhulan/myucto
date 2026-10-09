@@ -88,6 +88,32 @@ export interface TakeoverJmhzFormDifference {
   differences: TakeoverJmhzFormMetricDifference[]
 }
 
+export type TakeoverInvariantCode =
+  | 'takeover_totals_without_employment'
+  | 'takeover_relation_missing'
+  | 'takeover_totals_mismatch'
+  | 'takeover_source_rows_skipped'
+  | 'takeover_duplicate_person'
+  | 'takeover_terms_overlap'
+  | 'takeover_component_overlap'
+  | 'takeover_recurring_component_overlap'
+
+/** Porušení invariantu převzetí; `text` je popis s osobními čísly a obdobími z převodu. */
+export interface TakeoverInvariantViolation {
+  code: TakeoverInvariantCode
+  text: string
+  context: Record<string, unknown>
+}
+
+/**
+ * Invarianty převzetí: `live` počítá stránka z vlastních dat, `stored` jsou kontroly
+ * proti zdroji uložené posledním převodem každého zdroje.
+ */
+export interface TakeoverInvariants {
+  live: TakeoverInvariantViolation[]
+  stored: Array<{ source: string, checked_at: string, violations: TakeoverInvariantViolation[] }>
+}
+
 export interface TakeoverCheck {
   takeover_months: number[]
   missing_openings: TakeoverGap[]
@@ -97,6 +123,8 @@ export interface TakeoverCheck {
   missing_discount_intents?: TakeoverMissingDiscountIntent[]
   /** Volitelné kvůli starší odpovědi bez klíče. */
   jmhz_form_differences?: TakeoverJmhzFormDifference[]
+  /** Brána G2; volitelné kvůli starší odpovědi bez klíče. */
+  invariants?: TakeoverInvariants
   differences: TakeoverLayerDifference[]
   opening_only: TakeoverLayerOneSided[]
   takeover_only: TakeoverLayerOneSided[]
