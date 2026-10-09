@@ -167,6 +167,13 @@ final readonly class PayrollMigrationTakeoverFacts
             deductionsMinor: max(0, (int) round(PohodaXml::num($mz, 'KcSrazky') * 100)),
             netPayableMinor: (int) round(PohodaXml::num($mz, 'KcVyuct') * 100),
             payoutDate: PohodaXml::date($mz, 'Datum'),
+            // `NahrDoby` jsou vyloučené dny § 18 odst. 7 zák. č. 187/2006 Sb.: ověřeno na všech
+            // 157 měsících rozhodných období, která PAMICA podala v NEMPRI (`NEMPRIpol.VyldnyR*`),
+            // s nemocí, ošetřovným i celými měsíci mateřské a rodičovské. `NahrDobyDP`
+            // (vyloučené doby důchodového pojištění) je užší a rodičovskou nenese.
+            sicknessExcludedDays: $mz === [] || PohodaXml::text($mz, 'NahrDoby') === ''
+                ? null
+                : max(0, min((int) round(PohodaXml::num($mz, 'NahrDoby')), 31)),
         );
     }
 
