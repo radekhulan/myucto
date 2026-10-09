@@ -11,6 +11,7 @@ use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\SouhrnneHlaseniBuilder;
+use MyInvoice\Service\Report\VatCrossCheckService;
 use MyInvoice\Service\Invoice\InvoiceMath;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -2137,6 +2138,121 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame('301', (string) $dp->Veta2['pln_sluzby'], 'ř.21 zaokrouhluje až součet');
         $this->assertSame((int) round($result['summary']['total_amount_exact']), (int) (string) $dp->Veta2['pln_sluzby'],
             'po zaokrouhlení součtu sedí SH na ř.21 přiznání');
+    }
+
+    /**
+     * Issue #141 — součet haléřových řádků, který dává PŘESNĚ celé koruny, nesmí SH
+     * zaokrouhlit o korunu výš. 842,86 + 219,06 + 858,84 + 907,32 + 206,92 = 3 035,00 Kč,
+     * ale sčítání ve float dá 3035.0000000000005 a `ceil()` z toho udělá 3 036.
+     */
+    public function testShWholeCrownSumIsNotRoundedUpByFloatError(): void
+    {
+        $d = sprintf('%04d-%02d-10', self::YEAR, self::MONTH);
+        $customer = $this->client('EU SH float', $this->skId, 'SK1410000021', customer: true);
+        $this->sale('SH141-F1', $customer, '20', false, $d, $d, [
+            [842.86, 0, 0], [219.06, 0, 0], [858.84, 0, 0], [907.32, 0, 0], [206.92, 0, 0],
+        ]);
+
+        $result = $this->shv->build($this->supplierId, self::YEAR, self::MONTH);
+        $sh = (new \SimpleXMLElement($result['xml']))->DPHSHV;
+        $this->assertCount(1, $sh->VetaR);
+        $this->assertSame('3035', (string) $sh->VetaR[0]['pln_hodnota'], 'přesně 3 035,00 Kč se nezaokrouhluje');
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('3035', (string) $dp->Veta2['dod_zb'], 'ř.20 = SH, když řádek nemá haléře');
+    }
+
+    /**
+     * Issue #141 — tatáž data do SH, KH i přiznání. Každý výkaz zaokrouhluje podle svého
+     * předpisu a rozdíly mezi nimi jsou jen ty, které předpisy způsobují:
+     *   - KH nese haléře (A.4 per doklad, A.5 souhrnně, VetaC součty),
+     *   - přiznání zaokrouhluje matematicky každý řádek (součet haléřů),
+     *   - SH zaokrouhluje každý řádek stát × DIČ × kód plnění na celé Kč nahoru,
+     *     dobropis se v řádku započítá záporně.
+     * Křížová kontrola nesmí nic z toho hlásit jako nesoulad.
+     */
+    public function testShKhAndVatReturnRoundEachByItsOwnRule(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+
+        $czA4 = $this->client('Tuzemsko A4', $this->czId, 'CZ14100001', customer: true);
+        $czA5 = $this->client('Tuzemsko A5', $this->czId, 'CZ14100002', customer: true);
+        $this->sale('R141-A4', $czA4, '1', false, $d(3), $d(3), [[12345.67, 2592.59, 21]]);
+        $this->sale('R141-A5a', $czA5, '1', false, $d(4), $d(4), [[1000.40, 210.08, 21]]);
+        $this->sale('R141-A5b', $czA5, '1', false, $d(5), $d(5), [[2000.30, 420.06, 21]]);
+
+        $goodsA = $this->client('EU zboží A', $this->skId, 'SK1410000031', customer: true);
+        $goodsB = $this->client('EU zboží B', $this->skId, 'SK1410000032', customer: true);
+        $servC = $this->client('EU služby C', $this->skId, 'SK1410000033', customer: true);
+        $servD = $this->client('EU služby D', $this->skId, 'SK1410000034', customer: true);
+        $this->sale('R141-G1', $goodsA, '20', false, $d(6), $d(6), [[1000.30, 0, 0]]);
+        $this->sale('R141-G2', $goodsA, '20', false, $d(7), $d(7), [[2000.45, 0, 0]]);
+        $this->sale('R141-G3', $goodsB, '20', false, $d(8), $d(8), [[500.10, 0, 0]]);
+        $this->sale('R141-G3D', $goodsB, '20', false, $d(9), $d(9), [[-100.20, 0, 0]]);
+        $this->db->pdo()->prepare("UPDATE invoices SET invoice_type = 'credit_note' WHERE id = ?")
+            ->execute([end($this->invoiceIds)]);
+        $this->sale('R141-S1', $servC, '22', false, $d(10), $d(10), [[700.33, 0, 0]]);
+        $this->sale('R141-S2', $servD, '22', false, $d(11), $d(11), [[299.70, 0, 0]]);
+
+        $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+        $this->assertSame('12345.67', (string) $kh->VetaA4[0]['zakl_dane1'], 'KH A.4 per doklad s haléři');
+        $this->assertSame('2592.59', (string) $kh->VetaA4[0]['dan1']);
+        $this->assertSame('3000.70', (string) $kh->VetaA5['zakl_dane1'], 'KH A.5 souhrnně s haléři');
+        $this->assertSame('630.14', (string) $kh->VetaA5['dan1']);
+        $this->assertSame('15346.37', (string) $kh->VetaC['obrat23'], 'KH VetaC = ř.1 s haléři');
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('15346', (string) $dp->Veta1['obrat23'], 'ř.1 základ: round(15 346,37)');
+        $this->assertSame('3223', (string) $dp->Veta1['dan23'], 'ř.1 daň: round(3 222,73)');
+        $this->assertSame('3401', (string) $dp->Veta2['dod_zb'], 'ř.20: round(3 000,75 + 399,90)');
+        $this->assertSame('1000', (string) $dp->Veta2['pln_sluzby'], 'ř.21: round(700,33 + 299,70)');
+
+        $shResult = $this->shv->build($this->supplierId, self::YEAR, self::MONTH);
+        $sh = (new \SimpleXMLElement($shResult['xml']))->DPHSHV;
+        $byVat = [];
+        foreach ($sh->VetaR as $veta) {
+            $byVat[(string) $veta['c_vat']] = [(string) $veta['k_pln_eu'], (string) $veta['pln_hodnota'], (string) $veta['pln_pocet']];
+        }
+        $this->assertSame(['0', '3001', '2'], $byVat['1410000031'], 'zboží A: 3 000,75 → 3 001');
+        $this->assertSame(['0', '400', '2'], $byVat['1410000032'], 'zboží B s dobropisem: 399,90 → 400');
+        $this->assertSame(['3', '701', '1'], $byVat['1410000033'], 'služba C: 700,33 → 701');
+        $this->assertSame(['3', '300', '1'], $byVat['1410000034'], 'služba D: 299,70 → 300');
+        $this->assertEqualsWithDelta(4402, $shResult['summary']['total_amount'], 0.001);
+        $this->assertEqualsWithDelta(4400.68, $shResult['summary']['total_amount_exact'], 0.001);
+
+        // Jediný rozdíl SH proti ř. 20 + 21 je zaokrouhlení: nejvýš 1 Kč na řádek SH.
+        $vatReturnEu = (int) (string) $dp->Veta2['dod_zb'] + (int) (string) $dp->Veta2['pln_sluzby'];
+        $this->assertSame(1, (int) $shResult['summary']['total_amount'] - $vatReturnEu);
+        $this->assertSame($vatReturnEu, (int) round($shResult['summary']['total_amount_exact']));
+
+        $findings = Bootstrap::buildContainer()->get(VatCrossCheckService::class)
+            ->check($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $mismatches = array_values(array_filter(
+            $findings,
+            static fn (array $f): bool => ($f['severity'] ?? '') === 'mismatch',
+        ));
+        $this->assertSame([], array_column($mismatches, 'check'), 'zaokrouhlení podle předpisů není nesoulad');
+    }
+
+    /**
+     * Issue #141 — přiznání zaokrouhluje matematicky, takže 31 249,50 Kč je 31 250 Kč.
+     * Float součet těchto haléřových částek je 31249.499999999996 a `round()` z něj
+     * udělal 31 249: ř.21 by pak zaostal za SH i za správnou hodnotou.
+     */
+    public function testVatReturnHalfCrownSumRoundsUpDespiteFloatError(): void
+    {
+        $d = sprintf('%04d-%02d-10', self::YEAR, self::MONTH);
+        $customer = $this->client('EU služby float', $this->skId, 'SK1410000022', customer: true);
+        $this->sale('SH141-F2', $customer, '22', false, $d, $d, [
+            [6349.68, 0, 0], [2426.39, 0, 0], [2211.95, 0, 0], [2787.57, 0, 0],
+            [1025.40, 0, 0], [5854.79, 0, 0], [8711.17, 0, 0], [1882.55, 0, 0],
+        ]);
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('31250', (string) $dp->Veta2['pln_sluzby'], 'ř.21: 31 249,50 Kč matematicky na 31 250');
+
+        $sh = (new \SimpleXMLElement($this->shv->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHSHV;
+        $this->assertSame('31250', (string) $sh->VetaR[0]['pln_hodnota'], 'SH nahoru: 31 249,50 → 31 250');
     }
 
     /**

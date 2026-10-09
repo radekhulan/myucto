@@ -327,6 +327,23 @@ final class VatReducedDeductionTest extends TestCase
     }
 
     /**
+     * § 76 odst. 5: koeficient se zaokrouhluje na celé procento nahoru, takže podíl, který
+     * vyjde přesně na celé procento, se nezaokrouhluje. 7 000 / 100 000 je ve float
+     * 7.000000000000001 a holé ceil() z toho udělalo 8 %.
+     */
+    public function testAnnualCoefficientExactPercentIsNotRoundedUp(): void
+    {
+        $cust = $this->client('Odběratel koef', $this->czId, 'CZ90000167', customer: true);
+        $this->sale('S-K7-1', $cust, '1', false, $this->d(12, 2), $this->d(12, 2), [[7000, 1470, 21]]);
+        $this->sale('S-K7-50', $cust, '3', false, $this->d(12, 3), $this->d(12, 3), [[93000, 0, 0]]);
+
+        $coef = $this->dph->computeAnnualCoefficient($this->supplierId, self::YEAR);
+        $this->assertSame(7000, $coef['numerator']);
+        $this->assertSame(100000, $coef['denominator']);
+        $this->assertSame(7, $coef['final_percent'], '7 000 / 100 000 = přesně 7 %, ne 8 %');
+    }
+
+    /**
      * (g) Zaokrouhlení kráceného odpočtu je PER ŘÁDEK (40k/41k/42k zvlášť), shodně na
      * formuláři (ř.46/52 v build()) i ve vypořádání (kr_year, Σ uplatněných ř.52). Sum-then-round
      * by v období s víc krácenými sazbovými buckety rozešel podaný ř.52 s vypořádacím základem.

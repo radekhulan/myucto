@@ -116,9 +116,10 @@ v Kč ze všech dokladů skupiny a počet je počet různých faktur. Hodnota pl
 XML zapisuje na celé Kč zaokrouhlením **od nuly** (kladná nahoru, záporná dolů).
 Souhrnný náhled proto může zobrazovat haléře, zatímco jednotlivý řádek XML celé koruny.
 
-Zaokrouhlení nahoru předepisuje struktura souhrnného hlášení na EPO: „Celková hodnota
-plnění se zaokrouhlí na celé koruny nahoru. Celková hodnota plnění musí být vždy celé
-číslo." Zaokrouhluje se každý řádek zvlášť, kdežto přiznání k DPH sčítá haléře
+Zaokrouhlení nahoru předepisují pokyny k tiskopisu souhrnného hlášení (25 5525) i jeho
+struktura na EPO: „Daňový doklad dobropis se do celkové částky započítává záporně.
+Celková hodnota plnění se zaokrouhlí na celé koruny nahoru. Celková hodnota plnění musí
+být vždy celé číslo." Zaokrouhluje se celková hodnota každého řádku zvlášť, kdežto přiznání k DPH sčítá haléře
 a zaokrouhluje až součet na ř. 20, 21 a 31. **Celkem v EU** v náhledu je součet
 zaokrouhlených řádků, tedy to, co hlášení skutečně obsahuje, a může být o něco vyšší
 než přiznání, nejvýše o 1 Kč na každý řádek. Náhled pod částkou ukáže součet před

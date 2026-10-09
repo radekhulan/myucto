@@ -482,7 +482,7 @@ final class DphPriznaniBuilder
             if ($m['vat'] === null) {
                 continue;
             }
-            $lineVat = round($data['vat']);
+            $lineVat = (float) EpoAmount::wholeCzk((float) $data['vat']);
             if ($this->isOutputLine($lineKey)) {
                 $totalDanZdanitelne += $lineVat;
             } elseif (str_ends_with($lineKey, 'k')) {
@@ -556,7 +556,7 @@ final class DphPriznaniBuilder
         $upravOdp = 0.0;
         if ($isLastPeriodOfYear) {
             // Na celé Kč hned, ať ř. 63 = 46 + 52 + 53 + 60 sedí na vyplněné řádky.
-            $upravOdp = (float) round($this->deductionAdjustments->totalForReturn(
+            $upravOdp = (float) EpoAmount::wholeCzk($this->deductionAdjustments->totalForReturn(
                 $supplierId,
                 $year,
                 $annualCoef !== null ? (int) $annualCoef['final_percent'] : null,
@@ -575,7 +575,7 @@ final class DphPriznaniBuilder
         // mířit nemůže, protože nejde o vlastnost dokladu, ale o jednorázovou událost
         // registrace. Proto se plní z vlastní evidence, ne z ledgeru dokladů.
         // Na celé Kč HNED: ř. 46 je součtem řádků tak, jak jsou vyplněné (viz ř. 43 v mapperu).
-        $registrationCorrection = (float) round($this->section79->totalForReturn($supplierId, $vatStart, $vatEnd));
+        $registrationCorrection = (float) EpoAmount::wholeCzk($this->section79->totalForReturn($supplierId, $vatStart, $vatEnd));
         if ($registrationCorrection !== 0.0) {
             $veta4Raw['odp_rez_nar'] = $registrationCorrection;
             // ř.46 je součet ř.40–45 „V plné výši", takže korekce do něj patří — jinak by
@@ -1058,7 +1058,9 @@ final class DphPriznaniBuilder
         if ($jmenovatel <= 0.0) {
             $final = 100; // žádná osvobozená plnění bez nároku (ř.50 = 0) → plný nárok
         } else {
-            $final = (int) ceil($citatel / $jmenovatel * 100.0); // § 76 odst. 5: nahoru na celé %
+            // § 76 odst. 5: nahoru na celé %. Podíl přesně 7 % dá ve float 7.000000000000001
+            // a holé ceil() by z něj udělalo 8 %; round(…, 6) vrací přesnou hodnotu podílu.
+            $final = (int) ceil(round($citatel / $jmenovatel * 100.0, 6));
             if ($final >= $fullThreshold) $final = 100;
             if ($final < 0)   $final = 0;
         }
@@ -1166,7 +1168,7 @@ final class DphPriznaniBuilder
     {
         $sum = 0.0;
         foreach (['40k', '41k', '42k', '43k', '44k'] as $key) {
-            $sum += round((float) ($lines[$key]['vat'] ?? 0.0));
+            $sum += EpoAmount::wholeCzk((float) ($lines[$key]['vat'] ?? 0.0));
         }
         return $sum;
     }
@@ -1261,11 +1263,12 @@ final class DphPriznaniBuilder
     }
 
     /**
-     * Formátování částky pro EPO XML — celé číslo Kč (zaokrouhleno).
+     * Formátování částky pro EPO XML — celé číslo Kč. Tiskopis 25 5401: „Údaje v daňovém
+     * přiznání se uvedou zaokrouhlené na celé koruny."
      */
     private function formatAmount(float $amount): string
     {
-        return (string) (int) round($amount);
+        return (string) EpoAmount::wholeCzk($amount);
     }
 
     /**
@@ -1301,7 +1304,7 @@ final class DphPriznaniBuilder
                 }
                 continue;
             }
-            $delta = round((float) ($new[$k] ?? 0.0)) - round((float) ($baseline[$k] ?? 0.0));
+            $delta = (float) (EpoAmount::wholeCzk((float) ($new[$k] ?? 0.0)) - EpoAmount::wholeCzk((float) ($baseline[$k] ?? 0.0)));
             if ($delta !== 0.0) {
                 $out[$k] = $delta;
             }

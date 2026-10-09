@@ -646,17 +646,18 @@ final class SouhrnneHlaseniBuilder
      * Nahoru to předepisuje sama struktura EPO: popis atributu `pln_hodnota` v DPHSHV
      * (api/xsd/dphshv.xsd, shodně s živým https://adisspr.mfcr.cz/adis/jepo/schema/dphshv_epo2.xsd)
      * říká „Celková hodnota plnění se zaokrouhlí na celé koruny nahoru. Celková hodnota
-     * plnění musí být vždy celé číslo." a stejně to stálo v pokynech k tiskopisu SH
-     * (25 5525, oddíl 5 „Celková hodnota plnění v Kč"). Zaokrouhluje se každý řádek
-     * (stát × DIČ × kód plnění), kdežto přiznání (DPHDP3 ř. 20, 21, 31) sčítá haléře
-     * a zaokrouhluje až součet. Součet SH proto může přiznání převýšit až o 1 Kč na řádek
-     * a není to chyba; VatCrossCheckService kvůli tomu porovnává nezaokrouhlené řádky.
+     * plnění musí být vždy celé číslo." a doslova totéž stojí v pokynech k tiskopisu SH
+     * (25 5525 vzor č. 7, „Celková hodnota plnění v Kč"). Zaokrouhluje se celková hodnota
+     * řádku (stát × DIČ × kód plnění, dobropisy v ní záporně), kdežto přiznání (DPHDP3
+     * ř. 20, 21, 31) sčítá haléře a zaokrouhluje až součet. Součet SH proto může přiznání
+     * převýšit až o 1 Kč na řádek a není to chyba; VatCrossCheckService kvůli tomu
+     * porovnává nezaokrouhlené řádky.
      *
-     * Záporná hodnota (dobropis do JČS převyšuje dodávky) jde dolů, aby se opravovaná
-     * částka nezmenšila — `ceil()` by ji zaokrouhlil směrem k nule.
+     * Záporná hodnota (dobropis do JČS převyšuje dodávky) jde od nuly, aby se opravovaná
+     * částka nezmenšila. Směr u záporné hodnoty pokyny ani struktura EPO neupravují.
      */
     private function formatAmount(float $amount): string
     {
-        return (string) (int) ($amount < 0 ? floor($amount) : ceil($amount));
+        return (string) EpoAmount::wholeCzkUp($amount);
     }
 }

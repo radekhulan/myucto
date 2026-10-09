@@ -247,8 +247,8 @@ final class VatClassificationMapper
             $base = 0.0;
             $vat = 0.0;
             foreach ($parts as $part) {
-                $base += round($part['base']);
-                $vat  += round($part['vat']);
+                $base += EpoAmount::wholeCzk($part['base']);
+                $vat  += EpoAmount::wholeCzk($part['vat']);
             }
             $byLine[$mirrorLine]['base'] = $base;
             $byLine[$mirrorLine]['vat']  = $vat;
