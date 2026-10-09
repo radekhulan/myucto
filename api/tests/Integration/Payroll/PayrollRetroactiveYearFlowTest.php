@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
@@ -105,6 +107,100 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
      * Přihláška i odhláška se dají připravit (pozdě, ale neblokují), nesou
      * historická data a lhůta se počítá od skutečné události, ne od dneška.
      */
+    /**
+     * Varianta: leden až červenec zpracováno a hlášení přijatá, pak účetní
+     * zjistí, že v březnu chyběla odměna 2 000 Kč. Oprava březnového běhu
+     * přepočte jen březen, opravné hlášení JMHZ nese březen (typ O) s novými
+     * částkami, pozdější běhy zůstanou a průměr 2. čtvrtletí (rozhodné období
+     * 1. čtvrtletí) se ukáže jako neaktuální.
+     */
+    public function testMarchCorrectionAfterJulyRecalculatesMarchOnly(): void
+    {
+        $this->fileJmhz = true;
+        $this->hire('stala', 'Syntetická Stálá', '1985-05-12', 'female', 'hpp', 40, true, annual: 'requested',
+            gross: static fn (string $p): int => 40_000);
+        $this->hire('soubeh', 'Syntetický Souběžný', '1983-07-07', 'male', 'hpp', 40, true,
+            gross: static fn (string $p): int => 30_000);
+
+        $failures = $this->quarterAverages(1);
+        foreach (array_slice(self::MONTHS, 0, 7) as $period) {
+            $month = (int) substr($period, 5, 2);
+            if ($month === 4 || $month === 7) {
+                $failures = [...$failures, ...$this->quarterAverages(intdiv($month - 1, 3) + 1)];
+            }
+            $failures = [...$failures, ...$this->processMonth($period)];
+        }
+        self::assertSame([], $failures, implode("\n", $failures));
+        $later = [];
+        foreach (['2026-04', '2026-05', '2026-06', '2026-07'] as $period) {
+            $later[$period] = $this->scalar('SELECT CONCAT(status, ":", current_revision_no, ":", row_version) FROM payroll_runs WHERE supplier_id = ? AND id = ?',
+                [$this->supplierId, (int) $this->approvedRuns[$period]['id']]);
+        }
+
+        // Zapomenutá březnová odměna stálé zaměstnankyně.
+        $stala = $this->people['stala']['person'];
+        $this->createApprovedInput($stala, $this->baseComponentId, 2_000_00, 'g7-stala-2026-03-odmena', '2026-03-01');
+        $corrected = $this->correctPayrollRun($this->approvedRuns['2026-03'], 'g7-march-fix', 'Doplněna březnová odměna.');
+        self::assertSame('approved', $corrected->run['status']);
+        $revisionId = (int) $corrected->revision['id'];
+        $result = $this->personResult($revisionId, $stala['employee_id']);
+        self::assertNotNull($result);
+        self::assertSame(42_000_00, $result['cash_income']);
+        self::assertSame(2_982_00, $result['employee_social'], '7,1 % z 42 000');
+        self::assertSame(1_890_00, $result['employee_health'], 'třetina z 13,5 % z 42 000');
+        self::assertSame(3_730_00, $result['advance_tax'], '6 300 − 2 570');
+        $other = $this->personResult($revisionId, $this->people['soubeh']['person']['employee_id']);
+        self::assertSame(30_000_00, $other['cash_income'] ?? null, 'Oprava nesmí měnit ostatní lidi.');
+        foreach ($later as $period => $state) {
+            self::assertSame($state, $this->scalar('SELECT CONCAT(status, ":", current_revision_no, ":", row_version) FROM payroll_runs WHERE supplier_id = ? AND id = ?',
+                [$this->supplierId, (int) $this->approvedRuns[$period]['id']]), "Běh {$period} se opravou března nemá měnit.");
+        }
+
+        // Opravné hlášení JMHZ za březen.
+        $preparation = $this->prepareJmhz($revisionId, 'g7-march-fix');
+        self::assertSame(201, $preparation['status'], CanonicalJson::encode($preparation['body']));
+        self::assertSame('source_ready', $preparation['body']['readiness_status'], CanonicalJson::encode($preparation['body']['issues'] ?? []));
+        $corrections = $this->container->get(JmhzContentCorrectionSubmissionService::class);
+        self::assertInstanceOf(JmhzContentCorrectionSubmissionService::class, $corrections);
+        $candidates = $corrections->candidates($this->supplierId, 'test', $this->submissions['2026-03'], (int) $preparation['body']['id']);
+        // Kandidáti nabízí všechny přijaté formuláře; který se změnil, vybírá
+        // účetní (G7-D3 v OVERENE-DEFEKTY.json: seznam rozdíl neoznačuje).
+        $changed = array_values(array_filter(
+            $candidates['forms'],
+            static fn (array $f): bool => $f['action'] === 'correct_values' && $f['employee_name'] === 'Syntetická Stálá',
+        ));
+        self::assertCount(1, $changed, CanonicalJson::encode($candidates));
+        $frozen = $corrections->freeze(
+            $this->supplierId,
+            'test',
+            $this->submissions['2026-03'],
+            (int) $preparation['body']['id'],
+            [(string) $changed[0]['employment_external_identifier']],
+            $this->actors[0],
+        );
+        self::assertSame('correction', $frozen['submission_kind']);
+        $reader = $this->container->get(JmhzFrozenPayloadReader::class);
+        self::assertInstanceOf(JmhzFrozenPayloadReader::class, $reader);
+        $xml = (string) preg_replace('/>\s+</', '><', $reader->bytes($this->supplierId, 'test', (int) $frozen['submission_id']));
+        self::assertStringContainsString('<typPodani>O</typPodani>', $xml);
+        self::assertStringContainsString('<mesic>3</mesic>', $xml, 'Opravné hlášení nese období opravovaného měsíce.');
+        self::assertStringContainsString('<form:zuctovanoCelkem>42000</form:zuctovanoCelkem>', $xml);
+        self::assertStringContainsString('<form:danZalohaPoSleve>3730</form:danZalohaPoSleve>', $xml);
+        // Pojistná část a souhrn opravy nahrazují úhrn zaměstnavatele za celý měsíc.
+        self::assertStringContainsString('<pvpoj:zakladZamestnavateleA>72000</pvpoj:zakladZamestnavateleA>', $xml);
+        self::assertStringContainsString('<pvpoj:pojistneZamestnance>5112</pvpoj:pojistneZamestnance>', $xml, '2 982 + 2 130');
+        self::assertStringContainsString('<so:danZalohaPoSleve>5660</so:danZalohaPoSleve>', $xml, '3 730 + 1 930');
+        self::assertSame(1, substr_count($xml, '</formularOsoby>'));
+
+        // Průměr 2. čtvrtletí stojí na březnu: po opravě musí být vidět, že neplatí.
+        $batch = $this->container->get(AverageEarningBatchService::class);
+        self::assertInstanceOf(AverageEarningBatchService::class, $batch);
+        $items = array_column($batch->page($this->supplierId, 2026, 2, 100)['items'], null, 'employment_id');
+        $item = $items[$stala['employment_id']];
+        self::assertTrue($item['existing_outdated'] ?? null, 'Schválený průměr Q2 je po opravě března neaktuální: ' . CanonicalJson::encode($item));
+        self::assertFalse($items[$this->people['soubeh']['person']['employment_id']]['existing_outdated'] ?? null);
+    }
+
     public function testRetroactiveRegistrationsKeepHistoricalDates(): void
     {
         $calendar = new class () {
@@ -343,6 +439,15 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         }
         $xml = (string) preg_replace('/>\s+</', '><', (string) $tested['body']['xml']);
         $this->xmls[$period] = $xml;
+        if ($this->fileJmhz) {
+            // Pozdní podání minulého měsíce: zmrazit a přijmout bez přepsání období.
+            $frozen = $this->freezeJmhzSubmission((int) $preparation['body']['id'], $this->officeId);
+            if ($frozen['status'] !== 201) {
+                return ["{$period}: zmrazení pozdního hlášení: " . CanonicalJson::encode($frozen['body'])];
+            }
+            $this->submissions[$period] = (int) $frozen['body']['submission_id'];
+            $this->acceptJmhzSubmission($this->submissions[$period]);
+        }
 
         return $this->checkMonth($period, $revisionId, $xml);
     }
@@ -351,6 +456,9 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
     private array $xmls = [];
     /** @var array<string,array<string,mixed>> */
     private array $approvedRuns = [];
+    private bool $fileJmhz = false;
+    /** @var array<string,int> */
+    private array $submissions = [];
 
     /**
      * Ručně spočtená očekávání proti běhu a hlášení.
