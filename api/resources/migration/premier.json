@@ -2787,7 +2787,7 @@
         "MZ_SRAZ": {
             "rows_seen": 216,
             "status": "mapped",
-            "target": "karty srážek: exekuce, insolvence, dohody (PremierPayrollDeductions)",
+            "target": "karty srážek: exekuce, insolvence, dohody (PremierPayrollDeductions); trvalé osobní ohodnocení (303) jako opakovaná složka vztahu (PayrollTakeoverEmploymentWriter::recurringComponents)",
             "readers": [
                 "PayrollImporter",
                 "PremierPayrollDeductions"
@@ -4989,9 +4989,99 @@
         },
         "PER_NERZ": {
             "rows_seen": 25,
-            "status": "ignored",
-            "reason": "Údaje nerezidenta (adresa a identifikace v zemi rezidence): převod přebírá jen příznak nerezidenta z PER_MAIN.",
-            "review": "Daňová rezidence a zahraniční identifikace nerezidenta jsou potřeba pro hlášení JMHZ; převod je nepřenese."
+            "status": "mapped",
+            "target": "stát daňové rezidence nerezidenta (N_STAT) do zákonné evidence osoby, jako u PAMICA",
+            "readers": [
+                "PremierPayroll"
+            ],
+            "ignored_columns_reason": "Adresa, doklad a zahraniční DIČ nerezidenta: převod je zatím nepřenáší (zákonná evidence osoby nemá pole pro doklad, DIČ v zemi rezidence doplní účetní).",
+            "columns": {
+                "D_PLAT_ZR": {
+                    "status": "ignored"
+                },
+                "F_STAT": {
+                    "status": "ignored"
+                },
+                "ID": {
+                    "status": "mapped",
+                    "target": "PremierPayroll"
+                },
+                "N_CISDO": {
+                    "status": "ignored"
+                },
+                "N_CISPPOV": {
+                    "status": "ignored"
+                },
+                "N_DIC": {
+                    "status": "ignored"
+                },
+                "N_DNPOV": {
+                    "status": "ignored"
+                },
+                "N_DRPPOV": {
+                    "status": "ignored"
+                },
+                "N_DVYS_D": {
+                    "status": "ignored"
+                },
+                "N_DVZPPOV": {
+                    "status": "ignored"
+                },
+                "N_IDADR": {
+                    "status": "ignored"
+                },
+                "N_KODEU": {
+                    "status": "ignored"
+                },
+                "N_ORGAN_D": {
+                    "status": "ignored"
+                },
+                "N_PLAT_D": {
+                    "status": "ignored"
+                },
+                "N_PLAT_P": {
+                    "status": "ignored"
+                },
+                "N_PLOCH_DO": {
+                    "status": "ignored"
+                },
+                "N_PRAV_OCH": {
+                    "status": "ignored"
+                },
+                "N_PRODL": {
+                    "status": "ignored"
+                },
+                "N_STAT": {
+                    "status": "mapped",
+                    "target": "PremierPayroll"
+                },
+                "N_STATDO": {
+                    "status": "ignored"
+                },
+                "N_SUPINT": {
+                    "status": "mapped",
+                    "target": "PremierPayroll"
+                },
+                "N_TCISDO": {
+                    "status": "ignored"
+                },
+                "N_TDIC": {
+                    "status": "ignored"
+                },
+                "N_TYP_OCH": {
+                    "status": "ignored"
+                },
+                "N_UPPOV": {
+                    "status": "ignored"
+                },
+                "N_VOLPRIS": {
+                    "status": "ignored"
+                },
+                "TS": {
+                    "status": "mapped",
+                    "target": "PremierPayroll"
+                }
+            }
         },
         "PER_ORG": {
             "rows_seen": 16,
@@ -5902,7 +5992,8 @@
             "code_sources": [
                 "MyInvoice\\Service\\Migration\\Premier\\PremierPayrollTime::ABSENCE_CODES::keys",
                 "MyInvoice\\Service\\Migration\\Premier\\PremierPayrollDeductions::CODES::keys",
-                "MyInvoice\\Service\\Migration\\Premier\\PremierPayroll::DEDUCTION_CODES"
+                "MyInvoice\\Service\\Migration\\Premier\\PremierPayroll::DEDUCTION_CODES",
+                "MyInvoice\\Service\\Migration\\Premier\\PremierPayrollDeductions::RECURRING_INCOME::keys"
             ],
             "items": {
                 "101": {
@@ -5978,9 +6069,8 @@
                     "reason": "Složka mzdy (mzda, příplatek, odměna, náhrada, pojistné, daň): převzatý měsíc ji nese v úhrnech MZDY, účty složky čte návrh kontací."
                 },
                 "303": {
-                    "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ (osobní ohodnocení, penzijní připojištění, stravenkový paušál, praní): v úhrnech MZDY, jako trvalá složka se nezakládá.",
-                    "review": "Pravidelný příjem z karty (např. osobní ohodnocení) MyÚčto od prvního vlastního měsíce nevyplatí, dokud ho účetní nezaloží."
+                    "status": "mapped",
+                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PREMIER_303 (druh bonus, pravidelná) pro měsíce počítané MyÚčtem; převzaté měsíce ho mají v úhrnech MZDY"
                 },
                 "305": {
                     "status": "ignored",
@@ -6024,8 +6114,8 @@
                 },
                 "422": {
                     "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ (osobní ohodnocení, penzijní připojištění, stravenkový paušál, praní): v úhrnech MZDY, jako trvalá složka se nezakládá.",
-                    "review": "Pravidelný příjem z karty (např. osobní ohodnocení) MyÚčto od prvního vlastního měsíce nevyplatí, dokud ho účetní nezaloží."
+                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ, kterou nejde založit jako opakovanou složku pevnou částkou: příspěvek na penzijní připojištění nese koš osvobození podle smlouvy, stravenkový paušál se počítá ze směn, příspěvek na praní je náhrada mimo hrubou mzdu. V úhrnech MZDY.",
+                    "review": "Tato plnění MyÚčto od prvního vlastního měsíce nevyplatí, dokud je účetní nezaloží."
                 },
                 "430": {
                     "status": "ignored",
@@ -6257,8 +6347,8 @@
                 },
                 "712": {
                     "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ (osobní ohodnocení, penzijní připojištění, stravenkový paušál, praní): v úhrnech MZDY, jako trvalá složka se nezakládá.",
-                    "review": "Pravidelný příjem z karty (např. osobní ohodnocení) MyÚčto od prvního vlastního měsíce nevyplatí, dokud ho účetní nezaloží."
+                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ, kterou nejde založit jako opakovanou složku pevnou částkou: příspěvek na penzijní připojištění nese koš osvobození podle smlouvy, stravenkový paušál se počítá ze směn, příspěvek na praní je náhrada mimo hrubou mzdu. V úhrnech MZDY.",
+                    "review": "Tato plnění MyÚčto od prvního vlastního měsíce nevyplatí, dokud je účetní nezaloží."
                 },
                 "714": {
                     "status": "mapped",
@@ -6298,8 +6388,8 @@
                 },
                 "862": {
                     "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ (osobní ohodnocení, penzijní připojištění, stravenkový paušál, praní): v úhrnech MZDY, jako trvalá složka se nezakládá.",
-                    "review": "Pravidelný příjem z karty (např. osobní ohodnocení) MyÚčto od prvního vlastního měsíce nevyplatí, dokud ho účetní nezaloží."
+                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ, kterou nejde založit jako opakovanou složku pevnou částkou: příspěvek na penzijní připojištění nese koš osvobození podle smlouvy, stravenkový paušál se počítá ze směn, příspěvek na praní je náhrada mimo hrubou mzdu. V úhrnech MZDY.",
+                    "review": "Tato plnění MyÚčto od prvního vlastního měsíce nevyplatí, dokud je účetní nezaloží."
                 },
                 "900": {
                     "status": "ignored",

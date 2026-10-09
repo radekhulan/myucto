@@ -91,7 +91,8 @@ final class PremierPayrollTakeover
                     (array) $relation['payout_accounts'])
                 : (is_array($account) ? [new PayrollTakeoverPayoutAccount($account['account'], $account['bank_code'])] : []),
             taxResidence: $relation['non_resident'] === true
-                ? new PayrollTakeoverEvidencePeriod('non-resident', $from)
+                ? new PayrollTakeoverEvidencePeriod('non-resident', $from, null, 'premier:per_nerz:n_stat',
+                    self::NOTE . 'osoba je v PREMIER vedená jako daňový nerezident.', $relation['tax_residence_country'] ?? null)
                 : new PayrollTakeoverEvidencePeriod('czech-resident', $from, null, 'premier:per_main:rezident',
                     self::NOTE . 'osoba není v PREMIER vedená jako daňový nerezident.'),
             healthCoverage: is_string($relation['insurer_code'])
@@ -131,8 +132,38 @@ final class PremierPayrollTakeover
             absences: self::absences($relation, $until, $moduleStart)['absences'],
             leave: self::leave($relation, $until, $moduleStart),
             transferStart: self::transferStart($relation, $until),
+            recurringComponents: self::recurringComponents($relation, $until, $moduleStart),
         );
         return new PayrollTakeoverRecord($person, $employment);
+    }
+
+    /**
+     * Trvalé příjmy z karty vztahu (`MZ_SRAZ`, {@see PremierPayrollDeductions::recurringIncomes()}),
+     * které trvají na konci posledního převáděného měsíce: z nich vznikne opakovaná složka pro
+     * měsíce počítané MyÚčtem. Skončená karta se nepřebírá.
+     *
+     * @param array<string,mixed> $relation
+     * @return list<array{code:string,name:string,kind:string,amount:float,from:string,to:?string}>
+     */
+    public static function recurringComponents(array $relation, string $until, ?string $moduleStart = null): array
+    {
+        $last = self::lastPeriod($until, $moduleStart);
+        $out = [];
+        foreach ((array) ($relation['recurring_incomes'] ?? []) as $card) {
+            if (($card['from'] !== null && $card['from'] > $last) || ($card['to'] !== null && $card['to'] < $last) || $card['amount'] <= 0) {
+                continue;
+            }
+            $out[] = [
+                'code' => $card['code'],
+                'name' => $card['name'],
+                'kind' => $card['kind'],
+                'amount' => (float) $card['amount'],
+                'from' => ($card['from'] ?? substr((string) $relation['start'], 0, 7)) . '-01',
+                'to' => $card['to'] === null ? null : (new \DateTimeImmutable($card['to'] . '-01'))->format('Y-m-t'),
+            ];
+        }
+
+        return $out;
     }
 
     /**

@@ -134,6 +134,37 @@ final class PremierPayrollTakeoverTest extends TestCase
         self::assertArrayHasKey('social_jmhz_deregistration', $ended->checklistNotes);
     }
 
+    /** Nerezident dostane stát rezidence z karty `PER_NERZ` (jako PAMICA); rezidentská karta se nepoužije. */
+    public function testNonResidentCountryFromNonResidentCard(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_takeover_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true, 'payroll_nonresident' => true]);
+        $relations = array_column(PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations, null, 'key');
+
+        $residence = PremierPayrollTakeover::record($relations['6'], '2025-12-31')->person->taxResidence;
+        self::assertSame(['non-resident', 'SK', 'premier:per_nerz:n_stat'], [$residence?->status, $residence?->country, $residence?->reference]);
+        $resident = PremierPayrollTakeover::record($relations['5'], '2025-12-31')->person->taxResidence;
+        self::assertSame(['czech-resident', null], [$resident?->status, $resident?->country]);
+    }
+
+    /**
+     * Osobní ohodnocení z karty vztahu (`MZ_SRAZ` 303) trvající na konci převáděného období je
+     * opakovaná složka; karta, která začíná až po posledním převzatém měsíci, ne.
+     */
+    public function testRecurringIncomeFromRelationCard(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_takeover_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true]);
+        $relations = array_column(PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations, null, 'key');
+
+        self::assertSame(
+            [['code' => 'PREMIER_303', 'name' => 'Osobní ohodnocení', 'kind' => 'bonus', 'amount' => 2000.0, 'from' => '2025-01-01', 'to' => null]],
+            PremierPayrollTakeover::record($relations['5'], '2025-12-31')->employment->recurringComponents,
+        );
+        self::assertSame([], PremierPayrollTakeover::recurringComponents($relations['5'], '2025-12-31', '2025-01'));
+        self::assertSame([], PremierPayrollTakeover::record($relations['6'], '2025-12-31')->employment->recurringComponents);
+    }
+
     public function testPolicyKeepsPremierBehaviour(): void
     {
         $policy = PremierPayrollTakeover::policy();

@@ -428,6 +428,127 @@ final class PayrollTakeoverEmploymentWriter
     }
 
     /**
+     * Opakované složky z pravidelných plnění zdroje (osobní ohodnocení pevnou částkou a jiná
+     * zdanitelná plnění vedená na kartě vztahu): předpis pro měsíce, které počítá MyÚčto.
+     * Převzaté měsíce je mají v úhrnech zdroje, takže předpis jim nevadí; bez něj by první
+     * mzda v MyÚčtu plnění tiše vynechala.
+     *
+     * Složka se hledá podle kódu; chybí-li, založí se jako pravidelná (`regular`), zdanitelná
+     * a s pojistným, s druhem podle zdroje. Existující složka s jinou četností se nepoužije
+     * (předpis jde jen na pravidelnou) a protokol to spočítá. Předpis leží uvnitř trvání
+     * vztahu i platnosti složky. Vztah, který už předpis téže složky má (ruční nebo z dřívějšího
+     * převodu), se nemění.
+     *
+     * @return array<string,int>
+     */
+    public function recurringComponents(int $supplierId, int $employmentId, PayrollTakeoverEmployment $employment, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        if ($employment->recurringComponents === []) {
+            return [];
+        }
+        $row = $this->employmentById($supplierId, $employmentId);
+        $counts = [];
+        foreach ($employment->recurringComponents as $item) {
+            $minor = (int) round($item['amount'] * 100);
+            if ($minor <= 0) {
+                continue;
+            }
+            $component = $this->regularComponent($supplierId, $item);
+            if ($component === null) {
+                $counts['recurring_components_not_regular'] = ($counts['recurring_components_not_regular'] ?? 0) + 1;
+                continue;
+            }
+            $componentId = (int) $component['id'];
+            $existing = $this->db->pdo()->prepare(
+                'SELECT COUNT(*) FROM payroll_recurring_components WHERE supplier_id = ? AND employment_id = ? AND component_id = ?'
+            );
+            $existing->execute([$supplierId, $employmentId, $componentId]);
+            if ((int) $existing->fetchColumn() > 0) {
+                $counts['recurring_components_existing'] = ($counts['recurring_components_existing'] ?? 0) + 1;
+                continue;
+            }
+            $from = max(
+                $item['from'],
+                (string) ($row['actual_start_date'] ?? $row['start_date'] ?? '0000-01-01'),
+                (string) ($component['valid_from'] ?? '0000-01-01'),
+            );
+            $to = $item['to'];
+            foreach ([$row['end_date'] ?? null, $employment->end, $component['valid_to'] ?? null] as $limit) {
+                if (is_string($limit) && ($to === null || $limit < $to)) {
+                    $to = $limit;
+                }
+            }
+            if ($to !== null && $to < $from) {
+                continue;
+            }
+            $this->recurring->create($supplierId, $this->recurringValidator->validate([
+                'employment_id' => $employmentId,
+                'component_id' => $componentId,
+                'calculation_kind' => 'fixed_amount',
+                'amount_minor' => $minor,
+                'rate_basis_points' => null,
+                'valid_from' => $from,
+                'valid_to' => $to,
+                'allocation_rule' => 'calendar_days',
+                'maximum_amount_minor' => null,
+                'note' => $policy->note(mb_substr('opakovaná složka „' . $item['name'] . '" z karty vztahu.', 0, 200)),
+                'is_active' => true,
+            ]), $userId);
+            $counts['recurring_components'] = ($counts['recurring_components'] ?? 0) + 1;
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Pravidelná složka podle kódu; chybějící se založí ze zdroje.
+     *
+     * @param array{code:string,name:string,kind:string,amount:float,from:string,to:?string} $item
+     * @return array<string,mixed>|null `null` = složka s tím kódem není pravidelná
+     */
+    private function regularComponent(int $supplierId, array $item): ?array
+    {
+        $this->components->ensureDefaults($supplierId);
+        $find = $this->db->pdo()->prepare(
+            'SELECT id, valid_from, valid_to, frequency_kind FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code = ? AND is_active = 1
+              ORDER BY valid_from, id LIMIT 1'
+        );
+        $find->execute([$supplierId, $item['code']]);
+        $found = $find->fetch(\PDO::FETCH_ASSOC);
+        if ($found === false) {
+            $this->components->create($supplierId, [
+                'code' => $item['code'],
+                'name' => mb_substr($item['name'], 0, 120),
+                'component_kind' => $item['kind'],
+                'value_kind' => 'monetary',
+                'frequency_kind' => 'regular',
+                'tax_treatment' => 'included',
+                'social_participation_treatment' => 'included',
+                'social_treatment' => 'included',
+                'health_participation_treatment' => 'included',
+                'health_treatment' => 'included',
+                'average_earning_treatment' => 'included',
+                'enforcement_treatment' => 'included',
+                'jmhz_treatment' => 'included',
+                'statistics_treatment' => 'included',
+                'accounting_debit_code' => null,
+                'accounting_credit_code' => null,
+                'annual_limit_minor' => null,
+                'exemption_basket' => null,
+                'exemption_basis' => null,
+                'valid_from' => substr($item['from'], 0, 4) . '-01-01',
+                'valid_to' => null,
+                'is_active' => true,
+            ]);
+            $find->execute([$supplierId, $item['code']]);
+            $found = $find->fetch(\PDO::FETCH_ASSOC);
+        }
+
+        return $found === false || $found['frequency_kind'] !== 'regular' ? null : $found;
+    }
+
+    /**
      * Opakovaný převod srovná předpis, který zapsal dřívější převod téhož zdroje, se
      * sjednanou mzdou zdroje. Předpis zadaný nebo upravený jinak (jiná poznámka) se
      * nemění. Padne-li do jednoho předpisu víc verzí mzdy zdroje (zvýšení v průběhu

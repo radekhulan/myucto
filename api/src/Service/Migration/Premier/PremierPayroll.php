@@ -71,6 +71,16 @@ final class PremierPayroll
             }
         }
         $mailing = self::mailingAddresses($backup);
+        // Karta nerezidenta (`PER_NERZ`, vazba `N_SUPINT` = `PER_MAIN.SUP_INTER`): stát daňové
+        // rezidence `N_STAT`. Karta je i u rezidentů (stát CZ); převod ji bere jen u nerezidenta.
+        $residenceCountries = [];
+        foreach ($backup->rows('PER_NERZ') as $row) {
+            $country = self::country(self::text($row['N_STAT'] ?? ''));
+            if ($country !== null && (int) ($row['N_SUPINT'] ?? 0) > 0) {
+                $residenceCountries[(int) $row['N_SUPINT']] = $country;
+            }
+        }
+        $recurringIncomes = PremierPayrollDeductions::recurringIncomes($backup);
         $snapshots = [];
         foreach ($backup->rows('PERSON2') as $row) {
             $number = (int) ($row['CISLO'] ?? 0);
@@ -203,6 +213,8 @@ final class PremierPayroll
                 'email' => self::email(self::text($person['E_MAIL'] ?? '')),
                 'phone' => self::phone(self::text($person['MOBIL'] ?? '') ?: self::text($person['TEL'] ?? '')),
                 'non_resident' => ($person['NREZIDEN'] ?? false) === true,
+                'tax_residence_country' => $person !== null ? ($residenceCountries[(int) ($person['SUP_INTER'] ?? 0)] ?? null) : null,
+                'recurring_incomes' => $recurringIncomes[$inter] ?? [],
                 'foreign_legislation' => ($row['VYSLANY'] ?? false) === true
                     || (self::country($row['OSS_ZEME'] ?? '') ?? 'CZ') !== 'CZ',
                 'relation_type' => $relationType,

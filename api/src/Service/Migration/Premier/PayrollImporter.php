@@ -728,6 +728,11 @@ final class PayrollImporter
         $person = $takeover->person;
         $state = $this->state;
         $this->detail($ctx, $number, 'Sjednaná mzda', fn (): array => $this->wages($ctx, $employmentId, $relation));
+        if ($takeover->employment->recurringComponents !== []) {
+            $this->detail($ctx, $number, 'Opakované složky', fn (): array => $this->employmentWriter->recurringComponents(
+                $supplierId, $employmentId, $takeover->employment, $userId, $policy,
+            ));
+        }
         $this->detail($ctx, $number, 'Údaje o narození a občanství', fn (): array => $this->people->identity($supplierId, $employeeId, $person, $policy));
         $this->detail($ctx, $number, 'Adresa a kontakt', fn (): array => $this->people->personCard($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy));
         $this->detail($ctx, $number, 'Zákonná evidence', fn (): array => $this->people->statutoryEvidence(

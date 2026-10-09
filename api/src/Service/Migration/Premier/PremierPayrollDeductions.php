@@ -62,6 +62,50 @@ final class PremierPayrollDeductions
     public const INCOME_CODES = ['303', '422', '712', '862'];
 
     /**
+     * Trvalé příjmy pevnou měsíční částkou, ze kterých převod zakládá opakovanou složku
+     * ({@see self::recurringIncomes()}): kód => druh složky. Osobní ohodnocení (303) je
+     * v číselníku `MZDY_POL` hrubá mzda se sociálním i zdravotním pojištěním a do průměru.
+     * Ostatní příjmy z {@see self::INCOME_CODES} se nezakládají: příspěvek na penzijní
+     * připojištění (422) nese koš osvobození podle smlouvy, stravenkový paušál (712) se
+     * počítá ze směn a příspěvek na praní (862) je náhrada vyplácená mimo hrubou mzdu.
+     */
+    public const RECURRING_INCOME = ['303' => 'bonus'];
+
+    /**
+     * Karty `MZ_SRAZ` s trvalým příjmem ({@see self::RECURRING_INCOME}) po vztazích.
+     *
+     * @return array<int,list<array{code:string,name:string,kind:string,amount:float,from:?string,to:?string}>>
+     *         `S_INTER` => karty; `from`/`to` jsou měsíce `YYYY-MM` (`null` = neomezeno)
+     */
+    public static function recurringIncomes(PremierBackup $backup): array
+    {
+        $names = [];
+        foreach ($backup->rows('MZDY_POL') as $row) {
+            $names[self::text($row['KOD'] ?? '')] = self::text($row['POPIS'] ?? '');
+        }
+        $out = [];
+        foreach ($backup->rows('MZ_SRAZ') as $row) {
+            $code = self::text($row['S_KOD'] ?? '');
+            $kind = self::RECURRING_INCOME[$code] ?? null;
+            $inter = (int) ($row['S_INTER'] ?? 0);
+            if ($kind === null || $inter <= 0) {
+                continue;
+            }
+            $name = self::text($row['S_POPIS'] ?? '') ?: ($names[$code] ?? '') ?: "Složka {$code}";
+            $out[$inter][] = [
+                'code' => 'PREMIER_' . $code,
+                'name' => $name,
+                'kind' => $kind,
+                'amount' => round((float) ($row['S_CASTKA'] ?? 0), 2),
+                'from' => self::month($row['S_ROK_OD'] ?? null, $row['S_MES_OD'] ?? null),
+                'to' => self::month($row['S_ROK_DO'] ?? null, $row['S_MES_DO'] ?? null),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * Karty `MZ_SRAZ` se složkou, kterou převod nezná: není mezi srážkami ({@see self::CODES})
      * ani mezi vědomě vynechanými příjmy ({@see self::INCOME_CODES}). Čtení srážek by je jinak
      * tiše přeskočilo.

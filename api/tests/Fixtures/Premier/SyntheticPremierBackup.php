@@ -138,6 +138,8 @@ final class SyntheticPremierBackup
      *                           se zaúčtováním v deníku, viz {@see payroll()}
      *   `payroll_mismatch`      s `payroll`: jeden měsíc deníku nesedí na mzdy
      *   `payroll_detail`        s `payroll`: další vztahy a evidence mzdového modulu, viz {@see payrollDetail()}
+     *   `payroll_nonresident`   s `payroll_detail`: osoba DPP (INTER 6) je daňový nerezident s kartou
+     *                           `PER_NERZ` (stát rezidence SK); karta rezidenta (CZ) u INTER 5
      *   `bank_split`            výpis BV 8 z 15. 10. 2025 se čtyřmi pohyby a dvěma řádky bez pohybu: výběr hotovosti,
      *                           úhrada VF 250005 (1 209,60, VS jen ve `VAR_DAL`, údaje homebankingu
      *                           `H*`/`PARTRAN`) s haléřovým vyrovnáním 548/311 0,40 (vazba na tutéž
@@ -388,6 +390,9 @@ final class SyntheticPremierBackup
             array_push($chart, ['331', '100', 'Zaměstnanci'], ['336', '100', 'Zúčtování sociálního pojištění'], ['336', '200', 'Zúčtování zdravotního pojištění'],
                 ['342', '200', 'Srážková daň'], ['342', '100', 'Záloha na daň ze závislé činnosti'], ['521', '100', 'Mzdové náklady'], ['524', '100', 'Zákonné pojištění']);
             self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']), !empty($flags['payroll_unknown_codes']));
+            if (!empty($flags['payroll_detail']) && !empty($flags['payroll_nonresident'])) {
+                self::nonResident($tables);
+            }
         }
         if (!empty($flags['bank_split'])) {
             self::bankSplit($tables, $chart);
@@ -824,6 +829,29 @@ final class SyntheticPremierBackup
             $items,
         ];
         return [['SR_OST1', 'N', 12, 2]];
+    }
+
+    /**
+     * Daňový nerezident (`payroll_nonresident`): osoba OS-F (INTER 6) s příznakem `NREZIDEN`
+     * a kartou `PER_NERZ` (vazba `N_SUPINT` = `PER_MAIN.SUP_INTER`), stát rezidence SK.
+     * Karta osoby OS-E je rezidentská (CZ) a převod ji nepoužije.
+     *
+     * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
+     */
+    private static function nonResident(array &$tables): void
+    {
+        foreach ($tables['PER_MAIN'][1] as $i => $row) {
+            if ($row['ID'] === 'OS-F') {
+                $tables['PER_MAIN'][1][$i] += ['NREZIDEN' => true, 'SUP_INTER' => 106];
+            }
+        }
+        $tables['PER_NERZ'] = [
+            [['N_SUPINT', 'N', 10], ['N_STAT', 'C', 2], ['N_STATDO', 'C', 2], ['N_TCISDO', 'C', 1], ['N_CISDO', 'C', 20], ['F_STAT', 'C', 2], ['ID', 'C', 36]],
+            [
+                ['N_SUPINT' => 105, 'N_STAT' => 'CZ', 'N_STATDO' => 'CZ', 'N_TCISDO' => 'P', 'F_STAT' => 'CZ', 'ID' => 'NZ5'],
+                ['N_SUPINT' => 106, 'N_STAT' => 'SK', 'N_STATDO' => 'SK', 'N_TCISDO' => 'P', 'N_CISDO' => 'XX0000001', 'F_STAT' => 'SK', 'ID' => 'NZ6'],
+            ],
+        ];
     }
 
     /**

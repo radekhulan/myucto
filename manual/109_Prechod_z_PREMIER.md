@@ -364,9 +364,14 @@ Zkontrolujte po převodu:
 
 ### 109.8.3 Co převod nepřenese
 
-- **Docházka a složky mezd.** Mzdové složky jednotlivých měsíců a pravidelné
-  předpisy (osobní ohodnocení, příspěvky) se nepřevádějí, zadejte je
-  v modulu Mzdy.
+- **Docházka a složky mezd.** Mzdové složky jednotlivých měsíců se
+  nepřevádějí. Z trvalých karet vztahu převod založí jen osobní ohodnocení
+  pevnou částkou, a to jako opakovanou složku *Osobní ohodnocení*
+  (pravidelná odměna) pro měsíce, které počítá MyÚčto; karta, která na konci
+  převáděného období už skončila, se nepřevezme. Příspěvek na penzijní
+  připojištění, stravenkový paušál a příspěvek na praní zadejte v modulu Mzdy.
+- **Doklad a DIČ nerezidenta.** Stát daňové rezidence nerezidenta převod vezme
+  z karty nerezidenta; číslo dokladu a DIČ v zemi rezidence doplňte ručně.
 - **Sklad, zakázky a CRM.** Zápisy jsou v převedeném deníku, evidence se
   zakládá v MyÚčtu.
 - **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť

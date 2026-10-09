@@ -535,6 +535,34 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(2, self::stepCounts($again, 'payroll')['deductions_existing'] ?? 0, 'Opakovaný převod srážky nezdvojí.');
     }
 
+    /**
+     * Osobní ohodnocení z karty vztahu (`MZ_SRAZ` 303) je opakovaná složka pravidelné odměny
+     * pro měsíce počítané MyÚčtem; opakovaný převod předpis nezdvojí. Nerezident dostane stát
+     * rezidence z karty `PER_NERZ` a protokol ho nehlásí k ručnímu doplnění.
+     */
+    public function testRecurringIncomeAndNonResidentCountry(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true, 'payroll_nonresident' => true]);
+        $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertSame(1, self::stepCounts($first, 'payroll')['recurring_components'] ?? 0, $this->explain($first));
+        self::assertSame([['PREMIER_303', 'bonus', 'regular', '200000', '2025-01-15', null]], $this->fetch('SELECT d.code, d.component_kind, d.frequency_kind,
+                r.amount_minor, r.valid_from, r.valid_to
+              FROM payroll_recurring_components r
+              JOIN payroll_component_definitions d ON d.supplier_id = r.supplier_id AND d.id = r.component_id
+              JOIN payroll_employments e ON e.supplier_id = r.supplier_id AND e.id = r.employment_id
+             WHERE r.supplier_id = ? AND e.code = \'5\' AND d.code LIKE \'PREMIER\_%\'', $supplierId));
+        self::assertSame([['non-resident', 'SK']], $this->fetch('SELECT t.residence, t.country_code FROM payroll_person_tax_residences t
+              JOIN payroll_employments e ON e.supplier_id = t.supplier_id AND e.employee_id = t.employee_id
+             WHERE t.supplier_id = ? AND e.code = \'6\'', $supplierId));
+        self::assertNotContains('tax_residence_manual', $this->messageCodes($first));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame(1, self::stepCounts($again, 'payroll')['recurring_components_existing'] ?? 0, 'Opakovaný převod předpis nezdvojí.');
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

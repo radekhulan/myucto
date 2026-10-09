@@ -35,6 +35,10 @@ final readonly class PayrollTakeoverEmployment
      *        zahájením vedení mezd v MyÚčtu, pro zdroj, který nenese zůstatek (`$leave`), jen čerpání
      * @param list<string> $followUps úkoly na vztahu, které převzetí zakládá, protože zdroj
      *        něco dokládá jen příznakem ({@see PayrollTakeoverEmploymentWriter::followUps()})
+     * @param list<array{code:string,name:string,kind:string,amount:float,from:string,to:?string}> $recurringComponents
+     *        pravidelná zdanitelná plnění pevnou částkou (osobní ohodnocení…), která zdroj vede na
+     *        kartě vztahu a která trvají na konci převáděného období; zápis z nich udělá opakovanou
+     *        složku pro měsíce počítané MyÚčtem ({@see PayrollTakeoverEmploymentWriter::recurringComponents()})
      */
     public function __construct(
         public string $personalNumber,
@@ -57,5 +61,6 @@ final readonly class PayrollTakeoverEmployment
         public array $checklistNotes = [],
         public array $leaveTaken = [],
         public array $followUps = [],
+        public array $recurringComponents = [],
     ) {}
 }
