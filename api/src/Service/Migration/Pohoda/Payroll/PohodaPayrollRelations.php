@@ -150,7 +150,8 @@ final class PohodaPayrollRelations
             $owns ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
             try {
                 $employeeId = $this->siblingEmployee($supplierId, $relations, $relation)
-                    ?? $this->lookup->employeeId($supplierId, $relation['birth_number'], $relation['oic']);
+                    ?? $this->lookup->employeeId($supplierId, $relation['birth_number'], $relation['oic'],
+                        $relation['first_name'], $relation['last_name'], $relation['birth_date']);
                 $fullName = trim($relation['first_name'] . ' ' . $relation['last_name']) ?: 'Zaměstnanec ' . $number;
                 if ($employeeId !== null) {
                     $employmentId = $this->employments->addEmployment($supplierId, $employeeId, $fullName, $number,

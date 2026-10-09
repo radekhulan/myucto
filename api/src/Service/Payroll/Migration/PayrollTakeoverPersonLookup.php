@@ -27,7 +27,7 @@ final class PayrollTakeoverPersonLookup
         private readonly PayrollSensitiveData $sensitive,
     ) {}
 
-    public function employeeId(int $supplierId, ?string $birthNumber, ?string $oic): ?int
+    public function employeeId(int $supplierId, ?string $birthNumber, ?string $oic, ?string $firstName = null, ?string $lastName = null, ?string $birthDate = null): ?int
     {
         $normalized = null;
         if (is_string($birthNumber) && trim($birthNumber) !== '') {
@@ -50,6 +50,20 @@ final class PayrollTakeoverPersonLookup
         if (is_string($oic) && preg_match('/^[0-9]{10}$/D', $oic) === 1) {
             $ids = $this->lookup->employeesByPersonExternalIdHash($supplierId, self::ENVIRONMENT,
                 $this->sensitive->lookupHash($oic, PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER, $supplierId));
+            if (count($ids) === 1) {
+                return $ids[0];
+            }
+        }
+        // Identita (jméno, příjmení a datum narození) jako u převzetí oznámení OZUSPOJ, jen když
+        // ji rodné číslo nemůže vyvrátit: zdroj ho nenese, nebo ho nemá nalezená osoba (typicky
+        // osoba, kterou dřívější rok založil bez rodného čísla, protože bylo ve zdroji neplatné).
+        if ($firstName !== null && $lastName !== null && $birthDate !== null
+            && trim($firstName) !== '' && trim($lastName) !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $birthDate) === 1
+        ) {
+            $ids = $this->lookup->employeesByNameAndBirthDate($supplierId, trim($firstName), trim($lastName), $birthDate);
+            if ($normalized !== null) {
+                $ids = array_values(array_filter($ids, fn (int $id): bool => !$this->lookup->hasPersonIdentifier($supplierId, $id, 'birth_number')));
+            }
             if (count($ids) === 1) {
                 return $ids[0];
             }
