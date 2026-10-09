@@ -56,32 +56,68 @@ final class Section43Service
     /**
      * Součty oprav pro řádky přiznání za období PŮVODNÍHO plnění.
      *
+     * Sčítá TYTÉŽ záznamy, které {@see periodCorrections()} vrací Knize DPH jednotlivě,
+     * takže přiznání a Kniha nemohou mít každé svůj výběr.
+     *
      * @return array{basic:array{base:float,vat:float}, reduced:array{base:float,vat:float}}
      */
     public function periodCorrectionLines(int $supplierId, int $year, int $month, string $period = 'monthly'): array
+    {
+        $out = ['basic' => ['base' => 0.0, 'vat' => 0.0], 'reduced' => ['base' => 0.0, 'vat' => 0.0]];
+        foreach ($this->periodCorrections($supplierId, $year, $month, $period) as $r) {
+            $out[$r['rate_kind']]['base'] += $r['base_delta'];
+            $out[$r['rate_kind']]['vat']  += $r['vat_delta'];
+        }
+        foreach ($out as $kind => $v) {
+            $out[$kind] = ['base' => round($v['base'], 2), 'vat' => round($v['vat'], 2)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Jednotlivé opravy, které přiznání za dané zdaňovací období sčítá do ř. 1/2
+     * ({@see periodCorrectionLines()}), s číslem opravovaného dokladu pro Knihu DPH.
+     *
+     * @param string $period 'monthly' (default) nebo 'quarterly'
+     * @return list<array{id:int, source_type:string, source_id:int, rate_kind:string,
+     *                    base_delta:float, vat_delta:float, corrective_doc_number:?string,
+     *                    source_doc_number:string, delivered_on:string, reason:string}>
+     */
+    public function periodCorrections(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
         $months = $period === 'quarterly' ? self::quarterMonths($month) : [$month];
         $ph = implode(',', array_fill(0, count($months), '?'));
 
         $stmt = $this->db->pdo()->prepare(
-            "SELECT rate_kind,
-                    COALESCE(SUM(base_delta), 0) AS base_delta,
-                    COALESCE(SUM(vat_delta), 0)  AS vat_delta
-               FROM vat_s43_corrections
-              WHERE supplier_id = ? AND period_year = ? AND period_month IN ({$ph})
-           GROUP BY rate_kind"
+            "SELECT c.id, c.source_type, c.source_id, c.rate_kind, c.base_delta, c.vat_delta,
+                    c.corrective_doc_number, c.delivered_on, c.reason,
+                    i.varsymbol AS invoice_number, pi.vendor_invoice_number AS purchase_number
+               FROM vat_s43_corrections c
+          LEFT JOIN invoices i ON c.source_type = 'invoice' AND i.id = c.source_id
+          LEFT JOIN purchase_invoices pi ON c.source_type = 'purchase_invoice' AND pi.id = c.source_id
+              WHERE c.supplier_id = ? AND c.period_year = ? AND c.period_month IN ({$ph})
+           ORDER BY c.period_month, c.id"
         );
         $stmt->execute(array_merge([$supplierId, $year], $months));
 
-        $out = ['basic' => ['base' => 0.0, 'vat' => 0.0], 'reduced' => ['base' => 0.0, 'vat' => 0.0]];
+        $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
             $kind = (string) $r['rate_kind'];
-            if (!isset($out[$kind])) {
+            if ($kind !== 'basic' && $kind !== 'reduced') {
                 continue;
             }
-            $out[$kind] = [
-                'base' => round((float) $r['base_delta'], 2),
-                'vat'  => round((float) $r['vat_delta'], 2),
+            $out[] = [
+                'id'                    => (int) $r['id'],
+                'source_type'           => (string) $r['source_type'],
+                'source_id'             => (int) $r['source_id'],
+                'rate_kind'             => $kind,
+                'base_delta'            => round((float) $r['base_delta'], 2),
+                'vat_delta'             => round((float) $r['vat_delta'], 2),
+                'corrective_doc_number' => $r['corrective_doc_number'] === null ? null : (string) $r['corrective_doc_number'],
+                'source_doc_number'     => (string) ($r['source_type'] === 'invoice' ? $r['invoice_number'] : $r['purchase_number']),
+                'delivered_on'          => (string) $r['delivered_on'],
+                'reason'                => (string) $r['reason'],
             ];
         }
 

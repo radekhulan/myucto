@@ -13,10 +13,12 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\InvoiceKhSections;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
+use MyInvoice\Service\Report\Section79Service;
 use MyInvoice\Service\Report\SubmissionVariantGuard;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
+use MyInvoice\Service\Tax\Vat\Section43Service;
 use PDO;
 use PHPUnit\Framework\TestCase;
 
@@ -37,6 +39,8 @@ final class DphBookBuilderTest extends TestCase
     private Section74bService $section74b;
     private Section46Service $section46;
     private KontrolniHlaseniBuilder $kh;
+    private Section43Service $section43;
+    private Section79Service $section79;
 
     protected function setUp(): void
     {
@@ -71,7 +75,9 @@ final class DphBookBuilderTest extends TestCase
             new SubmissionVariantGuard($submissions),
         );
         $this->kh = $kh;
-        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b, $kh, $this->section46);
+        $this->section43 = new Section43Service($conn, $taxConstants);
+        $this->section79 = new Section79Service($conn, $taxConstants);
+        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b, $kh, $this->section46, $this->section43, $this->section79);
         $this->khSections = new InvoiceKhSections($this->builder, $ledger);
     }
 
@@ -262,6 +268,57 @@ final class DphBookBuilderTest extends TestCase
         $this->assertSame(0.0, round($r['totals']['issued']['vat'], 2), 'neplátce opravu §46 v přiznání nemá, Kniha také ne');
     }
 
+    public function testSection43CorrectionsMatchReturnLines1And2(): void
+    {
+        // Prodej v období původního plnění 2026-05: 1 000 + 210 (ř.1).
+        $this->insertSale(1, '2026-05-10', 1000.0, 210.0, '1');
+        // Opravy §43 za období 2026-05 (doručené později): základní skupina +40 daně,
+        // snížená −12 daně; oprava jiného období (2026-04) do květnové knihy nepatří.
+        $this->insertS43Correction(1, 'invoice', 2026, 5, 'basic', 0.0, 40.0, 'OD-TEST-1');
+        $this->insertS43Correction(1, 'invoice', 2026, 5, 'reduced', -100.0, -12.0, null);
+        $this->insertS43Correction(1, 'invoice', 2026, 4, 'basic', 0.0, 999.0, null);
+
+        $lines = $this->section43->periodCorrectionLines(1, 2026, 5, 'monthly');
+        $this->assertSame(40.0, $lines['basic']['vat']);
+        $this->assertSame(-12.0, $lines['reduced']['vat']);
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+        $byKey = array_column($r['sections'], null, 'key');
+
+        $this->assertArrayHasKey('36.001', $byKey);
+        $this->assertArrayHasKey('36.002', $byKey, 'oprava snížené sazby jde na ř.2');
+        $this->assertSame(round(210.0 + $lines['basic']['vat'], 2), round($byKey['36.001']['subtotal_vat'], 2),
+            'ř.1 Knihy DPH = ř.1 přiznání po opravě §43');
+        $this->assertSame($lines['reduced']['vat'], round($byKey['36.002']['subtotal_vat'], 2));
+        $this->assertSame($lines['reduced']['base'], round($byKey['36.002']['subtotal_base'], 2));
+        $this->assertSame(round(210.0 + $lines['basic']['vat'] + $lines['reduced']['vat'], 2), round($r['totals']['issued']['vat'], 2));
+
+        $docs = array_column($byKey['36.001']['rows'], 'doc_number');
+        $this->assertContains('OD-TEST-1', $docs, 'řádek §43 nese číslo opravného dokladu');
+    }
+
+    public function testSection79RegistrationCorrectionLandsOnLine45(): void
+    {
+        $this->insertReceivedInvoice(20, 200, '2026-05-05', 'PF-DOM-79', 10000.0, 2100.0, '40');
+        // Nárok při registraci 500 (ve lhůtě), snížení při zrušení u zásob −300 by
+        // patřilo do jiného období; položka mimo lhůtu (applies=false) do ř.45 nejde.
+        $this->insertS79Item('registration', 'Zásoby k registraci', '2026-01-10', '2026-05-01', 'inventory', null, 500.0);
+        $this->insertS79Item('registration', 'Stroj mimo lhůtu', '2024-01-10', '2026-05-01', 'fixed_asset', 5, 800.0);
+        $this->insertS79Item('deregistration', 'Zásoby při zrušení', '2026-01-10', '2026-06-30', 'inventory', null, 300.0);
+
+        $expected = $this->section79->totalForReturn(1, '2026-05-01', '2026-05-31');
+        $this->assertSame(500.0, $expected);
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+        $byKey = array_column($r['sections'], null, 'key');
+
+        $this->assertArrayHasKey('15.045', $byKey, 'korekce §79 má sekci ř.45');
+        $this->assertSame($expected, round($byKey['15.045']['subtotal_vat'], 2), 'ř.45 Knihy = ř.45 přiznání');
+        $this->assertCount(1, $byKey['15.045']['rows']);
+        $this->assertSame(round(2100.0 + $expected, 2), round($r['totals']['received']['vat'], 2),
+            'odpočet Knihy = ř.46 „V plné výši" (ř.40 + ř.45)');
+    }
+
     // ───── helpers ───────────────────────────────────────────────────────────
 
     private function createSchema(): void
@@ -310,6 +367,18 @@ final class DphBookBuilderTest extends TestCase
             id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL,
             period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, movement TEXT NOT NULL,
             vat_amount REAL NOT NULL, output_vat REAL NOT NULL
+        )");
+        $this->pdo->exec("CREATE TABLE vat_s43_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_id INTEGER NOT NULL,
+            source_type TEXT NOT NULL DEFAULT 'invoice', source_id INTEGER NOT NULL,
+            period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, rate_kind TEXT NOT NULL DEFAULT 'basic',
+            base_delta REAL NOT NULL DEFAULT 0, vat_delta REAL NOT NULL, corrective_doc_number TEXT NULL,
+            delivered_on TEXT NOT NULL, reason TEXT NOT NULL
+        )");
+        $this->pdo->exec("CREATE TABLE vat_registration_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_id INTEGER NOT NULL, kind TEXT NOT NULL,
+            label TEXT NOT NULL, acquired_on TEXT NOT NULL, effective_on TEXT NOT NULL,
+            asset_kind TEXT NOT NULL, period_years INTEGER NULL, vat_amount REAL NOT NULL
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,
@@ -399,6 +468,22 @@ final class DphBookBuilderTest extends TestCase
         $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code)
             VALUES (?, ?, 21.0, 'tuzemsko', ?, ?, ?)")
             ->execute([$id, $id, $base, $vat, $code]);
+    }
+
+    private function insertS43Correction(int $sourceId, string $sourceType, int $year, int $month, string $rateKind, float $baseDelta, float $vatDelta, ?string $docNumber): void
+    {
+        $this->pdo->prepare("INSERT INTO vat_s43_corrections
+            (supplier_id, source_type, source_id, period_year, period_month, rate_kind, base_delta, vat_delta, corrective_doc_number, delivered_on, reason)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, '2026-08-10', 'chybná sazba')")
+            ->execute([$sourceType, $sourceId, $year, $month, $rateKind, $baseDelta, $vatDelta, $docNumber]);
+    }
+
+    private function insertS79Item(string $kind, string $label, string $acquiredOn, string $effectiveOn, string $assetKind, ?int $periodYears, float $vat): void
+    {
+        $this->pdo->prepare("INSERT INTO vat_registration_corrections
+            (supplier_id, kind, label, acquired_on, effective_on, asset_kind, period_years, vat_amount)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$kind, $label, $acquiredOn, $effectiveOn, $assetKind, $periodYears, $vat]);
     }
 
     private function insertS46Correction(int $invoiceId, int $year, int $month, string $movement, float $vatAmount, float $outputVat): void

@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
+use MyInvoice\Service\Tax\Vat\Section43Service;
 
 /**
  * Builder pro **Knihu DPH** (interní VAT žurnál).
@@ -50,6 +51,10 @@ final class DphBookBuilder
         private readonly KontrolniHlaseniBuilder $kontrolniHlaseni,
         // § 46 ZDPH — evidované věřitelské opravy u nedobytné pohledávky (ř. 1/2, KH A.4 zdph_44='P').
         private readonly Section46Service $section46,
+        // § 43 ZDPH — oprava výše daně do období původního plnění (ř. 1/2), týž zdroj jako přiznání.
+        private readonly Section43Service $section43,
+        // § 79/§ 79a ZDPH — korekce odpočtu při registraci a zrušení registrace (ř. 45).
+        private readonly Section79Service $section79,
     ) {}
 
     /**
@@ -146,11 +151,16 @@ final class DphBookBuilder
         // obnova kladně), aby součet odpočtu Knihy DPH seděl s ř. 40/41 DPHDP3 po korekci.
         // EVIDOVANÉ opravy §46 (věřitel) jsou zrcadlo na straně výstupu: ř.1/2 (oprava
         // záporně, obnova po úhradě kladně), aby daň na výstupu seděla s ř. 1/2 DPHDP3.
-        // Obě opravy jen u plátce k poslednímu dni období, stejně jako DphPriznaniBuilder.
+        // Opravy §74b, §46 i §43 jen u plátce k poslednímu dni období, stejně jako DphPriznaniBuilder.
         if (!empty($supplier['is_vat_payer'])) {
             $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period, $khSections);
             $this->appendSection46Corrections($sections, $supplierId, $year, $month, $period, $khSections);
+            $this->appendSection43Corrections($sections, $supplierId, $year, $month, $period);
         }
+        // §79/§79a (ř. 45) přiznání započítává bez podmínky plátcovství: snížení při zrušení
+        // registrace patří do posledního období registrace, kdy stav k poslednímu dni
+        // období už může být „neplátce".
+        $this->appendSection79Corrections($sections, $supplierId, $start, $end);
 
         // Convert sections asociativní mapy → indexované pole, seřazené.
         $sectionList = array_values($sections);
@@ -317,6 +327,114 @@ final class DphBookBuilder
                 ];
                 $this->addToSection($sections, 'issued', $cls, $this->section46BookRow($inv, $rate, $base, $vat));
             }
+        }
+    }
+
+    /**
+     * Přimíchá EVIDOVANÉ opravy výše daně §43 do sekcí uskutečněných plnění ř.1/2. Opravy
+     * patří do období PŮVODNÍHO plnění, takže je Kniha bere za období, které se staví,
+     * z {@see Section43Service::periodCorrections()}, tedy z týchž záznamů, které přiznání
+     * sčítá přes periodCorrectionLines(). Stejně jako přiznání míří vše na ř.1/2 podle
+     * sazbové skupiny. V KH se oprava §43 nevykazuje, sloupec KH zůstává prázdný.
+     *
+     * @param array<string,array<string,mixed>> $sections by-ref
+     */
+    private function appendSection43Corrections(array &$sections, int $supplierId, int $year, int $month, string $period): void
+    {
+        $c = $this->taxConstants->forYear($year);
+        foreach ($this->section43->periodCorrections($supplierId, $year, $month, $period) as $corr) {
+            [$line, $rate] = $corr['rate_kind'] === 'basic'
+                ? ['1', (float) $c['vat_rate_standard']]
+                : ['2', (float) $c['vat_rate_reduced']];
+            $base = (float) $corr['base_delta'];
+            $vat = (float) $corr['vat_delta'];
+            $doc = (string) ($corr['corrective_doc_number'] ?? '');
+            $cls = [
+                'code'                  => '',
+                'label'                 => 'Oprava výše daně §43',
+                'dphdp3_line'           => $line,
+                'dphdp3_line_secondary' => null,
+                'kh_section'            => null,
+                'vat_rate'              => $rate,
+            ];
+            $this->addToSection($sections, 'issued', $cls, [
+                'invoice_id'              => (int) $corr['source_id'],
+                'direction'               => $corr['source_type'] === 'invoice' ? 'issued' : 'received',
+                'doc_number'              => $doc !== '' ? $doc : $corr['source_doc_number'],
+                'original_doc_number'     => $corr['source_doc_number'] !== '' ? $corr['source_doc_number'] : null,
+                'tax_date'                => $corr['delivered_on'],
+                'accounting_date'         => $corr['delivered_on'],
+                'claim_date'              => null,
+                'claim_basis'             => null,
+                'received_at'             => null,
+                'description'             => 'Oprava výše daně §43 - ' . $corr['reason'],
+                'counterparty_name'       => '',
+                'counterparty_dic'        => '',
+                'vat_classification_code' => null,
+                'vat_rate'                => $rate,
+                'currency'                => 'CZK',
+                'exchange_rate'           => 1.0,
+                'base'                    => $base,
+                'vat'                     => $vat,
+                'total'                   => $base + $vat,
+                'status'                  => 'posted',
+                'is_draft'                => false,
+                'is_fixed_asset'          => false,
+            ]);
+        }
+    }
+
+    /**
+     * Přimíchá korekce odpočtu §79/§79a do sekce přijatých plnění ř.45 (15.045) z
+     * {@see Section79Service::preview()}, tedy z týchž položek, které přiznání sčítá přes
+     * totalForReturn(). Jen položky, které do ř.45 vstupují (`applies`). Přiznání součet
+     * zaokrouhluje na celé Kč, Kniha ukazuje položky v haléřích.
+     *
+     * @param array<string,array<string,mixed>> $sections by-ref
+     */
+    private function appendSection79Corrections(array &$sections, int $supplierId, string $start, string $end): void
+    {
+        foreach ($this->section79->preview($supplierId, $start, $end) as $item) {
+            if (!$item['applies'] || round((float) $item['amount'], 2) == 0.0) {
+                continue;
+            }
+            $vat = (float) $item['amount'];
+            $cls = [
+                'code'                  => '',
+                'label'                 => 'Korekce odpočtu §79',
+                'dphdp3_line'           => '45',
+                'dphdp3_line_secondary' => null,
+                'kh_section'            => null,
+                'vat_rate'              => 0.0,
+            ];
+            // invoice_id nese id položky evidence §79, ne doklad; směr „correction“ ji drží
+            // mimo párování na faktury (InvoiceKhSections porovnává směr).
+            $this->addToSection($sections, 'received', $cls, [
+                'invoice_id'              => (int) $item['id'],
+                'direction'               => 'correction',
+                'doc_number'              => '',
+                'original_doc_number'     => null,
+                'tax_date'                => $item['effective_on'],
+                'accounting_date'         => $item['effective_on'],
+                'claim_date'              => null,
+                'claim_basis'             => null,
+                'received_at'             => null,
+                'description'             => ($item['kind'] === 'registration'
+                    ? 'Odpočet při registraci §79 - '
+                    : 'Snížení odpočtu při zrušení registrace §79a - ') . $item['label'],
+                'counterparty_name'       => '',
+                'counterparty_dic'        => '',
+                'vat_classification_code' => null,
+                'vat_rate'                => 0.0,
+                'currency'                => 'CZK',
+                'exchange_rate'           => 1.0,
+                'base'                    => 0.0,
+                'vat'                     => $vat,
+                'total'                   => $vat,
+                'status'                  => 'posted',
+                'is_draft'                => false,
+                'is_fixed_asset'          => false,
+            ]);
         }
     }
 
@@ -545,6 +663,7 @@ final class DphBookBuilder
         // Speciální popisy pro 40/41 (tuzemsko), 12 (dovoz služby), 7 (dovoz zboží), atd.
         $what = match ($line) {
             '40', '41', '42' => 'Z tuzemska - sazba',
+            '45'             => 'Korekce odpočtu při registraci a zrušení registrace (§ 79)',
             '12'             => 'Z dovozu služby - sazba',
             '7'              => 'Dovoz zboží ze 3. země',
             '3', '4'         => 'Pořízení z EU',
