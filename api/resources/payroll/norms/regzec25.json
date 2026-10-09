@@ -127,7 +127,7 @@
     "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationNormCoverageRulesTest::testForeignInsurerAddressIsAllOrNothing",
     "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationNormCoverageRulesTest::testHouseNumberRules",
     "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationNormCoverageRulesTest::testMinimumAgeIsFourteenFullYears",
-    "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationNormCoverageRulesTest::testSlovakCitizenBornAfter1992CannotBeRegisteredWithBirthNumber",
+    "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationNormCoverageRulesTest::testSlovakCitizenBornAfter1992WithBirthNumberIsWarnedNotBlocked",
     "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationPostalCodeTest::testCzechPostalCodeMustHaveFiveDigits",
     "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationPostalCodeTest::testTaxResidencyAddressIsRequiredOutsideCzechiaOnly",
     "MyInvoice\\Tests\\Unit\\Payroll\\Submission\\Registration\\PayrollRegistrationProfileCompletionTest::testBirthNumberFromThePersonCardIsSentWithoutSlash",

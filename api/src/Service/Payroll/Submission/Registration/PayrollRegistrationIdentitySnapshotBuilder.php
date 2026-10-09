@@ -597,30 +597,9 @@ final class PayrollRegistrationIdentitySnapshotBuilder
                 . 'Doplňte je na ' . self::WHERE_IDENTIFIERS . '.',
             );
         }
-        // Zásady REGZEC 1.4.6 (ID 10057 a kapitola o RČ/EČP): občan SR
-        // narozený po 31. 12. 1992 je pro ČSSZ cizinec a jeho slovenské RČ se
-        // do přihlášky A1 neuvádí, ČSSZ mu přidělí EČP. Které RČ je slovenské,
-        // evidence nepozná (formát je shodný s českým), proto aplikace číslo
-        // sama nevynechá a přihlášku zastaví.
-        $birthDate = $identity['birth_date']
-            ?? PayrollRegistrationMinimumAge::birthDateFromBirthNumber(
-                $identifiers['birth_number'],
-            );
-        if (($identity['citizenship_country_code'] ?? null) === 'SK'
-            && $identifiers['birth_number'] !== null
-            && is_string($birthDate)
-            && $birthDate > '1992-12-31'
-        ) {
-            $this->invalid(
-                'registration_identity_slovak_birth_number_after_1992',
-                'Zaměstnanec se slovenským státním občanstvím narozený po '
-                . '31. 12. 1992 je pro ČSSZ cizinec a slovenské rodné číslo se '
-                . 'do přihlášky REGZEC A1 neuvádí, ČSSZ by ji zamítla. Odeberte '
-                . 'rodné číslo na ' . self::WHERE_IDENTIFIERS . '; má-li '
-                . 'zaměstnanec přidělené EČP, vyplňte to, jinak přihláška '
-                . 'odejde jen s datem narození a ČSSZ EČP přidělí.',
-            );
-        }
+        // Rodné číslo občana SR narozeného po roce 1992 sestavení neodmítá,
+        // jen na něj upozorní kontrola profilu A1
+        // ({@see PayrollRegistrationSlovakBirthNumberRule}).
         $problems = PayrollRegistrationBirthNumberConsistency::problems(
             $identity,
             $identifiers['birth_number'],

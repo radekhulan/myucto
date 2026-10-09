@@ -728,12 +728,13 @@ final readonly class PayrollRegistrationIdentityService
              * identita osoby není důvod mlčet — ohlásí se jako první vada.
              */
             try {
-                $identity = $this->sensitiveIdentityAtInternal(
+                $sensitive = $this->sensitiveIdentityAtInternal(
                     $supplierId,
                     $employeeId,
                     $effectiveOn,
                     true,
-                )['identity'];
+                );
+                $identity = $sensitive['identity'];
             } catch (\DomainException $exception) {
                 return [
                     'complete' => false,
@@ -775,6 +776,18 @@ final readonly class PayrollRegistrationIdentityService
             );
             if ($educationWarning !== null) {
                 $warnings[] = $educationWarning;
+            }
+            $birthNumberWarning = PayrollRegistrationSlovakBirthNumberRule::warning(
+                is_string($identity['citizenship_country_code'] ?? null)
+                    ? $identity['citizenship_country_code']
+                    : null,
+                is_string($sensitive['identifiers']['birth_number'] ?? null)
+                    ? $sensitive['identifiers']['birth_number']
+                    : null,
+                is_string($identity['birth_date'] ?? null) ? $identity['birth_date'] : null,
+            );
+            if ($birthNumberWarning !== null) {
+                $warnings[] = $birthNumberWarning;
             }
 
             return [

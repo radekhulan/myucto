@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationHouseNu
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationMinimumAge;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSlovakBirthNumberRule;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSpecialStartDate;
 use PHPUnit\Framework\TestCase;
 
@@ -198,42 +199,33 @@ final class PayrollRegistrationNormCoverageRulesTest extends TestCase
     }
 
     /**
-     * REGZEC25-client.bno-09 (Zásady REGZEC 1.4.6, ID 10057): občan SR
-     * narozený po 31. 12. 1992 je cizinec, slovenské RČ do A1 nepatří.
-     * Narozený před 1. 1. 1993 RČ uvést smí, bez RČ přihláška projde.
+     * REGZEC25-client.bno-09 (pokyny REGZEC, ID 10057): „slovenské" RČ občana
+     * SR přiděleného po 31. 12. 1992 se do A1 neuvádí, cizinec s pobytem v ČR
+     * ale může mít české RČ a to se uvádět musí. Evidence je nerozliší a ČSSZ
+     * přihlášky s RČ u takových osob přijímá, proto varování, ne zákaz.
      */
-    public function testSlovakCitizenBornAfter1992CannotBeRegisteredWithBirthNumber(): void
+    public function testSlovakCitizenBornAfter1992WithBirthNumberIsWarnedNotBlocked(): void
     {
         $builder = new PayrollRegistrationIdentitySnapshotBuilder();
         $after = self::identitySource('935203/0006', null);
         $after['identity']['birth_date'] = '1993-02-03';
         $after['identity']['citizenship_country_code'] = 'SK';
-        $this->expectCode(
-            'registration_identity_slovak_birth_number_after_1992',
-            fn () => $builder->build(self::scope(), $after),
-        );
-
-        $withoutDate = $after;
-        $withoutDate['identity']['birth_date'] = null;
-        $this->expectCode(
-            'registration_identity_slovak_birth_number_after_1992',
-            fn () => $builder->build(self::scope(), $withoutDate),
-        );
-
-        $before = self::identitySource('915203/0008', null);
-        $before['identity']['citizenship_country_code'] = 'SK';
+        // Syntetická karta nemá údaje cizince, sestavení na nich může skončit,
+        // jen ne na rodném čísle.
         self::assertNotSame(
             'registration_identity_slovak_birth_number_after_1992',
-            self::failureCode(fn () => $builder->build(self::scope(), $before)),
+            self::failureCode(fn () => $builder->build(self::scope(), $after)),
         );
-
-        $withoutNumber = self::identitySource(null, null);
-        $withoutNumber['identity']['birth_date'] = '1993-02-03';
-        $withoutNumber['identity']['citizenship_country_code'] = 'SK';
-        self::assertNotSame(
+        self::assertSame(
             'registration_identity_slovak_birth_number_after_1992',
-            self::failureCode(fn () => $builder->build(self::scope(), $withoutNumber)),
+            PayrollRegistrationSlovakBirthNumberRule::warning('SK', '935203/0006', '1993-02-03')['code'] ?? null,
         );
+        // Bez data narození na kartě se rozhodne podle data z RČ.
+        self::assertNotNull(PayrollRegistrationSlovakBirthNumberRule::warning('SK', '935203/0006', null));
+
+        self::assertNull(PayrollRegistrationSlovakBirthNumberRule::warning('SK', '915203/0008', '1991-02-03'));
+        self::assertNull(PayrollRegistrationSlovakBirthNumberRule::warning('SK', null, '1993-02-03'));
+        self::assertNull(PayrollRegistrationSlovakBirthNumberRule::warning('CZ', '935203/0006', '1993-02-03'));
     }
 
     /** Kód, se kterým sestavení skončilo; `null`, když prošlo. */
