@@ -4991,11 +4991,11 @@
         "PER_NERZ": {
             "rows_seen": 25,
             "status": "mapped",
-            "target": "stát daňové rezidence nerezidenta (N_STAT) do zákonné evidence osoby, jako u PAMICA",
+            "target": "nerezident: stát daňové rezidence (N_STAT) do zákonné evidence osoby jako u PAMICA, DIČ v zemi rezidence (N_DIC) jako zahraniční daňový identifikátor karty osoby, doklad totožnosti (N_CISDO, N_TCISDO, N_STATDO, N_ORGAN_D) do profilu registrace A1 vztahu",
             "readers": [
                 "PremierPayroll"
             ],
-            "ignored_columns_reason": "Adresa, doklad a zahraniční DIČ nerezidenta: převod je zatím nepřenáší (zákonná evidence osoby nemá pole pro doklad, DIČ v zemi rezidence doplní účetní).",
+            "ignored_columns_reason": "Adresa nerezidenta, platnost dokladu, údaje o pobytu a příslušnosti: převod je nepřenáší (adresa jde z PER_MAIN a PER_ADR, ostatní doplní účetní v profilu registrace).",
             "columns": {
                 "D_PLAT_ZR": {
                     "status": "ignored"
@@ -5008,13 +5008,15 @@
                     "target": "PremierPayroll"
                 },
                 "N_CISDO": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PremierPayroll"
                 },
                 "N_CISPPOV": {
                     "status": "ignored"
                 },
                 "N_DIC": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PremierPayroll"
                 },
                 "N_DNPOV": {
                     "status": "ignored"
@@ -5035,7 +5037,8 @@
                     "status": "ignored"
                 },
                 "N_ORGAN_D": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PremierPayroll"
                 },
                 "N_PLAT_D": {
                     "status": "ignored"
@@ -5057,14 +5060,16 @@
                     "target": "PremierPayroll"
                 },
                 "N_STATDO": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PremierPayroll"
                 },
                 "N_SUPINT": {
                     "status": "mapped",
                     "target": "PremierPayroll"
                 },
                 "N_TCISDO": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PremierPayroll"
                 },
                 "N_TDIC": {
                     "status": "ignored"

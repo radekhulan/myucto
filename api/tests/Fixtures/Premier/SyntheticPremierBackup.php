@@ -875,10 +875,12 @@ final class SyntheticPremierBackup
             }
         }
         $tables['PER_NERZ'] = [
-            [['N_SUPINT', 'N', 10], ['N_STAT', 'C', 2], ['N_STATDO', 'C', 2], ['N_TCISDO', 'C', 1], ['N_CISDO', 'C', 20], ['F_STAT', 'C', 2], ['ID', 'C', 36]],
+            [['N_SUPINT', 'N', 10], ['N_STAT', 'C', 2], ['N_STATDO', 'C', 2], ['N_TCISDO', 'C', 1], ['N_CISDO', 'C', 20], ['N_DIC', 'C', 20],
+                ['N_ORGAN_D', 'C', 64], ['F_STAT', 'C', 2], ['ID', 'C', 36]],
             [
-                ['N_SUPINT' => 105, 'N_STAT' => 'CZ', 'N_STATDO' => 'CZ', 'N_TCISDO' => 'P', 'F_STAT' => 'CZ', 'ID' => 'NZ5'],
-                ['N_SUPINT' => 106, 'N_STAT' => 'SK', 'N_STATDO' => 'SK', 'N_TCISDO' => 'P', 'N_CISDO' => 'XX0000001', 'F_STAT' => 'SK', 'ID' => 'NZ6'],
+                ['N_SUPINT' => 105, 'N_STAT' => 'CZ', 'N_STATDO' => 'CZ', 'N_TCISDO' => 'P', 'N_CISDO' => 'XX0000005', 'F_STAT' => 'CZ', 'ID' => 'NZ5'],
+                ['N_SUPINT' => 106, 'N_STAT' => 'SK', 'N_STATDO' => 'SK', 'N_TCISDO' => 'P', 'N_CISDO' => 'XX0000001', 'N_DIC' => 'SK 1000000001',
+                    'N_ORGAN_D' => 'Fiktivní úřad', 'F_STAT' => 'SK', 'ID' => 'NZ6'],
             ],
         ];
     }

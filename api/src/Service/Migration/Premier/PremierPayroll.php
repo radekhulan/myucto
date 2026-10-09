@@ -74,10 +74,12 @@ final class PremierPayroll
         // Karta nerezidenta (`PER_NERZ`, vazba `N_SUPINT` = `PER_MAIN.SUP_INTER`): stát daňové
         // rezidence `N_STAT`. Karta je i u rezidentů (stát CZ); převod ji bere jen u nerezidenta.
         $residenceCountries = [];
+        $nonResidentCards = [];
         foreach ($backup->rows('PER_NERZ') as $row) {
             $country = self::country(self::text($row['N_STAT'] ?? ''));
             if ($country !== null && (int) ($row['N_SUPINT'] ?? 0) > 0) {
                 $residenceCountries[(int) $row['N_SUPINT']] = $country;
+                $nonResidentCards[(int) $row['N_SUPINT']] = self::nonResidentCard($row, $country);
             }
         }
         $recurringIncomes = PremierPayrollDeductions::recurringIncomes($backup);
@@ -214,6 +216,10 @@ final class PremierPayroll
                 'phone' => self::phone(self::text($person['MOBIL'] ?? '') ?: self::text($person['TEL'] ?? '')),
                 'non_resident' => ($person['NREZIDEN'] ?? false) === true,
                 'tax_residence_country' => $person !== null ? ($residenceCountries[(int) ($person['SUP_INTER'] ?? 0)] ?? null) : null,
+                // Doklad totožnosti a zahraniční DIČ z karty nerezidenta jen u nerezidenta.
+                'non_resident_card' => $person !== null && ($person['NREZIDEN'] ?? false) === true
+                    ? ($nonResidentCards[(int) ($person['SUP_INTER'] ?? 0)] ?? null)
+                    : null,
                 'recurring_incomes' => $recurringIncomes[$inter] ?? [],
                 'foreign_legislation' => ($row['VYSLANY'] ?? false) === true
                     || (self::country($row['OSS_ZEME'] ?? '') ?? 'CZ') !== 'CZ',
@@ -784,6 +790,39 @@ final class PremierPayroll
             }
         }
         return $out;
+    }
+
+    /**
+     * Doklad totožnosti a zahraniční daňové identifikační číslo z karty nerezidenta
+     * (`PER_NERZ`): číslo dokladu `N_CISDO`, jeho druh `N_TCISDO` (kódy ČSSZ, např. `P`
+     * cestovní pas), stát vydání `N_STATDO` a vydávající orgán `N_ORGAN_D`; DIČ v zemi
+     * rezidence `N_DIC`. DIČ se nese ve tvaru karty osoby `CC:HODNOTA` se státem rezidence;
+     * hodnota, která tvar nesplní, se nepřevezme (`null`) a doplní ji účetní.
+     *
+     * @param array<string,mixed> $row
+     * @return array{foreign_tax_identifier:?string,proof_identity:?array{type_code:string,number:string,foreign_issuer:?string,country_code:?string}}
+     */
+    private static function nonResidentCard(array $row, string $residenceCountry): array
+    {
+        $dic = mb_strtoupper((string) preg_replace('/\s+/', '', self::text($row['N_DIC'] ?? '')));
+        if (str_starts_with($dic, $residenceCountry)) {
+            $dic = substr($dic, strlen($residenceCountry));
+        }
+        $taxId = $residenceCountry . ':' . ltrim($dic, ':');
+        $number = self::text($row['N_CISDO'] ?? '');
+        $type = mb_strtoupper(self::text($row['N_TCISDO'] ?? ''));
+
+        return [
+            'foreign_tax_identifier' => $dic !== '' && preg_match('/^[A-Z]{2}:[A-Z0-9][A-Z0-9.\/-]{2,29}$/D', $taxId) === 1 ? $taxId : null,
+            'proof_identity' => $number !== '' && preg_match('/^[A-Z]{1,3}$/D', $type) === 1
+                ? [
+                    'type_code' => $type,
+                    'number' => mb_substr($number, 0, 64),
+                    'foreign_issuer' => self::limited($row['N_ORGAN_D'] ?? null, 100),
+                    'country_code' => self::country($row['N_STATDO'] ?? ''),
+                ]
+                : null,
+        ];
     }
 
     private static function country(mixed $value): ?string

@@ -946,6 +946,41 @@ final class PayrollTakeoverEmploymentWriter
     }
 
     /**
+     * Doklad totožnosti cizince ze zdroje do profilu registrace A1 vztahu - jediného místa,
+     * kde MyÚčto doklad vede (registrace a změnová hlášení ČSSZ). Zapisuje se stejně jako
+     * při importu registrací: nad uložený profil (nebo návrh z kmenových dat) se doplní jen
+     * doklad. Profil už odeslané registrace se nemění a doklad, který profil vede, se
+     * nepřepisuje.
+     *
+     * @return array<string,int>
+     */
+    public function proofIdentity(int $supplierId, int $employmentId, PayrollTakeoverEmployment $employment, ?int $userId): array
+    {
+        $proof = $employment->proofIdentity;
+        if ($proof === null) {
+            return [];
+        }
+        $view = $this->identities->a1ProfileView($supplierId, $employmentId);
+        if (($view['draft']['submitted'] ?? false) === true) {
+            return [];
+        }
+        $input = is_array($view['profile']) ? $view['profile'] : (array) ($view['draft']['suggested'] ?? []);
+        $current = $input['proof_identity'] ?? null;
+        if (is_array($current) && is_string($current['number'] ?? null) && trim($current['number']) !== '') {
+            return [];
+        }
+        foreach (['status', 'reference_hash', 'created_at', 'created', 'problems'] as $meta) {
+            unset($input[$meta]);
+        }
+        $input['proof_identity'] = $proof;
+        $input['row_version'] = (int) ($view['draft']['row_version'] ?? 0);
+        $input['effective_on'] = (string) $view['draft']['effective_on'];
+        $this->identities->saveA1Profile($supplierId, $employmentId, $input, $userId);
+
+        return ['proof_identity' => 1];
+    }
+
+    /**
      * Skončení vztahu k datu ze zdroje. Budoucí skončení (smlouva na dobu určitou) převod
      * nezapisuje, zapíše se až v den skončení běžnou cestou; se
      * {@see PayrollTakeoverPolicy::$countPlannedTermination} ho aspoň spočítá.

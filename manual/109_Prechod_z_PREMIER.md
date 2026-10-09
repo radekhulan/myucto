@@ -381,8 +381,12 @@ Zkontrolujte po převodu:
     měsíc ho MyÚčto nabídne k určení částky a sazbu ukáže v poznámce.
   - Příspěvek na praní pracovních oděvů jako vlastní složka, která není
     předmětem daně ani pojistného.
-- **Doklad a DIČ nerezidenta.** Stát daňové rezidence nerezidenta převod vezme
-  z karty nerezidenta; číslo dokladu a DIČ v zemi rezidence doplňte ručně.
+- **Údaje nerezidenta.** Z karty nerezidenta převod vezme stát daňové
+  rezidence, DIČ v zemi rezidence (na kartu osoby jako zahraniční daňový
+  identifikátor) a doklad totožnosti (druh, číslo, stát a orgán vydání do
+  profilu registrace vztahu). Doklad, který profil už vede, ani profil odeslané
+  registrace převod nemění. DIČ, které nemá tvar identifikátoru, a platnost
+  dokladu doplňte ručně.
 - **Sklad, zakázky a CRM.** Zápisy jsou v převedeném deníku, evidence se
   zakládá v MyÚčtu.
 - **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť

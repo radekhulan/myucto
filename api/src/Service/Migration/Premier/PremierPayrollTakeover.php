@@ -76,6 +76,7 @@ final class PremierPayrollTakeover
         }
         $account = $relation['account'];
         $children = self::children($relation, $until);
+        $nonResidentCard = is_array($relation['non_resident_card'] ?? null) ? $relation['non_resident_card'] : [];
         $person = new PayrollTakeoverPerson(
             key: (string) $relation['person_key'],
             identity: ['birth_date' => $relation['birth_date']] + (array) $relation['identity'],
@@ -112,6 +113,9 @@ final class PremierPayrollTakeover
                     self::NOTE . 'zdravotní pojišťovna ' . $run['code'] . ' podle oznámení pojišťovně.'),
                 (array) ($relation['insurer_history'] ?? []),
             ),
+            identifiers: is_string($nonResidentCard['foreign_tax_identifier'] ?? null)
+                ? ['foreign_tax_identifier' => $nonResidentCard['foreign_tax_identifier']]
+                : [],
         );
         $jmhz = $relation['registry']['jmhz'] ?? null;
         $identifiers = self::identifiers($relation);
@@ -133,6 +137,7 @@ final class PremierPayrollTakeover
             leave: self::leave($relation, $until, $moduleStart),
             transferStart: self::transferStart($relation, $until),
             recurringComponents: self::recurringComponents($relation, $until, $moduleStart),
+            proofIdentity: is_array($nonResidentCard['proof_identity'] ?? null) ? $nonResidentCard['proof_identity'] : null,
         );
         return new PayrollTakeoverRecord($person, $employment);
     }

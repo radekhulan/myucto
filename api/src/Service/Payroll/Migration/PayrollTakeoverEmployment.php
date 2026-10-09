@@ -41,6 +41,9 @@ final readonly class PayrollTakeoverEmployment
      *        složku pro měsíce počítané MyÚčtem ({@see PayrollTakeoverEmploymentWriter::recurringComponents()}).
      *        `allocation` je rozpočítání předpisu (výchozí `calendar_days`, `hours` = krácení
      *        poměrem odpracované doby jako u základní mzdy)
+     * @param array{type_code:string,number:string,foreign_issuer:?string,country_code:?string}|null $proofIdentity
+     *        doklad totožnosti cizince do profilu registrace A1 vztahu
+     *        ({@see PayrollTakeoverEmploymentWriter::proofIdentity()})
      */
     public function __construct(
         public string $personalNumber,
@@ -64,5 +67,6 @@ final readonly class PayrollTakeoverEmployment
         public array $leaveTaken = [],
         public array $followUps = [],
         public array $recurringComponents = [],
+        public ?array $proofIdentity = null,
     ) {}
 }

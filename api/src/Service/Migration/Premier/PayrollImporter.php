@@ -735,6 +735,11 @@ final class PayrollImporter
         }
         $this->detail($ctx, $number, 'Údaje o narození a občanství', fn (): array => $this->people->identity($supplierId, $employeeId, $person, $policy));
         $this->detail($ctx, $number, 'Adresa a kontakt', fn (): array => $this->people->personCard($supplierId, $employeeId, $person, $takeover->employment->start, $userId, $policy));
+        if ($takeover->employment->proofIdentity !== null) {
+            $this->detail($ctx, $number, 'Doklad totožnosti', fn (): array => $this->employmentWriter->proofIdentity(
+                $supplierId, $employmentId, $takeover->employment, $userId,
+            ));
+        }
         $this->detail($ctx, $number, 'Zákonná evidence', fn (): array => $this->people->statutoryEvidence(
             $supplierId, $employeeId, $person, date('Y-m-d'), $userId, $policy,
             function (string $manual) use ($ctx, $number): void {

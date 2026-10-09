@@ -80,8 +80,8 @@ final class PayrollTakeoverPersonWriter
     }
 
     /**
-     * Adresa trvalého pobytu, kontaktní adresa, e-mail a telefon, rodné příjmení - jedno
-     * uložení karty osoby (jeden optimistický zámek).
+     * Adresa trvalého pobytu, kontaktní adresa, e-mail a telefon, rodné příjmení a chybějící
+     * identifikátory (zahraniční DIČ) - jedno uložení karty osoby (jeden optimistický zámek).
      *
      * @param ?string $start nástup vztahu; od něj (nejpozději od dneška) platí adresy
      * @return array<string,int>
@@ -143,7 +143,15 @@ final class PayrollTakeoverPersonWriter
                 ];
             }
         }
-        if ($addresses === [] && $contacts === [] && $identity === []) {
+        $identifierValues = $person->identifiers;
+        foreach ($current['identifiers'] as $existing) {
+            unset($identifierValues[(string) ($existing['identifier_type'] ?? '')]);
+        }
+        $identifiers = [];
+        foreach ($identifierValues as $type => $value) {
+            $identifiers[] = ['id' => null, 'identifier_type' => $type, 'value' => $value];
+        }
+        if ($addresses === [] && $contacts === [] && $identity === [] && $identifiers === []) {
             return [];
         }
         $this->profiles->save($supplierId, $employeeId, $this->profileValidator->validate([
@@ -157,10 +165,10 @@ final class PayrollTakeoverPersonWriter
             'identity_history' => $identity,
             'addresses' => $addresses,
             'contacts' => $contacts,
-            'identifiers' => [],
+            'identifiers' => $identifiers,
             'accounts' => [],
         ]), $current['row_version'], $userId, null, null);
-        return ['person_card' => 1];
+        return ['person_card' => 1] + ($identifiers !== [] ? ['person_identifiers' => count($identifiers)] : []);
     }
 
     /**

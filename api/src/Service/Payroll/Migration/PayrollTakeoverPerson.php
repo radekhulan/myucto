@@ -43,6 +43,8 @@ final readonly class PayrollTakeoverPerson
      *        nedoplácel zdravotní pojištění do minimálního vyměřovacího základu; stav = důvod
      *        podle {@see \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason}
      *        (`unverified`, když ho zdroj nevede)
+     * @param array<string,string> $identifiers identifikátory karty osoby podle typu
+     *        (`foreign_tax_identifier` ve tvaru `CC:HODNOTA`); typ, který karta už vede, se nepřepisuje
      */
     public function __construct(
         public string $key,
@@ -65,5 +67,6 @@ final readonly class PayrollTakeoverPerson
         public array $openingMonths = [],
         public array $healthCoverageHistory = [],
         public array $healthMinimumExemptions = [],
+        public array $identifiers = [],
     ) {}
 }

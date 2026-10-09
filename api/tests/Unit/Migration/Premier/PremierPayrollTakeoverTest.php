@@ -145,6 +145,14 @@ final class PremierPayrollTakeoverTest extends TestCase
         self::assertSame(['non-resident', 'SK', 'premier:per_nerz:n_stat'], [$residence?->status, $residence?->country, $residence?->reference]);
         $resident = PremierPayrollTakeover::record($relations['5'], '2025-12-31')->person->taxResidence;
         self::assertSame(['czech-resident', null], [$resident?->status, $resident?->country]);
+
+        // Doklad a DIČ v zemi rezidence z karty nerezidenta; u rezidenta se karta nepoužije.
+        $nonResident = PremierPayrollTakeover::record($relations['6'], '2025-12-31');
+        self::assertSame(['foreign_tax_identifier' => 'SK:1000000001'], $nonResident->person->identifiers);
+        self::assertSame(['type_code' => 'P', 'number' => 'XX0000001', 'foreign_issuer' => 'Fiktivní úřad', 'country_code' => 'SK'],
+            $nonResident->employment->proofIdentity);
+        $czech = PremierPayrollTakeover::record($relations['5'], '2025-12-31');
+        self::assertSame([[], null], [$czech->person->identifiers, $czech->employment->proofIdentity]);
     }
 
     /**

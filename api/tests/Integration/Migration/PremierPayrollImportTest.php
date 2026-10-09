@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierImporter;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Tests\Fixtures\Premier\DbfWriter;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\Attributes\Group;
@@ -25,6 +26,7 @@ final class PremierPayrollImportTest extends TestCase
 {
     private Connection $db;
     private PremierImporter $importer;
+    private PayrollRegistrationIdentityService $identities;
     private string $tmp = '';
     private int $userId = 0;
     private int $anyCurrencyId = 0;
@@ -41,6 +43,7 @@ final class PremierPayrollImportTest extends TestCase
             $container = Bootstrap::buildContainer();
             $this->db = $container->get(Connection::class);
             $this->importer = $container->get(PremierImporter::class);
+            $this->identities = $container->get(PayrollRegistrationIdentityService::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -557,10 +560,22 @@ final class PremierPayrollImportTest extends TestCase
               JOIN payroll_employments e ON e.supplier_id = t.supplier_id AND e.employee_id = t.employee_id
              WHERE t.supplier_id = ? AND e.code = \'6\'', $supplierId));
         self::assertNotContains('tax_residence_manual', $this->messageCodes($first));
+        // Zahraniční DIČ na kartu osoby, doklad totožnosti do profilu registrace A1 vztahu.
+        self::assertSame(1, self::stepCounts($first, 'payroll')['person_identifiers'] ?? 0, $this->explain($first));
+        self::assertSame(1, self::stepCounts($first, 'payroll')['proof_identity'] ?? 0, $this->explain($first));
+        self::assertSame([['foreign_tax_identifier']], $this->fetch('SELECT i.identifier_type FROM payroll_person_identifiers i
+              JOIN payroll_employments e ON e.supplier_id = i.supplier_id AND e.employee_id = i.employee_id
+             WHERE i.supplier_id = ? AND e.code = \'6\' AND i.identifier_type = \'foreign_tax_identifier\'', $supplierId));
+        $employmentId = (int) $this->fetch('SELECT id FROM payroll_employments WHERE supplier_id = ? AND code = \'6\'', $supplierId)[0][0];
+        $a1 = $this->identities->a1ProfileView($supplierId, $employmentId);
+        self::assertSame(['P', 'XX0000001', 'SK'], [$a1['profile']['proof_identity']['type_code'] ?? null,
+            $a1['profile']['proof_identity']['number'] ?? null, $a1['profile']['proof_identity']['country_code'] ?? null]);
 
         $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($again->hasErrors(), $this->explain($again));
         self::assertSame(1, self::stepCounts($again, 'payroll')['recurring_components_existing'] ?? 0, 'Opakovaný převod předpis nezdvojí.');
+        self::assertArrayNotHasKey('proof_identity', self::stepCounts($again, 'payroll'), 'Opakovaný převod doklad nepřepíše.');
+        self::assertArrayNotHasKey('person_identifiers', self::stepCounts($again, 'payroll'));
     }
 
     /**
