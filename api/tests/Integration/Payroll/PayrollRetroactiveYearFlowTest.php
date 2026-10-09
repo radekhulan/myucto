@@ -309,6 +309,61 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         $item = $items[$stala['employment_id']];
         self::assertTrue($item['existing_outdated'] ?? null, 'Schválený průměr Q2 je po opravě března neaktuální: ' . CanonicalJson::encode($item));
         self::assertFalse($items[$this->people['soubeh']['person']['employment_id']]['existing_outdated'] ?? null);
+
+        // Navazující opravy: nová revize průměru Q2 (122 000 Kč / 504 h) a opravy
+        // dubna až června; opravné hlášení nese jen stálou se změněným 10345.
+        $created = $this->absences->createAverage(
+            $this->request('POST', '/api/payroll/absences/average')->withParsedBody([
+                'employment_id' => $stala['employment_id'],
+                'applicable_year' => 2026,
+                'applicable_quarter' => 2,
+                'decisive_from' => '2026-01-01',
+                'decisive_to' => '2026-03-31',
+                'gross_earnings_minor' => 122_000_00,
+                'longer_period_allocated_minor' => 0,
+                'worked_minutes' => 504 * 60,
+                'worked_days' => 63,
+                'probable_hourly_minor' => null,
+                'rationale' => 'Revize po opravě března.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode(), 'Nová revize průměru Q2: ' . (string) $created->getBody());
+        $average = $this->json($created)['snapshot'];
+        $approved = $this->absences->approveAverage(
+            $this->request('POST', '/api/payroll/absences/average/approve')->withParsedBody(['row_version' => $average['row_version']]),
+            new Response(),
+            ['id' => (string) $average['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $items = array_column($batch->page($this->supplierId, 2026, 2, 100)['items'], null, 'employment_id');
+        self::assertFalse($items[$stala['employment_id']]['existing_outdated'], 'Po revizi průměr zase sedí na běhy.');
+
+        foreach (['2026-04', '2026-05', '2026-06'] as $period) {
+            $run = $this->db->pdo()->prepare('SELECT * FROM payroll_runs WHERE supplier_id = ? AND id = ?');
+            $run->execute([$this->supplierId, (int) $this->approvedRuns[$period]['id']]);
+            $corrected = $this->correctPayrollRun($run->fetch(\PDO::FETCH_ASSOC), "g7-avg-{$period}", 'Revize průměru Q2 po opravě března.');
+            $preparation = $this->prepareJmhz((int) $corrected->revision['id'], "g7-avg-{$period}");
+            self::assertSame('source_ready', $preparation['body']['readiness_status'] ?? null, CanonicalJson::encode($preparation['body']));
+            $candidates = $corrections->candidates($this->supplierId, 'test', $this->submissions[$period], (int) $preparation['body']['id']);
+            self::assertSame(
+                ['Syntetická Stálá' => true, 'Syntetický Souběžný' => false],
+                array_column($candidates['forms'], 'changed', 'employee_name'),
+                "{$period}: " . CanonicalJson::encode($candidates),
+            );
+            $frozen = $corrections->freeze(
+                $this->supplierId,
+                'test',
+                $this->submissions[$period],
+                (int) $preparation['body']['id'],
+                [(string) $this->people['stala']['ppv']],
+                $this->actors[0],
+            );
+            $xml = (string) preg_replace('/>\s+</', '><', $reader->bytes($this->supplierId, 'test', (int) $frozen['submission_id']));
+            self::assertStringContainsString('<mesic>' . (int) substr($period, 5, 2) . '</mesic>', $xml);
+            self::assertStringContainsString('<form:vydelekPrumernyHod>242.06</form:vydelekPrumernyHod>', $xml, $period);
+            self::assertSame(1, substr_count($xml, '</formularOsoby>'));
+        }
     }
 
     /**
