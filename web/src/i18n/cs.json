@@ -25327,7 +25327,7 @@
         "add": "Zaevidovat opravu",
         "empty": "Za zvolený rok není evidovaná žádná oprava podle § 43.",
         "form_title": "Oprava výše daně (§ 43 ZDPH)",
-        "form_hint": "Období zadejte podle PŮVODNÍHO plnění. Datum doručení opravného dokladu jen určuje, kdy nejdřív šlo opravu provést.",
+        "form_hint": "Období zadejte podle PŮVODNÍHO plnění, u přijaté faktury podle období, kdy jste z ní uplatnili odpočet. U přijaté faktury se oprava promítne do odpočtu (ř. 40/41), ne do daně na výstupu. Datum doručení opravného dokladu jen určuje, kdy nejdřív šlo opravu provést.",
         "required": "Vyplňte doklad, datum doručení a důvod."
       },
       "s79": {

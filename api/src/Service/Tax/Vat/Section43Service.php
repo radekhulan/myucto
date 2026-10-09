@@ -56,46 +56,87 @@ final class Section43Service
     /**
      * Součty oprav pro řádky přiznání za období PŮVODNÍHO plnění.
      *
-     * Sčítá TYTÉŽ záznamy, které {@see periodCorrections()} vrací Knize DPH jednotlivě,
-     * takže přiznání a Kniha nemohou mít každé svůj výběr.
+     * Sčítá TYTÉŽ záznamy, které {@see periodCorrections()} vrací Knize DPH a kontrolnímu
+     * hlášení jednotlivě, takže přiznání, Kniha a KH nemohou mít každé svůj výběr ani
+     * vlastní směrování na řádky.
      *
-     * @return array{basic:array{base:float,vat:float}, reduced:array{base:float,vat:float}}
+     * `basic`/`reduced` = daň na výstupu (ř. 1/2) z vydaných dokladů. `lines` = všechny
+     * řádky přiznání včetně odpočtu příjemce (ř. 40/41, krácený 40k/41k). `warnings` =
+     * opravy, které na žádný řádek přiznání nepatří (viz {@see periodCorrections()}).
+     *
+     * @return array{basic:array{base:float,vat:float}, reduced:array{base:float,vat:float},
+     *               lines:array<string,array{base:float,vat:float}>, warnings:list<string>}
      */
     public function periodCorrectionLines(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
-        $out = ['basic' => ['base' => 0.0, 'vat' => 0.0], 'reduced' => ['base' => 0.0, 'vat' => 0.0]];
+        $lines = [];
+        $warnings = [];
         foreach ($this->periodCorrections($supplierId, $year, $month, $period) as $r) {
-            $out[$r['rate_kind']]['base'] += $r['base_delta'];
-            $out[$r['rate_kind']]['vat']  += $r['vat_delta'];
+            if ($r['dphdp3_line'] === null) {
+                $warnings[] = (string) $r['warning'];
+                continue;
+            }
+            $lines[$r['dphdp3_line']] ??= ['base' => 0.0, 'vat' => 0.0];
+            $lines[$r['dphdp3_line']]['base'] += $r['base'];
+            $lines[$r['dphdp3_line']]['vat']  += $r['vat'];
         }
-        foreach ($out as $kind => $v) {
-            $out[$kind] = ['base' => round($v['base'], 2), 'vat' => round($v['vat'], 2)];
+        foreach ($lines as $line => $v) {
+            $lines[$line] = ['base' => round($v['base'], 2), 'vat' => round($v['vat'], 2)];
         }
 
-        return $out;
+        return [
+            'basic'    => $lines['1'] ?? ['base' => 0.0, 'vat' => 0.0],
+            'reduced'  => $lines['2'] ?? ['base' => 0.0, 'vat' => 0.0],
+            'lines'    => $lines,
+            'warnings' => $warnings,
+        ];
     }
 
     /**
-     * Jednotlivé opravy, které přiznání za dané zdaňovací období sčítá do ř. 1/2
-     * ({@see periodCorrectionLines()}), s číslem opravovaného dokladu pro Knihu DPH.
+     * Jednotlivé opravy za zdaňovací období, už zařazené na řádek přiznání. Jediné místo
+     * pravidla, kam oprava patří; čte ho přiznání ({@see periodCorrectionLines()}), Kniha DPH
+     * i kontrolní hlášení.
+     *
+     * Kam oprava patří:
+     *   - VYDANÝ doklad: daň na výstupu, ř. 1 (základní) / ř. 2 (snížená). § 43 odst. 1
+     *     opravuje ten, kdo daň přiznal, tedy dodavatel.
+     *   - PŘIJATÝ doklad (tuzemský, bez přenesení daně): § 43 se týká dodavatele, příjemce
+     *     daň na výstupu nepřiznal. U příjemce se oprava promítne do ODPOČTU, který byl
+     *     uplatněn z daně uvedené dodavatelem, tedy ř. 40/41 v období, kdy byl odpočet
+     *     uplatněn (proto `period_*` u přijatého dokladu = období odpočtu). Způsob odpočtu
+     *     přebírá z hlavičky původního dokladu stejně jako
+     *     {@see \MyInvoice\Service\Report\VatLedgerService} (normalize): poměrný § 75 se krátí
+     *     procentem, krácený § 76 jde na ř. 40k/41k.
+     *   - Přijatý doklad BEZ NÁROKU na odpočet: odpočet nebyl, oprava se do přiznání
+     *     nepromítá (`dphdp3_line` = null + `warning`).
+     *   - Přijatý doklad s PŘENESENÍM daně: příjemce daň přiznal sám (ř. 3–13 a zrcadlový
+     *     odpočet), tuto opravu evidence neumí vyjádřit; registrace ji odmítá a starší
+     *     záznam vrací `dphdp3_line` = null + `warning`.
      *
      * @param string $period 'monthly' (default) nebo 'quarterly'
      * @return list<array{id:int, source_type:string, source_id:int, rate_kind:string,
      *                    base_delta:float, vat_delta:float, corrective_doc_number:?string,
-     *                    source_doc_number:string, delivered_on:string, reason:string}>
+     *                    source_doc_number:string, source_tax_date:?string, counterparty_dic:string,
+     *                    delivered_on:string, reason:string, side:string, dphdp3_line:?string,
+     *                    base:float, vat:float, is_pomer:bool, warning:?string}>
      */
     public function periodCorrections(int $supplierId, int $year, int $month, string $period = 'monthly'): array
     {
         $months = $period === 'quarterly' ? self::quarterMonths($month) : [$month];
         $ph = implode(',', array_fill(0, count($months), '?'));
+        $saleDic = \MyInvoice\Service\Report\VatLedgerService::saleCounterpartyDicExpr($this->db, 'i', 'ic');
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT c.id, c.source_type, c.source_id, c.rate_kind, c.base_delta, c.vat_delta,
                     c.corrective_doc_number, c.delivered_on, c.reason,
-                    i.varsymbol AS invoice_number, pi.vendor_invoice_number AS purchase_number
+                    i.varsymbol AS invoice_number, i.tax_date AS invoice_tax_date, {$saleDic} AS invoice_dic,
+                    pi.vendor_invoice_number AS purchase_number, pi.tax_date AS purchase_tax_date,
+                    pc.dic AS purchase_dic, pi.reverse_charge, pi.vat_deduction, pi.vat_deduction_percent
                FROM vat_s43_corrections c
           LEFT JOIN invoices i ON c.source_type = 'invoice' AND i.id = c.source_id
+          LEFT JOIN clients ic ON ic.id = i.client_id
           LEFT JOIN purchase_invoices pi ON c.source_type = 'purchase_invoice' AND pi.id = c.source_id
+          LEFT JOIN clients pc ON pc.id = pi.vendor_id
               WHERE c.supplier_id = ? AND c.period_year = ? AND c.period_month IN ({$ph})
            ORDER BY c.period_month, c.id"
         );
@@ -107,18 +148,59 @@ final class Section43Service
             if ($kind !== 'basic' && $kind !== 'reduced') {
                 continue;
             }
-            $out[] = [
+            $isSale = $r['source_type'] === 'invoice';
+            $baseDelta = round((float) $r['base_delta'], 2);
+            $vatDelta = round((float) $r['vat_delta'], 2);
+            $docNumber = (string) ($isSale ? $r['invoice_number'] : $r['purchase_number']);
+            $taxDate = $isSale ? $r['invoice_tax_date'] : $r['purchase_tax_date'];
+            $row = [
                 'id'                    => (int) $r['id'],
                 'source_type'           => (string) $r['source_type'],
                 'source_id'             => (int) $r['source_id'],
                 'rate_kind'             => $kind,
-                'base_delta'            => round((float) $r['base_delta'], 2),
-                'vat_delta'             => round((float) $r['vat_delta'], 2),
+                'base_delta'            => $baseDelta,
+                'vat_delta'             => $vatDelta,
                 'corrective_doc_number' => $r['corrective_doc_number'] === null ? null : (string) $r['corrective_doc_number'],
-                'source_doc_number'     => (string) ($r['source_type'] === 'invoice' ? $r['invoice_number'] : $r['purchase_number']),
+                'source_doc_number'     => $docNumber,
+                'source_tax_date'       => $taxDate !== null ? substr((string) $taxDate, 0, 10) : null,
+                'counterparty_dic'      => (string) (($isSale ? $r['invoice_dic'] : $r['purchase_dic']) ?? ''),
                 'delivered_on'          => (string) $r['delivered_on'],
                 'reason'                => (string) $r['reason'],
+                'side'                  => $isSale ? 'output' : 'deduction',
+                'dphdp3_line'           => null,
+                'base'                  => 0.0,
+                'vat'                   => 0.0,
+                'is_pomer'              => false,
+                'warning'               => null,
             ];
+            $label = $docNumber !== '' ? $docNumber : '#' . $row['source_id'];
+
+            if ($isSale) {
+                $row['dphdp3_line'] = $kind === 'basic' ? '1' : '2';
+                $row['base'] = $baseDelta;
+                $row['vat'] = $vatDelta;
+            } elseif ((int) ($r['reverse_charge'] ?? 0) === 1) {
+                $row['warning'] = "Oprava § 43 u přijatého dokladu {$label} s přenesením daně se do přiznání nepromítla: "
+                    . 'samovyměřenou daň a zrcadlový odpočet je nutné opravit v dodatečném přiznání ručně.';
+            } else {
+                $deduction = (string) ($r['vat_deduction'] ?? 'full');
+                $line = $kind === 'basic' ? '40' : '41';
+                if ($deduction === 'none') {
+                    $row['warning'] = "Oprava § 43 u přijatého dokladu {$label} se do přiznání nepromítá: "
+                        . 'z dokladu nebyl uplatněn odpočet.';
+                } elseif ($deduction === 'proportional') {
+                    $ratio = max(0.0, min(100.0, (float) ($r['vat_deduction_percent'] ?? 100))) / 100.0;
+                    $row['dphdp3_line'] = $line;
+                    $row['base'] = round($baseDelta * $ratio, 2);
+                    $row['vat'] = round($vatDelta * $ratio, 2);
+                    $row['is_pomer'] = true;
+                } else {
+                    $row['dphdp3_line'] = $deduction === 'reduced' ? $line . 'k' : $line;
+                    $row['base'] = $baseDelta;
+                    $row['vat'] = $vatDelta;
+                }
+            }
+            $out[] = $row;
         }
 
         return $out;
@@ -189,6 +271,26 @@ final class Section43Service
         $bad = (new \MyInvoice\Http\TenantReferenceGuard($this->db))->violations($supplierId, [$column => $sourceId], [$column]);
         if ($sourceId <= 0 || $bad !== []) {
             throw new \InvalidArgumentException('Zdroj opravy nenalezen.');
+        }
+        if ($sourceType === 'purchase_invoice') {
+            // U přijatého dokladu se oprava promítá do odpočtu (viz periodCorrections()).
+            // Přenesení daně a doklad bez nároku na odpočet na ř. 40/41 nepatří.
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT reverse_charge, vat_deduction FROM purchase_invoices WHERE supplier_id = ? AND id = ?'
+            );
+            $stmt->execute([$supplierId, $sourceId]);
+            $pi = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            if ((int) ($pi['reverse_charge'] ?? 0) === 1) {
+                throw new \InvalidArgumentException(
+                    'U přijatého dokladu s přenesením daně opravuje příjemce samovyměřenou daň a zrcadlový '
+                        . 'odpočet; tuto opravu evidence § 43 nepodporuje, proveďte ji v dodatečném přiznání.'
+                );
+            }
+            if (($pi['vat_deduction'] ?? 'full') === 'none') {
+                throw new \InvalidArgumentException(
+                    'Z přijatého dokladu nebyl uplatněn odpočet, oprava výše daně se u příjemce do přiznání nepromítá.'
+                );
+            }
         }
         if (!in_array($rateKind, ['basic', 'reduced'], true)) {
             throw new \InvalidArgumentException('Sazbová skupina je basic (ř. 1) nebo reduced (ř. 2).');

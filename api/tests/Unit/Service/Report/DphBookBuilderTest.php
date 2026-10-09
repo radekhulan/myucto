@@ -65,6 +65,7 @@ final class DphBookBuilderTest extends TestCase
         $ledger = new VatLedgerService($conn, $taxConstants);
         $submissions = new TaxSubmissionRepository($conn);
         $this->section46 = new Section46Service($conn, new Section46CorrectionRepository($conn), new ActivityLogger($conn), $taxConstants);
+        $this->section43 = new Section43Service($conn, $taxConstants);
         $kh = new KontrolniHlaseniBuilder(
             $conn,
             $ledger,
@@ -73,9 +74,9 @@ final class DphBookBuilderTest extends TestCase
             $this->section46,
             $submissions,
             new SubmissionVariantGuard($submissions),
+            $this->section43,
         );
         $this->kh = $kh;
-        $this->section43 = new Section43Service($conn, $taxConstants);
         $this->section79 = new Section79Service($conn, $taxConstants);
         $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b, $kh, $this->section46, $this->section43, $this->section79);
         $this->khSections = new InvoiceKhSections($this->builder, $ledger);
@@ -295,6 +296,65 @@ final class DphBookBuilderTest extends TestCase
 
         $docs = array_column($byKey['36.001']['rows'], 'doc_number');
         $this->assertContains('OD-TEST-1', $docs, 'řádek §43 nese číslo opravného dokladu');
+
+        // KH: původní doklad (1 210 Kč s DPH) je v A.5, oprava pod limitem také.
+        $kh = $this->kh->sectionDocuments(1, 2026, 5, 'monthly')['sections'];
+        $a5Docs = array_column($kh['A.5']['rows'], 'doc_number');
+        $this->assertContains('OD-TEST-1', $a5Docs, 'oprava §43 k dokladu z A.5 jde do A.5');
+        $this->assertSame(
+            round(210.0 + $lines['basic']['vat'], 2),
+            round($kh['A.5']['totals']['vat21'] ?? 0.0, 2),
+            'KH A.5 daň 21 % = ř.1 přiznání po opravě'
+        );
+    }
+
+    public function testSection43OnPurchaseInvoiceCorrectsDeductionAndGoesToB2(): void
+    {
+        // Přijatý doklad nad limitem (B.2), opravný doklad dodavatele snížil daň o 100.
+        $this->insertReceivedInvoice(20, 200, '2026-05-05', 'PF-43-1', 10000.0, 2100.0, '40');
+        $this->insertS43Correction(20, 'purchase_invoice', 2026, 5, 'basic', 0.0, -100.0, 'OD-PF-1');
+
+        $lines = $this->section43->periodCorrectionLines(1, 2026, 5, 'monthly');
+        $this->assertSame(0.0, $lines['basic']['vat'], 'oprava přijatého dokladu nepatří na ř.1');
+        $this->assertSame(-100.0, $lines['lines']['40']['vat'] ?? null, 'oprava přijatého dokladu snižuje odpočet ř.40');
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+        $byKey = array_column($r['sections'], null, 'key');
+        $this->assertArrayNotHasKey('36.001', $byKey, 'na výstupu nic');
+        $this->assertSame(0.0, round($r['totals']['issued']['vat'], 2));
+        $this->assertSame(2000.0, round($byKey['15.040']['subtotal_vat'], 2), 'ř.40 Knihy = 2 100 − 100');
+
+        $row = null;
+        foreach ($byKey['15.040']['rows'] as $candidate) {
+            if (($candidate['doc_number'] ?? '') === 'OD-PF-1') {
+                $row = $candidate;
+            }
+        }
+        $this->assertNotNull($row);
+        $this->assertSame('B.2', $row['kh_section'], 'opravný doklad k dokladu z B.2 jde do B.2 i pod limitem');
+
+        $b2 = $this->kh->sectionDocuments(1, 2026, 5, 'monthly')['sections']['B.2'];
+        $this->assertContains('OD-PF-1', array_column($b2['rows'], 'doc_number'));
+        $this->assertSame(2000.0, round($b2['totals']['vat21'] ?? 0.0, 2), 'KH B.2 = ř.40 přiznání');
+
+        // Seznam přijatých dokladů nebere řádek opravy za zařazení původního dokladu.
+        $received = [['invoices' => [['id' => 20, 'month_bucket' => '2026-05']]]];
+        $this->khSections->addToGroups(1, $received, 'received');
+        $this->assertSame(['B.2'], $received[0]['invoices'][0]['kh_sections']);
+    }
+
+    public function testSection43ProportionalAndNoDeductionPurchase(): void
+    {
+        $this->insertReceivedInvoice(21, 200, '2026-05-05', 'PF-43-2', 1000.0, 210.0, '40');
+        $this->pdo->exec("UPDATE purchase_invoices SET vat_deduction = 'proportional', vat_deduction_percent = 50 WHERE id = 21");
+        $this->insertS43Correction(21, 'purchase_invoice', 2026, 5, 'basic', 0.0, -100.0, 'OD-PF-2');
+        $this->insertReceivedInvoice(22, 200, '2026-05-06', 'PF-43-3', 1000.0, 210.0, '40');
+        $this->pdo->exec("UPDATE purchase_invoices SET vat_deduction = 'none' WHERE id = 22");
+        $this->insertS43Correction(22, 'purchase_invoice', 2026, 5, 'basic', 0.0, -100.0, 'OD-PF-3');
+
+        $lines = $this->section43->periodCorrectionLines(1, 2026, 5, 'monthly');
+        $this->assertSame(-50.0, $lines['lines']['40']['vat'], 'poměrný odpočet § 75 se opraví poměrem');
+        $this->assertCount(1, $lines['warnings'], 'doklad bez nároku do přiznání nejde, jen varuje');
     }
 
     public function testSection79RegistrationCorrectionLandsOnLine45(): void

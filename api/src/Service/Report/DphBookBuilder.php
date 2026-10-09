@@ -155,7 +155,7 @@ final class DphBookBuilder
         if (!empty($supplier['is_vat_payer'])) {
             $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period, $khSections);
             $this->appendSection46Corrections($sections, $supplierId, $year, $month, $period, $khSections);
-            $this->appendSection43Corrections($sections, $supplierId, $year, $month, $period);
+            $this->appendSection43Corrections($sections, $supplierId, $year, $month, $period, $khSections);
         }
         // §79/§79a (ř. 45) přiznání započítává bez podmínky plátcovství: snížení při zrušení
         // registrace patří do posledního období registrace, kdy stav k poslednímu dni
@@ -331,45 +331,51 @@ final class DphBookBuilder
     }
 
     /**
-     * Přimíchá EVIDOVANÉ opravy výše daně §43 do sekcí uskutečněných plnění ř.1/2. Opravy
-     * patří do období PŮVODNÍHO plnění, takže je Kniha bere za období, které se staví,
-     * z {@see Section43Service::periodCorrections()}, tedy z týchž záznamů, které přiznání
-     * sčítá přes periodCorrectionLines(). Stejně jako přiznání míří vše na ř.1/2 podle
-     * sazbové skupiny. V KH se oprava §43 nevykazuje, sloupec KH zůstává prázdný.
+     * Přimíchá EVIDOVANÉ opravy výše daně §43. Opravy patří do období PŮVODNÍHO plnění
+     * (u přijatého dokladu do období odpočtu), takže je Kniha bere za období, které se
+     * staví, z {@see Section43Service::periodCorrections()}, tedy z týchž záznamů a se
+     * stejným řádkem, jaký sčítá přiznání: vydaný doklad ř.1/2, přijatý odpočet ř.40/41
+     * (krácený 40k/41k). Oprava bez řádku přiznání (bez nároku, přenesení daně) se
+     * nevykazuje. Sloupec KH nese oddíl, do kterého opravu zařadilo KH.
      *
      * @param array<string,array<string,mixed>> $sections by-ref
+     * @param array<string,array<string,true>> $khSections {@see KontrolniHlaseniBuilder::documentSections()}
      */
-    private function appendSection43Corrections(array &$sections, int $supplierId, int $year, int $month, string $period): void
+    private function appendSection43Corrections(array &$sections, int $supplierId, int $year, int $month, string $period, array $khSections): void
     {
         $c = $this->taxConstants->forYear($year);
         foreach ($this->section43->periodCorrections($supplierId, $year, $month, $period) as $corr) {
-            [$line, $rate] = $corr['rate_kind'] === 'basic'
-                ? ['1', (float) $c['vat_rate_standard']]
-                : ['2', (float) $c['vat_rate_reduced']];
-            $base = (float) $corr['base_delta'];
-            $vat = (float) $corr['vat_delta'];
+            $line = $corr['dphdp3_line'];
+            if ($line === null) {
+                continue;
+            }
+            $isSale = $corr['side'] === 'output';
+            $rate = $corr['rate_kind'] === 'basic' ? (float) $c['vat_rate_standard'] : (float) $c['vat_rate_reduced'];
+            $base = (float) $corr['base'];
+            $vat = (float) $corr['vat'];
             $doc = (string) ($corr['corrective_doc_number'] ?? '');
+            $placed = array_keys($khSections[KontrolniHlaseniBuilder::documentSectionKey(['s43_id' => $corr['id']])] ?? []);
             $cls = [
                 'code'                  => '',
                 'label'                 => 'Oprava výše daně §43',
                 'dphdp3_line'           => $line,
                 'dphdp3_line_secondary' => null,
-                'kh_section'            => null,
+                'kh_section'            => $placed[0] ?? null,
                 'vat_rate'              => $rate,
             ];
-            $this->addToSection($sections, 'issued', $cls, [
+            $this->addToSection($sections, $isSale ? 'issued' : 'received', $cls, [
                 'invoice_id'              => (int) $corr['source_id'],
-                'direction'               => $corr['source_type'] === 'invoice' ? 'issued' : 'received',
+                'direction'               => $isSale ? 'issued' : 'received',
                 'doc_number'              => $doc !== '' ? $doc : $corr['source_doc_number'],
                 'original_doc_number'     => $corr['source_doc_number'] !== '' ? $corr['source_doc_number'] : null,
-                'tax_date'                => $corr['delivered_on'],
+                'tax_date'                => $corr['source_tax_date'] ?? $corr['delivered_on'],
                 'accounting_date'         => $corr['delivered_on'],
                 'claim_date'              => null,
                 'claim_basis'             => null,
                 'received_at'             => null,
                 'description'             => 'Oprava výše daně §43 - ' . $corr['reason'],
                 'counterparty_name'       => '',
-                'counterparty_dic'        => '',
+                'counterparty_dic'        => $corr['counterparty_dic'],
                 'vat_classification_code' => null,
                 'vat_rate'                => $rate,
                 'currency'                => 'CZK',
@@ -380,6 +386,9 @@ final class DphBookBuilder
                 'status'                  => 'posted',
                 'is_draft'                => false,
                 'is_fixed_asset'          => false,
+                // Řádek opravy nese id PŮVODNÍHO dokladu; seznam dokladů (InvoiceKhSections)
+                // ho nesmí vzít za zařazení původního dokladu v KH.
+                'is_correction'           => true,
             ]);
         }
     }

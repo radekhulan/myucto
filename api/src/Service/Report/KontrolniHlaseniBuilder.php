@@ -10,6 +10,7 @@ use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
+use MyInvoice\Service\Tax\Vat\Section43Service;
 
 /**
  * Builder XML pro Kontrolní hlášení (DPHKH1) — EPO portál MFČR.
@@ -52,6 +53,8 @@ final class KontrolniHlaseniBuilder
         private readonly TaxSubmissionRepository $submissions,
         // Společná pravidla pro volbu typu podání — tatáž brána, jakou používá přiznání.
         private readonly SubmissionVariantGuard $variantGuard,
+        // § 43 ZDPH — opravné doklady k výši daně (A.4/A.5, B.2/B.3), týž zdroj jako DPHDP3.
+        private readonly Section43Service $section43,
     ) {}
 
     /**
@@ -581,6 +584,93 @@ final class KontrolniHlaseniBuilder
         }
     }
 
+    /**
+     * Přidá opravné doklady podle § 43 do oddílů KH za období PŮVODNÍHO plnění (do téhož
+     * období je zařazuje přiznání, takže následné KH sedí s dodatečným přiznáním).
+     * Řádky a částky bere z {@see Section43Service::periodCorrections()} — týž zdroj jako
+     * DPHDP3 a Kniha DPH. Oprava, která na řádek přiznání nepatří (bez nároku, přenesení
+     * daně), do KH nejde.
+     *
+     * Oddíl: opravný doklad k plnění vykázanému jednotlivě (A.4/B.2) jde do A.4/B.2 bez
+     * ohledu na výši opravy; jinak rozhoduje limit 10 000 Kč (§ 101e) na celkové částce
+     * opravy a DIČ protistrany, stejně jako u ostatních dokladů. Evidenční číslo je číslo
+     * opravného dokladu (§ 45 odst. 1 písm. f), datum povinnosti přiznat daň je datum
+     * původního plnění.
+     *
+     * @param list<array<string,mixed>> $a4 by-ref
+     * @param array<string,mixed> $a5 by-ref
+     * @param list<array<string,mixed>> $b2 by-ref
+     * @param array<string,mixed> $b3 by-ref
+     * @param list<string> $warnings by-ref
+     */
+    private function appendSection43Corrections(array &$a4, array &$a5, array &$b2, array &$b3, int $supplierId, int $year, int $month, string $period, array &$warnings): void
+    {
+        $rows = $this->section43->periodCorrections($supplierId, $year, $month, $period);
+        if ($rows === []) {
+            return;
+        }
+        $itemThreshold = $this->taxConstants->khItemThreshold($year);
+        $individual = [];
+        foreach ([[$a4, 'sale'], [$b2, 'purchase']] as [$list, $source]) {
+            foreach ($list as $row) {
+                if (($row['source'] ?? null) === $source && isset($row['invoice_id'])) {
+                    $individual[$source . ':' . (int) $row['invoice_id']] = true;
+                }
+            }
+        }
+
+        foreach ($rows as $c) {
+            if ($c['dphdp3_line'] === null) {
+                continue;
+            }
+            $isSale = $c['source_type'] === 'invoice';
+            $isBasic = $c['rate_kind'] === 'basic';
+            $base21 = $isBasic ? $c['base'] : 0.0; $vat21 = $isBasic ? $c['vat'] : 0.0;
+            $base12 = $isBasic ? 0.0 : $c['base']; $vat12 = $isBasic ? 0.0 : $c['vat'];
+            if (self::isNilKhAmount($base21, $vat21, $base12, $vat12)) {
+                continue;
+            }
+            $docNumber = (string) ($c['corrective_doc_number'] ?? '');
+            if ($docNumber === '') {
+                $docNumber = $c['source_doc_number'];
+                $warnings[] = 'Oprava §43 k dokladu ' . ($c['source_doc_number'] !== '' ? $c['source_doc_number'] : '#' . $c['source_id'])
+                    . ' nemá číslo opravného dokladu, v KH je uvedena pod číslem původního dokladu.';
+            }
+            $dic = self::cleanDic($c['counterparty_dic']);
+            $hasDic = $dic !== '';
+            $individually = $hasDic && (
+                isset($individual[($isSale ? 'sale' : 'purchase') . ':' . $c['source_id']])
+                || abs($base21 + $vat21 + $base12 + $vat12) > $itemThreshold
+            );
+            $meta = ['source' => $isSale ? 'sale' : 'purchase', 'document_kind' => null,
+                     'invoice_id' => $c['source_id'], 'counterparty_name' => '', 'internal_number' => null,
+                     's43_id' => $c['id']];
+            $amounts = ['base21' => $base21, 'vat21' => $vat21, 'base12' => $base12, 'vat12' => $vat12];
+            if ($isSale) {
+                $row = ['varsymbol' => $docNumber, 'tax_date' => $c['source_tax_date'], 'counterparty_dic' => $dic]
+                    + $amounts + ['kh_regime_code' => '0', 'kh_bad_debt' => 'N', 'kh_attribute_conflict' => false] + $meta;
+                if ($individually) {
+                    $a4[] = $row;
+                } else {
+                    $a5['count']++;
+                    foreach ($amounts as $k => $v) { $a5[$k] += $v; }
+                    $a5['docs'][] = $row;
+                }
+            } else {
+                $row = ['vendor_invoice_number' => $docNumber, 'tax_date' => $c['source_tax_date'], 'counterparty_dic' => $dic]
+                    + $amounts + ['is_pomer' => $c['is_pomer'], 'parent_vendor_invoice_number' => null,
+                                  'kh_bad_debt' => 'N', 'kh_attribute_conflict' => false] + $meta;
+                if ($individually) {
+                    $b2[] = $row;
+                } else {
+                    $b3['count']++;
+                    foreach ($amounts as $k => $v) { $b3[$k] += $v; }
+                    $b3['docs'][] = $row;
+                }
+            }
+        }
+    }
+
     /** Normalizace vstupního data (Y-m-d) — null pokud prázdné/neplatné. */
     private function normalizeDate(?string $date): ?string
     {
@@ -826,6 +916,9 @@ final class KontrolniHlaseniBuilder
         // § 46 věřitelská oprava u nedobytné pohledávky — zrcadlo výše na vydané straně:
         // do A.4 se zdph_44='P' VŽDY (i pod 10 000 Kč), před rekapitulací VetaC.
         $this->appendSection46Corrections($a4, $supplierId, $year, $month, $period, $warnings);
+        // § 43 oprava výše daně — opravný doklad do období původního plnění, A.4/A.5
+        // (dodavatel) nebo B.2/B.3 (odběratel), před rekapitulací VetaC.
+        $this->appendSection43Corrections($a4, $a5, $b2, $b3, $supplierId, $year, $month, $period, $warnings);
 
         return ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3,
                 'missing_rates' => $missingRates, 'outside' => $r['outside']];
@@ -927,8 +1020,9 @@ final class KontrolniHlaseniBuilder
     /**
      * Klíč dokladu v {@see documentSections()}: identita kanonického řádku
      * ({@see VatLedgerService::documentIdentity()}), u opravy § 74b `s74b:<id přijaté faktury>`,
-     * u věřitelské opravy § 46 `s46:<id vydané faktury>`. Oprava má vlastní klíč, protože
-     * se vykazuje v jiném období než opravovaný doklad.
+     * u věřitelské opravy § 46 `s46:<id vydané faktury>`, u opravy výše daně § 43
+     * `s43:<id záznamu opravy>`. Oprava má vlastní klíč, protože se vykazuje v jiném období
+     * nebo jiném oddílu než opravovaný doklad.
      *
      * @param array<string,mixed> $row
      */
@@ -939,6 +1033,9 @@ final class KontrolniHlaseniBuilder
         }
         if (isset($row['s46_invoice_id'])) {
             return 's46:' . (int) $row['s46_invoice_id'];
+        }
+        if (isset($row['s43_id'])) {
+            return 's43:' . (int) $row['s43_id'];
         }
         if (!isset($row['source'], $row['invoice_id'])) {
             return null;

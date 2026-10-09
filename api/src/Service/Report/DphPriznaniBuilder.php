@@ -263,14 +263,22 @@ final class DphPriznaniBuilder
             // § 43 ZDPH — oprava VÝŠE daně (chybná sazba, špatný výpočet). Na rozdíl od
             // § 42 patří ZPĚTNĚ do období PŮVODNÍHO plnění, proto se načítá podle období,
             // které se právě staví, a ne podle data opravného dokladu.
+            // Řádek určuje Section43Service: vydaný doklad ř. 1/2, přijatý doklad odpočet
+            // ř. 40/41 (krácený 40k/41k) — stejný zdroj čte Kniha DPH i KH.
             $s43 = $this->section43->periodCorrectionLines($supplierId, $year, $month, $period);
-            $this->addToLine($lines, '1', $s43['basic']['base'], $s43['basic']['vat'], 'Oprava výše daně §43 (21 %)');
-            $this->addToLine($lines, '2', $s43['reduced']['base'], $s43['reduced']['vat'], 'Oprava výše daně §43 (12 %)');
+            $s43HasVat = false;
+            foreach ($s43['lines'] as $s43Line => $s43Sum) {
+                $this->addToLine($lines, (string) $s43Line, $s43Sum['base'], $s43Sum['vat'], 'Oprava výše daně §43 (ř. ' . $s43Line . ')');
+                $s43HasVat = $s43HasVat || $s43Sum['vat'] != 0.0;
+            }
+            foreach ($s43['warnings'] as $s43Warning) {
+                $warnings[] = $s43Warning;
+            }
 
             // § 43 odst. 1 opravu výslovně směruje do DODATEČNÉHO přiznání. Když se za
             // totéž období staví řádné, oprava sice sedí věcně, ale podá se špatným
             // typem podání — a to je vada, kterou by jinak nikdo nezachytil.
-            if (!$isAmendment && ($s43['basic']['vat'] != 0.0 || $s43['reduced']['vat'] != 0.0)) {
+            if (!$isAmendment && $s43HasVat) {
                 $warnings[] = 'Za toto období jsou evidované opravy výše daně podle § 43 ZDPH. '
                     . 'Ty se podávají v DODATEČNÉM daňovém přiznání za období původního plnění '
                     . '(§ 43 odst. 1) — zkontroluj typ podání.';

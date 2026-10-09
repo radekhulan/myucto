@@ -25327,7 +25327,7 @@
         "add": "Record correction",
         "empty": "No § 43 correction recorded for the selected year.",
         "form_title": "Correction of the tax amount (§ 43 VAT Act)",
-        "form_hint": "Enter the period of the ORIGINAL supply. The delivery date only determines the earliest date the correction could be made.",
+        "form_hint": "Enter the period of the ORIGINAL supply; for a received invoice, the period in which you claimed the deduction. For a received invoice the correction adjusts the deduction (lines 40/41), not output tax. The delivery date only determines the earliest date the correction could be made.",
         "required": "Fill in the document, delivery date and reason."
       },
       "s79": {

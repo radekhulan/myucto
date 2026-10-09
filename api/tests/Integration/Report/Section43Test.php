@@ -295,6 +295,38 @@ final class Section43Test extends TestCase
     }
 
     /**
+     * Oprava u PŘIJATÉHO dokladu není daň na výstupu: příjemce daň nepřiznal, mění se jeho
+     * odpočet. Přiznání ji proto vykazuje na ř. 40 (odp_tuz23_nar), ne na ř. 1 (dan23).
+     */
+    public function testPurchaseInvoiceCorrectionGoesToDeductionLine40(): void
+    {
+        $this->service->register(
+            $this->supplierId, 'purchase_invoice', $this->purchaseInvoiceId, 2026, 3, 'basic',
+            0.0, -300.0, '2026-05-10', 'Dodavatel uvedl 21 % místo 12 %',
+        );
+
+        $lines = $this->service->periodCorrectionLines($this->supplierId, 2026, 3);
+        self::assertSame(0.0, $lines['basic']['vat'], 'Na ř. 1 oprava přijatého dokladu nepatří.');
+        self::assertEqualsWithDelta(-300.0, $lines['lines']['40']['vat'] ?? 0.0, 0.01);
+
+        $xml = (string) ($this->builder->build($this->supplierId, 2026, 3, 'monthly')['xml'] ?? '');
+        self::assertStringContainsString('odp_tuz23_nar="-300"', $xml, 'Oprava odpočtu musí být na ř. 40.');
+        self::assertStringNotContainsString('dan23="-300"', $xml);
+    }
+
+    public function testReverseChargePurchaseCorrectionIsRejected(): void
+    {
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')
+            ->execute([$this->purchaseInvoiceId]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->service->register(
+            $this->supplierId, 'purchase_invoice', $this->purchaseInvoiceId, 2026, 3, 'basic',
+            0.0, -300.0, '2026-05-10', 'Chybná sazba',
+        );
+    }
+
+    /**
      * Staví-li se za období s evidovanou opravou ŘÁDNÉ přiznání, systém upozorní — § 43
      * odst. 1 opravu směruje do dodatečného a špatný typ podání by jinak nikdo nezachytil.
      */

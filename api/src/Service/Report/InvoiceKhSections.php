@@ -57,7 +57,7 @@ final class InvoiceKhSections
                     $id = (int) ($row['invoice_id'] ?? 0);
                     $kh = (string) ($row['kh_section'] ?? '');
                     if (!isset($periodIds[$id]) || ($row['direction'] ?? '') !== $direction
-                        || ($row['document_kind'] ?? '') === 'cash') continue;
+                        || ($row['document_kind'] ?? '') === 'cash' || !empty($row['is_correction'])) continue;
                     if ($kh !== '') $sectionsById[$id][$kh] = true;
                     if ($includeVat) {
                         $line = (string) ($section['dphdp3_line'] ?? '');
