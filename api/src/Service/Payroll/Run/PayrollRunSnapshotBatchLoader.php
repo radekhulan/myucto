@@ -153,6 +153,41 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Počty nerozhodnutých nepřítomností zasahujících do období podle pracovního
+     * vztahu: žádost bez rozhodnutí a schválená nepřítomnost s rozpracovanou
+     * opravou. Snímek běhu bere jen schválené ({@see self::absences()}), takže
+     * bez téhle kontroly by běh nerozhodnutou nepřítomnost tiše vynechal.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,int>
+     */
+    public function undecidedAbsenceCounts(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $counts = [];
+        foreach ($this->fetch(
+            'SELECT employment_id AS ' . self::GROUP_KEY . ', COUNT(*) AS undecided_count
+               FROM payroll_absences
+              WHERE supplier_id = ?
+                AND employment_id IN (%s)
+                AND (status = "requested" OR (status = "approved" AND correction_pending = 1))
+                AND date_from <= ?
+                AND date_to >= ?
+              GROUP BY employment_id',
+            [$supplierId],
+            $employmentIds,
+            [$periodEnd, $periodStart],
+        ) as $row) {
+            $counts[(int) $row[self::GROUP_KEY]] = (int) $row['undecided_count'];
+        }
+
+        return $counts;
+    }
+
+    /**
      * Počty neschválených vstupů podle pracovního vztahu.
      *
      * @param list<int> $employmentIds

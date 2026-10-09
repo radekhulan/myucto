@@ -213,11 +213,16 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // schváleného vstupu (PayrollRunSnapshotBatchLoader::pendingRecurringCounts,
         // prepare + execute) — převzatá měsíční mzda z PAMICA. Jeden dotaz na běh.
         //
+        // N6 (10/2026) přidal množinovou dávku nerozhodnutých nepřítomností
+        // v období (PayrollRunSnapshotBatchLoader::undecidedAbsenceCounts,
+        // prepare + execute): snímek bere jen schválené, takže bez ní běh
+        // s hodinovou mzdou neschválenou DPN tiše vynechal. Jeden dotaz na běh.
+        //
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            86,
+            88,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 86 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 88 round-tripů.',
         );
     }
 

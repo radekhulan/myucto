@@ -202,6 +202,12 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodEnd,
         );
+        $undecidedAbsenceCounts = $this->batch->undecidedAbsenceCounts(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+            $periodEnd,
+        );
         $discountIntentRecords = $this->batch->discountIntentRecords(
             $supplierId,
             $employmentIds,
@@ -384,6 +390,30 @@ final class PayrollRunSnapshotBuilder
                     // Rovnou na koncepty měsíce: nefiltrovaný seznam měl stovky
                     // řádků a koncepty v něm musel uživatel hledat po stránkách.
                     '/payroll/components?tab=inputs&status=draft&period=' . substr($periodStart, 0, 7),
+                );
+            }
+            /*
+             * Nerozhodnutá nepřítomnost blokuje bez ohledu na druh mzdy.
+             *
+             * Snímek nese jen schválené nepřítomnosti. U měsíční mzdy to dřív
+             * zachytil jen předpis mzdy (krácení bez rozhodnutí spočítat nejde,
+             * PayrollWageProrationService::pendingDecisionReason), u hodinové
+             * mzdy nic: neschválená DPN přes celý měsíc z běhu tiše vypadla
+             * a mzda vyšla, jako by nebyla. Stejné pravidlo drží i schválení
+             * pracovního měsíce (PayrollJmhzWorkMonthSummaryBuilder `absence_not_final`).
+             */
+            if (($undecidedAbsenceCounts[$employmentId] ?? 0) > 0) {
+                $validations[] = new PayrollRunValidation(
+                    'blocker',
+                    'absence_pending_decision',
+                    'employment',
+                    $employmentId,
+                    sprintf(
+                        '%s: v období je nerozhodnutá nepřítomnost (žádost bez schválení nebo rozpracovaná oprava). '
+                        . 'Rozhodněte ji, jinak by se mzda po rozhodnutí změnila.',
+                        (string) $row['full_name'],
+                    ),
+                    "/payroll/absences?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);

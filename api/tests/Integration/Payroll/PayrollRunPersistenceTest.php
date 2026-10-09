@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCalculator;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
+use MyInvoice\Service\Payroll\Run\PayrollRunValidation;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
@@ -2433,6 +2434,51 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->runs->missingPreviousPeriods($this->supplierId, '2026-06-01'),
         );
         self::assertSame([], $this->runs->missingPreviousPeriods($this->supplierId, '2026-01-01'));
+    }
+
+    /**
+     * Nerozhodnutá nepřítomnost v období blokuje běh bez ohledu na druh mzdy.
+     *
+     * Snímek běhu bere jen schválené nepřítomnosti. U měsíční mzdy nerozhodnutou
+     * zachytil předpis mzdy (krácení se bez rozhodnutí spočítat nedá), u hodinové
+     * mzdy ji ale běh tiše vynechal: neschválená DPN přes celý měsíc nezastavila
+     * nic a mzda se spočítala, jako by žádná nebyla.
+     */
+    public function testUndecidedAbsenceInPeriodBlocksRunWhateverTheWageKind(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to, status, correction_pending)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $insert->execute([$this->supplierId, $this->employmentId, 'dpn', '2026-05-20', '2026-06-30', 'requested', 0]);
+        $requestedId = (int) $this->db->pdo()->lastInsertId();
+        // Rozhodnutá nepřítomnost mimo období ani zamítnutá v období běh nedrží.
+        $insert->execute([$this->supplierId, $this->employmentId, 'vacation', '2026-07-01', '2026-07-03', 'requested', 0]);
+        $insert->execute([$this->supplierId, $this->employmentId, 'vacation', '2026-06-10', '2026-06-10', 'rejected', 0]);
+
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $pending = static fn (array $validations): array => array_values(array_filter(
+            $validations,
+            static fn (PayrollRunValidation $validation): bool => $validation->code === 'absence_pending_decision',
+        ));
+
+        $blockers = $pending($builder->build($this->supplierId, '2026-06-01', '2026-07-15')->validations);
+        self::assertCount(1, $blockers);
+        self::assertSame('blocker', $blockers[0]->severity);
+        self::assertSame('employment', $blockers[0]->entityType);
+        self::assertSame($this->employmentId, $blockers[0]->entityId);
+
+        // Schválená nepřítomnost s rozpracovanou opravou je taky nerozhodnutá.
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_absences SET status = "approved", correction_pending = 1 WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $requestedId]);
+        self::assertCount(1, $pending($builder->build($this->supplierId, '2026-06-01', '2026-07-15')->validations));
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_absences SET correction_pending = 0 WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $requestedId]);
+        self::assertSame([], $pending($builder->build($this->supplierId, '2026-06-01', '2026-07-15')->validations));
     }
 
     public function testSnapshotValidationBlocksApprovalWithoutChangingReviewedRun(): void
