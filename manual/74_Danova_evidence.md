@@ -557,6 +557,9 @@ Vyúčtování, jehož pohyby nebo výplata leží v roce s dokončenou roční 
 
 ## 74.10 Související kapitoly
 
+- [Daňová evidence - postupy](115_Danova_evidence_postupy.md) - dobropis, platební kalendář, zálohy, poplatky a převody,
+  hotovost, majetek a uzávěrka krok za krokem.
+
 - [Pokladna](32_Pokladna.md) - pokladní doklady, které se promítají do peněžního deníku.
 - [GoPay](33_GoPay.md) - import vyúčtování platební brány, poplatky a výplaty v peněžním deníku.
 - [Přijaté faktury](23_Prijate_faktury.md) - příznaky uznatelnosti a DPH.

@@ -3,6 +3,10 @@
 > Návod, jak vyrovnat pohledávky a závazky vůči jednomu stejnému partnerovi bez bankovní platby.
 > Pro účetní firmy v podvojném účetnictví.
 
+> [!TIP]
+> **Daňová evidence** zápočty partnerů nevede. Dobropis se s opravovanou fakturou započte sám, zápočet pohledávky a závazku
+> zapíšete při roční uzávěrce jako nepeněžní úpravu. Viz [Daňová evidence - postupy](115_Danova_evidence_postupy.md).
+
 ## 67.1 Kdy to potřebujete
 
 Kapitolu otevřete, když:

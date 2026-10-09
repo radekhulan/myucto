@@ -122,6 +122,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 ### Daňová evidence
 
 74. [Daňová evidence](74_Danova_evidence.md)
+115. [Daňová evidence - postupy](115_Danova_evidence_postupy.md)
 
 ### Mzdy
 

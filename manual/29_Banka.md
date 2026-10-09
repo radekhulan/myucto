@@ -117,6 +117,11 @@ Pravidla kombinací (okno ±7 dní, jeden klient, přijaté faktury od různých
 
 Stav a poznámka se aktualizují přímo v seznamu a nastavený filtr zůstane zachovaný. Při filtru **Nespárováno** transakce ze seznamu zmizí. Poznámka se zobrazuje u ignorovaného pohybu při příštím otevření výpisu, v tabulce i na mobilu. **Zrušit ignorování** vrátí pohyb mezi nespárované.
 
+> [!TIP]
+> **Daňová evidence:** ignorovaný pohyb v peněžním deníku zůstává, ignorování jen ruší párování. Zařaďte ho (poplatek, převod,
+> soukromé) v peněžním deníku, nebo si na opakované pohyby založte pravidlo, které pohyb ignoruje i zařadí najednou. Viz
+> [Daňová evidence - postupy](115_Danova_evidence_postupy.md#1156-krok-za-krokem-bankovni-poplatky-prevody-mezi-ucty-vklady-a-vybery).
+
 **Vytvoření přijaté faktury z odchozí platby**, ke které ještě nemáte fakturu:
 
 1. V detailu výpisu najděte odchozí transakci a klikněte na **Vytvořit fakturu**.
@@ -167,6 +172,10 @@ Nad transakcemi v detailu výpisu můžete filtrovat **Zaúčtování: vše / Ne
 ## 29.9 Krok za krokem: pravidlo pro opakované platby
 
 Opakují se platby bez faktury (odvody, bankovní poplatky, úroky, leasing)? Založte pro ně pravidlo, ať se zaúčtují samy.
+
+> [!TIP]
+> Tento postup platí pro podvojné účetnictví. V daňové evidenci se nic nezaúčtovává, pravidla tam pohyb ignorují a zařadí
+> v peněžním deníku: `Daňová evidence → Pravidla bankovních pohybů`, viz [§ 74.9.16](74_Danova_evidence.md#74916-pravidla-bankovnich-pohybu).
 
 **Z konkrétního pohybu (nejrychlejší):**
 
