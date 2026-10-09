@@ -630,6 +630,8 @@ final class PohodaPayrollImporter
                 }
                 $this->jmhz->write($supplierId, $userOrNull, $file, $year, $records, $jmhz, $this->people->matchedRelations(),
                     $confirmIdentifiers, $protocol, self::STEP_JMHZ);
+                // VS a kód OSSZ z přijatých registrací; import registrací podle VS ověřuje, že věty patří firmě.
+                $this->employerIdentifiers($supplierId, $userOrNull, $jmhz['registrations'], $protocol);
                 // Přijaté registrace produktovým importem: až po podmínkách z hlášení, věty jen doplňují.
                 $this->submittedRegistrations($supplierId, $userOrNull, $jmhz['registrations'], $runId, $protocol);
                 $protocol->finish(self::STEP_JMHZ);
@@ -706,6 +708,29 @@ final class PohodaPayrollImporter
             }
         }
         return $protocol;
+    }
+
+    /** @param list<array<string,mixed>> $registrations */
+    private function employerIdentifiers(int $supplierId, ?int $userId, array $registrations, ImportProtocol $protocol): void
+    {
+        $source = PohodaPayrollJmhzReports::employerIdentifiers($registrations);
+        $result = $this->moduleSetup->fillEmployerIdentifiers($supplierId, $userId, $source['symbol'], $source['office'],
+            'Převod mezd z PAMICA: VS z přijatých registrací ČSSZ, účinnost od začátku vedení mezd v MyÚčtu');
+        $labels = ['symbol' => 'VS ČSSZ mzdové účtárny', 'registration' => 'registrační číslo zaměstnavatele', 'office' => 'kód OSSZ'];
+        foreach ($result['filled'] as $key => $value) {
+            $protocol->count(self::STEP_JMHZ, 'employer_' . $key . '_filled', 1);
+            $protocol->info(self::STEP_JMHZ, 'employer_identifier_filled', sprintf('Z přijatých registrací PAMICA doplněno: %s %s.', $labels[$key], $value));
+        }
+        foreach ($result['conflicts'] as $key => $conflict) {
+            $protocol->warn(self::STEP_JMHZ, 'employer_identifier_conflict', sprintf(
+                'Nastavení mezd má %s %s, přijaté registrace PAMICA uvádějí %s. Hodnota se nepřepsala, ověřte ji v Mzdy → Nastavení.',
+                $labels[$key], $conflict['current'], $conflict['source'],
+            ), ['field' => $key]);
+        }
+        if ($source['ambiguous'] !== []) {
+            $protocol->warn(self::STEP_JMHZ, 'employer_identifier_ambiguous',
+                'Přijaté registrace PAMICA uvádějí víc různých hodnot VS nebo kódu OSSZ; nic se nedoplnilo, vyplňte je v Mzdy → Nastavení.');
+        }
     }
 
     /**

@@ -277,6 +277,38 @@ final class PohodaPayrollJmhzReports
     }
 
     /**
+     * VS zaměstnavatele u ČSSZ (ID 10221) a kód OSSZ (ID 10004) z odeslaných registrací.
+     * Hodnota se vrátí jen tehdy, když ji všechny věty uvádějí shodně.
+     *
+     * @param list<array<string,mixed>> $registrations {@see self::registrations()}
+     * @return array{symbol:?string,office:?string,ambiguous:list<int>}
+     */
+    public static function employerIdentifiers(array $registrations): array
+    {
+        $seen = [10221 => [], 10004 => []];
+        foreach ($registrations as $registration) {
+            if ($registration['sent'] !== true) {
+                continue;
+            }
+            foreach ($registration['items'] as $item) {
+                foreach (array_keys($seen) as $id) {
+                    $value = trim((string) ($item['values'][$id] ?? ''));
+                    if ($value !== '') {
+                        $seen[$id][$value] = true;
+                    }
+                }
+            }
+        }
+        $pick = static fn (array $values): ?string => count($values) === 1 ? (string) array_key_first($values) : null;
+
+        return [
+            'symbol' => $pick($seen[10221]),
+            'office' => $pick($seen[10004]),
+            'ambiguous' => array_keys(array_filter($seen, static fn (array $values): bool => count($values) > 1)),
+        ];
+    }
+
+    /**
      * @param list<array{id:int,value:string}> $attributes
      */
     private static function first(array $attributes, int $id): ?string

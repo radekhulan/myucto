@@ -295,6 +295,57 @@ final class PayrollMigrationModuleSetup
     }
 
     /**
+     * Doplní identifikátory zaměstnavatele u ČSSZ, které předchozí program uvedl
+     * v přijatých podáních: VS ČSSZ výchozí účtárně a registrační číslo zaměstnavatele
+     * (ČSSZ podle něj páruje hlášení, je to týž desetimístný symbol), kód OSSZ do nastavení
+     * zaměstnavatele. Jen do prázdných míst; jinou vyplněnou hodnotu vrátí jako rozpor.
+     *
+     * @return array{filled:array<string,string>,conflicts:array<string,array{current:string,source:string}>,registration_from:?string}
+     */
+    public function fillEmployerIdentifiers(int $supplierId, ?int $userId, ?string $symbol, ?string $officeCode, string $sourceReference): array
+    {
+        $result = ['filled' => [], 'conflicts' => [], 'registration_from' => null];
+        $symbol = PayrollEmployerLegacyIdentifierCarryOver::variableSymbol($symbol);
+        $symbol = $symbol !== null && strlen($symbol) === 10 ? $symbol : null;
+        $officeCode = PayrollEmployerLegacyIdentifierCarryOver::socialSecurityOfficeCode($officeCode);
+        if (($symbol === null && $officeCode === null) || !$this->hasSettings($supplierId)) {
+            return $result;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT o.social_security_variable_symbol AS symbol, s.employer_registration_number AS registration, s.social_security_office_code AS office
+               FROM payroll_employer_settings s
+               LEFT JOIN payroll_offices o ON o.supplier_id = s.supplier_id AND o.id = s.default_office_id
+              WHERE s.supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        $current = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $check = static function (string $key, ?string $source) use (&$result, $current): bool {
+            $value = trim((string) ($current[$key] ?? ''));
+            if ($source === null) {
+                return false;
+            }
+            if ($value !== '' && $value !== $source) {
+                $result['conflicts'][$key] = ['current' => $value, 'source' => $source];
+            }
+            return $value === '';
+        };
+        if ($check('symbol', $symbol) && $this->settings->fillEmptyDefaultOfficeSocialSecuritySymbol($supplierId, (string) $symbol)) {
+            $result['filled']['symbol'] = (string) $symbol;
+        }
+        if ($check('registration', $symbol) && $this->settings->fillEmptyEmployerRegistrationNumber($supplierId, (string) $symbol)) {
+            $result['filled']['registration'] = (string) $symbol;
+        }
+        if ($check('office', $officeCode) && $this->settings->fillEmptySocialSecurityOfficeCode($supplierId, (string) $officeCode)) {
+            $result['filled']['office'] = (string) $officeCode;
+        }
+        if (isset($result['filled']['symbol'])) {
+            $result['registration_from'] = $this->ensureOfficeRegistration($supplierId, $userId, $sourceReference);
+        }
+
+        return $result;
+    }
+
+    /**
      * Založí registraci výchozí účtárny s účinností od začátku vedení mezd v MyÚčtu,
      * když účtárna má desetimístný VS ČSSZ a registraci ještě nemá. Volá ji převod
      * po převzetí VS i každý, kdo VS doplní až později (import hlášení JMHZ).

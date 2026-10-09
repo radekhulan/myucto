@@ -236,7 +236,7 @@ final class SyntheticPohodaPayroll
      */
     private static function janaSentence(): array
     {
-        return [[10004, '712'], [10051, self::JANA_OIC], [10053, 'Testovací'], [10054, 'Jana'], [10056, '4.5.1990'], [10059, 'Ž'],
+        return [[10004, '110'], [10051, self::JANA_OIC], [10053, 'Testovací'], [10054, 'Jana'], [10056, '4.5.1990'], [10059, 'Ž'],
             [10067, 'CZ'], [10120, 'Syntetická firma'], [10221, '1234567890'], [10227, '1.3.2025']];
     }
 

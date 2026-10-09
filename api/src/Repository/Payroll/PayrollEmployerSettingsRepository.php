@@ -265,6 +265,20 @@ final class PayrollEmployerSettingsRepository
         return $update->rowCount() === 1;
     }
 
+    /** Doplní registrační číslo zaměstnavatele, jen když chybí (stejně jako kód OSSZ). */
+    public function fillEmptyEmployerRegistrationNumber(int $supplierId, string $number): bool
+    {
+        $update = $this->db->pdo()->prepare(
+            "UPDATE payroll_employer_settings
+                SET employer_registration_number = ?, row_version = row_version + 1
+              WHERE supplier_id = ?
+                AND (employer_registration_number IS NULL OR TRIM(employer_registration_number) = '')"
+        );
+        $update->execute([$number, $supplierId]);
+
+        return $update->rowCount() === 1;
+    }
+
     /**
      * Doplní VS ČSSZ výchozí účtárně, která ho nemá a nemá ani historii registrace.
      *

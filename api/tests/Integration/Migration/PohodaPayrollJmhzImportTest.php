@@ -177,7 +177,29 @@ final class PohodaPayrollJmhzImportTest extends TestCase
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM payroll_registration_a1_profiles WHERE supplier_id = ? AND employment_id = ?', [$supplierId, $jana['id']]));
     }
 
-    private function payrollSupplier(): int
+    /**
+     * Firma bez VS a kódu OSSZ: převod je doplní z přijatých registrací, založí registraci
+     * účtárny a registrace pak projdou importem (dřív je VS „jiného zaměstnavatele" blokoval).
+     */
+    public function testEmployerIdentifiersAreFilledFromAcceptedRegistrations(): void
+    {
+        $supplierId = $this->payrollSupplier(false);
+        $file = SyntheticPohodaPayroll::writeWithRegistrations($this->tmp);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT o.social_security_variable_symbol, s.employer_registration_number, s.social_security_office_code
+               FROM payroll_employer_settings s JOIN payroll_offices o ON o.supplier_id = s.supplier_id AND o.id = s.default_office_id
+              WHERE s.supplier_id = ?'
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame(['1234567890', '1234567890', '110'], array_values(array_map('strval', $stmt->fetch(\PDO::FETCH_ASSOC))), $this->explain($protocol));
+        self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM payroll_office_registration_versions WHERE supplier_id = ? AND social_security_variable_symbol = '1234567890'", [$supplierId]));
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_JMHZ)['registrations_applied'] ?? 0, $this->explain($protocol));
+    }
+
+    private function payrollSupplier(bool $identifiers = true): int
     {
         $pdo = $this->db->pdo();
         $supplierId = $this->createIsolatedSupplier($pdo, $this->sourceSupplierId);
@@ -188,9 +210,13 @@ final class PohodaPayrollJmhzImportTest extends TestCase
         )->execute([$supplierId, $this->userId]);
         $pdo->prepare(
             'INSERT INTO payroll_offices (supplier_id, code, name, social_security_variable_symbol, is_active)
-             VALUES (?, "IMP", "Syntetická účtárna", "1234567890", 1)',
-        )->execute([$supplierId]);
+             VALUES (?, "IMP", "Syntetická účtárna", ?, 1)',
+        )->execute([$supplierId, $identifiers ? '1234567890' : null]);
         $officeId = (int) $pdo->lastInsertId();
+        if (!$identifiers) {
+            $pdo->prepare('INSERT INTO payroll_employer_settings (supplier_id, default_office_id) VALUES (?, ?)')->execute([$supplierId, $officeId]);
+            return $supplierId;
+        }
         $pdo->prepare(
             'INSERT INTO payroll_office_registration_versions
                 (supplier_id, office_id, effective_from, social_security_variable_symbol, source_reference)
