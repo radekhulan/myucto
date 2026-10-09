@@ -3273,7 +3273,7 @@ onUnmounted(clearReceiptsTimer)
               v-for="m in inbox"
               :key="m.id"
               class="rounded-lg border bg-surface p-4"
-              :class="isInboxUnread(m) ? 'border-primary-300 dark:border-primary-700' : 'border-neutral-200'"
+              :class="isInboxUnread(m) ? 'border-primary-300' : 'border-neutral-200'"
               data-test="inbox-mobile-card"
             >
               <div class="flex items-start justify-between gap-3">
