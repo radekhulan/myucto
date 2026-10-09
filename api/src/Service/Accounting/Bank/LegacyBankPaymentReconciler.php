@@ -51,15 +51,27 @@ final class LegacyBankPaymentReconciler
             return false;
         }
 
+        // Úhrady vyrovnané jinou cestou než bankou (zápočet dobropisu, zápočet proti účtu,
+        // vzájemný zápočet, pokladna) se k pohybu nevážou a nerozhodují: zbytek faktury po
+        // nich musí krýt právě jedna evidenční platba, kterou pohyb potvrzuje.
         $paymentStmt = $pdo->prepare(
-            'SELECT id, source, bank_transaction_id, amount, currency
-               FROM invoice_payments
-              WHERE supplier_id = ? AND invoice_id = ?
-              ORDER BY id
+            'SELECT p.id, p.source, p.bank_transaction_id, p.amount, p.currency,
+                    ' . InvoicePaymentService::bankSettleableSql('p') . ' AS bank_settleable
+               FROM invoice_payments p
+              WHERE p.supplier_id = ? AND p.invoice_id = ?
+              ORDER BY p.id
               FOR UPDATE'
         );
         $paymentStmt->execute([$supplierId, (int) $tx['invoice_id']]);
-        $paymentRows = $paymentStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $paymentRows = [];
+        $settledElsewhere = 0.0;
+        foreach ($paymentStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            if ((int) $row['bank_settleable'] === 1) {
+                $paymentRows[] = $row;
+            } else {
+                $settledElsewhere += (float) $row['amount'];
+            }
+        }
         if (count($paymentRows) !== 1) {
             return false;
         }
@@ -69,7 +81,7 @@ final class LegacyBankPaymentReconciler
             || $payment['bank_transaction_id'] !== null
             || (float) $payment['amount'] <= 0.0
             || abs((float) $payment['amount'] - (float) $tx['amount']) > 0.05
-            || abs((float) $payment['amount'] - (float) $tx['paid_total']) > 0.01
+            || abs((float) $payment['amount'] + $settledElsewhere - (float) $tx['paid_total']) > 0.01
         ) {
             return false;
         }

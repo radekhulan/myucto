@@ -781,13 +781,28 @@ final class StatementMatcher
         // jen NAVÁZAT (status/paid_at zůstane), proto porovnáváme proti CELKOVÉ částce
         // faktury (amount_to_pay; fallback paid_total, kdyby header byl 0). U nezaplacených
         // zůstává porovnání proti zbývajícímu dluhu beze změny.
+        // Část vyrovnaná jinak než bankou (zápočet dobropisu, zápočet proti účtu, pokladna)
+        // bankou nepřijde: zaplacenou fakturu potvrzuje pohyb na zbytek po ní.
+        $settledElsewhere = $alreadyPaid ? $this->settledOutsideBank($pdo, (int) $inv['id']) : 0.0;
         $compareBase = $alreadyPaid
-            ? round(max((float) $inv['amount_to_pay'], (float) ($inv['paid_total'] ?? 0)), 2)
+            ? round(max((float) $inv['amount_to_pay'], (float) ($inv['paid_total'] ?? 0)) - $settledElsewhere, 2)
             : $remaining;
         $m = $this->expectedMatch($compareBase, (string) $inv['currency'], (float) ($inv['exchange_rate'] ?: 0), $txCurrency, $exactTolerance);
         if ($m === null) {
             return ['status' => 'unmatched', 'reason' => 'currency_mismatch',
                     'tx_currency' => $txCurrency, 'invoice_currency' => $inv['currency']];
+        }
+        // Odběratel zaplatil původní částku i přes zápočet dobropisu → plná úhrada.
+        // Zápočet zruší až evidence platby (InvoicePaymentService::recordPayment).
+        if (!$alreadyPaid && $amount - $m['expected'] > $m['exact']) {
+            $offsetTotal = $this->creditNoteOffsetTotal($pdo, (int) $inv['id']);
+            if ($offsetTotal > 0) {
+                $full = $this->expectedMatch(round($remaining + $offsetTotal, 2), (string) $inv['currency'], (float) ($inv['exchange_rate'] ?: 0), $txCurrency, $exactTolerance);
+                if ($full !== null && abs($amount - $full['expected']) <= $full['exact']) {
+                    $m = $full;
+                    $remaining = round($remaining + $offsetTotal, 2);
+                }
+            }
         }
 
         $diff = abs($amount - $m['expected']);
@@ -971,6 +986,26 @@ final class StatementMatcher
      * Částečná CZK platba se nadále přepočítá kurzem faktury. Jiná nepřevoditelná
      * kombinace měn použije $fallback.
      */
+    /** Součet úhrad faktury, které bankovní pohyb nepotvrzuje (viz InvoicePaymentService::bankSettleableSql). */
+    private function settledOutsideBank(\PDO $pdo, int $invoiceId): float
+    {
+        $stmt = $pdo->prepare(
+            'SELECT COALESCE(SUM(p.amount), 0) FROM invoice_payments p
+              WHERE p.invoice_id = ? AND NOT ' . InvoicePaymentService::bankSettleableSql('p')
+        );
+        $stmt->execute([$invoiceId]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    private function creditNoteOffsetTotal(\PDO $pdo, int $invoiceId): float
+    {
+        $stmt = $pdo->prepare(
+            "SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE invoice_id = ? AND source = 'credit_note'"
+        );
+        $stmt->execute([$invoiceId]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
     private function txAmountInInvoiceCurrency(
         float $txAmount,
         array $inv,

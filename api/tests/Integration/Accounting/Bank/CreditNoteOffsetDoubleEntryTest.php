@@ -161,7 +161,110 @@ final class CreditNoteOffsetDoubleEntryTest extends BankPostingTestCase
         self::assertEqualsWithDelta(0.0, $this->bank311Credit($tx), 0.001);
     }
 
+    /**
+     * Zápočet dobropisu a potom „Označit uhrazeno": faktura má dvě nenavázané platby
+     * (credit_note + mark_paid). Bankovní pohyb na zbytek se musí automaticky spárovat,
+     * navázat na platbu mark_paid a zaúčtovat 221/311 jen zbytkem.
+     */
+    public function testMarkPaidAfterOffsetIsMatchedAndPostedAutomatically(): void
+    {
+        [$invoiceId] = $this->partiallyOffsetInvoice('2099881101', 10000.00, 2000.00);
+        $markPaid = $this->payments()->recordPayment($invoiceId, 8000.00, self::YEAR . '-06-12', ['source' => 'mark_paid']);
+        self::assertTrue($markPaid['became_paid']);
+
+        $tx = $this->transaction($this->statement(), 8000.00, ['variable_symbol' => '2099881101']);
+        $match = $this->container->get(\MyInvoice\Service\Bank\StatementMatcher::class)->match($tx);
+        self::assertSame('auto_exact', $match['status'] ?? null, json_encode($match, JSON_UNESCAPED_UNICODE));
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res, JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(8000.00, $this->bank311Credit($tx), 0.001);
+        self::assertSame($tx, (int) $this->scalar('SELECT bank_transaction_id FROM invoice_payments WHERE id = ?', [$markPaid['payment_id']]));
+        self::assertEqualsWithDelta(0.0, $this->receivable311([$invoiceId]), 0.001, 'saldo faktury i dobropisu je vyrovnané');
+    }
+
+    /** Totéž s ručně spárovaným pohybem: rekonciliace nesmí skončit v ruční frontě. */
+    public function testMarkPaidAfterOffsetManualMatchIsPosted(): void
+    {
+        [$invoiceId] = $this->partiallyOffsetInvoice('2099881102', 10000.00, 2000.00);
+        $this->payments()->recordPayment($invoiceId, 8000.00, self::YEAR . '-06-12', ['source' => 'mark_paid']);
+        $tx = $this->transaction($this->statement(), 8000.00, ['match_status' => 'manual', 'matched_invoice_id' => $invoiceId]);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res, JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(8000.00, $this->bank311Credit($tx), 0.001);
+    }
+
+    /**
+     * Odběratel zaplatil původní částku dřív, než dostal dobropis. Ruční spárování
+     * nesmí platbu oříznout na zbytek po zápočtu (allocation_mismatch): zápočet padá,
+     * platba se zaeviduje celá a dobropis zůstává k vrácení.
+     */
+    public function testFullOriginalPaymentAfterOffsetReleasesOffsetOnManualMatch(): void
+    {
+        [$invoiceId, $creditNoteId] = $this->partiallyOffsetInvoice('2099881103', 10000.00, 2000.00);
+        $tx = $this->transaction($this->statement(), 10000.00);
+
+        $res = $this->callAction(
+            $this->container->get(\MyInvoice\Action\Bank\BankStatementAction::class),
+            'manualMatch',
+            'POST',
+            'admin',
+            ['invoice_id' => $invoiceId],
+            ['id' => (string) $tx],
+        );
+
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('posted', $res['body']['posting']['action'] ?? null, json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(10000.00, $this->bank311Credit($tx), 0.001);
+        self::assertSame('paid', $this->invoiceStatus($invoiceId));
+        self::assertSame('issued', $this->invoiceStatus($creditNoteId), 'dobropis je zase k vrácení penězi');
+        self::assertSame(0, $this->offsetCount($creditNoteId));
+    }
+
+    public function testFullOriginalPaymentAfterOffsetIsMatchedAutomatically(): void
+    {
+        [$invoiceId, $creditNoteId] = $this->partiallyOffsetInvoice('2099881104', 10000.00, 2000.00);
+        $tx = $this->transaction($this->statement(), 10000.00, ['variable_symbol' => '2099881104']);
+
+        $match = $this->container->get(\MyInvoice\Service\Bank\StatementMatcher::class)->match($tx);
+        self::assertSame('auto_exact', $match['status'] ?? null, json_encode($match, JSON_UNESCAPED_UNICODE));
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res, JSON_UNESCAPED_UNICODE));
+        self::assertEqualsWithDelta(10000.00, $this->bank311Credit($tx), 0.001);
+        self::assertSame('issued', $this->invoiceStatus($creditNoteId));
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /**
+     * Faktura a dobropis s předpisy, ručně započtené. Zbývá uhradit = total − credit.
+     *
+     * @return array{0:int, 1:int} [faktura, dobropis]
+     */
+    private function partiallyOffsetInvoice(string $varsymbol, float $total, float $credit): array
+    {
+        $client = $this->client('Odběratel ' . $varsymbol);
+        $invoiceId = $this->saleInvoice($varsymbol, $client, $total);
+        $creditNoteId = $this->saleInvoice($varsymbol . '9', $client, -$credit, 'credit_note');
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')
+            ->execute([$invoiceId, $creditNoteId]);
+        $this->postPredpis('invoice', $invoiceId, '311', '602', $total);
+        $this->postPredpis('invoice', $creditNoteId, '602', '311', $credit);
+
+        $result = $this->offsets->applyForInvoice($this->supplierId, $creditNoteId, $this->userId);
+        self::assertNotNull($result['offset_id'], (string) $result['reason']);
+        self::assertEqualsWithDelta($total - $credit, $this->remaining($invoiceId), 0.001);
+        return [$invoiceId, $creditNoteId];
+    }
+
+    private function payments(): \MyInvoice\Service\Invoice\InvoicePaymentService
+    {
+        return $this->container->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class);
+    }
 
     /**
      * Faktura s předpisem 311/602 a dobropis na plnou výši s předpisem 602/311,

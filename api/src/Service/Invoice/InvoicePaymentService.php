@@ -607,6 +607,24 @@ final class InvoicePaymentService
         $paid->execute([$invoiceId]);
         $remaining = round($due - (float) $paid->fetchColumn(), 2);
 
+        // Odběratel zaplatil původní částku i přes zápočet dobropisu (typicky platba
+        // odešla dřív, než dobropis dostal). Zápočet tím padá: platba se zaeviduje celá
+        // a dobropis se vrací do stavu k vrácení penězi. Bez toho by se platba ořízla na
+        // zbytek po zápočtu a bankovní zápis skončil v allocation_mismatch.
+        if ($amount > $remaining + self::TOLERANCE) {
+            $offsets = $pdo->prepare(
+                "SELECT COALESCE(SUM(amount), 0) FROM invoice_payments WHERE invoice_id = ? AND source = 'credit_note'"
+            );
+            $offsets->execute([$invoiceId]);
+            $offsetTotal = round((float) $offsets->fetchColumn(), 2);
+            if ($offsetTotal > 0 && $amount >= $remaining + $offsetTotal - self::TOLERANCE) {
+                self::releaseCreditNotes($pdo, "p.invoice_id = ? AND p.source = 'credit_note'", [$invoiceId]);
+                $pdo->prepare("DELETE FROM invoice_payments WHERE invoice_id = ? AND source = 'credit_note'")
+                    ->execute([$invoiceId]);
+                $remaining = round($remaining + $offsetTotal, 2);
+            }
+        }
+
         if ($remaining <= self::TOLERANCE) {
             throw new InvoiceAlreadySettledException($invoiceId, $remaining);
         }
