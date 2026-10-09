@@ -785,6 +785,9 @@ final readonly class PayrollRegistrationIdentityService
                     ? $sensitive['identifiers']['birth_number']
                     : null,
                 is_string($identity['birth_date'] ?? null) ? $identity['birth_date'] : null,
+                is_string($sensitive['identifiers']['ecp'] ?? null)
+                    ? $sensitive['identifiers']['ecp']
+                    : null,
             );
             if ($birthNumberWarning !== null) {
                 $warnings[] = $birthNumberWarning;

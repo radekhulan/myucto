@@ -1314,8 +1314,14 @@ final class PayrollRegistrationXmlSerializer
     private function nullableBno(
         PayrollRegistrationXmlPayload $payload,
     ): ?string {
-        return $payload->identity->identifiers['birth_number']
-            ?? $payload->identity->identifiers['ecp'];
+        $identity = $payload->identity->identity;
+
+        return PayrollRegistrationSlovakBirthNumberRule::bno(
+            is_string($identity['citizenship_country_code'] ?? null) ? $identity['citizenship_country_code'] : null,
+            $payload->identity->identifiers['birth_number'],
+            $payload->identity->identifiers['ecp'],
+            is_string($identity['birth_date'] ?? null) ? $identity['birth_date'] : null,
+        );
     }
 
     private function document(): DOMDocument

@@ -14,21 +14,40 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
  * číslo přidělené ministerstvem vnitra. Které z nich na kartě je, evidence
  * nepozná (formát je shodný), a ČSSZ přihlášky občanů SR narozených po roce
  * 1992 s rodným číslem přijímá. Sestavení proto neodmítá, jen upozorní.
+ *
+ * Má-li takový zaměstnanec na kartě vedle rodného čísla i EČP, jde do přihlášky
+ * EČP ({@see self::bno()}): identifikuje cizince jednoznačně a ČSSZ takovou
+ * přihlášku přijímá. Varování pak odpadá.
  */
 final class PayrollRegistrationSlovakBirthNumberRule
 {
+    /**
+     * Identifikátor pro `client/@bno` přihlášky REGZEC A1: rodné číslo, a není-li,
+     * EČP; u občana SR narozeného po roce 1992 přednostně EČP.
+     */
+    public static function bno(
+        ?string $citizenship,
+        ?string $birthNumber,
+        ?string $ecp,
+        ?string $birthDate,
+    ): ?string {
+        $ecp = $ecp === null || trim($ecp) === '' ? null : $ecp;
+        if ($ecp !== null && self::applies($citizenship, $birthNumber, $birthDate)) {
+            return $ecp;
+        }
+
+        return $birthNumber ?? $ecp;
+    }
+
     /** @return array{code:string,field:string,message:string}|null */
     public static function warning(
         ?string $citizenship,
         ?string $birthNumber,
         ?string $birthDate,
+        ?string $ecp = null,
     ): ?array {
-        $birthDate ??= PayrollRegistrationMinimumAge::birthDateFromBirthNumber($birthNumber);
-        if ($citizenship !== 'SK'
-            || $birthNumber === null
-            || trim($birthNumber) === ''
-            || !is_string($birthDate)
-            || $birthDate <= '1992-12-31'
+        if (!self::applies($citizenship, $birthNumber, $birthDate)
+            || ($ecp !== null && trim($ecp) !== '')
         ) {
             return null;
         }
@@ -43,5 +62,16 @@ final class PayrollRegistrationSlovakBirthNumberRule
                 . 'vyplňte to, jinak přihláška odejde jen s datem narození '
                 . 'a ČSSZ EČP přidělí. České rodné číslo přidělené v ČR ponechte.',
         ];
+    }
+
+    private static function applies(?string $citizenship, ?string $birthNumber, ?string $birthDate): bool
+    {
+        $birthDate ??= PayrollRegistrationMinimumAge::birthDateFromBirthNumber($birthNumber);
+
+        return $citizenship === 'SK'
+            && $birthNumber !== null
+            && trim($birthNumber) !== ''
+            && is_string($birthDate)
+            && $birthDate > '1992-12-31';
     }
 }
