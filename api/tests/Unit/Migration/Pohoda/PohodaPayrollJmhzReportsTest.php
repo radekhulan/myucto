@@ -178,6 +178,49 @@ final class PohodaPayrollJmhzReportsTest extends TestCase
         self::assertFalse(PohodaPayrollJmhzReports::accepted($byKey['RegZAM:2']));
     }
 
+    /**
+     * Položka hlášení osoby v souběhu nese za každé PPV vlastní blok atributů (`j` = order2).
+     * Každý blok je samostatný formulář svého vztahu; slité do jednoho by DPP přepsala fond
+     * a úvazek pracovního poměru.
+     */
+    public function testConcurrentBlocksOfOneItemAreSeparateForms(): void
+    {
+        $file = $this->tmp . '/soubeh.xml';
+        $block = static function (int $order2, string $guid, string $ppv, string $primary, string $activity, string $standard, string $weekly): string {
+            $out = '';
+            foreach ([[1, 'bezPriznaku'], [10012, $guid], [10016, 'R'], [10495, $primary], [10051, '1234567895'], [10228, $ppv],
+                [10053, 'Souběžná'], [10054, 'Eva'], [10056, '1.2.1990'], [10223, '1.1.2025'], [10239, $activity],
+                [10259, $standard], [10260, $standard], [10261, $weekly], [10265, '31'], [10268, '20.000']] as [$id, $value]) {
+                $out .= '<a id="' . $id . '" t="0" f="1" j="' . $order2 . '">' . $value . '</a>';
+            }
+            return $out;
+        };
+        file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?><mdbExport>'
+            . '<ZAMpomer><ID>1</ID><RefZAM>5</RefZAM><Poradi>1</Poradi><IDPPV>1111111111111</IDPPV></ZAMpomer>'
+            . '<ZAMpomer><ID>2</ID><RefZAM>5</RefZAM><Poradi>2</Poradi><IDPPV>2222222222222</IDPPV></ZAMpomer>'
+            . '<MH><ID>1</ID><Rok>2026</Rok><RelMesic>1</RelMesic><RelTyp>1</RelTyp><RelStavDP>7</RelStavDP><ElOdeslano>1</ElOdeslano>'
+            . '<DatPod>2026-02-15T09:00:00</DatPod><DatPrij>2026-02-15T09:00:00</DatPrij></MH>'
+            . '<MHitems><ID>7</ID><RefAg>1</RefAg><RefZAM>5</RefZAM><RefPomer>1</RefPomer><Soubeh>1</Soubeh><Data v="1">'
+            . $block(0, 'CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC', '1111111111111', 'A', '1', '165.000', '37.50')
+            . $block(1, 'DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD', '2222222222222', 'N', 'T', '176.000', '99')
+            . '</Data></MHitems></mdbExport>');
+
+        $forms = PohodaPayrollJmhzReports::read($file, 2026)[0]['forms'];
+
+        self::assertCount(2, $forms, 'Souběžná položka jsou dva formuláře.');
+        self::assertSame(['1', '2'], array_column($forms, 'relation_key'), 'Druhý blok patří vztahu podle ID PPV.');
+        self::assertSame(['7', '7:1'], array_column($forms, 'item_id'));
+        [$hpp, $dpp] = [$forms[0]['form'], $forms[1]['form']];
+        self::assertInstanceOf(JmhzReportForm::class, $hpp);
+        self::assertInstanceOf(JmhzReportForm::class, $dpp);
+        self::assertSame(['1111111111111', true], [$hpp->employmentIdentifier, $hpp->primary]);
+        self::assertSame(['2222222222222', false], [$dpp->employmentIdentifier, $dpp->primary]);
+        self::assertSame('37.50', $hpp->fund['weekly'], 'Úvazek pracovního poměru nepřepíše blok DPP.');
+        self::assertSame('165.000', $hpp->fund['standard']);
+        self::assertNotNull($hpp->workload());
+        self::assertSame([1, 2], array_map(static fn (array $f): int => $f['form']->position, $forms));
+    }
+
     public function testRegistrationsAndProfilesFromSentRegistrations(): void
     {
         $registrations = PohodaPayrollJmhzReports::registrations(SyntheticPohodaPayroll::writeWithReports($this->tmp));

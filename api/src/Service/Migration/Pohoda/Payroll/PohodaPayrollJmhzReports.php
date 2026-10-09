@@ -50,8 +50,15 @@ final class PohodaPayrollJmhzReports
         // podání) druhým - jen hlášení převáděného roku.
         $headers = [];
         $deliveries = [];
-        foreach (PohodaXml::scan($file, ['MH', 'DataBoxSent']) as $table => $row) {
-            if ($table === 'MH') {
+        /** @var array<string,array<string,string>> $ppvRelations osoba => ID PPV => vztah (souběžné bloky položky) */
+        $ppvRelations = [];
+        foreach (PohodaXml::scan($file, ['MH', 'DataBoxSent', 'ZAMpomer']) as $table => $row) {
+            if ($table === 'ZAMpomer') {
+                $ppv = preg_replace('/\D/', '', PohodaXml::text($row, 'IDPPV')) ?? '';
+                if ($ppv !== '') {
+                    $ppvRelations[PohodaXml::text($row, 'RefZAM')][$ppv] = PohodaXml::text($row, 'ID');
+                }
+            } elseif ($table === 'MH') {
                 if ((int) PohodaXml::text($row, 'Rok') === $year) {
                     $headers[PohodaXml::text($row, 'ID')] = $row;
                 }
@@ -88,28 +95,43 @@ final class PohodaPayrollJmhzReports
             if (!isset($meta[$parent])) {
                 continue;
             }
-            $position = count($forms[$parent] ?? []) + 1;
-            $attributes = PohodaXml::attributes($item, 'Data');
-            $form = null;
-            $error = null;
-            if ($attributes === []) {
-                $error = 'Položka hlášení nemá obsah (v exportu chybí atributy formuláře).';
-            } else {
-                try {
-                    $form = $reader->formFromDocument(JmhzAttributeDocument::form($meta[$parent]['header'], $attributes), $position);
-                } catch (RegistrationImportFileException $e) {
-                    $error = $e->getMessage();
-                }
+            $personKey = PohodaXml::text($item, 'RefZAM');
+            $columns = self::columns($item, ['Data']);
+            // Položka osoby se souběžnými vztahy (`Soubeh`) nese za každé PPV vlastní blok
+            // atributů (`order2`: 0 hlavní vztah položky, 1… další). Každý blok je samostatný
+            // formulář hlášení; slité do jednoho by pozdější blok přepsal hodnoty hlavního vztahu.
+            $blocks = [];
+            foreach (PohodaXml::attributes($item, 'Data') as $attribute) {
+                $blocks[(int) $attribute['order2']][] = $attribute;
             }
-            $forms[$parent][] = [
-                'item_id' => PohodaXml::text($item, 'ID'),
-                'relation_key' => PohodaXml::text($item, 'RefPomer'),
-                'person_key' => PohodaXml::text($item, 'RefZAM'),
-                'item' => self::columns($item, ['Data']),
-                'attributes' => $attributes,
-                'form' => $form,
-                'error' => $error,
-            ];
+            ksort($blocks);
+            if ($blocks === []) {
+                $blocks = [0 => []];
+            }
+            foreach ($blocks as $block => $attributes) {
+                $position = count($forms[$parent] ?? []) + 1;
+                $form = null;
+                $error = null;
+                if ($attributes === []) {
+                    $error = 'Položka hlášení nemá obsah (v exportu chybí atributy formuláře).';
+                } else {
+                    try {
+                        $form = $reader->formFromDocument(JmhzAttributeDocument::form($meta[$parent]['header'], $attributes), $position);
+                    } catch (RegistrationImportFileException $e) {
+                        $error = $e->getMessage();
+                    }
+                }
+                $ppv = preg_replace('/\D/', '', self::first($attributes, 10228) ?? '') ?? '';
+                $forms[$parent][] = [
+                    'item_id' => PohodaXml::text($item, 'ID') . ($block === 0 ? '' : ':' . $block),
+                    'relation_key' => $block === 0 ? PohodaXml::text($item, 'RefPomer') : ($ppvRelations[$personKey][$ppv] ?? ''),
+                    'person_key' => $personKey,
+                    'item' => $columns,
+                    'attributes' => $attributes,
+                    'form' => $form,
+                    'error' => $error,
+                ];
+            }
         }
 
         $out = [];
