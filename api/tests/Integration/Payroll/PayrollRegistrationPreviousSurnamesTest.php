@@ -65,8 +65,13 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
         }
     }
 
-    /** Rodné příjmení bylo dřívějším příjmením; Money S3 i ČSSZ ho v `ona` berou. */
-    public function testCollectsEarlierSurnamesNewestFirstWithoutCurrentIncludingBirthSurname(): void
+    /**
+     * REGZEC25-client.name.ona-04, REGZEC25-client.name.sur-05: EDV 1.4.0.6
+     * („vyjma rodného") a Zásady REGZEC 1.4.6 („bez aktuálního příjmení
+     * a rodného"). Rodné příjmení nese `birth/@nam`, do `ona` nepatří, ani
+     * když ho evidence doplnila až k pozdějšímu záznamu.
+     */
+    public function testCollectsEarlierSurnamesNewestFirstWithoutCurrentAndBirthSurname(): void
     {
         $this->history('2019-01-01', '2020-12-31', 'Nguyen Quoc', null);
         $this->history('2021-01-01', '2023-12-31', 'Dvořáková', null);
@@ -74,7 +79,7 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
         $this->history('2018-01-01', '2018-12-31', 'Nováková', null);
 
         self::assertSame(
-            'Dvořáková, Nguyen Quoc, Nováková',
+            'Dvořáková, Nguyen Quoc',
             $this->repository->previousSurnames(
                 $this->supplierId,
                 $this->employeeId,
@@ -84,7 +89,7 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
         );
         // K dřívějšímu dni se budoucí příjmení nepočítá.
         self::assertSame(
-            'Nguyen Quoc, Nováková',
+            'Nguyen Quoc',
             $this->repository->previousSurnames(
                 $this->supplierId,
                 $this->employeeId,
@@ -92,6 +97,20 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
                 'Dvořáková',
             ),
         );
+    }
+
+    /** Jediné dřívější příjmení shodné s rodným znamená, že `ona` se nevyplní. */
+    public function testOnlyBirthSurnameInHistoryLeavesNoPreviousSurnames(): void
+    {
+        $this->history('2015-01-01', '2023-12-31', 'Malá', 'Malá');
+        $this->history('2024-01-01', null, 'Velká', 'Malá');
+
+        self::assertNull($this->repository->previousSurnames(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-08-04',
+            'Velká',
+        ));
     }
 
     public function testNoHistoryMeansNoKeyInTheFrozenIdentity(): void

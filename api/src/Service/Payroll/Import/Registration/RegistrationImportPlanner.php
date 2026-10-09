@@ -724,6 +724,7 @@ final class RegistrationImportPlanner
         $manual = 'Doplňte je s datem změny na kartě osoby v historii jména (Identita a adresy → Historie jména), '
             . 'aby je další podání REGZEC nesla.';
         $known = [];
+        $matched = [];
         if ($employeeId !== null) {
             try {
                 $today = date('Y-m-d');
@@ -739,13 +740,18 @@ final class RegistrationImportPlanner
                         $current,
                     ));
                 }
+                // Cizí program může v `ona` uvést i rodné příjmení, které ale
+                // evidence vede ve vlastním údaji, ne v historii jména.
+                $birth = trim((string) ($identity['birth_surname'] ?? ''));
+                $matched = $birth === '' ? $known : [...$known, $birth];
             } catch (\DomainException) {
                 $known = [];
+                $matched = [];
             }
         }
         $missing = array_values(array_filter(
             $stated,
-            static fn (string $name): bool => !in_array(mb_strtolower($name), array_map('mb_strtolower', $known), true),
+            static fn (string $name): bool => !in_array(mb_strtolower($name), array_map('mb_strtolower', $matched), true),
         ));
         if ($missing === []) {
             return;

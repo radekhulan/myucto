@@ -80,10 +80,13 @@ final class PayrollRegistrationIdentityRepository
 
     /**
      * Dřívější příjmení osoby k danému dni (ID 10064): příjmení z dřívějších
-     * záznamů historie jména, bez aktuálního příjmení, od nejnovějšího,
-     * oddělená čárkou. `null`, když žádné nejsou. Rodné příjmení se
-     * nevynechává: bylo dřívějším příjmením a přijatá podání jiných programů
-     * ho v tomto atributu uvádějí.
+     * záznamů historie jména, bez aktuálního a bez rodného příjmení, od
+     * nejnovějšího, oddělená čárkou. `null`, když žádné nejsou. Rodné
+     * příjmení nese vlastní atribut `birth/@nam` (ID 10063), a proto ho EDV
+     * 1.4.0.6 („všechna další předchozí příjmení vyjma rodného") i Zásady
+     * REGZEC 1.4.6 („bez aktuálního příjmení a rodného") z `ona` vylučují.
+     * Rodné příjmení se v čase nemění, vylučuje se tedy podle kteréhokoli
+     * záznamu historie, i když ho evidence doplnila až později.
      *
      * Atribut má v REGZEC25 nejvýš 100 znaků; vejdou se jen celá příjmení,
      * nejstarší případně vypadnou (nikdy se příjmení neuřízne).
@@ -96,21 +99,29 @@ final class PayrollRegistrationIdentityRepository
         bool $forUpdate = false,
     ): ?string {
         $statement = $this->db->pdo()->prepare(
-            'SELECT last_name
+            'SELECT last_name, birth_surname, effective_from
                FROM payroll_person_identity_history
               WHERE supplier_id = ?
                 AND employee_id = ?
-                AND effective_from <= ?
-                AND last_name IS NOT NULL
               ORDER BY effective_from DESC, id DESC'
             . ($forUpdate ? ' FOR UPDATE' : '')
         );
-        $statement->execute([$supplierId, $employeeId, $onDate]);
+        $statement->execute([$supplierId, $employeeId]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
         $excluded = [mb_strtolower(trim($currentSurname))];
+        foreach ($rows as $row) {
+            $birth = trim((string) ($row['birth_surname'] ?? ''));
+            if ($birth !== '') {
+                $excluded[] = mb_strtolower($birth);
+            }
+        }
         $names = [];
         $length = 0;
-        foreach ($statement->fetchAll(PDO::FETCH_COLUMN) as $raw) {
-            $name = trim((string) $raw);
+        foreach ($rows as $row) {
+            if ((string) $row['effective_from'] > $onDate) {
+                continue;
+            }
+            $name = trim((string) ($row['last_name'] ?? ''));
             $key = mb_strtolower($name);
             if ($name === '' || in_array($key, $excluded, true)) {
                 continue;

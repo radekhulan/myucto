@@ -280,8 +280,10 @@ final class PayrollRegistrationLifecycleFlowTest extends TestCase
         self::assertTrue($a3['fileable'], CanonicalJson::encode($a3));
         self::assertSame('2026-11-28', $a3['due_on']);
         self::assertSame('2026-11-01', $a3['effective_on']);
+        // Dřívější „Registrační" je zároveň rodné příjmení: to nese vlastní
+        // atribut (ID 10063) a do dřívějších příjmení (ID 10064) nepatří.
         self::assertSame(
-            ['first_name' => 'Petra', 'last_name' => 'Nová', 'previous_surnames' => 'Registrační'],
+            ['first_name' => 'Petra', 'last_name' => 'Nová'],
             $a3['changes']['identity'],
         );
 
