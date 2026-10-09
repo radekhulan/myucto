@@ -878,6 +878,37 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertContains(248, $this->failedIds($report));
     }
 
+    /** @return iterable<string,array{string}> */
+    public static function nonPrimaryFormTypes(): iterable
+    {
+        yield 'činnost KS' => ['cinnostKS'];
+        yield 'odložený příjem' => ['odlozenyPrijem'];
+    }
+
+    /**
+     * IN37 (10495 = NE) odebírá souhrnná data zaměstnance i z formulářů
+     * činnosti KS a odloženého příjmu: kontrola 248 je u druhého vztahu
+     * téže osoby odmítne, u primárního vztahu je ponechá.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('nonPrimaryFormTypes')]
+    public function testSummaryDataOnNonPrimaryEmploymentIsRefusedOnOtherForms(string $formType): void
+    {
+        $secondary = str_replace(
+            ['<form:bezPriznaku>', '</form:bezPriznaku>'],
+            ["<form:{$formType}>", "</form:{$formType}>"],
+            JmhzXmlSample::form('1000000012', '2000000000000000000002', primary: false),
+        );
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001') . $secondary,
+            formCount: 4,
+        ));
+        self::assertContains(248, $this->failedIds($report));
+
+        $primary = str_replace('<primarniPpv>false</primarniPpv>', '<primarniPpv>true</primarniPpv>', $secondary);
+        $report = $this->validate(JmhzXmlSample::document($primary, formCount: 2));
+        self::assertNotContains(248, $this->failedIds($report));
+    }
+
     public function testDeclaredFormCountMustMatchReality(): void
     {
         $report = $this->validate(JmhzXmlSample::document(
