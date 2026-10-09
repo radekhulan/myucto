@@ -187,7 +187,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         // Skutečný nástup, ne sjednaný.
         self::assertStringContainsString('<zamestnanOd>2025-10-06</zamestnanOd>', $xml);
         // Dítě z evidence vyživovaných osob i s odhaleným rodným číslem.
-        self::assertStringContainsString('<rodneCislo>1501010007</rodneCislo>', $xml);
+        self::assertStringContainsString('<rodneCislo>1501010005</rodneCislo>', $xml);
         self::assertStringContainsString('<jmeno>Dítě</jmeno>', $xml);
         // Rozhodné období nese všechny měsíce (i leden 2026, který pokrylo
         // měsíční hlášení) a oba součty — DV NEMPRI25, kontroly 7 a 8.
@@ -1009,7 +1009,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
         )->execute([$this->supplierId, $employeeId]);
         $dependantId = (int) $pdo->lastInsertId();
         $sealed = $this->sensitive()->seal(
-            '1501010007',
+            '1501010005',
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
             $this->supplierId,
             $dependantId,

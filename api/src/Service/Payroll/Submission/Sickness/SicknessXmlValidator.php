@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
 use DOMDocument;
 use MyInvoice\Service\Bank\CzechBankCodeRegistry;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
+use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 
 /**
@@ -972,6 +973,21 @@ final readonly class SicknessXmlValidator
                 'nempri_person_birth_number_invalid',
                 'Rodné číslo dítěte nebo ošetřované osoby musí mít 9 nebo 10 číslic.',
             );
+        }
+        // DV NEMPRI25, LK 4: rodné číslo musí projít modulo 11 a nést platné
+        // datum. EČP (den zvýšený o 40) se tu neověřuje, prvek ho připouští.
+        if ($person->birthNumber !== null
+            && (int) substr($person->birthNumber, 4, 2) <= 40
+        ) {
+            try {
+                CzechBirthNumber::normalize($person->birthNumber);
+            } catch (\InvalidArgumentException $exception) {
+                $this->invalid(
+                    'nempri_person_birth_number_invalid',
+                    'Rodné číslo dítěte nebo ošetřované osoby není platné: '
+                        . $exception->getMessage(),
+                );
+            }
         }
         if ($person->birthNumber === null && $person->birthDate === null) {
             $this->invalid(

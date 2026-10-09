@@ -60,7 +60,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         self::assertStringContainsString('<onemocnela>true</onemocnela>', $xml);
         self::assertStringContainsString('<kodRodVztah>PL</kodRodVztah>', $xml);
         self::assertStringContainsString('<odeDne>2026-09-07</odeDne>', $xml);
-        self::assertStringContainsString('<rodneCislo>1501010007</rodneCislo>', $xml);
+        self::assertStringContainsString('<rodneCislo>1501010005</rodneCislo>', $xml);
         self::assertStringContainsString('<pecovalVeDnech>', $xml);
         self::assertStringContainsString('<planovaneSmeny>true</planovaneSmeny>', $xml);
         // Potvrzení zaměstnavatele u OSE: převedení PŘED pracovním volnem.
@@ -494,7 +494,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             actionEnd: $actionEnd,
             fromDate: '2026-09-07',
             toDate: '2026-09-11',
-            person: $person ? new NempriPerson('Dítě', 'Testovací', '1501010007', null) : null,
+            person: $person ? new NempriPerson('Dítě', 'Testovací', '1501010005', null) : null,
             careReason: $careReason,
             schoolName: $schoolName,
             schoolBusinessId: $schoolBusinessId,
