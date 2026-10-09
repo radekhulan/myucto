@@ -884,16 +884,17 @@ trait PayrollFullFlowTrait
      */
     private function recordWorkedDays(int $employmentId, array $dates, int $workedMinutes = 480): int
     {
-        $monthVersion = 0;
+        // Měsíc už může mít verzi (např. kalendář založený v témže měsíci).
+        $monthVersion = $dates === [] ? 0 : $this->timeMonthRowVersion($employmentId, substr($dates[0], 0, 7));
         foreach ($dates as $date) {
-            $end = (new \DateTimeImmutable("{$date} 08:00:00"))
-                ->modify('+' . ($workedMinutes + 30) . ' minutes')
-                ->format('H:i:s');
+            // Posun podle data: v zimních měsících platí +01:00, v letních +02:00.
+            $start = new \DateTimeImmutable("{$date} 08:00:00", new \DateTimeZone('Europe/Prague'));
+            $end = $start->modify('+' . ($workedMinutes + 30) . ' minutes');
             $entry = $this->time->entry(
                 $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
                     'employment_id' => $employmentId,
-                    'starts_at' => "{$date}T08:00:00+02:00",
-                    'ends_at' => "{$date}T{$end}+02:00",
+                    'starts_at' => $start->format('Y-m-d\TH:i:sP'),
+                    'ends_at' => $end->format('Y-m-d\TH:i:sP'),
                     'timezone' => 'Europe/Prague',
                     'category' => 'regular',
                     'break_minutes' => 30,
