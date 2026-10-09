@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Migration\Premier;
 
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierPayroll;
+use MyInvoice\Service\Migration\Premier\PremierPayrollDeductions;
 use MyInvoice\Service\Migration\Premier\PremierPayrollTakeover;
 use MyInvoice\Service\Migration\Premier\PremierPayrollTime;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
@@ -43,6 +44,29 @@ final class PremierPayrollTimeTest extends TestCase
             'Srážky (702, 750) nepřítomnostmi nejsou.');
         self::assertSame(['balance' => 155.0, 'taken' => 38.75], $time['leave'][5]['2025-12']);
         self::assertSame([['from' => '2025-11-10', 'to' => '2026-01-20', 'kind' => 'DPN']], $time['sickness'][5]);
+    }
+
+    /**
+     * Brána G1: složka z řady nepřítomností, kterou převod nezná, i karta srážek s neznámou
+     * složkou se vrátí k varování v protokolu. Náhrada za svátek (510) nepřítomnost vědomě
+     * není a varování nevyvolá, stejně jako osobní ohodnocení (303) na kartě srážek.
+     */
+    public function testUnknownAbsenceAndDeductionCodesAreReportedNotDroppedSilently(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_time_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true, 'payroll_unknown_codes' => true]);
+        $backup = PremierBackup::open($this->tmp);
+
+        self::assertSame(['557' => 1], PremierPayrollTime::unknownAbsenceCodes($backup));
+        self::assertSame(['721' => 1], PremierPayrollDeductions::unknownCodes($backup));
+    }
+
+    public function testKnownCodesRaiseNoUnknownCodeWarning(): void
+    {
+        $backup = $this->backup();
+
+        self::assertSame([], PremierPayrollTime::unknownAbsenceCodes($backup));
+        self::assertSame([], PremierPayrollDeductions::unknownCodes($backup));
     }
 
     public function testTakeoverSelectsTransferredYearAndContinuesSickness(): void

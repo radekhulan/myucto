@@ -1,0 +1,1611 @@
+{
+    "meta": {
+        "source": "money-s3",
+        "program": "Money S3 (záloha agendy .lz, tabulky .DAT), mzdová část",
+        "style": "ms3_rows",
+        "readers": [
+            "api/src/Service/Migration/MoneyS3/PayrollImporter.php",
+            "api/src/Service/Migration/MoneyS3/MoneyS3PayrollLedger.php",
+            "api/src/Service/Migration/MoneyS3/MoneyS3PayrollPostingMap.php",
+            "api/src/Service/Migration/MoneyS3/MoneyS3PayrollTotals.php"
+        ],
+        "scope": "Tabulky mezd (Mz*, Zamest, SzMzPod, VyucDPFO) a všechny, které mzdový krok čte. Ostatní tabulky pokrývá převod účetnictví.",
+        "unknown_items": "Mzdový krok zaměstnance ani mzdy osob nepřevádí; protokol vždy vypíše upozornění payroll_people (převzetí z podání JMHZ). Mzdový doklad deníku bez rozpoznaného druhu zůstane v deníku převedený 1:1 a do návrhu kontací nejde.",
+        "verified_against": [
+            "čtyři zálohy agend Money S3 skupiny firem (2012-2026), 171 tabulek, z toho 22 mzdových"
+        ],
+        "limits": "Sloupec se přiřazuje k tabulce podle souborů čtečky, které čtou tabulku i sloupec (statické čtení)."
+    },
+    "tables": {
+        "IntDokl": {
+            "rows_seen": 459,
+            "status": "mapped",
+            "target": "příznak mzdového dokladu (MZTyp, MZRok, MZMesic, MZDI_Zauct) pro návrh kontací",
+            "readers": [
+                "MoneyS3PayrollLedger"
+            ],
+            "ignored_columns_reason": "Mzdový krok sloupec nečte: účetní stránku dokladu převádí převod deníku 1:1, mzdový krok z něj bere jen to, co potřebuje k návrhu kontací a kontrolním úhrnům.",
+            "columns": {
+                "$LS11": {
+                    "status": "ignored"
+                },
+                "AdCislo": {
+                    "status": "ignored"
+                },
+                "AdDIC": {
+                    "status": "ignored"
+                },
+                "AdICO": {
+                    "status": "ignored"
+                },
+                "AdMesto": {
+                    "status": "ignored"
+                },
+                "AdNazev": {
+                    "status": "ignored"
+                },
+                "AdPSC": {
+                    "status": "ignored"
+                },
+                "AdStat": {
+                    "status": "ignored"
+                },
+                "AdUlice": {
+                    "status": "ignored"
+                },
+                "Celkem": {
+                    "status": "ignored"
+                },
+                "Cinnost": {
+                    "status": "ignored"
+                },
+                "Cislo": {
+                    "status": "ignored"
+                },
+                "CisloZapoc": {
+                    "status": "ignored"
+                },
+                "Cleneni": {
+                    "status": "ignored"
+                },
+                "DCislo": {
+                    "status": "ignored"
+                },
+                "DPHSS": {
+                    "status": "ignored"
+                },
+                "DPHZS": {
+                    "status": "ignored"
+                },
+                "DPH_3": {
+                    "status": "ignored"
+                },
+                "DPH_4": {
+                    "status": "ignored"
+                },
+                "DPH_5": {
+                    "status": "ignored"
+                },
+                "DPH_6": {
+                    "status": "ignored"
+                },
+                "DRada": {
+                    "status": "ignored"
+                },
+                "DatPln": {
+                    "status": "ignored"
+                },
+                "DatPor": {
+                    "status": "ignored"
+                },
+                "DatUcPr": {
+                    "status": "ignored"
+                },
+                "DatUplDPH": {
+                    "status": "ignored"
+                },
+                "Del": {
+                    "status": "ignored"
+                },
+                "Doklad": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Dokumenty": {
+                    "status": "ignored"
+                },
+                "EETCislo": {
+                    "status": "ignored"
+                },
+                "EMail": {
+                    "status": "ignored"
+                },
+                "KorekceCen": {
+                    "status": "ignored"
+                },
+                "Kurs": {
+                    "status": "ignored"
+                },
+                "MZDI_Zauct": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MZMesic": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MZRok": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MZTyp": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Mena": {
+                    "status": "ignored"
+                },
+                "Neuctovat": {
+                    "status": "ignored"
+                },
+                "NoExpImp": {
+                    "status": "ignored"
+                },
+                "ParSym": {
+                    "status": "ignored"
+                },
+                "PocetJedn": {
+                    "status": "ignored"
+                },
+                "Popis": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "PorDPH_1": {
+                    "status": "ignored"
+                },
+                "PorDPH_2": {
+                    "status": "ignored"
+                },
+                "PovahDPH_3": {
+                    "status": "ignored"
+                },
+                "PovahDPH_4": {
+                    "status": "ignored"
+                },
+                "PovahDPH_5": {
+                    "status": "ignored"
+                },
+                "PovahDPH_6": {
+                    "status": "ignored"
+                },
+                "Pozn": {
+                    "status": "ignored"
+                },
+                "PrKont": {
+                    "status": "ignored"
+                },
+                "PrijatDokl": {
+                    "status": "ignored"
+                },
+                "Rezim": {
+                    "status": "ignored"
+                },
+                "SSazba": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_3": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_4": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_5": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_6": {
+                    "status": "ignored"
+                },
+                "Slave": {
+                    "status": "ignored"
+                },
+                "StatMOSS": {
+                    "status": "ignored"
+                },
+                "Storno": {
+                    "status": "ignored"
+                },
+                "Stred": {
+                    "status": "ignored"
+                },
+                "Telefon": {
+                    "status": "ignored"
+                },
+                "TimPor": {
+                    "status": "ignored"
+                },
+                "TypDokl": {
+                    "status": "ignored"
+                },
+                "TypOp": {
+                    "status": "ignored"
+                },
+                "Uzamceni": {
+                    "status": "ignored"
+                },
+                "ValutyDPH1": {
+                    "status": "ignored"
+                },
+                "ValutyDPH2": {
+                    "status": "ignored"
+                },
+                "ValutyDPH3": {
+                    "status": "ignored"
+                },
+                "ValutyDPH4": {
+                    "status": "ignored"
+                },
+                "ValutyDPH5": {
+                    "status": "ignored"
+                },
+                "ValutyDPH6": {
+                    "status": "ignored"
+                },
+                "ValutyKUhr": {
+                    "status": "ignored"
+                },
+                "ValutyZak0": {
+                    "status": "ignored"
+                },
+                "ValutyZak1": {
+                    "status": "ignored"
+                },
+                "ValutyZak2": {
+                    "status": "ignored"
+                },
+                "ValutyZak3": {
+                    "status": "ignored"
+                },
+                "ValutyZak4": {
+                    "status": "ignored"
+                },
+                "ValutyZak5": {
+                    "status": "ignored"
+                },
+                "ValutyZak6": {
+                    "status": "ignored"
+                },
+                "VarSym": {
+                    "status": "ignored"
+                },
+                "Version": {
+                    "status": "ignored"
+                },
+                "Vyroba": {
+                    "status": "ignored"
+                },
+                "Vyst": {
+                    "status": "ignored"
+                },
+                "ZSazba": {
+                    "status": "ignored"
+                },
+                "Zakazka": {
+                    "status": "ignored"
+                },
+                "Zakl0": {
+                    "status": "ignored"
+                },
+                "ZaklSS": {
+                    "status": "ignored"
+                },
+                "ZaklZS": {
+                    "status": "ignored"
+                },
+                "Zaklad_3": {
+                    "status": "ignored"
+                },
+                "Zaklad_4": {
+                    "status": "ignored"
+                },
+                "Zaklad_5": {
+                    "status": "ignored"
+                },
+                "Zaklad_6": {
+                    "status": "ignored"
+                },
+                "ZpVypDPH": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "KnihZav": {
+            "rows_seen": 930,
+            "status": "mapped",
+            "target": "příznak mzdového dokladu v knize závazků (výplaty, odvody)",
+            "readers": [
+                "MoneyS3PayrollLedger"
+            ],
+            "ignored_columns_reason": "Mzdový krok sloupec nečte: účetní stránku dokladu převádí převod deníku 1:1, mzdový krok z něj bere jen to, co potřebuje k návrhu kontací a kontrolním úhrnům.",
+            "columns": {
+                "$LS17": {
+                    "status": "ignored"
+                },
+                "AdCislo": {
+                    "status": "ignored"
+                },
+                "AdDIC": {
+                    "status": "ignored"
+                },
+                "AdICO": {
+                    "status": "ignored"
+                },
+                "AdMesto": {
+                    "status": "ignored"
+                },
+                "AdNazev": {
+                    "status": "ignored"
+                },
+                "AdPSC": {
+                    "status": "ignored"
+                },
+                "AdStat": {
+                    "status": "ignored"
+                },
+                "AdUlice": {
+                    "status": "ignored"
+                },
+                "BarCode": {
+                    "status": "ignored"
+                },
+                "Celkem": {
+                    "status": "ignored"
+                },
+                "Cinnost": {
+                    "status": "ignored"
+                },
+                "Cislo": {
+                    "status": "ignored"
+                },
+                "Cleneni": {
+                    "status": "ignored"
+                },
+                "DCislo": {
+                    "status": "ignored"
+                },
+                "DPHSS": {
+                    "status": "ignored"
+                },
+                "DPHZS": {
+                    "status": "ignored"
+                },
+                "DPH_3": {
+                    "status": "ignored"
+                },
+                "DPH_4": {
+                    "status": "ignored"
+                },
+                "DPH_5": {
+                    "status": "ignored"
+                },
+                "DPH_6": {
+                    "status": "ignored"
+                },
+                "DRada": {
+                    "status": "ignored"
+                },
+                "DatPln": {
+                    "status": "ignored"
+                },
+                "DatPor": {
+                    "status": "ignored"
+                },
+                "DatSpl": {
+                    "status": "ignored"
+                },
+                "DatUcPr": {
+                    "status": "ignored"
+                },
+                "DatUpom1": {
+                    "status": "ignored"
+                },
+                "DatUpom2": {
+                    "status": "ignored"
+                },
+                "DatUpomL": {
+                    "status": "ignored"
+                },
+                "DatVyst": {
+                    "status": "ignored"
+                },
+                "Dbrpis": {
+                    "status": "ignored"
+                },
+                "Del": {
+                    "status": "ignored"
+                },
+                "DobrDUZP": {
+                    "status": "ignored"
+                },
+                "Doklad": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Dokumenty": {
+                    "status": "ignored"
+                },
+                "Doruceno": {
+                    "status": "ignored"
+                },
+                "Dummy": {
+                    "status": "ignored"
+                },
+                "EMail": {
+                    "status": "ignored"
+                },
+                "KonSym": {
+                    "status": "ignored"
+                },
+                "KorekceCen": {
+                    "status": "ignored"
+                },
+                "Kurs": {
+                    "status": "ignored"
+                },
+                "MZDI_Zauct": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MZMesic": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MZRok": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MZTyp": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Mena": {
+                    "status": "ignored"
+                },
+                "Neuctovat": {
+                    "status": "ignored"
+                },
+                "NoExpImp": {
+                    "status": "ignored"
+                },
+                "OdbBanSpoj": {
+                    "status": "ignored"
+                },
+                "PUDatum": {
+                    "status": "ignored"
+                },
+                "PUZbyva": {
+                    "status": "ignored"
+                },
+                "ParSym": {
+                    "status": "ignored"
+                },
+                "PocetJedn": {
+                    "status": "ignored"
+                },
+                "Popis": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "PorDPH_1": {
+                    "status": "ignored"
+                },
+                "PorDPH_2": {
+                    "status": "ignored"
+                },
+                "PovahDPH_3": {
+                    "status": "ignored"
+                },
+                "PovahDPH_4": {
+                    "status": "ignored"
+                },
+                "PovahDPH_5": {
+                    "status": "ignored"
+                },
+                "PovahDPH_6": {
+                    "status": "ignored"
+                },
+                "Pozn": {
+                    "status": "ignored"
+                },
+                "PrDokl": {
+                    "status": "ignored"
+                },
+                "PrKont": {
+                    "status": "ignored"
+                },
+                "PrevUcZadr": {
+                    "status": "ignored"
+                },
+                "ProZamest": {
+                    "status": "ignored"
+                },
+                "Rezim": {
+                    "status": "ignored"
+                },
+                "SSazba": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_3": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_4": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_5": {
+                    "status": "ignored"
+                },
+                "SazbaDPH_6": {
+                    "status": "ignored"
+                },
+                "Slave": {
+                    "status": "ignored"
+                },
+                "SmzPKont": {
+                    "status": "ignored"
+                },
+                "SmzsMesic": {
+                    "status": "ignored"
+                },
+                "SmzsRok": {
+                    "status": "ignored"
+                },
+                "SpecSym": {
+                    "status": "ignored"
+                },
+                "Storno": {
+                    "status": "ignored"
+                },
+                "Stred": {
+                    "status": "ignored"
+                },
+                "Telefon": {
+                    "status": "ignored"
+                },
+                "TimPor": {
+                    "status": "ignored"
+                },
+                "TypDokl": {
+                    "status": "ignored"
+                },
+                "TypOp": {
+                    "status": "ignored"
+                },
+                "TypPojis": {
+                    "status": "ignored"
+                },
+                "UcPokl": {
+                    "status": "ignored"
+                },
+                "UhDatum": {
+                    "status": "ignored"
+                },
+                "UhDokl": {
+                    "status": "ignored"
+                },
+                "UhZbyva": {
+                    "status": "ignored"
+                },
+                "UpomPocet": {
+                    "status": "ignored"
+                },
+                "Uzamceni": {
+                    "status": "ignored"
+                },
+                "ValutyDPH1": {
+                    "status": "ignored"
+                },
+                "ValutyDPH2": {
+                    "status": "ignored"
+                },
+                "ValutyDPH3": {
+                    "status": "ignored"
+                },
+                "ValutyDPH4": {
+                    "status": "ignored"
+                },
+                "ValutyDPH5": {
+                    "status": "ignored"
+                },
+                "ValutyDPH6": {
+                    "status": "ignored"
+                },
+                "ValutyKUhr": {
+                    "status": "ignored"
+                },
+                "ValutyProp": {
+                    "status": "ignored"
+                },
+                "ValutyZak0": {
+                    "status": "ignored"
+                },
+                "ValutyZak1": {
+                    "status": "ignored"
+                },
+                "ValutyZak2": {
+                    "status": "ignored"
+                },
+                "ValutyZak3": {
+                    "status": "ignored"
+                },
+                "ValutyZak4": {
+                    "status": "ignored"
+                },
+                "ValutyZak5": {
+                    "status": "ignored"
+                },
+                "ValutyZak6": {
+                    "status": "ignored"
+                },
+                "VarSym": {
+                    "status": "ignored"
+                },
+                "Version": {
+                    "status": "ignored"
+                },
+                "Vyst": {
+                    "status": "ignored"
+                },
+                "ZSazba": {
+                    "status": "ignored"
+                },
+                "Zakazka": {
+                    "status": "ignored"
+                },
+                "Zakl0": {
+                    "status": "ignored"
+                },
+                "ZaklSS": {
+                    "status": "ignored"
+                },
+                "ZaklZS": {
+                    "status": "ignored"
+                },
+                "Zaklad_3": {
+                    "status": "ignored"
+                },
+                "Zaklad_4": {
+                    "status": "ignored"
+                },
+                "Zaklad_5": {
+                    "status": "ignored"
+                },
+                "Zaklad_6": {
+                    "status": "ignored"
+                },
+                "ZamStrID": {
+                    "status": "ignored"
+                },
+                "ZpVypDPH": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "MzDavky": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "Mzdy": {
+            "rows_seen": 19,
+            "status": "mapped",
+            "target": "kontrolní úhrny měsíce celé firmy (MoneyS3PayrollTotals), poslední měsíc s mzdou osob",
+            "readers": [
+                "MoneyS3PayrollLedger"
+            ],
+            "ignored_columns_reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací). Z mzdy se čte jen období a úhrny pro kontrolu.",
+            "columns": {
+                "CISTA": {
+                    "status": "ignored"
+                },
+                "DPNavysZ": {
+                    "status": "ignored"
+                },
+                "DPSrazkova": {
+                    "status": "ignored"
+                },
+                "DPZaklNav": {
+                    "status": "ignored"
+                },
+                "DPZaklad": {
+                    "status": "ignored"
+                },
+                "DPZaloha": {
+                    "status": "ignored"
+                },
+                "DPZalohova": {
+                    "status": "ignored"
+                },
+                "DaJin": {
+                    "status": "ignored"
+                },
+                "DaJinPopis": {
+                    "status": "ignored"
+                },
+                "DalMatDny": {
+                    "status": "ignored"
+                },
+                "DalMatHod": {
+                    "status": "ignored"
+                },
+                "DalMatKal": {
+                    "status": "ignored"
+                },
+                "Dokumenty": {
+                    "status": "ignored"
+                },
+                "DovolDny": {
+                    "status": "ignored"
+                },
+                "DovolHod": {
+                    "status": "ignored"
+                },
+                "DovolNahr": {
+                    "status": "ignored"
+                },
+                "DpNDny": {
+                    "status": "ignored"
+                },
+                "DpNHod": {
+                    "status": "ignored"
+                },
+                "DpNKal": {
+                    "status": "ignored"
+                },
+                "DuchPoj": {
+                    "status": "ignored"
+                },
+                "DuchPojSaz": {
+                    "status": "ignored"
+                },
+                "DuchPojZak": {
+                    "status": "ignored"
+                },
+                "HRUBA": {
+                    "status": "ignored"
+                },
+                "HodMzda": {
+                    "status": "ignored"
+                },
+                "HodVHod": {
+                    "status": "ignored"
+                },
+                "HodVMes": {
+                    "status": "ignored"
+                },
+                "JNahrDny": {
+                    "status": "ignored"
+                },
+                "JNahrHod": {
+                    "status": "ignored"
+                },
+                "JNahrNahr": {
+                    "status": "ignored"
+                },
+                "JNahrPopis": {
+                    "status": "ignored"
+                },
+                "JNeprDny": {
+                    "status": "ignored"
+                },
+                "JNeprHod": {
+                    "status": "ignored"
+                },
+                "JNeprPopis": {
+                    "status": "ignored"
+                },
+                "Jmeno": {
+                    "status": "ignored"
+                },
+                "KalDnu": {
+                    "status": "ignored"
+                },
+                "KaranDny": {
+                    "status": "ignored"
+                },
+                "KaranHod": {
+                    "status": "ignored"
+                },
+                "KaranKal": {
+                    "status": "ignored"
+                },
+                "KarantNahr": {
+                    "status": "ignored"
+                },
+                "MRozsah": {
+                    "status": "ignored"
+                },
+                "MaterDavky": {
+                    "status": "ignored"
+                },
+                "MaterDny": {
+                    "status": "ignored"
+                },
+                "MaterHod": {
+                    "status": "ignored"
+                },
+                "MaterKal": {
+                    "status": "ignored"
+                },
+                "MesMzda": {
+                    "status": "ignored"
+                },
+                "MesNaHod": {
+                    "status": "ignored"
+                },
+                "Mesic": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "MzdaSlozky": {
+                    "status": "ignored"
+                },
+                "NAbsDny": {
+                    "status": "ignored"
+                },
+                "NAbsHod": {
+                    "status": "ignored"
+                },
+                "NAbsKal": {
+                    "status": "ignored"
+                },
+                "NVolnoDny": {
+                    "status": "ignored"
+                },
+                "NVolnoHod": {
+                    "status": "ignored"
+                },
+                "NVolnoKal": {
+                    "status": "ignored"
+                },
+                "NemDavky": {
+                    "status": "ignored"
+                },
+                "NemocDny": {
+                    "status": "ignored"
+                },
+                "NemocHod": {
+                    "status": "ignored"
+                },
+                "NemocKal": {
+                    "status": "ignored"
+                },
+                "NemocNahr": {
+                    "status": "ignored"
+                },
+                "NezdCInv": {
+                    "status": "ignored"
+                },
+                "NezdDavky": {
+                    "status": "ignored"
+                },
+                "NezdDeti": {
+                    "status": "ignored"
+                },
+                "NezdPInv": {
+                    "status": "ignored"
+                },
+                "NezdStud": {
+                    "status": "ignored"
+                },
+                "NezdUroky": {
+                    "status": "ignored"
+                },
+                "NezdZTPP": {
+                    "status": "ignored"
+                },
+                "NezdZakl": {
+                    "status": "ignored"
+                },
+                "OCRDavky": {
+                    "status": "ignored"
+                },
+                "OCRDny": {
+                    "status": "ignored"
+                },
+                "OCRHod": {
+                    "status": "ignored"
+                },
+                "OCRKal": {
+                    "status": "ignored"
+                },
+                "OdJin": {
+                    "status": "ignored"
+                },
+                "OdJinPopis": {
+                    "status": "ignored"
+                },
+                "Odmeny": {
+                    "status": "ignored"
+                },
+                "OdprDnu": {
+                    "status": "ignored"
+                },
+                "OdprHod": {
+                    "status": "ignored"
+                },
+                "OsCislo": {
+                    "status": "ignored"
+                },
+                "OtcovDnu": {
+                    "status": "ignored"
+                },
+                "OtcovHod": {
+                    "status": "ignored"
+                },
+                "OtcovKal": {
+                    "status": "ignored"
+                },
+                "ParagDny": {
+                    "status": "ignored"
+                },
+                "ParagHod": {
+                    "status": "ignored"
+                },
+                "ParagNahr": {
+                    "status": "ignored"
+                },
+                "PoJin": {
+                    "status": "ignored"
+                },
+                "PoJinPopis": {
+                    "status": "ignored"
+                },
+                "PojZamL": {
+                    "status": "ignored"
+                },
+                "Pokuty": {
+                    "status": "ignored"
+                },
+                "Pozn": {
+                    "status": "ignored"
+                },
+                "PracDnu": {
+                    "status": "ignored"
+                },
+                "PracHod": {
+                    "status": "ignored"
+                },
+                "PracPom": {
+                    "status": "ignored"
+                },
+                "Premie": {
+                    "status": "ignored"
+                },
+                "PremieProc": {
+                    "status": "ignored"
+                },
+                "PremieZakl": {
+                    "status": "ignored"
+                },
+                "PreplDPFO": {
+                    "status": "ignored"
+                },
+                "PriCastka1": {
+                    "status": "ignored"
+                },
+                "PriCastka2": {
+                    "status": "ignored"
+                },
+                "PriCastka3": {
+                    "status": "ignored"
+                },
+                "PriCastka4": {
+                    "status": "ignored"
+                },
+                "PriCastka5": {
+                    "status": "ignored"
+                },
+                "PriCastka6": {
+                    "status": "ignored"
+                },
+                "PriCastka7": {
+                    "status": "ignored"
+                },
+                "PriCastka8": {
+                    "status": "ignored"
+                },
+                "PriMP": {
+                    "status": "ignored"
+                },
+                "PriMPPopis": {
+                    "status": "ignored"
+                },
+                "PripHodin1": {
+                    "status": "ignored"
+                },
+                "PripHodin2": {
+                    "status": "ignored"
+                },
+                "PripHodin3": {
+                    "status": "ignored"
+                },
+                "PripHodin4": {
+                    "status": "ignored"
+                },
+                "PripHodin5": {
+                    "status": "ignored"
+                },
+                "PripHodin6": {
+                    "status": "ignored"
+                },
+                "PripHodin7": {
+                    "status": "ignored"
+                },
+                "PripHodin8": {
+                    "status": "ignored"
+                },
+                "PripPopis1": {
+                    "status": "ignored"
+                },
+                "PripPopis2": {
+                    "status": "ignored"
+                },
+                "PripPopis3": {
+                    "status": "ignored"
+                },
+                "PripPopis4": {
+                    "status": "ignored"
+                },
+                "PripPopis5": {
+                    "status": "ignored"
+                },
+                "PripPopis6": {
+                    "status": "ignored"
+                },
+                "PripPopis7": {
+                    "status": "ignored"
+                },
+                "PripPopis8": {
+                    "status": "ignored"
+                },
+                "PripSazba1": {
+                    "status": "ignored"
+                },
+                "PripSazba2": {
+                    "status": "ignored"
+                },
+                "PripSazba3": {
+                    "status": "ignored"
+                },
+                "PripSazba4": {
+                    "status": "ignored"
+                },
+                "PripSazba5": {
+                    "status": "ignored"
+                },
+                "PripSazba6": {
+                    "status": "ignored"
+                },
+                "PripSazba7": {
+                    "status": "ignored"
+                },
+                "PripSazba8": {
+                    "status": "ignored"
+                },
+                "PripTyp1": {
+                    "status": "ignored"
+                },
+                "PripTyp2": {
+                    "status": "ignored"
+                },
+                "PripTyp3": {
+                    "status": "ignored"
+                },
+                "PripTyp4": {
+                    "status": "ignored"
+                },
+                "PripTyp5": {
+                    "status": "ignored"
+                },
+                "PripTyp6": {
+                    "status": "ignored"
+                },
+                "PripTyp7": {
+                    "status": "ignored"
+                },
+                "PripTyp8": {
+                    "status": "ignored"
+                },
+                "PripZkrat1": {
+                    "status": "ignored"
+                },
+                "PripZkrat2": {
+                    "status": "ignored"
+                },
+                "PripZkrat3": {
+                    "status": "ignored"
+                },
+                "PripZkrat4": {
+                    "status": "ignored"
+                },
+                "PripZkrat5": {
+                    "status": "ignored"
+                },
+                "PripZkrat6": {
+                    "status": "ignored"
+                },
+                "PripZkrat7": {
+                    "status": "ignored"
+                },
+                "PripZkrat8": {
+                    "status": "ignored"
+                },
+                "PropDovDny": {
+                    "status": "ignored"
+                },
+                "PropDovHod": {
+                    "status": "ignored"
+                },
+                "PropDvNahr": {
+                    "status": "ignored"
+                },
+                "PrumNahr": {
+                    "status": "ignored"
+                },
+                "Rok": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "SazbaHod": {
+                    "status": "ignored"
+                },
+                "SazbaMes": {
+                    "status": "ignored"
+                },
+                "SlevDanSpo": {
+                    "status": "ignored"
+                },
+                "SlevaNaDan": {
+                    "status": "ignored"
+                },
+                "SocDavky": {
+                    "status": "ignored"
+                },
+                "SocPSazPSl": {
+                    "status": "ignored"
+                },
+                "SocPSazPod": {
+                    "status": "ignored"
+                },
+                "SocPZPrSlv": {
+                    "status": "ignored"
+                },
+                "SocPZSlevM": {
+                    "status": "ignored"
+                },
+                "SocPZSleva": {
+                    "status": "ignored"
+                },
+                "SocPZakZSl": {
+                    "status": "ignored"
+                },
+                "SocPZaklZ": {
+                    "status": "ignored"
+                },
+                "SocPoj": {
+                    "status": "ignored"
+                },
+                "SocPojSazb": {
+                    "status": "ignored"
+                },
+                "SocPojZ": {
+                    "status": "ignored"
+                },
+                "SocPojZakl": {
+                    "status": "ignored"
+                },
+                "SrJin": {
+                    "status": "ignored"
+                },
+                "SrJinPopis": {
+                    "status": "ignored"
+                },
+                "Srazky": {
+                    "status": "ignored"
+                },
+                "SrazkyZust": {
+                    "status": "ignored"
+                },
+                "StatDavky": {
+                    "status": "ignored"
+                },
+                "SvatDny": {
+                    "status": "ignored"
+                },
+                "SvatHod": {
+                    "status": "ignored"
+                },
+                "SvatNahr": {
+                    "status": "ignored"
+                },
+                "UkolMzda": {
+                    "status": "ignored"
+                },
+                "UzamDokl": {
+                    "status": "ignored"
+                },
+                "VYUCTOVANI": {
+                    "status": "ignored"
+                },
+                "VojDny": {
+                    "status": "ignored"
+                },
+                "VojHod": {
+                    "status": "ignored"
+                },
+                "VojKal": {
+                    "status": "ignored"
+                },
+                "VratkaDP": {
+                    "status": "ignored"
+                },
+                "VyrPrDavky": {
+                    "status": "ignored"
+                },
+                "ZakPSazPod": {
+                    "status": "ignored"
+                },
+                "Zaloha": {
+                    "status": "ignored"
+                },
+                "Zav1": {
+                    "status": "ignored"
+                },
+                "Zav2": {
+                    "status": "ignored"
+                },
+                "ZdrPSazPod": {
+                    "status": "ignored"
+                },
+                "ZdrPZaklZ": {
+                    "status": "ignored"
+                },
+                "ZdrPoj": {
+                    "status": "ignored"
+                },
+                "ZdrPojSazb": {
+                    "status": "ignored"
+                },
+                "ZdrPojZ": {
+                    "status": "ignored"
+                },
+                "ZdrPojZakl": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "Mzdy2": {
+            "rows_seen": 19,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzNeprit": {
+            "rows_seen": 23,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzPripl": {
+            "rows_seen": 24,
+            "status": "ignored",
+            "reason": "Číselník příplatků Money: složky MyÚčto zakládá ze svého číselníku."
+        },
+        "MzPrPom": {
+            "rows_seen": 52,
+            "status": "ignored",
+            "reason": "Číselník druhů pracovních poměrů: vztahy se nepřevádějí (Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací).)"
+        },
+        "MzSezOdm": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzSlMMz": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzSlMSZ": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzSlTyp": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Číselník mzdových složek Money: složky MyÚčto zakládá ze svého číselníku."
+        },
+        "MzSrazky": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací). Trvající srážky založí účetní v Mzdy, Exekuce a insolvence."
+        },
+        "MzSrZusM": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzSrZust": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací). Trvající srážky založí účetní v Mzdy, Exekuce a insolvence."
+        },
+        "MzStred": {
+            "rows_seen": 4,
+            "status": "ignored",
+            "reason": "Rozdělení mezd na střediska: střediska nese mzdový zápis deníku (UcDenik), který převod přebírá."
+        },
+        "MzSzDeti": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzSzNZDa": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "MzSzOdv": {
+            "rows_seen": 128,
+            "status": "ignored",
+            "reason": "Parametry odvodů a sazeb po letech: MyÚčto má vlastní legislativní parametry."
+        },
+        "MzZamest": {
+            "rows_seen": 7,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        },
+        "SzMzPod": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Uložená mzdová podání Money: historická podání, převzetí jde z podaných hlášení JMHZ."
+        },
+        "UcDenik": {
+            "rows_seen": 12538,
+            "status": "mapped",
+            "target": "mzdové zápisy deníku pro návrh kontací a úhrny (zápisy převádí převod deníku 1:1)",
+            "readers": [
+                "MoneyS3PayrollLedger"
+            ],
+            "ignored_columns_reason": "Mzdový krok sloupec nečte: účetní stránku dokladu převádí převod deníku 1:1, mzdový krok z něj bere jen to, co potřebuje k návrhu kontací a kontrolním úhrnům.",
+            "columns": {
+                "AdCislo": {
+                    "status": "ignored"
+                },
+                "Castka": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "CastkaCM": {
+                    "status": "ignored"
+                },
+                "Cinnost": {
+                    "status": "ignored"
+                },
+                "Cislo": {
+                    "status": "ignored"
+                },
+                "DatPlnDPH": {
+                    "status": "ignored"
+                },
+                "DatPor": {
+                    "status": "ignored"
+                },
+                "Datum": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Del": {
+                    "status": "ignored"
+                },
+                "Doklad": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Free": {
+                    "status": "ignored"
+                },
+                "Kurz": {
+                    "status": "ignored"
+                },
+                "Mena": {
+                    "status": "ignored"
+                },
+                "Mnozstvi": {
+                    "status": "ignored"
+                },
+                "ParICO": {
+                    "status": "ignored"
+                },
+                "ParSym": {
+                    "status": "ignored"
+                },
+                "Popis": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Pozn": {
+                    "status": "ignored"
+                },
+                "SparDal": {
+                    "status": "ignored"
+                },
+                "SparMD": {
+                    "status": "ignored"
+                },
+                "Stred": {
+                    "status": "ignored"
+                },
+                "TimPor": {
+                    "status": "ignored"
+                },
+                "UcD": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "UcMD": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Vyst": {
+                    "status": "ignored"
+                },
+                "ZRadek": {
+                    "status": "ignored"
+                },
+                "Zakazka": {
+                    "status": "ignored"
+                },
+                "Zdroj": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                }
+            }
+        },
+        "UCOSNOVA": {
+            "rows_seen": 9214,
+            "status": "mapped",
+            "target": "názvy účtů osnovy pro rozpoznání mzdových účtů",
+            "readers": [
+                "MoneyS3PayrollLedger"
+            ],
+            "ignored_columns_reason": "Mzdový krok sloupec nečte: účetní stránku dokladu převádí převod deníku 1:1, mzdový krok z něj bere jen to, co potřebuje k návrhu kontací a kontrolním úhrnům.",
+            "columns": {
+                "DatPor": {
+                    "status": "ignored"
+                },
+                "DruhCin": {
+                    "status": "ignored"
+                },
+                "DruhUctu": {
+                    "status": "ignored"
+                },
+                "Jazyk_1": {
+                    "status": "ignored"
+                },
+                "Jazyk_2": {
+                    "status": "ignored"
+                },
+                "Jazyk_3": {
+                    "status": "ignored"
+                },
+                "Nazev": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Nazev_1": {
+                    "status": "ignored"
+                },
+                "Nazev_2": {
+                    "status": "ignored"
+                },
+                "Nazev_3": {
+                    "status": "ignored"
+                },
+                "Opravky": {
+                    "status": "ignored"
+                },
+                "Pozn": {
+                    "status": "ignored"
+                },
+                "PrevodKZ": {
+                    "status": "ignored"
+                },
+                "Radek": {
+                    "status": "ignored"
+                },
+                "RadekZkr": {
+                    "status": "ignored"
+                },
+                "Saldo": {
+                    "status": "ignored"
+                },
+                "SlaveExp": {
+                    "status": "ignored"
+                },
+                "Technicky": {
+                    "status": "ignored"
+                },
+                "TimPor": {
+                    "status": "ignored"
+                },
+                "Typ": {
+                    "status": "ignored"
+                },
+                "TypOp": {
+                    "status": "ignored"
+                },
+                "UcPrev": {
+                    "status": "ignored"
+                },
+                "Ucet": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "UcetPodTyp": {
+                    "status": "ignored"
+                },
+                "UcetTyp": {
+                    "status": "ignored"
+                },
+                "Vnitro": {
+                    "status": "ignored"
+                },
+                "ZkratOld": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "VyucDPFO": {
+            "rows_seen": 38,
+            "status": "mapped",
+            "target": "měsíční úhrn daně z příjmů pro porovnání s mzdovými doklady",
+            "readers": [
+                "MoneyS3PayrollLedger"
+            ],
+            "ignored_columns_reason": "Mzdový krok sloupec nečte: účetní stránku dokladu převádí převod deníku 1:1, mzdový krok z něj bere jen to, co potřebuje k návrhu kontací a kontrolním úhrnům.",
+            "columns": {
+                "DPFO": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Mesic": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "Odvod": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "PreplBonus": {
+                    "status": "ignored"
+                },
+                "Preplatek": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                },
+                "PrevodPrep": {
+                    "status": "ignored"
+                },
+                "Rok": {
+                    "status": "mapped",
+                    "target": "MoneyS3PayrollLedger"
+                }
+            }
+        },
+        "Zamest": {
+            "rows_seen": 6,
+            "status": "ignored",
+            "reason": "Mzdy osob Money od 11/2020 vede v šifrované databázi agendy; převod zaměstnance ani mzdy jednotlivých osob nepřebírá (MoneyS3/PayrollImporter, protokol odkáže na převzetí z podání JMHZ a registrací)."
+        }
+    }
+}

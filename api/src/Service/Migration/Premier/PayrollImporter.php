@@ -244,6 +244,7 @@ final class PayrollImporter
         $this->cardSummary($p);
         $this->timeSummary($p, $ctx->year);
         $this->notConverted($p, $deductions, $excluded);
+        $this->unknownCodes($p, PremierPayrollTime::unknownAbsenceCodes($ctx->backup), PremierPayrollDeductions::unknownCodes($ctx->backup));
         if ($totals !== []) {
             $this->referenceTotals->store($ctx->supplierId, self::SOURCE, $totals, self::REFERENCE . ' ' . $ctx->backup->ico);
         }
@@ -409,6 +410,36 @@ final class PayrollImporter
                     array_values($excluded),
                 )),
             ), ['personal_numbers' => array_keys($excluded)]);
+        }
+    }
+
+    /**
+     * Složky zdroje, které převod nezná (matice api/resources/migration/premier.json, brána G1):
+     * nepřítomnost z řad 5xx a 6xx, kterou nepřevede ani o ní neví, že nepřítomnost není,
+     * a karta `MZ_SRAZ` se složkou mimo srážky a vědomě vynechané příjmy. Nic se nezahodí
+     * tiše: protokol je vypíše s počtem řádků.
+     *
+     * @param array<string,int> $absences kód => řádky `DNY`
+     * @param array<string,int> $deductions kód => karty `MZ_SRAZ`
+     */
+    private function unknownCodes(ImportProtocol $p, array $absences, array $deductions): void
+    {
+        $list = static fn (array $codes): string => implode(', ', array_map(
+            static fn (string $code, int $count): string => "{$code} ({$count}×)",
+            array_map('strval', array_keys($codes)),
+            array_values($codes),
+        ));
+        if ($absences !== []) {
+            $p->count(self::STEP, 'absence_codes_unknown', count($absences));
+            $p->warn(self::STEP, 'absence_codes_unknown', 'Nepřítomnosti s neznámou složkou PREMIER se nepřevedly: '
+                . $list($absences) . '. Zkontrolujte je v PREMIER a podle potřeby je založte ručně na kartě zaměstnance.',
+                ['codes' => array_map('strval', array_keys($absences))]);
+        }
+        if ($deductions !== []) {
+            $p->count(self::STEP, 'deduction_codes_unknown', count($deductions));
+            $p->warn(self::STEP, 'deduction_codes_unknown', 'Trvalé složky karty srážek PREMIER s neznámým kódem se nepřevedly: '
+                . $list($deductions) . '. Jde-li o srážku nebo pravidelný příjem, založte ho v MyÚčtu ručně.',
+                ['codes' => array_map('strval', array_keys($deductions))]);
         }
     }
 

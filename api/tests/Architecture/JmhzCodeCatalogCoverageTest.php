@@ -114,6 +114,7 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_risk_categorization_code' => 'field',
         // Počty a upozornění v protokolu převodu PAMICA (PohodaPayrollJmhzWriter),
         // ne kódy blokací podání.
+        'jmhz_attributes_unknown' => 'other',
         'jmhz_data_failed' => 'other',
         'jmhz_eldp_days_compared' => 'other',
         'jmhz_eldp_days_differ' => 'other',

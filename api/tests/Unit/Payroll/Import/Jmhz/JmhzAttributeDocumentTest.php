@@ -30,6 +30,22 @@ final class JmhzAttributeDocumentTest extends TestCase
         self::assertSame('Brno', JmhzAttributeDocument::value(' Brno ', 'text'));
     }
 
+    /**
+     * Brána G1: atribut, který slovník nezná, složení formuláře vynechá; převod ho proto
+     * musí umět vyjmenovat k varování. Atribut druhu těla (1) mezi neznámé nepatří.
+     */
+    public function testUnknownAttributeIdsAreListedForTheProtocol(): void
+    {
+        self::assertSame([99999901, 99999902], JmhzAttributeDocument::unknownAttributeIds([
+            ['id' => 1, 'order' => 0, 'order2' => 0, 'value' => 'bezPriznaku'],
+            ['id' => 10228, 'order' => 0, 'order2' => 0, 'value' => '1234567890123'],
+            ['id' => 99999902, 'order' => 0, 'order2' => 0, 'value' => 'x'],
+            ['id' => 99999901, 'order' => 0, 'order2' => 0, 'value' => 'y'],
+            ['id' => 99999901, 'order' => 1, 'order2' => 0, 'value' => 'z'],
+        ]));
+        self::assertSame([], JmhzAttributeDocument::unknownAttributeIds([['id' => 10228, 'order' => 0, 'order2' => 0, 'value' => '1']]));
+    }
+
     public function testDocumentPlacesAttributesByDictionaryPath(): void
     {
         $document = JmhzAttributeDocument::form(self::HEADER, [

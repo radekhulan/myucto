@@ -79,6 +79,30 @@ final class JmhzAttributeDocument
     }
 
     /**
+     * ID atributů, které slovník nezná, takže je složení formuláře ({@see self::form()})
+     * vynechá. Atribut druhu těla ({@see self::VARIANT_ATTRIBUTE}) mezi ně nepatří. Převod je
+     * hlásí varováním, aby se údaj z cizího programu neztratil tiše (matice zdroje, brána G1).
+     *
+     * @param list<array{id:int}> $attributes
+     * @return list<int>
+     */
+    public static function unknownAttributeIds(array $attributes): array
+    {
+        $dictionary = self::dictionary();
+        $out = [];
+        foreach ($attributes as $attribute) {
+            $id = (int) $attribute['id'];
+            if ($id !== self::VARIANT_ATTRIBUTE && !isset($dictionary[$id])) {
+                $out[$id] = true;
+            }
+        }
+        $ids = array_keys($out);
+        sort($ids);
+
+        return $ids;
+    }
+
+    /**
      * Hlášení s jedinou součástí: hlavička podání a formulář osoby z atributů.
      *
      * @param array{guid:string,type:string,year:int,month:int,filled_at:string} $header

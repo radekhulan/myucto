@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzAttributeDocument;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportPlanner;
@@ -274,9 +275,14 @@ final class PohodaPayrollJmhzWriter
      */
     private function storeHistory(int $supplierId, ?int $userId, array $context, array $matched, ImportProtocol $protocol, string $step): void
     {
+        /** @var array<int,int> $unknownAttributes ID atributu => počet formulářů */
+        $unknownAttributes = [];
         foreach ($context['reports'] as $report) {
             $forms = [];
             foreach ($report['forms'] as $index => $form) {
+                foreach (JmhzAttributeDocument::unknownAttributeIds($form['attributes']) as $id) {
+                    $unknownAttributes[$id] = ($unknownAttributes[$id] ?? 0) + 1;
+                }
                 $pair = $matched[$form['relation_key']] ?? null;
                 $forms[] = [
                     'position' => $index + 1,
@@ -314,6 +320,15 @@ final class PohodaPayrollJmhzWriter
             $protocol->count($step, 'jmhz_submissions');
             $protocol->count($step, 'jmhz_submissions_' . $result['status']);
             $protocol->count($step, 'jmhz_forms', count($forms));
+        }
+        if ($unknownAttributes !== []) {
+            ksort($unknownAttributes);
+            $protocol->count($step, 'jmhz_attributes_unknown', count($unknownAttributes));
+            $this->warn($protocol, $step, 'jmhz_attributes_unknown', sprintf(
+                'Hlášení JMHZ z PAMICA obsahují atributy, které datový slovník JMHZ nezná, a do formuláře se nepřevzaly: %s. '
+                . 'V uloženém obsahu podání zůstávají; zkontrolujte, zda nejde o údaj novější verze slovníku.',
+                implode(', ', array_map(static fn (int $id, int $n): string => "{$id} ({$n}×)", array_keys($unknownAttributes), array_values($unknownAttributes))),
+            ));
         }
         foreach ($context['registrations'] as $registration) {
             $forms = [];

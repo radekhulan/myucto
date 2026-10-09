@@ -387,7 +387,7 @@ final class SyntheticPremierBackup
         if (!empty($flags['payroll'])) {
             array_push($chart, ['331', '100', 'Zaměstnanci'], ['336', '100', 'Zúčtování sociálního pojištění'], ['336', '200', 'Zúčtování zdravotního pojištění'],
                 ['342', '200', 'Srážková daň'], ['342', '100', 'Záloha na daň ze závislé činnosti'], ['521', '100', 'Mzdové náklady'], ['524', '100', 'Zákonné pojištění']);
-            self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']));
+            self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']), !empty($flags['payroll_unknown_codes']));
         }
         if (!empty($flags['bank_split'])) {
             self::bankSplit($tables, $chart);
@@ -473,7 +473,7 @@ final class SyntheticPremierBackup
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      */
-    private static function payroll(array &$tables, bool $mismatch, bool $detail = false): void
+    private static function payroll(array &$tables, bool $mismatch, bool $detail = false, bool $unknownCodes = false): void
     {
         $tables['PERSONAL'] = [
             [['INTER', 'N', 8], ['CISLO', 'N', 10], ['VSTUP', 'D'], ['VYSTUP', 'D'], ['BANKA_UCET', 'C', 30], ['BANKA_KOD', 'C', 20], ['UVA_KATE', 'C', 3],
@@ -548,7 +548,7 @@ final class SyntheticPremierBackup
             'POJIS_SO' => true, 'ZKR_POJ' => '201', 'DNY_ODPR' => 19, 'UVA_DOBA' => 8]];
         $mzdyFields = [];
         if ($detail) {
-            $mzdyFields = self::payrollDetail($tables, $months);
+            $mzdyFields = self::payrollDetail($tables, $months, $unknownCodes);
         }
 
         $rows = [];
@@ -612,9 +612,12 @@ final class SyntheticPremierBackup
      *
      * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
      * @param list<array{0:int,1:int,2:int,3:array<string,mixed>}> $months MĚNÍ SE
+     * `$unknownCodes` (příznak `payroll_unknown_codes`): navíc položka z řady nepřítomností,
+     * kterou převod nezná (557), a karta `MZ_SRAZ` s neznámou složkou (721).
+     *
      * @return list<array{0:string,1:string,2?:int,3?:int}> další sloupce `MZDY`
      */
-    private static function payrollDetail(array &$tables, array &$months): array
+    private static function payrollDetail(array &$tables, array &$months, bool $unknownCodes = false): array
     {
         array_push($tables['PERSONAL'][1],
             ['INTER' => 4, 'CISLO' => 4, 'VSTUP' => '2025-09-01', 'UVA_KATE' => 'UCN', 'UVA_PROF' => 'učeň', 'KODPP_SO' => '',
@@ -766,6 +769,10 @@ final class SyntheticPremierBackup
             self::item5(2025, 11, '600', 0, ['DATUM_OD' => '2025-11-24', 'DATUM_DO' => '2025-11-30', 'N_DNY' => 7, 'TYP' => 3]),
             self::item5(2025, 12, '600', 0, ['DATUM_OD' => '2025-12-01', 'DATUM_DO' => '2025-12-31', 'N_DNY' => 31, 'TYP' => 3]),
         );
+        if ($unknownCodes) {
+            $items[] = self::item5(2025, 9, '557', 0, ['DATUM_OD' => '2025-09-15', 'DATUM_DO' => '2025-09-16', 'N_DNY' => 2, 'TYP' => 2]);
+            $items[] = self::item5(2025, 9, '510', 800, ['TYP' => 2]);
+        }
         // Trvalé složky vztahu: osobní ohodnocení (příjem, ne srážka), exekuce od 10/2025,
         // spoření skončené v 6/2025 a odborové příspěvky.
         $card = static fn (int $sra, string $code, string $text, array $values): array => $values + ['S_INTER' => 5, 'S_SRAINT' => $sra, 'S_KOD' => $code,
@@ -781,6 +788,7 @@ final class SyntheticPremierBackup
                     'S_VAR' => '1234', 'S_KONS' => '558']),
                 $card(3, '700', 'Spoření', ['S_CASTKA' => 500, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025, 'S_MES_DO' => 6, 'S_ROK_DO' => 2025]),
                 $card(4, '720', 'Odbory', ['S_CASTKA' => 150, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025]),
+                ...($unknownCodes ? [$card(5, '721', 'Neznámá složka', ['S_CASTKA' => 300, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025])] : []),
             ],
         ];
         $tables['MZ_HDPN'] = [[['INTER', 'N', 10], ['HDPN_OD', 'D'], ['HDPN_DO', 'D'], ['TYP_NP', 'C', 3], ['C_LISTKU', 'C', 20], ['ID', 'C', 36]],

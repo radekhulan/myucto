@@ -63,6 +63,36 @@ final class PremierPayrollTime
     ];
 
     /**
+     * Složky z řad nepřítomností (5xx, 6xx), které nepřítomnost vědomě nejsou: náhrada za
+     * svátek, proplacená dovolená, čerpání či proplacení náhradního volna (viz hlavička).
+     */
+    public const NOT_ABSENCE_CODES = ['501', '510', '584'];
+
+    /**
+     * Složky z řad nepřítomností (5xx, 6xx) v `DNY`, které převod nezná: ani je nepřevádí
+     * jako nepřítomnost ({@see self::ABSENCE_CODES}), ani o nich neví, že nepřítomnost nejsou
+     * ({@see self::NOT_ABSENCE_CODES}). Takový řádek by čtení nepřítomností jinak tiše vynechalo.
+     *
+     * @return array<string,int> kód => počet řádků
+     */
+    public static function unknownAbsenceCodes(PremierBackup $backup): array
+    {
+        $out = [];
+        foreach ($backup->rows('DNY') as $row) {
+            $code = self::text($row['KOD'] ?? '');
+            if (preg_match('/^[56]\d\d$/D', $code) === 1
+                && !isset(self::ABSENCE_CODES[$code])
+                && !in_array($code, self::NOT_ABSENCE_CODES, true)
+            ) {
+                $out[$code] = ($out[$code] ?? 0) + 1;
+            }
+        }
+        ksort($out, SORT_STRING);
+
+        return $out;
+    }
+
+    /**
      * @return array{
      *     absences: array<int,list<array{type:string,from:string,to:string,childbirth:?string,period:string}>>,
      *     leave: array<int,array<string,array{balance:float,taken:float}>>,

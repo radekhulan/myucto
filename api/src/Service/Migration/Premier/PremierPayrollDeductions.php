@@ -58,6 +58,30 @@ final class PremierPayrollDeductions
         '750' => ['voluntary', 'advance'],
     ];
 
+    /** Trvalé složky příjmu na kartě `MZ_SRAZ`, které srážkou nejsou (viz hlavička). */
+    public const INCOME_CODES = ['303', '422', '712', '862'];
+
+    /**
+     * Karty `MZ_SRAZ` se složkou, kterou převod nezná: není mezi srážkami ({@see self::CODES})
+     * ani mezi vědomě vynechanými příjmy ({@see self::INCOME_CODES}). Čtení srážek by je jinak
+     * tiše přeskočilo.
+     *
+     * @return array<string,int> kód => počet karet
+     */
+    public static function unknownCodes(PremierBackup $backup): array
+    {
+        $out = [];
+        foreach ($backup->rows('MZ_SRAZ') as $row) {
+            $code = self::text($row['S_KOD'] ?? '');
+            if ($code !== '' && !isset(self::CODES[$code]) && !in_array($code, self::INCOME_CODES, true)) {
+                $out[$code] = ($out[$code] ?? 0) + 1;
+            }
+        }
+        ksort($out, SORT_STRING);
+
+        return $out;
+    }
+
     /**
      * Srážky vztahů `$relations`, které trvají na konci posledního převáděného měsíce
      * (`$lastPeriod`). Skončené se jen spočítají.

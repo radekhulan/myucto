@@ -1,0 +1,973 @@
+{
+    "meta": {
+        "source": "jmhz",
+        "program": "Měsíční hlášení JMHZ jiného mzdového programu (XML podle XSD JMHZ 1.4.3.6) a formuláře složené z atributů PAMICA",
+        "style": "jmhz_xpath",
+        "readers": [
+            "api/src/Service/Payroll/Import/Jmhz"
+        ],
+        "unknown_items": "Element mimo připnuté XSD: validace soubor odmítne, nebo ho v měkkém režimu (jen v nečtených blocích) převezme s varováním. Atribut PAMICA, který slovník nezná, hlásí převod varováním jmhz_attributes_unknown (JmhzAttributeDocument::unknownAttributeIds). Elementy XSD, které import nečte, zůstávají v uloženém obsahu podání.",
+        "verified_against": [
+            "XSD JMHZ 1.4.3.6 (268 elementů) a 86 přijatých hlášení cizích programů (PAMICA, PREMIER a další), 214 různých elementů"
+        ],
+        "limits": "Hlášení je jedna „tabulka\" jmhz, sloupce jsou elementy podle lokálního jména (stejné jméno v různých blocích je jeden záznam)."
+    },
+    "tables": {
+        "jmhz": {
+            "rows_seen": 86,
+            "status": "mapped",
+            "target": "převzaté měsíce a historie podání (JmhzReportReader, JmhzReportPlanner, JmhzTakeoverPlanner, JmhzEmploymentHistory, JmhzExternalSubmissionStore)",
+            "readers": [
+                "JmhzReportReader",
+                "JmhzReportForm"
+            ],
+            "ignored_columns_reason": "Import element nečte: hlášení se ukládá celé (payroll_jmhz_external_submissions); převzatý měsíc z něj bere identitu, vztah, úhrny, slevy, zálohu a ELDP, ostatní údaje MyÚčto pro převzaté měsíce nepotřebuje nebo je počítá samo.",
+            "columns": {
+                "PVPOJ": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "SENDER": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "VENDOR": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "balikPoradi": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "balikyPocet": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "bezPriznaku": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "castkaOdvodPojistneho": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "celkem": {
+                    "status": "ignored"
+                },
+                "cinnostKS": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "dan": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "danBonus": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "danBonusDoplatek": {
+                    "status": "ignored"
+                },
+                "danBonusPreplatekRok": {
+                    "status": "ignored"
+                },
+                "danPreplatek": {
+                    "status": "ignored"
+                },
+                "danPreplatekRok": {
+                    "status": "ignored"
+                },
+                "danSrazenaZvlSazba": {
+                    "status": "ignored"
+                },
+                "danUdajeMesic": {
+                    "status": "ignored"
+                },
+                "danUdajeRok": {
+                    "status": "ignored"
+                },
+                "danZalohaPoSleve": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "danoveZvyhodneniDetiMesic": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "datum": {
+                    "status": "ignored"
+                },
+                "datumDo": {
+                    "status": "ignored"
+                },
+                "datumNarozeni": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "datumNastupu": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "datumOd": {
+                    "status": "ignored"
+                },
+                "datumVyplneni": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "deti": {
+                    "status": "ignored"
+                },
+                "dite": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "dnyEvidencniStav": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "dnyOdpracovanePocet": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "docasNeschopnost": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "docasnaNeschopnost": {
+                    "status": "ignored"
+                },
+                "docasnePrideleni": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "docasnePrideleniEvidovano": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "dovolena": {
+                    "status": "ignored"
+                },
+                "druhCinnosti": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "duvodUplatneni": {
+                    "status": "ignored"
+                },
+                "eldp": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "eldpObdobi": {
+                    "status": "ignored"
+                },
+                "eldpSeznam": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "expoziceNpeDosazeniDatum": {
+                    "status": "ignored"
+                },
+                "fondPracovniDoby": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "formaVlastnictvi": {
+                    "status": "ignored"
+                },
+                "formularOsoby": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "formulareOsob": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "formularePocetCelkem": {
+                    "status": "ignored"
+                },
+                "formularePocetVBaliku": {
+                    "status": "ignored"
+                },
+                "funkcniPozitky": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hlavicka": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hodinyNeodpracBezNahrady": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hodinyNeodpracCelkem": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hodinyNeodpracDovol": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hodinyNeodpracNahrada": {
+                    "status": "ignored"
+                },
+                "hodinyNeodpracNeschop": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hodinyNeodpracOcr": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "hodinyOdpracovanePocet": {
+                    "status": "ignored"
+                },
+                "hornictvi": {
+                    "status": "ignored"
+                },
+                "ico": {
+                    "status": "ignored"
+                },
+                "idFormulare": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "idPodani": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "idPpv": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "identifikace": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "ikMpsv": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "jinaOsoba": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "jineOsoby": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "jinyPrijem": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "jmeno": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "jmhz": {
+                    "status": "ignored"
+                },
+                "kategorizaceRizika": {
+                    "status": "ignored"
+                },
+                "kod": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "kodObce": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "kodStatu": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "kolektivniSmlouva": {
+                    "status": "ignored"
+                },
+                "kolektivniSmlouvy": {
+                    "status": "ignored"
+                },
+                "materstvi": {
+                    "status": "ignored"
+                },
+                "mesic": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "mesiceVyzivovani": {
+                    "status": "ignored"
+                },
+                "mezinarodniPronajemSily": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "mistoVykonuPrace": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "mzda": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "mzdaCista": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "mzdaOzpHotovost": {
+                    "status": "ignored"
+                },
+                "mzdaOzpSrazka": {
+                    "status": "ignored"
+                },
+                "mzdaOzpUhradaDatum": {
+                    "status": "ignored"
+                },
+                "mzdaRozpad": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "mzdaZuctovana": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "mzdyZuctovane": {
+                    "status": "ignored"
+                },
+                "nahrady": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "nastrojApzKod": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "nazev": {
+                    "status": "ignored"
+                },
+                "neodpracovaneHodiny": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "neomluveneAbsence": {
+                    "status": "ignored"
+                },
+                "neplaceneVolno": {
+                    "status": "ignored"
+                },
+                "nocni": {
+                    "status": "ignored"
+                },
+                "obdobi": {
+                    "status": "ignored"
+                },
+                "obec": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "odecitaneDny": {
+                    "status": "ignored"
+                },
+                "odecitaneDobyCelkem": {
+                    "status": "ignored"
+                },
+                "odlozenyPrijem": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "odmenaNerezident": {
+                    "status": "ignored"
+                },
+                "odmeny": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "odmenyNepravidelne": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "odmenyNerezident": {
+                    "status": "ignored"
+                },
+                "odmenyPravidelne": {
+                    "status": "ignored"
+                },
+                "odpracovaneDny": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "odpracovaneHodiny": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "omluvenaNepritomnost": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "osetrovaniBezNaroku": {
+                    "status": "ignored"
+                },
+                "osetrovaniClenaRodiny": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "osetrovaniSNarokem": {
+                    "status": "ignored"
+                },
+                "osoba": {
+                    "status": "ignored"
+                },
+                "osvobozenoCelkem": {
+                    "status": "ignored"
+                },
+                "otcovska": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "ozpTpp": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "partner": {
+                    "status": "ignored"
+                },
+                "partnerUdaje": {
+                    "status": "ignored"
+                },
+                "penezitaPomocMaterstvi": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pestoun": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "pismenoA": {
+                    "status": "ignored"
+                },
+                "pismenoB": {
+                    "status": "ignored"
+                },
+                "pismenoC": {
+                    "status": "ignored"
+                },
+                "platnostDo": {
+                    "status": "ignored"
+                },
+                "platnostOd": {
+                    "status": "ignored"
+                },
+                "pocet": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pocetDnu": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pocetZamestnancu": {
+                    "status": "ignored"
+                },
+                "podilZamZtp": {
+                    "status": "ignored"
+                },
+                "pohotovost": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pojisteni": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pojisteniDo": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pojisteniOd": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pojisteniZamestnanec": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pojisteniZamestnavatel": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pojistne": {
+                    "status": "ignored"
+                },
+                "pojistneCelkem": {
+                    "status": "ignored"
+                },
+                "pojistneSleva": {
+                    "status": "ignored"
+                },
+                "pojistneUhrada": {
+                    "status": "ignored"
+                },
+                "pojistneZamestnance": {
+                    "status": "ignored"
+                },
+                "pojistneZamestnavateleA": {
+                    "status": "ignored"
+                },
+                "pojistneZamestnavateleB": {
+                    "status": "ignored"
+                },
+                "pojistneZamestnavateleC": {
+                    "status": "ignored"
+                },
+                "pojistneZamestnavateleCelkem": {
+                    "status": "ignored"
+                },
+                "poradi": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "pracovniDobaKratsi": {
+                    "status": "ignored"
+                },
+                "pracovniNeschopnost": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prekazkaZamestnanec": {
+                    "status": "ignored"
+                },
+                "prekazkaZamestnavatel": {
+                    "status": "ignored"
+                },
+                "prekazkyVPraci": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "prekazkyZamestnanec": {
+                    "status": "ignored"
+                },
+                "prekazkyZamestnavatel": {
+                    "status": "ignored"
+                },
+                "preplatekRok": {
+                    "status": "ignored"
+                },
+                "prescas": {
+                    "status": "ignored"
+                },
+                "prijem": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prijemNepojistenaCinnost": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prijemSrazkDanZvlSazba": {
+                    "status": "ignored"
+                },
+                "prijemZdanitelnyCelkem": {
+                    "status": "ignored"
+                },
+                "prijemZdanitelnyDoplatek": {
+                    "status": "ignored"
+                },
+                "prijmeni": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prijmy": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "primarniPpv": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "priplatky": {
+                    "status": "ignored"
+                },
+                "prispevekDip": {
+                    "status": "ignored"
+                },
+                "prispevekDoplnPenzPripoj": {
+                    "status": "ignored"
+                },
+                "prispevekPenzPoj": {
+                    "status": "ignored"
+                },
+                "prispevekPenzPripoj": {
+                    "status": "ignored"
+                },
+                "prispevekZamestnavatele": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "prispevekZelPojDlPece": {
+                    "status": "ignored"
+                },
+                "prispevekZelSporeniOsvob": {
+                    "status": "ignored"
+                },
+                "prispevekZivotPoj": {
+                    "status": "ignored"
+                },
+                "prohlaseniPoplatnika": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prohlaseniPoplatnikaDane": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prubehZamestnani": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "prukazZtpp": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "riziko": {
+                    "status": "ignored"
+                },
+                "rocniUhrny": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "rocniZuctovaniProvedeno": {
+                    "status": "ignored"
+                },
+                "rocniZuctovaniZadost": {
+                    "status": "ignored"
+                },
+                "rodneCislo": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "rok": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "rozpad": {
+                    "status": "ignored"
+                },
+                "rozsirenaSlevaInvalidita3": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "sjednanyFond": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaDite": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaNaPartnera": {
+                    "status": "ignored"
+                },
+                "slevaPocetMesicu": {
+                    "status": "ignored"
+                },
+                "slevaPocetMesicuZtpp": {
+                    "status": "ignored"
+                },
+                "slevaZTPP": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaZamestnance": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaZamestnanceEvidovana": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaZamestnanceOvoZel": {
+                    "status": "ignored"
+                },
+                "slevaZamestnanceOvoZelEvidovana": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaZamestnavatele": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaZamestnavateleEvidovana": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "slevaZamestnavateleRozpad": {
+                    "status": "ignored"
+                },
+                "slevyZamestnancu": {
+                    "status": "ignored"
+                },
+                "slevyZamestnancuOvoZel": {
+                    "status": "ignored"
+                },
+                "smenyOstatni": {
+                    "status": "ignored"
+                },
+                "smenyUran": {
+                    "status": "ignored"
+                },
+                "sobotaNedele": {
+                    "status": "ignored"
+                },
+                "socialniPojisteni": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "souhrn": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "souhrnDataZec": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "specifickaSkutecnost": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "srazenaDan": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "srazenaDanNerezident": {
+                    "status": "ignored"
+                },
+                "srazkaPlneniZel": {
+                    "status": "ignored"
+                },
+                "srazkaSkodaZec": {
+                    "status": "ignored"
+                },
+                "srazkaStrava": {
+                    "status": "ignored"
+                },
+                "srazkaZavazkyZec": {
+                    "status": "ignored"
+                },
+                "srazky": {
+                    "status": "ignored"
+                },
+                "srazkyZeMzdyEvidovany": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "stanovenaTydenniDoba": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "stanovenyFond": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "svatek": {
+                    "status": "ignored"
+                },
+                "svatky": {
+                    "status": "ignored"
+                },
+                "tarif": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "teoretickaPraktickaPriprava": {
+                    "status": "ignored"
+                },
+                "trvani": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "typ": {
+                    "status": "ignored"
+                },
+                "typFormulare": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "typKolektSmlouvy": {
+                    "status": "ignored"
+                },
+                "typPodani": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "uhrnVymerovacichZakladu": {
+                    "status": "ignored"
+                },
+                "uplatnenaSlevaNaPartnera": {
+                    "status": "ignored"
+                },
+                "uplatnenoZvyhodneniNaDeti": {
+                    "status": "ignored"
+                },
+                "uplatnujiPrispevekApz": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "uzivatel": {
+                    "status": "ignored"
+                },
+                "variabilniSymbol": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vezen": {
+                    "status": "mapped",
+                    "target": "JmhzReportForm"
+                },
+                "vydelek": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vydelekOZP": {
+                    "status": "ignored"
+                },
+                "vydelekPrumernyHod": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vykonavanaPozice": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vylouceneDny": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vylouceneDobyCelkem": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vyloucenePar16": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vyloucenePar18": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vymerovaciZaklad": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vymerovaciZakladParagraf5": {
+                    "status": "ignored",
+                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                },
+                "vyplaceniDavek": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vyplatniTermin": {
+                    "status": "ignored"
+                },
+                "vypoctenaZaloha": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vyseSlevy": {
+                    "status": "ignored"
+                },
+                "vysledekRocnihoZuctovani": {
+                    "status": "ignored"
+                },
+                "vyzivovaneDeti": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vyzivovaneDite": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "vyzivujeJinaOsoba": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zahranicniOsoba": {
+                    "status": "ignored"
+                },
+                "zakladDane": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zakladZamestnavateleA": {
+                    "status": "ignored"
+                },
+                "zakladZamestnavateleB": {
+                    "status": "ignored"
+                },
+                "zakladZamestnavateleC": {
+                    "status": "ignored"
+                },
+                "zakladniSleva": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zakladniSlevaInvalidita12": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zalohaDoplatky": {
+                    "status": "ignored"
+                },
+                "zalohaNaDan": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zalohaPrijmy": {
+                    "status": "ignored"
+                },
+                "zamestnavaniOzp": {
+                    "status": "ignored"
+                },
+                "zamestnavatelUdajeRok": {
+                    "status": "ignored"
+                },
+                "zdravPojZamestnanec": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zdravPojZamestnavatel": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zdravotniPojisteni": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zecPocetPrepOzpRok": {
+                    "status": "ignored"
+                },
+                "zecPocetPrepRok": {
+                    "status": "ignored"
+                },
+                "zuctovanoCelkem": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zvlastniSazbaDane": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zvyhodneniDetiMesic": {
+                    "status": "mapped",
+                    "target": "JmhzReportReader"
+                },
+                "zvyhodneniNaDeti": {
+                    "status": "ignored"
+                }
+            }
+        }
+    }
+}
