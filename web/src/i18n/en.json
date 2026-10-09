@@ -8439,7 +8439,8 @@
       "deathOnHint": "Fill in only for a pension record issued in connection with death (type 03). It is submitted within 3 months of death.",
       "copy": {
         "download": "Copy for the employee (PDF)",
-        "hint": "The copy is printed from the frozen sheet; record the hand-over at the request on the person card.",
+        "downloadEmployer": "Copy for the employer's records (PDF)",
+        "hint": "The copies are printed from the frozen sheet. Have the employee sign the copy for the employer's records and keep it for three years after the year it covers; record the hand-over at the request on the person card.",
         "failed": "The copy could not be prepared."
       },
       "fromRequest": {

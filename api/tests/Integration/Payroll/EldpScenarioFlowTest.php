@@ -242,6 +242,52 @@ final class EldpScenarioFlowTest extends TestCase
         }
     }
 
+    /**
+     * § 38 odst. 5 zákona č. 582/1991 Sb. ve znění do 31. 12. 2025 a Všeobecné
+     * zásady ELDP (Datum a podpis pojištěnce): zaměstnavatel vyhotoví dva
+     * stejnopisy. Ten pro jeho evidenci nese pole pro datum a podpis
+     * pojištěnce, ten pro zaměstnance podpis pověřeného zaměstnance a razítko.
+     */
+    public function testEmployerRecordCopyCarriesTheInsuredPersonsSignature(): void
+    {
+        [$person, $agreement] = $this->approvedJuly();
+        $this->prepareOnAuthorityRequest($agreement['employment_id'], 'eldp-copy-employer');
+        $this->completeCopyIdentity((int) $person['employee_id']);
+        $copies = $this->container->get(EldpStatementCopyService::class);
+        self::assertInstanceOf(EldpStatementCopyService::class, $copies);
+
+        $employer = $copies->html($copies->template(
+            $this->supplierId,
+            'test',
+            $agreement['employment_id'],
+            2026,
+            EldpStatementCopyService::VARIANT_EMPLOYER,
+        ));
+        self::assertStringContainsString('Pro evidenci zaměstnavatele', $employer);
+        self::assertStringContainsString('Datum a podpis pojištěnce', $employer);
+        self::assertStringNotContainsString('razítko zaměstnavatele', $employer);
+        $employee = $copies->html($copies->template($this->supplierId, 'test', $agreement['employment_id'], 2026));
+        self::assertStringContainsString('Podpis pověřeného zaměstnance a razítko zaměstnavatele', $employee);
+        self::assertStringNotContainsString('Datum a podpis pojištěnce', $employee);
+
+        $eldp = $this->container->get(PayrollEldpAction::class);
+        self::assertInstanceOf(PayrollEldpAction::class, $eldp);
+        $query = [
+            'employment_id' => (string) $agreement['employment_id'],
+            'year' => '2026',
+            'environment' => 'test',
+            'variant' => 'employer',
+        ];
+        $pdf = $eldp->copy($this->request('GET', '/api/payroll/submissions/eldp/copy')->withQueryParams($query), new Response());
+        self::assertSame(200, $pdf->getStatusCode(), (string) $pdf->getBody());
+        self::assertStringContainsString('-evidence.pdf', $pdf->getHeaderLine('Content-Disposition'));
+        $invalid = $eldp->copy(
+            $this->request('GET', '/api/payroll/submissions/eldp/copy')->withQueryParams(['variant' => 'other'] + $query),
+            new Response(),
+        );
+        self::assertSame(422, $invalid->getStatusCode());
+    }
+
     private function prepareOnAuthorityRequest(int $employmentId, string $idempotencyKey): void
     {
         $service = $this->container->get(EldpStatementService::class);

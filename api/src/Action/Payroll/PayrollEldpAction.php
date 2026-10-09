@@ -119,7 +119,9 @@ final class PayrollEldpAction
     }
 
     /**
-     * Stejnopis zmrazeného evidenčního listu pro zaměstnance (PDF).
+     * Stejnopis zmrazeného evidenčního listu (PDF): `variant=employee` pro
+     * zaměstnance (výchozí), `variant=employer` pro evidenci zaměstnavatele
+     * s polem pro podpis pojištěnce.
      */
     public function copy(Request $request, Response $response): Response
     {
@@ -128,11 +130,13 @@ final class PayrollEldpAction
         }
         try {
             $query = $request->getQueryParams();
+            $variant = $query['variant'] ?? EldpStatementCopyService::VARIANT_EMPLOYEE;
             $artifact = $this->copies->render(
                 $this->currentSupplierId($request),
                 $this->queryEnvironment($request),
                 $this->queryPositiveInt($query, 'employment_id'),
                 $this->queryPositiveInt($query, 'year'),
+                is_string($variant) ? $variant : '',
             );
         } catch (EldpValidationException $exception) {
             return $this->failure($response, $exception);

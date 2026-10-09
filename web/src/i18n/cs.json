@@ -8439,7 +8439,8 @@
       "deathOnHint": "Vyplňte jen u evidenčního listu v souvislosti s úmrtím (typ 03). Předkládá se do 3 měsíců od úmrtí.",
       "copy": {
         "download": "Stejnopis pro zaměstnance (PDF)",
-        "hint": "Stejnopis se tiskne ze zmrazeného listu; předání zapište u výzvy na kartě osoby.",
+        "downloadEmployer": "Stejnopis pro evidenci zaměstnavatele (PDF)",
+        "hint": "Stejnopisy se tisknou ze zmrazeného listu. Stejnopis pro evidenci zaměstnavatele dejte zaměstnanci podepsat a uschovejte ho tři roky po roce, kterého se týká; předání zapište u výzvy na kartě osoby.",
         "failed": "Stejnopis se nepodařilo připravit."
       },
       "fromRequest": {

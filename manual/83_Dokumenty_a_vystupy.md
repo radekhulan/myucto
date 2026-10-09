@@ -150,7 +150,10 @@ zaměstnance (jméno, příjmení, rodné příjmení, rodné číslo, datum a m
 narození, trvalý pobyt) a zaměstnavatele (název z rejstříku, IČ, sídlo,
 variabilní symbol účtárny) a u každého řádku příznak malého rozsahu MR.
 Chybí-li některý z těchto údajů, aplikace stejnopis nevydá a řekne, co
-doplnit. Předání zapište u výzvy na kartě osoby (**Stejnopis předán
+doplnit. Druhé tlačítko **Stejnopis pro evidenci zaměstnavatele (PDF)**
+vytiskne stejnopis s polem pro datum a podpis zaměstnance: dejte ho
+zaměstnanci podepsat a uschovejte ho tři kalendářní roky po roce, kterého se
+list týká. Předání zapište u výzvy na kartě osoby (**Stejnopis předán
 zaměstnanci**).
 
 **Jak poznáte, že je hotovo:** Žádost má stav **Vyřízeno** a termín zmizí

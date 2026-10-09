@@ -357,6 +357,7 @@ final class EldpFormAndRelationshipsTest extends TestCase
         $copies = (new \ReflectionClass(EldpStatementCopyService::class))->newInstanceWithoutConstructor();
 
         return $copies->html([
+            'variant' => EldpStatementCopyService::VARIANT_EMPLOYEE,
             'statement_id' => 1,
             'year' => 2025,
             'environment' => 'test',

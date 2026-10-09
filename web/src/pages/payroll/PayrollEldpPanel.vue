@@ -532,7 +532,7 @@ async function prepare(): Promise<void> {
 const copyDownloading = ref(false)
 const copyError = ref('')
 
-async function downloadCopy(): Promise<void> {
+async function downloadCopy(variant: 'employee' | 'employer' = 'employee'): Promise<void> {
   if (employmentId.value === null || copyDownloading.value) return
   copyDownloading.value = true
   copyError.value = ''
@@ -541,6 +541,7 @@ async function downloadCopy(): Promise<void> {
       employment_id: employmentId.value,
       year: year.value,
       environment: environment.value,
+      variant,
     })
   } catch (exception) {
     copyError.value = await copyFailureMessage(exception)
@@ -1047,19 +1048,31 @@ watch(requestedByAuthority, value => {
             </tbody>
           </table>
         </div>
-        <!-- Stejnopis pro zaměstnance (§ 38 odst. 5 ve znění do 31. 12. 2025) ze zmrazeného listu. -->
+        <!-- Dva stejnopisy (§ 38 odst. 5 ve znění do 31. 12. 2025) ze zmrazeného listu: pro zaměstnance a pro evidenci zaměstnavatele. -->
         <div class="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
             :class="[btnOutline('neutral'), 'whitespace-nowrap']"
             :disabled="copyDownloading"
             data-test="eldp-copy"
-            @click="downloadCopy"
+            @click="downloadCopy('employee')"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.download" />
             </svg>
             {{ t('payroll.eldp.copy.download') }}
+          </button>
+          <button
+            type="button"
+            :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+            :disabled="copyDownloading"
+            data-test="eldp-copy-employer"
+            @click="downloadCopy('employer')"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.download" />
+            </svg>
+            {{ t('payroll.eldp.copy.downloadEmployer') }}
           </button>
           <span class="text-xs text-neutral-500">{{ t('payroll.eldp.copy.hint') }}</span>
         </div>

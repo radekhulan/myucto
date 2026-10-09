@@ -25,7 +25,7 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
 <body>
 <div class="accent"></div>
 <div class="title">Stejnopis evidenčního listu důchodového pojištění za rok {{ year }}</div>
-<div class="subtitle">Pro zaměstnance · § 38 odst. 5 zákona č. 582/1991 Sb. ve znění do 31. 12. 2025{% if environment == 'test' %} · TESTOVACÍ PROSTŘEDÍ{% endif %}</div>
+<div class="subtitle">{{ variant == 'employer' ? 'Pro evidenci zaměstnavatele · § 35a odst. 4 písm. a) a' : 'Pro zaměstnance ·' }} § 38 odst. 5 zákona č. 582/1991 Sb. ve znění do 31. 12. 2025{% if environment == 'test' %} · TESTOVACÍ PROSTŘEDÍ{% endif %}</div>
 
 <table class="grid" style="margin-top:3mm">
   <tr>
@@ -86,6 +86,20 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
   </tbody>
 </table>
 
+{% if variant == 'employer' %}
+<div class="note">
+  Stejnopis odpovídá zmrazenému evidenčnímu listu č. {{ statement_id }}, který zaměstnavatel předkládá České správě
+  sociálního zabezpečení. Zaměstnavatel ho předkládá pojištěnci k podpisu a ponechává si ho ve své evidenci tři
+  kalendářní roky po roce, kterého se týká (§ 35a odst. 4 písm. a) zákona č. 582/1991 Sb.).
+</div>
+
+<table class="signature">
+  <tr>
+    <td>Datum vyhotovení: {{ prepared_on is not null ? prepared_on|cz_date : '' }}</td>
+    <td><div class="line">Datum a podpis pojištěnce</div></td>
+  </tr>
+</table>
+{% else %}
 <div class="note">
   Stejnopis odpovídá zmrazenému evidenčnímu listu č. {{ statement_id }}, který zaměstnavatel předkládá České správě
   sociálního zabezpečení. Nesouhlasíte-li se zápisem a zaměstnavatel ho na vaši žádost neopraví, můžete do 30 dnů od
@@ -98,6 +112,7 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
     <td><div class="line">Podpis pověřeného zaměstnance a razítko zaměstnavatele</div></td>
   </tr>
 </table>
+{% endif %}
 <div class="mono">
 Renderer: {{ renderer_version }}<br>
 SHA-256 XML: {{ manifest_sha256 }}

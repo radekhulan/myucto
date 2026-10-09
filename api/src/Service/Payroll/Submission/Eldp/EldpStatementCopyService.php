@@ -19,9 +19,13 @@ use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
 
 /**
- * Stejnopis evidenčního listu pro zaměstnance (§ 38 odst. 5 zákona
- * č. 582/1991 Sb. ve znění do 31. 12. 2025: druhý stejnopis vydá zaměstnavatel
- * občanovi nejpozději v den předložení listu).
+ * Stejnopisy evidenčního listu (§ 38 odst. 5 zákona č. 582/1991 Sb. ve znění
+ * do 31. 12. 2025; Všeobecné zásady ELDP, Hlavní zásady): zaměstnavatel
+ * vyhotoví dva. Jeden předloží občanovi k podpisu a založí do své evidence
+ * (§ 35a odst. 4 písm. a), varianta {@see self::VARIANT_EMPLOYER} s polem
+ * pro datum a podpis pojištěnce); druhý s podpisem pověřeného zaměstnance
+ * a razítkem vydá občanovi nejpozději v den předložení listu (varianta
+ * {@see self::VARIANT_EMPLOYEE}).
  *
  * Tiskne se ze ZMRAZENÉHO listu ({@see EldpStatementService::statement()}),
  * ne z nového sestavení: kopie musí říkat přesně to, co šlo na ČSSZ.
@@ -29,6 +33,9 @@ use Twig\Loader\FilesystemLoader;
 final class EldpStatementCopyService
 {
     public const VERSION = 'mz-eldp-copy-2026-v1';
+
+    public const VARIANT_EMPLOYEE = 'employee';
+    public const VARIANT_EMPLOYER = 'employer';
 
     private ?Environment $twig = null;
 
@@ -39,9 +46,14 @@ final class EldpStatementCopyService
     ) {}
 
     /** @return array{pdf:string,filename:string} */
-    public function render(int $supplierId, string $environment, int $employmentId, int $year): array
-    {
-        $template = $this->template($supplierId, $environment, $employmentId, $year);
+    public function render(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $year,
+        string $variant = self::VARIANT_EMPLOYEE,
+    ): array {
+        $template = $this->template($supplierId, $environment, $employmentId, $year, $variant);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Stejnopis evidenčního listu důchodového pojištění');
         $mpdf->SetCreator('MyÚčto.cz');
@@ -54,7 +66,11 @@ final class EldpStatementCopyService
 
         return [
             'pdf' => $pdf,
-            'filename' => sprintf('stejnopis-eldp-%d-%d.pdf', $year, (int) $template['statement_id']),
+            'filename' => sprintf(
+                $variant === self::VARIANT_EMPLOYER ? 'stejnopis-eldp-%d-%d-evidence.pdf' : 'stejnopis-eldp-%d-%d.pdf',
+                $year,
+                (int) $template['statement_id'],
+            ),
         ];
     }
 
@@ -67,8 +83,16 @@ final class EldpStatementCopyService
      *
      * @return array<string,mixed>
      */
-    public function template(int $supplierId, string $environment, int $employmentId, int $year): array
-    {
+    public function template(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $year,
+        string $variant = self::VARIANT_EMPLOYEE,
+    ): array {
+        if (!in_array($variant, [self::VARIANT_EMPLOYEE, self::VARIANT_EMPLOYER], true)) {
+            throw new \InvalidArgumentException('Stejnopis evidenčního listu je pro zaměstnance, nebo pro evidenci zaměstnavatele.');
+        }
         $statement = $this->statements->statement($supplierId, $environment, $employmentId, $year);
         if ($statement === null) {
             throw new \OutOfBoundsException('Za tento rok a vztah zatím žádný evidenční list zmrazený není.');
@@ -99,6 +123,7 @@ final class EldpStatementCopyService
             );
         }
         $template = [
+            'variant' => $variant,
             'statement_id' => (int) $statement['id'],
             'year' => $year,
             'environment' => $environment,
