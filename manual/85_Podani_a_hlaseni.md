@@ -2598,6 +2598,10 @@ způsob výplaty ve výplatním profilu osoby, nebo oznámení podejte mimo
 aplikaci. Ve větě jsou vždy všechny čtyři volby způsobu výplaty (účet v ČR,
 účet v zahraničí, adresa, hotovost), vybraná jako „ano“ a ostatní jako „ne“.
 
+**Jméno a příjmení pojištěnce** nesou NEMPRI i HZUPN v podobě platné v den
+přípravy podání, i když se změnily až po vzniku události (například sňatkem).
+Ostatní údaje se berou ke dni události.
+
 **Kontakt pojištěnce** (telefon a e-mail) se do NEMPRI doplní z karty osoby.
 Bere se primární aktivní kontakt, a když primární není, jediný aktivní; při
 více kandidátech se kontakt nevysílá.

@@ -620,6 +620,51 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
     }
 
     /**
+     * NEMPRI25-CR-02 (Všeobecné zásady NEMPRI, sekce B): uvede se příjmení
+     * platné v den provádění zápisu. Zaměstnanec změnil příjmení po vzniku
+     * neschopnosti; věta nese nové příjmení, rodné číslo zůstává.
+     */
+    public function testInsuredSurnameIsTheOneValidOnTheDayOfFilling(): void
+    {
+        [$employeeId, $employmentId] = $this->employee();
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history SET effective_to = "2026-02-28"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name,
+                 birth_date, effective_from)
+             VALUES (?, ?, "Jan Přejmenovaný", "Jan", "Přejmenovaný", "1980-01-01", "2026-03-01")',
+        )->execute([$this->supplierId, $employeeId]);
+        $case = $this->service(SicknessCaseService::class)->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'NEM',
+            [
+                'incapacity_from' => '2026-02-09',
+                'decision_number' => 'E1234567',
+                'daily_working_hours' => '8',
+                'decisive_months' => self::months(['2025-10', '2025-11', '2025-12', '2026-01']),
+            ],
+            $this->userId,
+        );
+
+        $xml = (string) $this->service(SicknessSubmissionService::class)->preview(
+            $this->supplierId,
+            'test',
+            (int) $case['id'],
+            SicknessDocumentKind::Nempri,
+        )['xml'];
+
+        self::assertStringContainsString('<prijmeni>Přejmenovaný</prijmeni>', $xml);
+        self::assertStringNotContainsString('<prijmeni>Testovací</prijmeni>', $xml);
+        self::assertStringContainsString('<rodneCislo>8001010008</rodneCislo>', $xml);
+    }
+
+    /**
      * NRO-03 (§ 19 odst. 11): zaměstnání skončilo 27. 3., neschopnost 2. 4.
      * v ochranné lhůtě. Rozhodný den je 28. 3., takže období končí únorem
      * — ne březnem, jak by vyšlo ze dne vzniku neschopnosti.

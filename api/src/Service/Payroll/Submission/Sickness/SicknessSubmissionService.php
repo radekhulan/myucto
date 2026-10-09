@@ -20,6 +20,7 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 
@@ -407,6 +408,17 @@ final readonly class SicknessSubmissionService
             (int) $row['employee_id'],
             $incapacityFrom,
         );
+        // Jméno a příjmení platné v den provádění zápisu (Všeobecné zásady
+        // NEMPRI, sekce B), ne k rozhodnému dni: změní-li zaměstnanec po vzniku
+        // události příjmení, ČSSZ ho ztotožňuje podle současného. Ostatní údaje
+        // identity zůstávají ke dni události.
+        $current = $this->identities->sensitiveIdentityAt(
+            $supplierId,
+            (int) $row['employee_id'],
+            PayrollSubmissionCalendar::today(),
+        );
+        $identity['identity']['first_name'] = $current['identity']['first_name'];
+        $identity['identity']['last_name'] = $current['identity']['last_name'];
 
         // Odpracovaná celá směna v den vzniku posouvá první den neschopnosti
         // (§ 26 odst. 3) a počátek podpůrčí doby ošetřovného (§ 40 odst. 1),
