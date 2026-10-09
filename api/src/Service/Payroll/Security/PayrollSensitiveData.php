@@ -9,6 +9,13 @@ use MyInvoice\Service\Auth\SecretEncryption;
 
 final class PayrollSensitiveData
 {
+    /**
+     * Strop pro citlivé dokumenty (profil registrace A1, převzatý payload JMHZ).
+     * Chrání jen před zjevně nesmyslným vstupem; skutečnou mez ukládání dává
+     * `max_allowed_packet`, protože šifrovaný text je o třetinu delší.
+     */
+    public const MAX_DOCUMENT_LENGTH = 200_000_000;
+
     public function __construct(
         private readonly SecretEncryption $encryption,
         private readonly Config $config,
@@ -78,7 +85,7 @@ final class PayrollSensitiveData
         string $purpose,
         int $supplierId,
     ): string {
-        if ($canonicalValue === '' || strlen($canonicalValue) > 10_000_000) {
+        if ($canonicalValue === '') {
             throw new \InvalidArgumentException('Kanonická hodnota pro otisk není platná.');
         }
         if ($supplierId <= 0) {
@@ -88,11 +95,13 @@ final class PayrollSensitiveData
             throw new \InvalidArgumentException('Účel citlivého otisku není platný.');
         }
 
-        return hash_hmac(
-            'sha256',
-            "payroll-fingerprint-v1\0{$purpose}\0{$supplierId}\0{$canonicalValue}",
-            $this->hashKey(),
-        );
+        // Otisk se počítá postupně a hodnotu nekopíruje, takže velikost neomezuje.
+        // Příprava JMHZ firmy s tisíci zaměstnanci má kanonický JSON v desítkách MB.
+        $context = hash_init('sha256', HASH_HMAC, $this->hashKey());
+        hash_update($context, "payroll-fingerprint-v1\0{$purpose}\0{$supplierId}\0");
+        hash_update($context, $canonicalValue);
+
+        return hash_final($context);
     }
 
     public function mask(string $plaintext, PayrollSensitiveField $field): string
@@ -140,7 +149,7 @@ final class PayrollSensitiveData
     {
         $value = trim($plaintext);
         $maximumLength = $field?->isDocument() === true
-            ? 10_000_000
+            ? self::MAX_DOCUMENT_LENGTH
             : 191;
         if ($value === '' || mb_strlen($value, 'UTF-8') > $maximumLength) {
             throw new \InvalidArgumentException('Citlivá hodnota je prázdná nebo příliš dlouhá.');

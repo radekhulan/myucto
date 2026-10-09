@@ -6,9 +6,11 @@ namespace MyInvoice\Tests\Unit\Payroll\Security;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollSensitiveDataTest extends TestCase
@@ -122,6 +124,85 @@ final class PayrollSensitiveDataTest extends TestCase
                 10,
             ),
         );
+    }
+
+    /** Postupný výpočet musí dát stejný otisk jako dřív, jinak neprojdou uložené snapshoty. */
+    public function testFingerprintStaysCompatibleWithStoredValues(): void
+    {
+        $canonical = '{"identifier":"0001010009","name":"Syntetická Osoba"}';
+
+        self::assertSame(
+            hash_hmac(
+                'sha256',
+                "payroll-fingerprint-v1\0jmhz-preparation-snapshot\0" . '10' . "\0" . $canonical,
+                str_repeat('h', 32),
+            ),
+            $this->service->keyedFingerprint(
+                $canonical,
+                'jmhz-preparation-snapshot',
+                10,
+            ),
+        );
+    }
+
+    /**
+     * Příprava JMHZ firmy s ~200 zaměstnanci má kanonický JSON přes 10 MB,
+     * firma s tisíci zaměstnanci desítky MB. Projít musí stejný sled jako
+     * zmrazení a ověření snapshotu: otisk, šifrování, dešifrování, otisk.
+     *
+     * @return iterable<string, array{int}>
+     */
+    public static function largeSnapshotSizes(): iterable
+    {
+        yield 'nad 10 MB' => [10_600_000];
+        yield 'nad 50 MB' => [52_000_000];
+    }
+
+    #[DataProvider('largeSnapshotSizes')]
+    public function testLargePreparationSnapshotCanBeFrozenAndVerified(int $minimumBytes): void
+    {
+        $form = [
+            'employee' => 'Syntetický zaměstnanec',
+            'rows' => array_fill(0, 200, ['code' => 'A01', 'amount' => '12345.67']),
+        ];
+        $formBytes = strlen(CanonicalJson::encode($form));
+        $forms = array_fill(0, intdiv($minimumBytes, $formBytes) + 1, $form);
+        $json = CanonicalJson::encode(['forms' => $forms]);
+        unset($forms);
+        self::assertGreaterThan($minimumBytes, strlen($json));
+
+        $fingerprint = $this->service->keyedFingerprint($json, 'jmhz-preparation-snapshot', 10);
+        $encryption = new SecretEncryption(new Config([
+            'app' => ['secret_encryption_key' => base64_encode(str_repeat('e', 32))],
+        ]));
+        $ciphertext = $encryption->encryptFor($json, 'jmhz-preparation:10:' . $fingerprint);
+        $plaintext = $encryption->decryptFor($ciphertext, 'jmhz-preparation:10:' . $fingerprint);
+        unset($ciphertext);
+
+        self::assertTrue($plaintext === $json);
+        self::assertSame(
+            $fingerprint,
+            $this->service->keyedFingerprint($plaintext, 'jmhz-preparation-snapshot', 10),
+        );
+    }
+
+    public function testLargeSensitiveDocumentCanBeSealedAndRevealed(): void
+    {
+        $payload = '{"forms":"' . str_repeat('A', 10_600_000) . '"}';
+        $sealed = $this->service->seal(
+            $payload,
+            PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD,
+            10,
+            20,
+        );
+
+        self::assertTrue($payload === $this->service->reveal(
+            $sealed->ciphertext,
+            PayrollSensitiveField::EXTERNAL_JMHZ_PAYLOAD,
+            10,
+            20,
+            PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
+        ));
     }
 
     public function testA1ProfileKeepsCanonicalJsonCaseAndSupportsFullPayload(): void
