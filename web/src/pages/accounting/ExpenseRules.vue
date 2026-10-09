@@ -17,6 +17,7 @@ import {
 } from '@/api/expenseRules'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
@@ -38,6 +39,17 @@ const toast = useToast()
 const pageId = useId()
 
 const canWrite = computed(() => auth.canWrite('accounting'))
+// Daňová evidence nemá účtovou osnovu: pravidlo v ní určuje druh a daňovou uznatelnost
+// výdaje, účty se nenačítají (endpoint osnovy je jen pro podvojné účetnictví).
+const supplierStore = useSupplierStore()
+const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
+type DeductibleChoice = '' | 'true' | 'false'
+function deductibleLabel(v: boolean | null | undefined): string {
+  return v == null ? '' : t(v ? 'accounting.expense_rules.deductible_yes' : 'accounting.expense_rules.deductible_no')
+}
+async function loadAccounts(): Promise<ChartAccount[]> {
+  return isTaxEvidence.value ? [] : accountingApi.listAccounts()
+}
 
 const EXPENSE_KINDS: ExpenseKind[] = ['service', 'material', 'small_asset', 'small_intangible', 'fixed_asset']
 // Účet odvozený z druhu nákladu, když pravidlo nemá vlastní target_account_code.
@@ -102,7 +114,7 @@ async function load() {
         active: filters.active === '' ? undefined : filters.active === 'true',
         page: page.value,
       }),
-      accountingApi.listAccounts(),
+      loadAccounts(),
     ])
     if (r.items.length === 0 && r.total > 0 && page.value > 1) {
       page.value = Math.max(1, Math.ceil(r.total / r.per_page))
@@ -170,6 +182,7 @@ const form = reactive({
   amount_max: null as number | null,
   expense_kind: 'service' as ExpenseKind,
   target_account_code: '',
+  tax_deductible: '' as DeductibleChoice,
   application_mode: 'auto' as 'suggest' | 'auto',
   priority: 100,
   is_active: true,
@@ -195,6 +208,7 @@ function resetForm() {
   form.amount_max = null
   form.expense_kind = 'service'
   form.target_account_code = ''
+  form.tax_deductible = ''
   form.application_mode = 'auto'
   form.priority = 100
   form.is_active = true
@@ -221,6 +235,7 @@ function openEdit(r: ExpenseRule) {
   form.amount_max = r.amount_max
   form.expense_kind = r.expense_kind
   form.target_account_code = r.target_account_code ?? ''
+  form.tax_deductible = r.tax_deductible == null ? '' : (r.tax_deductible ? 'true' : 'false')
   form.application_mode = r.application_mode
   form.priority = r.priority
   form.is_active = r.is_active
@@ -246,7 +261,8 @@ async function saveRule() {
       amount_min: form.amount_min,
       amount_max: form.amount_max,
       expense_kind: form.expense_kind,
-      target_account_code: form.target_account_code.trim() || null,
+      target_account_code: isTaxEvidence.value ? null : form.target_account_code.trim() || null,
+      tax_deductible: form.tax_deductible === '' ? null : form.tax_deductible === 'true',
       application_mode: form.application_mode,
       priority: Number(form.priority),
       is_active: form.is_active,
@@ -271,7 +287,7 @@ async function saveRule() {
 onMounted(async () => {
   if (!props.initialDraft) return load()
 
-  try { accounts.value = await accountingApi.listAccounts() }
+  try { accounts.value = await loadAccounts() }
   catch (e) { toast.error(expenseRuleErrorMessage(e, t)) }
 
   if (props.initialDraft.ruleId) {
@@ -343,9 +359,9 @@ onMounted(async () => {
       <EmptyState v-else-if="items.length === 0" icon="cycle"
         :title="t('accounting.expense_rules.empty')"
         :cta="canWrite ? t('accounting.expense_rules.new') : undefined"
-        :secondary="t('accounting.setup_assistant.open')"
-        secondary-to="/accounting/setup-assistant"
-        secondary-icon="chart"
+        :secondary="isTaxEvidence ? undefined : t('accounting.setup_assistant.open')"
+        :secondary-to="isTaxEvidence ? undefined : '/accounting/setup-assistant'"
+        :secondary-icon="isTaxEvidence ? undefined : 'chart'"
         @action="openNew" />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -380,7 +396,10 @@ onMounted(async () => {
                 <span class="ml-1 text-xs px-2 py-0.5 rounded-full" :class="r.application_mode === 'auto' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
                   {{ t(`accounting.expense_rules.mode_${r.application_mode}`) }}
                 </span>
-                <div class="text-xs text-neutral-500 mt-0.5 font-mono" :title="accountName(effectiveAccount(r))">
+                <div v-if="isTaxEvidence" class="text-xs mt-0.5" :class="r.tax_deductible === false ? 'text-warning-600' : 'text-neutral-500'">
+                  {{ deductibleLabel(r.tax_deductible) || t('accounting.expense_rules.deductible_keep') }}
+                </div>
+                <div v-else class="text-xs text-neutral-500 mt-0.5 font-mono" :title="accountName(effectiveAccount(r))">
                   → {{ effectiveAccount(r) }}
                   <span v-if="!r.target_account_code" class="not-italic text-neutral-400">({{ t('accounting.expense_rules.derived') }})</span>
                 </div>
@@ -484,9 +503,18 @@ onMounted(async () => {
           <select v-model="form.expense_kind" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
             <option v-for="k in EXPENSE_KINDS" :key="k" :value="k">{{ kindLabel(k) }}</option>
           </select>
-          <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.expense_rules.kind_hint') }}</p>
+          <p class="text-xs text-neutral-400 mt-1">{{ t(isTaxEvidence ? 'accounting.expense_rules.kind_hint_tax_evidence' : 'accounting.expense_rules.kind_hint') }}</p>
         </div>
-        <div>
+        <div v-if="isTaxEvidence">
+          <label :for="`${pageId}-deductible`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_tax_deductible') }}</label>
+          <select :id="`${pageId}-deductible`" v-model="form.tax_deductible" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('accounting.expense_rules.deductible_keep') }}</option>
+            <option value="true">{{ t('accounting.expense_rules.deductible_yes') }}</option>
+            <option value="false">{{ t('accounting.expense_rules.deductible_no') }}</option>
+          </select>
+          <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.expense_rules.tax_deductible_hint') }}</p>
+        </div>
+        <div v-else>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.expense_rules.form_target_account') }}</label>
           <ChartAccountSelect v-model="form.target_account_code" :accounts="expenseAccounts"
             :input-id="`${pageId}-target-account`" :aria-label="t('accounting.expense_rules.form_target_account')" />

@@ -482,6 +482,21 @@ Odhad příjmy a výdaje do konce roku nepromítá, pojistné ale počítá s ro
 často vychází pojistné z minima, i když za celý rok bude vyšší. Způsob uplatnění výdajů měňte v profilu přiznání; při přechodu mezi
 paušálem a skutečnými výdaji upravte základ podle § 23 odst. 8 ZDP.
 
+### 74.9.15 Pravidla nákladů v daňové evidenci
+
+Pravidla nákladů ([§ 65.4](65_Sablony.md#654-krok-za-krokem-pravidlo-nakladu)) najdete v daňové evidenci v menu
+`Daňová evidence → Pravidla nákladů`. Kritéria (dodavatel, část názvu dodavatele, popis položky, rozpětí ceny) i priorita
+fungují stejně, jen pravidlo nenastavuje účet a nemá časové rozlišení předplatného. Místo účtu určuje:
+
+- **Druh nákladu** položky: dlouhodobý majetek se do výdajů při úhradě nepočítá, drobný majetek se zapíše do evidence
+  drobného majetku.
+- **Daňovou uznatelnost dokladu** (Neměnit, Daňový výdaj, Nedaňový výdaj): podle ní peněžní deník řadí úhradu mezi daňové
+  nebo nedaňové výdaje.
+
+Automatická pravidla se uplatní při přijetí přijaté faktury. Druh nákladu doplní jen položkám, které ho ještě nemají
+z ruční volby. Uznatelnost dokladu změní jen tehdy, když automatická pravidla zachytí **všechny** položky dokladu a shodují
+se. Doklad, u kterého se pravidla rozcházejí nebo část položek nezachytila, zůstane beze změny a uznatelnost nastavíte ručně.
+
 ## 74.10 Související kapitoly
 
 - [Pokladna](32_Pokladna.md) - pokladní doklady, které se promítají do peněžního deníku.

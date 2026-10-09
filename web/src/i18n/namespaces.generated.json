@@ -719,6 +719,10 @@
     "tax-evidence-tax-estimate": [
       "tax_evidence"
     ],
+    "tax-evidence-expense-rules": [
+      "purchase_invoice",
+      "vendor"
+    ],
     "stock-items": [
       "eshop",
       "imports",

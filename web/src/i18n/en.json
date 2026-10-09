@@ -17175,7 +17175,15 @@
       "err_target_account": "Invalid target account — it must not be an open-item, VAT or bank account, and the account must be active.",
       "err_vendor_not_found": "The selected vendor was not found.",
       "err_not_found": "Rule not found.",
-      "err_generic": "The operation could not be completed."
+      "err_generic": "The operation could not be completed.",
+      "kind_hint_tax_evidence": "Long-term assets are not an expense when paid (depreciation applies instead); small assets are added to the small-asset register.",
+      "form_tax_deductible": "Tax deductibility of the document",
+      "tax_deductible_hint": "Set when the document is received, only if automatic rules match all of its items and agree. The cash journal uses it to sort the payment into deductible or non-deductible expenses.",
+      "deductible_keep": "Keep",
+      "deductible_yes": "Deductible expense",
+      "deductible_no": "Non-deductible expense",
+      "err_target_account_tax_evidence": "In tax evidence a rule sets no account, only the kind and tax deductibility of the expense.",
+      "err_recurring_prepaid_tax_evidence": "Prepaid annual subscriptions are not accrued in tax evidence."
     },
     "assets": {
       "title": "Fixed assets",

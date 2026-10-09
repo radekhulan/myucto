@@ -969,7 +969,8 @@
         "1985_payroll_jmhz_unpaid_holidays.sql",
         "1986_import_jobs_myucto.sql",
         "1987_purchase_invoice_vendor_number_seq.sql",
-        "1988_credit_note_offsets.sql"
+        "1988_credit_note_offsets.sql",
+        "1989_expense_rules_tax_deductible.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4902,6 +4903,7 @@
                 "recurring_prepaid": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "target_account_code": "varchar(10) NULL DEFAULT NULL",
+                "tax_deductible": "tinyint(1) NULL DEFAULT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "vendor_client_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "vendor_name_contains": "varchar(120) NULL DEFAULT NULL"

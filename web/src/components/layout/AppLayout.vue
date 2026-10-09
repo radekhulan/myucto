@@ -645,6 +645,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
         { to: '/tax-evidence/tax-estimate',         label: t('nav.de_tax_estimate'),         icon: ICONS.tax_income },
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
+        { to: '/tax-evidence/expense-rules', label: t('accounting.expense_rules.title'), icon: ICONS.codebooks, permission: 'accounting' },
         { to: '/other-items', label: t('nav.other_items'), icon: ICONS.coin, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
         // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).
@@ -658,8 +659,8 @@ const navSections = computed<NavSection[]>(() => {
         // Pokladna (PPD/VPD) je v sekci Peníze hned za Bankovní účty (jako u podvojného).
         // Export/Import vydaných/přijaté faktury jsou nezávisle na účetním režimu pod Prodej/Nákup.
         // Šablony (předkontace, pravidla nákladů a zaúčtování banky) tu ZÁMĚRNĚ nejsou:
-        // všechny tři jsou k účtování do deníku, takže stránka v daňové evidenci nemá
-        // co zobrazit a odkaz vedl na prázdno.
+        // jsou k účtování do deníku. Pravidla výdajů mají v daňové evidenci vlastní
+        // stránku výše (druh a daňová uznatelnost výdaje, bez účtů).
       ],
     })
   }

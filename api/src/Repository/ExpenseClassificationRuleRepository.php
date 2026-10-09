@@ -15,7 +15,7 @@ use PDO;
 final class ExpenseClassificationRuleRepository
 {
     private const COLS = 'id, supplier_id, name, vendor_client_id, vendor_name_contains,
-        description_contains, amount_min, amount_max, expense_kind, target_account_code, recurring_prepaid, application_mode,
+        description_contains, amount_min, amount_max, expense_kind, target_account_code, tax_deductible, recurring_prepaid, application_mode,
         priority, is_active, hit_count, last_hit_at, created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
@@ -138,8 +138,8 @@ final class ExpenseClassificationRuleRepository
         $pdo->prepare(
             'INSERT INTO expense_classification_rules
                 (supplier_id, name, vendor_client_id, vendor_name_contains, description_contains,
-                 amount_min, amount_max, expense_kind, target_account_code, recurring_prepaid, application_mode, priority, is_active, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 amount_min, amount_max, expense_kind, target_account_code, tax_deductible, recurring_prepaid, application_mode, priority, is_active, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
@@ -150,6 +150,7 @@ final class ExpenseClassificationRuleRepository
             $data['amount_max'] ?? null,
             $data['expense_kind'],
             $data['target_account_code'] ?? null,
+            isset($data['tax_deductible']) ? (int) (bool) $data['tax_deductible'] : null,
             array_key_exists('recurring_prepaid', $data) ? (int) (bool) $data['recurring_prepaid'] : 0,
             $data['application_mode'] ?? 'auto',
             $data['priority'] ?? 100,
@@ -168,7 +169,7 @@ final class ExpenseClassificationRuleRepository
     {
         $allowed = [
             'name', 'vendor_client_id', 'vendor_name_contains', 'description_contains',
-            'amount_min', 'amount_max', 'expense_kind', 'target_account_code', 'recurring_prepaid', 'application_mode',
+            'amount_min', 'amount_max', 'expense_kind', 'target_account_code', 'tax_deductible', 'recurring_prepaid', 'application_mode',
             'priority', 'is_active',
         ];
         $sets = [];
@@ -176,7 +177,11 @@ final class ExpenseClassificationRuleRepository
         foreach ($allowed as $col) {
             if (array_key_exists($col, $fields)) {
                 $sets[] = "{$col} = ?";
-                $params[] = in_array($col, ['is_active', 'recurring_prepaid'], true) ? (int) (bool) $fields[$col] : $fields[$col];
+                $params[] = match (true) {
+                    in_array($col, ['is_active', 'recurring_prepaid'], true) => (int) (bool) $fields[$col],
+                    $col === 'tax_deductible' => $fields[$col] === null ? null : (int) (bool) $fields[$col],
+                    default => $fields[$col],
+                };
             }
         }
         if ($sets === []) {
@@ -233,6 +238,7 @@ final class ExpenseClassificationRuleRepository
         $r['priority'] = (int) $r['priority'];
         $r['is_active'] = (bool) $r['is_active'];
         $r['recurring_prepaid'] = (bool) $r['recurring_prepaid'];
+        $r['tax_deductible'] = $r['tax_deductible'] === null ? null : (bool) $r['tax_deductible'];
         $r['hit_count'] = (int) $r['hit_count'];
         $r['created_by'] = $r['created_by'] === null ? null : (int) $r['created_by'];
         if (array_key_exists('created_by_name', $r)) {

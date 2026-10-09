@@ -43,7 +43,7 @@ final class ExpenseClassificationRuleAction
     public function list(Request $request, Response $response): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $q = $request->getQueryParams();
         $kind = ExpenseKind::tryFromNullable(self::nn($q['expense_kind'] ?? null))?->value;
         $active = array_key_exists('active', $q) && $q['active'] !== ''
@@ -63,7 +63,7 @@ final class ExpenseClassificationRuleAction
     public function get(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $rule = $this->rules->find($supplierId, (int) $args['id']);
         return $rule === null
             ? Json::error($response, 'not_found', 'Pravidlo nenalezeno.', 404)
@@ -74,7 +74,7 @@ final class ExpenseClassificationRuleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             $data = $this->normalizeRule($supplierId, $body);
@@ -90,7 +90,7 @@ final class ExpenseClassificationRuleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         $existing = $this->rules->find($supplierId, $id);
         if ($existing === null) {
@@ -110,7 +110,7 @@ final class ExpenseClassificationRuleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         if (!$this->rules->delete($supplierId, $id)) {
             return Json::error($response, 'not_found', 'Pravidlo nenalezeno.', 404);
@@ -123,7 +123,7 @@ final class ExpenseClassificationRuleAction
     public function suggestions(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         if (!$this->ownsPurchaseInvoice($supplierId, $id)) {
             return Json::error($response, 'not_found', 'Doklad nenalezen.', 404);
@@ -162,6 +162,10 @@ final class ExpenseClassificationRuleAction
         }
         $band = $this->assertBand($body['amount_min'] ?? null, $body['amount_max'] ?? null);
 
+        $recurringPrepaid = array_key_exists('recurring_prepaid', $body)
+            && (bool) filter_var($body['recurring_prepaid'], FILTER_VALIDATE_BOOLEAN);
+        $this->assertTaxEvidenceFields($supplierId, $body['target_account_code'] ?? null, $recurringPrepaid);
+
         return [
             'name' => self::nn($body['name'] ?? null) ?? 'Pravidlo',
             'vendor_client_id' => $vendorClientId,
@@ -171,9 +175,8 @@ final class ExpenseClassificationRuleAction
             'amount_max' => $band[1],
             'expense_kind' => $kind->value,
             'target_account_code' => $this->assertTargetAccount($supplierId, $body['target_account_code'] ?? null),
-            'recurring_prepaid' => array_key_exists('recurring_prepaid', $body)
-                ? (bool) filter_var($body['recurring_prepaid'], FILTER_VALIDATE_BOOLEAN)
-                : false,
+            'tax_deductible' => self::taxDeductible($body['tax_deductible'] ?? null),
+            'recurring_prepaid' => $recurringPrepaid,
             'application_mode' => ($body['application_mode'] ?? 'auto') === 'suggest' ? 'suggest' : 'auto',
             'priority' => $this->assertPriority($body['priority'] ?? 100),
             'is_active' => array_key_exists('is_active', $body)
@@ -204,10 +207,15 @@ final class ExpenseClassificationRuleAction
             $fields['expense_kind'] = $kind->value;
         }
         if (array_key_exists('target_account_code', $body)) {
+            $this->assertTaxEvidenceFields($supplierId, $body['target_account_code'], false);
             $fields['target_account_code'] = $this->assertTargetAccount($supplierId, $body['target_account_code']);
         }
         if (array_key_exists('recurring_prepaid', $body)) {
             $fields['recurring_prepaid'] = (bool) filter_var($body['recurring_prepaid'], FILTER_VALIDATE_BOOLEAN);
+            $this->assertTaxEvidenceFields($supplierId, null, $fields['recurring_prepaid']);
+        }
+        if (array_key_exists('tax_deductible', $body)) {
+            $fields['tax_deductible'] = self::taxDeductible($body['tax_deductible']);
         }
         if (array_key_exists('application_mode', $body)) {
             $fields['application_mode'] = $body['application_mode'] === 'suggest' ? 'suggest' : 'auto';
@@ -306,6 +314,39 @@ final class ExpenseClassificationRuleAction
             throw $this->err('invalid_priority', 'Priorita musí být v rozsahu 0 až 999.');
         }
         return $priority;
+    }
+
+    /**
+     * Daňová evidence nemá účtovou osnovu ani časové rozlišení: cílový účet ani roční
+     * předplatné (381) pravidlo v ní nastavit nemůže, rozhoduje druh výdaje a uznatelnost.
+     */
+    private function assertTaxEvidenceFields(int $supplierId, mixed $targetAccount, bool $recurringPrepaid): void
+    {
+        if (!$this->isTaxEvidence($supplierId)) {
+            return;
+        }
+        if (self::nn($targetAccount) !== null) {
+            throw $this->err('target_account_tax_evidence', 'V daňové evidenci pravidlo účet nenastavuje, určuje jen druh a daňovou uznatelnost výdaje.');
+        }
+        if ($recurringPrepaid) {
+            throw $this->err('recurring_prepaid_tax_evidence', 'Časové rozlišení ročního předplatného se v daňové evidenci nevede.');
+        }
+    }
+
+    private function isTaxEvidence(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchColumn() === 'tax_evidence';
+    }
+
+    /** NULL / '' = pravidlo uznatelnost nemění; jinak daňový (true) nebo nedaňový (false) výdaj. */
+    private static function taxDeductible(mixed $value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return (bool) filter_var($value, FILTER_VALIDATE_BOOLEAN);
     }
 
     private function ownsPurchaseInvoice(int $supplierId, int $id): bool

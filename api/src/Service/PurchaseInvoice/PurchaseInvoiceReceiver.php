@@ -31,6 +31,7 @@ final class PurchaseInvoiceReceiver
         private readonly CashSettlementService $cashSettlement,
         private readonly CardPaymentAutomation $cardAutomation,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
+        private readonly \MyInvoice\Service\TaxEvidence\TaxEvidenceExpenseRules $taxEvidenceRules,
     ) {}
 
     /**
@@ -79,6 +80,15 @@ final class PurchaseInvoiceReceiver
         // zapnutý auto_post_purchases a běží v podvojném účetnictví, zaúčtuj PF hned.
         // Idempotentní, takže opakované dosažení stavu received (un-cancel) zápis neduplikuje.
         $this->autoPoster->maybeAutoPost($supplierId, 'purchase_invoice', $id, $userId, $ip, $userAgent);
+
+        // Daňová evidence nic neúčtuje, pravidla klasifikace výdajů (druh výdaje, daňová
+        // uznatelnost) se proto uplatní tady. Před evidencí drobného majetku, ta čte druh.
+        try {
+            $this->taxEvidenceRules->applyOnReceive($supplierId, $id, $userId);
+        } catch (\Throwable $e) {
+            $this->logger->log('purchase_invoice.expense_rules_failed', $userId,
+                'purchase_invoice', $id, ['error' => $e->getMessage()], $ip, $userAgent);
+        }
 
         // Platba kartou: přijatý doklad s koncovkou karty se spáruje s pohybem karty.
         $this->cardAutomation->afterPurchaseReady($supplierId, $id, $userId);

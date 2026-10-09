@@ -16,6 +16,8 @@ export interface ExpenseRule {
   amount_max: number | null
   expense_kind: ExpenseKind
   target_account_code: string | null
+  /** Daňová evidence: null = neměnit, false = nedaňový výdaj, true = daňový výdaj. */
+  tax_deductible?: boolean | null
   application_mode: 'suggest' | 'auto'
   priority: number
   is_active: boolean
@@ -49,6 +51,8 @@ const ERROR_KEYS: Record<string, string> = {
   invalid_amount_band:    'accounting.expense_rules.err_amount_band',
   invalid_priority:       'accounting.expense_rules.err_priority',
   invalid_target_account: 'accounting.expense_rules.err_target_account',
+  target_account_tax_evidence: 'accounting.expense_rules.err_target_account_tax_evidence',
+  recurring_prepaid_tax_evidence: 'accounting.expense_rules.err_recurring_prepaid_tax_evidence',
   vendor_not_found:       'accounting.expense_rules.err_vendor_not_found',
   not_found:              'accounting.expense_rules.err_not_found',
 }

@@ -17175,7 +17175,15 @@
       "err_target_account": "Neplatný cílový účet - nesmí to být saldokontní, DPH ani bankovní účet a účet musí být aktivní.",
       "err_vendor_not_found": "Vybraný dodavatel nebyl nalezen.",
       "err_not_found": "Pravidlo nebylo nalezeno.",
-      "err_generic": "Operaci se nepodařilo dokončit."
+      "err_generic": "Operaci se nepodařilo dokončit.",
+      "kind_hint_tax_evidence": "Dlouhodobý majetek se do výdajů při úhradě nepočítá (uplatní se odpisy), drobný majetek se zapíše do evidence drobného majetku.",
+      "form_tax_deductible": "Daňová uznatelnost dokladu",
+      "tax_deductible_hint": "Při přijetí dokladu se nastaví, jen když automatická pravidla zachytí všechny jeho položky a shodují se. Podle ní peněžní deník řadí úhradu mezi daňové nebo nedaňové výdaje.",
+      "deductible_keep": "Neměnit",
+      "deductible_yes": "Daňový výdaj",
+      "deductible_no": "Nedaňový výdaj",
+      "err_target_account_tax_evidence": "V daňové evidenci pravidlo účet nenastavuje, určuje jen druh a daňovou uznatelnost výdaje.",
+      "err_recurring_prepaid_tax_evidence": "Časové rozlišení ročního předplatného se v daňové evidenci nevede."
     },
     "assets": {
       "title": "Majetek",

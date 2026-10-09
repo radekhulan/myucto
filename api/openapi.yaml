@@ -11298,6 +11298,12 @@ paths:
         Účetní/admin. READ-ONLY návrh — nic neúčtuje, jen předvyplňuje `expense_kind`
         na řádku PF. Vyžaduje alespoň jednu podmínku (`vendor_client_id`,
         `vendor_name_contains` nebo `description_contains`).
+
+        Dostupné i v daňové evidenci: tam pravidlo nesmí mít `target_account_code`
+        ani `recurring_prepaid` (422 `target_account_tax_evidence`,
+        `recurring_prepaid_tax_evidence`) a při přijetí dokladu nastaví
+        `tax_deductible` celého dokladu, když automatická pravidla se shodnou na
+        všech jeho položkách.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -11315,6 +11321,7 @@ paths:
                 amount_min: { type: [number, "null"] }
                 amount_max: { type: [number, "null"] }
                 target_account_code: { type: [string, "null"] }
+                tax_deductible: { type: [boolean, "null"], description: 'Daňová evidence: null = neměnit, false = nedaňový výdaj, true = daňový výdaj' }
                 recurring_prepaid: { type: boolean, default: false }
                 application_mode: { type: string, enum: [suggest, auto], default: auto }
                 priority: { type: integer, minimum: 0, maximum: 999, default: 100 }
@@ -39351,6 +39358,11 @@ components:
         target_account_code:
           type:
           - string
+          - 'null'
+        tax_deductible:
+          description: 'Daňová evidence: null = neměnit, false = nedaňový výdaj, true = daňový výdaj'
+          type:
+          - boolean
           - 'null'
         application_mode:
           type: string

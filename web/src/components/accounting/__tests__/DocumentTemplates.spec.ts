@@ -8,6 +8,8 @@ vi.mock('@/api/expenseRules', () => ({ expenseRulesApi: { createRule: m.createRu
 vi.mock('@/composables/useFormat', () => ({ formatMoney: String, formatDate: String }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+const supplierState = vi.hoisted(() => ({ currentSupplier: { accounting_mode: 'double_entry' } }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplierState }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
 vi.mock('@/api/settings', () => ({ settingsApi: { listCurrencies: async () => [{ code: 'EUR', is_active: true }] } }))
 vi.mock('@/api/bankPosting', () => ({ bankPostingApi: { createRule: m.createBankRule }, bankPostingErrorMessage: () => 'error' }))
@@ -25,6 +27,7 @@ const global = { stubs: {
 describe('templates from source documents', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    supplierState.currentSupplier.accounting_mode = 'double_entry'
     m.listAccounts.mockResolvedValue([])
     m.listCostCenters.mockResolvedValue([])
     m.createRule.mockResolvedValue({ rule: { id: 1 } })
@@ -55,6 +58,21 @@ describe('templates from source documents', () => {
       priority: 80, application_mode: 'suggest',
     }))
     expect(wrapper.emitted('saved')).toHaveLength(1)
+  })
+
+  it('in tax evidence sets deductibility instead of an account and never loads the chart of accounts', async () => {
+    supplierState.currentSupplier.accounting_mode = 'tax_evidence'
+    const wrapper = mount(ExpenseRules, { props: { initialDraft: { vendorId: 7, description: 'pokuta' } }, global })
+    await flushPromises()
+    expect(m.listAccounts).not.toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'ChartAccountSelect' }).exists()).toBe(false)
+    await wrapper.find('input[id$="-name"]').setValue('Pokuty')
+    await wrapper.find('select[id$="-deductible"]').setValue('false')
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    await flushPromises()
+    expect(m.createRule).toHaveBeenCalledWith(expect.objectContaining({
+      target_account_code: null, tax_deductible: false, description_contains: 'pokuta',
+    }))
   })
 
   it('loads a recommended rule fresh and updates it without losing mode or priority', async () => {
