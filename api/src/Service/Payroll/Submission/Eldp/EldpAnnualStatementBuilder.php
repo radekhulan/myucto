@@ -122,6 +122,9 @@ final class EldpAnnualStatementBuilder
      */
     public const FULL_PENSION_EXCLUSION_FROM_YEAR = 2025;
 
+    /** První rok, za který se list ELDP12 vyplňuje (Zadání ELDP12, údaj Rok: > 2008). */
+    public const FIRST_ELDP12_YEAR = 2009;
+
     private const MONTH_NAMES = [
         1 => 'leden', 2 => 'únor', 3 => 'březen', 4 => 'duben',
         5 => 'květen', 6 => 'červen', 7 => 'červenec', 8 => 'srpen',
@@ -174,6 +177,23 @@ final class EldpAnnualStatementBuilder
         if ($year < 2000 || $year > 2100) {
             throw new \InvalidArgumentException(
                 'Rok evidenčního listu musí být v rozsahu 2000 až 2100.',
+            );
+        }
+        /*
+         * Zadání ELDP12, údaj Rok: hodnota je vždy větší než 2008 a nejvýš
+         * rok přijetí listu. Dnešek zná jen kontejner ({@see self::$clock});
+         * bez hodin hlídá horní mez nepřímo datum vyhotovení (nejdřív „Do").
+         */
+        $currentYear = $this->clock === null
+            ? null
+            : (int) substr(PayrollSubmissionCalendar::today($this->clock->now()), 0, 4);
+        if ($year < self::FIRST_ELDP12_YEAR ||($currentYear !== null && $year > $currentYear)) {
+            throw new EldpValidationException(
+                'eldp_year_out_of_range',
+                'Evidenční list ELDP12 jde sestavit jen za rok ' . self::FIRST_ELDP12_YEAR
+                    . ' až ' . ($currentYear ?? 'letošní') . ", ne za rok {$year} (Zadání ELDP12, "
+                    . 'údaj Rok). Za dřívější rok ho podejte mimo aplikaci, budoucí rok '
+                    . 'ještě nejde vykázat.',
             );
         }
         $requestedByAuthority = $confirmation['requested_by_authority'] ?? null;

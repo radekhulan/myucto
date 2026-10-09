@@ -127,6 +127,7 @@ final class JmhzBlockerCatalog
         'eldp_base_with_fully_excluded_section' => 'absences',
         'eldp_post_termination_small_scale_unsupported' => 'manual',
         'eldp_death_date_invalid' => 'submission',
+        'eldp_year_out_of_range' => 'submission',
         'eldp_takeover_insurance_days_exceed_period' => 'takeover',
         'eldp_takeover_insurance_days_missing' => 'takeover',
         'eldp_takeover_month_ambiguous' => 'takeover',

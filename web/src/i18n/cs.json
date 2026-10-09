@@ -11476,6 +11476,7 @@
         "eldp_base_with_fully_excluded_section": "Sekce má všechny dny vyloučenou dobou, a přesto nese vyměřovací základ; ČSSZ by ji odmítla. Zkontrolujte nepřítomnosti a příjmy sekce.",
         "eldp_post_termination_small_scale_unsupported": "U zaměstnání malého rozsahu a DPP se příjem po skončení nepíše řádkem P+, patří do měsíce skončení. Přepočtěte měsíc skončení, nebo opravný list podejte mimo aplikaci.",
         "eldp_death_date_invalid": "Datum úmrtí zaměstnance musí být platné datum, které neleží před vykazovaným rokem.",
+        "eldp_year_out_of_range": "Evidenční list ELDP12 jde sestavit jen za rok 2009 a pozdější, nejvýš za letošní rok. Za dřívější rok ho podejte mimo aplikaci.",
         "eldp_takeover_insurance_days_exceed_period": "Převzatý měsíc vykazuje víc dnů účasti na pojištění, než kolik dnů pracovní vztah v měsíci trval.",
         "eldp_takeover_insurance_days_missing": "Převzatý měsíc se účastní důchodového pojištění, ale nemá vyplněné dny účasti. Doplňte údaj v Kontrole převodu mezd.",
         "eldp_takeover_month_ambiguous": "Za dané období leží víc převzatých mzdových měsíců téhož pracovního vztahu. Ponechte v Kontrole převodu mezd jen jeden řádek za měsíc.",

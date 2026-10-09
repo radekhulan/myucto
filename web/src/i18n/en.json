@@ -11476,6 +11476,7 @@
         "eldp_base_with_fully_excluded_section": "All days of the section are excluded periods yet it carries an assessment base; ČSSZ would reject it. Check the section's absences and income.",
         "eldp_post_termination_small_scale_unsupported": "For small-scale employment and agreements to perform work, income after termination is not written as a P+ row, it belongs to the month of termination. Recalculate that month or submit a corrective record outside the application.",
         "eldp_death_date_invalid": "The date of the employee's death must be a valid date not before the reported year.",
+        "eldp_year_out_of_range": "An ELDP12 pension insurance record sheet can only be built for 2009 or later, and at most for the current year. File a sheet for an earlier year outside the application.",
         "eldp_takeover_insurance_days_exceed_period": "The taken-over month reports more insurance participation days than the employment actually lasted in the month.",
         "eldp_takeover_insurance_days_missing": "The taken-over month participates in pension insurance but has no participation days filled in. Add the value in the payroll takeover review.",
         "eldp_takeover_month_ambiguous": "More than one taken-over payroll month exists for this employment in this period. Keep only one row per month in the payroll takeover review.",

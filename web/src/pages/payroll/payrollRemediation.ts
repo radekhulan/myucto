@@ -77,6 +77,7 @@ export const eldpRemediationCodes: Record<string, string> = {
   eldp_confirmation_invalid: 'confirmation',
   eldp_confirmation_note_invalid: 'confirmation',
   eldp_death_date_invalid: 'confirmation',
+  eldp_year_out_of_range: 'confirmation',
   eldp_manual_date_future: 'confirmation',
   eldp_manual_date_invalid: 'confirmation',
   eldp_manual_reference_invalid: 'confirmation',

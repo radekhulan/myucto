@@ -243,6 +243,44 @@ final class EldpNormCoverageTest extends TestCase
     }
 
     /**
+     * Zadání ELDP12, údaj Rok: hodnota je vždy větší než 2008 a nejvýš rok
+     * přijetí listu. Rok 2008 i rok po dnešku list nesestaví.
+     */
+    public function testYearOutsideEldp12RangeIsRefused(): void
+    {
+        $clock = new class implements ClockInterface {
+            public function now(): \DateTimeImmutable
+            {
+                return new \DateTimeImmutable('2026-02-10 10:00:00', new \DateTimeZone('Europe/Prague'));
+            }
+        };
+        foreach ([2008, 2027] as $year) {
+            try {
+                (new EldpAnnualStatementBuilder(clock: $clock))->build(
+                    self::SUPPLIER_ID,
+                    self::EMPLOYMENT_ID,
+                    $year,
+                    $this->months($year, 1, 12),
+                    $this->confirmation(),
+                );
+                self::fail("Rok {$year} je mimo meze údaje Rok ELDP12.");
+            } catch (EldpValidationException $exception) {
+                self::assertSame('eldp_year_out_of_range', $exception->validationCode, (string) $year);
+            }
+        }
+        self::assertSame(
+            2009,
+            (new EldpAnnualStatementBuilder(clock: $clock))->build(
+                self::SUPPLIER_ID,
+                self::EMPLOYMENT_ID,
+                2009,
+                $this->months(2009, 1, 12),
+                $this->confirmation(),
+            )->scope()['year'],
+        );
+    }
+
+    /**
      * § 15a zákona č. 187/2006 Sb., př. 31 a 38: nemoc v měsíci bez účasti
      * po třech měsících účasti je vyloučenou dobou, započte se do dnů a měsíc
      * zůstane „X". Př. 32: bez tří měsíců účasti se nevykazuje.
