@@ -434,53 +434,84 @@ final class PayrollTakeoverEmploymentWriter
      * roku), předpis se ukončí den před změnou a další verze dostanou vlastní předpis,
      * stejně jako při prvním převodu. Začátek předpisu se nemění nikdy.
      *
+     * Sazba se srovnává s předpisem platným k jejímu datu, ne se všemi předpisy. Převod
+     * jde rok po roce a zdroj každého roku zná jen sazby do svého konce; jeho poslední
+     * sazba je otevřená jen proto, že o další změně neví. Opakovaný převod staršího roku
+     * by jinak přepsal pozdější předpis a další rok by ho vracel zpátky. Opravuje se
+     * proto jen poslední předpis, stejně jako u verzí podmínek; jinou sazbu
+     * v předpisu, po kterém už následuje další, převod ponechá.
+     *
      * @param list<array{from:string,amount:float,prorated:bool}> $wages
      * @return array<string,int>
      */
     private function repairOwnRecurringWage(int $supplierId, int $employmentId, int $componentId, array $wages, ?int $userId, PayrollTakeoverPolicy $policy): array
     {
         $note = $policy->note('sjednaná měsíční mzda ze zpracovaných mezd.');
-        $statement = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_recurring_components WHERE supplier_id = ? AND employment_id = ? AND component_id = ? ORDER BY valid_from'
-        );
-        $statement->execute([$supplierId, $employmentId, $componentId]);
-        $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
+        $rows = $this->ownRecurringRows($supplierId, $employmentId, $componentId);
         foreach ($rows as $row) {
             if ((string) $row['note'] !== $note) {
                 return [];
             }
         }
+        $start = (string) $rows[0]['valid_from'];
         $corrected = 0;
-        foreach ($rows as $row) {
-            $from = (string) $row['valid_from'];
-            $to = $row['valid_to'] === null ? null : (string) $row['valid_to'];
-            // Verze mzdy zdroje, které do předpisu padnou, oříznuté na jeho platnost.
-            $segments = [];
-            foreach ($wages as $index => $wage) {
-                $next = $wages[$index + 1]['from'] ?? null;
-                $wageTo = $next === null ? null : (new \DateTimeImmutable($next))->modify('-1 day')->format('Y-m-d');
-                $minor = (int) round($wage['amount'] * 100);
-                if ($minor <= 0 || ($to !== null && $wage['from'] > $to) || ($wageTo !== null && $wageTo < $from)) {
-                    continue;
-                }
-                $segmentTo = $wageTo === null ? $to : ($to === null ? $wageTo : min($to, $wageTo));
-                $segments[] = ['from' => max($from, $wage['from']), 'to' => $segmentTo, 'amount' => $minor];
-            }
-            if ($segments === [] || $segments[0]['from'] !== $from) {
+        foreach ($wages as $index => $wage) {
+            $next = $wages[$index + 1]['from'] ?? null;
+            // Sazba, kterou ještě před začátkem předpisu vystřídala další, do něj nepatří.
+            if ($next !== null && $next <= $start) {
                 continue;
             }
-            $first = array_shift($segments);
-            if ($first['amount'] !== (int) $row['amount_minor'] || $first['to'] !== $to) {
-                $this->recurring->update($supplierId, (int) $row['id'], $this->recurringData($row, $employmentId, $componentId, $from, $first['to'], $first['amount'], $note), (int) $row['row_version'], $userId);
-                $corrected++;
+            $date = max($start, $wage['from']);
+            $minor = (int) round($wage['amount'] * 100);
+            $rows = $this->ownRecurringRows($supplierId, $employmentId, $componentId);
+            $atIndex = null;
+            foreach ($rows as $rowIndex => $candidate) {
+                if ((string) $candidate['valid_from'] <= $date) {
+                    $atIndex = $rowIndex;
+                }
             }
-            foreach ($segments as $segment) {
-                $this->recurring->create($supplierId, $this->recurringData($row, $employmentId, $componentId, $segment['from'], $segment['to'], $segment['amount'], $note), $userId);
-                $corrected++;
+            if ($atIndex === null) {
+                continue;
             }
+            $at = $rows[$atIndex];
+            $from = (string) $at['valid_from'];
+            $to = $at['valid_to'] === null ? null : (string) $at['valid_to'];
+            if (($to !== null && $to < $date)
+                || $atIndex !== count($rows) - 1
+                || ($minor > 0 && (int) $at['amount_minor'] === $minor)
+                || ($minor <= 0 && $from === $date)
+            ) {
+                continue;
+            }
+            $dayBefore = (new \DateTimeImmutable($date))->modify('-1 day')->format('Y-m-d');
+            if ($minor <= 0) {
+                // Měsíční mzda ve zdroji skončila: předpis se ukončí den předtím.
+                $this->recurring->update($supplierId, (int) $at['id'], $this->recurringData($at, $employmentId, $componentId, $from, $dayBefore, (int) $at['amount_minor'], $note), (int) $at['row_version'], $userId);
+                $corrected++;
+                continue;
+            }
+            if ($from === $date) {
+                $this->recurring->update($supplierId, (int) $at['id'], $this->recurringData($at, $employmentId, $componentId, $from, $to, $minor, $note), (int) $at['row_version'], $userId);
+                $corrected++;
+                continue;
+            }
+            $this->recurring->update($supplierId, (int) $at['id'], $this->recurringData($at, $employmentId, $componentId, $from, $dayBefore, (int) $at['amount_minor'], $note), (int) $at['row_version'], $userId);
+            $this->recurring->create($supplierId, $this->recurringData($at, $employmentId, $componentId, $date, $to, $minor, $note), $userId);
+            $corrected += 2;
         }
 
         return $corrected > 0 ? ['recurring_wage_corrected' => $corrected] : [];
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function ownRecurringRows(int $supplierId, int $employmentId, int $componentId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_recurring_components WHERE supplier_id = ? AND employment_id = ? AND component_id = ? ORDER BY valid_from'
+        );
+        $statement->execute([$supplierId, $employmentId, $componentId]);
+
+        return $statement->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /**

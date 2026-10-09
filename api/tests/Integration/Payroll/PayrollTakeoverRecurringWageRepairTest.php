@@ -104,6 +104,56 @@ final class PayrollTakeoverRecurringWageRepairTest extends TestCase
         ], array_map(static fn (array $r): array => ['amount_minor' => (int) $r['amount_minor'], 'valid_from' => (string) $r['valid_from'], 'valid_to' => $r['valid_to']], $statement->fetchAll(\PDO::FETCH_ASSOC)));
     }
 
+    /**
+     * N9: převod jde rok po roce a zdroj roku 2026 o zvýšení v roce 2027 neví. Opakovaný
+     * převod obou let nesmí předpis přepisovat tam a zpátky: hodnoty i `row_version`
+     * zůstanou a protokol opravu nehlásí.
+     */
+    public function testRepeatedMultiYearTakeoverLeavesPrescriptionsUntouched(): void
+    {
+        $employmentId = $this->employment('OPR-4');
+        $policy = PohodaPayrollTakeover::policy();
+        $year2026 = new PayrollTakeoverEmployment(
+            personalNumber: 'OPR',
+            relationKey: '4',
+            monthlyWages: [['from' => '2026-01-01', 'amount' => 48_000.0, 'prorated' => false]],
+        );
+        $year2027 = new PayrollTakeoverEmployment(
+            personalNumber: 'OPR',
+            relationKey: '4',
+            monthlyWages: [
+                ['from' => '2026-01-01', 'amount' => 48_000.0, 'prorated' => false],
+                ['from' => '2027-04-01', 'amount' => 52_000.0, 'prorated' => false],
+            ],
+        );
+        $this->writer->recurringWage($this->supplierId, $employmentId, $year2026, $this->userId, $policy, new PayrollTakeoverRunState());
+        $this->writer->recurringWage($this->supplierId, $employmentId, $year2027, $this->userId, $policy, new PayrollTakeoverRunState());
+        $before = $this->rows($employmentId);
+        self::assertSame([
+            [4_800_000, '2026-01-01', '2027-03-31'],
+            [5_200_000, '2027-04-01', null],
+        ], array_map(static fn (array $r): array => [$r[0], $r[1], $r[2]], $before));
+
+        $again2026 = $this->writer->recurringWage($this->supplierId, $employmentId, $year2026, $this->userId, $policy, new PayrollTakeoverRunState());
+        $again2027 = $this->writer->recurringWage($this->supplierId, $employmentId, $year2027, $this->userId, $policy, new PayrollTakeoverRunState());
+
+        self::assertSame([], $again2026);
+        self::assertSame([], $again2027);
+        self::assertSame($before, $this->rows($employmentId));
+    }
+
+    /** @return list<array{0:int,1:string,2:?string,3:int}> částka, od, do, row_version */
+    private function rows(int $employmentId): array
+    {
+        $statement = $this->db->pdo()->prepare('SELECT amount_minor, valid_from, valid_to, row_version FROM payroll_recurring_components WHERE supplier_id = ? AND employment_id = ? ORDER BY valid_from');
+        $statement->execute([$this->supplierId, $employmentId]);
+
+        return array_map(
+            static fn (array $r): array => [(int) $r['amount_minor'], (string) $r['valid_from'], $r['valid_to'] === null ? null : (string) $r['valid_to'], (int) $r['row_version']],
+            $statement->fetchAll(\PDO::FETCH_ASSOC),
+        );
+    }
+
     public function testPrescriptionEditedByTheAccountantIsLeftAlone(): void
     {
         $employmentId = $this->employment('OPR-2');
