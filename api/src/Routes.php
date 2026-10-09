@@ -3806,6 +3806,12 @@ final class Routes
             $g->get   ('/item-templates',               [\MyInvoice\Action\Stock\StockItemAction::class, 'templates']);
             $g->post  ('/item-templates/{templateId:[0-9]+}/apply', [\MyInvoice\Action\Stock\StockItemAction::class, 'applyTemplate']);
             $g->delete('/item-templates/{templateId:[0-9]+}', [\MyInvoice\Action\Stock\StockItemAction::class, 'deleteTemplate']);
+            // Sady (virtuální sety) ve veřejném API — issue #138.
+            $g->get   ('/sets',                         [\MyInvoice\Action\Stock\StockSetAction::class, 'list']);
+            $g->post  ('/sets',                         [\MyInvoice\Action\Stock\StockSetAction::class, 'create']);
+            $g->post  ('/sets/bulk',                    [\MyInvoice\Action\Stock\StockSetAction::class, 'bulk']);
+            $g->get   ('/sets/{id:[0-9]+}',             [\MyInvoice\Action\Stock\StockSetAction::class, 'get']);
+            $g->put   ('/sets/{id:[0-9]+}',             [\MyInvoice\Action\Stock\StockSetAction::class, 'update']);
             $g->get   ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'list']);
             $g->post  ('/items',                        [\MyInvoice\Action\Stock\StockItemAction::class, 'create']);
             $g->get   ('/items/{id:[0-9]+}',            [\MyInvoice\Action\Stock\StockItemAction::class, 'get']);

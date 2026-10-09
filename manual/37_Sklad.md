@@ -592,6 +592,9 @@ a všechny povinné volby. Vypočte aktuální cenu a rozpad na komponenty. Úda
 ani napsaná pevná cena sama o sobě nenahrazuje tuto kalkulaci: cenu objednávky vždy
 určuje její zachycená kalkulace.
 
+Sady lze číst, zakládat a upravovat i přes veřejné API, včetně hromadného
+zakládání z PIM nebo e-shopu ([Sady přes API](104_API.md#104919-sady-virtualni-sety)).
+
 #### 37.12.2.7 Kompletace výrobku
 
 Stránka **Kompletace výrobků** převádí komponenty virtuálního setu na vlastní

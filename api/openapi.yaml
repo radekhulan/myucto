@@ -16757,6 +16757,229 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/StockItemQuoteLine' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/stock/sets:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Stock]
+      summary: Seznam sad
+      description: |
+        Sady (virtuální sety) firmy s definicí složení. Sada je skladová karta bez
+        vlastní skladové zásoby; její ID je shodné s ID karty. Řazeno podle ID,
+        stránkuje se `page` / `per_page`. Pro synchronizaci stačí `updated_since`.
+
+        Vyžaduje oprávnění `eshop` (čtení) a zapnutý skladový modul.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Hledání v SKU a názvu karty sady.
+        - in: query
+          name: sku
+          schema: { type: string }
+          description: Přesné SKU karty sady.
+        - in: query
+          name: active
+          schema: { type: boolean }
+        - in: query
+          name: updated_since
+          schema: { type: string }
+          description: Jen sady s definicí změněnou od daného data (`YYYY-MM-DD`) nebo času (ISO 8601).
+        - in: query
+          name: page
+          schema: { type: integer, default: 1, minimum: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, default: 50, minimum: 5, maximum: 200 }
+      responses:
+        '200':
+          description: Stránka sad.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockSet' }
+                  meta: { $ref: '#/components/schemas/ListMeta' }
+        '400': { description: Neplatný filtr (`validation_failed`). }
+        '403': { description: Chybí oprávnění nebo skladový modul není zapnutý. }
+    post:
+      tags: [Stock]
+      summary: Nová sada
+      description: |
+        Založí v jedné transakci kartu sady (bez skladové zásoby) a její definici.
+        Komponenty lze zadat přes `item_id` nebo `sku`; obojí se hledá jen ve
+        firmě požadavku. Validace je stejná jako v editoru sady v aplikaci.
+
+        Vyžaduje token se scope `read_write` a oprávnění `eshop.write`
+        a `stock.items.write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockSetCreate' }
+            example:
+              sku: SADA-KAVA-DARKOVA
+              name: Dárková sada kávy
+              vat_rate_id: 1
+              definition:
+                components:
+                  - { sku: KAVA-250, quantity: '2' }
+                  - { sku: HRNEK-BILY, quantity: '1' }
+                prices:
+                  CZK: { mode: discount, discount_pct: '10' }
+      responses:
+        '201':
+          description: Sada založena.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockSet' }
+        '403': { description: Token nemá scope `read_write` nebo chybí oprávnění. }
+        '404': { description: 'Komponenta neexistuje nebo patří jiné firmě (`set_component_not_found`; u komponent zadaných přes `sku` nese chyba seznam `error.skus`).' }
+        '409': { description: Karta s tímto SKU už existuje (`sku_taken`). }
+        '422': { description: 'Neplatná definice nebo karta (`validation_failed`, `set_definition_invalid`, `set_cycle`, `set_inactive_component` …).' }
+  /api/v1/stock/sets/bulk:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Stock]
+      summary: Hromadné založení a úprava sad (upsert podle SKU)
+      description: |
+        Až 200 sad v jedné dávce. Klíčem je `sku`: neexistující karta se založí
+        jako sada, existující karta dostane novou definici. Každá položka se
+        ukládá ve vlastní transakci, takže chyba jedné položky ostatní neovlivní
+        a odpověď je 200 i při částečném neúspěchu; výsledek je v `results`
+        ve stejném pořadí jako vstup.
+
+        Opakované odeslání téže dávky je bezpečné: položka, jejíž uložená
+        definice už odpovídá požadavku, vrátí `unchanged` a verzi nezvýší.
+        Položky se zpracují postupně, takže sada může jako komponentu použít
+        sadu založenou dříve v téže dávce (přes `sku`). Atributy existující karty
+        (název, jednotka, DPH) dávka nemění, k tomu slouží `PUT /stock/items/{id}`.
+
+        Vyžaduje token se scope `read_write` a oprávnění `eshop.write`
+        a `stock.items.write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sets]
+              properties:
+                sets:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { $ref: '#/components/schemas/StockSetBulkItem' }
+            example:
+              sets:
+                - sku: SADA-KAVA-DARKOVA
+                  name: Dárková sada kávy
+                  definition:
+                    components:
+                      - { sku: KAVA-250, quantity: '2' }
+                      - { sku: HRNEK-BILY, quantity: '1' }
+                    prices:
+                      CZK: { mode: discount, discount_pct: '10' }
+                - sku: SADA-CAJ
+                  name: Čajová sada
+                  definition:
+                    components:
+                      - { sku: CAJ-ZELENY, quantity: '3' }
+      responses:
+        '200':
+          description: Výsledek po položkách.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    properties:
+                      created: { type: integer }
+                      updated: { type: integer }
+                      unchanged: { type: integer }
+                      failed: { type: integer }
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/StockSetBulkResult' }
+              example:
+                summary: { created: 1, updated: 0, unchanged: 0, failed: 1 }
+                results:
+                  - { index: 0, sku: SADA-KAVA-DARKOVA, status: created, stock_item_id: 2051, row_version: 1, card_created: true }
+                  - index: 1
+                    sku: SADA-CAJ
+                    status: error
+                    stock_item_id: null
+                    row_version: null
+                    card_created: false
+                    error: { code: set_component_not_found, message: 'Karta nebo komponenta setu nenalezena.', skus: [CAJ-ZELENY] }
+        '403': { description: Token nemá scope `read_write` nebo chybí oprávnění. }
+        '422': { description: 'Prázdná nebo neplatná dávka (`validation_failed`), víc než 200 položek (`batch_too_large`).' }
+  /api/v1/stock/sets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        description: ID karty sady.
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Stock]
+      summary: Detail sady
+      responses:
+        '200':
+          description: Sada s definicí.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockSet' }
+        '403': { description: Chybí oprávnění nebo skladový modul není zapnutý. }
+        '404': { description: Karta neexistuje nebo není sada. }
+    put:
+      tags: [Stock]
+      summary: Úprava definice sady
+      description: |
+        Nahradí celou definici. `row_version` musí odpovídat uložené verzi, jinak
+        409 `version_conflict` (sadu mezitím změnil někdo jiný; načtěte ji znovu).
+        Karta bez skladové zásoby, která sadou ještě není, se jí stane s
+        `row_version: 0`. Karta se skladovou zásobou sadou být nemůže
+        (`set_stocked_card`).
+
+        Vyžaduje token se scope `read_write` a oprávnění `eshop.write`
+        a `stock.items.write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [row_version, definition]
+              properties:
+                row_version: { type: integer, minimum: 0 }
+                definition: { $ref: '#/components/schemas/StockSetDefinition' }
+            example:
+              row_version: 3
+              definition:
+                components:
+                  - { item_id: 1042, quantity: '2' }
+                groups: []
+                prices:
+                  CZK: { mode: fixed, fixed_price: '499.00' }
+      responses:
+        '200':
+          description: Uloženo.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockSet' }
+        '403': { description: Token nemá scope `read_write` nebo chybí oprávnění. }
+        '404': { description: 'Karta nebo komponenta neexistuje (`not_found`, `set_component_not_found`).' }
+        '409': { description: Sadu mezitím změnil někdo jiný (`version_conflict`). }
+        '422': { description: Neplatná definice. }
   /api/v1/stock/items:
     parameters:
     - $ref: '#/components/parameters/SupplierIdHeader'
@@ -29631,6 +29854,157 @@ components:
         promo_qty_available:
           type: [string, 'null']
           description: Zbývající množství akce se stropem, v základních jednotkách; null = akce bez stropu nebo žádná.
+        is_set:
+          type: boolean
+          description: Karta je sada (virtuální set s definicí složení). Vrací seznam a detail `/stock/items`.
+        set_id:
+          type: [integer, 'null']
+          description: ID sady pro `/stock/sets/{id}` (shodné s ID karty); null, pokud karta není sada. Vrací seznam a detail `/stock/items`.
+    StockSetComponent:
+      type: object
+      description: Pevná komponenta sady. Kartu určuje buď `item_id`, nebo `sku` (jen v požadavku; odpověď vrací vždy `item_id`).
+      required: [quantity]
+      additionalProperties: false
+      properties:
+        item_id: { type: integer, format: int64, minimum: 1 }
+        sku: { type: string, maxLength: 50, description: 'Jen v požadavku, místo `item_id`. Hledá se ve firmě požadavku.' }
+        quantity: { type: string, pattern: '^\d{1,11}(\.\d{1,3})?$', description: 'Kladné množství komponenty na jednu sadu (max 3 desetinná místa).' }
+    StockSetGroupOption:
+      type: object
+      required: [code, name, quantity]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: '^[a-zA-Z0-9_-]{1,50}$' }
+        name: { type: string, maxLength: 150 }
+        item_id: { type: integer, format: int64, minimum: 1 }
+        sku: { type: string, maxLength: 50, description: 'Jen v požadavku, místo `item_id`.' }
+        quantity: { type: string, pattern: '^\d{1,11}(\.\d{1,3})?$' }
+        surcharges:
+          type: object
+          description: Příplatek za volbu podle měny (klíč = kód měny ISO 4217), částka bez DPH.
+          additionalProperties: { type: string, pattern: '^\d{1,12}(\.\d{1,2})?$' }
+    StockSetGroup:
+      type: object
+      description: Volitelná skupina komponent (zákazník vybírá `min` až `max` voleb).
+      required: [code, name, options]
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: '^[a-zA-Z0-9_-]{1,50}$' }
+        name: { type: string, maxLength: 150 }
+        min: { type: integer, minimum: 0, default: 0 }
+        max: { type: integer, minimum: 1, default: 1 }
+        options:
+          type: array
+          maxItems: 50
+          items: { $ref: '#/components/schemas/StockSetGroupOption' }
+    StockSetPrice:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [sum, discount, fixed]
+          default: sum
+          description: '`sum` = součet cen komponent, `discount` = součet se slevou `discount_pct`, `fixed` = pevná cena `fixed_price` bez DPH.'
+        discount_pct: { type: [string, 'null'], pattern: '^\d{1,3}(\.\d{1,3})?$', description: 'Sleva v procentech (0–100), jen pro `discount`.' }
+        fixed_price: { type: [string, 'null'], pattern: '^\d{1,12}(\.\d{1,2})?$', description: 'Pevná cena bez DPH, jen pro `fixed`.' }
+    StockSetDefinition:
+      type: object
+      description: |
+        Složení sady. Musí obsahovat aspoň jednu komponentu nebo skupinu; nejvýše
+        100 komponent a 20 skupin. Komponenty musí být aktivní karty téže firmy.
+        Komponentou smí být i jiná sada (nejvýše 12 úrovní), cyklus se odmítne
+        (`set_cycle`).
+      additionalProperties: false
+      properties:
+        components:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/StockSetComponent' }
+        groups:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/StockSetGroup' }
+        prices:
+          type: object
+          description: Cenotvorba sady podle měny (klíč = kód měny ISO 4217). Měna bez záznamu = `sum`.
+          additionalProperties: { $ref: '#/components/schemas/StockSetPrice' }
+      example:
+        components:
+          - { sku: KAVA-250, quantity: '2' }
+          - { item_id: 1042, quantity: '1' }
+        groups: []
+        prices:
+          CZK: { mode: discount, discount_pct: '10' }
+    StockSet:
+      type: object
+      properties:
+        stock_item_id: { type: integer, format: int64, description: 'ID karty sady; zároveň ID sady v `/stock/sets/{id}`.' }
+        sku: { type: string }
+        name: { type: string }
+        unit: { type: string }
+        item_type: { type: string, enum: [material, goods, product] }
+        vat_rate_id: { type: [integer, 'null'] }
+        ean: { type: [string, 'null'] }
+        is_active: { type: boolean }
+        lifecycle_status: { type: string, enum: [draft, ready, retired] }
+        row_version: { type: integer, minimum: 1, description: Verze definice; posílá se zpět při úpravě. }
+        definition: { $ref: '#/components/schemas/StockSetDefinition' }
+        created_at: { type: string }
+        updated_at: { type: string }
+    StockSetCreate:
+      type: object
+      required: [sku, name, definition]
+      properties:
+        sku: { type: string, maxLength: 50, description: Kód karty sady; musí být ve firmě jedinečný. }
+        name: { type: string, maxLength: 255 }
+        unit: { type: string, maxLength: 20, default: ks }
+        item_type: { type: string, enum: [goods, product], default: goods }
+        vat_rate_id: { type: [integer, 'null'] }
+        ean: { type: [string, 'null'], maxLength: 50 }
+        note: { type: [string, 'null'] }
+        is_active: { type: boolean, default: true }
+        definition: { $ref: '#/components/schemas/StockSetDefinition' }
+    StockSetBulkItem:
+      type: object
+      required: [sku, definition]
+      properties:
+        sku: { type: string, maxLength: 50, description: 'Klíč upsertu. Existující karta se SKU dostane novou definici, jinak se karta sady založí.' }
+        name: { type: string, maxLength: 255, description: Povinné jen při zakládání nové karty; u existující karty se ignoruje. }
+        unit: { type: string, maxLength: 20 }
+        item_type: { type: string, enum: [goods, product] }
+        vat_rate_id: { type: [integer, 'null'] }
+        ean: { type: [string, 'null'], maxLength: 50 }
+        note: { type: [string, 'null'] }
+        is_active: { type: boolean }
+        row_version:
+          type: integer
+          minimum: 0
+          description: Volitelná optimistická kontrola. Bez ní se přepíše aktuální definice; s ní a jinou uloženou verzí vrátí položka `version_conflict`.
+        definition: { $ref: '#/components/schemas/StockSetDefinition' }
+    StockSetBulkResult:
+      type: object
+      properties:
+        index: { type: integer, description: Pořadí položky v dávce (od 0). }
+        sku: { type: [string, 'null'] }
+        status:
+          type: string
+          enum: [created, updated, unchanged, error]
+          description: '`unchanged` = uložená definice už odpovídá požadavku, nic se nezměnilo ani nezvýšila verze.'
+        stock_item_id: { type: [integer, 'null'], format: int64 }
+        row_version: { type: [integer, 'null'] }
+        card_created: { type: boolean, description: Položka založila novou kartu sady. }
+        error:
+          type: object
+          description: Jen u `status = error`. Stejný tvar jako `error` v odpovědi jednotlivé operace, včetně doplňujících klíčů (např. `skus`).
+          additionalProperties: true
+          properties:
+            code: { type: string, description: 'Například `validation_failed`, `duplicate_in_batch`, `sku_taken`, `version_conflict`, `set_component_not_found`, `set_cycle`, `set_stocked_card`, `set_inactive_component`, `set_definition_invalid`.' }
+            message: { type: string }
+            skus:
+              type: array
+              items: { type: string }
+              description: U `set_component_not_found` SKU komponent, které ve firmě neexistují.
     CatalogEditorInput:
       type: object
       required: [row_version]

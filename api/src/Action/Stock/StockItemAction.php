@@ -111,7 +111,32 @@ final class StockItemAction
         $p = Pagination::fromQuery($q, 50);
         [$rows, $total] = $this->items->listPaged($supplierId, $filters, $p['per_page'], $p['offset']);
         $rows = $this->withSearchMatch($supplierId, $this->withEffectivePrice($supplierId, $rows), (string) ($filters['q'] ?? ''));
-        return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
+        return Json::ok($response, Pagination::envelope($this->withSetFlag($supplierId, $rows), $total, $p['page'], $p['per_page']));
+    }
+
+    /**
+     * `is_set` = karta má definici sady, `set_id` = ID pro `/api/v1/stock/sets/{id}`
+     * (shodné s ID karty), jinak null. Sada je vždy karta bez skladové zásoby.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withSetFlag(int $supplierId, array $rows): array
+    {
+        $ids = array_map(static fn (array $r): int => (int) $r['id'], array_filter($rows, static fn (array $r): bool => !(bool) ($r['is_stocked'] ?? true)));
+        $sets = [];
+        if ($ids !== []) {
+            $stmt = $this->db->pdo()->prepare('SELECT stock_item_id FROM product_sets WHERE supplier_id = ? AND stock_item_id IN ('
+                . implode(',', array_fill(0, count($ids), '?')) . ')');
+            $stmt->execute([$supplierId, ...array_values($ids)]);
+            $sets = array_flip(array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: []));
+        }
+        foreach ($rows as $i => $row) {
+            $isSet = isset($sets[(int) $row['id']]);
+            $rows[$i]['is_set'] = $isSet;
+            $rows[$i]['set_id'] = $isSet ? (int) $row['id'] : null;
+        }
+        return $rows;
     }
 
     public function search(Request $request, Response $response): Response
@@ -197,7 +222,7 @@ final class StockItemAction
         if ($item === null) {
             return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
         }
-        return Json::ok($response, $this->withPackaging($supplierId, $this->withEffectivePrice($supplierId, [$item]), '')[0]);
+        return Json::ok($response, $this->withSetFlag($supplierId, $this->withPackaging($supplierId, $this->withEffectivePrice($supplierId, [$item]), ''))[0]);
     }
 
     public function create(Request $request, Response $response): Response
