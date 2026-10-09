@@ -73,6 +73,9 @@ final class PohodaPayrollPeople
         'V19' => 'compensatory_time_off', 'V20' => 'compensatory_time_off',
     ];
 
+    /** Ošetřovné osamělého pracovníka (číselník PAMICA „Ošetřovné - osamělý pracovník"). */
+    private const LONE_CARER_ABSENCES = ['N06', 'H06'];
+
     /** Čísla složek hodinové a úkolové mzdy: takový vztah měsíční mzdu nepobírá. */
     private const HOURLY_WAGE_CODES = ['C01', 'C02', 'C08', 'U01', 'U02', 'U03', 'U04', 'U05'];
 
@@ -266,6 +269,9 @@ final class PohodaPayrollPeople
                     'to' => $dates['to'],
                     'childbirth' => $childbirth,
                     'hours' => PohodaXml::num($row, 'HodPrac'),
+                    // Osamělý zaměstnanec má podpůrčí dobu ošetřovného 16 dnů místo 9
+                    // (§ 40 odst. 1 písm. b) zák. č. 187/2006 Sb.); ELDP z ní odvozuje vyloučené dny.
+                    'lone_carer' => $type === 'ocr' && in_array(strtoupper(trim($number)), self::LONE_CARER_ABSENCES, true),
                 ];
                 continue;
             }

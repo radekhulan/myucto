@@ -500,6 +500,64 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * Ošetřovné osamělého pracovníka (H06) se převezme s příznakem, ze kterého ELDP
+     * odvozuje podpůrčí dobu 16 dnů. Nepřítomnost zapsanou dřívějším převodem bez
+     * příznaku opakovaný převod opraví.
+     */
+    public function testLoneCarerCareIsTakenOverWithTheFlag(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $this->db->pdo()->prepare("UPDATE payroll_module_state SET start_period = '2027-01-01' WHERE supplier_id = ?")->execute([$supplierId]);
+        $file = $this->writeLoneCarerPayroll();
+        $flag = "SELECT lone_carer FROM payroll_absences WHERE supplier_id = ? AND absence_type = 'ocr'
+                   AND date_from = '2025-03-10' AND date_to = '2025-03-20' AND status NOT IN ('cancelled', 'rejected')";
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2025, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->scalar($flag, [$supplierId]), $this->explain($protocol));
+
+        $this->db->pdo()->prepare("UPDATE payroll_absences SET lone_carer = 0 WHERE supplier_id = ? AND absence_type = 'ocr'")->execute([$supplierId]);
+        $again = $this->importer->run($supplierId, $this->userId, $file, 2025, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+        self::assertSame(1, $this->scalar($flag, [$supplierId]), $this->explain($again));
+        self::assertSame(1, self::stepCounts($again, PohodaPayrollImporter::STEP_PEOPLE)['absences_lone_carer'] ?? 0, $this->explain($again));
+    }
+
+    /** Osoba s ošetřovným osamělého pracovníka v březnu 2025. Syntetická data. */
+    private function writeLoneCarerPayroll(): string
+    {
+        $dir = $this->tmp . '/12345678_2025_ocr';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $x = '';
+        $row = static function (string $table, array $cols) use (&$x): void {
+            $x .= "<{$table}>";
+            foreach ($cols as $k => $v) {
+                $x .= "<{$k}>" . htmlspecialchars((string) $v, ENT_XML1) . "</{$k}>";
+            }
+            $x .= "</{$table}>";
+        };
+        $row('sMZneprit', ['ID' => 1, 'Cislo' => 'H06', 'Nazev' => 'Ošetřovné - osamělý pracovník']);
+        $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
+        $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
+        $row('ZAM', ['ID' => 1, 'OsCislo' => '5101', 'Jmeno' => 'Olga', 'Prijmeni' => 'Pečující', 'DatNar' => '1987-06-02',
+            'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '1', 'Obec' => 'Brno',
+            'PSC' => '60200', 'Stat' => 'CZ']);
+        $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'Cislo' => '1', 'JeDPP' => 0, 'DatNast' => '2024-01-01', 'TUvazek' => 40]);
+        $row('MZ', ['ID' => 30, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2025, 'RelMes' => 3, 'HodFond' => 168, 'DnyFond2' => 21,
+            'TUvazek' => 40, 'HodOdpra' => 96, 'RefPoj' => 1, 'KcHrubaM' => 20000, 'KcCistaM' => 16000, 'Prohlas' => 1,
+            'JeSocPP' => 1, 'KcSoc' => 1420, 'KcZaklM' => 20000, 'DnyPrac' => 21, 'DnyOdpra' => 12, 'KcPrum' => 200,
+            'Datum' => '2025-04-10', 'KcVyplat' => 16000]);
+        $row('MZslozky', ['ID' => 1, 'RefAg' => 30, 'RefSlozka' => 1, 'KcMzda' => 20000, 'Hodnota1' => 35000]);
+        $row('MZneprit', ['ID' => 1, 'RefAg' => 30, 'RefSlozka' => 1, 'HodPrac' => 72, 'DatZac' => '2025-03-10', 'DatKon' => '2025-03-20']);
+
+        $file = $dir . '/91_mzdy.xml';
+        file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<mdbExport version="1" group="mzdy" ico="12345678" year="2025" source="POHODA" state="ok">' . $x . '</mdbExport>');
+        return $file;
+    }
+
+    /**
      * Osoba s neschopností od 20. 12. 2025 do 10. 1. 2026, kterou PAMICA vede po měsících
      * (prosincová a lednová mzda). Syntetická data, žádné reálné doklady ani osoby.
      */

@@ -111,10 +111,28 @@ final class PohodaPayrollDatedAbsenceTest extends TestCase
         self::assertContains(['type' => 'dpn', 'from' => '2026-03-05', 'to' => '2026-03-13'], $absences);
         self::assertContains(['type' => 'vacation', 'from' => '2026-03-02', 'to' => '2026-03-02'], $absences);
         self::assertContains(['type' => 'ocr', 'from' => '2026-05-04', 'to' => '2026-05-05'], $absences);
-        self::assertCount(3, $absences);
+        self::assertContains(['type' => 'ocr', 'from' => '2026-04-20', 'to' => '2026-04-21'], $absences);
+        self::assertCount(4, $absences);
 
         // Nemoc bez data (duben) a jedno ošetřovné bez data (květen).
         self::assertSame(2, $record['absences_without_dates']);
+    }
+
+    /**
+     * Ošetřovné osamělého pracovníka (H06, N06) má podpůrčí dobu 16 dnů místo 9 a ELDP
+     * z ní odvozuje vyloučené dny. Převod dřív příznak zahodil a list vyšel s jinými
+     * vyloučenými dny než u předchozího programu.
+     */
+    public function testLoneCarerCareKeepsTheFlag(): void
+    {
+        $flags = [];
+        foreach (PohodaPayrollPeople::read($this->file, 2026)[0]['absences'] as $absence) {
+            $flags[$absence['type'] . ' ' . $absence['from']] = $absence['lone_carer'] ?? null;
+        }
+
+        self::assertTrue($flags['ocr 2026-04-20']);
+        self::assertFalse($flags['ocr 2026-05-04']);
+        self::assertFalse($flags['dpn 2026-03-05']);
     }
 
     /** Nulové datum Accessu i doba mimo převáděný rok znamenají „nepoužitelné datum". */
@@ -174,6 +192,7 @@ final class PohodaPayrollDatedAbsenceTest extends TestCase
         $row('sMZneprit', ['ID' => 1, 'Cislo' => 'V01', 'Nazev' => 'Dovolená']);
         $row('sMZneprit', ['ID' => 2, 'Cislo' => 'H01', 'Nazev' => 'Náhrada za nemoc']);
         $row('sMZneprit', ['ID' => 3, 'Cislo' => 'H05', 'Nazev' => 'Ošetřování člena rodiny']);
+        $row('sMZneprit', ['ID' => 4, 'Cislo' => 'H06', 'Nazev' => 'Ošetřovné - osamělý pracovník']);
         $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
         $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
         $row('ZAM', ['ID' => 1, 'OsCislo' => '4001', 'Jmeno' => 'Hana', 'Prijmeni' => 'Nemocná', 'DatNar' => '1988-02-03',
@@ -190,6 +209,8 @@ final class PohodaPayrollDatedAbsenceTest extends TestCase
         $row('MZneprit', ['ID' => 2, 'RefAg' => 30, 'RefSlozka' => 2, 'HodPrac' => 40, 'DatZac' => '2026-03-05', 'DatKon' => '2026-03-13']);
         // Duben: nemoc s nulovým datem Accessu, tedy bez použitelného data.
         $row('MZneprit', ['ID' => 3, 'RefAg' => 40, 'RefSlozka' => 2, 'HodPrac' => 16, 'DatZac' => '1899-12-30', 'DatKon' => '1899-12-30']);
+        // Duben: ošetřovné osamělého pracovníka s daty.
+        $row('MZneprit', ['ID' => 6, 'RefAg' => 40, 'RefSlozka' => 4, 'HodPrac' => 16, 'DatZac' => '2026-04-20', 'DatKon' => '2026-04-21']);
         // Květen: jedno ošetřovné s daty, druhé bez nich.
         $row('MZneprit', ['ID' => 4, 'RefAg' => 50, 'RefSlozka' => 3, 'HodPrac' => 16, 'DatZac' => '2026-05-04', 'DatKon' => '2026-05-05']);
         $row('MZneprit', ['ID' => 5, 'RefAg' => 50, 'RefSlozka' => 3, 'HodPrac' => 8, 'DatZac' => '1899-12-30', 'DatKon' => '1899-12-30']);

@@ -21,7 +21,8 @@ final readonly class PayrollTakeoverEmployment
      * @param list<string> $regularBenefits pravidelná plnění, která převod nezakládá (jen do protokolu)
      * @param list<array{year:int,quarter:int,hourly:float,from:string,to:string,gross:float,worked:float,days:float}> $averages
      *        průměrné výdělky čtvrtletí, se kterými počítal zdroj
-     * @param list<array{type:string,from:string,to:string,childbirth:?string}> $absences nepřítomnosti s daty
+     * @param list<array{type:string,from:string,to:string,childbirth:?string,lone_carer?:bool}> $absences nepřítomnosti s daty
+     *        (`lone_carer`: ošetřovné osamělého zaměstnance)
      * @param int $absencesWithoutDates nepřítomnosti, které evidence vede s daty a zdroj je nemá
      * @param array{year:int,balance_hours:float,balance_days:?float,taken_hours:float,daily_hours:?float,from_days:bool}|null $leave
      *        zůstatek dovolené ke dni převodu

@@ -101,9 +101,11 @@ final class PayrollTakeoverAbsenceWriter
         $continued = 0;
         /** @var array<string,int> $sicknessCases */
         $sicknessCases = [];
+        $loneCarer = 0;
         foreach (self::splitAtQuarters(self::mergedAbsences($absences, $overlaps)) as $absence) {
             if ($this->recorded($supplierId, $employmentId, $absence)) {
                 $already++;
+                $loneCarer += $this->repairLoneCarer($supplierId, $employmentId, $absence, $policy);
                 continue;
             }
             // Měsíc, jehož docházku nese souhrn z importu, má tytéž hodiny i náhradu už z něj.
@@ -127,6 +129,9 @@ final class PayrollTakeoverAbsenceWriter
             if ($absence['type'] === 'ppm' && is_string($absence['childbirth'])) {
                 $body['expected_childbirth_date'] = $absence['childbirth'];
                 $body['childbirth_date'] = $absence['childbirth'];
+            }
+            if ($absence['type'] === 'ocr' && ($absence['lone_carer'] ?? false) === true) {
+                $body['lone_carer'] = true;
             }
             try {
                 $created = $this->absences->create($supplierId, $this->absenceValidator->absence($body, takeover: true), $userId);
@@ -181,6 +186,9 @@ final class PayrollTakeoverAbsenceWriter
         }
         if ($continued > 0) {
             $counts['sickness_window_continued'] = $continued;
+        }
+        if ($loneCarer > 0) {
+            $counts['absences_lone_carer'] = $loneCarer;
         }
         if ($approved > 0) {
             $counts['absences_approved'] = $approved;
@@ -276,6 +284,29 @@ final class PayrollTakeoverAbsenceWriter
             $from,
             AbsenceRuleset::forSicknessWindow($this->rulesets, (string) $previous['date_from'])->sicknessWindowCalendarDays(),
         );
+    }
+
+    /**
+     * Ošetřovné osamělého zaměstnance, které dřívější převod zapsal bez příznaku: doplní
+     * ho, jinak ELDP počítá vyloučené dny z podpůrčí doby 9 dnů místo 16. Jen u zápisu
+     * převodu téhož zdroje, ruční nepřítomnost je rozhodnutí účetní.
+     *
+     * @param array<string,mixed> $absence
+     */
+    private function repairLoneCarer(int $supplierId, int $employmentId, array $absence, PayrollTakeoverPolicy $policy): int
+    {
+        if ($absence['type'] !== 'ocr' || ($absence['lone_carer'] ?? false) !== true) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE payroll_absences SET lone_carer = 1
+              WHERE supplier_id = ? AND employment_id = ? AND absence_type = 'ocr' AND date_from = ? AND date_to = ?
+                AND lone_carer = 0 AND status NOT IN ('cancelled', 'rejected') AND note LIKE ?"
+        );
+        $stmt->execute([$supplierId, $employmentId, (string) $absence['from'], (string) $absence['to'],
+            str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $policy->note('')) . '%']);
+
+        return $stmt->rowCount();
     }
 
     /**
@@ -511,6 +542,7 @@ final class PayrollTakeoverAbsenceWriter
         foreach ($absences as $absence) {
             $last = $out === [] ? null : array_key_last($out);
             if ($last !== null && $out[$last]['type'] === $absence['type']
+                && ($out[$last]['lone_carer'] ?? false) === ($absence['lone_carer'] ?? false)
                 && (new \DateTimeImmutable($out[$last]['to']))->modify('+1 day')->format('Y-m-d') >= $absence['from']
             ) {
                 $out[$last]['to'] = max($out[$last]['to'], $absence['to']);
