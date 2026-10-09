@@ -2707,15 +2707,187 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         (new JmhzScenario1XmlValidator())->validateFrozen($broken);
     }
 
-    /** @return array<string,mixed> */
-    private function summaryMatrixDocument(string $body, int $month = 7): array
+    /** @return iterable<string, array{string, string}> */
+    public static function identifiedFormBodies(): iterable
     {
-        $payload = $this->payloadWithChildCredit();
+        foreach ([
+            'bezPriznaku' => '1',
+            'cinnostKS' => 'K',
+            'odlozenyPrijem' => '1',
+            'vezen' => '1',
+            'jinyPrijem' => '13',
+            'mezinarodniPronajemSily' => '12',
+        ] as $body => $activity) {
+            yield $body => [$body, $activity];
+        }
+    }
+
+    /**
+     * Identifikace zaměstnance na každém typu formuláře: s přidělenými čísly
+     * ČSSZ jen OIČ (10051) a ID PPV (10228), bez nich jmenná větev
+     * s příjmením, jménem, datem narození, datem nástupu a druhem činnosti
+     * vztahu (10053, 10054, 10056, 10223, 10239).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('identifiedFormBodies')]
+    public function testEveryFormBodyIdentifiesTheEmployee(string $body, string $activity): void
+    {
+        $document = $this->summaryMatrixDocument($body);
+        $xpath = $this->summaryMatrixXpath($document);
+        $read = static fn (\DOMXPath $xpath, string $path): array => array_map(
+            static fn (\DOMNode $node): string => $node->textContent,
+            iterator_to_array($xpath->query(self::formQuery($body, $path))),
+        );
+        self::assertSame(['1000000001'], $read($xpath, 'identifikace/ikMpsv'), $body);
+        self::assertSame(['2000000000000000000001'], $read($xpath, 'identifikace/idPpv'), $body);
+        self::assertSame([], $read($xpath, 'identifikace/prijmeni'), $body);
+        self::assertSame(1, $xpath->query(self::formQuery($body, 'souhrnDataZec'))->length, $body);
+        self::assertSame(
+            'true',
+            $xpath->query('/j:jmhz/j:formulareOsob/j:formularOsoby/j:hlavicka/j:primarniPpv')->item(0)?->textContent,
+        );
+
+        $named = $document;
+        $named['people'][0]['employments'][0]['identity']['person_external_identifier'] = null;
+        $named['people'][0]['employments'][0]['identity']['employment_external_identifier'] = null;
+        $xpath = $this->summaryMatrixXpath($named);
+        foreach ([
+            'identifikace/ikMpsv' => [],
+            'identifikace/idPpv' => [],
+            'identifikace/prijmeni' => ['Nováková'],
+            'identifikace/jmeno' => ['Jana'],
+            'identifikace/datumNarozeni' => ['1990-04-12'],
+            'identifikace/datumNastupu' => ['2026-03-01'],
+            'identifikace/druhCinnosti' => [$activity],
+        ] as $path => $expected) {
+            self::assertSame($expected, $read($xpath, $path), "{$body}: {$path}");
+        }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function insuredFormBodies(): iterable
+    {
+        foreach (['bezPriznaku', 'cinnostKS', 'odlozenyPrijem', 'vezen'] as $body) {
+            yield $body => [$body];
+        }
+    }
+
+    /**
+     * Blok pojištění podle typu formuláře: trvání pojištění (10354, 10355)
+     * mimo odložený příjem, vyměřovací základ a příjem z nepojištěné činnosti
+     * (10477, 10476) a pojistné (10370, 10481) mimo vězně, rozpad podle § 5a
+     * (10478–10480) jen bez příznaku a u odloženého příjmu, ELDP s kódem,
+     * platností, dny, vyměřovacím základem a vyloučenými dobami (u vězně
+     * zúžený rozpad), sleva zaměstnance s výší a příznak slevy zaměstnavatele.
+     * Odložený příjem nese typ (10548) a ELDP po období (10537, 10538).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('insuredFormBodies')]
+    public function testEveryFormBodyCarriesItsInsuranceBlock(string $body): void
+    {
+        $prisoner = $body === 'vezen';
+        $document = $this->summaryMatrixDocument($body, 7, static function (array &$payload) use ($prisoner): void {
+            $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+            $section['excluded_days'] = [
+                'docasNeschopnost' => 5,
+                'penezitaPomocMaterstvi' => 4,
+                'osetrovaniClenaRodiny' => $prisoner ? 0 : 3,
+                'otcovska' => $prisoner ? 0 : 2,
+                'vyloucenePar16' => $prisoner ? 0 : 1,
+            ];
+            $section['excluded_days_total'] = $prisoner ? 9 : 15;
+            $section['section18_days'] = [
+                'omluvenaNepritomnost' => 2,
+                'pracovniNeschopnost' => 1,
+                'vyplaceniDavek' => 0,
+            ];
+            $section['section18_days_total'] = 3;
+            unset($section);
+        });
+        $employment = &$document['people'][0]['employments'][0];
+        $employment['social_base']['reported_income_czk'] = 1_250;
+        $employment['employee_social_discount'] = ['amount_czk' => 120];
+        unset($employment);
+
+        $deferred = $body === 'odlozenyPrijem';
+        $eldp = $deferred ? 'pojisteni/eldpObdobi/obdobi/eldpSeznam/eldp/' : 'pojisteni/eldpSeznam/eldp/';
+        $withBase = !$prisoner;
+        $withSplit = in_array($body, ['bezPriznaku', 'odlozenyPrijem'], true);
+        $expected = [
+            'typ' => $deferred ? '1' : null,
+            'pojisteni/trvani/pojisteniOd' => $deferred ? null : '2026-07-01',
+            'pojisteni/trvani/pojisteniDo' => $deferred ? null : '2026-07-31',
+            'pojisteni/vymerovaciZaklad/castkaOdvodPojistneho' => $withBase ? '1000' : null,
+            'pojisteni/vymerovaciZaklad/prijemNepojistenaCinnost' => $withBase ? '1250' : null,
+            'pojisteni/vymerovaciZakladParagraf5/pismenoA' => $withSplit ? '1000' : null,
+            'pojisteni/eldpObdobi/obdobi/mesic' => $deferred ? '6' : null,
+            'pojisteni/eldpObdobi/obdobi/rok' => $deferred ? '2026' : null,
+            $eldp . 'kod' => '1++',
+            $eldp . 'platnostOd' => '2026-07-01',
+            $eldp . 'platnostDo' => '2026-07-31',
+            $eldp . 'pocetDnu' => '31',
+            $eldp . 'vymerovaciZaklad' => '1000',
+            $eldp . 'vylouceneDny/vylouceneDobyCelkem' => $prisoner ? '9' : '15',
+            $eldp . 'vylouceneDny/docasNeschopnost' => '5',
+            $eldp . 'vylouceneDny/penezitaPomocMaterstvi' => '4',
+            $eldp . 'vylouceneDny/osetrovaniClenaRodiny' => $prisoner ? null : '3',
+            $eldp . 'vylouceneDny/otcovska' => $prisoner ? null : '2',
+            $eldp . 'vylouceneDny/vyloucenePar16' => $prisoner ? null : '1',
+            $eldp . 'vylouceneDny/vyloucenePar18' => '3',
+            'pojisteni/pojisteniZamestnanec/socialniPojisteni' => $withBase ? '71' : null,
+            'pojisteni/pojisteniZamestnavatel/socialniPojisteni' => $withBase ? '248' : null,
+            'pojisteni/slevaZamestnance/slevaZamestnanceEvidovana' => 'true',
+            'pojisteni/slevaZamestnance/slevaZamestnance/vyseSlevy' => '120',
+            'pojisteni/slevaZamestnavatele/slevaZamestnavateleEvidovana' => $withSplit ? 'false' : null,
+        ];
+        $xpath = $this->summaryMatrixXpath($document);
+        foreach ($expected as $path => $value) {
+            self::assertSame(
+                $value === null ? [] : [$value],
+                array_map(
+                    static fn (\DOMNode $node): string => $node->textContent,
+                    iterator_to_array($xpath->query(self::formQuery($body, $path))),
+                ),
+                "{$body}: {$path}",
+            );
+        }
+
+        if (!$withSplit) {
+            return;
+        }
+        foreach (['b' => 'pismenoB', 'c' => 'pismenoC'] as $letter => $element) {
+            $split = $document;
+            $split['people'][0]['employments'][0]['social_base']['paragraph5_letter'] = $letter;
+            $xpath = $this->summaryMatrixXpath($split);
+            foreach (['pismenoA', 'pismenoB', 'pismenoC'] as $candidate) {
+                self::assertSame(
+                    $candidate === $element ? ['1000'] : [],
+                    array_map(
+                        static fn (\DOMNode $node): string => $node->textContent,
+                        iterator_to_array($xpath->query(
+                            self::formQuery($body, 'pojisteni/vymerovaciZakladParagraf5/' . $candidate),
+                        )),
+                    ),
+                    "{$body}: § 5a písm. {$letter}",
+                );
+            }
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function summaryMatrixDocument(string $body, int $month = 7, ?callable $adjust = null): array
+    {
+        $international = $body === 'mezinarodniPronajemSily';
+        $payload = $international ? $this->uninsuredPayload('scenario_6', '12') : $this->payloadWithChildCredit();
         $source = match ($body) {
             'vezen' => $this->specialScenarioPayload('scenario_4', '1', '2'),
             'jinyPrijem' => $this->uninsuredPayload('scenario_5', '13'),
             default => null,
         };
+        if ($adjust !== null) {
+            $adjust($payload);
+            if ($source !== null) {
+                $adjust($source);
+            }
+        }
         if ($source !== null) {
             $payload['scope'] = $source['scope'];
             $payload['people'][0]['employments'][0] = $source['people'][0]['employments'][0];
@@ -2741,7 +2913,9 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
         unset($employment);
         $document['header']['month'] = $month;
-        $document['people'][0]['summary'] = self::fullTaxSummary($document['people'][0]['summary']);
+        if (!$international) {
+            $document['people'][0]['summary'] = self::fullTaxSummary($document['people'][0]['summary']);
+        }
 
         return $document;
     }
