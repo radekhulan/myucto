@@ -1957,6 +1957,122 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame($body['artifact_sha256'], hash('sha256', $xml));
     }
 
+    /**
+     * REGZEC25-PROC.A6.scope-01, REGZEC25-forin.definitions-01 (Zásady 1.4.6,
+     * Specifický postup č. 1): vztah přihlášený A1 s příslušností k cizím
+     * předpisům od počátku nejde A6 převést na české předpisy, jen A2 a novou
+     * A1. Rozhoduje profil, se kterým přihláška odešla, ne pozdější úprava.
+     */
+    public function testA6IsRejectedWhenA1RegisteredForeignLegislationFromStart(): void
+    {
+        $this->startExistingEmployment('2026-02-15', '1', '1', null, false);
+        // Přihláška odešla o hodinu dřív, než účetní profil upravila; profil
+        // i podání nesou čas jen na sekundy.
+        $this->db->pdo()->exec('SET timestamp = UNIX_TIMESTAMP() - 3600');
+        $this->saveA1ProfileWithForeignLegislation('2026-02-15', 'SK');
+        $prepared = $this->post();
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $this->acceptWithTrustedReceipt($this->json($prepared));
+        $this->db->pdo()->exec('SET timestamp = DEFAULT');
+        $this->identities->assignManualJmhzIdentity(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '1000000001',
+            '200000000000000000002',
+            '2026-02-15',
+            'synthetic-regzec-identity',
+            true,
+            $this->userId,
+        );
+        // Po odeslání A1 účetní v profilu cizí příslušnost zrušila; ČSSZ ale
+        // vztah vede tak, jak ho A1 přihlásila.
+        $this->saveA1ProfileWithForeignLegislation('2026-02-15', null);
+
+        $response = $this->approveA6();
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a6_foreign_from_start',
+            $this->json($response)['error']['code'],
+        );
+        self::assertStringContainsString('REGZEC A2', (string) $response->getBody());
+    }
+
+    /**
+     * Přihlášení převzaté z jiného programu (A1 z aplikace neodešla): o
+     * příslušnosti od počátku rozhoduje profil A1, jak ho evidence vede.
+     */
+    public function testA6UsesA1ProfileWhenA1WasNotSentFromApp(): void
+    {
+        $this->startExistingEmployment('2026-02-15', '1', '1', null, true);
+        $this->saveA1ProfileWithForeignLegislation('2026-02-15', 'SK');
+
+        $blocked = $this->approveA6();
+        self::assertSame(422, $blocked->getStatusCode(), (string) $blocked->getBody());
+        self::assertSame(
+            'registration_a6_foreign_from_start',
+            $this->json($blocked)['error']['code'],
+        );
+    }
+
+    /** Vztah přihlášený pod českými předpisy A6 podat smí. */
+    public function testA6IsAllowedWhenA1RegisteredCzechLegislation(): void
+    {
+        $this->startExistingEmployment('2026-02-15', '1', '1', null, true);
+        $this->saveA1ProfileWithForeignLegislation('2026-02-15', null);
+
+        $response = $this->approveA6();
+
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+    }
+
+    private function saveA1ProfileWithForeignLegislation(string $startOn, ?string $country): void
+    {
+        $version = $this->db->pdo()->prepare(
+            'SELECT COALESCE(MAX(row_version), 0) FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $version->execute([$this->supplierId, $this->employmentId]);
+        $payload = $this->completeA1Payload();
+        $payload['row_version'] = (int) $version->fetchColumn();
+        $payload['effective_on'] = $startOn;
+        $payload['employment']['actual_start_on'] = $startOn;
+        $payload['employment']['contract_start_on'] = $startOn;
+        $payload['employment']['activity_code'] = '1';
+        $payload['employment']['relationship_detail_code'] = '1';
+        $payload['foreign_legislation'] = [
+            'applies' => $country !== null,
+            'country_code' => $country,
+        ];
+        $response = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($payload),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('verified', $this->json($response)['profile']['status']);
+    }
+
+    private function approveA6(): \Psr\Http\Message\ResponseInterface
+    {
+        return ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'czech_legislation_start',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a6-foreign-from-start',
+                'foreign_insurance' => [
+                    'current' => 'P',
+                    'name' => 'Syntetická zahraniční instituce',
+                    'country_code' => 'SK',
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+    }
+
     public function testA4MustUseTheExactDateAndIdentityOfTheAcceptedSourceArtifact(): void
     {
         $this->db->pdo()->prepare(

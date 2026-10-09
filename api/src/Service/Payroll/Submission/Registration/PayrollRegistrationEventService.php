@@ -610,7 +610,11 @@ final readonly class PayrollRegistrationEventService
                     $context['social_security_variable_symbol'] ?? null,
                 ),
             ],
-            'czech_legislation_start' => [
+            'czech_legislation_start' => $this->assertNotForeignFromStart(
+                $supplierId,
+                $environment,
+                $employmentId,
+            ) + [
                 'foreign_insurance' => $this->foreignInsurance($input, 'P'),
             ],
             'czech_legislation_end' => [
@@ -2270,6 +2274,50 @@ final readonly class PayrollRegistrationEventService
         }
 
         return $effectiveOn;
+    }
+
+    /**
+     * Zásady REGZEC 1.4.6, Specifický postup č. 1 a atribut 10427: byl-li
+     * vztah přihlášen akcí A1 s příslušností k cizím právním předpisům od
+     * počátku a později vznikne příslušnost k českým předpisům, nelze
+     * z technických důvodů použít A3 ani A6. Podává se skončení (A2) a nová
+     * přihláška (A1) ode dne změny. A6 by ČSSZ odmítla.
+     *
+     * @return array{}
+     */
+    private function assertNotForeignFromStart(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): array {
+        $registered = $this->identities->a1ProfileAsRegistered(
+            $supplierId,
+            $environment,
+            $employmentId,
+        );
+        $legislation = is_array($registered['foreign_legislation'] ?? null)
+            ? $registered['foreign_legislation']
+            : [];
+        if (($legislation['applies'] ?? null) !== true) {
+            return [];
+        }
+        $country = is_string($legislation['country_code'] ?? null)
+            && $legislation['country_code'] !== ''
+                ? ' (' . $legislation['country_code'] . ')'
+                : '';
+        throw new PayrollRegistrationXmlException(
+            'registration_a6_foreign_from_start',
+            $this->actionName(6) . ' nejde podat: pracovní vztah byl přihlášen'
+                . ' s příslušností k cizím právním předpisům' . $country
+                . ' od počátku. ČSSZ v tom případě vznik příslušnosti k českým'
+                . ' předpisům neumí přijmout přes A3 ani A6. Podejte skončení'
+                . ' zaměstnání (REGZEC A2) a novou přihlášku (REGZEC A1) dnem,'
+                . ' kdy začaly platit české předpisy, i když zaměstnání trvá'
+                . ' dál.'
+                . PayrollRegistrationFieldVocabulary::reference(
+                    'foreign_legislation.applies',
+                ),
+        );
     }
 
     /** @param array<string,mixed> $input @return array<string,string> */

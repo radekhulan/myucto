@@ -345,6 +345,33 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
+     * Profil A1 tak, jak s ním byl vztah přihlášen (první přihláška REGZEC
+     * A1). Podle něj se pozná, co ČSSZ o vztahu ví „od počátku".
+     *
+     * @return array<string,mixed>|null
+     */
+    public function a1ProfileAsRegistered(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $stored = $this->repository->a1ProfileAsRegistered(
+            $supplierId,
+            $environment,
+            $employmentId,
+        );
+
+        return $stored === null ? null : $this->publicA1Profile(
+            $stored,
+            $this->decodeA1Profile($stored),
+            false,
+        );
+    }
+
+    /**
      * Poslední OVĚŘENÁ verze profilu.
      *
      * Detekce změn z ní zakládá povinnosti s běžící lhůtou, takže se nesmí

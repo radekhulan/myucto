@@ -454,6 +454,63 @@ final class PayrollRegistrationIdentityRepository
         return is_array($raw) ? $raw : null;
     }
 
+    /**
+     * Ověřená verze profilu A1, se kterou byl vztah PŘIHLÁŠEN: ta, ze které
+     * se zmrazila první přihláška REGZEC A1 odeslaná z aplikace. Nebyla-li
+     * přihláška odeslaná odsud (převzetí z jiného programu), ověřený profil,
+     * jak ho evidence vede: bez odeslaného podání se jeho verze nahrazují,
+     * takže jiný doklad o přihlášení aplikace nemá.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function a1ProfileAsRegistered(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT MIN(submission.created_at)
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.subject_reference = ?
+                AND part.agenda_code = \'REGZEC25\'
+                AND part.source_entity_type = \'payroll_employment\'
+                AND submission.status IN (
+                      \'submitted\', \'processing\', \'accepted\',
+                      \'partially_accepted\'
+                    )'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            "payroll_employment:{$employmentId}",
+        ]);
+        $preparedAt = $statement->fetchColumn();
+        if (is_string($preparedAt) && $preparedAt !== '') {
+            return $this->a1ProfileAsOf($supplierId, $employmentId, $preparedAt);
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, employee_id, employment_id, effective_on,
+                    status, profile_ciphertext, profile_hash, reference_hash,
+                    row_version, created_at
+               FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ?
+                AND employment_id = ?
+                AND status = \'verified\'
+              ORDER BY row_version ASC, id ASC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employmentId]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($raw) ? $raw : null;
+    }
+
     public function insertA1Profile(
         int $supplierId,
         int $employeeId,
