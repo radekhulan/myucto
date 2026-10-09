@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Section46CorrectionRepository;
 use MyInvoice\Repository\Section74bCorrectionRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\InvoiceKhSections;
+use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
+use MyInvoice\Service\Report\SubmissionVariantGuard;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 use PDO;
 use PHPUnit\Framework\TestCase;
@@ -52,7 +57,17 @@ final class DphBookBuilderTest extends TestCase
             $taxConstants,
         );
         $ledger = new VatLedgerService($conn, $taxConstants);
-        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b);
+        $submissions = new TaxSubmissionRepository($conn);
+        $kh = new KontrolniHlaseniBuilder(
+            $conn,
+            $ledger,
+            $taxConstants,
+            $this->section74b,
+            new Section46Service($conn, new Section46CorrectionRepository($conn), new ActivityLogger($conn), $taxConstants),
+            $submissions,
+            new SubmissionVariantGuard($submissions),
+        );
+        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b, $kh);
         $this->khSections = new InvoiceKhSections($this->builder, $ledger);
     }
 
@@ -211,6 +226,11 @@ final class DphBookBuilderTest extends TestCase
             purchase_invoice_id INTEGER NOT NULL, period_year INTEGER NOT NULL, period_month INTEGER NOT NULL,
             movement TEXT NOT NULL, vat_amount REAL NOT NULL, claimed_deduction_vat REAL NOT NULL,
             unpaid_ratio REAL NOT NULL, state TEXT NOT NULL, note TEXT NULL, created_by INTEGER NULL
+        )");
+        $this->pdo->exec("CREATE TABLE vat_s46_corrections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, supplier_id INTEGER NOT NULL, invoice_id INTEGER NOT NULL,
+            period_year INTEGER NOT NULL, period_month INTEGER NOT NULL, movement TEXT NOT NULL,
+            vat_amount REAL NOT NULL, output_vat REAL NOT NULL
         )");
         $this->pdo->exec("CREATE TABLE purchase_invoice_items (
             id INTEGER PRIMARY KEY, purchase_invoice_id INTEGER NOT NULL, vat_rate_snapshot REAL NOT NULL,

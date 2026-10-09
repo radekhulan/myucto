@@ -544,6 +544,7 @@ final class KontrolniHlaseniBuilder
                 'parent_vendor_invoice_number' => null,
                 'kh_bad_debt'                  => 'P',
                 'kh_attribute_conflict'        => false,
+                's74b_purchase_invoice_id'     => (int) $row['purchase_invoice_id'],
             ];
         }
     }
@@ -800,9 +801,9 @@ final class KontrolniHlaseniBuilder
      *   a4:list<array<string,mixed>>, a5:array<string,mixed>, b1:list<array<string,mixed>>,
      *   b2:list<array<string,mixed>>, b3:array<string,mixed>, missing_rates:list<array<string,mixed>>}
      */
-    private function finalSections(int $supplierId, int $year, int $month, string $period, string $start, string $end, array &$warnings, array &$excluded = []): array
+    private function finalSections(int $supplierId, int $year, int $month, string $period, string $start, string $end, array &$warnings, array &$excluded = [], bool $includeDrafts = false): array
     {
-        $r = $this->buildSections($supplierId, $start, $end);
+        $r = $this->buildSections($supplierId, $start, $end, $includeDrafts);
         ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3] = $r['sections'];
         $missingRates = $r['missing_rates'];
         // #238: doklady v cizí měně bez kurzu — akce je při stažení doplní z ČNB.
@@ -884,6 +885,83 @@ final class KontrolniHlaseniBuilder
             'excluded' => $excluded,
             'warnings' => $warnings,
         ];
+    }
+
+    /**
+     * Zařazení dokladů do oddílů KH pro sloupec „KH" Knihy DPH.
+     *
+     * Čte TENTÝŽ výsledek {@see finalSections()} jako XML i soupis (#142), takže Kniha
+     * nemá vlastní kopii pravidla: limit 10 000 Kč na doklad, DIČ, příznak opravy
+     * nedobytné pohledávky, doklad bez částky, vyřazené řádky i opravy § 74b. Na rozdíl
+     * od podání umí zahrnout koncepty, protože Kniha je pracovní žurnál a koncept v ní
+     * má ukázat oddíl, do kterého po vystavení půjde.
+     *
+     * Klíč je {@see documentSectionKey()}, hodnota množina oddílů dokladu (smíšený doklad
+     * může být současně v A.1 a A.4). Doklad, který v KH není, v mapě chybí.
+     *
+     * @return array<string, array<string,true>>
+     */
+    public function documentSections(int $supplierId, int $year, int $month, string $period = 'monthly', bool $includeDrafts = false): array
+    {
+        [$start, $end] = self::periodBounds($year, $month, $period);
+        $warnings = [];
+        $excluded = [];
+        $s = $this->finalSections($supplierId, $year, $month, $period, $start, $end, $warnings, $excluded, $includeDrafts);
+        $map = [
+            'A.1' => $s['a1'], 'A.2' => $s['a2'], 'A.4' => $s['a4'], 'A.5' => $s['a5']['docs'],
+            'B.1' => $s['b1'], 'B.2' => $s['b2'], 'B.3' => $s['b3']['docs'],
+        ];
+        $out = [];
+        foreach ($map as $section => $rows) {
+            foreach ($rows as $row) {
+                $key = self::documentSectionKey($row);
+                if ($key !== null) {
+                    $out[$key][$section] = true;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Klíč dokladu v {@see documentSections()}: identita kanonického řádku
+     * ({@see VatLedgerService::documentIdentity()}), u opravy § 74b `s74b:<id přijaté faktury>`.
+     * Oprava má vlastní klíč, protože se vykazuje v jiném období než opravovaný doklad.
+     * Opravy § 46 klíč nemají — Kniha DPH je jako samostatné řádky nevede.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function documentSectionKey(array $row): ?string
+    {
+        if (isset($row['s74b_purchase_invoice_id'])) {
+            return 's74b:' . (int) $row['s74b_purchase_invoice_id'];
+        }
+        if (!isset($row['source'], $row['invoice_id'])) {
+            return null;
+        }
+        return VatLedgerService::documentIdentity($row);
+    }
+
+    /**
+     * Do kterých oddílů KH může kanonický řádek ledgeru přispět. Jediné místo pravidla pro
+     * směrování řádku ({@see buildSections()}) i pro sloupec Knihy DPH: A.1/A.2/B.1 podle
+     * klasifikace, tuzemská část jen řádky s nárokem (přijaté bez řádku přiznání, kód 42,
+     * do KH nepatří), bez přenesené daně a se sekcí odpovídající směru dokladu. Který
+     * z dvojice A.4/A.5 nebo B.2/B.3 to bude, rozhoduje doklad, ne řádek.
+     *
+     * @param array<string,mixed> $r
+     * @return list<string>
+     */
+    public static function rowSections(array $r): array
+    {
+        $kh = $r['kh_section'] ?? null;
+        if (in_array($kh, ['A.1', 'A.2', 'B.1'], true)) {
+            return [$kh];
+        }
+        $sale = ($r['source'] ?? '') === 'sale';
+        $domestic = $sale ? ['A.4', 'A.5'] : ['B.2', 'B.3'];
+        $eligible = $sale || ($r['dphdp3_line'] ?? null) !== null;
+        return $eligible && in_array($kh, $domestic, true) && empty($r['is_reverse_charge']) ? $domestic : [];
     }
 
     /** @param array<string,mixed> $r */
@@ -977,7 +1055,7 @@ final class KontrolniHlaseniBuilder
      *
      * @return array{sections: array<string,mixed>, invoices: list<array<string,mixed>>}
      */
-    private function buildSections(int $supplierId, string $start, string $end): array
+    private function buildSections(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
     {
         // Konstanty pro rok OBDOBÍ výkazu (ne aktuální) — zpětně generované KH za
         // staré období musí použít tehdejší limit/sazby.
@@ -985,8 +1063,9 @@ final class KontrolniHlaseniBuilder
         $itemThreshold = $this->taxConstants->khItemThreshold($periodYear);
         $bucket = $this->taxConstants->vatBucketThreshold($periodYear);
 
-        // Agregace kanonických řádků per (zdroj, faktura).
-        $ledgerRows = $this->ledger->rows($supplierId, $start, $end, includeDrafts: false);
+        // Agregace kanonických řádků per (zdroj, faktura). Koncepty jen pro Knihu DPH
+        // ({@see documentSections()}), podané hlášení je nikdy nenese.
+        $ledgerRows = $this->ledger->rows($supplierId, $start, $end, includeDrafts: $includeDrafts);
         // Daňová pojistka (issue #238): non-CZK doklad bez kurzu by se do KH dostal
         // s náhradním kurzem 1.0 (cizí měna jako CZK). NEházíme chybu — vrátíme doklady
         // bez kurzu, akce je při stažení doplní z ČNB (náhled jen varuje).
@@ -1043,8 +1122,7 @@ final class KontrolniHlaseniBuilder
             // přispěje jen do JEDNÉ sekce. Tím se mixed faktura (např. §92 RC řádek +
             // běžný 21% řádek) rozdělí správně (RC část do A.1/B.1, zdanitelná do A.4/B.2),
             // místo aby celý součet spadl do jedné sekce (issue — audit KH/DPH 2026-07).
-            // Přijaté bez nároku (kód 42, dphdp3_line=NULL) do KH nepatří.
-            $khEligible = $r['source'] === 'sale' || $r['dphdp3_line'] !== null;
+            // Přijaté bez nároku (kód 42, dphdp3_line=NULL) do KH nepatří ({@see rowSections()}).
             switch ($r['kh_section']) {
                 case 'A.1': // tuzemský §92 dodavatel — jen základ (VetaA1 nemá sazbové sloupce)
                     $g['a1_by_code'][$rowKodPredPl] = ($g['a1_by_code'][$rowKodPredPl] ?? 0.0) + $base;
@@ -1063,10 +1141,7 @@ final class KontrolniHlaseniBuilder
                 default:
                     // Tuzemská plnění výhradně s explicitní KH sekcí. Řádky DPH přiznání
                     // bez KH sekce (např. vývoz nebo služba do EU) sem nepatří.
-                    $domesticKhSection = $r['source'] === 'sale'
-                        ? in_array($r['kh_section'], ['A.4', 'A.5'], true)
-                        : in_array($r['kh_section'], ['B.2', 'B.3'], true);
-                    if ($khEligible && $domesticKhSection && !$r['is_reverse_charge']) {
+                    if (self::rowSections($r) !== []) {
                         $g['kh_regime_codes'][(string) ($r['kh_regime_code'] ?? '0')] = true;
                         $g['kh_bad_debt_codes'][(string) ($r['kh_bad_debt'] ?? 'N')] = true;
                         if ($is21) { $g['dom_base21'] += $base; $g['dom_vat21'] += $vat; }
@@ -1086,6 +1161,7 @@ final class KontrolniHlaseniBuilder
         // Identifikace dokladu pro soupis; XML emise tyhle klíče nečte.
         $meta = static fn (array $g): array => [
             'source'            => $g['source'],
+            'document_kind'     => $g['document_kind'],
             'invoice_id'        => $g['invoice_id'],
             'counterparty_name' => $g['counterparty_name'],
             'internal_number'   => $g['internal_number'],

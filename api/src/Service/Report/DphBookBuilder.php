@@ -45,6 +45,8 @@ final class DphBookBuilder
         private readonly TaxConstantsRepository $taxConstants,
         // § 74b ZDPH — evidované korekce odpočtu dlužníka (ř. 40/41, KH B.2 zdph_44='P').
         private readonly Section74bService $section74b,
+        // Sloupec „KH" = zařazení dokladu v kontrolním hlášení, žádná vlastní kopie pravidla.
+        private readonly KontrolniHlaseniBuilder $kontrolniHlaseni,
     ) {}
 
     /**
@@ -77,15 +79,16 @@ final class DphBookBuilder
         $supplier = $this->loadSupplier($supplierId, $end);
 
         // Konstanty pro rok období (číselník daňových konstant, admin override).
-        $khItemThreshold = $this->taxConstants->khItemThreshold($year);
         $vatBucket = $this->taxConstants->vatBucketThreshold($year);
+
+        // Zařazení dokladů do oddílů KH za totéž období, vč. konceptů (Kniha je pracovní žurnál).
+        $khSections = $this->kontrolniHlaseni->documentSections($supplierId, $year, $month, $period, includeDrafts: true);
 
         // Kanonické řádky ze sdílené VatLedgerService (vč. draftů — Kniha je pracovní
         // žurnál). Seskupíme per (doklad, kód, sazba) do jednoho řádku přehledu a
         // zařadíme do sekcí dle dphdp3_line (+ mirror 43, + ř.47 majetek).
         $sections = [];
         $groups = $this->groupLedgerRows($supplierId, $start, $end);
-        $nilKhDocuments = $this->nilKhDocuments($groups, $vatBucket);
         foreach ($groups as $g) {
             $scope = $g['source'] === 'sale' ? 'issued' : 'received';
             $line = $g['dphdp3_line'];
@@ -105,7 +108,7 @@ final class DphBookBuilder
                 'label'                 => $g['label'] !== '' ? $g['label'] : '(bez klasifikace)',
                 'dphdp3_line'           => $line,
                 'dphdp3_line_secondary' => $g['dphdp3_line_secondary'],
-                'kh_section'            => $this->effectiveKhSection($g, $khItemThreshold, $nilKhDocuments),
+                'kh_section'            => $this->effectiveKhSection($g, $khSections),
                 'vat_rate'              => $g['vat_rate'],
             ];
             $row = $this->toBookRow($g);
@@ -138,7 +141,7 @@ final class DphBookBuilder
         // EVIDOVANÉ korekce §74b (dlužník) — snížení/obnovení odpočtu za období vstupují do
         // sekcí přijatých ř.40/41 se znaménkem z periodCorrectionLines (snížení záporně,
         // obnova kladně), aby součet odpočtu Knihy DPH seděl s ř. 40/41 DPHDP3 po korekci.
-        $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period);
+        $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period, $khSections);
 
         // Convert sections asociativní mapy → indexované pole, seřazené.
         $sectionList = array_values($sections);
@@ -236,12 +239,13 @@ final class DphBookBuilder
      * Přimíchá EVIDOVANÉ korekce §74b (dlužník) do sekcí přijatých plnění. Per doklad a sazba
      * (21 % → ř.40 sekce 15.040, 12 % → ř.41 sekce 15.041) přidá řádek se znaménkem z
      * {@see Section74bService::periodCorrectionLines()} (snížení záporně, obnova kladně).
-     * Doklad je označen jako oprava (KH B.2, zdph_44='P') analogicky KontrolniHlaseniBuilder.
-     * Když za období nic evidováno není, `invoices` je prázdné → sekce beze změny.
+     * Sloupec KH nese B.2 jen tehdy, když oprava v KH B.2 opravdu je (bez platného DIČ
+     * dodavatele ji KH neuvede). Když za období nic evidováno není, `invoices` je prázdné.
      *
      * @param array<string,array<string,mixed>> $sections by-ref
+     * @param array<string,array<string,true>> $khSections {@see KontrolniHlaseniBuilder::documentSections()}
      */
-    private function appendSection74bCorrections(array &$sections, int $supplierId, int $year, int $month, string $period): void
+    private function appendSection74bCorrections(array &$sections, int $supplierId, int $year, int $month, string $period, array $khSections): void
     {
         $s74b = $this->section74b->periodCorrectionLines($supplierId, $year, $month, $period);
         $c = $this->taxConstants->forYear($year);
@@ -259,7 +263,9 @@ final class DphBookBuilder
                     'label'                 => 'Oprava odpočtu §74b',
                     'dphdp3_line'           => $line,
                     'dphdp3_line_secondary' => null,
-                    'kh_section'            => 'B.2',
+                    'kh_section'            => isset($khSections[KontrolniHlaseniBuilder::documentSectionKey(
+                        ['s74b_purchase_invoice_id' => (int) $inv['purchase_invoice_id']],
+                    )]['B.2']) ? 'B.2' : null,
                     'vat_rate'              => $rate,
                 ];
                 $this->addToSection($sections, 'received', $cls, $this->section74bBookRow($inv, $rate, $base, $vat));
@@ -463,78 +469,27 @@ final class DphBookBuilder
     }
 
     /**
-     * Efektivní KH sekce pro sloupec Knihy DPH. A.4/A.5 a B.2/B.3 NEJSOU
-     * vlastnost klasifikačního kódu, ale dokladu: rozhoduje celková hodnota
-     * dokladu vč. DPH (limit 10 000 Kč) a DIČ protistrany — stejná logika jako
-     * KontrolniHlaseniBuilder::collectSections. Číselník nese jen statický
-     * default (kód 40 → "B.2"), takže by Kniha ukazovala B.2 i u drobných
-     * dokladů, které v KH reálně jdou do sumace B.3 (POHODA tiskne efektivní
-     * sekci — reference DPH_LIST_KH 42026.pdf: 2026-0010 → B.2, zbytek B.3).
-     * A.2 se naopak NEPŘEPOČÍTÁVÁ podle dodavatele: plnění od osoby neusazené
-     * v tuzemsku tam patří i bez EU DIČ, jen s prázdnou identifikací (issue #53,
-     * {@see KontrolniHlaseniBuilder::a2Identification()}). Kniha proto u dokladu
-     * ze 3. země tiskne A.2 — stejně jako výkaz.
-     * Ostatní sekce (A.1, A.2, B.1, NULL) se nepřepočítávají.
-     *
-     * Doklad s nulovým základem i daní tuzemské části (vyúčtování plně předplacené
-     * zálohy) v KH není, proto ani v Knize nemá sekci — {@see KontrolniHlaseniBuilder::isNilKhAmount()}.
+     * Sloupec „KH" Knihy DPH = oddíl, do kterého doklad reálně jde v kontrolním hlášení.
+     * Číselník nese jen statický default (kód 40 → B.2), A.4/A.5 a B.2/B.3 jsou ale
+     * vlastnost DOKLADU (limit 10 000 Kč, DIČ, příznak opravy nedobytné pohledávky)
+     * a doklad může z KH vypadnout úplně (rozdílné atributy položek, přenesená daň bez
+     * DIČ, nulová tuzemská částka). Proto se nic nepřepočítává tady: řádek najde svůj
+     * oddíl v {@see KontrolniHlaseniBuilder::documentSections()} mezi oddíly, do kterých
+     * podle {@see KontrolniHlaseniBuilder::rowSections()} smí přispět. Doklad v KH
+     * nezařazený = prázdný sloupec.
      *
      * @param array<string,mixed> $g kanonický (seskupený) řádek ledgeru
-     * @param float $itemThreshold limit KH pro rok období (číselník daňových konstant)
-     * @param array<string,true> $nilKhDocuments identity dokladů bez částky pro KH
+     * @param array<string,array<string,true>> $khSections
      */
-    private function effectiveKhSection(array $g, float $itemThreshold, array $nilKhDocuments = []): ?string
+    private function effectiveKhSection(array $g, array $khSections): ?string
     {
-        $kh = $g['kh_section'] ?? null;
-        if (!in_array($kh, ['A.4', 'A.5', 'B.2', 'B.3'], true)) {
-            return $kh;
-        }
-        if (isset($nilKhDocuments[VatLedgerService::documentIdentity($g)])) {
-            return null;
-        }
-        // § 101e: „nad 10 000 Kč" = OSTŘE více → přesně 10 000 jde do sumace (A.5/B.3),
-        // ne jednotlivě (A.4/B.2). Proto '>' (ne '>='), shodně s KontrolniHlaseniBuilder.
-        $itemized = KontrolniHlaseniBuilder::cleanDic($g['counterparty_dic'] ?? null) !== ''
-            && abs((float) $g['total_with_vat_czk']) > $itemThreshold;
-        return str_starts_with($kh, 'A.')
-            ? ($itemized ? 'A.4' : 'A.5')
-            : ($itemized ? 'B.2' : 'B.3');
-    }
-
-    /**
-     * Identity dokladů, jejichž tuzemská zdanitelná část (sekce A.4/A.5/B.2/B.3) má ve všech
-     * sazbách nulový základ i daň — týmž rozřazením sazeb jako KontrolniHlaseniBuilder.
-     *
-     * @param list<array<string,mixed>> $groups seskupené řádky ledgeru
-     * @return array<string,true>
-     */
-    private function nilKhDocuments(array $groups, float $vatBucket): array
-    {
-        $sums = [];
-        foreach ($groups as $g) {
-            // Stejný výběr řádků jako KontrolniHlaseniBuilder: přijaté jen s nárokem na odpočet.
-            $khEligible = $g['source'] === 'sale' || ($g['dphdp3_line'] ?? null) !== null;
-            if (!$khEligible || !in_array($g['kh_section'] ?? null, ['A.4', 'A.5', 'B.2', 'B.3'], true) || !empty($g['is_reverse_charge'])) {
-                continue;
-            }
-            $rate = (float) $g['vat_rate'];
-            if ($rate <= 0) {
-                continue;
-            }
-            $key = VatLedgerService::documentIdentity($g);
-            $bucket = $rate >= $vatBucket ? 21 : 12;
-            $sums[$key] ??= ['b21' => 0.0, 'v21' => 0.0, 'b12' => 0.0, 'v12' => 0.0];
-            $sums[$key]['b' . $bucket] += (float) $g['base_czk'];
-            $sums[$key]['v' . $bucket] += (float) $g['vat_czk'];
-        }
-        $out = [];
-        foreach ($sums as $key => $s) {
-            if (KontrolniHlaseniBuilder::isNilKhAmount($s['b21'], $s['v21'], $s['b12'], $s['v12'])) {
-                $out[$key] = true;
+        $placed = $khSections[VatLedgerService::documentIdentity($g)] ?? [];
+        foreach (KontrolniHlaseniBuilder::rowSections($g) as $section) {
+            if (isset($placed[$section])) {
+                return $section;
             }
         }
-
-        return $out;
+        return null;
     }
 
     private function sectionOrder(string $key): int
