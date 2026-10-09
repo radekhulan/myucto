@@ -8,6 +8,7 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\CashJournalNoteRepository;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -38,6 +39,7 @@ final class CashJournalAction
         private readonly IpMatcher $ipMatcher,
         private readonly LoggerInterface $log,
         private readonly Connection $db,
+        private readonly CashJournalNoteRepository $notes,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -53,6 +55,17 @@ final class CashJournalAction
             $this->log->error('Peněžní deník se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
             return Json::error($response, 'build_failed', 'Deník se nepodařilo vytvořit.', 500);
         }
+
+        // Poznámky a počty příloh pohybů (jen pro obrazovku, export je nenese).
+        $notes = $this->notes->briefForSupplier($supplierId);
+        $attachments = $this->notes->attachmentCounts($supplierId);
+        foreach ($data['rows'] as &$row) {
+            $key = $row['source_type'] . ':' . $row['source_id'];
+            $row['notes'] = $notes[$key] ?? [];
+            $row['attachment_entity'] = CashJournalNoteRepository::ATTACHMENT_ENTITY[$row['source_type']] ?? null;
+            $row['attachment_count'] = $attachments[$key] ?? 0;
+        }
+        unset($row);
 
         return Json::ok($response, $data);
     }

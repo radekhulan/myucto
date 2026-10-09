@@ -8453,7 +8453,7 @@ paths:
               type: object
               required: [entity_type, entity_id]
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item, invoice_payment] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -8470,7 +8470,7 @@ paths:
             schema:
               type: object
               properties:
-                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
+                entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item, invoice_payment] }
                 entity_id: { type: integer }
       responses:
         '200': { description: Aktuální vazby, content: { application/json: { schema: { type: object, properties: { links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } } } } } } }
@@ -8481,7 +8481,7 @@ paths:
       summary: Dokumenty navázané na entitu (oboustranné párování)
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
-        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item, invoice_payment] } }
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200': { description: Navázané dokumenty, content: { application/json: { schema: { type: object, properties: { documents: { type: array, items: { $ref: '#/components/schemas/Document' } } } } } } }
@@ -12054,6 +12054,8 @@ paths:
       summary: Roční statistika dimenze po měsících, hodnotách a firmách
       description: |
         Částky ze zaúčtovaného deníku, stejná metodika jako výsledovka po dimenzi.
+        U firmy v daňové evidenci z peněžního deníku (`basis: cash_journal`): výnosy
+        a náklady jsou daňové příjmy a výdaje, hodnotu nese doklad pohybu.
         Firemní typ lze zobrazit jen pro aktuální firmu. Globální typ lze zobrazit
         pro aktuální firmu, jinou firmu stejné skupiny s účetním přístupem nebo
         pro součet všech takto přístupných firem (`supplier_id=all`).
@@ -21544,11 +21546,50 @@ paths:
       description: |
         Read-only report. Období zadej buď `year` (celý rok), nebo `from`+`to`
         (YYYY-MM-DD). Bez parametrů = aktuální rok. Vrací deník + totály +
-        checks{} + warnings[].
+        checks{} + warnings[]. Řádek nese i `notes` (poznámky pohybu: id, body,
+        pinned), `attachment_entity` (typ entity pro přílohy v
+        `/documents/by-entity/{type}/{id}` s `source_id`, u pohybu GoPay null)
+        a `attachment_count`.
       responses:
         '200': { description: OK }
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /api/v1/tax-evidence/cash-journal/notes/{source}/{id}:
+    get:
+      tags: [Tax]
+      summary: Poznámky k pohybu peněžního deníku
+      description: |
+        Pohyb je dvojice typu řádku deníku a jeho `source_id`. Připnuté poznámky první,
+        pak nejnovější. Cizí nebo neexistující pohyb vrací 404.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { name: source, in: path, required: true, schema: { type: string, enum: [cash, bank, invoice_payment, purchase_invoice, gopay] } }
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Poznámky pohybu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        source_type: { type: string }
+                        source_id: { type: integer }
+                        body: { type: string }
+                        pinned: { type: boolean }
+                        created_by: { type: [integer, "null"] }
+                        created_by_name: { type: [string, "null"] }
+                        created_at: { type: string }
+                        updated_by: { type: [integer, "null"] }
+                        updated_by_name: { type: [string, "null"] }
+                        updated_at: { type: [string, "null"] }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/tax-evidence/bank-rules:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -33357,13 +33398,13 @@ components:
     DocumentLink:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item, invoice_payment] }
         entity_id: { type: integer }
         label: { type: string }
     DocumentLinkCandidate:
       type: object
       properties:
-        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item] }
+        entity_type: { type: string, enum: [client, invoice, purchase_invoice, project, journal_entry, bank_transaction, cash_document, other_item, invoice_payment] }
         entity_id: { type: integer }
         label: { type: string }
         sublabel: { type: string }
@@ -33930,6 +33971,10 @@ components:
           type: array
           items:
             type: integer
+        basis:
+          type: string
+          enum: [journal, cash_journal]
+          description: '`journal` = zaúčtovaný deník (podvojné účetnictví); `cash_journal` = firma v daňové evidenci, výnosy a náklady jsou daňové příjmy a výdaje peněžního deníku (kódy 6 a 5 v rozpadu).'
         hidden_companies:
           type: integer
         value_id:
@@ -34190,6 +34235,9 @@ components:
           type: array
           items:
             type: integer
+        basis:
+          type: string
+          enum: [journal, cash_journal]
         rows:
           type: array
           items:

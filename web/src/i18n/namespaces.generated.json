@@ -711,6 +711,8 @@
       "cash"
     ],
     "tax-evidence-cash-journal": [
+      "documents",
+      "linked_documents",
       "tax_evidence"
     ],
     "tax-evidence-receivables-payables": [

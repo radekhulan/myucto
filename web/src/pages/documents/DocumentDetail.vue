@@ -142,7 +142,12 @@ function goEntity(l: { entity_type: EntityType; entity_id: number }) {
     router.push({ name: 'other-item-detail', params: { id: l.entity_id } })
     return
   }
-  const map: Record<Exclude<EntityType, 'journal_entry' | 'bank_transaction' | 'cash_document' | 'other_item'>, string> = {
+  // Ruční úhrada faktury je pohyb peněžního deníku daňové evidence.
+  if (l.entity_type === 'invoice_payment') {
+    router.push({ name: 'tax-evidence-cash-journal' })
+    return
+  }
+  const map: Record<Exclude<EntityType, 'journal_entry' | 'bank_transaction' | 'cash_document' | 'other_item' | 'invoice_payment'>, string> = {
     invoice: 'invoice-detail',
     purchase_invoice: 'purchase-invoice-detail',
     client: 'client-detail',

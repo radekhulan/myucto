@@ -1,7 +1,7 @@
 import { api } from './client'
 
 export type DocType = 'pdf' | 'docx' | 'xlsx' | 'xml' | 'zfo' | 'p7s' | 'zip' | 'image' | 'other'
-export type EntityType = 'client' | 'invoice' | 'purchase_invoice' | 'project' | 'journal_entry' | 'bank_transaction' | 'cash_document' | 'other_item'
+export type EntityType = 'client' | 'invoice' | 'purchase_invoice' | 'project' | 'journal_entry' | 'bank_transaction' | 'cash_document' | 'other_item' | 'invoice_payment'
 
 /** Viditelnost dokladu v rámci tenanta (Epic F7). company = celá firma, user = jen vlastník. */
 export type DocScope = 'company' | 'user'

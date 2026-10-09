@@ -973,7 +973,9 @@
         "1989_expense_rules_tax_deductible.sql",
         "1990_tax_evidence_bank_rules.sql",
         "1991_gopay_tax_evidence_settings.sql",
-        "1992_payroll_takeover_old_age_savings.sql"
+        "1992_payroll_takeover_old_age_savings.sql",
+        "1993_cash_journal_notes.sql",
+        "1994_document_links_invoice_payment.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3234,6 +3236,32 @@
                 "chk_cashdoc_amount_positive": "`total_amount` > 0"
             }
         },
+        "cash_journal_notes": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "body": "text NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "deleted_at": "timestamp NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "pinned": "tinyint(1) NOT NULL DEFAULT 0",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "source_type": "enum('cash','bank','invoice_payment','purchase_invoice','gopay') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_cjn_source": "BTREE (supplier_id, source_type, source_id, pinned, created_at)"
+            },
+            "foreign_keys": {
+                "fk_cjn_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "cash_registers": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -4497,7 +4525,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "document_id": "bigint(20) unsigned NOT NULL",
                 "entity_id": "bigint(20) unsigned NOT NULL",
-                "entity_type": "enum('client','invoice','purchase_invoice','project','journal_entry','bank_transaction','cash_document','other_item') NOT NULL",
+                "entity_type": "enum('client','invoice','purchase_invoice','project','journal_entry','bank_transaction','cash_document','other_item','invoice_payment') NOT NULL",
                 "supplier_id": "bigint(20) unsigned NOT NULL"
             },
             "indexes": {

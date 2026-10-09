@@ -14,9 +14,11 @@ import { formatMoney } from '@/composables/useFormat'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import CashJournalMovementModal from '@/components/tax-evidence/CashJournalMovementModal.vue'
+import type { CashJournalNote } from '@/api/taxEvidence'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -188,8 +190,15 @@ const COLUMNS: ColumnDef[] = [
   { key: 'source', labelKey: 'tax_evidence.cash_journal.col_source', defaultHidden: true },
   { key: 'base', labelKey: 'tax_evidence.cash_journal.col_base', defaultHidden: true },
   { key: 'vat', labelKey: 'tax_evidence.cash_journal.col_vat', defaultHidden: true },
+  { key: 'notes', labelKey: 'tax_evidence.cash_journal.col_notes' },
 ]
 const tbl = useTablePrefs('cash_journal', COLUMNS)
+
+// Poznámky a přílohy pohybu (dialog). Po změně se aktualizuje jen řádek, ne celý deník.
+const movementRow = ref<CashJournalRow | null>(null)
+function onNotesChanged(notes: CashJournalNote[]) {
+  if (movementRow.value) movementRow.value.notes = notes.map(n => ({ id: n.id, body: n.body, pinned: n.pinned }))
+}
 
 onMounted(load)
 </script>
@@ -376,6 +385,7 @@ onMounted(load)
               <th v-if="tbl.isVisible('source')" class="px-3 py-2 text-left font-medium">{{ t('tax_evidence.cash_journal.col_source') }}</th>
               <th v-if="tbl.isVisible('base')" class="px-3 py-2 text-right font-medium">{{ t('tax_evidence.cash_journal.col_base') }}</th>
               <th v-if="tbl.isVisible('vat')" class="px-3 py-2 text-right font-medium">{{ t('tax_evidence.cash_journal.col_vat') }}</th>
+              <th v-if="tbl.isVisible('notes')" class="px-3 py-2 text-left font-medium">{{ t('tax_evidence.cash_journal.col_notes') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -412,10 +422,21 @@ onMounted(load)
               <td v-if="tbl.isVisible('source')" class="px-3 py-2 text-neutral-500 whitespace-nowrap">{{ row.source_type }}</td>
               <td v-if="tbl.isVisible('base')" class="px-3 py-2 text-right font-mono text-neutral-500">{{ formatMoney(row.base) }}</td>
               <td v-if="tbl.isVisible('vat')" class="px-3 py-2 text-right font-mono text-neutral-500">{{ formatMoney(row.vat) }}</td>
+              <td v-if="tbl.isVisible('notes')" class="px-3 py-2">
+                <div class="flex items-start gap-2">
+                  <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" :title="t('tax_evidence.cash_journal.notes_title')"
+                          :aria-label="t('tax_evidence.cash_journal.notes_title')" data-test="cash-journal-notes-open" @click="movementRow = row">
+                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+                    <span v-if="(row.notes?.length ?? 0) + (row.attachment_count ?? 0) > 0">{{ (row.notes?.length ?? 0) }} / {{ row.attachment_count ?? 0 }}</span>
+                  </button>
+                  <span v-if="row.notes?.length" class="text-xs text-neutral-600 line-clamp-2 max-w-xs whitespace-pre-wrap break-words">{{ row.notes[0]!.body }}</span>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+    <CashJournalMovementModal v-if="movementRow" :row="movementRow" @changed="onNotesChanged" @close="movementRow = null; load()" />
   </div>
 </template>

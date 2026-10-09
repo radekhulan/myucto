@@ -4161,6 +4161,11 @@ final class Routes
         $app->group('/api/tax-evidence', function ($g) {
             $g->get('/cash-journal',                 [\MyInvoice\Action\TaxEvidence\CashJournalAction::class, 'get']);
             $g->get('/cash-journal/export',          [\MyInvoice\Action\TaxEvidence\CashJournalAction::class, 'export']);
+            // Poznámky k pohybům peněžního deníku (migrace 1993); přílohy přes document_links.
+            $g->get   ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}',                     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'list']);
+            $g->post  ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}',                     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'create']);
+            $g->patch ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}/{noteId:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'update']);
+            $g->delete('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}/{noteId:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'delete']);
             $g->get('/closing/{year:[0-9]+}',        [\MyInvoice\Action\TaxEvidence\AnnualClosingAction::class, 'get']);
             $g->put('/closing/{year:[0-9]+}',        [\MyInvoice\Action\TaxEvidence\AnnualClosingAction::class, 'save']);
             $g->post('/closing/{year:[0-9]+}/finalize', [\MyInvoice\Action\TaxEvidence\AnnualClosingAction::class, 'finalize']);

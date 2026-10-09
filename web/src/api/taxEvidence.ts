@@ -38,6 +38,28 @@ export interface CashJournalRow {
   instrument: CashJournalInstrument
   /** Bankovní výplata nebo pohyb vyúčtování GoPay — zařazení určuje vyúčtování. */
   gopay_clearing_id: number | null
+  /** Poznámky pohybu (připnuté první). */
+  notes?: CashJournalNoteBrief[]
+  /** Entita pro přílohy (document_links), u pohybu GoPay null. */
+  attachment_entity?: 'cash_document' | 'bank_transaction' | 'invoice_payment' | 'purchase_invoice' | null
+  attachment_count?: number
+}
+
+export interface CashJournalNoteBrief {
+  id: number
+  body: string
+  pinned: boolean
+}
+
+export interface CashJournalNote extends CashJournalNoteBrief {
+  source_type: string
+  source_id: number
+  created_by: number | null
+  created_by_name: string | null
+  created_at: string
+  updated_by: number | null
+  updated_by_name: string | null
+  updated_at: string | null
 }
 
 export type CashJournalInstrument = 'cash' | 'bank' | 'gopay' | 'virtual'
@@ -176,6 +198,14 @@ export interface ReceivablesPayablesReport {
 export const taxEvidenceApi = {
   cashJournal: (params: CashJournalParams) =>
     api.get<CashJournalReport>('/tax-evidence/cash-journal', { params }).then(r => r.data),
+  movementNotes: (source: string, id: number) =>
+    api.get<{ notes: CashJournalNote[] }>(`/tax-evidence/cash-journal/notes/${source}/${id}`).then(r => r.data.notes),
+  createMovementNote: (source: string, id: number, body: string, pinned = false) =>
+    api.post<{ notes: CashJournalNote[] }>(`/tax-evidence/cash-journal/notes/${source}/${id}`, { body, pinned }).then(r => r.data.notes),
+  updateMovementNote: (source: string, id: number, noteId: number, data: { body?: string; pinned?: boolean }) =>
+    api.patch<{ notes: CashJournalNote[] }>(`/tax-evidence/cash-journal/notes/${source}/${id}/${noteId}`, data).then(r => r.data.notes),
+  deleteMovementNote: (source: string, id: number, noteId: number) =>
+    api.delete<{ notes: CashJournalNote[] }>(`/tax-evidence/cash-journal/notes/${source}/${id}/${noteId}`).then(r => r.data.notes),
   closing: (year: number) => api.get<TaxEvidenceClosing>(`/tax-evidence/closing/${year}`).then(r => r.data),
   saveClosing: (year: number, data: Partial<TaxEvidenceClosing>, rowVersion: number) =>
     api.put<TaxEvidenceClosing>(`/tax-evidence/closing/${year}`, { ...data, row_version: rowVersion }).then(r => r.data),

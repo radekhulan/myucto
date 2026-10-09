@@ -10,7 +10,7 @@ use PDO;
 /** Polymorfní vazba dokument ↔ entita. */
 final class DocumentLinkRepository
 {
-    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document', 'other_item'];
+    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document', 'other_item', 'invoice_payment'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -71,6 +71,8 @@ final class DocumentLinkRepository
             'bank_transaction' => 'SELECT 1 FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE bt.id = ? AND bs.supplier_id = ? LIMIT 1',
             'cash_document'    => 'SELECT 1 FROM cash_documents WHERE id = ? AND supplier_id = ? LIMIT 1',
             'other_item'       => 'SELECT 1 FROM other_items WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL LIMIT 1',
+            // Ruční úhrada faktury — pohyb peněžního deníku daňové evidence (migrace 1994).
+            'invoice_payment'  => 'SELECT 1 FROM invoice_payments WHERE id = ? AND supplier_id = ? LIMIT 1',
         };
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$id, $supplierId]);
@@ -227,6 +229,21 @@ final class DocumentLinkRepository
                         $stmt->execute([$supplierId, ...$ids]);
                         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                             $labels['other_item:' . (int) $r['id']] = (string) $r['title'];
+                        }
+                        break;
+                    case 'invoice_payment':
+                        $stmt = $pdo->prepare(
+                            "SELECT ip.id, ip.paid_on, ip.amount, COALESCE(NULLIF(ip.currency, ''), 'CZK') AS currency,
+                                    i.varsymbol, c.company_name
+                               FROM invoice_payments ip
+                               JOIN invoices i ON i.id = ip.invoice_id AND i.supplier_id = ip.supplier_id
+                          LEFT JOIN clients c ON c.id = i.client_id
+                              WHERE ip.supplier_id = ? AND ip.id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $id = (int) $r['id'];
+                            $labels['invoice_payment:' . $id] = $this->invoiceLabel((string) ($r['varsymbol'] ?? ''), (string) ($r['company_name'] ?? ''), $r['paid_on'], $r['amount'], (string) $r['currency'], $id);
                         }
                         break;
                 }
