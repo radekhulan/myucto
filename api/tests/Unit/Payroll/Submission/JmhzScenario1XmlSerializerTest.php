@@ -1946,6 +1946,34 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringNotContainsString('<form:rozpad>', $result['xml']);
     }
 
+    /**
+     * IN33 (Datové scénáře 1.4.0.2): 10268 = 0 odebírá rozpad 10269 až 10274.
+     * Měsíc bez odpracované hodiny (celé neplacené volno, PPM) nese jen nulu,
+     * i když vztah má rizikovou kategorii a souhrn nulový přesčas.
+     */
+    public function testZeroWorkedHoursOmitTheWorkedHoursBreakdown(): void
+    {
+        $payload = $this->payload();
+        $payload['people'][0]['employments'][0]['term']['social_employer_rate_category'] = 'risk_employment';
+        $values = &$payload['people'][0]['employments'][0]['work_month']
+            ['jmhz_work_summary']['values'];
+        $values['worked_millihours'] = 0;
+        $values['worked_days'] = 0;
+        $values['overtime_millihours'] = 0;
+        unset($values);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString('<form:pocet>0.000</form:pocet>', $xml);
+        self::assertStringNotContainsString('<form:rozpad>', $xml);
+        self::assertStringNotContainsString('<form:prescas>', $xml);
+        self::assertStringNotContainsString('<form:riziko>', $xml);
+    }
+
     public function testOvertimeAboveWorkedHoursIsRefused(): void
     {
         $payload = $this->payload();

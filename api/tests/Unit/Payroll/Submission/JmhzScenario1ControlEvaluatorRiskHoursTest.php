@@ -34,15 +34,43 @@ final class JmhzScenario1ControlEvaluatorRiskHoursTest extends TestCase
         self::assertSame([JmhzControlOutcome::Failed], $this->outcomes('165.000', '166'));
     }
 
-    /** @return list<JmhzControlOutcome> */
-    private function outcomes(string $worked, string $risk): array
+    /**
+     * IN33 (Datové scénáře 1.4.0.2) a kontrola 282: nulové odpracované hodiny
+     * 10268 odebírají rozpad 10269 až 10274, nesmí být vyplněný ani nulou.
+     */
+    public function testZeroWorkedHoursWithBreakdownFailControl282(): void
     {
-        $xml = str_replace(
-            '<form:pocet>184.000</form:pocet>',
+        self::assertSame([JmhzControlOutcome::Failed], $this->outcomes('0.000', '0', 282));
+        self::assertSame(
+            [JmhzControlOutcome::Failed],
+            $this->outcomesFor('<form:pocet>0.000</form:pocet><form:rozpad><form:prescas>0.000</form:prescas></form:rozpad>', 282),
+        );
+    }
+
+    public function testZeroWorkedHoursWithoutBreakdownPassControl282(): void
+    {
+        self::assertSame([JmhzControlOutcome::Passed], $this->outcomesFor('<form:pocet>0.000</form:pocet>', 282));
+        self::assertSame([JmhzControlOutcome::Passed], $this->outcomes('165.500', '166', 282));
+    }
+
+    /** @return list<JmhzControlOutcome> */
+    private function outcomes(string $worked, string $risk, int $control = 57): array
+    {
+        return $this->outcomesFor(
             "<form:pocet>{$worked}</form:pocet><form:rozpad><form:riziko>"
                 . "<form:hodinyOdpracovanePocet>{$risk}</form:hodinyOdpracovanePocet>"
                 . '<form:kategorizaceRizika>1</form:kategorizaceRizika>'
                 . '</form:riziko></form:rozpad>',
+            $control,
+        );
+    }
+
+    /** @return list<JmhzControlOutcome> */
+    private function outcomesFor(string $hours, int $control): array
+    {
+        $xml = str_replace(
+            '<form:pocet>184.000</form:pocet>',
+            $hours,
             JmhzXmlSample::minimal(),
             $count,
         );
@@ -55,7 +83,7 @@ final class JmhzScenario1ControlEvaluatorRiskHoursTest extends TestCase
         return array_map(
             static fn (JmhzControlVerdict $verdict): JmhzControlOutcome => $verdict->outcome,
             $evaluator->evaluate(
-                57,
+                $control,
                 JmhzAttributeProjection::fromXml($xml),
                 new JmhzControlContext('2026-08-14'),
             ),
