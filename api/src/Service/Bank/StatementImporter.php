@@ -33,6 +33,9 @@ final class StatementImporter
         // a provizorní signál z avíza se uzavírá. Nullable — instalace bez mezd.
         private readonly ?PayrollPaymentSettlementRecognizer $payrollSettlements = null,
         private readonly ?LoggerInterface $logger = null,
+        // Pravidla pohybů v daňové evidenci (issue #140) — ignorovat / zařadit v peněžním
+        // deníku. Nullable a mimo daňovou evidenci no-op.
+        private readonly ?\MyInvoice\Service\TaxEvidence\TaxEvidenceBankRules $taxEvidenceRules = null,
     ) {}
 
     /**
@@ -209,6 +212,12 @@ final class StatementImporter
         try {
             $this->payrollSettlements?->recognizeForSupplier($supplierId, $userId);
         } catch (\Throwable) {
+        }
+        // Až po párování: pravidla berou jen pohyby, které nenašly doklad.
+        try {
+            $this->taxEvidenceRules?->apply($supplierId, null, $userId);
+        } catch (\Throwable $e) {
+            $this->logger?->warning('Pravidla pohybů daňové evidence selhala: ' . $e->getMessage());
         }
         return $result;
     }

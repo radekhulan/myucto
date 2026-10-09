@@ -773,6 +773,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\SupplierBankAccountRepository::class),
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class),
                 $c->get(LoggerInterface::class),
+                $c->get(\MyInvoice\Service\TaxEvidence\TaxEvidenceBankRules::class),
             ),
 
             // EntityCache je v obou službách volitelný class-param (kvůli testovacím

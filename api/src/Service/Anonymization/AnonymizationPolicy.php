@@ -606,6 +606,7 @@ final class AnonymizationPolicy
         'supplier_vat_status_history' => ['note' => 'text'],
         'tax_advance_overrides' => ['note' => 'text'],
         'tax_advance_schedules' => ['variable_symbol' => 'symbol'],
+        'tax_evidence_bank_rules' => ['counterparty_account' => 'bank_account', 'name' => 'text', 'text_contains' => 'text', 'variable_symbol' => 'symbol'],
         'tax_constants' => ['data' => 'keep'],
         'tax_evidence_closings' => ['checklist' => 'json', 'closing_balances' => 'keep', 'opening_balances' => 'keep', 'source_hash' => 'keep', 'source_snapshot' => 'json', 'unsupported_cases' => 'json'],
         'tax_evidence_non_cash_adjustments' => ['description' => 'text', 'evidence_ref' => 'text'],

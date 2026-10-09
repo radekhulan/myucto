@@ -723,6 +723,9 @@
       "purchase_invoice",
       "vendor"
     ],
+    "tax-evidence-bank-rules": [
+      "tax_evidence"
+    ],
     "stock-items": [
       "eshop",
       "imports",

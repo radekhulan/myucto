@@ -4169,6 +4169,12 @@ final class Routes
             // Zápis = účetní|admin (route permission rules); GET/write obojí kryje CLIENT_DENY výše.
             $g->post  ('/classification',                                       [\MyInvoice\Action\TaxEvidence\MovementClassificationAction::class, 'create']);
             $g->delete('/classification/{source_type:bank|cash}/{source_id:[0-9]+}', [\MyInvoice\Action\TaxEvidence\MovementClassificationAction::class, 'delete']);
+            // Pravidla bankovních pohybů v daňové evidenci (issue #140, migrace 1990).
+            $g->get   ('/bank-rules',                 [\MyInvoice\Action\TaxEvidence\TaxEvidenceBankRuleAction::class, 'list']);
+            $g->post  ('/bank-rules',                 [\MyInvoice\Action\TaxEvidence\TaxEvidenceBankRuleAction::class, 'create']);
+            $g->post  ('/bank-rules/apply',           [\MyInvoice\Action\TaxEvidence\TaxEvidenceBankRuleAction::class, 'apply']);
+            $g->put   ('/bank-rules/{id:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\TaxEvidenceBankRuleAction::class, 'update']);
+            $g->delete('/bank-rules/{id:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\TaxEvidenceBankRuleAction::class, 'delete']);
             // G7 (audit 2026-07) — podklady pro přechodový můstek §7b→§24 ZDP (příloha č. 3).
             $g->get('/transition-report',            [\MyInvoice\Action\TaxEvidence\TransitionReportAction::class, 'get']);
             // Odhad daně z příjmů a pojistného OSVČ během roku (vrstva přiznání DPFO).

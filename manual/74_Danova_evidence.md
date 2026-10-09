@@ -497,6 +497,25 @@ Automatická pravidla se uplatní při přijetí přijaté faktury. Druh náklad
 z ruční volby. Uznatelnost dokladu změní jen tehdy, když automatická pravidla zachytí **všechny** položky dokladu a shodují
 se. Doklad, u kterého se pravidla rozcházejí nebo část položek nezachytila, zůstane beze změny a uznatelnost nastavíte ručně.
 
+### 74.9.16 Pravidla bankovních pohybů
+
+Pohyby bez dokladu se opakují: bankovní poplatky, převody mezi vlastními účty, vklady z osobních peněz. Místo ručního
+zařazování každého pohybu v peněžním deníku (§ 74.4) si v menu `Daňová evidence → Pravidla bankovních pohybů` založte
+pravidlo.
+
+- **Podmínky:** směr (příchozí, odchozí), protiúčet, variabilní symbol, text ve zprávě nebo názvu protistrany a rozpětí
+  částky. Vyplnit je potřeba aspoň protiúčet, variabilní symbol nebo text, platit musí všechny vyplněné.
+- **Akce:** **Ignorovat** (pohyb se nepáruje s doklady a nenabízí se k párování) a **Zařazení v peněžním deníku**
+  (stejné volby jako ruční zařazení). Výdaj zařazený jako daňový nebo nedaňový určuje daňovou uznatelnost stejně jako
+  pravidla nákladů (§ 74.9.15).
+- **Kdy se uplatní:** při načtení výpisu na pohyby, které nenašly doklad, a tlačítkem **Uplatnit na stávající pohyby**.
+  Ruční zařazení v peněžním deníku má vždy přednost a pravidlo ho nepřepíše. Rozhoduje pravidlo s nejnižší prioritou.
+
+> [!TIP]
+> Ignorovaný pohyb v peněžním deníku zůstává, jinak by zůstatek deníku nesouhlasil s bankou. Ignorování jen říká, že k němu
+> nepatří žádný doklad. Do kterého řádku deníku pohyb patří, určuje zařazení. Pro převod mezi vlastními účty proto zvolte
+> **Ignorovat** a zařazení **Převod**.
+
 ## 74.10 Související kapitoly
 
 - [Pokladna](32_Pokladna.md) - pokladní doklady, které se promítají do peněžního deníku.

@@ -970,7 +970,8 @@
         "1986_import_jobs_myucto.sql",
         "1987_purchase_invoice_vendor_number_seq.sql",
         "1988_credit_note_offsets.sql",
-        "1989_expense_rules_tax_deductible.sql"
+        "1989_expense_rules_tax_deductible.sql",
+        "1990_tax_evidence_bank_rules.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -22090,6 +22091,42 @@
             "foreign_keys": [],
             "checks": {
                 "data": "json_valid(`data`)"
+            }
+        },
+        "tax_evidence_bank_rules": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "action_ignore": "tinyint(1) NOT NULL DEFAULT 0",
+                "amount_max": "decimal(15,2) NULL DEFAULT NULL",
+                "amount_min": "decimal(15,2) NULL DEFAULT NULL",
+                "counterparty_account": "varchar(64) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "int(11) NULL DEFAULT NULL",
+                "direction": "enum('any','incoming','outgoing') NOT NULL DEFAULT 'any'",
+                "hit_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "last_hit_at": "datetime NULL DEFAULT NULL",
+                "name": "varchar(120) NOT NULL",
+                "priority": "smallint(5) unsigned NOT NULL DEFAULT 100",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "tax_bucket": "enum('income_taxable','income_exempt','income_nontax','expense_taxable','expense_nontax','transfer','private') NULL DEFAULT NULL",
+                "text_contains": "varchar(255) NULL DEFAULT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "variable_symbol": "varchar(20) NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_tebr_supplier": "BTREE (supplier_id, is_active, priority)"
+            },
+            "foreign_keys": {
+                "fk_tebr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_tebr_action": "`action_ignore` = 1 or `tax_bucket` is not null",
+                "chk_tebr_criteria": "`counterparty_account` is not null or `variable_symbol` is not null or `text_contains` is not null"
             }
         },
         "tax_evidence_closings": {

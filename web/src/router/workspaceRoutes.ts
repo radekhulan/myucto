@@ -305,6 +305,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'tax-evidence/tax-estimate',         name: 'tax-evidence-tax-estimate',         component: () => import('@/pages/tax-evidence/TaxEstimate.vue'),         meta: { requiresTaxEvidence: true } },
       // Pravidla výdajů v daňové evidenci: druh a daňová uznatelnost (bez účtů); v podvojném jsou pod Šablonami.
       { path: 'tax-evidence/expense-rules',        name: 'tax-evidence-expense-rules',        component: () => import('@/pages/accounting/ExpenseRules.vue'),          meta: { requiresTaxEvidence: true } },
+      // Pravidla bankovních pohybů v daňové evidenci: ignorovat a zařadit v peněžním deníku (issue #140).
+      { path: 'tax-evidence/bank-rules',           name: 'tax-evidence-bank-rules',           component: () => import('@/pages/tax-evidence/BankRules.vue'),           meta: { requiresTaxEvidence: true } },
       // Sklad (Epic SKLAD) — gate requiresStock (supplier.stock_enabled); role client nemá
       // clientAllowed → guard ho pošle na /portal (deny-by-default, žádný deniedRoles).
       { path: 'stock/items',            name: 'stock-items',           component: () => import('@/pages/stock/ItemList.vue'),     meta: { requiresStock: true } },

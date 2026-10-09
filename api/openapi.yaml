@@ -21505,6 +21505,28 @@ paths:
         '200': { description: OK }
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /api/v1/tax-evidence/bank-rules:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Tax]
+      summary: Pravidla bankovních pohybů v daňové evidenci
+      description: |
+        Pravidlo podle směru, protiúčtu, variabilního symbolu, textu a částky označí nespárovaný
+        pohyb jako ignorovaný (`action_ignore`) a/nebo ho zařadí v peněžním deníku (`tax_bucket`,
+        stejné hodnoty jako ruční zařazení). Jen v daňové evidenci, jinak 403 `wrong_accounting_mode`.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/TaxEvidenceBankRule' }
+
   /api/v1/tax-evidence/cash-journal/export:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -37300,6 +37322,26 @@ components:
         account_code: { type: string, maxLength: 10 }
         vat_classification_code: { type: [string, "null"] }
         order_index: { type: integer }
+
+    TaxEvidenceBankRule:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        priority: { type: integer, description: Nižší číslo vyhrává }
+        is_active: { type: boolean }
+        direction: { type: string, enum: [any, incoming, outgoing] }
+        counterparty_account: { type: [string, "null"] }
+        variable_symbol: { type: [string, "null"] }
+        text_contains: { type: [string, "null"], description: Hledá se ve zprávě a názvu protistrany }
+        amount_min: { type: [number, "null"] }
+        amount_max: { type: [number, "null"] }
+        action_ignore: { type: boolean }
+        tax_bucket:
+          type: [string, "null"]
+          enum: [income_taxable, income_exempt, income_nontax, expense_taxable, expense_nontax, transfer, private, null]
+        hit_count: { type: integer }
+        last_hit_at: { type: [string, "null"], format: date-time }
 
     CreditNoteOffsetState:
       type: object

@@ -698,6 +698,8 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],
 
         ['*', '#^/api/tax-evidence/classification(/|$)#', 'tax_evidence.classification.write', AccessLevel::WRITE],
+        ['GET', '#^/api/tax-evidence/bank-rules(/|$)#', 'tax_evidence', AccessLevel::READ],
+        ['*', '#^/api/tax-evidence/bank-rules(/|$)#', 'tax_evidence.classification.write', AccessLevel::WRITE],
         ['GET', '#^/api/tax-evidence/.*/export$#', 'tax_evidence.export', AccessLevel::READ],
         ['GET', '#^/api/tax-evidence(/|$)#', 'tax_evidence', AccessLevel::READ],
         ['*', '#^/api/tax-evidence(/|$)#', 'tax_evidence', AccessLevel::WRITE],

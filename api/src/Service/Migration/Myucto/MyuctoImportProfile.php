@@ -20,6 +20,7 @@ final class MyuctoImportProfile
         'offset_agreements', 'offset_agreement_items', 'assets', 'asset_improvements',
         'depreciation_entries', 'small_assets', 'journal_entries', 'journal_entry_lines',
         'posting_rules', 'de_movement_classification', 'de_movement_classification_history',
+        'tax_evidence_bank_rules',
     ];
     public const CONFIG_TABLES = ['supplier_vat_status_history'];
     public const GLOBAL_KEYS = ['countries' => ['iso2'], 'vat_rates' => ['code', 'rate_percent', 'country']];
@@ -58,6 +59,7 @@ final class MyuctoImportProfile
         'de_movement_classification' => ['bank_transaction_id' => 'bank_transactions',
             'cash_document_id' => 'cash_documents', 'classified_by' => 'users'],
         'de_movement_classification_history' => ['changed_by' => 'users'],
+        'tax_evidence_bank_rules' => ['created_by' => 'users'],
     ];
     public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id'];
     public const RESET_COLUMNS = [
