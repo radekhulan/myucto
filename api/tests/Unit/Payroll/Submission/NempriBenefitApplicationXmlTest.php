@@ -427,6 +427,26 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         }
     }
 
+    /**
+     * Mzda v hotovosti: `vyplatitHotovost=true` a ostatní volby `false`, bez
+     * adresy (DV NEMPRI25 ji váže jen na `vyplatitAdresa`). ÚSSZ si způsob
+     * výplaty dávky vyžádá od pojištěnce (Všeobecné zásady NEMPRI 2025).
+     */
+    public function testCashWageSendsCashFlagWithoutAddress(): void
+    {
+        $payload = $this->payload(SicknessBenefitKind::Nem, null, [
+            'paymentConnection' => new NempriPaymentConnection(NempriPaymentConnection::KIND_CASH),
+        ]);
+        $xml = $this->serializer->serialize($payload);
+
+        $this->validator->validateNempri($payload, $xml);
+
+        self::assertStringContainsString('<vyplatitHotovost>true</vyplatitHotovost>', $xml);
+        self::assertStringContainsString('<vyplatitAdresa>false</vyplatitAdresa>', $xml);
+        self::assertStringContainsString('<vyplatitUcetCR>false</vyplatitUcetCR>', $xml);
+        self::assertStringNotContainsString('<adresa>', $xml);
+    }
+
     private function expectRejected(string $code, NempriXmlPayload $payload): void
     {
         try {

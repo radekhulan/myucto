@@ -766,7 +766,6 @@ final readonly class SicknessSubmissionService
         return $this->paymentConnections->resolve(
             $target['payout_method'],
             $plaintext,
-            $target['address'],
         );
     }
 

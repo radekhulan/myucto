@@ -840,7 +840,7 @@ final class NempriXmlSerializer
         $this->bool($document, $namespace, $node, 'vyplatitUcetCR', $connection->kind === NempriPaymentConnection::KIND_ACCOUNT_CZ);
         $this->bool($document, $namespace, $node, 'vyplatitUcetCizina', $connection->kind === NempriPaymentConnection::KIND_ACCOUNT_FOREIGN);
         $this->bool($document, $namespace, $node, 'vyplatitAdresa', $connection->kind === NempriPaymentConnection::KIND_ADDRESS);
-        $this->bool($document, $namespace, $node, 'vyplatitHotovost', false);
+        $this->bool($document, $namespace, $node, 'vyplatitHotovost', $connection->kind === NempriPaymentConnection::KIND_CASH);
         switch ($connection->kind) {
             case NempriPaymentConnection::KIND_ACCOUNT_CZ:
                 $account = $document->createElementNS($namespace, 'ucetCZ');

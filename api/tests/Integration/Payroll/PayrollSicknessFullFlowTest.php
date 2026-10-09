@@ -848,7 +848,7 @@ final class PayrollSicknessFullFlowTest extends TestCase
         return $person;
     }
 
-    /** Výplata mzdy v hotovosti na adresu bydliště — NEMPRI nese způsob výplaty. */
+    /** Výplata mzdy v hotovosti — NEMPRI nese `vyplatitHotovost`, adresa se nepředává. */
     private function cashPayout(int $employeeId): void
     {
         $pdo = $this->db->pdo();

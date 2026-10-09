@@ -11,13 +11,15 @@ namespace MyInvoice\Service\Payroll\Submission\Sickness;
  * spolu s podklady „údaje o způsobu výplaty mzdy, platu nebo odměny“. Bez nich
  * si je ČSSZ vyžádá výzvou a výplata dávky se zdrží. Údaj se proto bere
  * z výplatního profilu zaměstnance: bankovní účet, na který chodí mzda, nebo
- * adresa bydliště, když se mzda vyplácí v hotovosti.
+ * výplata v hotovosti (`vyplatitHotovost`), po níž si ÚSSZ způsob výplaty
+ * dávky vyžádá od pojištěnce (Všeobecné zásady NEMPRI 2025).
  */
 final readonly class NempriPaymentConnection
 {
     public const KIND_ACCOUNT_CZ = 'account_cz';
     public const KIND_ACCOUNT_FOREIGN = 'account_foreign';
     public const KIND_ADDRESS = 'address';
+    public const KIND_CASH = 'cash';
 
     public function __construct(
         public string $kind,

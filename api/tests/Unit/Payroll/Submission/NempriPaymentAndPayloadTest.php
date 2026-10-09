@@ -20,7 +20,7 @@ final class NempriPaymentAndPayloadTest extends TestCase
 {
     public function testCzechAccountWithPrefixIsSplit(): void
     {
-        $connection = (new NempriPaymentConnectionResolver())->resolve('bank', '19-1000000005/0100', null);
+        $connection = (new NempriPaymentConnectionResolver())->resolve('bank', '19-1000000005/0100');
 
         self::assertNotNull($connection);
         self::assertSame(NempriPaymentConnection::KIND_ACCOUNT_CZ, $connection->kind);
@@ -32,7 +32,7 @@ final class NempriPaymentAndPayloadTest extends TestCase
     public function testCzechIbanIsConvertedToNationalAccount(): void
     {
         $connection = (new NempriPaymentConnectionResolver())
-            ->resolve('mixed', 'CZ04 0100 0000 1910 0000 0005', null);
+            ->resolve('mixed', 'CZ04 0100 0000 1910 0000 0005');
 
         self::assertNotNull($connection);
         self::assertSame(NempriPaymentConnection::KIND_ACCOUNT_CZ, $connection->kind);
@@ -44,7 +44,7 @@ final class NempriPaymentAndPayloadTest extends TestCase
     public function testForeignIbanGoesToForeignAccount(): void
     {
         $connection = (new NempriPaymentConnectionResolver())
-            ->resolve('bank', 'DE89 3704 0044 0532 0130 00', null);
+            ->resolve('bank', 'DE89 3704 0044 0532 0130 00');
 
         self::assertNotNull($connection);
         self::assertSame(NempriPaymentConnection::KIND_ACCOUNT_FOREIGN, $connection->kind);
@@ -52,21 +52,34 @@ final class NempriPaymentAndPayloadTest extends TestCase
         self::assertSame('DE89370400440532013000', $connection->iban);
     }
 
-    public function testCashPayoutUsesResidenceAddress(): void
+    /**
+     * Všeobecné zásady NEMPRI 2025 (Způsob výplaty mzdy nebo odměny): mzda
+     * v hotovosti je volba „v hotovosti nebo na adresu v zahraničí“, po níž
+     * ÚSSZ vyzve pojištěnce, aby určil způsob výplaty dávky. Poštovní poukázka
+     * na adresu bydliště by tvrdila jiný způsob výplaty mzdy, než jaký je.
+     */
+    public function testCashWageIsReportedAsCashWithoutAddress(): void
     {
-        $connection = (new NempriPaymentConnectionResolver())->resolve('cash', null, [
-            'street_line' => 'Zkušební 123/4a',
-            'city' => 'Testov',
-            'postal_code' => '110 00',
-            'country_code' => 'CZ',
-        ]);
+        $connection = (new NempriPaymentConnectionResolver())->resolve('cash', null);
 
-        self::assertNotNull($connection);
-        self::assertSame(NempriPaymentConnection::KIND_ADDRESS, $connection->kind);
-        self::assertSame('Zkušební', $connection->street);
-        self::assertSame('123', $connection->houseNumber);
-        self::assertSame('4a', $connection->orientationNumber);
-        self::assertSame('11000', $connection->postalCode);
+        self::assertSame(NempriPaymentConnection::KIND_CASH, $connection->kind);
+        self::assertNull($connection->city);
+        self::assertNull($connection->houseNumber);
+        self::assertNull($connection->postalCode);
+    }
+
+    /**
+     * Bez výplatního profilu není známo, jak se mzda vyplácí. Adresa bydliště
+     * by z toho udělala poštovní poukázku, o kterou zaměstnanec nepožádal.
+     */
+    public function testUnknownPayoutMethodDoesNotGuessPostalOrder(): void
+    {
+        try {
+            (new NempriPaymentConnectionResolver())->resolve(null, null);
+            self::fail('Neznámý způsob výplaty mzdy se nesmí hádat jako poštovní poukázka.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_payment_connection_missing', $exception->validationCode);
+        }
     }
 
     /**
@@ -78,7 +91,7 @@ final class NempriPaymentAndPayloadTest extends TestCase
     public function testPartnerSettlementStopsWithClearReason(): void
     {
         try {
-            (new NempriPaymentConnectionResolver())->resolve('partner_settlement', '1000000005/0100', null);
+            (new NempriPaymentConnectionResolver())->resolve('partner_settlement', '1000000005/0100');
             self::fail('Výplata přes partnera nesmí větu tiše nechat bez platebního spojení.');
         } catch (SicknessException $exception) {
             self::assertSame('nempri_payment_connection_partner_settlement', $exception->validationCode);
@@ -89,7 +102,7 @@ final class NempriPaymentAndPayloadTest extends TestCase
     public function testMissingAccountStopsWithReason(): void
     {
         try {
-            (new NempriPaymentConnectionResolver())->resolve('bank', null, null);
+            (new NempriPaymentConnectionResolver())->resolve('bank', null);
             self::fail('Bez účtu se způsob výplaty mzdy nesmí tiše vynechat.');
         } catch (SicknessException $exception) {
             self::assertSame('nempri_payment_connection_missing', $exception->validationCode);

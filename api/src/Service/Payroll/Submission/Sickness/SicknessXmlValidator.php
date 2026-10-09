@@ -1038,6 +1038,7 @@ final readonly class SicknessXmlValidator
                 trim((string) $connection->city) !== ''
                 && preg_match('/^[0-9A-Za-z]{1,4}$/D', (string) $connection->houseNumber) === 1
                 && preg_match('/^[0-9A-Za-z]{1,5}$/D', (string) $connection->postalCode) === 1,
+            NempriPaymentConnection::KIND_CASH => true,
             default => false,
         };
         if (!$valid) {

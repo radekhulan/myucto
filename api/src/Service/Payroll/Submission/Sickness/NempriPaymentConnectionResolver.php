@@ -15,7 +15,12 @@ use MyInvoice\Service\Payment\CzechBankAccountValidator;
  *
  *  - mzda na účet (i částečně) → účet, na který mzda chodí; český účet jako
  *    `ucetCZ`, zahraniční IBAN jako `ucetZahranicni`,
- *  - mzda v hotovosti → adresa bydliště (`vyplatitAdresa`),
+ *  - mzda v hotovosti → `vyplatitHotovost` bez adresy: podle Všeobecných
+ *    zásad NEMPRI 2025 je to volba „v hotovosti nebo na adresu v zahraničí“,
+ *    po níž ÚSSZ vyzve pojištěnce, aby určil způsob výplaty dávky. Poštovní
+ *    poukázka na adresu bydliště by tvrdila jiný způsob výplaty mzdy,
+ *  - bez výplatního profilu se způsob výplaty mzdy nehádá: bez účtu se
+ *    podání zastaví,
  *  - mzda vyplácená přes partnera (vyrovnání s jiným subjektem) → podání se
  *    ZASTAVÍ: DV NEMPRI25 vyžaduje platební spojení u každé věty s akcí vznik,
  *    zaměstnavatel nezná účet, na který mzda doopravdy dojde, a vymyslet ho
@@ -25,7 +30,7 @@ use MyInvoice\Service\Payment\CzechBankAccountValidator;
  * Volající resolver nevolá u ošetřovného a dlouhodobého ošetřovného bez akce
  * vznik — tam DV platební spojení zakazuje.
  *
- * Třída je čistá: plaintext účtu i adresu dostane hotové.
+ * Třída je čistá: plaintext účtu dostane hotový.
  */
 final readonly class NempriPaymentConnectionResolver
 {
@@ -33,13 +38,9 @@ final readonly class NempriPaymentConnectionResolver
         private CzechBankAccountValidator $czechAccounts = new CzechBankAccountValidator(),
     ) {}
 
-    /**
-     * @param array{street_line:string,city:string,postal_code:string,country_code:string}|null $address
-     */
     public function resolve(
         ?string $payoutMethod,
         ?string $accountPlaintext,
-        ?array $address,
     ): NempriPaymentConnection {
         if ($payoutMethod === 'partner_settlement') {
             throw new SicknessException(
@@ -52,13 +53,10 @@ final readonly class NempriPaymentConnectionResolver
             );
         }
         if ($payoutMethod === 'cash') {
-            return $this->fromAddress($address);
+            return new NempriPaymentConnection(NempriPaymentConnection::KIND_CASH);
         }
         if ($accountPlaintext !== null) {
             return $this->fromAccount($accountPlaintext);
-        }
-        if ($payoutMethod === null && $address !== null) {
-            return $this->fromAddress($address);
         }
 
         throw new SicknessException(
@@ -116,49 +114,6 @@ final readonly class NempriPaymentConnectionResolver
             accountPrefix: $parsed['prefix'],
             accountNumber: $parsed['base'],
             bankCode: $parsed['bank_code'],
-        );
-    }
-
-    /**
-     * Adresa bydliště pro výplatu dávky poštou.
-     *
-     * `CtAdresa` chce ulici, číslo popisné, orientační a PSČ zvlášť, evidence
-     * drží ulici s čísly v jednom řádku. Řádek se rozloží podle českého zápisu
-     * „Ulice 123/4a“; nejde-li to, podání se zastaví s výzvou k opravě adresy
-     * — hádat číslo popisné by poslalo dávku jinam.
-     *
-     * @param array{street_line:string,city:string,postal_code:string,country_code:string}|null $address
-     */
-    public function fromAddress(?array $address): NempriPaymentConnection
-    {
-        $message = 'Mzda se vyplácí v hotovosti, a tak NEMPRI nese adresu bydliště pro výplatu '
-            . 'dávky. Adresa zaměstnance chybí, není česká nebo nemá rozlišitelné číslo popisné '
-            . 'a PSČ („Ulice 123/4“). Opravte ji na kartě osoby.';
-        if ($address === null || strtoupper(trim($address['country_code'])) !== 'CZ') {
-            throw new SicknessException('nempri_payment_address_invalid', $message);
-        }
-        $line = trim($address['street_line']);
-        if (preg_match(
-            '/^(.*?)[\s,]*(?:č\.\s*p\.\s*)?(\d{1,4}[a-zA-Z]?)(?:\s*\/\s*(\d{1,4}[a-zA-Z]?))?$/uD',
-            $line,
-            $match,
-        ) !== 1) {
-            throw new SicknessException('nempri_payment_address_invalid', $message);
-        }
-        $postal = (string) preg_replace('/\s+/', '', $address['postal_code']);
-        $city = trim($address['city']);
-        if ($city === '' || preg_match('/^\d{5}$/D', $postal) !== 1) {
-            throw new SicknessException('nempri_payment_address_invalid', $message);
-        }
-        $street = trim($match[1]);
-
-        return new NempriPaymentConnection(
-            NempriPaymentConnection::KIND_ADDRESS,
-            city: $city,
-            street: $street === '' ? null : $street,
-            houseNumber: $match[2],
-            orientationNumber: ($match[3] ?? '') === '' ? null : $match[3],
-            postalCode: $postal,
         );
     }
 }

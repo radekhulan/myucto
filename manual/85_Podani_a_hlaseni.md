@@ -2581,12 +2581,15 @@ zaměstnání. Rozhodné období se pak určí, jako by událost vznikla den po
 skončení zaměstnání (§ 19 odst. 11 zákona č. 187/2006 Sb.).
 
 **Způsob výplaty mzdy** se do NEMPRI doplní sám z výplatního profilu
-zaměstnance: účet, na který chodí mzda, zahraniční IBAN, nebo adresa
-bydliště, když se mzda vyplácí v hotovosti. Platební spojení se posílá jen
-s akcí Vznik (u ošetřovného bez vzniku je zakázané) a u ostatních dávek vždy;
-u nemocenského jen s elektronickým číslem rozhodnutí (10 číslic). Chybí-li
-účet nebo nejde-li adresu rozložit na ulici, číslo popisné a PSČ, příprava se
-zastaví a pod chybou je odkaz na kartu osoby. Stejně se zastaví výplata přes
+zaměstnance: účet, na který chodí mzda, nebo zahraniční IBAN. Vyplácí-li se
+mzda v hotovosti, věta nese volbu „v hotovosti“ bez adresy. Dávky se
+v hotovosti nevyplácejí, a tak územní správa vyzve zaměstnance, aby si způsob
+výplaty dávky určil. Zaměstnanec to může vyřídit předem Žádostí o změnu
+způsobu výplaty dávky (ZZVDPN25), kterou lze přiložit k NEMPRI. Platební
+spojení se posílá jen s akcí Vznik (u ošetřovného bez vzniku je zakázané)
+a u ostatních dávek vždy; u nemocenského jen s elektronickým číslem rozhodnutí
+(10 číslic). Chybí-li účet u mzdy vyplácené na účet nebo výplatní profil
+úplně, příprava se zastaví a pod chybou je odkaz na kartu osoby. Stejně se zastaví výplata přes
 partnera: MyÚčto nezná účet ani adresu, kam má ČSSZ dávku poslat. Opravte
 způsob výplaty ve výplatním profilu osoby, nebo oznámení podejte mimo
 aplikaci. Ve větě jsou vždy všechny čtyři volby způsobu výplaty (účet v ČR,
