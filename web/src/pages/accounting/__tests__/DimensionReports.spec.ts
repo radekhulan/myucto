@@ -9,6 +9,13 @@ const m = vi.hoisted(() => ({
   responsibleCandidates: vi.fn(),
   replace: vi.fn(),
   routeQuery: {} as Record<string, string>,
+  accountingMode: 'double_entry',
+}))
+
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({
+    get currentSupplier() { return { id: 1, accounting_mode: m.accountingMode } },
+  }),
 }))
 
 vi.mock('@/composables/useDimensions', () => ({
@@ -63,6 +70,7 @@ const profitReport = {
 beforeEach(() => {
   vi.clearAllMocks()
   m.routeQuery = {}
+  m.accountingMode = 'double_entry'
   m.profit.mockResolvedValue(profitReport)
   m.cashFlow.mockResolvedValue({
     from: '2094-01-01', to: '2094-12-31', supplier_ids: [1, 3], hidden_companies: 0, dimension: null, profit: 0,

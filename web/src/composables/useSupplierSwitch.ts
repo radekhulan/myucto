@@ -81,6 +81,11 @@ async function currentRoute(): Promise<{ name?: unknown, path: string, fullPath:
 /** Sdílené napříč přepínačem, hledáním i paletou: druhé přepnutí během prvního se ignoruje. */
 const switching = ref(false)
 
+/** Úspěšné přepnutí příznak nevrací (stránka se přenačte), testy ho proto nulují samy. */
+export function resetSupplierSwitchForTests(): void {
+  switching.value = false
+}
+
 export function useSupplierSwitch() {
   const supplierStore = useSupplierStore()
   const auth = useAuthStore()

@@ -39,7 +39,12 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 
+vi.mock('@/router', () => ({
+  router: { currentRoute: { value: { name: 'dashboard', path: '/', fullPath: '/' } } },
+}))
+
 import SupplierSwitcher from '../SupplierSwitcher.vue'
+import { resetSupplierSwitchForTests } from '@/composables/useSupplierSwitch'
 
 async function pickSecond() {
   const w = mount(SupplierSwitcher)
@@ -54,6 +59,7 @@ describe('SupplierSwitcher — výchozí firma účtu', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    resetSupplierSwitchForTests()
     m.calls = []
     m.isDemo = false
     m.setDefaultSupplier.mockImplementation(async () => { m.calls.push('default') })

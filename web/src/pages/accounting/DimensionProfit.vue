@@ -35,14 +35,15 @@ const toast = useToast()
 const dims = useDimensions()
 // Daňová evidence: výsledovka z peněžního deníku (příjmy a výdaje), peněžní tok
 // po dimenzi a výkazy z deníku tu nejsou.
-const isTaxEvidence = computed(() => useSupplierStore().currentSupplier?.accounting_mode === 'tax_evidence')
+const supplierStore = useSupplierStore()
+const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 function revenueLabel() { return isTaxEvidence.value ? t('dimensions.profit_income') : t('dimensions.profit_revenue') }
 function costLabel() { return isTaxEvidence.value ? t('dimensions.profit_expense') : t('dimensions.profit_cost') }
 function metricLabel(metric: 'revenue' | 'cost' | 'result') { return metric === 'revenue' ? revenueLabel() : metric === 'cost' ? costLabel() : t('dimensions.profit_result') }
 
 type Tab = 'profit' | 'cash_flow'
 const year = new Date().getFullYear()
-const tab = ref<Tab>(route.query.tab === 'cash_flow' && useSupplierStore().currentSupplier?.accounting_mode !== 'tax_evidence' ? 'cash_flow' : 'profit')
+const tab = ref<Tab>(route.query.tab === 'cash_flow' && !isTaxEvidence.value ?'cash_flow' : 'profit')
 const from = ref(String(route.query.from || `${year}-01-01`))
 const to = ref(String(route.query.to || `${year}-12-31`))
 const groupScope = ref(route.query.scope === 'group')
