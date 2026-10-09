@@ -118,7 +118,8 @@ nehlásí chybu. Parametry a konfigurace jsou v
    - potvrzení původu OIČ a ID PPV z protokolů ČSSZ (jen pokud tomu tak je),
    - u začátku vedení mezd před zpracovanými měsíci volbu **Posunout začátek na
      MM/RRRR a převést** (výchozí), nebo **Převést bez posunu začátku**
-     (vyžaduje potvrzení).
+     (vyžaduje potvrzení). Firma bez začátku vedení mezd žádnou volbu nemá;
+     náhled jen řekne, na jaký měsíc ho převod nastaví.
 5. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
    zkoušku nanečisto**. Přečtěte protokol, chyby opravte a zkoušku zopakujte.
 
@@ -414,7 +415,12 @@ zapíše a schválí. Protokol vypíše počty podle druhu.
 
 **Zapnutí mezd a začátek vedení mezd.** Firmě, která mzdy v MyÚčtu ještě
 nemá, převod zapne modul Mzdy a začátek vedení mezd v MyÚčtu nastaví na měsíc
-po posledním měsíci v exportu. Chybí-li nastavení zaměstnavatele, založí ho
+po posledním uzavřeném měsíci exportu. Převádíte-li v jedné úloze víc roků,
+platí poslední měsíc nejpozdějšího vybraného roku: převod staršího roku tak
+začátek nenastaví za jeho prosinec a pozdější rok nenarazí na začátek před
+měsíci, které PAMICA zpracovala. Náhled ukáže, na jaký měsíc převod začátek
+nastaví, a po každé doběhlé úloze se kontroly náhledu načtou znovu podle
+aktuálního stavu firmy. Chybí-li nastavení zaměstnavatele, založí ho
 s mzdovou účtárnou `MZDY` a výchozími předkontacemi. Variabilní symbol ČSSZ,
 kód OSSZ a číslo plátce zdravotního pojištění, které firma vede v Nastavení
 firmy, převezme do Mezd a k variabilnímu symbolu založí registraci účtárny

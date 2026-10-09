@@ -42,9 +42,20 @@ final class SyntheticPohodaPayrollTwoYears
     /** Důvod slevy zaměstnavatele Aleny (§ 7a odst. 1 písm. b). */
     public const ALENA_DISCOUNT_REASON = 'child_care_under_10';
 
-    public static function write(string $root): string
+    /**
+     * Export po rocích, jak ho dělá exportní nástroj PAMICA: složka `IČO_rok` pro každý rok
+     * a v jejím souboru jen mzdy toho roku.
+     *
+     * @return array<int,string> rok => soubor mezd
+     */
+    public static function writeYears(string $root): array
     {
-        $dir = rtrim($root, '/\\') . '/' . self::ICO . '_2025_2026';
+        return [2025 => self::write($root, 2025), 2026 => self::write($root, 2026)];
+    }
+
+    public static function write(string $root, ?int $onlyYear = null): string
+    {
+        $dir = rtrim($root, '/\\') . '/' . self::ICO . ($onlyYear === null ? '_2025_2026' : '_' . $onlyYear);
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
         }
@@ -84,6 +95,9 @@ final class SyntheticPohodaPayrollTwoYears
         foreach ([[1, 1, [2025, 2026]], [1, 2, [2025]], [2, 3, [2025]], [2, 4, [2025]]] as [$person, $relation, $years]) {
             $dpp = in_array($relation, [2, 4], true);
             foreach ($years as $year) {
+                if ($onlyYear !== null && $year !== $onlyYear) {
+                    continue;
+                }
                 foreach ([1, 2] as $month) {
                     $id++;
                     $gross = $dpp ? 4000 : 32000;
@@ -104,13 +118,15 @@ final class SyntheticPohodaPayrollTwoYears
         }
 
         // Doplatek Bohumilovi v únoru 2026, po skončení vztahu (PAMICA ho zúčtovala k vztahu).
-        $row('MZ', ['ID' => ++$id, 'RefZAM' => 2, 'RefPomer' => 3, 'Rok' => 2026, 'RelMes' => 2, 'HodFond' => 0, 'HodOdpra' => 0,
-            'RefPoj' => 1, 'KcHrubaM' => 2000, 'KcCistaM' => 1600, 'Prohlas' => 1, 'JeSocPP' => 1, 'Datum' => '2026-03-10', 'KcVyplat' => 1600]);
-        $row('MZslozky', ['ID' => ++$item, 'RefAg' => $id, 'RefSlozka' => 2, 'KcMzda' => 2000]);
+        if ($onlyYear === null || $onlyYear === 2026) {
+            $row('MZ', ['ID' => ++$id, 'RefZAM' => 2, 'RefPomer' => 3, 'Rok' => 2026, 'RelMes' => 2, 'HodFond' => 0, 'HodOdpra' => 0,
+                'RefPoj' => 1, 'KcHrubaM' => 2000, 'KcCistaM' => 1600, 'Prohlas' => 1, 'JeSocPP' => 1, 'Datum' => '2026-03-10', 'KcVyplat' => 1600]);
+            $row('MZslozky', ['ID' => ++$item, 'RefAg' => $id, 'RefSlozka' => 2, 'KcMzda' => 2000]);
+        }
 
         $file = $dir . '/91_mzdy.xml';
         file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
-            . '<mdbExport version="1" group="mzdy" ico="' . self::ICO . '" year="2026" source="POHODA" state="ok">' . $x . '</mdbExport>');
+            . '<mdbExport version="1" group="mzdy" ico="' . self::ICO . '" year="' . ($onlyYear ?? 2026) . '" source="POHODA" state="ok">' . $x . '</mdbExport>');
         return $file;
     }
 }

@@ -71,6 +71,38 @@ describe('useMigrationWizard', () => {
     expect(wizard().currentStep.value).toBe(3)
   })
 
+  it('s refreshPreview po doběhnutí úlohy a při návratu na náhled načte náhled znovu beze změny kroku', async () => {
+    const client = api([{ id: 11, job_id: 7, mode: 'dry_run', status: 'completed', agenda_year: 2024 }])
+    client.show.mockResolvedValue({ token: 'tok', agendas: [2024, 2025] })
+    const { wizard } = mountWizard(true, client, { refreshPreview: true })
+    await flushPromises()
+    m.fetchImportJob.mockResolvedValue({ id: 7, status: 'completed', processed: 1, total_items: 1 })
+    wizard().upload.value = { token: 'tok', agendas: [2024] }
+
+    await wizard().start('dry_run', { mode: 'dry_run' })
+
+    expect(client.show).toHaveBeenCalledWith('tok')
+    expect(wizard().upload.value?.agendas).toEqual([2024, 2025])
+    expect(wizard().currentStep.value).toBe(3)
+    expect(wizard().dryRunPassed.value).toBe(true)
+
+    wizard().goTo(2)
+    await flushPromises()
+    expect(client.show).toHaveBeenCalledTimes(2)
+  })
+
+  it('bez refreshPreview náhled po úloze znovu nenačítá', async () => {
+    const client = api([{ id: 11, job_id: 7, mode: 'dry_run', status: 'completed', agenda_year: 2024 }])
+    const { wizard } = mountWizard(true, client)
+    await flushPromises()
+    m.fetchImportJob.mockResolvedValue({ id: 7, status: 'completed', processed: 1, total_items: 1 })
+    wizard().upload.value = { token: 'tok', agendas: [2024] }
+
+    await wizard().start('dry_run', { mode: 'dry_run' })
+
+    expect(client.show).not.toHaveBeenCalled()
+  })
+
   it('u převodu jednoho běhu bere úspěch ze stavu běhu', async () => {
     const client = api([{ id: 4, job_id: 7, mode: 'dry_run', status: 'failed', agenda_year: 0 }])
     const { wizard } = mountWizard(false, client)

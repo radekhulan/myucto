@@ -194,6 +194,15 @@ final class PohodaImportJobService extends AbstractImportJobService
             $plan = self::plan($meta, $ico, ImportYears::fromParams($params), $payroll, $supplierId, $token);
             $planYears = array_column($plan, 'year');
             $steps = $payroll ? PohodaPayrollImporter::stepKeys() : PohodaImporter::stepKeys();
+            if ($payroll) {
+                // Začátek vedení mezd firmě bez začátku nastaví úloha až za poslední měsíc
+                // posledního vybraného roku. Začátek, který firma neměla před úlohou, nastavila
+                // úloha sama: pozdější rok ho proto posune bez dotazu na rozhodnutí uživatele.
+                $params['job_last_period'] = self::payrollLastPeriod($meta, $ico, $planYears, $supplierId, $token);
+                if (!isset($params['start_decision']) && $this->payroll->startPeriod($supplierId) === null) {
+                    $params['start_decision'] = PohodaPayrollImporter::START_ADVANCE;
+                }
+            }
 
             $status = $this->runYears($jobId, $planYears, $dryRun, $steps,
                 function (int $index, array &$totals) use ($jobId, $params, $meta, $supplierId, $userId, $plan, $planYears, $steps): array {
@@ -266,7 +275,8 @@ final class PohodaImportJobService extends AbstractImportJobService
                     'import' => fn (?callable $progress, ?callable $cancel): object => $export === null
                         ? $this->payroll->run($supplierId, $userId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $agenda['year'], $dryRun, $runId, $progress, $cancel,
                             (bool) ($params['confirm_identifiers'] ?? false), (bool) ($params['approve_taken_over'] ?? false),
-                            isset($params['start_decision']) ? (string) $params['start_decision'] : null, (bool) ($params['accept_differences'] ?? false))
+                            isset($params['start_decision']) ? (string) $params['start_decision'] : null, (bool) ($params['accept_differences'] ?? false),
+                            isset($params['job_last_period']) ? (string) $params['job_last_period'] : null)
                         : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip'], (bool) ($params['accept_differences'] ?? false),
                             self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null)),
                     'journal' => static fn (array $byStep): array => $payroll
@@ -316,6 +326,36 @@ final class PohodaImportJobService extends AbstractImportJobService
             }
         }
         return $plan;
+    }
+
+    /**
+     * Poslední uzavřený měsíc mezd přes všechny roky úlohy (`YYYY-MM`), nebo `null`. Bere ho
+     * z přehledu exportu (`meta.json`); agendu, jejíž přehled je neúplný, přečte ze souboru.
+     *
+     * @param array<string,mixed> $meta
+     * @param list<int> $years
+     */
+    public static function payrollLastPeriod(array $meta, string $ico, array $years, int $supplierId, string $token): ?string
+    {
+        $last = null;
+        foreach ((array) ($meta['agendas'] ?? []) as $a) {
+            if (!in_array((int) ($a['year'] ?? 0), $years, true) || ($ico !== '' && (string) ($a['ico'] ?? '') !== $ico)
+                || !(bool) ($a['has_payroll'] ?? false)
+            ) {
+                continue;
+            }
+            $summary = $a['payroll'] ?? null;
+            if (!PohodaPayrollImporter::summaryComplete($summary)) {
+                try {
+                    $summary = PohodaPayrollImporter::summary(PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR
+                        . (string) $a['dir'] . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], (int) $a['year']);
+                } catch (PohodaException) {
+                    continue;
+                }
+            }
+            $last = PohodaPayrollImporter::setupLastPeriod($last, isset($summary['last_overall']) ? (string) $summary['last_overall'] : null);
+        }
+        return $last;
     }
 
     /**

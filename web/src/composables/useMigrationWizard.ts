@@ -106,6 +106,11 @@ export interface MigrationWizardOptions<TUpload extends { token: string }, TPend
   inlineLoadError?: boolean
   /** Přehled běhů, které tenhle průvodce ukazuje. */
   filterRuns?: (runs: TRun[]) => TRun[]
+  /**
+   * Kontroly v náhledu závisí na stavu firmy, který převod mění (například začátek vedení
+   * mezd). Po doběhnutí úlohy a při návratu na náhled je průvodce načte znovu.
+   */
+  refreshPreview?: boolean
 }
 
 /**
@@ -188,7 +193,22 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
   }
 
   function goTo(step: number): void {
-    if (canGoTo(step)) currentStep.value = step
+    if (!canGoTo(step)) return
+    currentStep.value = step
+    if (step === 2) void refreshPreview()
+  }
+
+  /**
+   * Znovu načte náhled nahraného souboru beze změny kroku a voleb průvodce. Chyba (soubor
+   * po ostrém převodu už server smazal) nechá dosavadní náhled.
+   */
+  async function refreshPreview(): Promise<void> {
+    const token = upload.value?.token
+    if (!options.refreshPreview || !token) return
+    try {
+      const result = await api.show(token)
+      if (options.isReady(result) && upload.value?.token === token) upload.value = result
+    } catch { /* dosavadní náhled zůstává */ }
   }
 
   function onFile(event: Event): void {
@@ -363,6 +383,7 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
       // Server nahraný soubor po úspěšném převodu smazal (nebo si ho drží pro další roky).
       writeToken(null)
     }
+    await refreshPreview()
   }
 
   function schedulePoll(id: number): void {
@@ -447,5 +468,6 @@ export function useMigrationWizard<TUpload extends { token: string }, TPending e
     differencesAcceptable, differences, acceptDifferences, canImport, clearDifferences,
     uploadPercent, processing, processingProgress, processingSlow, loadError, deletingRun, jobRunning, jobSucceeded, percent,
     canGoTo, goTo, onFile, doUpload, resetUpload, retryUpload, abandonUpload, start, cancel, showRun, deleteRun, loadRuns, errorMessage, writeToken,
+    refreshPreview,
   }
 }

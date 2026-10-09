@@ -30789,7 +30789,8 @@
       "keep": "Transfer without moving the start",
       "keep_hint": "Only if MyÚčto should deliberately recalculate {from} to {last}.",
       "keep_confirm": "I confirm that MyÚčto will calculate {from} to {last} itself, although PAMICA has already processed them.",
-      "keep_confirm_first": "Confirm the transfer without moving the payroll start first."
+      "keep_confirm_first": "Confirm the transfer without moving the payroll start first.",
+      "will_set": "The company has no payroll start in MyÚčto yet. The transfer sets it to {period}, the month after the last month processed by the previous program ({last}). All selected years are taken over as processed by the previous program."
     }
   },
   "credit_cards": {

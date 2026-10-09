@@ -135,6 +135,8 @@ const {
   // Historie je společná pro oba průvodce, ale ukazuje se jen ta jeho. Běh bez druhu
   // je z doby před podporou mezd, tedy vždycky účetnictví.
   filterRuns: items => items.filter(r => (r.kind ?? 'accounting') === kind.value),
+  // Kontroly mezd závisí na začátku vedení mezd, který převod nastavuje nebo posouvá.
+  refreshPreview: true,
 })
 
 const steps = computed(() => [1, 2, 3, 4].map(number => ({ number, label: tt(`step${number}`) })))
@@ -209,6 +211,7 @@ const stockAgenda = computed(() => {
 watch(stockAgenda, agenda => {
   stockChoices.value = Object.fromEntries((agenda?.stock.warehouses ?? []).map(w => [w.code, stockChoices.value[w.code] ?? w.suggested]))
 }, { immediate: true })
+const START_WILL_SET = 'payroll_start_will_set'
 const noteFiles = computed(() => selectedAgendas.value.flatMap(a => a.files.filter(f => f.state !== 'ok').map(f => ({ ...f, year: a.year }))))
 /**
  * Kontrola před převodem po vybraných rocích vzestupně. Zpráva s rokem v kontextu (období
@@ -222,6 +225,8 @@ const preflightGroups = computed(() => {
       const own = typeof m.context?.year === 'number' ? m.context.year : agendaYear
       const later = Array.isArray(m.context?.years) ? (m.context.years as number[]) : null
       if (m.code === 'later_periods' && later && !later.some(isSelected)) continue
+      // Začátek vedení mezd nastavuje úloha jednou za všechny roky ({@link startWillSet}).
+      if (m.code === START_WILL_SET) continue
       groups.get(own)?.push(m)
     }
   }
@@ -236,6 +241,23 @@ const startBehind = computed(() => {
   const c = m?.context
   if (!c || typeof c.from !== 'string' || typeof c.to !== 'string' || typeof c.last !== 'string') return null
   return { from: monthLabel(c.from), to: monthLabel(c.to), last: monthLabel(c.last) }
+})
+/**
+ * Firma bez začátku vedení mezd: úloha ho nastaví za poslední zpracovaný měsíc
+ * nejpozdějšího vybraného roku. Náhled každého roku zná jen svůj rok, proto platí
+ * nejpozdější z nich.
+ */
+const startWillSet = computed(() => {
+  if (kind.value !== 'payroll') return null
+  let best: { start: string; last: string } | null = null
+  for (const agendaYear of runYears.value) {
+    for (const m of upload.value?.payroll_preflight?.[String(agendaYear)] ?? []) {
+      const c = m.context
+      if (m.code !== START_WILL_SET || typeof c?.start_period !== 'string' || typeof c?.last !== 'string') continue
+      if (best === null || c.start_period > best.start) best = { start: c.start_period, last: c.last }
+    }
+  }
+  return best && { period: monthLabel(best.start), last: monthLabel(best.last) }
 })
 const startDecision = ref<'advance' | 'keep'>('advance')
 const keepStartConfirmed = ref(false)
@@ -662,6 +684,8 @@ const actions = computed<ActionItem[]>(() => {
             <input v-model="approveTakenOver" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-approve-taken-over" />
             <span class="text-sm text-neutral-700">{{ tt('payroll_approve_taken_over') }}</span>
           </label>
+
+          <p v-if="startWillSet" class="mb-5 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-start-will-set">{{ tt('payroll_start.will_set', startWillSet) }}</p>
 
           <fieldset v-if="startBehind" class="mb-5 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm" data-testid="pohoda-start-decision">
             <legend class="sr-only">{{ tt('payroll_start.title', startBehind) }}</legend>

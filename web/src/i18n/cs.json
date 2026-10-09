@@ -30789,7 +30789,8 @@
       "keep": "Převést bez posunu začátku",
       "keep_hint": "Jen pokud má MyÚčto měsíce {from} až {last} vědomě spočítat znovu.",
       "keep_confirm": "Potvrzuji, že MyÚčto bude měsíce {from} až {last} počítat samo, i když je PAMICA už zpracovala.",
-      "keep_confirm_first": "Převod bez posunu začátku vedení mezd nejdřív potvrďte."
+      "keep_confirm_first": "Převod bez posunu začátku vedení mezd nejdřív potvrďte.",
+      "will_set": "Firma nemá nastavený začátek vedení mezd v MyÚčtu. Převod ho nastaví na {period}, měsíc po posledním měsíci zpracovaném předchozím programem ({last}). Všechny vybrané roky se převezmou jako zpracované předchozím programem."
     }
   },
   "credit_cards": {

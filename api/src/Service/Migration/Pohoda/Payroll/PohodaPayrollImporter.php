@@ -66,6 +66,8 @@ final class PohodaPayrollImporter
     public const START_ADVANCE = 'advance';
     /** Rozhodnutí k začátku vedení mezd: vědomě ponechat, MyÚčto dotčené měsíce spočítá znovu. */
     public const START_KEEP = 'keep';
+    /** Kód kontroly: firma bez začátku vedení mezd ho převodem dostane (kontext `start_period`). */
+    public const START_WILL_SET = 'payroll_start_will_set';
     private const PERSON_CHUNK = 100;
     private const MESSAGE_LIMIT = 20;
 
@@ -173,6 +175,27 @@ final class PohodaPayrollImporter
         );
     }
 
+    /**
+     * Poslední měsíc, za který převod nastavuje začátek vedení mezd: pozdější z posledního
+     * měsíce převáděného roku a posledního měsíce celé úlohy. PAMICA i POHODA exportují
+     * každý rok zvlášť, takže převod roku 2025 o mzdách 2026 neví; kdyby nastavil začátek
+     * za prosinec 2025, převod roku 2026 v téže úloze by narazil na začátek před měsíci,
+     * které předchozí program už zpracoval.
+     */
+    public static function setupLastPeriod(?string $yearLast, ?string $jobLast): ?string
+    {
+        if ($yearLast === null || $yearLast === '') {
+            return $jobLast === null || $jobLast === '' ? null : $jobLast;
+        }
+        return $jobLast !== null && $jobLast > $yearLast ? $jobLast : $yearLast;
+    }
+
+    /** Začátek vedení mezd firmy (`YYYY-MM-DD`), nebo `null`. */
+    public function startPeriod(int $supplierId): ?string
+    {
+        return $this->sickness->startPeriod($supplierId);
+    }
+
     /** `YYYY-MM` → `M/YYYY`. */
     private static function monthLabel(string $period): string
     {
@@ -218,10 +241,14 @@ final class PohodaPayrollImporter
      * nečte a stojí jen pár dotazů do databáze - tak ji volá náhled průvodce. Bez něj
      * přehled spočítá jedním průchodem souborem (převod na pozadí).
      *
+     * Úloha s víc roky předá `$jobLastPeriod`, poslední uzavřený měsíc přes všechny své roky:
+     * začátek vedení mezd, který převod firmě bez začátku nastaví, se počítá od něj, ne od
+     * posledního měsíce převáděného roku ({@see self::setupLastPeriod()}).
+     *
      * @param array<string,mixed>|null $summary
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    public function preflight(int $supplierId, string $file, int $year, ?array $summary = null): array
+    public function preflight(int $supplierId, string $file, int $year, ?array $summary = null, ?string $jobLastPeriod = null): array
     {
         $out = [];
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
@@ -239,18 +266,26 @@ final class PohodaPayrollImporter
         $pdo = $this->db->pdo();
         // Chybějící nastavení mezd převod doplní sám ({@see PayrollMigrationModuleSetup});
         // chybou zůstává jen to, co doplnit nejde (licence).
-        $last = $summary['last_overall'] ?? null;
-        $plan = $last === null ? null : $this->moduleSetup->plan($supplierId, (string) $last);
+        $last = isset($summary['last_overall']) ? (string) $summary['last_overall'] : null;
+        $setupLast = self::setupLastPeriod($last, $jobLastPeriod);
+        $plan = $setupLast === null ? null : $this->moduleSetup->plan($supplierId, $setupLast);
         $willSetUp = ($plan['outcome'] ?? null) === PayrollMigrationModuleSetup::OUTCOME_READY;
         $stmt = $pdo->prepare('SELECT payroll_enabled FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
         if ((int) $stmt->fetchColumn() !== 1) {
             if ($willSetUp) {
-                $add('info', 'payroll_module_will_enable', 'Firma nemá zapnutý modul Mzdy. Převod ho zapne'
-                    . ($plan['start_period'] !== null ? ' a nastaví začátek vedení mezd na ' . $plan['start_period'] : '') . '.');
+                $add('info', 'payroll_module_will_enable', 'Firma nemá zapnutý modul Mzdy. Převod ho zapne.');
             } else {
                 $add('error', 'payroll_disabled', 'Firma nemá zapnutý modul Mzdy. Zapněte ho v Nastavení → Moduly, jinak mzdy nejde převést.');
             }
+        }
+        // Náhled průvodce zná jen svůj rok; při víc vybraných rocích ukáže začátek podle
+        // nejpozdějšího z nich (kontext `start_period`), tak jako ho nastaví úloha.
+        if ($willSetUp && ($plan['start_period'] ?? null) !== null) {
+            $add('info', self::START_WILL_SET, sprintf(
+                'Firma nemá nastavený začátek vedení mezd v MyÚčtu. Převod ho nastaví na %s, měsíc po posledním měsíci zpracovaném předchozím programem (%s).',
+                self::monthLabel((string) $plan['start_period']), self::monthLabel($setupLast),
+            ), ['start_period' => $plan['start_period'], 'last' => $setupLast]);
         }
         // Počáteční stavy ročních kumulací se zapisují za měsíce před začátkem vedení mezd
         // v MyÚčtu; bez něj je převod nezapíše a mzdový běh je bude hlásit jako chybějící.
@@ -302,12 +337,14 @@ final class PohodaPayrollImporter
      * @param ?string $startDecision rozhodnutí k začátku vedení mezd, který leží před měsíci zpracovanými
      *        PAMICA ({@see self::START_ADVANCE} / {@see self::START_KEEP}); ostrý převod bez něj skončí chybou
      * @param bool $acceptDifferences ostrý převod přijme měsíce, které se nepřevedly ({@see ImportProtocol::difference()})
+     * @param ?string $jobLastPeriod poslední uzavřený měsíc přes všechny roky úlohy (`YYYY-MM`); firmě bez
+     *        začátku vedení mezd ho převod nastaví až za něj ({@see self::setupLastPeriod()})
      */
-    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false, ?string $startDecision = null, bool $acceptDifferences = false): ImportProtocol
+    public function run(int $supplierId, int $userId, string $file, int $year, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, bool $confirmIdentifiers = false, bool $approveTakenOver = false, ?string $startDecision = null, bool $acceptDifferences = false, ?string $jobLastPeriod = null): ImportProtocol
     {
         $protocol = new ImportProtocol($dryRun ? 'dry_run' : 'import', $acceptDifferences);
         $protocol->set('kind', 'payroll');
-        $preflight = $this->preflight($supplierId, $file, $year);
+        $preflight = $this->preflight($supplierId, $file, $year, null, $jobLastPeriod);
         $protocol->set('preflight', $preflight);
         $protocol->begin(self::STEP_PREFLIGHT);
         foreach ($preflight as $m) {
@@ -347,7 +384,7 @@ final class PohodaPayrollImporter
             $last = self::lastPeriod($converter);
             if ($last !== null) {
                 PayrollMigrationModuleSetup::report($protocol, self::STEP_PREFLIGHT,
-                    $this->moduleSetup->ensure($supplierId, $userOrNull, $last), 'PAMICA');
+                    $this->moduleSetup->ensure($supplierId, $userOrNull, (string) self::setupLastPeriod($last, $jobLastPeriod)), 'PAMICA');
                 if ($startDecision === self::START_ADVANCE) {
                     try {
                         $moved = $this->moduleSetup->advanceStartBeforeTakeover($supplierId, $userOrNull, $last);
