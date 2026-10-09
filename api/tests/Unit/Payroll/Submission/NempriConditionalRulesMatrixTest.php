@@ -40,6 +40,13 @@ final class NempriConditionalRulesMatrixTest extends TestCase
             yield "{$kind} volno bez náhrady od po do" => [$kind, [], ['unpaidLeave' => true, 'unpaidLeaveFrom' => '2026-08-20', 'unpaidLeaveTo' => '2026-08-10'], 'nempri_unpaid_leave_period_invalid'];
             yield "{$kind} rozhodné období do před od" => [$kind, [], ['decisivePeriod' => new NempriDecisivePeriod('2026-08-31', '2025-09-01', self::months('2025-09', 12), true)], 'nempri_decisive_period_incomplete'];
             yield "{$kind} bez názvu zaměstnavatele" => [$kind, [], ['employerName' => ''], 'nempri_employer_name_missing'];
+            foreach (['QQ', 'XX', 'S', 'SVK'] as $country) {
+                yield "{$kind} zahraniční účet se státem {$country} mimo C_STAT" => [$kind, [], ['paymentConnection' => new NempriPaymentConnection(
+                    NempriPaymentConnection::KIND_ACCOUNT_FOREIGN,
+                    iban: 'SK3112000000198742637541',
+                    countryCode: $country,
+                )], 'nempri_payment_connection_invalid'];
+            }
             foreach (['0', '10', 'ZD', 'AA'] as $code) {
                 yield "{$kind} druh činnosti {$code} mimo CIS_DRUHCIN" => [$kind, [], ['activityCode' => $code], 'nempri_activity_code_invalid'];
             }

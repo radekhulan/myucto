@@ -8,6 +8,7 @@ use DOMDocument;
 use MyInvoice\Service\Bank\CzechBankCodeRegistry;
 use MyInvoice\Service\Payroll\Cssz\CsszSchemaCatalog;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodebooks;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 
 /**
@@ -1112,7 +1113,11 @@ final readonly class SicknessXmlValidator
             // Zahraniční účet nesmí mít stát CZ (DV NEMPRI25, ucetZahranicni/stat).
             NempriPaymentConnection::KIND_ACCOUNT_FOREIGN =>
                 preg_match('/^[A-Z]{2}[0-9A-Z]{2,32}$/D', (string) $connection->iban) === 1
-                && preg_match('/^[0-9A-Z]{1,3}$/D', (string) $connection->countryCode) === 1
+                // Stát z číselníku C_STAT (CZEM ČSÚ 1186), stejného jako u registrací.
+                && PayrollRegistrationCodebooks::contains(
+                    PayrollRegistrationCodebooks::COUNTRY,
+                    $connection->countryCode,
+                )
                 && $connection->countryCode !== 'CZ'
                 && !str_starts_with((string) $connection->iban, 'CZ'),
             NempriPaymentConnection::KIND_ADDRESS =>
