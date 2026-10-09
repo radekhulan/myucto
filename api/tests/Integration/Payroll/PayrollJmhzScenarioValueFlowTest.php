@@ -421,6 +421,61 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
         self::assertStringContainsString('<form:slevaDite>0</form:slevaDite>', $xml);
     }
 
+    /**
+     * Sleva zaměstnavatele za zkrácený úvazek (§ 7a zák. 589/1992): zaměstnankyně
+     * nad 55 let na 20 h týdně, přijatý záměr OZUSPOJ od 1. 7. Formulář nese
+     * 10372 = ano, 10373 = 20,00 h a důvod A; PVPOJ jednu osobu se slevou,
+     * úhrn vyměřovacích základů 20 000 a slevu 5 % = 1 000 Kč, o kterou je
+     * pojistné k úhradě nižší (6 380 - 1 000 = 5 380).
+     */
+    public function testEmployerPartTimeDiscountIsReportedOnFormAndInPvpoj(): void
+    {
+        $person = $this->hire('Věra Zkrácená', 'female', '1965-04-04', weeklyHours: 20, workload: 5_000);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET social_part_time_discount_reason = "age_55_plus"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $this->db->pdo()->prepare('UPDATE payroll_employees SET birth_date = "1965-04-04" WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $person['employee_id']]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employer_settings (supplier_id, default_office_id, social_security_office_code)
+             VALUES (?, ?, "112") ON DUPLICATE KEY UPDATE social_security_office_code = "112"',
+        )->execute([$this->supplierId, $this->officeId]);
+        $intents = $this->container->get(\MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository::class);
+        $service = new \MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentService(
+            $intents,
+            new \MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojDeadlinePolicy(),
+            new \MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy(),
+            new class implements \Psr\Clock\ClockInterface {
+                public function now(): \DateTimeImmutable
+                {
+                    return new \DateTimeImmutable('2026-06-15 12:00:00', new \DateTimeZone('Europe/Prague'));
+                }
+            },
+        );
+        $created = $service->create($this->supplierId, 'production', $person['employment_id'], '2026-07-01', '2026-06-10', $this->actors[0]);
+        $row = $intents->find($this->supplierId, 'production', (int) $created['id']);
+        $intents->update($this->supplierId, 'production', (int) $created['id'], (int) $row['row_version'],
+            ['status' => 'accepted', 'accepted_on' => '2026-06-20']);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD), dailyMinutes: 240);
+        $this->pay($person, 2_000_000);
+        $xml = $this->submission('employer-discount');
+
+        self::assertStringContainsString(
+            '<form:slevaZamestnavatele><form:slevaZamestnavateleEvidovana>true</form:slevaZamestnavateleEvidovana>'
+                . '<form:slevaZamestnavateleRozpad><form:pracovniDobaKratsi>20.00</form:pracovniDobaKratsi>'
+                . '<form:duvodUplatneni>A</form:duvodUplatneni>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<pvpoj:slevaZamestnavatele><pvpoj:pocetZamestnancu>1</pvpoj:pocetZamestnancu>'
+                . '<pvpoj:uhrnVymerovacichZakladu>20000</pvpoj:uhrnVymerovacichZakladu>'
+                . '<pvpoj:pojistneSleva>1000</pvpoj:pojistneSleva></pvpoj:slevaZamestnavatele>'
+                . '<pvpoj:pojistneUhrada>5380</pvpoj:pojistneUhrada>',
+            $xml,
+        );
+    }
+
     private function createChild(int $employeeId, string $name, string $birthDate, int $sequence): int
     {
         $birthNumber = self::syntheticBirthNumber($birthDate, 'male', 200 + $sequence);
