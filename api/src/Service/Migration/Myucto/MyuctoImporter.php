@@ -150,6 +150,9 @@ final class MyuctoImporter
                     }
                 }
             }
+            if ($previous === false) {
+                $this->assertNoExtraTargetPostingRules($pdo, $supplierId, array_keys($reused['posting_rules'] ?? []), $map);
+            }
             $ready = ['supplier' => [$sourceSupplier => true], 'countries' => array_fill_keys(array_keys($map['countries'] ?? []), true),
                 'vat_rates' => array_fill_keys(array_keys($map['vat_rates'] ?? []), true)];
             foreach ([$reused, $existing] as $group) {
@@ -476,6 +479,34 @@ final class MyuctoImporter
             if ((int) $stmt->fetchColumn() !== 0) {
                 throw new RuntimeException('Cílová firma už obsahuje vlastní data: ' . $table . '.');
             }
+        }
+    }
+
+    /**
+     * Předkontace se při první obnově párují na existující pravidla cílové firmy. Pravidlo,
+     * které cíl má a zdroj ne, by po obnově měnilo účinná pravidla oproti zdroji, takže
+     * cílová firma není prázdná a obnova se zastaví stejně jako u ostatních tabulek.
+     *
+     * @param list<int|string> $reusedSourceIds
+     * @param array<string,array<int|string,int>> $map
+     */
+    private function assertNoExtraTargetPostingRules(PDO $pdo, int $supplierId, array $reusedSourceIds, array $map): void
+    {
+        $matched = [];
+        foreach ($reusedSourceIds as $sourceId) {
+            $matched[$map['posting_rules'][$sourceId]] = true;
+        }
+        $stmt = $pdo->prepare('SELECT id, rule_key, priority FROM posting_rules WHERE supplier_id = ? ORDER BY rule_key, priority');
+        $stmt->execute([$supplierId]);
+        $extra = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $rule) {
+            if (!isset($matched[(int) $rule['id']])) {
+                $extra[] = $rule['rule_key'] . ' (' . $rule['priority'] . ')';
+            }
+        }
+        if ($extra !== []) {
+            throw new RuntimeException('Cílová firma už obsahuje vlastní předkontace, které v exportu nejsou: ' . implode(', ', array_slice($extra, 0, 10))
+                . (count($extra) > 10 ? ' a další' : '') . '.');
         }
     }
 

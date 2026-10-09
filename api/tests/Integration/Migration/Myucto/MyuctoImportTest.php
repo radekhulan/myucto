@@ -435,6 +435,22 @@ final class MyuctoImportTest extends TestCase
         self::assertSame(1, $this->targetCount('posting_rules'));
     }
 
+    public function testTargetPostingRuleMissingInSourceStopsFirstRestore(): void
+    {
+        $this->pdo->prepare("INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active) SELECT ?, 'synthetic.target.only', description, debit_account_code, credit_account_code, priority, is_active FROM posting_rules WHERE supplier_id = ? AND priority = 120")
+            ->execute([$this->target, $this->source]);
+        $package = (new MyuctoExportReader())->read($this->archive);
+        try {
+            $this->importer->import($package, $this->target, $this->actor, 'synthetic-instance', false);
+            self::fail('Předkontace navíc v cílové firmě nesmí projít.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('synthetic.target.only', $e->getMessage());
+        }
+        self::assertSame(0, $this->targetCount('invoices'));
+        self::assertSame(0, $this->targetCount('external_entity_map'));
+        self::assertSame(1, $this->targetCount('posting_rules'));
+    }
+
     public function testOldProfileCannotSilentlyExtendAnExistingRestore(): void
     {
         $package = (new MyuctoExportReader())->read($this->archive);
