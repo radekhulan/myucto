@@ -576,6 +576,7 @@ final class KontrolniHlaseniBuilder
                 'kh_regime_code'        => '0',
                 'kh_bad_debt'           => 'P',
                 'kh_attribute_conflict' => false,
+                's46_invoice_id'        => (int) $row['invoice_id'],
             ];
         }
     }
@@ -892,7 +893,7 @@ final class KontrolniHlaseniBuilder
      *
      * Čte TENTÝŽ výsledek {@see finalSections()} jako XML i soupis (#142), takže Kniha
      * nemá vlastní kopii pravidla: limit 10 000 Kč na doklad, DIČ, příznak opravy
-     * nedobytné pohledávky, doklad bez částky, vyřazené řádky i opravy § 74b. Na rozdíl
+     * nedobytné pohledávky, doklad bez částky, vyřazené řádky i opravy § 74b a § 46. Na rozdíl
      * od podání umí zahrnout koncepty, protože Kniha je pracovní žurnál a koncept v ní
      * má ukázat oddíl, do kterého po vystavení půjde.
      *
@@ -925,9 +926,9 @@ final class KontrolniHlaseniBuilder
 
     /**
      * Klíč dokladu v {@see documentSections()}: identita kanonického řádku
-     * ({@see VatLedgerService::documentIdentity()}), u opravy § 74b `s74b:<id přijaté faktury>`.
-     * Oprava má vlastní klíč, protože se vykazuje v jiném období než opravovaný doklad.
-     * Opravy § 46 klíč nemají — Kniha DPH je jako samostatné řádky nevede.
+     * ({@see VatLedgerService::documentIdentity()}), u opravy § 74b `s74b:<id přijaté faktury>`,
+     * u věřitelské opravy § 46 `s46:<id vydané faktury>`. Oprava má vlastní klíč, protože
+     * se vykazuje v jiném období než opravovaný doklad.
      *
      * @param array<string,mixed> $row
      */
@@ -935,6 +936,9 @@ final class KontrolniHlaseniBuilder
     {
         if (isset($row['s74b_purchase_invoice_id'])) {
             return 's74b:' . (int) $row['s74b_purchase_invoice_id'];
+        }
+        if (isset($row['s46_invoice_id'])) {
+            return 's46:' . (int) $row['s46_invoice_id'];
         }
         if (!isset($row['source'], $row['invoice_id'])) {
             return null;

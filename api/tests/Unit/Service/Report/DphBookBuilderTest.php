@@ -35,6 +35,8 @@ final class DphBookBuilderTest extends TestCase
     private DphBookBuilder $builder;
     private InvoiceKhSections $khSections;
     private Section74bService $section74b;
+    private Section46Service $section46;
+    private KontrolniHlaseniBuilder $kh;
 
     protected function setUp(): void
     {
@@ -58,16 +60,18 @@ final class DphBookBuilderTest extends TestCase
         );
         $ledger = new VatLedgerService($conn, $taxConstants);
         $submissions = new TaxSubmissionRepository($conn);
+        $this->section46 = new Section46Service($conn, new Section46CorrectionRepository($conn), new ActivityLogger($conn), $taxConstants);
         $kh = new KontrolniHlaseniBuilder(
             $conn,
             $ledger,
             $taxConstants,
             $this->section74b,
-            new Section46Service($conn, new Section46CorrectionRepository($conn), new ActivityLogger($conn), $taxConstants),
+            $this->section46,
             $submissions,
             new SubmissionVariantGuard($submissions),
         );
-        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b, $kh);
+        $this->kh = $kh;
+        $this->builder = new DphBookBuilder($conn, $ledger, $taxConstants, $this->section74b, $kh, $this->section46);
         $this->khSections = new InvoiceKhSections($this->builder, $ledger);
     }
 
@@ -181,6 +185,81 @@ final class DphBookBuilderTest extends TestCase
                 $this->assertStringNotContainsStringIgnoringCase('§74b', (string) ($row['description'] ?? ''));
             }
         }
+    }
+
+    public function testSection46CorrectionLowersOutputVatInBookLikeReturnAndKh(): void
+    {
+        // Běžný prodej v období: základ 1 000, DPH 210 → ř.1 (sekce 36.001).
+        $this->insertSale(1, '2026-05-10', 1000.0, 210.0, '1');
+        // Vydaná faktura z dřívějška (DUZP 2025-01, do květnové knihy sama nevstupuje),
+        // za kterou je v období 2026-05 zaevidována věřitelská oprava §46 celé daně 2 100.
+        $this->insertSale(40, '2025-01-15', 10000.0, 2100.0, '1');
+        $this->insertS46Correction(40, 2026, 5, 'correction', 2100.0, 2100.0);
+
+        $lines = $this->section46->periodCorrectionLines(1, 2026, 5, 'monthly');
+        $this->assertSame(-2100.0, $lines['basic']['vat'], 'oprava §46 je záporná daň v ř.1');
+        $this->assertSame(-10000.0, $lines['basic']['base']);
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+
+        $section = null;
+        foreach ($r['sections'] as $s) {
+            if ($s['key'] === '36.001') {
+                $section = $s;
+            }
+        }
+        $this->assertNotNull($section, 'sekce 36.001 (výstup 21 %) musí existovat');
+        // Součty Knihy = ř.1 DPHDP3 po opravě (210 + (−2 100), základ 1 000 + (−10 000)).
+        $this->assertSame(round(210.0 + $lines['basic']['vat'], 2), round($section['subtotal_vat'], 2));
+        $this->assertSame(round(1000.0 + $lines['basic']['base'], 2), round($section['subtotal_base'], 2));
+        $this->assertSame(
+            round(210.0 + $lines['basic']['vat'], 2),
+            round($r['totals']['issued']['vat'], 2),
+            'daň na výstupu Knihy DPH musí sedět s ř.1 DPHDP3 po §46 opravě'
+        );
+        $this->assertSame(-1890.0, round($r['totals']['vat_balance'], 2));
+
+        $s46Row = null;
+        foreach ($section['rows'] as $row) {
+            if ((int) $row['invoice_id'] === 40) {
+                $s46Row = $row;
+            }
+        }
+        $this->assertNotNull($s46Row, '§46 oprava má vlastní řádek v 36.001');
+        $this->assertSame(-2100.0, round($s46Row['vat'], 2), 'oprava daně věřitele = záporná daň');
+        $this->assertSame('issued', $s46Row['direction']);
+        $this->assertStringContainsString('§46', (string) $s46Row['description']);
+        $this->assertSame('A.4', $s46Row['kh_section'], '§46 oprava se v Knize DPH značí KH A.4');
+
+        // KH A.4 nese tutéž opravu se zdph_44='P' a stejnými částkami jako Kniha.
+        $a4 = $this->kh->sectionDocuments(1, 2026, 5, 'monthly')['sections']['A.4']['rows'];
+        $a4Vat = array_sum(array_map(static fn (array $row): float => (float) $row['vat21'], array_values(array_filter(
+            $a4,
+            static fn (array $row): bool => (string) $row['doc_number'] === '40',
+        ))));
+        $this->assertSame(round($s46Row['vat'], 2), round($a4Vat, 2), 'Kniha a KH A.4 nesou stejnou opravu §46');
+    }
+
+    public function testSection46RestorationRaisesOutputVatInBook(): void
+    {
+        $this->insertSale(41, '2025-01-15', 10000.0, 2100.0, '1');
+        $this->insertS46Correction(41, 2026, 5, 'restoration', 2100.0, 2100.0);
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+
+        $this->assertSame(2100.0, round($r['totals']['issued']['vat'], 2), 'obnova po úhradě (§46e) zvyšuje daň na výstupu');
+        $this->assertSame(10000.0, round($r['totals']['issued']['base'], 2));
+    }
+
+    public function testSection46NotAppliedForNonPayerLikeReturn(): void
+    {
+        $this->pdo->exec('UPDATE supplier SET is_vat_payer = 0 WHERE id = 1');
+        $this->insertSale(42, '2025-01-15', 10000.0, 2100.0, '1');
+        $this->insertS46Correction(42, 2026, 5, 'correction', 2100.0, 2100.0);
+
+        $r = $this->builder->build(1, 2026, 5, 'monthly');
+
+        $this->assertSame(0.0, round($r['totals']['issued']['vat'], 2), 'neplátce opravu §46 v přiznání nemá, Kniha také ne');
     }
 
     // ───── helpers ───────────────────────────────────────────────────────────
@@ -320,6 +399,14 @@ final class DphBookBuilderTest extends TestCase
         $this->pdo->prepare("INSERT INTO purchase_invoice_items (id, purchase_invoice_id, vat_rate_snapshot, description, total_without_vat, total_vat, vat_classification_code)
             VALUES (?, ?, 21.0, 'tuzemsko', ?, ?, ?)")
             ->execute([$id, $id, $base, $vat, $code]);
+    }
+
+    private function insertS46Correction(int $invoiceId, int $year, int $month, string $movement, float $vatAmount, float $outputVat): void
+    {
+        $this->pdo->prepare("INSERT INTO vat_s46_corrections
+            (supplier_id, invoice_id, period_year, period_month, movement, vat_amount, output_vat)
+            VALUES (1, ?, ?, ?, ?, ?, ?)")
+            ->execute([$invoiceId, $year, $month, $movement, $vatAmount, $outputVat]);
     }
 
     private function insertS74bCorrection(int $purchaseInvoiceId, int $year, int $month, string $movement, float $vatAmount, float $claimed): void

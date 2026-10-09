@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 
 /**
@@ -47,6 +48,8 @@ final class DphBookBuilder
         private readonly Section74bService $section74b,
         // Sloupec „KH" = zařazení dokladu v kontrolním hlášení, žádná vlastní kopie pravidla.
         private readonly KontrolniHlaseniBuilder $kontrolniHlaseni,
+        // § 46 ZDPH — evidované věřitelské opravy u nedobytné pohledávky (ř. 1/2, KH A.4 zdph_44='P').
+        private readonly Section46Service $section46,
     ) {}
 
     /**
@@ -141,7 +144,13 @@ final class DphBookBuilder
         // EVIDOVANÉ korekce §74b (dlužník) — snížení/obnovení odpočtu za období vstupují do
         // sekcí přijatých ř.40/41 se znaménkem z periodCorrectionLines (snížení záporně,
         // obnova kladně), aby součet odpočtu Knihy DPH seděl s ř. 40/41 DPHDP3 po korekci.
-        $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period, $khSections);
+        // EVIDOVANÉ opravy §46 (věřitel) jsou zrcadlo na straně výstupu: ř.1/2 (oprava
+        // záporně, obnova po úhradě kladně), aby daň na výstupu seděla s ř. 1/2 DPHDP3.
+        // Obě opravy jen u plátce k poslednímu dni období, stejně jako DphPriznaniBuilder.
+        if (!empty($supplier['is_vat_payer'])) {
+            $this->appendSection74bCorrections($sections, $supplierId, $year, $month, $period, $khSections);
+            $this->appendSection46Corrections($sections, $supplierId, $year, $month, $period, $khSections);
+        }
 
         // Convert sections asociativní mapy → indexované pole, seřazené.
         $sectionList = array_values($sections);
@@ -271,6 +280,82 @@ final class DphBookBuilder
                 $this->addToSection($sections, 'received', $cls, $this->section74bBookRow($inv, $rate, $base, $vat));
             }
         }
+    }
+
+    /**
+     * Přimíchá EVIDOVANÉ věřitelské opravy §46 (nedobytná pohledávka) do sekcí uskutečněných
+     * plnění. Per doklad a sazba (21 % → ř.1 sekce 36.001, 12 % → ř.2 sekce 36.002) přidá
+     * řádek se znaménkem z {@see Section46Service::periodCorrectionLines()} (oprava záporně,
+     * obnova po úhradě podle § 46e kladně). Informativní ř. 33 do Knihy nepatří, daňový
+     * efekt nese ř. 1/2. Odlišné od §74b záměrně: jiná strana, jiné řádky i oddíl KH (A.4).
+     *
+     * @param array<string,array<string,mixed>> $sections by-ref
+     * @param array<string,array<string,true>> $khSections {@see KontrolniHlaseniBuilder::documentSections()}
+     */
+    private function appendSection46Corrections(array &$sections, int $supplierId, int $year, int $month, string $period, array $khSections): void
+    {
+        $s46 = $this->section46->periodCorrectionLines($supplierId, $year, $month, $period);
+        $c = $this->taxConstants->forYear($year);
+        foreach ($s46['invoices'] as $inv) {
+            $buckets = [
+                ['1', (float) $c['vat_rate_standard'], (float) $inv['base21'], (float) $inv['vat21']],
+                ['2', (float) $c['vat_rate_reduced'], (float) $inv['base12'], (float) $inv['vat12']],
+            ];
+            foreach ($buckets as [$line, $rate, $base, $vat]) {
+                if (round($base, 2) == 0.0 && round($vat, 2) == 0.0) {
+                    continue;
+                }
+                $cls = [
+                    'code'                  => '',
+                    'label'                 => 'Oprava daně §46',
+                    'dphdp3_line'           => $line,
+                    'dphdp3_line_secondary' => null,
+                    'kh_section'            => isset($khSections[KontrolniHlaseniBuilder::documentSectionKey(
+                        ['s46_invoice_id' => (int) $inv['invoice_id']],
+                    )]['A.4']) ? 'A.4' : null,
+                    'vat_rate'              => $rate,
+                ];
+                $this->addToSection($sections, 'issued', $cls, $this->section46BookRow($inv, $rate, $base, $vat));
+            }
+        }
+    }
+
+    /**
+     * Řádek Knihy DPH pro jednu sazbovou opravu §46 (base/vat už nesou znaménko pohybu).
+     *
+     * @param array<string,mixed> $inv položka periodCorrectionLines()['invoices']
+     * @return array<string,mixed>
+     */
+    private function section46BookRow(array $inv, float $rate, float $base, float $vat): array
+    {
+        $doc = (string) ($inv['varsymbol'] ?? '');
+        $desc = $inv['movement'] === 'correction'
+            ? 'Oprava daně §46 - nedobytná pohledávka'
+            : 'Oprava daně §46 - obnovení po úhradě';
+        return [
+            'invoice_id'              => (int) $inv['invoice_id'],
+            'direction'               => 'issued',
+            'doc_number'              => $doc,
+            'original_doc_number'     => null,
+            'tax_date'                => $inv['tax_date'],
+            'accounting_date'         => $inv['tax_date'],
+            'claim_date'              => null,
+            'claim_basis'             => null,
+            'received_at'             => null,
+            'description'             => $desc,
+            'counterparty_name'       => '',
+            'counterparty_dic'        => (string) ($inv['client_dic'] ?? ''),
+            'vat_classification_code' => null,
+            'vat_rate'                => $rate,
+            'currency'                => 'CZK',
+            'exchange_rate'           => 1.0,
+            'base'                    => $base,
+            'vat'                     => $vat,
+            'total'                   => $base + $vat,
+            'status'                  => 'posted',
+            'is_draft'                => false,
+            'is_fixed_asset'          => false,
+        ];
     }
 
     /**
