@@ -30,6 +30,8 @@ final class PohodaPayrollJmhzReports
     public const PROGRAM = 'PAMICA';
     private const TYPES = ['1' => 'R', '2' => 'O', '3' => 'S'];
     private const DATA_BOX_AGENDA_MONTHLY = '190';
+    /** `RelStavDP` přijatého podání. */
+    private const STATE_ACCEPTED = '7';
 
     /**
      * Měsíční hlášení roku v pořadí období a odeslání.
@@ -127,7 +129,7 @@ final class PohodaPayrollJmhzReports
                 'year' => $year,
                 'month' => $month,
                 'period' => sprintf('%04d-%02d', $year, $month),
-                'sent' => self::bool(PohodaXml::text($row, 'ElOdeslano')),
+                'sent' => self::submitted($row, isset($deliveries[$id])),
                 'state' => PohodaXml::text($row, 'RelStavDP'),
                 'filled_at' => $filled,
                 'submitted_at' => $submitted,
@@ -210,7 +212,7 @@ final class PohodaPayrollJmhzReports
                     'source_key' => $headerTable . ':' . $id,
                     'kind' => $headerTable === 'RegZAM' ? 'registration' : 'preregistration',
                     'id' => (string) $id,
-                    'sent' => self::bool(PohodaXml::text($row, 'ElOdeslano')),
+                    'sent' => self::submitted($row, false),
                     'state' => PohodaXml::text($row, 'RelStavDP'),
                     'filled_at' => $submitted ?? self::moment(PohodaXml::text($row, 'DatSave')) ?? self::moment(PohodaXml::text($row, 'DatCreate')),
                     'submitted_at' => $submitted,
@@ -358,6 +360,28 @@ final class PohodaPayrollJmhzReports
         ksort($out, SORT_STRING);
 
         return $out;
+    }
+
+    /**
+     * Podání odešlo: příznak elektronického odeslání, stav „přijato" (`RelStavDP` 7), datum přijetí,
+     * nebo doručenka datové schránky. Podání odeslané datovou schránkou má `ElOdeslano` 0
+     * (příznak patří jen odeslání přes rozhraní ČSSZ), a bez ostatních znaků by ho převod vedl
+     * jako neodeslané a vyzval k druhému podání téhož měsíce.
+     *
+     * @param array<string,mixed> $row hlavička `MH` / `RegZAM` / `PredRegZAM`
+     */
+    private static function submitted(array $row, bool $delivered): bool
+    {
+        return self::bool(PohodaXml::text($row, 'ElOdeslano'))
+            || PohodaXml::text($row, 'RelStavDP') === self::STATE_ACCEPTED
+            || self::moment(PohodaXml::text($row, 'DatPrij')) !== null
+            || $delivered;
+    }
+
+    /** Přijaté podání: datum přijetí, nebo stav „přijato" (podání datovou schránkou datum přijetí nenese). */
+    public static function accepted(array $submission): bool
+    {
+        return ($submission['accepted_at'] ?? null) !== null || ($submission['state'] ?? null) === self::STATE_ACCEPTED;
     }
 
     private static function bool(string $value): bool

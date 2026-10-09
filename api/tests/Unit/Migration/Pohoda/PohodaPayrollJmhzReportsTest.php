@@ -147,6 +147,37 @@ final class PohodaPayrollJmhzReportsTest extends TestCase
         self::assertSame('MH:2', $effective['2']['2026-02']['report']['source_key'], 'Petra opravné podání neobsahuje, platí řádné.');
     }
 
+    /**
+     * Podání odeslané datovou schránkou má v PAMICA `ElOdeslano` 0: odeslané je podle stavu
+     * „přijato", data přijetí nebo doručenky. Jinak by převod vyzval k druhému podání.
+     */
+    public function testSubmissionSentByDataBoxIsSent(): void
+    {
+        $file = $this->tmp . '/databox.xml';
+        $mh = static fn (int $id, int $month, string $state, string $sent, string $accepted): string => "<MH><ID>{$id}</ID><Rok>2026</Rok>"
+            . "<RelMesic>{$month}</RelMesic><RelTyp>1</RelTyp><RelStavDP>{$state}</RelStavDP><ElOdeslano>{$sent}</ElOdeslano>"
+            . '<DatPod>2026-0' . ($month + 1) . '-13T09:00:00</DatPod>' . ($accepted !== '' ? "<DatPrij>{$accepted}</DatPrij>" : '') . '</MH>';
+        file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?><mdbExport>'
+            . $mh(1, 1, '7', '0', '')
+            . $mh(2, 2, '4', '0', '')
+            . $mh(3, 3, '1', '0', '')
+            . '<DataBoxSent><ID>9</ID><RelAgID>190</RelAgID><RefID>2</RefID><JeDorucenka>1</JeDorucenka></DataBoxSent>'
+            . '<RegZAM><ID>1</ID><RelStavDP>7</RelStavDP><ElOdeslano>0</ElOdeslano><DatPod>2026-06-30T09:00:00</DatPod></RegZAM>'
+            . '<RegZAM><ID>2</ID><RelStavDP>1</RelStavDP><ElOdeslano>0</ElOdeslano></RegZAM>'
+            . '</mdbExport>');
+
+        $reports = PohodaPayrollJmhzReports::read($file, 2026);
+        self::assertSame(['MH:1', 'MH:2', 'MH:3'], array_column($reports, 'source_key'));
+        self::assertSame([true, true, false], array_column($reports, 'sent'), 'Přijaté a doručené datovou schránkou je odeslané.');
+
+        $registrations = PohodaPayrollJmhzReports::registrations($file);
+        $byKey = array_column($registrations, null, 'source_key');
+        self::assertTrue($byKey['RegZAM:1']['sent']);
+        self::assertTrue(PohodaPayrollJmhzReports::accepted($byKey['RegZAM:1']), 'Stav „přijato" je přijetí i bez data.');
+        self::assertFalse($byKey['RegZAM:2']['sent']);
+        self::assertFalse(PohodaPayrollJmhzReports::accepted($byKey['RegZAM:2']));
+    }
+
     public function testRegistrationsAndProfilesFromSentRegistrations(): void
     {
         $registrations = PohodaPayrollJmhzReports::registrations(SyntheticPohodaPayroll::writeWithReports($this->tmp));

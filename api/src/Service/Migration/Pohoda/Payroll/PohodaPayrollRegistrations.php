@@ -66,7 +66,7 @@ final class PohodaPayrollRegistrations
                 continue;
             }
             $counts['registrations_files']++;
-            if (!$registration['sent'] || $registration['accepted_at'] === null) {
+            if (!$registration['sent'] || !PohodaPayrollJmhzReports::accepted($registration)) {
                 $counts['registrations_files_unaccepted']++;
                 continue;
             }
