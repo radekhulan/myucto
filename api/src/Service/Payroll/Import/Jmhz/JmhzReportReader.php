@@ -447,7 +447,48 @@ final class JmhzReportReader
             absenceMillihours: $this->absenceMillihours($xpath, $body),
             uninsuredIncome: $i('f:pojisteni/f:vymerovaciZaklad/f:prijemNepojistenaCinnost'),
             employerDiscount: $this->lenientBool($t('f:pojisteni/f:slevaZamestnavatele/f:slevaZamestnavateleEvidovana')),
+            employerDiscountReasons: $this->texts($xpath, 'f:pojisteni/f:slevaZamestnavatele/f:slevaZamestnavateleRozpad/f:duvodUplatneni', $body),
+            employerContributions: $this->employerContributions($xpath, $body),
         );
+    }
+
+    /**
+     * Příspěvky zaměstnavatele z osvobozených příjmů souhrnných dat (`prispevekZamestnavatele`).
+     * Blok smí měkký režim přejít, proto se čte tolerantně; chybějící položka je nula.
+     *
+     * @return array{pension_supplementary:int,supplementary_savings:int,pension_insurance:int,life_insurance:int,dip:int,long_term_care:int}|null
+     */
+    private function employerContributions(DOMXPath $xpath, DOMElement $body): ?array
+    {
+        $block = $this->element($xpath, 'f:souhrnDataZec/f:prijmy/f:prispevekZamestnavatele', $body);
+        if ($block === null) {
+            return null;
+        }
+        $amount = fn (string $path): int => max(0, $this->lenientInt($this->text($xpath, $path, $block)) ?? 0);
+
+        return [
+            'pension_supplementary' => $amount('f:prispevekPenzPripoj'),
+            'supplementary_savings' => $amount('f:prispevekDoplnPenzPripoj'),
+            'pension_insurance' => $amount('f:prispevekPenzPoj'),
+            'life_insurance' => $amount('f:prispevekZivotPoj'),
+            'dip' => $amount('f:prispevekDip'),
+            'long_term_care' => $amount('f:prispevekZelPojDlPece'),
+        ];
+    }
+
+    /** @return list<string> neprázdné texty všech výskytů cesty */
+    private function texts(DOMXPath $xpath, string $path, DOMNode $context): array
+    {
+        $nodes = $xpath->query($path, $context);
+        $out = [];
+        foreach ($nodes === false ? [] : $nodes as $node) {
+            $value = trim((string) $node->textContent);
+            if ($value !== '') {
+                $out[] = $value;
+            }
+        }
+
+        return $out;
     }
 
     /**

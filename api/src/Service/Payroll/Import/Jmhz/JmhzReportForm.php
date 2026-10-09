@@ -112,7 +112,37 @@ final readonly class JmhzReportForm
          * předchozí program vykázal. Čte se tolerantně, blok měkký režim smí přejít.
          */
         public ?bool $employerDiscount = null,
+        /**
+         * Důvody uplatnění slevy zaměstnavatele (`slevaZamestnavateleRozpad/duvodUplatneni`,
+         * kód skupiny osob § 7a odst. 2), jak je předchozí program vykázal.
+         *
+         * @var list<string>
+         */
+        public array $employerDiscountReasons = [],
+        /**
+         * Příspěvky zaměstnavatele z osvobozených příjmů (`prispevekZamestnavatele`, jen
+         * formulář se souhrnnými daty): penzijní připojištění 10292, doplňkové penzijní spoření
+         * 10293, penzijní pojištění 10294, soukromé životní pojištění 10295, DIP 10296 a pojištění
+         * dlouhodobé péče 10418, vše v Kč. `null` = blok chybí. Čte se tolerantně.
+         *
+         * @var array{pension_supplementary:int,supplementary_savings:int,pension_insurance:int,life_insurance:int,dip:int,long_term_care:int}|null
+         */
+        public ?array $employerContributions = null,
     ) {}
+
+    /**
+     * Příspěvek na produkty spoření na stáří (10292 až 10296) v Kč: čerpání koše § 6 odst. 9
+     * písm. p) ZDP. Pojištění dlouhodobé péče (10418) do něj nepatří, má vlastní posouzení.
+     */
+    public function oldAgeSavingsContribution(): ?int
+    {
+        if ($this->employerContributions === null) {
+            return null;
+        }
+        $c = $this->employerContributions;
+
+        return $c['pension_supplementary'] + $c['supplementary_savings'] + $c['pension_insurance'] + $c['life_insurance'] + $c['dip'];
+    }
 
     /**
      * Klíč pracovního vztahu v dávce: ID PPV, u větve B (osoba ještě bez OIČ)

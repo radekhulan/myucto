@@ -247,6 +247,21 @@ final class JmhzEmploymentHistoryTest extends TestCase
         self::assertNull($agreementTotals->facts->sicknessExcludedDays);
     }
 
+    /**
+     * Převzatý měsíc nese příspěvek zaměstnavatele na produkty spoření na stáří (10292 až
+     * 10296) pro roční koš § 6 odst. 9 písm. p) ZDP, jen z formuláře se souhrnnými daty.
+     */
+    public function testMonthTotalsCarryOldAgeSavingsContribution(): void
+    {
+        $row = ['id' => 7, 'code' => 'ZAM-7', 'start_date' => '2026-01-01', 'actual_start_date' => '2026-01-01', 'end_date' => null, 'relation_type' => 'employment'];
+        $item = $this->batchFromXml([JmhzReportFixtures::report([$this->a(['contributions' => ['10417' => 2_000, '10293' => 1_200, '10296' => 800]])], 2026, 2)])->effective()[0];
+
+        self::assertSame(200_000, JmhzPayrollTakeover::totals($item, [$item], 3, $row, '1')->facts->oldAgeSavingsContributionMinor);
+
+        $plain = $this->batchFromXml([JmhzReportFixtures::report([$this->a()], 2026, 2)])->effective()[0];
+        self::assertNull(JmhzPayrollTakeover::totals($plain, [$plain], 3, $row, '1')->facts->oldAgeSavingsContributionMinor);
+    }
+
     public function testMonthTotalsSplitPersonIncomeAcrossConcurrentEmployments(): void
     {
         $batch = $this->batch([[2026, 3, [

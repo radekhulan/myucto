@@ -154,7 +154,8 @@
                     "target": "JmhzReportReader"
                 },
                 "duvodUplatneni": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "důvod uplatnění slevy § 7a do upozornění na chybějící záměr OZUSPOJ (JmhzReportPlanner)"
                 },
                 "eldp": {
                     "status": "mapped",
@@ -591,29 +592,35 @@
                     "status": "ignored"
                 },
                 "prispevekDip": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10296)"
                 },
                 "prispevekDoplnPenzPripoj": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10293)"
                 },
                 "prispevekPenzPoj": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10294)"
                 },
                 "prispevekPenzPripoj": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10292, roční koš § 6 odst. 9 písm. p ZDP)"
                 },
                 "prispevekZamestnavatele": {
-                    "status": "ignored",
-                    "reason": "Blok, ze kterého měsíční hlášení při importu nic nečte (JmhzReportReader::UNREAD_BLOCKS); chyby schématu v něm měkký režim přejde s varováním. Hlášení je uložené celé."
+                    "status": "mapped",
+                    "target": "příspěvky zaměstnavatele z osvobozených příjmů (JmhzReportForm::employerContributions)"
                 },
                 "prispevekZelPojDlPece": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "čte se do formuláře (10418); do koše spoření na stáří nepatří, převzatý měsíc ho nenese"
                 },
                 "prispevekZelSporeniOsvob": {
                     "status": "ignored"
                 },
                 "prispevekZivotPoj": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10295)"
                 },
                 "prohlaseniPoplatnika": {
                     "status": "mapped",
@@ -704,7 +711,8 @@
                     "target": "JmhzReportReader"
                 },
                 "slevaZamestnavateleRozpad": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "rozpad slevy zaměstnavatele § 7a: důvody uplatnění (JmhzReportForm::employerDiscountReasons)"
                 },
                 "slevyZamestnancu": {
                     "status": "ignored"

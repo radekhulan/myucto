@@ -91,6 +91,32 @@ final class JmhzReportReaderTest extends TestCase
         self::assertTrue($this->reader->read($with)->forms[0]->employerDiscount);
     }
 
+    /**
+     * Příspěvky zaměstnavatele na produkty spoření na stáří (10292 až 10296) a pojištění
+     * dlouhodobé péče (10418) se čtou z bloku `prispevekZamestnavatele`; koš § 6 odst. 9
+     * písm. p) ZDP nese jen 10292 až 10296. Důvod uplatnění slevy zaměstnavatele se čte.
+     */
+    public function testEmployerContributionsAndDiscountReasonAreRead(): void
+    {
+        $plain = $this->reader->read(JmhzReportFixtures::report([JmhzReportFixtures::person()], 2026, 2))->forms[0];
+        self::assertNull($plain->oldAgeSavingsContribution());
+
+        $xml = JmhzReportFixtures::report([JmhzReportFixtures::person([
+            'contributions' => ['10417' => 1_500, '10292' => 1_000, '10296' => 500, '10418' => 300],
+        ])], 2026, 2);
+        $form = $this->reader->read($xml)->forms[0];
+        self::assertSame(['pension_supplementary' => 1_000, 'supplementary_savings' => 0, 'pension_insurance' => 0,
+            'life_insurance' => 0, 'dip' => 500, 'long_term_care' => 300], $form->employerContributions);
+        self::assertSame(1_500, $form->oldAgeSavingsContribution());
+
+        $reason = str_replace(
+            '</form:slevaZamestnavateleEvidovana>',
+            '</form:slevaZamestnavateleEvidovana><form:slevaZamestnavateleRozpad><form:duvodUplatneni>B</form:duvodUplatneni></form:slevaZamestnavateleRozpad>',
+            $xml,
+        );
+        self::assertSame(['B'], $this->reader->read($reason)->forms[0]->employerDiscountReasons);
+    }
+
     public function testSection18ExcludedDaysAreReadFrom10366(): void
     {
         $xml = JmhzReportFixtures::withExcludedDays(

@@ -693,9 +693,13 @@ ročního limitu DPP; dále sjednanou měsíční mzdu a její předpis (když t
 v měsících bez dovolené a nemoci zůstává stejný i při různém fondu), průměrný
 výdělek po čtvrtletích jako schválený průměr, čerpání dovolené po měsících
 a skončení vztahu (když pojištění končí před koncem měsíce nebo vztah v řádném
-hlášení dalšího měsíce chybí). Mzdový list, potvrzení o příjmech, roční
+hlášení dalšího měsíce chybí). Příspěvky zaměstnavatele na penzijní
+připojištění, doplňkové penzijní spoření, penzijní a životní pojištění a DIP
+(z formuláře se souhrnnými daty) čerpají roční limit osvobození, takže další
+měsíce téhož roku osvobodí jen zbytek. Mzdový list, potvrzení o příjmech, roční
 zúčtování a vyúčtování daně čtou počáteční stavy ročních součtů, ne převzaté
-mzdy.
+mzdy. Upozornění na chybějící záměr slevy zaměstnavatele jmenuje důvod
+uplatnění slevy, který hlášení vykázalo.
 
 Účast na důchodovém pojištění dokládá kód ELDP nebo nenulový vyměřovací základ:
 měsíc celý v dávkách (mateřská, dlouhá nemoc) je dobou účasti i s nula dny

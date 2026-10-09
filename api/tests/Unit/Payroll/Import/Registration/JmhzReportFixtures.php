@@ -69,6 +69,8 @@ final class JmhzReportFixtures
             'agreed_fund' => 168_000,
             'unworked' => [],
             'deductions_recorded' => false,
+            // Příspěvky zaměstnavatele z osvobozených příjmů: ID atributu (10292 až 10296, 10418, 10417) => Kč.
+            'contributions' => [],
             // Zařazení scénáře součásti: formulář vězně, jiného příjmu nebo
             // pronájmu síly místo `bezPriznaku`.
             'selector' => ['scenario_key' => 'scenario_1', 'activity_code' => '1', 'relationship_detail_code' => '1'],
@@ -90,7 +92,7 @@ final class JmhzReportFixtures
             'summary' => [
                 'income_total_czk' => $o['wage'],
                 'exempt_income_czk' => null,
-                'employer_contributions_czk' => [],
+                'employer_contributions_czk' => $o['contributions'],
                 'net_income_czk' => (int) round($o['wage'] * 0.78),
                 'deductions_recorded' => $o['deductions_recorded'],
                 'employee_health_czk' => (int) ceil($o['wage'] * 0.045),

@@ -216,6 +216,11 @@ final class JmhzPayrollTakeover
                     ? null
                     : min(31, (int) $form->eldp['sickness_excluded_days']),
                 uninsuredIncomeMinor: $form->uninsuredIncome === null ? null : $czk($form->uninsuredIncome),
+                // Příspěvky zaměstnavatele na produkty spoření na stáří jsou souhrnná data osoby:
+                // nese je jen formulář se souhrnem, jinak by se v souběhu vztahů započetly dvakrát.
+                oldAgeSavingsContributionMinor: $form->hasSummary && $form->oldAgeSavingsContribution() !== null
+                    ? $czk($form->oldAgeSavingsContribution())
+                    : null,
             ),
         );
     }

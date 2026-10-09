@@ -663,7 +663,9 @@ final class JmhzReportPlanner
         if ($present) {
             return;
         }
-        $plan['warnings'][] = "Předchozí program vykazuje za {$item->period()} slevu na pojistném zaměstnavatele (10372), "
+        $reasons = array_values(array_unique($item->form->employerDiscountReasons));
+        $plan['warnings'][] = "Předchozí program vykazuje za {$item->period()} slevu na pojistném zaměstnavatele (10372"
+            . ($reasons === [] ? '' : ', důvod uplatnění ' . implode(', ', $reasons)) . '), '
             . "ale u vztahu {$row['code']} není v evidenci přijatý záměr slevy (OZUSPOJ). Bez něj se sleva po převodu "
             . 'neuplatní: převezměte záměr z přijatého oznámení předchozího programu, nebo podejte nový. '
             . 'Z hlášení se záměr neodvozuje.';
