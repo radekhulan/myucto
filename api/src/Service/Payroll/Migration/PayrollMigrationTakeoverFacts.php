@@ -71,7 +71,7 @@ final readonly class PayrollMigrationTakeoverFacts
         public ?int $uninsuredIncomeMinor = null,
         /**
          * Příspěvek zaměstnavatele na produkty spoření na stáří (JMHZ 10292 až 10296) v haléřích:
-         * čerpání ročního koše § 6 odst. 9 písm. p) ZDP v převzatém měsíci; `null` = zdroj ho nevydal.
+         * čerpání ročního koše § 6 odst. 9 písm. m) ZDP v převzatém měsíci; `null` = zdroj ho nevydal.
          */
         public ?int $oldAgeSavingsContributionMinor = null,
     ) {

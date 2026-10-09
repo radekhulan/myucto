@@ -1602,7 +1602,7 @@
         "MZ2": {
             "rows_seen": 4222,
             "status": "mapped",
-            "target": "doplňkové údaje mzdy: sleva pracujícího důchodce po měsících (SocPojSlevaPracDuch, PohodaPayrollPeople) a příspěvky zaměstnavatele na penzijní produkty KcPDP + KcDIP do převzatého měsíce (old_age_savings_contribution_minor, roční koš § 6 odst. 9 písm. p ZDP)",
+            "target": "doplňkové údaje mzdy: sleva pracujícího důchodce po měsících (SocPojSlevaPracDuch, PohodaPayrollPeople) a příspěvky zaměstnavatele na penzijní produkty KcPDP + KcDIP do převzatého měsíce (old_age_savings_contribution_minor, roční koš § 6 odst. 9 písm. m ZDP)",
             "readers": [
                 "PohodaPayrollImporter",
                 "PohodaPayrollPeople"

@@ -580,7 +580,7 @@ final class PremierPayrollImportTest extends TestCase
 
     /**
      * Trvalé příjmy karty vztahu (`MZ_SRAZ` 422, 712, 862): penzijní připojištění na výchozí
-     * složku koše § 6 odst. 9 písm. p), stravenkový paušál jako předpis k ručnímu určení
+     * složku koše § 6 odst. 9 písm. m), stravenkový paušál jako předpis k ručnímu určení
      * částky a příspěvek na praní jako vlastní složka mimo daň, pojistné i JMHZ. Převzaté
      * měsíce nesou příspěvek na penzijní připojištění do čerpání koše.
      */

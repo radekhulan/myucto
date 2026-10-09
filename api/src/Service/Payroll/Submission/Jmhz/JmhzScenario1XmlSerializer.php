@@ -1685,7 +1685,7 @@ final class JmhzScenario1XmlSerializer
      * dlouhodobé péče (10417 a rozpad 10418, 10292–10296).
      *
      * Stojí uvnitř `prijmy` za osvobozeným úhrnem a je jeho ČÁSTÍ: příspěvek
-     * na penzijní produkt je osvobozený příjem podle § 6 odst. 9 písm. p) ZDP,
+     * na penzijní produkt je osvobozený příjem podle § 6 odst. 9 písm. m) ZDP,
      * takže se objeví jednou v 10289 a podruhé tady, rozepsaný podle druhu
      * produktu. Není to dvojí vykázání částky, ale dva pohledy na tutéž.
      *

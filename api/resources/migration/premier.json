@@ -6120,7 +6120,7 @@
                 },
                 "422": {
                     "status": "mapped",
-                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PRISPEVEK_PENZE_ZIVOTNI (koš § 6 odst. 9 písm. p) ZDP, pevná částka, kalendářní dny) pro měsíce počítané MyÚčtem; převzaté měsíce nesou příspěvek (MZDY.MZ_PENZ) v čerpání koše"
+                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PRISPEVEK_PENZE_ZIVOTNI (koš § 6 odst. 9 písm. m) ZDP, pevná částka, kalendářní dny) pro měsíce počítané MyÚčtem; převzaté měsíce nesou příspěvek (MZDY.MZ_PENZ) v čerpání koše"
                 },
                 "430": {
                     "status": "ignored",

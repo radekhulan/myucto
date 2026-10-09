@@ -16,7 +16,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Roční koš § 6 odst. 9 písm. p) ZDP (příspěvky zaměstnavatele na produkty spoření na
+ * Roční koš § 6 odst. 9 písm. m) ZDP (příspěvky zaměstnavatele na produkty spoření na
  * stáří) v roce přechodu: příspěvky převzatých měsíců čerpají limit stejně jako vstupy
  * počítané MyÚčtem. Měsíc převzatý dvakrát (převod i import hlášení) se počítá jednou,
  * jiný rok a jiný koš se nezapočítají. Syntetická data.

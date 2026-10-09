@@ -94,7 +94,7 @@ final class JmhzReportReaderTest extends TestCase
     /**
      * Příspěvky zaměstnavatele na produkty spoření na stáří (10292 až 10296) a pojištění
      * dlouhodobé péče (10418) se čtou z bloku `prispevekZamestnavatele`; koš § 6 odst. 9
-     * písm. p) ZDP nese jen 10292 až 10296. Důvod uplatnění slevy zaměstnavatele se čte.
+     * písm. m) ZDP nese jen 10292 až 10296. Důvod uplatnění slevy zaměstnavatele se čte.
      */
     public function testEmployerContributionsAndDiscountReasonAreRead(): void
     {

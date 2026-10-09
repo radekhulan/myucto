@@ -345,7 +345,7 @@ jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
 | příznak *Nedoplácet ZP do minima* u zpracovaných mezd | výjimka z minimálního vyměřovacího základu zdravotního pojištění za dotčené měsíce (důvod doplní účetní) |
 | týdenní úvazek u zpracovaných mezd | týdenní pracovní doba a úvazek vztahu po měsících |
 | sleva pracujícího důchodce u zpracovaných mezd (doplňkové údaje mzdy) | sleva pracujícího důchodce po měsících (uplatněná, nebo neuplatňuje se); podané hlášení má přednost |
-| příspěvek zaměstnavatele na penzijní připojištění, doplňkové penzijní spoření a DIP u zpracovaných mezd | čerpání ročního limitu osvobození (§ 6 odst. 9 písm. p) zákona o daních z příjmů) v převzatém měsíci; další měsíce téhož roku osvobodí jen zbytek limitu |
+| příspěvek zaměstnavatele na penzijní připojištění, doplňkové penzijní spoření a DIP u zpracovaných mezd | čerpání ročního limitu osvobození (§ 6 odst. 9 písm. m) zákona o daních z příjmů) v převzatém měsíci; další měsíce téhož roku osvobodí jen zbytek limitu |
 | děti s daňovým zvýhodněním (1., 2. a 3. dítě) | vyživované osoby s nárokem daného pořadí, od měsíce podepsaného prohlášení |
 | prohlášení poplatníka u zpracovaných mezd | prohlášení poplatníka po měsících |
 | pracoviště s kódem obce, CZ-ISCO | podmínky vztahu (pracoviště JMHZ) |

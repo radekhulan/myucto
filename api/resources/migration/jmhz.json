@@ -605,7 +605,7 @@
                 },
                 "prispevekPenzPripoj": {
                     "status": "mapped",
-                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10292, roční koš § 6 odst. 9 písm. p ZDP)"
+                    "target": "převzatý měsíc: old_age_savings_contribution_minor (10292, roční koš § 6 odst. 9 písm. m ZDP)"
                 },
                 "prispevekZamestnavatele": {
                     "status": "mapped",

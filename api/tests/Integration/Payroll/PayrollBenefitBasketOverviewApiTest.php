@@ -215,7 +215,7 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
 
     /**
      * Rok přechodu z jiného mzdového programu: příspěvky na spoření na stáří z převzatých
-     * měsíců čerpají koš § 6 odst. 9 písm. p) ZDP stejně jako v annualBasketTotal() (měsíc
+     * měsíců čerpají koš § 6 odst. 9 písm. m) ZDP stejně jako v annualBasketTotal() (měsíc
      * a vztah jednou, dva vztahy téhož měsíce oba). Přehled je musí ukázat v „vyčerpáno"
      * i zvlášť, a osoba jen s převzatými měsíci v něm nesmí chybět.
      */

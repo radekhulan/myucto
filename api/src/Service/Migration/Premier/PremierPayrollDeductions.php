@@ -68,7 +68,7 @@ final class PremierPayrollDeductions
      *  - 303 osobní ohodnocení: v číselníku `MZDY_POL` hrubá mzda se sociálním
      *    i zdravotním pojištěním a do průměru => vlastní složka `PREMIER_303`,
      *  - 422 příspěvek zaměstnavatele na penzijní připojištění pevnou částkou =>
-     *    výchozí složka `PRISPEVEK_PENZE_ZIVOTNI` (koš § 6 odst. 9 písm. p) ZDP; zařazení
+     *    výchozí složka `PRISPEVEK_PENZE_ZIVOTNI` (koš § 6 odst. 9 písm. m) ZDP; zařazení
      *    smlouvy ověří účetní na složce),
      *  - 712 stravenkový paušál: karta nese sazbu ZA SMĚNU, ne měsíční částku =>
      *    výchozí složka `PRISPEVEK_STRAVOVANI` s předpisem k ručnímu určení částky

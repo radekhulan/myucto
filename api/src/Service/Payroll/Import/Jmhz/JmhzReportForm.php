@@ -132,7 +132,7 @@ final readonly class JmhzReportForm
 
     /**
      * Příspěvek na produkty spoření na stáří (10292 až 10296) v Kč: čerpání koše § 6 odst. 9
-     * písm. p) ZDP. Pojištění dlouhodobé péče (10418) do něj nepatří, má vlastní posouzení.
+     * písm. m) ZDP. Pojištění dlouhodobé péče (10418) do něj nepatří, má vlastní posouzení.
      */
     public function oldAgeSavingsContribution(): ?int
     {

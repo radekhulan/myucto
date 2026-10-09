@@ -249,7 +249,7 @@ final class JmhzEmploymentHistoryTest extends TestCase
 
     /**
      * Převzatý měsíc nese příspěvek zaměstnavatele na produkty spoření na stáří (10292 až
-     * 10296) pro roční koš § 6 odst. 9 písm. p) ZDP, jen z formuláře se souhrnnými daty.
+     * 10296) pro roční koš § 6 odst. 9 písm. m) ZDP, jen z formuláře se souhrnnými daty.
      */
     public function testMonthTotalsCarryOldAgeSavingsContribution(): void
     {

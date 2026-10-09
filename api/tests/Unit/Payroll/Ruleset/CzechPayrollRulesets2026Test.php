@@ -31,7 +31,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * parametrů se přitom nezměnily — hlídá to matice níže.
      *
      * Potřetí se posunul s doplněním limitů osvobození zaměstnaneckých benefitů
-     * (§ 6 odst. 9 písm. b), d) a p) ZDP). Doména daně z příjmů je nesla jen
+     * (§ 6 odst. 9 písm. b), d) a m) ZDP). Doména daně z příjmů je nesla jen
      * v hlavách účetních, takže výchozí mzdové složky měly `annual_limit_minor`
      * NULL a roční strop se nehlídal vůbec — viz
      * {@see \MyInvoice\Service\Payroll\Component\PayrollComponentDefaults}.
@@ -408,7 +408,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 // celá průměrná mzda, bod 2 volnočasová plnění její polovina.
                 'benefit_exemption.non_cash_health.yearly' => ['money_minor', 4_896_700],
                 'benefit_exemption.non_cash_leisure.yearly' => ['money_minor', 2_448_350],
-                // § 6 odst. 9 písm. p) ZDP — pevná částka ze zákona, ne odvozenina.
+                // § 6 odst. 9 písm. m) ZDP — pevná částka ze zákona, ne odvozenina.
                 'benefit_exemption.old_age_savings.yearly' => ['money_minor', 5_000_000],
                 // § 6 odst. 9 písm. i) ZDP — „maximálně do výše 3 500 Kč měsíčně".
                 'benefit_exemption.temporary_accommodation.monthly' => ['money_minor', 350_000],
