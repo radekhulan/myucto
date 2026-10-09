@@ -963,7 +963,8 @@
         "1979_payroll_pension_requests.sql",
         "1980_payroll_absence_invalid_termination.sql",
         "1981_client_email_subject_attachment_name.sql",
-        "1982_submission_inbox_categories.sql"
+        "1982_submission_inbox_categories.sql",
+        "1983_payroll_component_meal_allowance_taxable_mapping.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
