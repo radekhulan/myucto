@@ -296,6 +296,29 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
      * akceptovány". Všech 39 přijatých A1 z cizích programů nese 1111–1222;
      * dřív se do pole vešly jen dva znaky.
      */
+    /**
+     * EDV 1.4.0.6, R91 (job/prof/@clas): z CZ-ISCO jen kódy o pěti znacích.
+     * Čtyřmístnou podskupinu (přípustnou v JMHZ) registrace neodešle.
+     */
+    public function testProfessionCodeMustBeFiveDigitCategory(): void
+    {
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        foreach (['2411' => true, '24111' => false] as $code => $rejected) {
+            $source = self::source('1', '1');
+            $source['employment']['profession_code'] = (string) $code;
+            $problems = array_column(
+                $builder->problems($source, self::identity(), self::scope()),
+                'message',
+                'field',
+            );
+            if ($rejected) {
+                self::assertStringContainsString('pětimístný kód CZ-ISCO', $problems['employment.profession_code'] ?? '');
+            } else {
+                self::assertArrayNotHasKey('employment.profession_code', $problems);
+            }
+        }
+    }
+
     public function testEmploymentStatusMustBeFourDigitCodebookCode(): void
     {
         $builder = new PayrollRegistrationA1SnapshotBuilder();

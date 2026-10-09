@@ -764,6 +764,12 @@ Historie drží uzavření smlouvy, plánovaný a skutečný nástup a dobu urč
 činnosti, mzdovou účtárnu, pojistnou účast, A1 a cizí předpisy, rizikovou práci,
 daňový režim, příznak primárního vztahu a důvod změny.
 
+Kód **CZ-ISCO** může mít čtyři číslice (podskupina) nebo pět (kategorie).
+Měsíční hlášení JMHZ přijme obojí, registrace zaměstnance na ČSSZ (přihláška
+A1 i změna A3) jen pětimístnou kategorii. Se čtyřmístným kódem se přihláška
+zastaví a vyzve k výběru kategorie; aplikace ji sama nedoplní, protože
+podskupina má obvykle několik kategorií.
+
 Karta vztahu má v hlavním sloupci **Základní údaje** (pravidelná hrubá mzda,
 týdenní pracovní doba, **Úvazek (%)**, **Výjimka z výměry dovolené (týdny)**,
 pravděpodobný výdělek, **Mzdová účtárna**, **Druh činnosti**, **Bližší určení

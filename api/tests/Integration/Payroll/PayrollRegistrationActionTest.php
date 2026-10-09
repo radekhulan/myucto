@@ -5492,7 +5492,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 'contract_workplace' => 'Praha 1, Dlouhá 1',
                 'workplace_city' => 'Praha',
                 'workplace_municipality_code' => '554782',
-                'profession_code' => '2411',
+                'profession_code' => '24111',
                 'required_education_code' => null,
                 'position_name' => 'Účetní',
                 'leadership' => false,

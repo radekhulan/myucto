@@ -6805,6 +6805,7 @@
             "status_for_activity": "{field}: for activity type “{activity}” only {allowed} is allowed, it is now “{value}”.",
             "status_format": "{field} must be a four-digit code from the NKPZ classification, it is now “{value}”.",
             "status_unknown": "{field} is not in the NKPZ classification, it is now “{value}”. Pick a code from the list.",
+            "profession_five_digits": "{field} must be a five-digit CZ-ISCO code (category), it is now “{value}”. ČSSZ does not accept a four-digit sub-group in the registration; pick a five-digit category on the employment card.",
             "postal_code_cz": "{field} must have five digits for an address in the Czech Republic and must not start with 0, 8 or 9 (for example 60200), it is now “{value}”.",
             "house_number_cz": "{field} must be a number of at most four digits for a Czech address (no letters or slashes), it is now “{value}”. Put the orientation number in its own field.",
             "orientation_number_cz_residence": "{field} may have at most {max} characters for an address of stay in the Czech Republic, it is now “{value}”.",

@@ -468,6 +468,17 @@ final class PayrollRegistrationA1SnapshotBuilder
                 ['activity' => (string) $employment['activity_code']],
             );
         }
+        if ($employment['profession_code'] !== null
+            && !PayrollRegistrationProfessionCode::isRegistrable((string) $employment['profession_code'])
+        ) {
+            $this->malformed(
+                'employment.profession_code',
+                'musí být pětimístný kód CZ-ISCO (kategorie); čtyřmístnou podskupinu ČSSZ'
+                    . ' v registraci nepřijme, teď je „' . $employment['profession_code'] . '".',
+                'profession_five_digits',
+                ['value' => (string) $employment['profession_code']],
+            );
+        }
         $allowed = PayrollRegistrationEmploymentStatusCodebook::restrictedFor(
             $employment['activity_code'],
         );

@@ -6805,6 +6805,7 @@
             "status_for_activity": "{field}: u druhu činnosti „{activity}“ smí být jen {allowed}, teď je „{value}“.",
             "status_format": "{field} musí být čtyřmístný kód z číselníku NKPZ, teď je „{value}“.",
             "status_unknown": "{field} není v číselníku NKPZ, teď je „{value}“. Vyberte kód z nabídky.",
+            "profession_five_digits": "{field} musí být pětimístný kód CZ-ISCO (kategorie), teď je „{value}“. ČSSZ v registraci čtyřmístnou podskupinu nepřijme; v kartě vztahu vyberte kategorii o pěti číslicích.",
             "postal_code_cz": "{field} musí mít u adresy v ČR pět číslic a nesmí začínat 0, 8 ani 9 (například 60200), teď je „{value}“.",
             "house_number_cz": "{field} musí být u české adresy jen číslo o nejvýš čtyřech číslicích (bez písmene a lomítka), teď je „{value}“. Orientační číslo patří do vlastního pole.",
             "orientation_number_cz_residence": "{field} smí mít u adresy pobytu v ČR nejvýš {max} znaky, teď je „{value}“.",

@@ -235,6 +235,25 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
     }
 
     /** @param list<mixed> $arguments */
+    /**
+     * EDV 1.4.0.6, R91: změna profese v A3 smí nést jen pětimístný kód CZ-ISCO;
+     * čtyřmístná podskupina se odmítne s výzvou, pětimístná kategorie projde.
+     */
+    public function testEmploymentChangeAcceptsOnlyFiveDigitProfessionCode(): void
+    {
+        $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(PayrollRegistrationEventService::class, 'employmentChange');
+
+        self::assertSame(['profession_code' => '24111'], $method->invoke($service, ['profession_code' => '24111']));
+        try {
+            $method->invoke($service, ['profession_code' => '2411']);
+            self::fail('Čtyřmístný kód CZ-ISCO nesmí do A3 projít.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('pětimístný kód CZ-ISCO', $exception->getMessage());
+            self::assertStringEndsWith('(employment.profession_code)', $exception->getMessage());
+        }
+    }
+
     private function messageFrom(string $method, array $arguments): string
     {
         try {

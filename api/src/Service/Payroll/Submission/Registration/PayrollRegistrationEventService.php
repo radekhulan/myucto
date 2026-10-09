@@ -2840,6 +2840,15 @@ final readonly class PayrollRegistrationEventService
                 ));
             }
         }
+        if (isset($result['profession_code'])
+            && !PayrollRegistrationProfessionCode::isRegistrable((string) $result['profession_code'])
+        ) {
+            throw new \InvalidArgumentException($this->say(
+                'employment.profession_code',
+                'musí být pětimístný kód CZ-ISCO (kategorie); čtyřmístnou podskupinu ČSSZ '
+                    . "v registraci nepřijme, teď je „{$result['profession_code']}“.",
+            ));
+        }
         ksort($result, SORT_STRING);
 
         return $result;
