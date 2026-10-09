@@ -11,6 +11,7 @@ import {
 } from '@/api/assets'
 import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney, formatMonth } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
@@ -23,6 +24,12 @@ import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsP
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+// Daňová evidence: karta je jen evidence daňových odpisů, nic se neúčtuje do deníku.
+const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
+const saleHint = computed(() => isTaxEvidence.value
+  ? t('accounting.assets.hints.sale_invoice_de')
+  : t('accounting.assets.hints.sale_invoice_641'))
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
@@ -457,7 +464,10 @@ const yearOptions = computed(() => {
             · {{ t(`accounting.assets.kind.${asset.kind}`) }}
             · {{ t(`accounting.assets.method.${asset.tax_method}`) }}<template v-if="asset.tax_group"> ({{ t(`accounting.assets.group.${asset.tax_group}`) }})</template>
           </p>
-          <p class="text-xs text-neutral-400 mt-0.5 font-mono">
+          <p v-if="isTaxEvidence" class="text-xs text-neutral-400 mt-0.5">
+            {{ t(`accounting.assets.de_kind.${asset.asset_account_code.slice(0, 3)}`) }}
+          </p>
+          <p v-else class="text-xs text-neutral-400 mt-0.5 font-mono">
             {{ asset.asset_account_code }}<template v-if="asset.accumulated_account_code"> / {{ asset.accumulated_account_code }}</template>
             / {{ asset.acquisition_account_code }}
           </p>
@@ -481,7 +491,7 @@ const yearOptions = computed(() => {
         }) }}
         <template v-if="asset.disposal_type === 'sold' && asset.disposal_price != null">
           · {{ t('accounting.assets.fields.disposal_price') }}: {{ formatMoney(num(asset.disposal_price)) }}
-          <div class="text-xs text-warning-600 mt-1">{{ t('accounting.assets.hints.sale_invoice_641') }}</div>
+          <div class="text-xs text-warning-600 mt-1">{{ saleHint }}</div>
         </template>
         <div v-if="asset.disposal_entry_id" class="mt-1">
           <RouterLink :to="{ name: 'accounting-journal', query: { entry_id: String(asset.disposal_entry_id) } }"
@@ -493,7 +503,7 @@ const yearOptions = computed(() => {
       </div>
 
       <!-- Souhrn -->
-      <div v-if="summary" class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
+      <div v-if="summary" class="grid grid-cols-2 gap-3 mb-4" :class="isTaxEvidence ? 'sm:grid-cols-3' : 'sm:grid-cols-5'">
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('accounting.assets.fields.input_price') }}</div>
           <div class="text-sm font-mono font-semibold mt-1">{{ formatMoney(num(summary.input_price)) }}</div>
@@ -502,7 +512,7 @@ const yearOptions = computed(() => {
           <div class="text-xs text-neutral-500">{{ t('accounting.assets.fields.increased_input_price') }}</div>
           <div class="text-sm font-mono font-semibold mt-1">{{ formatMoney(num(summary.increased_input_price)) }}</div>
         </div>
-        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+        <div v-if="!isTaxEvidence" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('accounting.assets.summary_accumulated') }}</div>
           <div class="text-sm font-mono font-semibold mt-1">{{ formatMoney(num(summary.accumulated_depreciation)) }}</div>
         </div>
@@ -513,7 +523,7 @@ const yearOptions = computed(() => {
             <template v-else>{{ formatMoney(num(summary.tax_residual)) }}</template>
           </div>
         </div>
-        <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
+        <div v-if="!isTaxEvidence" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('accounting.assets.col_acc_residual') }}</div>
           <div class="text-sm font-mono font-semibold mt-1">
             <template v-if="!asset.accumulated_account_code">—</template>
@@ -533,7 +543,7 @@ const yearOptions = computed(() => {
             <span class="text-xs text-neutral-500 block">{{ t('accounting.assets.fields.put_into_use_date') }}</span>
             {{ formatDate(asset.put_into_use_date) }}
           </div>
-          <div v-if="asset.accumulated_account_code">
+          <div v-if="asset.accumulated_account_code && !isTaxEvidence">
             <span class="text-xs text-neutral-500 block">{{ t('accounting.assets.fields.acc_method') }}</span>
             {{ t(`accounting.assets.accMethod.${asset.acc_method ?? 'straight_line'}`) }}
           </div>
@@ -551,7 +561,7 @@ const yearOptions = computed(() => {
         </div>
         <p v-if="asset.description" class="mt-2 text-neutral-600">{{ asset.description }}</p>
         <!-- Proklik do deníku na zápis zařazení majetku (FEATURA C, audit 2026-07 follow-up). -->
-        <div v-if="asset.status !== 'draft'" class="mt-3 pt-3 border-t border-neutral-100">
+        <div v-if="asset.status !== 'draft' && !isTaxEvidence" class="mt-3 pt-3 border-t border-neutral-100">
           <RouterLink :to="{ name: 'accounting-journal', query: { source_type: 'asset', source_id: String(asset.id) } }"
             class="inline-flex items-center gap-1.5 text-sm text-primary-600 hover:text-primary-700 hover:underline">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
@@ -606,7 +616,7 @@ const yearOptions = computed(() => {
               class="cursor-pointer px-3 h-8" :class="planTab === 'tax' ? 'bg-primary-600 text-white' : 'hover:bg-neutral-50'">
               {{ t('accounting.assets.plan.tab_tax') }}
             </button>
-            <button v-if="asset.accumulated_account_code" @click="planTab = 'accounting'; expandedYear = null"
+            <button v-if="asset.accumulated_account_code && !isTaxEvidence" @click="planTab = 'accounting'; expandedYear = null"
               class="cursor-pointer px-3 h-8" :class="planTab === 'accounting' ? 'bg-primary-600 text-white' : 'hover:bg-neutral-50'">
               {{ t('accounting.assets.plan.tab_accounting') }}
             </button>
@@ -726,11 +736,11 @@ const yearOptions = computed(() => {
       <Modal v-if="showPutIntoUse" :title="t('accounting.assets.lifecycle.put_into_use')" widthClass="max-w-md" @close="showPutIntoUse = false">
         <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.lifecycle.put_into_use_date') }}</label>
         <DateInput v-model="putIntoUseDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
-        <label class="inline-flex items-center gap-2 text-sm mb-4">
+        <label v-if="!isTaxEvidence" class="inline-flex items-center gap-2 text-sm mb-4">
           <input v-model="putIntoUseBook" type="checkbox" class="rounded border-neutral-300" />
           {{ t('accounting.assets.lifecycle.put_into_use_book') }}
         </label>
-        <p v-if="!putIntoUseBook" class="text-xs text-warning-600 mb-3">{{ t('accounting.assets.lifecycle.put_into_use_no_book_hint') }}</p>
+        <p v-if="!putIntoUseBook && !isTaxEvidence" class="text-xs text-warning-600 mb-3">{{ t('accounting.assets.lifecycle.put_into_use_no_book_hint') }}</p>
         <div class="flex justify-end gap-2">
           <button @click="showPutIntoUse = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
           <button :disabled="acting || !putIntoUseDate" @click="runPutIntoUse" :class="btnFilled('success')">
@@ -826,13 +836,14 @@ const yearOptions = computed(() => {
           <div v-if="disposeForm.type === 'sold'">
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.fields.disposal_price') }}</label>
             <input v-model.number="disposeForm.price" type="number" min="0" step="0.01" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-            <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.hints.sale_invoice_641') }}</p>
+            <p class="text-xs text-neutral-400 mt-1">{{ saleHint }}</p>
           </div>
-          <label class="inline-flex items-center gap-2 text-sm">
+          <p v-if="isTaxEvidence" class="text-xs text-neutral-500">{{ t('accounting.assets.lifecycle.dispose_de_hint') }}</p>
+          <label v-if="!isTaxEvidence" class="inline-flex items-center gap-2 text-sm">
             <input v-model="disposeForm.book_entry" type="checkbox" class="rounded border-neutral-300" />
             {{ t('accounting.assets.lifecycle.dispose_book') }}
           </label>
-          <p v-if="!disposeForm.book_entry" class="text-xs text-warning-600">{{ t('accounting.assets.lifecycle.dispose_no_book_hint') }}</p>
+          <p v-if="!disposeForm.book_entry && !isTaxEvidence" class="text-xs text-warning-600">{{ t('accounting.assets.lifecycle.dispose_no_book_hint') }}</p>
         </div>
         <div class="flex justify-end gap-2">
           <button @click="showDispose = false" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>

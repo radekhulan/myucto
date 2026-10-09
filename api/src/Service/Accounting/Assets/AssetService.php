@@ -359,7 +359,11 @@ final class AssetService
         }
 
         $warnings = [];
-        if (!$bookEntry) {
+        $taxEvidence = $this->isTaxEvidence($supplierId);
+        if ($taxEvidence) {
+            // Daňová evidence nemá deník: zařazení je jen evidenční údaj karty.
+            $bookEntry = false;
+        } elseif (!$bookEntry) {
             $period = $this->periods->findForDate($supplierId, $date);
             if ($period !== null && $period['status'] === 'open') {
                 $warnings[] = [
@@ -519,6 +523,9 @@ final class AssetService
             throw new AssetException('not_found', 'Majetek nenalezen.', 404);
         }
         [$date, $type, $price, $saleInvoiceId] = $this->disposalInput($supplierId, $asset, $data);
+        if ($this->isTaxEvidence($supplierId)) {
+            return $this->disposeTaxEvidence($supplierId, $id, $date, $type, $price, $saleInvoiceId);
+        }
 
         $period = $this->periods->ensureOpenPeriodFor($supplierId, $date);
         if ($period['status'] !== 'open') {
@@ -684,6 +691,9 @@ final class AssetService
             throw new AssetException('invalid_status', 'Vyřadit lze jen majetek v užívání.');
         }
         [$date, $type, $price, $saleInvoiceId] = $this->disposalInput($supplierId, $asset, $data);
+        if ($this->isTaxEvidence($supplierId)) {
+            return $this->disposeTaxEvidence($supplierId, $id, $date, $type, $price, $saleInvoiceId);
+        }
 
         $period = $this->periods->findForDate($supplierId, $date);
         if ($period === null || $period['status'] !== 'open') {
@@ -781,6 +791,89 @@ final class AssetService
     }
 
     /**
+     * Vyřazení v daňové evidenci: bez deníku. Potvrdí daňový odpis roku vyřazení
+     * (§ 26 odst. 7 ZDP polovina ročního odpisu, § 30a měsíce) a kartu vyřadí. Daňová
+     * zůstatková cena prodaného nebo zlikvidovaného majetku je výdajem § 24 odst. 2
+     * písm. b) ZDP; do přiznání ji dodává {@see DisposalResiduals}, ne peněžní deník.
+     *
+     * @return array{asset: array<string,mixed>, warnings: list<array{code:string, message:string}>}
+     */
+    private function disposeTaxEvidence(int $supplierId, int $id, string $date, string $type, ?float $price, ?int $saleInvoiceId): array
+    {
+        $year = (int) substr($date, 0, 4);
+        $this->assertTaxEvidenceYearOpen($supplierId, $year);
+
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $asset = $this->assets->findForUpdate($supplierId, $id);
+            if ($asset === null) {
+                throw new AssetException('not_found', 'Majetek nenalezen.', 404);
+            }
+            if ($asset['status'] !== 'in_use') {
+                throw new AssetException('invalid_status', 'Vyřadit lze jen majetek v užívání.');
+            }
+            $assetView = $asset;
+            $assetView['disposal_date'] = $date;
+            $ctx = $this->depreciationPosting->buildContext($assetView);
+            $this->assertDisposalChronology($supplierId, $asset, $ctx, $year);
+
+            $existingTax = $this->entries->findYear($id, 'tax', $year);
+            if ($existingTax === null || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax))) {
+                $taxRow = $this->calculator->taxYearRow($ctx, (string) $asset['tax_method'], $year);
+                if ($taxRow !== null) {
+                    $this->entries->upsert([
+                        'supplier_id' => $supplierId,
+                        'asset_id' => $id,
+                        'kind' => 'tax',
+                        'fiscal_year' => $year,
+                        'amount' => (float) $taxRow['amount'],
+                        'full_amount' => (float) $taxRow['full_amount'],
+                        'residual_value_end' => (float) $taxRow['residual_end'],
+                        'is_paused' => (bool) $taxRow['is_paused'],
+                        'is_half' => (bool) $taxRow['is_half'],
+                        'months_count' => $taxRow['months_count'] ?? null,
+                        'detail' => isset($taxRow['months']) && $taxRow['months'] !== null
+                            ? json_encode($taxRow['months'], JSON_UNESCAPED_UNICODE)
+                            : null,
+                        'status' => 'confirmed',
+                    ]);
+                }
+            }
+
+            $this->assets->update($supplierId, $id, [
+                'disposal_date' => $date,
+                'disposal_type' => $type,
+                'disposal_price' => $price,
+                'sale_invoice_id' => $saleInvoiceId,
+                'disposal_entry_id' => null,
+                'status' => 'disposed',
+            ]);
+
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
+
+        $warnings = [];
+        if ($type === 'sold') {
+            $warnings[] = [
+                'code' => 'sale_invoice_income',
+                'message' => 'Příjem z prodeje se z karty nezapisuje — vystavte fakturu; do peněžního deníku vstoupí jejím zaplacením.',
+            ];
+        }
+        return ['asset' => $this->get($supplierId, $id), 'warnings' => array_merge($warnings, self::disposalTypeWarnings($type))];
+    }
+
+    /**
      * Datum, typ, prodejní cena a faktura prodeje z požadavku na vyřazení.
      *
      * @param array<string,mixed> $asset
@@ -855,6 +948,9 @@ final class AssetService
             throw new AssetException('invalid_status', 'Vrátit vyřazení lze jen u vyřazeného majetku.');
         }
         $disposalDate = (string) $asset['disposal_date'];
+        if ($this->isTaxEvidence($supplierId)) {
+            return $this->revertDisposalTaxEvidence($supplierId, $id, $disposalDate);
+        }
         $period = $this->periods->findForDate($supplierId, $disposalDate);
         if ($period === null || $period['status'] !== 'open') {
             throw new AssetException(
@@ -930,6 +1026,49 @@ final class AssetService
             throw $this->translate($e);
         }
 
+        return ['asset' => $this->get($supplierId, $id), 'warnings' => []];
+    }
+
+    /**
+     * Vrácení vyřazení v daňové evidenci: dokud rok nemá dokončenou roční uzávěrku.
+     * Vrací se daňový odpis roku dopočtený k vyřazení; pauza, ruční přepis a řádek
+     * převzatý převodem zůstávají.
+     *
+     * @return array{asset: array<string,mixed>, warnings: list<array{code:string, message:string}>}
+     */
+    private function revertDisposalTaxEvidence(int $supplierId, int $id, string $disposalDate): array
+    {
+        $year = (int) substr($disposalDate, 0, 4);
+        $this->assertTaxEvidenceYearOpen($supplierId, $year);
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->assets->findForUpdate($supplierId, $id);
+            $taxEntry = $this->entries->findYear($id, 'tax', $year);
+            if ($taxEntry !== null && !$taxEntry['is_paused'] && !DepreciationEntryRepository::isOverridden($taxEntry)
+                && !DepreciationEntryRepository::isConfirmedByMigration($taxEntry)) {
+                $this->entries->deleteOne($id, 'tax', $year);
+            }
+            $this->assets->update($supplierId, $id, [
+                'disposal_date' => null,
+                'disposal_type' => null,
+                'disposal_price' => null,
+                'sale_invoice_id' => null,
+                'disposal_entry_id' => null,
+                'status' => 'in_use',
+            ]);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $this->translate($e);
+        }
         return ['asset' => $this->get($supplierId, $id), 'warnings' => []];
     }
 
@@ -1160,6 +1299,10 @@ final class AssetService
     /** Daňový odpis roku se schválenou účetní závěrkou (§17/7 ZoÚ) se už nemění. */
     private function assertTaxYearEditable(int $supplierId, int $fiscalYear): void
     {
+        if ($this->isTaxEvidence($supplierId)) {
+            $this->assertTaxEvidenceYearOpen($supplierId, $fiscalYear);
+            return;
+        }
         $period = $this->periods->findByYear($supplierId, $fiscalYear);
         if ($period !== null && (string) $period['status'] === 'approved') {
             throw new AssetException(
@@ -1438,9 +1581,34 @@ final class AssetService
         // „nástupce nesmí uplatnit zvýšení" ověřovala nad už přepsanou hodnotou
         // a pravidlo by tiše neplatilo.
 
+        // Daňová evidence: osnova neexistuje a účetní odpisy se nevedou. Účty zůstávají
+        // na kartě jen jako druh majetku (02x/01x/03x), oprávkový účet určuje, zda se
+        // majetek odpisuje. Hmotný majetek nemá účetní plán, nehmotný (§ 24 odst. 2 písm. v) ZDP) se
+        // odpisuje rovnoměrně po měsících, a to právě účetní strategií karty.
+        $taxEvidence = $this->isTaxEvidence($supplierId);
+        if ($taxEvidence) {
+            if ($method === 'none') {
+                $card['accumulated_account_code'] = null;
+            } elseif ($card['accumulated_account_code'] === null || $card['accumulated_account_code'] === '') {
+                throw new AssetException('validation_failed', 'Odpisovaný majetek musí mít druh, ke kterému patří oprávky (např. 022, 013).');
+            }
+            if ($kind === 'tangible' && $method !== 'none') {
+                $card['acc_method'] = 'by_tax';
+            } elseif ($kind === 'intangible') {
+                $card['acc_method'] = 'straight_line';
+            }
+            if ($kind === 'tangible' || $method === 'none') {
+                $card['opening_acc_months'] = 0;
+                $card['opening_acc_amount'] = 0.0;
+            }
+        }
+
         // účty: existence v osnově firmy + konzistence odpisovanosti (R17/R18)
-        $codeMap = $this->chart->codeToIdMap($supplierId);
+        $codeMap = $taxEvidence ? [] : $this->chart->codeToIdMap($supplierId);
         foreach (['asset_account_code', 'acquisition_account_code', 'accumulated_account_code'] as $field) {
+            if ($taxEvidence) {
+                break;
+            }
             $code = $card[$field];
             if ($code === null || $code === '') {
                 if ($field === 'accumulated_account_code') {
@@ -1515,7 +1683,7 @@ final class AssetService
             if ($status === 'in_use' && $card['put_into_use_date'] === null) {
                 throw new AssetException('validation_failed', 'Historický majetek (in_use) vyžaduje datum zařazení do užívání (R23).');
             }
-            if ($status === 'in_use' && $card['put_into_use_date'] !== null) {
+            if ($status === 'in_use' && $card['put_into_use_date'] !== null && !$taxEvidence) {
                 $period = $this->periods->findForDate($supplierId, (string) $card['put_into_use_date']);
                 if ($period !== null && $period['status'] === 'open') {
                     $warnings[] = [
@@ -1696,6 +1864,40 @@ final class AssetService
 
     /** @var array<int, FiscalCalendar> memo režimu firmy v rámci běhu */
     private array $calendarCache = [];
+
+    /** @var array<int, bool> */
+    private array $taxEvidenceCache = [];
+
+    /**
+     * Firma v daňové evidenci (§ 7b ZDP): karta majetku je jen evidence pro daňové odpisy.
+     * Nic se neúčtuje do deníku, účtová osnova firmy neexistuje a zdaňovací období je
+     * kalendářní rok (fyzická osoba).
+     */
+    private function isTaxEvidence(int $supplierId): bool
+    {
+        if (!isset($this->taxEvidenceCache[$supplierId])) {
+            $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $this->taxEvidenceCache[$supplierId] = $stmt->fetchColumn() === 'tax_evidence';
+        }
+        return $this->taxEvidenceCache[$supplierId];
+    }
+
+    /** Rok s dokončenou roční uzávěrkou daňové evidence se už nemění. */
+    private function assertTaxEvidenceYearOpen(int $supplierId, int $year): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM tax_evidence_closings WHERE supplier_id = ? AND year = ? AND status = 'final'"
+        );
+        $stmt->execute([$supplierId, $year]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new AssetException(
+                'closing_final',
+                'Roční uzávěrka daňové evidence ' . $year . ' je dokončená — nejdřív ji vraťte do rozpracovaného stavu.',
+                409,
+            );
+        }
+    }
 
     /** Režim firmy (kalendářní vs hospodářský rok) dle tvaru účetních období. */
     private function supplierCalendar(int $supplierId): FiscalCalendar

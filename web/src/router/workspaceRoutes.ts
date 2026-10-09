@@ -265,10 +265,10 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/fx-rate-settings', name: 'accounting-fx-rate-settings', redirect: '/utilities?section=fx-rates' },
       { path: 'accounting/repo-rates',       name: 'accounting-repo-rates',       redirect: '/utilities?section=repo-rates' },
       // Majetek a odpisy (Epic F3)
-      { path: 'accounting/assets',                name: 'accounting-assets',       component: () => import('@/pages/accounting/Assets.vue'),      meta: { requiresDoubleEntry: true } },
-      { path: 'accounting/assets/new',            name: 'accounting-asset-new',    component: () => import('@/pages/accounting/AssetEditor.vue'), meta: { requiresDoubleEntry: true } },
-      { path: 'accounting/assets/:id(\\d+)',      name: 'accounting-asset-detail', component: () => import('@/pages/accounting/AssetDetail.vue'), meta: { requiresDoubleEntry: true } },
-      { path: 'accounting/assets/:id(\\d+)/edit', name: 'accounting-asset-edit',   component: () => import('@/pages/accounting/AssetEditor.vue'), meta: { requiresDoubleEntry: true } },
+      { path: 'accounting/assets',                name: 'accounting-assets',       component: () => import('@/pages/accounting/Assets.vue'),      meta: { requiresAccountingMode: true } },
+      { path: 'accounting/assets/new',            name: 'accounting-asset-new',    component: () => import('@/pages/accounting/AssetEditor.vue'), meta: { requiresAccountingMode: true } },
+      { path: 'accounting/assets/:id(\\d+)',      name: 'accounting-asset-detail', component: () => import('@/pages/accounting/AssetDetail.vue'), meta: { requiresAccountingMode: true } },
+      { path: 'accounting/assets/:id(\\d+)/edit', name: 'accounting-asset-edit',   component: () => import('@/pages/accounting/AssetEditor.vue'), meta: { requiresAccountingMode: true } },
       // Drobný majetek (§DM) — evidence dle §28/5 ZoÚ. Vlastní stránka vedle DHM: jiný
       // režim (jednorázový náklad na 501 bez odpisů) i jiné oprávnění (`accounting`,
       // protože API /api/accounting/small-assets spadá pod fallback, ne pod `assets`).

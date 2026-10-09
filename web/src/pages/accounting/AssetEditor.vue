@@ -11,8 +11,13 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
+import { useSupplierStore } from '@/stores/supplier'
 
 const { t } = useI18n()
+const supplierStore = useSupplierStore()
+// Daňová evidence: bez osnovy a účetních odpisů — účet karty slouží jen jako druh majetku.
+const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
+const DE_KIND_CODES = ['013', '014', '019', '021', '022', '025', '026', '029', '031', '032']
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
@@ -65,7 +70,9 @@ function accountOptions(prefixes: string[]) {
     .filter(a => a.is_active && prefixes.some(p => a.account_code.startsWith(p)))
     .map(a => ({ value: a.account_code, label: `${a.account_code} - ${a.name}` }))
 }
-const assetAccountOptions = computed(() => accountOptions(['01', '02', '03']))
+const assetAccountOptions = computed(() => isTaxEvidence.value
+  ? DE_KIND_CODES.map(code => ({ value: code, label: t(`accounting.assets.de_kind.${code}`) }))
+  : accountOptions(['01', '02', '03']))
 const accumulatedAccountOptions = computed(() => accountOptions(['07', '08']))
 const acquisitionAccountOptions = computed(() => accountOptions(['041', '042']))
 
@@ -105,6 +112,10 @@ const isDepreciable = computed(() => form.accumulated_account_code !== null && f
 const accMethodOptions = computed<AccMethod[]>(() =>
   form.tax_method === 'none' ? ['straight_line'] : ['straight_line', 'by_tax'])
 const isAccByTax = computed(() => form.acc_method === 'by_tax')
+// V daňové evidenci se zadává jen doba odpisování nehmotného majetku (§ 24 odst. 2 písm. v) ZDP);
+// hmotný majetek se odpisuje jen daňově.
+const deNeedsMonths = computed(() => isTaxEvidence.value && isDepreciable.value
+  && form.kind === 'intangible' && form.tax_method === 'by_accounting')
 
 watch(() => form.kind, (kind) => {
   if (kind === 'intangible') {
@@ -135,7 +146,9 @@ watch([() => form.tax_group, () => form.is_first_owner], () => {
 onMounted(async () => {
   loading.value = true
   try {
-    try { accounts.value = await accountingApi.listAccounts() } catch { accounts.value = [] }
+    if (!isTaxEvidence.value) {
+      try { accounts.value = await accountingApi.listAccounts() } catch { accounts.value = [] }
+    }
     if (isEdit.value) {
       const a = await assetsApi.get(assetId.value!)
       form.inventory_number = a.inventory_number
@@ -217,7 +230,8 @@ function validate(): boolean {
   if (isExtraordinary.value && (!form.is_zero_emission || !form.is_first_owner)) {
     errors.value.push(t('accounting.assets.editor.err_extraordinary'))
   }
-  if (isDepreciable.value && !isAccByTax.value && (!form.acc_useful_life_months || form.acc_useful_life_months < 1)) {
+  const needsMonths = isTaxEvidence.value ? deNeedsMonths.value : isDepreciable.value && !isAccByTax.value
+  if (needsMonths && (!form.acc_useful_life_months || form.acc_useful_life_months < 1)) {
     errors.value.push(t('accounting.assets.editor.err_acc_months'))
   }
   if (isHistorical.value && !form.put_into_use_date) {
@@ -259,6 +273,16 @@ async function save() {
       payload.opening_tax_amount = Number(form.opening_tax_amount) || 0
       payload.opening_acc_months = Number(form.opening_acc_months) || 0
       payload.opening_acc_amount = Number(form.opening_acc_amount) || 0
+    }
+    if (isTaxEvidence.value) {
+      // Účetní plán server v daňové evidenci odvodí sám (hmotný = daňový, nehmotný rovnoměrně po měsících).
+      payload.acc_method = form.kind === 'tangible' && form.tax_method !== 'none' ? 'by_tax' : 'straight_line'
+      payload.acc_useful_life_months = deNeedsMonths.value ? form.acc_useful_life_months : null
+      payload.acc_residual_value = 0
+      if (isHistorical.value && form.kind === 'tangible') {
+        payload.opening_acc_months = 0
+        payload.opening_acc_amount = 0
+      }
     }
     const result = isEdit.value
       ? await assetsApi.update(assetId.value!, payload)
@@ -325,21 +349,22 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
 
       <!-- Účty -->
       <section class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
-        <h2 class="text-sm font-semibold mb-3">{{ t('accounting.assets.editor.section_accounts') }}</h2>
+        <h2 class="text-sm font-semibold mb-3">{{ isTaxEvidence ? t('accounting.assets.editor.section_kind_de') : t('accounting.assets.editor.section_accounts') }}</h2>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label :class="labelCls">{{ t('accounting.assets.fields.asset_account') }} *</label>
+            <label :class="labelCls">{{ isTaxEvidence ? t('accounting.assets.fields.asset_kind_de') : t('accounting.assets.fields.asset_account') }} *</label>
             <SearchableSelect :modelValue="form.asset_account_code" :options="assetAccountOptions"
               :clearable="false" @update:modelValue="onAssetAccountChange" />
+            <p v-if="isTaxEvidence" class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.editor.kind_de_hint') }}</p>
           </div>
-          <div>
+          <div v-if="!isTaxEvidence">
             <label :class="labelCls">{{ t('accounting.assets.fields.accumulated_account') }}</label>
             <SearchableSelect :modelValue="form.accumulated_account_code" :options="accumulatedAccountOptions"
               :emptyLabel="t('accounting.assets.editor.no_depreciation')"
               @update:modelValue="v => form.accumulated_account_code = v" />
             <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.editor.accumulated_hint') }}</p>
           </div>
-          <div>
+          <div v-if="!isTaxEvidence">
             <label :class="labelCls">{{ t('accounting.assets.fields.acquisition_account') }} *</label>
             <SearchableSelect :modelValue="form.acquisition_account_code" :options="acquisitionAccountOptions"
               :clearable="false" @update:modelValue="v => form.acquisition_account_code = v || '042'" />
@@ -427,8 +452,19 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
         </p>
       </section>
 
+      <!-- Doba odpisování nehmotného majetku v daňové evidenci (§ 24 odst. 2 písm. v) ZDP) -->
+      <section v-if="deNeedsMonths" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label :class="labelCls">{{ t('accounting.assets.fields.intangible_months_de') }} *</label>
+            <input v-model.number="form.acc_useful_life_months" type="number" min="1" step="1" :class="inputCls" />
+          </div>
+        </div>
+        <p class="mt-2 text-xs text-neutral-400">{{ t('accounting.assets.editor.intangible_months_de_hint') }}</p>
+      </section>
+
       <!-- Účetní odpisy -->
-      <section v-if="isDepreciable" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
+      <section v-if="isDepreciable && !isTaxEvidence" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <h2 class="text-sm font-semibold mb-3">{{ t('accounting.assets.editor.section_accounting_dep') }}</h2>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
@@ -481,11 +517,11 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
             <label :class="labelCls">{{ t('accounting.assets.fields.opening_tax_amount') }}</label>
             <input v-model.number="form.opening_tax_amount" type="number" min="0" step="0.01" :disabled="isEdit" :class="inputCls" />
           </div>
-          <div>
+          <div v-if="!isTaxEvidence || deNeedsMonths">
             <label :class="labelCls">{{ t('accounting.assets.fields.opening_acc_months') }}</label>
             <input v-model.number="form.opening_acc_months" type="number" min="0" step="1" :disabled="isEdit" :class="inputCls" />
           </div>
-          <div>
+          <div v-if="!isTaxEvidence || deNeedsMonths">
             <label :class="labelCls">{{ t('accounting.assets.fields.opening_acc_amount') }}</label>
             <input v-model.number="form.opening_acc_amount" type="number" min="0" step="0.01" :disabled="isEdit" :class="inputCls" />
           </div>

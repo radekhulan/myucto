@@ -1,8 +1,8 @@
 # 28. Majetek
 
 > Návod, jak vést dlouhodobý hmotný a nehmotný majetek: založit kartu, zařadit ji do užívání, zaúčtovat
-> roční odpisy, přidat technické zhodnocení a majetek vyřadit nebo prodat. Pro účetní firem v podvojném
-> účetnictví.
+> roční odpisy, přidat technické zhodnocení a majetek vyřadit nebo prodat. Pro firmy v podvojném
+> účetnictví i v daňové evidenci.
 
 ## 28.1 Kdy to potřebujete
 
@@ -15,8 +15,9 @@
 - Máte majetek vedený jen na účtu (například pozemky) a chcete ho dostat do evidence.
 
 Modul vede evidenci **dlouhodobého hmotného a nehmotného majetku**: karty s inventárními čísly, výpočet **daňových odpisů**
-(§ 26 až 33 zákona o daních z příjmů) i **účetních odpisů** (ČÚS 013), technická zhodnocení a vyřazení. Je dostupný jen v
-režimu **podvojného účetnictví** (u daňové evidence se pořízení majetku eviduje jinak, viz [Daňová evidence](74_Danova_evidence.md)).
+(§ 26 až 33 zákona o daních z příjmů) i **účetních odpisů** (ČÚS 013), technická zhodnocení a vyřazení. Je dostupný v
+režimu **podvojného účetnictví** i **daňové evidence**. V daňové evidenci se nic neúčtuje a vedou se jen daňové odpisy, rozdíly
+popisuje [§ 28.12.14](#281214-majetek-v-danove-evidenci).
 
 <!-- cols: 24 46 30 -->
 | Kdy | Co udělat | Kde v aplikaci |
@@ -34,9 +35,10 @@ režimu **podvojného účetnictví** (u daňové evidence se pořízení majetk
 
 ## 28.2 Než začnete
 
-- Firma musí být v režimu **podvojného účetnictví**.
+- Firma musí být v režimu **podvojného účetnictví** nebo **daňové evidence**.
 - Majetek pořízený přijatou fakturou musí mít na faktuře označený druh nákladu **Dlouhodobý majetek** (viz [Přijaté faktury](23_Prijate_faktury.md)).
-- Pro zaúčtování odpisů musí mít účetní období stav otevřené (viz [Uzávěrka](72_Uzaverka.md)).
+- V podvojném účetnictví musí mít pro zaúčtování odpisů účetní období stav otevřené (viz [Uzávěrka](72_Uzaverka.md)). V daňové
+  evidenci nesmí mít rok dokončenou roční uzávěrku (viz [Daňová evidence](74_Danova_evidence.md)).
 - Pro čtení, filtrování a export stačí čtecí oprávnění, pro všechny akce karty (založení, úprava, zařazení, technické zhodnocení,
   vyřazení, zaúčtování) je potřeba zápis.
 - Drobnější majetek, který se účtuje přímo do nákladů, patří do kapitoly [Drobný majetek](27_Drobny_majetek.md). Ten nemá daňový
@@ -435,7 +437,6 @@ pohyby deníku nejde rozdělit mezi karty a majetek by se započetl dvakrát.
 
 ### 28.12.13 Omezení a tipy
 
-- Modul Majetek je dostupný jen v režimu **podvojného účetnictví**. V daňové evidenci se dlouhodobý majetek eviduje jinak.
 - **Sazby a koeficienty** daňových odpisů jsou v systému pevně dané aktuálním zněním zákona (poznámka pod plánem odpisů uvádí,
   ke kterému datu). Při legislativní změně je potřeba prostudovat aktuální stav se svou účetní.
 - **Vstupní cenu a daňové parametry** po prvním potvrzeném odpisu, resp. pořizovací údaje po zařazení do užívání, už nejde měnit.
@@ -448,6 +449,26 @@ pohyby deníku nejde rozdělit mezi karty a majetek by se započetl dvakrát.
   vyřazení vrátit nejde.
 - Uživatelé bez oprávnění k zápisu mají všechny akce karty (založení, editace, zařazení, zhodnocení, vyřazení, zaúčtování)
   nedostupné, mohou jen prohlížet seznam, detail a exportovat.
+
+### 28.12.14 Majetek v daňové evidenci
+
+Firma v daňové evidenci (§ 7b ZDP) nemá účtovou osnovu ani deník. Karta majetku je proto jen evidence pro daňové odpisy
+(§ 26 až 33 ZDP) a liší se takto:
+
+<!-- cols: 30 70 -->
+| Oblast | Daňová evidence |
+|---|---|
+| Karta | Místo tří účtů se volí jen **druh majetku** (stavby, hmotné movité věci, software, pozemky…). Druh určuje, zda se majetek odpisuje. Pozemky a umělecká díla se neodpisují. |
+| Účetní odpisy | Nevedou se. Plán odpisů ukazuje jen daňové odpisy. U nehmotného majetku se zadává doba odpisování v měsících a odpisuje se rovnoměrně po měsících. |
+| Zařazení do užívání | Jen evidenční údaj, nic se nezaúčtuje. |
+| Odpisy roku | Tlačítko **Potvrdit odpisy roku** potvrdí daňové odpisy u všech karet v užívání. Potvrzené odpisy vstupují do výdajů § 7 v přiznání k dani z příjmů fyzických osob, ne do peněžního deníku. |
+| Vyřazení | Dopočte se daňový odpis roku vyřazení (u rovnoměrných a zrychlených odpisů polovina, § 26 odst. 7 ZDP). Daňová zůstatková cena prodaného nebo zlikvidovaného majetku je výdajem (§ 24 odst. 2 písm. b) ZDP) a přiznání ji do výdajů zahrne samo. Darovaný majetek výdaj nemá. U škody je zůstatková cena výdajem jen do výše náhrad nebo při živelní pohromě či neznámém pachateli, uznatelnou část zadejte ručně v roční uzávěrce daňové evidence. |
+| Prodej | Příjem z prodeje se z karty nezapisuje. Vystavte fakturu, do peněžního deníku vstoupí jejím zaplacením. |
+| Zámek roku | Rok s dokončenou roční uzávěrkou daňové evidence už nejde měnit: vyřazení, vrácení vyřazení ani ruční přepis odpisu. Nejdřív uzávěrku vraťte do rozpracovaného stavu. |
+| Nedostupné | Souhrnná karta z účtu, import a export Excelem a drobný majetek patří k účetnictví, v daňové evidenci nejsou. |
+
+Pořízení majetku peněžní deník do výdajů nezapočítá, pokud je přijatá faktura označená jako dlouhodobý majetek. Výdajem jsou
+až odpisy, takže kartu založte z téže faktury (`Nákup → Majetek → Z přijaté faktury`).
 
 ## 28.13 Související kapitoly
 

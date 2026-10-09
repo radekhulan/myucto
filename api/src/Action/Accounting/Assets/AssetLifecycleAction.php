@@ -47,7 +47,7 @@ final class AssetLifecycleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
 
@@ -75,7 +75,7 @@ final class AssetLifecycleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
 
@@ -114,7 +114,7 @@ final class AssetLifecycleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $impId = (int) ($args['impId'] ?? 0);
 
@@ -133,7 +133,7 @@ final class AssetLifecycleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
 
@@ -208,7 +208,7 @@ final class AssetLifecycleAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) ($args['id'] ?? 0);
 
         try {

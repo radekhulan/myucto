@@ -225,6 +225,8 @@ const companyAdminRouteNames = new Set(['admin-price-list', 'admin-price-list-ne
 const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback'])
 const commercialOnlyRouteNames = new Set([
   'accounting-activation',
+  // Majetek je dostupný i v daňové evidenci (requiresAccountingMode), licence platí stejně.
+  'accounting-assets', 'accounting-asset-new', 'accounting-asset-detail', 'accounting-asset-edit',
   'automation-cockpit',
   'accounting-setup-assistant',
   'portfolio-overview',

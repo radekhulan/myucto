@@ -5,6 +5,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { assetsApi, type AccountSummaryCandidate, type AssetListItem, type AssetStatus, type PurchaseCandidate } from '@/api/assets'
 import { postingErrorI18nKey } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
@@ -22,6 +23,9 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const supplierStore = useSupplierStore()
+// Daňová evidence: odpisy se jen potvrzují do evidence, souhrnné karty z účtů ani číselník osnovy nemá.
+const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 const toast = useToast()
 const router = useRouter()
 const route = useRoute()
@@ -299,20 +303,20 @@ async function runBook() {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.assets.subtitle') }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <button @click="codebookTransferApi.download('assets')" :class="btnOutline('primary')">
+        <button v-if="!isTaxEvidence" @click="codebookTransferApi.download('assets')" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('codebookTransfer.export') }}
         </button>
-        <button v-if="auth.canWrite('assets.write')" @click="importOpen = true" :class="btnOutline('primary')">
+        <button v-if="auth.canWrite('assets.write') && !isTaxEvidence" @click="importOpen = true" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ t('codebookTransfer.import') }}
         </button>
         <template v-if="auth.canWrite('assets.write')">
           <button @click="showBook = true" :class="btnOutline('neutral')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.play" /></svg>
-            {{ t('accounting.assets.book_year') }}
+            {{ isTaxEvidence ? t('accounting.assets.book_year_de') : t('accounting.assets.book_year') }}
           </button>
-          <button @click="openSummary" :class="btnOutline('neutral')" class="whitespace-nowrap">
+          <button v-if="!isTaxEvidence" @click="openSummary" :class="btnOutline('neutral')" class="whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
             {{ t('accounting.assets.account_summary.button') }}
           </button>
@@ -589,8 +593,8 @@ async function runBook() {
     </Modal>
 
     <!-- Modal: zaúčtování odpisů roku -->
-    <Modal v-if="showBook" :title="t('accounting.assets.book.title')" widthClass="max-w-md" @close="showBook = false">
-      <p class="text-sm text-neutral-500 mb-3">{{ t('accounting.assets.book.hint') }}</p>
+    <Modal v-if="showBook" :title="isTaxEvidence ? t('accounting.assets.book_year_de') : t('accounting.assets.book.title')" widthClass="max-w-md" @close="showBook = false">
+      <p class="text-sm text-neutral-500 mb-3">{{ isTaxEvidence ? t('accounting.assets.book.hint_de') : t('accounting.assets.book.hint') }}</p>
       <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.book.fiscal_year') }}</label>
       <select v-model.number="bookYear" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface mb-4">
         <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>

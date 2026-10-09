@@ -45,6 +45,27 @@ trait GuardsAccountingMode
         return true;
     }
 
+    /**
+     * Funkce dostupná v obou režimech (podvojné účetnictví i daňová evidence), ale ne
+     * firmě bez účetního režimu. Rozdíl chování mezi režimy řeší služba.
+     */
+    protected function requireAccountingMode(Connection $db, int $supplierId, Response $response, ?Response &$err): bool
+    {
+        if (!$this->accountingModeIs($db, $supplierId, 'double_entry')
+            && !$this->accountingModeIs($db, $supplierId, 'tax_evidence')
+        ) {
+            $err = Json::error(
+                $response,
+                'wrong_accounting_mode',
+                'Tato funkce je dostupná jen pro firmu vedenou v účetnictví nebo v daňové evidenci.',
+                403,
+            );
+            return false;
+        }
+        $err = null;
+        return true;
+    }
+
     protected function requireTaxEvidenceForYear(
         Connection $db,
         int $supplierId,
