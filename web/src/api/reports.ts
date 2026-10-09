@@ -693,6 +693,7 @@ export const reportsApi = {
         period: string
         rows_count: number
         total_amount: number
+        total_amount_exact?: number | null
         rows: Array<{
           country_iso2: string
           k_stat: string

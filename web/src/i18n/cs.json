@@ -24726,6 +24726,7 @@
       "rows_hint": "Agregováno per VAT_ID + typ plnění",
       "total_amount": "Celkem v EU",
       "total_hint": "Suma základů v CZK (bez DPH)",
+      "total_rounding_hint": "Před zaokrouhlením {exact}. Hodnota plnění se podle pokynů k souhrnnému hlášení zaokrouhluje na celé koruny nahoru u každého řádku, přiznání k DPH (ř. 20, 21 a 31) zaokrouhluje až součet. Rozdíl do 1 Kč na řádek je proto v pořádku.",
       "rows_title": "Řádky výkazu",
       "country": "Stát",
       "vat_id": "DIČ kupujícího",

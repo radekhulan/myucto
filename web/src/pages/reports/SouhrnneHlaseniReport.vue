@@ -178,6 +178,10 @@ onMounted(loadPreview)
             {{ formatMoney(preview.summary.total_amount, 'CZK') }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">{{ t('reports.shv.total_hint') }}</div>
+          <div v-if="preview.summary.total_amount_exact != null && Math.abs(preview.summary.total_amount - preview.summary.total_amount_exact) >= 0.005"
+            class="text-xs text-neutral-500 mt-1">
+            {{ t('reports.shv.total_rounding_hint', { exact: formatMoney(preview.summary.total_amount_exact, 'CZK') }) }}
+          </div>
         </div>
         <div v-if="preview.summary.submission_deadline" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
           <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">{{ t('reports.dph.deadline') }}</div>

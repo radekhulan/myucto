@@ -116,6 +116,15 @@ v Kč ze všech dokladů skupiny a počet je počet různých faktur. Hodnota pl
 XML zapisuje na celé Kč zaokrouhlením **od nuly** (kladná nahoru, záporná dolů).
 Souhrnný náhled proto může zobrazovat haléře, zatímco jednotlivý řádek XML celé koruny.
 
+Zaokrouhlení nahoru předepisuje struktura souhrnného hlášení na EPO: „Celková hodnota
+plnění se zaokrouhlí na celé koruny nahoru. Celková hodnota plnění musí být vždy celé
+číslo." Zaokrouhluje se každý řádek zvlášť, kdežto přiznání k DPH sčítá haléře
+a zaokrouhluje až součet na ř. 20, 21 a 31. **Celkem v EU** v náhledu je součet
+zaokrouhlených řádků, tedy to, co hlášení skutečně obsahuje, a může být o něco vyšší
+než přiznání, nejvýše o 1 Kč na každý řádek. Náhled pod částkou ukáže součet před
+zaokrouhlením, který s přiznáním souhlasí. Křížová kontrola přiznání se souhrnným
+hlášením porovnává částky před zaokrouhlením, takže tento rozdíl jako nesoulad nehlásí.
+
 **Záporná hodnota plnění** (dobropis do jiného členského státu převyšuje v období
 dodávky téže protistraně) do řádného hlášení nepatří. EPO řádné hlášení se zápornou
 hodnotou odmítne. Náhled na takový řádek upozorní se jménem protistrany a částkou,

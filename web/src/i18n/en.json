@@ -24726,6 +24726,7 @@
       "rows_hint": "Aggregated per VAT_ID + supply type",
       "total_amount": "EU total",
       "total_hint": "Sum of bases in CZK (no VAT)",
+      "total_rounding_hint": "Before rounding {exact}. Per the EC Sales List instructions, the supply value is rounded up to whole crowns on each row, while the VAT return (lines 20, 21 and 31) rounds only the total. A difference of up to CZK 1 per row is therefore expected.",
       "rows_title": "Report rows",
       "country": "Country",
       "vat_id": "Buyer VAT ID",
