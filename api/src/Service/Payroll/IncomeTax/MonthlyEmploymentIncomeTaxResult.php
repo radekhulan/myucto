@@ -37,11 +37,19 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
         public string $policyHash,
         public string $rulesetId,
         public string $rulesetHash,
+        /**
+         * Daňová rezidence, ze které výpočet vyšel. Hlášení JMHZ podle ní
+         * vynechává atributy, které kontrola 243 nerezidentovi s prohlášením
+         * zakazuje. `null` = výsledek z doby před jejím zmrazením.
+         */
+        public ?TaxResidence $taxResidence = null,
     ) {}
 
     /** @return array<string,mixed> */
     public function jsonSerialize(): array
     {
+        $residence = $this->taxResidence === null ? [] : ['tax_residence' => $this->taxResidence->value];
+
         return [
             'status' => $this->status->value,
             'calculation_date' => $this->calculationDate,
@@ -69,6 +77,6 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
             'policy_hash' => $this->policyHash,
             'ruleset_id' => $this->rulesetId,
             'ruleset_hash' => $this->rulesetHash,
-        ];
+        ] + $residence;
     }
 }

@@ -349,10 +349,9 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
      * sleva na průkaz ZTP/P výpočet mzdy zastaví (nonresident-monthly-credit-not-supported),
      * takže zakázaný atribut do hlášení nedojde.
      *
-     * Element danBonus (10306) s nulou ale formulář nerezidenta nese, i když ho
-     * kontrola 243 zakazuje stejně jako kontrola 244 u zaměstnance bez
-     * prohlášení. Proto se tu jeho nepřítomnost netestuje; viz defekt G3-3 a
-     * řádek JMHZ-SV-10306-02.
+     * Element danBonus (10306) formulář nerezidenta nenese ani s nulou: kontrola
+     * 243 ho zakazuje stejně jako kontrola 244 u zaměstnance bez prohlášení,
+     * kde ČSSZ nulový element odmítla (40244).
      */
     public function testNonResidentWithDeclarationClaimsOnlyTaxpayerCredit(): void
     {
@@ -369,6 +368,8 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
         );
         self::assertStringContainsString('<form:danZalohaPoSleve>3430</form:danZalohaPoSleve>', $xml);
         self::assertSame(['40000'], $this->relationshipTaxBases($xml));
+        // Kontrola 243: 10306 se nerezidentovi s prohlášením nevyplňuje ani nulou.
+        self::assertStringNotContainsString('<form:danBonus>', $xml);
         self::assertStringNotContainsString('<form:zvlastniSazbaDane>', $xml);
     }
 

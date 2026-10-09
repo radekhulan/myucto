@@ -139,6 +139,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 EmploymentIncomeTaxPolicy2026::contractHash(),
                 $ruleset->id,
                 $ruleset->canonicalHash,
+                $input->residence->residence,
             );
         }
 
@@ -265,6 +266,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
             EmploymentIncomeTaxPolicy2026::contractHash(),
             $ruleset->id,
             $ruleset->canonicalHash,
+            $input->residence->residence,
         );
     }
 

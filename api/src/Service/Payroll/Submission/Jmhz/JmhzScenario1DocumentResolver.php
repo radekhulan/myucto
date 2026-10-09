@@ -692,6 +692,9 @@ final class JmhzScenario1DocumentResolver
                         ? null
                         : ($personEvidence['attribute_values']['10116'] ?? null),
                     'taxpayer_declaration_signed' => $declarationSigned,
+                    // Rezidence z výpočtu daně (10068 se v profilu nevykazuje);
+                    // podle ní serializér plní kontrolu 243. `null` = starší výsledek.
+                    'tax_residence' => is_string($tax['tax_residence'] ?? null) ? $tax['tax_residence'] : null,
                     'advance_tax_czk' => $advanceTaxCzk,
                     'withholding_tax_czk' => $withholdingTaxCzk,
                     'tax_credits_czk' => $taxCreditsCzk,

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use DOMDocument;
 use DOMElement;
+use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 
 /**
@@ -1398,7 +1399,12 @@ final class JmhzScenario1XmlSerializer
 
                 continue;
             }
-            if ($element === 'form:danBonus' && !$declarationSigned) {
+            // Kontrola 243 zakazuje 10306 nerezidentovi s prohlášením stejně,
+            // jako kontrola 244 zaměstnanci bez prohlášení: za vyplněný bere
+            // i nulu (zamítnutí 40244 u 244). Bonus nerezident mít nemůže,
+            // výpočet mu zvýhodnění na děti odmítne.
+            $nonResident = ($summary['tax_residence'] ?? null) === TaxResidence::NonResident->value;
+            if ($element === 'form:danBonus' && ($nonResident || !$declarationSigned)) {
                 // Kontrola 244 bere za „vyplněný" atribut samotnou přítomnost
                 // elementu, ne až nenulovou částku — nulový bonus u zaměstnance
                 // bez prohlášení nechal ČSSZ celý formulář odmítnout (40244,
