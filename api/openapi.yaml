@@ -14125,6 +14125,9 @@ paths:
         Existuje-li už řádek pro danou měnu, jsou všechna pole nepovinná a vynechané pole zachová
         uloženou hodnotu. Pro novou měnu zůstávají povinná všechna ID účtů i výplatní účet.
         `currency` vybírá řádek, výchozí je `CZK`.
+
+        Firma v daňové evidenci účty nezadává (ID účtů se ignorují a uložené zůstávají),
+        ukládá jen výplatní účet GoPay a toleranci data výplaty.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -32652,9 +32655,13 @@ components:
 
     GoPaySettingsResponse:
       type: object
-      required: [configured, settings, account_options]
+      required: [configured, mode, settings, account_options]
       properties:
         configured: { type: boolean }
+        mode:
+          type: string
+          enum: [double_entry, tax_evidence]
+          description: Režim firmy. V daňové evidenci se GoPay neúčtuje do účtů a `account_options` je prázdné.
         settings: { $ref: '#/components/schemas/GoPaySettings' }
         account_options: { type: array, items: { $ref: '#/components/schemas/GoPayAccountOption' } }
 

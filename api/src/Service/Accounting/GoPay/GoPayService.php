@@ -6,10 +6,12 @@ namespace MyInvoice\Service\Accounting\GoPay;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\MovementClassificationRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
+use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 use PDO;
 use PDOException;
 
@@ -27,7 +29,11 @@ final class GoPayService
         private readonly ActivityLogger $activity,
         private readonly GoPayMovementPoster $poster,
         private readonly GoPayPendingService $pending,
+        private readonly MovementClassificationRepository $classifications,
     ) {}
+
+    /** Poznámka zařazení výplaty v peněžním deníku; podle ní ho smazání vyúčtování pozná. */
+    private const PAYOUT_CLASSIFICATION_NOTE = 'GoPay: výplata vyúčtování ';
 
     /** @return array<string,mixed> */
     public function settings(int $supplierId, string $currency = 'CZK'): array
@@ -41,15 +47,28 @@ final class GoPayService
                     ca.account_code clearing_account_code, ca.name clearing_account_name,
                     ba.account_code destination_bank_account_code, ba.name destination_bank_account_name
                FROM gopay_settings gs
-               JOIN chart_of_accounts ga ON ga.id=gs.gopay_account_id AND ga.supplier_id=gs.supplier_id
-               JOIN chart_of_accounts ra ON ra.id=gs.receivable_account_id AND ra.supplier_id=gs.supplier_id
-               JOIN chart_of_accounts fa ON fa.id=gs.fee_account_id AND fa.supplier_id=gs.supplier_id
-               JOIN chart_of_accounts ca ON ca.id=gs.clearing_account_id AND ca.supplier_id=gs.supplier_id
-               JOIN chart_of_accounts ba ON ba.id=gs.destination_bank_account_id AND ba.supplier_id=gs.supplier_id
+          LEFT JOIN chart_of_accounts ga ON ga.id=gs.gopay_account_id AND ga.supplier_id=gs.supplier_id
+          LEFT JOIN chart_of_accounts ra ON ra.id=gs.receivable_account_id AND ra.supplier_id=gs.supplier_id
+          LEFT JOIN chart_of_accounts fa ON fa.id=gs.fee_account_id AND fa.supplier_id=gs.supplier_id
+          LEFT JOIN chart_of_accounts ca ON ca.id=gs.clearing_account_id AND ca.supplier_id=gs.supplier_id
+          LEFT JOIN chart_of_accounts ba ON ba.id=gs.destination_bank_account_id AND ba.supplier_id=gs.supplier_id
               WHERE gs.supplier_id=? AND gs.currency=?'
         );
         $stmt->execute([$supplierId, $currency]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $doubleEntry = $this->isDoubleEntry($supplierId);
+        // Podvojné účetnictví účtuje do všech pěti účtů; daňové evidenci stačí výplatní účet.
+        if ($row !== null && $doubleEntry && !$this->hasAllAccounts($row)) {
+            $row = null;
+        }
+        if (!$doubleEntry) {
+            return [
+                'configured' => $row !== null,
+                'mode' => 'tax_evidence',
+                'settings' => $row === null ? $this->defaultSettings($currency) : $this->normalizeSettings($row),
+                'account_options' => [],
+            ];
+        }
 
         $accounts = $this->db->pdo()->prepare(
             'SELECT id,account_code,name,account_type,is_synthetic,parent_id
@@ -69,25 +88,46 @@ final class GoPayService
 
         return [
             'configured' => $row !== null,
-            'settings' => $row === null ? [
-                'currency' => $currency,
-                'gopay_account_id' => null,
-                'receivable_account_id' => null,
-                'fee_account_id' => null,
-                'clearing_account_id' => null,
-                'destination_bank_account_id' => null,
-                'payout_account_number' => '115-1391640287',
-                'payout_bank_code' => '0100',
-                'payout_date_tolerance_days' => 3,
-            ] : $this->normalizeSettings($row),
+            'mode' => 'double_entry',
+            'settings' => $row === null ? $this->defaultSettings($currency) : $this->normalizeSettings($row),
             'account_options' => $options,
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function defaultSettings(string $currency): array
+    {
+        return [
+            'currency' => $currency,
+            'gopay_account_id' => null,
+            'receivable_account_id' => null,
+            'fee_account_id' => null,
+            'clearing_account_id' => null,
+            'destination_bank_account_id' => null,
+            'payout_account_number' => '115-1391640287',
+            'payout_bank_code' => '0100',
+            'payout_date_tolerance_days' => 3,
+        ];
+    }
+
+    /** @param array<string,mixed> $row */
+    private function hasAllAccounts(array $row): bool
+    {
+        foreach (['gopay_account_id', 'receivable_account_id', 'fee_account_id', 'clearing_account_id', 'destination_bank_account_id'] as $field) {
+            if (($row[$field] ?? null) === null) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */
     public function saveSettings(int $supplierId, array $input, ?int $userId): array
     {
-        $this->assertDoubleEntry($supplierId);
+        $this->assertSupportedMode($supplierId);
+        if (!$this->isDoubleEntry($supplierId)) {
+            return $this->saveTaxEvidenceSettings($supplierId, $input, $userId);
+        }
         $currency = $this->currency((string) ($input['currency'] ?? 'CZK'));
         // Chybějící klíč = ponechat uloženou hodnotu (částečná aktualizace); validuje se sloučený stav.
         $stmt = $this->db->pdo()->prepare('SELECT * FROM gopay_settings WHERE supplier_id=? AND currency=?');
@@ -120,18 +160,7 @@ final class GoPayService
         $this->assertAccount($accounts, $ids['clearing_account_id'], '261', null, 'clearing_account_id');
         $this->assertAccount($accounts, $ids['fee_account_id'], null, 'expense', 'fee_account_id');
 
-        $accountNumber = preg_replace('/\s+/', '', trim((string) ($input['payout_account_number'] ?? '')));
-        $bankCode = trim((string) ($input['payout_bank_code'] ?? ''));
-        if (!is_string($accountNumber) || preg_match('/^(?:[0-9]{1,6}-)?[0-9]{1,10}$/', $accountNumber) !== 1) {
-            throw new GoPayException('invalid_payout_account', 'Číslo výplatního účtu GoPay nemá platný český formát.');
-        }
-        if (preg_match('/^[0-9]{4}$/', $bankCode) !== 1) {
-            throw new GoPayException('invalid_payout_bank_code', 'Kód banky GoPay musí mít čtyři číslice.');
-        }
-        $tolerance = (int) ($input['payout_date_tolerance_days'] ?? 3);
-        if ($tolerance < 0 || $tolerance > 14) {
-            throw new GoPayException('invalid_tolerance', 'Tolerance data musí být 0 až 14 dní.');
-        }
+        [$accountNumber, $bankCode, $tolerance] = $this->payoutFields($input);
 
         $this->db->pdo()->prepare(
             'INSERT INTO gopay_settings
@@ -156,6 +185,55 @@ final class GoPayService
         ]);
 
         return $this->settings($supplierId, $currency);
+    }
+
+    /**
+     * Daňová evidence: GoPay se neúčtuje do účtů, nastavení nese jen výplatní účet a
+     * toleranci data. Účty uložené dřív (firma vedla podvojné účetnictví) zůstávají.
+     *
+     * @param array<string,mixed> $input @return array<string,mixed>
+     */
+    private function saveTaxEvidenceSettings(int $supplierId, array $input, ?int $userId): array
+    {
+        $currency = $this->currency((string) ($input['currency'] ?? 'CZK'));
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM gopay_settings WHERE supplier_id=? AND currency=?');
+        $stmt->execute([$supplierId, $currency]);
+        $stored = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $input += array_intersect_key($stored, array_flip([
+            'payout_account_number', 'payout_bank_code', 'payout_date_tolerance_days',
+        ]));
+        [$accountNumber, $bankCode, $tolerance] = $this->payoutFields($input);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO gopay_settings
+                (supplier_id,currency,payout_account_number,payout_bank_code,payout_date_tolerance_days,updated_by)
+             VALUES (?,?,?,?,?,?)
+             ON DUPLICATE KEY UPDATE
+                payout_account_number=VALUES(payout_account_number),
+                payout_bank_code=VALUES(payout_bank_code),
+                payout_date_tolerance_days=VALUES(payout_date_tolerance_days),
+                updated_by=VALUES(updated_by)'
+        )->execute([$supplierId, $currency, $accountNumber, $bankCode, $tolerance, $userId]);
+
+        return $this->settings($supplierId, $currency);
+    }
+
+    /** @param array<string,mixed> $input @return array{string,string,int} */
+    private function payoutFields(array $input): array
+    {
+        $accountNumber = preg_replace('/\s+/', '', trim((string) ($input['payout_account_number'] ?? '')));
+        $bankCode = trim((string) ($input['payout_bank_code'] ?? ''));
+        if (!is_string($accountNumber) || preg_match('/^(?:[0-9]{1,6}-)?[0-9]{1,10}$/', $accountNumber) !== 1) {
+            throw new GoPayException('invalid_payout_account', 'Číslo výplatního účtu GoPay nemá platný český formát.');
+        }
+        if (preg_match('/^[0-9]{4}$/', $bankCode) !== 1) {
+            throw new GoPayException('invalid_payout_bank_code', 'Kód banky GoPay musí mít čtyři číslice.');
+        }
+        $tolerance = (int) ($input['payout_date_tolerance_days'] ?? 3);
+        if ($tolerance < 0 || $tolerance > 14) {
+            throw new GoPayException('invalid_tolerance', 'Tolerance data musí být 0 až 14 dní.');
+        }
+        return [$accountNumber, $bankCode, $tolerance];
     }
 
     /** @return list<array<string,mixed>> */
@@ -301,6 +379,7 @@ final class GoPayService
     /** @return array{deleted:bool,deleted_entry_ids:list<int>,preserved_bank_entry_id:int|null} */
     public function delete(int $supplierId, int $clearingId, ?int $userId): array
     {
+        $this->assertClearingYearsOpen($supplierId, $clearingId);
         $pdo = $this->db->pdo();
         $ownTx = $this->beginUnit($pdo, 'gopay_delete');
         try {
@@ -378,6 +457,11 @@ final class GoPayService
                 $clearing['bank_transaction_id'] !== null ? (int) $clearing['bank_transaction_id'] : 0,
             ])));
             foreach ($transactionIds as $transactionId) {
+                $classification = $this->classifications->find($supplierId, 'bank', $transactionId);
+                if ($classification !== null
+                    && str_starts_with((string) ($classification['note'] ?? ''), self::PAYOUT_CLASSIFICATION_NOTE)) {
+                    $this->classifications->delete($supplierId, 'bank', $transactionId, $userId);
+                }
                 $pdo->prepare(
                     'UPDATE bank_transactions bt
                         SET bt.match_status="unmatched",bt.matched_at=NULL,bt.matched_by=NULL
@@ -421,10 +505,14 @@ final class GoPayService
      */
     public function import(int $supplierId, ?int $userId, string $fileName, string $xml, ?array $pdf = null): array
     {
-        $this->assertDoubleEntry($supplierId);
+        $this->assertSupportedMode($supplierId);
         $statement = GoPayStatementXlsxParser::isSpreadsheet($xml);
         $parsed = $statement ? $this->statementParser->parse($xml) : $this->parser->parse($xml);
         $this->requireSettings($supplierId, $parsed['currency']);
+        $this->assertTaxEvidenceYearsOpen($supplierId, array_merge(
+            [(string) $parsed['performed_on']],
+            array_map(static fn (array $m): string => (string) $m['performed_on'], $parsed['movements']),
+        ));
         // Výpis stažený znovu má jiné bajty (datum vytvoření, zip), ale stejný obsah.
         $hash = $statement
             ? hash('sha256', json_encode($parsed, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR))
@@ -522,9 +610,10 @@ final class GoPayService
     /** @return array<string,mixed> */
     public function process(int $supplierId, int $clearingId, ?int $userId): array
     {
-        $this->assertDoubleEntry($supplierId);
+        $this->assertSupportedMode($supplierId);
         $clearing = $this->clearingRow($supplierId, $clearingId);
         $this->requireSettings($supplierId, (string) $clearing['currency']);
+        $this->assertClearingYearsOpen($supplierId, $clearingId);
         $this->db->pdo()->prepare('UPDATE gopay_clearings SET status="processing" WHERE id=? AND supplier_id=?')
             ->execute([$clearingId, $supplierId]);
 
@@ -564,8 +653,10 @@ final class GoPayService
         int $transactionId,
         ?int $userId,
     ): array {
-        $this->assertDoubleEntry($supplierId);
+        $this->assertSupportedMode($supplierId);
+        $this->assertClearingYearsOpen($supplierId, $clearingId);
         $transaction = $this->payoutTransaction($supplierId, $transactionId);
+        $this->assertTaxEvidenceYearsOpen($supplierId, [(string) $transaction['posted_at']]);
         $candidates = $this->payoutCandidates($supplierId, $transaction);
         $candidateIds = array_map(static fn (array $row): int => (int) $row['id'], $candidates);
         if (!in_array($clearingId, $candidateIds, true)) {
@@ -638,7 +729,7 @@ final class GoPayService
         $this->refreshClearingStatus($supplierId, $clearingId);
         $row = $this->clearingRow($supplierId, $clearingId);
         return (int) ($row['bank_transaction_id'] ?? 0) === $transactionId
-            && $row['bank_journal_entry_id'] !== null;
+            && ($row['bank_journal_entry_id'] !== null || !$this->isDoubleEntry($supplierId));
     }
 
     /** Jen dobropisy, stejně jako GoPayMovementPoster::matchCreditNote (tam je důvod). */
@@ -683,8 +774,8 @@ final class GoPayService
                         ba.account_code destination_bank_account_code,ca.account_code clearing_account_code
                    FROM gopay_clearings gc
                    JOIN gopay_settings gs ON gs.supplier_id=gc.supplier_id AND gs.currency=gc.currency
-                   JOIN chart_of_accounts ba ON ba.id=gs.destination_bank_account_id AND ba.supplier_id=gs.supplier_id
-                   JOIN chart_of_accounts ca ON ca.id=gs.clearing_account_id AND ca.supplier_id=gs.supplier_id
+              LEFT JOIN chart_of_accounts ba ON ba.id=gs.destination_bank_account_id AND ba.supplier_id=gs.supplier_id
+              LEFT JOIN chart_of_accounts ca ON ca.id=gs.clearing_account_id AND ca.supplier_id=gs.supplier_id
                   WHERE gc.id=? AND gc.supplier_id=? FOR UPDATE'
             );
             $stmt->execute([$clearingId, $supplierId]);
@@ -751,7 +842,16 @@ final class GoPayService
 
             $txId = (int) $rows[0]['id'];
             $existing = $this->journal->findBySource($supplierId, 'bank', $txId);
-            if ($existing !== null && ($existing['reversed_by'] ?? null) === null) {
+            if (!$this->isDoubleEntry($supplierId)) {
+                // Daňová evidence nemá zápis: vazba výplaty na bankovní pohyb stačí, peněžní
+                // deník podle ní pohyb zařadí jako převod mezi vlastními prostředky.
+                $entryId = null;
+                $entryOwned = false;
+                $this->classifications->upsert(
+                    $supplierId, 'bank', $txId, 'transfer',
+                    self::PAYOUT_CLASSIFICATION_NOTE . (string) $clearing['clearing_id'], $userId,
+                );
+            } elseif ($existing !== null && ($existing['reversed_by'] ?? null) === null) {
                 $entryId = (int) $existing['id'];
                 $entryOwned = (int) ($clearing['bank_journal_entry_id'] ?? 0) === $entryId
                     && (bool) ($clearing['bank_journal_entry_owned'] ?? false);
@@ -897,19 +997,76 @@ final class GoPayService
         $stmt = $this->db->pdo()->prepare('SELECT * FROM gopay_settings WHERE supplier_id=? AND currency=?');
         $stmt->execute([$supplierId, $currency]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
+        if (!is_array($row) || ($this->isDoubleEntry($supplierId) && !$this->hasAllAccounts($row))) {
             throw new GoPayException('settings_missing', 'Před importem nastav účty modulu GoPay.', 409);
         }
         return $row;
     }
 
-    private function assertDoubleEntry(int $supplierId): void
+    /** GoPay vede podvojné účetnictví (zápisy) i daňová evidence (peněžní deník). */
+    private function assertSupportedMode(int $supplierId): void
+    {
+        $mode = $this->accountingMode($supplierId);
+        if ($mode !== 'double_entry' && $mode !== 'tax_evidence') {
+            throw new GoPayException('not_double_entry', 'GoPay vyžaduje podvojné účetnictví nebo daňovou evidenci.', 409);
+        }
+    }
+
+    private function isDoubleEntry(int $supplierId): bool
+    {
+        return $this->accountingMode($supplierId) === 'double_entry';
+    }
+
+    private function accountingMode(int $supplierId): ?string
     {
         $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id=?');
         $stmt->execute([$supplierId]);
-        if ($stmt->fetchColumn() !== 'double_entry') {
-            throw new GoPayException('not_double_entry', 'GoPay automatické účtování vyžaduje podvojné účetnictví.', 409);
+        $mode = $stmt->fetchColumn();
+        return is_string($mode) ? $mode : null;
+    }
+
+    /**
+     * Daňová evidence: pohyby vyúčtování vstupují do peněžního deníku (poplatky, vratky,
+     * výplata), takže je v roce s dokončenou roční uzávěrkou nejde načíst, přepracovat
+     * ani smazat. Podvojné účetnictví hlídá období přes PostingService.
+     *
+     * @param list<string> $dates
+     */
+    private function assertTaxEvidenceYearsOpen(int $supplierId, array $dates): void
+    {
+        if ($this->isDoubleEntry($supplierId)) {
+            return;
         }
+        $years = [];
+        foreach ($dates as $date) {
+            if (preg_match('/^(\d{4})-\d{2}-\d{2}/', $date, $m) === 1) {
+                $years[(int) $m[1]] = true;
+            }
+        }
+        ksort($years);
+        foreach (array_keys($years) as $year) {
+            if (TaxEvidenceYearLock::isFinal($this->db, $supplierId, $year)) {
+                throw new GoPayException(TaxEvidenceYearLock::ERROR_CODE, TaxEvidenceYearLock::message($year), 409);
+            }
+        }
+    }
+
+    private function assertClearingYearsOpen(int $supplierId, int $clearingId): void
+    {
+        if ($this->isDoubleEntry($supplierId)) {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT gc.performed_on FROM gopay_clearings gc WHERE gc.id=? AND gc.supplier_id=?
+             UNION ALL
+             SELECT gm.performed_on FROM gopay_movements gm WHERE gm.clearing_id=? AND gm.supplier_id=?
+             UNION ALL
+             SELECT bt.posted_at FROM gopay_clearings gc
+               JOIN bank_transactions bt ON bt.id=gc.bank_transaction_id
+              WHERE gc.id=? AND gc.supplier_id=?'
+        );
+        $stmt->execute([$clearingId, $supplierId, $clearingId, $supplierId, $clearingId, $supplierId]);
+        $this->assertTaxEvidenceYearsOpen($supplierId, array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
     }
 
     /** @param array<int,array<string,mixed>> $accounts */

@@ -19,7 +19,12 @@ use PDO;
  *      (sloupec neexistuje, R4), ale přes shodu bank_statements.account_number s účty daného
  *      supplieru v currencies (AccountNumberNormalizer::matchesAny — přesně jako StatementMatcher)
  *   C) virtuální úhrady bez fyzického dokladu   — invoice_payments (source manual/mark_paid/legacy)
- *      a ručně zaplacené purchase_invoices bez payment_matches i bez cash dokladu (R2)
+ *      a ručně zaplacené purchase_invoices bez payment_matches i bez cash dokladu (R2);
+ *      úhrada s referencí GOPAY: u firmy s nastaveným GoPay patří peněžnímu prostředku GoPay
+ *   G) pohyby vyúčtování GoPay mimo spárované platby (poplatky, vratky, výplata na účet)
+ *
+ * Každý řádek nese `instrument` (cash / bank / gopay / virtual), po kterém se dá
+ * sesouhlasit zůstatek jednotlivého peněžního prostředku.
  *
  * Dedup (R3): invoice_payments source IN ('bank','cash') a payment_matches jsou ANOTACE
  * pohybu nohy A/B (přes cash_documents.invoice_payment_id, resp. bank_transaction_id) —
@@ -84,6 +89,28 @@ final class CashJournalRepository
         return round((float) $this->db->pdo()->query($sql)->fetchColumn(), 2);
     }
 
+    /**
+     * Otevírací zůstatek k datu `from` po peněžních prostředcích (cash, bank, gopay,
+     * virtual = úhrady bez fyzického pohybu). Součet hodnot = openingBalance().
+     *
+     * @return array<string,float>
+     */
+    public function openingBalancesByInstrument(int $supplierId, string $from, bool $isVatPayer = false): array
+    {
+        $union = $this->unionSql($supplierId, $this->beforePredicate($from), $isVatPayer);
+        if ($union === null) {
+            return [];
+        }
+        $sql = "SELECT t.instrument, COALESCE(SUM(CASE WHEN t.direction = 'in' THEN t.amount ELSE -t.amount END), 0) AS balance
+                  FROM ( {$union} ) t
+                 GROUP BY t.instrument";
+        $out = [];
+        foreach ($this->db->pdo()->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(string) $row['instrument']] = round((float) $row['balance'], 2);
+        }
+        return $out;
+    }
+
     /** Počet řádků deníku v rozsahu (pro stránkování). */
     public function count(int $supplierId, string $from, string $to, bool $isVatPayer = false): int
     {
@@ -136,7 +163,8 @@ final class CashJournalRepository
                     cpi.is_fixed_asset AS pi_is_fixed_asset,
                     ccls.tax_bucket AS override_bucket,
                     " . self::otherItemKindSql($sid, 'cash_document_id', 'cd.id') . " AS other_item_kind,
-                    " . self::otherItemAllocatedSql($sid, 'cash_document_id', 'cd.id') . " AS other_item_allocated
+                    " . self::otherItemAllocatedSql($sid, 'cash_document_id', 'cd.id') . " AS other_item_allocated,
+                    'cash' AS instrument, NULL AS gopay_clearing_id, NULL AS gopay_type
                FROM cash_documents cd
                LEFT JOIN (SELECT cash_document_id,
                                   SUM(CASE WHEN tax_treatment = 'deductible'
@@ -215,7 +243,11 @@ final class CashJournalRepository
                         bpi.is_fixed_asset AS pi_is_fixed_asset,
                         bcls.tax_bucket AS override_bucket,
                         " . self::otherItemKindSql($sid, 'bank_transaction_id', 'bt.id') . " AS other_item_kind,
-                        " . self::otherItemAllocatedSql($sid, 'bank_transaction_id', 'bt.id') . " AS other_item_allocated
+                        " . self::otherItemAllocatedSql($sid, 'bank_transaction_id', 'bt.id') . " AS other_item_allocated,
+                        'bank' AS instrument,
+                        (SELECT MIN(gc.id) FROM gopay_clearings gc
+                          WHERE gc.supplier_id = {$sid} AND gc.bank_transaction_id = bt.id) AS gopay_clearing_id,
+                        NULL AS gopay_type
                    FROM bank_transactions bt
                    LEFT JOIN (
                         SELECT ip.bank_transaction_id AS btid,
@@ -305,7 +337,12 @@ final class CashJournalRepository
                     NULL AS purchase_invoice_id, NULL AS pi_without_vat, NULL AS pi_vat, NULL AS pi_with_vat,
                     NULL AS pi_deductible, NULL AS pi_kind, NULL AS pi_vat_deduction,
                     NULL AS pi_vat_deduction_percent, NULL AS pi_is_fixed_asset, NULL AS override_bucket,
-                    NULL AS other_item_kind, NULL AS other_item_allocated
+                    NULL AS other_item_kind, NULL AS other_item_allocated,
+                    CASE WHEN ip.bank_reference LIKE BINARY '" . \MyInvoice\Service\Accounting\GoPay\GoPayPendingService::REFERENCE_PREFIX . "%'
+                              AND EXISTS (SELECT 1 FROM gopay_settings gs
+                                           WHERE gs.supplier_id = {$sid} AND gs.currency = ip.currency)
+                         THEN 'gopay' ELSE 'virtual' END AS instrument,
+                    NULL AS gopay_clearing_id, NULL AS gopay_type
                FROM invoice_payments ip
                JOIN invoices ii      ON ii.id = ip.invoice_id AND ii.supplier_id = {$sid}
                LEFT JOIN clients icl ON icl.id = ii.client_id
@@ -335,7 +372,8 @@ final class CashJournalRepository
                     pi.document_kind AS pi_kind, pi.vat_deduction AS pi_vat_deduction,
                     pi.vat_deduction_percent AS pi_vat_deduction_percent,
                     pi.is_fixed_asset AS pi_is_fixed_asset, NULL AS override_bucket,
-                    NULL AS other_item_kind, NULL AS other_item_allocated
+                    NULL AS other_item_kind, NULL AS other_item_allocated,
+                    'virtual' AS instrument, NULL AS gopay_clearing_id, NULL AS gopay_type
                FROM purchase_invoices pi
                LEFT JOIN currencies pcur ON pcur.id = pi.currency_id
                LEFT JOIN clients pv      ON pv.id = pi.vendor_id
@@ -348,6 +386,49 @@ final class CashJournalRepository
                                  WHERE cno2.doc_type = 'purchase_invoice' AND cno2.credit_note_id = pi.id)
                 AND NOT ({$cnOffsets} > 0 AND ABS(COALESCE(pi.amount_to_pay, pi.total_with_vat) - {$cnOffsets}) <= 0.005)
                 AND " . sprintf($datePredicate, 'pi.paid_at');
+
+        // ── Noha G — GoPay jako samostatný peněžní prostředek (pohyby vyúčtování) ──
+        // Příjem z platby kartou nebo převodem přes GoPay nese úhrada faktury (noha C1,
+        // instrument 'gopay') ke dni inkasa. Z vyúčtování se proto bere všechno OSTATNÍ:
+        // poplatky (daňový výdaj ke dni srážky), dobropis poplatků, vratka k dobropisu
+        // (snižuje příjem), výplata na bankovní účet (převod, protějšek bankovního pohybu
+        // spárovaného s vyúčtováním) a kreditní pohyb, který se nespároval s úhradou faktury
+        // (nezařazený příjem, blokuje uzávěrku). Spárovaný kreditní pohyb tu NENÍ: jeho
+        // příjem už je v noze C1, započetl by se dvakrát.
+        $gopayRate = "IF(gc.currency = 'CZK', 1, " . self::nearestRateSql('gc.currency', 'gm.performed_on') . ')';
+        $legs[] =
+            "SELECT 'gopay' AS source_type, gm.id AS source_id, gm.performed_on AS movement_date,
+                    CASE WHEN gm.movement_type IN ('credit', 'fee_credit') THEN 'in' ELSE 'out' END AS direction,
+                    ROUND(ABS(gm.amount) * {$gopayRate}, 2) AS amount,
+                    COALESCE(gcn.varsymbol, gc.clearing_id) AS doc_no,
+                    'GoPay' AS partner,
+                    CASE gm.movement_type
+                         WHEN 'credit'       THEN 'GoPay: platba bez spárované úhrady faktury'
+                         WHEN 'storno'       THEN 'GoPay: vratka k dobropisu'
+                         WHEN 'storno_fee'   THEN 'GoPay: poplatek za vratku'
+                         WHEN 'clearing_fee' THEN 'GoPay: poplatky za zpracování plateb'
+                         WHEN 'fee_credit'   THEN 'GoPay: dobropis poplatků'
+                         WHEN 'payout'       THEN 'GoPay: výplata na bankovní účet'
+                    END AS description,
+                    NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
+                    NULL AS bank_class, NULL AS bank_income_base, NULL AS bank_income_exempt,
+                    gcn.id AS invoice_id, gcn.invoice_type AS inv_type,
+                    gcn.total_without_vat AS inv_without_vat, gcn.total_vat AS inv_vat,
+                    gcn.total_with_vat AS inv_with_vat,
+                    gcn.income_tax_exempt AS inv_exempt, gcn.status AS inv_status,
+                    NULL AS purchase_invoice_id, NULL AS pi_without_vat, NULL AS pi_vat, NULL AS pi_with_vat,
+                    NULL AS pi_deductible, NULL AS pi_kind, NULL AS pi_vat_deduction,
+                    NULL AS pi_vat_deduction_percent, NULL AS pi_is_fixed_asset, NULL AS override_bucket,
+                    NULL AS other_item_kind, NULL AS other_item_allocated,
+                    'gopay' AS instrument, gc.id AS gopay_clearing_id, gm.movement_type AS gopay_type
+               FROM gopay_movements gm
+               JOIN gopay_clearings gc ON gc.id = gm.clearing_id AND gc.supplier_id = {$sid}
+               LEFT JOIN invoices gcn
+                      ON gcn.id = gm.credit_note_id AND gcn.supplier_id = {$sid}
+                     AND gm.movement_type = 'storno' AND gm.status = 'posted'
+              WHERE gm.supplier_id = {$sid}
+                AND NOT (gm.movement_type = 'credit' AND gm.status = 'posted' AND gm.invoice_payment_id IS NOT NULL)
+                AND " . sprintf($datePredicate, 'gm.performed_on');
 
         return $legs === [] ? null : implode("\nUNION ALL\n", $legs);
     }
@@ -448,6 +529,10 @@ final class CashJournalRepository
                LEFT JOIN currencies pcur ON pcur.id = pi.currency_id
               WHERE pi.supplier_id = {$sid} AND pi.paid_at IS NOT NULL AND pi.paid_at <= '{$toDate}'
                 AND pi.status <> 'cancelled'",
+            "SELECT gc.currency AS c, gm.performed_on AS d
+               FROM gopay_movements gm
+               JOIN gopay_clearings gc ON gc.id = gm.clearing_id AND gc.supplier_id = {$sid}
+              WHERE gm.supplier_id = {$sid} AND gm.performed_on <= '{$toDate}'",
         ];
         $stmtIds = $this->matchingStatementIds($supplierId);
         if ($stmtIds !== []) {
@@ -628,6 +713,9 @@ final class CashJournalRepository
         $r['other_item_allocated'] = isset($r['other_item_allocated']) ? round((float) $r['other_item_allocated'], 2) : null;
         $r['fx_rate_missing'] = !array_key_exists('amount', $r) || $r['amount'] === null;
         $r['source_id']    = (int) $r['source_id'];
+        $r['instrument']   = (string) ($r['instrument'] ?? 'virtual');
+        $r['gopay_clearing_id'] = isset($r['gopay_clearing_id']) ? (int) $r['gopay_clearing_id'] : null;
+        $r['gopay_type']   = isset($r['gopay_type']) ? (string) $r['gopay_type'] : null;
         $r['amount']       = $r['fx_rate_missing'] ? 0.0 : round((float) $r['amount'], 2);
         $r['running_delta'] = isset($r['running_delta']) ? round((float) $r['running_delta'], 2) : 0.0;
         foreach (['invoice_id', 'purchase_invoice_id'] as $k) {

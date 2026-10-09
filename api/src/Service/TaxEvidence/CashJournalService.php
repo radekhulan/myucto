@@ -88,6 +88,7 @@ final class CashJournalService
         ];
 
         $rows = [];
+        $instrumentMoves = [];
         $warnings = $rateWarnings;
         $bucketKeyMap = [
             'income_taxable'   => 'prijem_danovy',
@@ -117,9 +118,13 @@ final class CashJournalService
                     'direction'   => (string) $r['direction'],
                     'amount'      => (float) $r['amount'],
                     'blocking'    => $c['blocking'],
-                    'message'     => $c['blocking']
-                        ? 'Nezařazený příchozí bankovní pohyb — zařaďte jej (mimo daňový základ, riziko podhodnocení příjmu).'
-                        : 'Nezařazený bankovní pohyb — zařaďte jej pro správný daňový základ.',
+                    'message'     => $r['source_type'] === 'gopay'
+                        ? ($c['blocking']
+                            ? 'Platba GoPay bez spárované úhrady faktury — dořešte ji v modulu GoPay (chybí v daňovém příjmu).'
+                            : 'Vratka GoPay bez spárovaného dobropisu — dořešte ji v modulu GoPay.')
+                        : ($c['blocking']
+                            ? 'Nezařazený příchozí bankovní pohyb — zařaďte jej (mimo daňový základ, riziko podhodnocení příjmu).'
+                            : 'Nezařazený bankovní pohyb — zařaďte jej pro správný daňový základ.'),
                 ];
             }
 
@@ -185,7 +190,12 @@ final class CashJournalService
                 'unclassified'        => $c['unclassified'],
                 'blocking'            => $c['blocking'],
                 'fx_rate_missing'     => ($r['fx_rate_missing'] ?? false) === true,
+                'instrument'          => (string) ($r['instrument'] ?? 'virtual'),
+                'gopay_clearing_id'   => $r['gopay_clearing_id'] ?? null,
             ];
+            $signed = $r['direction'] === 'in' ? (float) $r['amount'] : -(float) $r['amount'];
+            $instrument = (string) ($r['instrument'] ?? 'virtual');
+            $instrumentMoves[$instrument] = round(($instrumentMoves[$instrument] ?? 0.0) + $signed, 2);
         }
 
         // H2: bankovní úhrady mimo spárované výpisy (změna účtu / currencies.account_number)
@@ -216,6 +226,7 @@ final class CashJournalService
             'is_vat_payer'    => $isVatPayer,
             'opening_balance' => $opening,
             'closing_balance' => $closing,
+            'balances'        => $this->instrumentBalances($supplierId, $from, $isVatPayer, $instrumentMoves),
             'rows'            => $rows,
             'totals'          => $totals,
             'checks'          => $this->reconciliation($supplierId, $year, $isVatPayer, $totals, $variance),
@@ -386,6 +397,18 @@ final class CashJournalService
         $direction = (string) $r['direction'];
         $source    = (string) $r['source_type'];
 
+        // GoPay: výplata vyúčtování na bankovní účet je převod mezi vlastními prostředky.
+        // Příjem vznikl už inkasem platby přes GoPay (úhrada faktury), takže bankovní pohyb
+        // spárovaný s vyúčtováním nesmí tvořit příjem znovu — ani ručním zařazením.
+        // Párování výplaty ho zároveň zařadí jako převod stejnou cestou jako ruční zařazení
+        // a pravidla bankovních pohybů (GoPayService::matchPayout), tady jde o pojistku.
+        if ($source === 'bank' && ($r['gopay_clearing_id'] ?? null) !== null) {
+            return $this->wholeToBucket('transfer', $amount, $direction);
+        }
+        if ($source === 'gopay') {
+            return $this->goPayAlloc($amount, $direction, $r, $isVatPayer);
+        }
+
         // 0) Ruční override (1027) — nejvyšší priorita; celý pohyb do daného kbelíku.
         $override = $r['override_bucket'] ?? null;
         if ($override !== null && $override !== '') {
@@ -469,6 +492,42 @@ final class CashJournalService
         return $direction === 'in'
             ? $this->single('income_nontax', $amount, 'income_nontax')
             : $this->single('expense_nontax', $amount, 'expense_nontax');
+    }
+
+    /**
+     * Pohyb vyúčtování GoPay (noha G). Poplatky jsou daňový výdaj ke dni srážky (finanční
+     * služba bez DPH, celé = základ), dobropis poplatků ho snižuje, vratka k dobropisu
+     * snižuje příjem stejně jako bankovní vratka (prorata DPH dobropisu) a výplata na
+     * bankovní účet je převod. Kreditní pohyb bez spárované úhrady faktury a vratka bez
+     * dobropisu zůstávají nezařazené (příchozí blokuje), dořeší se v modulu GoPay.
+     *
+     * @param array<string,mixed> $r
+     * @return array{alloc:array<string,float>, bucket:string, base:float, vat:float, unclassified:bool, blocking:bool}
+     */
+    private function goPayAlloc(float $amount, string $direction, array $r, bool $isVatPayer): array
+    {
+        switch ((string) ($r['gopay_type'] ?? '')) {
+            case 'clearing_fee':
+            case 'storno_fee':
+                return $this->single('expense_taxable', $amount, 'expense_taxable', $amount, 0.0);
+            case 'fee_credit':
+                return $this->single('expense_taxable', -$amount, 'expense_taxable', -$amount, 0.0);
+            case 'payout':
+                return $this->wholeToBucket('transfer', $amount, $direction);
+            case 'storno':
+                if ($r['invoice_id'] !== null) {
+                    return $this->incomeAlloc($amount, $direction, $r, $isVatPayer);
+                }
+                break;
+        }
+        return [
+            'alloc'        => [],
+            'bucket'       => 'nezarazeno',
+            'base'         => 0.0,
+            'vat'          => 0.0,
+            'unclassified' => true,
+            'blocking'     => $direction === 'in',
+        ];
     }
 
     /**
@@ -853,6 +912,35 @@ final class CashJournalService
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Zůstatky po peněžních prostředcích (pokladna, banka, GoPay, úhrady bez fyzického
+     * pohybu). Součet otevíracích i konečných zůstatků = opening_balance / closing_balance.
+     * Zůstatek GoPay je částka, kterou GoPay drží a ještě nevyplatil — sesouhlasí se
+     * se zůstatkem obchodního účtu GoPay.
+     *
+     * @param array<string,float> $moves
+     * @return list<array{instrument:string, opening:float, movement:float, closing:float}>
+     */
+    private function instrumentBalances(int $supplierId, string $from, bool $isVatPayer, array $moves): array
+    {
+        $opening = $this->repo->openingBalancesByInstrument($supplierId, $from, $isVatPayer);
+        $out = [];
+        foreach (['cash', 'bank', 'gopay', 'virtual'] as $instrument) {
+            $open = $opening[$instrument] ?? 0.0;
+            $move = $moves[$instrument] ?? 0.0;
+            if ($open == 0.0 && $move == 0.0 && !array_key_exists($instrument, $opening) && !array_key_exists($instrument, $moves)) {
+                continue;
+            }
+            $out[] = [
+                'instrument' => $instrument,
+                'opening'    => round($open, 2),
+                'movement'   => round($move, 2),
+                'closing'    => round($open + $move, 2),
+            ];
+        }
+        return $out;
+    }
 
     /** @param list<array<string,mixed>> $rows */
     private function sumSigned(array $rows): float

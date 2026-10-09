@@ -971,7 +971,8 @@
         "1987_purchase_invoice_vendor_number_seq.sql",
         "1988_credit_note_offsets.sql",
         "1989_expense_rules_tax_deductible.sql",
-        "1990_tax_evidence_bank_rules.sql"
+        "1990_tax_evidence_bank_rules.sql",
+        "1991_gopay_tax_evidence_settings.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5422,17 +5423,17 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
-                "clearing_account_id": "bigint(20) unsigned NOT NULL",
+                "clearing_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "currency": "char(3) NOT NULL DEFAULT 'CZK'",
-                "destination_bank_account_id": "bigint(20) unsigned NOT NULL",
-                "fee_account_id": "bigint(20) unsigned NOT NULL",
-                "gopay_account_id": "bigint(20) unsigned NOT NULL",
+                "destination_bank_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "fee_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "gopay_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "payout_account_number": "varchar(40) NOT NULL DEFAULT '115-1391640287'",
                 "payout_bank_code": "char(4) NOT NULL DEFAULT '0100'",
                 "payout_date_tolerance_days": "tinyint(3) unsigned NOT NULL DEFAULT 3",
-                "receivable_account_id": "bigint(20) unsigned NOT NULL",
+                "receivable_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"

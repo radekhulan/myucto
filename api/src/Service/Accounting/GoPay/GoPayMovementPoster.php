@@ -45,6 +45,11 @@ final class GoPayMovementPoster
             if (!is_array($movement)) {
                 throw new GoPayException('movement_not_found', 'GoPay pohyb nebyl nalezen.', 404);
             }
+            if (!$this->isDoubleEntry($supplierId)) {
+                $this->linkForTaxEvidence($supplierId, $movement);
+                $this->commitUnit($pdo, $ownTx, 'gopay_movement');
+                return;
+            }
             if ($movement['status'] === 'posted' && $movement['journal_entry_id'] !== null) {
                 $existing = $this->journal->find((int) $movement['journal_entry_id'], $supplierId);
                 if (is_array($existing) && ($existing['reversed_by'] ?? null) === null) {
@@ -110,6 +115,74 @@ final class GoPayMovementPoster
                   WHERE id=? AND supplier_id=? AND status<>"posted"'
             )->execute([$status, $code, $message, $movementId, $supplierId]);
         }
+    }
+
+    /**
+     * Daňová evidence nemá zápisy: pohyb se jen spáruje s úhradou faktury nebo dobropisem
+     * a označí jako zpracovaný. Peněžní deník pak čte příjem z úhrady faktury (ke dni
+     * inkasa), vratku, poplatky a výplatu přímo z pohybů vyúčtování.
+     *
+     * @param array<string,mixed> $movement
+     */
+    private function linkForTaxEvidence(int $supplierId, array $movement): void
+    {
+        $movementId = (int) $movement['id'];
+        $links = ['invoice_id' => null, 'invoice_payment_id' => null, 'credit_note_id' => null];
+        try {
+            switch ((string) $movement['movement_type']) {
+                case 'credit':
+                    $match = $this->matchInvoicePayment($supplierId, $movement);
+                    $duplicate = $this->db->pdo()->prepare(
+                        'SELECT 1 FROM gopay_movements
+                          WHERE supplier_id=? AND invoice_payment_id=? AND id<>?
+                            AND movement_type="credit" AND status="posted" LIMIT 1'
+                    );
+                    $duplicate->execute([$supplierId, (int) $match['payment_id'], $movementId]);
+                    if ($duplicate->fetchColumn() !== false) {
+                        throw new GoPayException('payment_already_posted', 'Úhrada faktury je už spárovaná s jiným GoPay pohybem.');
+                    }
+                    $links['invoice_id'] = (int) $match['invoice_id'];
+                    $links['invoice_payment_id'] = (int) $match['payment_id'];
+                    break;
+                case 'storno':
+                    $links['credit_note_id'] = (int) $this->matchCreditNote($supplierId, $movement)['id'];
+                    break;
+                case 'storno_fee':
+                case 'clearing_fee':
+                case 'fee_credit':
+                case 'payout':
+                    break;
+                default:
+                    throw new GoPayException('unsupported_movement', 'Nepodporovaný typ GoPay pohybu.');
+            }
+        } catch (GoPayException $e) {
+            $this->db->pdo()->prepare(
+                'UPDATE gopay_movements
+                    SET invoice_id=IF(origin="payment",invoice_id,NULL),
+                        invoice_payment_id=IF(origin="payment",invoice_payment_id,NULL),
+                        credit_note_id=NULL,
+                        status="unmatched",issue_code=?,issue_message=?,processed_at=NOW()
+                  WHERE id=? AND supplier_id=?'
+            )->execute([$e->errorCode, mb_substr($e->getMessage(), 0, 500), $movementId, $supplierId]);
+            return;
+        }
+
+        $this->db->pdo()->prepare(
+            'UPDATE gopay_movements
+                SET invoice_id=?,invoice_payment_id=?,credit_note_id=?,journal_entry_id=NULL,
+                    status="posted",issue_code=NULL,issue_message=NULL,processed_at=NOW()
+              WHERE id=? AND supplier_id=?'
+        )->execute([
+            $links['invoice_id'], $links['invoice_payment_id'], $links['credit_note_id'],
+            $movementId, $supplierId,
+        ]);
+    }
+
+    private function isDoubleEntry(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id=?');
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchColumn() === 'double_entry';
     }
 
     /**
@@ -319,6 +392,10 @@ final class GoPayMovementPoster
 
     private function assertInvoicePosted(int $supplierId, int $invoiceId): void
     {
+        // Daňová evidence doklady nezaúčtovává; párování stačí k existujícímu dokladu.
+        if (!$this->isDoubleEntry($supplierId)) {
+            return;
+        }
         $stmt = $this->db->pdo()->prepare(
             'SELECT 1 FROM journal_entries
               WHERE supplier_id=? AND source_type="invoice" AND source_id=?
