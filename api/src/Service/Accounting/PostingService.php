@@ -1444,7 +1444,7 @@ final class PostingService
             $receivedAt = ((string) ($pi['received_at_source'] ?? '') === 'manual')
                 ? ($pi['received_at'] !== null ? (string) $pi['received_at'] : null)
                 : null;
-            [$net, $vat] = $this->ledgerTotals(
+            [$net, $vat, $selfAssessedVat] = $this->ledgerTotals(
                 $supplierId,
                 'purchase',
                 $purchaseInvoiceId,
@@ -1454,6 +1454,7 @@ final class PostingService
             );
         } else {
             [$net, $vat] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
+            $selfAssessedVat = 0.0;
         }
         if ($net + $vat === 0.0) {
             throw new PostingException('document_not_postable', 'Přijatá faktura #' . $purchaseInvoiceId . ' nemá řádky k zaúčtování.');
@@ -1497,16 +1498,22 @@ final class PostingService
         $lines = [];
         if ($isRc) {
             // Vendor fakturuje bez DPH → závazek = základ; daň se samovyměří na 343 (obě strany).
+            // Smíšený doklad nese vedle řádků § 92a i tuzemský řádek s daní dodavatele: ta je
+            // běžným odpočtem a je součástí závazku, samovyměřuje se jen daň RC řádků.
+            $supplierVat = round($vat - $selfAssessedVat, 2);
             $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
-            if ($vat !== 0.0) {
+            if ($selfAssessedVat !== 0.0) {
                 // Samovyměření: obě nohy jsou tatáž částka, ale patří na RŮZNÉ analytiky —
                 // odpočet na vstup, přiznaná daň na výstup. Na plochém 343 se okamžitě
                 // vynetovaly a v zúčtování období po nich nezůstala stopa.
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($vat), $cc);  // nárok na odpočet
-                $lines[] = $this->line($this->outputVatAccount($supplierId), $payableSide, abs($vat), $cc); // povinnost přiznat daň
+                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($selfAssessedVat), $cc);  // nárok na odpočet
+                $lines[] = $this->line($this->outputVatAccount($supplierId), $payableSide, abs($selfAssessedVat), $cc); // povinnost přiznat daň
+            }
+            if ($supplierVat !== 0.0) {
+                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($supplierVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
-            $this->appendRounding($lines, $totalCzk, $net, $cc, $totalOnCredit);
+            $this->appendRounding($lines, $totalCzk, $net + $supplierVat, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'none') {
             $expenseAmount = round($net + $vat, 2);
             $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
@@ -3429,8 +3436,11 @@ final class PostingService
      * roku, ale scanner by ho bez tohoto rozšíření minul → 'document_not_postable'.
      * Proto received_at (jen manual) vstupuje do min/max stejně jako docDate/issueDate.
      *
+     * Třetí prvek je ta část daně, která je samovyměřením ({@see VatLedgerService::isSelfAssessedRow()}).
+     * Zbytek daně je daň dodavatele k odpočtu, i na dokladu s příznakem přenesení v hlavičce.
+     *
      * @param 'sale'|'purchase' $source
-     * @return array{0:float,1:float} [net, vat]
+     * @return array{0:float,1:float,2:float} [net, vat, selfAssessedVat]
      */
     private function ledgerTotals(int $supplierId, string $source, int $invoiceId, string $docDate, string $issueDate, ?string $receivedAt = null): array
     {
@@ -3444,6 +3454,7 @@ final class PostingService
         $end   = sprintf('%04d-12-31', $endYear);
         $net = 0.0;
         $vat = 0.0;
+        $selfAssessed = 0.0;
         foreach ($this->vatLedger->rows($supplierId, $start, $end, true) as $row) {
             if (($row['document_kind'] ?? null) !== 'cash'
                 && $row['source'] === $source
@@ -3451,9 +3462,12 @@ final class PostingService
             ) {
                 $net += (float) $row['base_czk'];
                 $vat += (float) $row['vat_czk'];
+                if (VatLedgerService::isSelfAssessedRow($row)) {
+                    $selfAssessed += (float) $row['vat_czk'];
+                }
             }
         }
-        return [round($net, 2), round($vat, 2)];
+        return [round($net, 2), round($vat, 2), round($selfAssessed, 2)];
     }
 
     /**

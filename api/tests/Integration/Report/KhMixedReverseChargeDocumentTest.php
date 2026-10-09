@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Report;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Report\DphBookBuilder;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
@@ -212,6 +213,34 @@ final class KhMixedReverseChargeDocumentTest extends TestCase
         $this->assertSame(-4200.0, $declared['purchase_invoice:' . $pOver]);
         $this->assertSame(-420.0, $declared['purchase_invoice:' . $pUnder]);
         $this->assertSame(-120.0, $declared['purchase_invoice:' . $pReduced]);
+    }
+
+    public function testMixedReverseChargePurchasePostsDomesticVatAsDeduction(): void
+    {
+        $vend = $this->client('Testovací dodavatel', 'CZ22222220', vendor: true);
+        $date = sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, 3);
+        $id = $this->purchase('P-2097-111', $vend, $date, [[50000.00, 0.0, '5', 21.0], [20000.00, 4200.00, '40', 21.0]]);
+
+        $lines = Bootstrap::buildContainer()->get(PostingService::class)->buildFromPurchaseInvoice($this->supplierId, $id);
+
+        $sum = static function (array $lines, string $prefix, string $side): float {
+            $s = 0.0;
+            foreach ($lines as $l) {
+                if (str_starts_with($l['account_code'], $prefix) && $l['side'] === $side) {
+                    $s += (float) $l['amount'];
+                }
+            }
+            return round($s, 2);
+        };
+        $this->assertSame(70000.0, $sum($lines, '5', 'debit'), 'Náklad = základ obou řádků.');
+        $this->assertSame(14700.0, $sum($lines, '343', 'debit'), 'Odpočet = samovyměření § 92a 10 500 + daň dodavatele 4 200.');
+        $this->assertSame(10500.0, $sum($lines, '343', 'credit'), 'Výstupní daň jen z řádku § 92a.');
+        $this->assertSame(74200.0, $sum($lines, '321', 'credit'), 'Závazek včetně daně dodavatele.');
+        $this->assertSame($sum($lines, '', 'debit'), $sum($lines, '', 'credit'), 'Zápis je vyvážený.');
+        $this->assertSame([], array_values(array_filter(
+            $lines,
+            static fn (array $l): bool => in_array($l['account_code'], ['548', '648'], true),
+        )), 'Žádné zaokrouhlovací dorovnání.');
     }
 
     private function client(string $name, ?string $dic, bool $customer = false, bool $vendor = false): int

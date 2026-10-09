@@ -1216,6 +1216,22 @@ final class VatLedgerService
         ];
     }
 
+    /**
+     * Je řádek evidence samovyměřením (daň na vstupu i na výstupu), nebo běžným odpočtem?
+     *
+     * Příznak přenesení v hlavičce dokladu nestačí: smíšený doklad nese vedle řádku § 92a
+     * i tuzemský řádek kódu 40/41 s daní dodavatele, který přiznání odečítá na ř. 40/41
+     * bez výstupní daně. Rozhoduje klasifikace řádku; řádek bez řádku přiznání (bez kódu)
+     * se pod příznakem v hlavičce dál bere jako samovyměření.
+     *
+     * @param array<string,mixed> $row řádek z {@see rows()}
+     */
+    public static function isSelfAssessedRow(array $row): bool
+    {
+        return !empty($row['is_reverse_charge'])
+            && (!empty($row['classification_reverse_charge']) || ($row['dphdp3_line'] ?? null) === null);
+    }
+
     /** Datum (DATE i DATETIME z PDO) na `YYYY-MM-DD`; prázdno → null. */
     private static function dateOnly(mixed $value): ?string
     {
