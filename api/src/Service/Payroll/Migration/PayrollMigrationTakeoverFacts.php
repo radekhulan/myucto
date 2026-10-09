@@ -209,7 +209,9 @@ final readonly class PayrollMigrationTakeoverFacts
      * celá čísla je převádí tahle metoda; ostatní jsou už celá čísla.
      *
      * @param array{pension_participation:bool,insurance_days:int,excluded_days:int,worked_days:float|int,
-     *     worked_minutes:int,deductions:float|int,net_payable:float|int,payout_date?:?string} $month
+     *     worked_minutes:int,deductions:float|int,net_payable:float|int,payout_date?:?string,
+     *     old_age_savings?:float|int} $month `old_age_savings` = příspěvek zaměstnavatele na produkty
+     *     spoření na stáří v Kč (zdroj, který ho nevede, klíč vynechá)
      */
     public static function fromMonth(
         array $month,
@@ -231,6 +233,9 @@ final readonly class PayrollMigrationTakeoverFacts
             deductionsMinor: (int) round($month['deductions'] * 100),
             netPayableMinor: (int) round($month['net_payable'] * 100),
             payoutDate: $month['payout_date'] ?? null,
+            oldAgeSavingsContributionMinor: isset($month['old_age_savings'])
+                ? max(0, (int) round($month['old_age_savings'] * 100))
+                : null,
         );
     }
 

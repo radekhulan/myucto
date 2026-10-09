@@ -365,15 +365,22 @@ Zkontrolujte po převodu:
 ### 109.8.3 Co převod nepřenese
 
 - **Docházka a složky mezd.** Mzdové složky jednotlivých měsíců se
-  nepřevádějí. Z trvalých karet vztahu převod založí jen osobní ohodnocení
-  pevnou částkou, a to jako opakovanou složku *Osobní ohodnocení*
-  (pravidelná odměna) pro měsíce, které počítá MyÚčto; karta, která na konci
-  převáděného období už skončila, se nepřevezme. Předpis má rozpočítání
-  *Odpracované hodiny*: v měsíci s dovolenou, nemocí nebo překážkou se krátí
-  poměrem odpracované doby k fondu pracovní doby stejně jako základní mzda,
-  tak jak ho krátí PREMIER. Částku, kterou jste v PREMIER zadávali ručně,
-  upravte ve vstupu měsíce. Příspěvek na penzijní
-  připojištění, stravenkový paušál a příspěvek na praní zadejte v modulu Mzdy.
+  nepřevádějí. Z trvalých karet vztahu převod založí opakované složky pro
+  měsíce, které počítá MyÚčto; karta, která na konci převáděného období už
+  skončila, se nepřevezme:
+  - *Osobní ohodnocení* (pravidelná odměna) s rozpočítáním *Odpracované
+    hodiny*: v měsíci s dovolenou, nemocí nebo překážkou se krátí poměrem
+    odpracované doby k fondu pracovní doby stejně jako základní mzda, tak jak
+    ho krátí PREMIER. Částku, kterou jste v PREMIER zadávali ručně, upravte ve
+    vstupu měsíce.
+  - Příspěvek zaměstnavatele na penzijní připojištění na složku *Příspěvek na
+    penzijní a životní produkty*. Na složce ověřte zařazení podle smlouvy.
+    Příspěvky z převzatých měsíců se započtou do ročního limitu 50 000 Kč.
+  - Stravenkový paušál na složku *Příspěvek na stravování*. PREMIER vede
+    sazbu za směnu, ne měsíční částku, proto předpis částku netvrdí: každý
+    měsíc ho MyÚčto nabídne k určení částky a sazbu ukáže v poznámce.
+  - Příspěvek na praní pracovních oděvů jako vlastní složka, která není
+    předmětem daně ani pojistného.
 - **Doklad a DIČ nerezidenta.** Stát daňové rezidence nerezidenta převod vezme
   z karty nerezidenta; číslo dokladu a DIČ v zemi rezidence doplňte ručně.
 - **Sklad, zakázky a CRM.** Zápisy jsou v převedeném deníku, evidence se

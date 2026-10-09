@@ -158,13 +158,39 @@ final class PremierPayrollTakeoverTest extends TestCase
         $relations = array_column(PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations, null, 'key');
 
         self::assertSame(
-            [['code' => 'PREMIER_303', 'name' => 'Osobní ohodnocení', 'kind' => 'bonus', 'amount' => 2000.0, 'from' => '2025-01-01', 'to' => null, 'allocation' => 'hours']],
+            [['code' => 'PREMIER_303', 'name' => 'Osobní ohodnocení', 'kind' => 'bonus', 'amount' => 2000.0, 'from' => '2025-01-01', 'to' => null, 'allocation' => 'hours',
+                'calculation' => 'fixed_amount', 'definition' => [], 'note' => null]],
             PremierPayrollTakeover::record($relations['5'], '2025-12-31')->employment->recurringComponents,
         );
         self::assertSame([], PremierPayrollTakeover::recurringComponents($relations['5'], '2025-12-31', '2025-01'));
         self::assertSame([], PremierPayrollTakeover::recurringComponents(['end' => '2025-09-30'] + $relations['5'], '2025-12-31'),
             'Vztah skončený před posledním převzatým měsícem opakovanou složku nedostane.');
         self::assertSame([], PremierPayrollTakeover::record($relations['6'], '2025-12-31')->employment->recurringComponents);
+    }
+
+    /**
+     * Ostatní trvalé příjmy karty vztahu: penzijní připojištění na výchozí složku koše,
+     * stravenkový paušál (sazba za směnu) jako předpis k ručnímu určení částky a příspěvek
+     * na praní jako vlastní složka, která není předmětem daně. Převzaté měsíce nesou
+     * příspěvek na penzijní připojištění pro koš osvobození.
+     */
+    public function testRecurringBenefitsFromRelationCard(): void
+    {
+        $this->tmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'premier_takeover_' . bin2hex(random_bytes(5));
+        SyntheticPremierBackup::writeDir($this->tmp, false, ['payroll' => true, 'payroll_detail' => true, 'payroll_benefits' => true]);
+        $relations = array_column(PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations, null, 'key');
+
+        $items = array_column(PremierPayrollTakeover::record($relations['5'], '2025-12-31')->employment->recurringComponents, null, 'code');
+        self::assertSame(['PREMIER_303', 'PRISPEVEK_PENZE_ZIVOTNI', 'PRISPEVEK_STRAVOVANI', 'PREMIER_862'], array_keys($items));
+        self::assertSame(['benefit_pension', 1000.0, 'fixed_amount', 'calendar_days'], [$items['PRISPEVEK_PENZE_ZIVOTNI']['kind'],
+            $items['PRISPEVEK_PENZE_ZIVOTNI']['amount'], $items['PRISPEVEK_PENZE_ZIVOTNI']['calculation'], $items['PRISPEVEK_PENZE_ZIVOTNI']['allocation']]);
+        self::assertSame('manual_review', $items['PRISPEVEK_STRAVOVANI']['calculation']);
+        self::assertStringContainsString('129,50 Kč za směnu', (string) $items['PRISPEVEK_STRAVOVANI']['note']);
+        self::assertSame(['exempt', 'not_subject_to_tax', 'excluded', 'excluded'], [$items['PREMIER_862']['definition']['tax_treatment'],
+            $items['PREMIER_862']['definition']['exemption_basis'], $items['PREMIER_862']['definition']['social_treatment'],
+            $items['PREMIER_862']['definition']['jmhz_treatment']]);
+        self::assertSame([], $items['PREMIER_303']['definition']);
+        self::assertSame(1000.0, $relations['5']['months']['2025-03']['old_age_savings']);
     }
 
     public function testPolicyKeepsPremierBehaviour(): void

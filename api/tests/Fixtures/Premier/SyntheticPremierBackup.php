@@ -140,7 +140,10 @@ final class SyntheticPremierBackup
      *   `payroll_detail`        s `payroll`: další vztahy a evidence mzdového modulu, viz {@see payrollDetail()}
      *   `payroll_nonresident`   s `payroll_detail`: osoba DPP (INTER 6) je daňový nerezident s kartou
      *                           `PER_NERZ` (stát rezidence SK); karta rezidenta (CZ) u INTER 5
-     *   `bank_split`            výpis BV 8 z 15. 10. 2025 se čtyřmi pohyby a dvěma řádky bez pohybu: výběr hotovosti,
+     *   `payroll_benefits`      s `payroll_detail`: trvalé příjmy INTER 5 na kartě `MZ_SRAZ` (penzijní
+     *                           připojištění 422, stravenkový paušál 712 za směnu, praní 862) a příspěvek
+     *                           na penzijní připojištění v `MZDY.MZ_PENZ` všech měsíců, viz {@see benefits()}
+     *   `bank_split`           výpis BV 8 z 15. 10. 2025 se čtyřmi pohyby a dvěma řádky bez pohybu: výběr hotovosti,
      *                           úhrada VF 250005 (1 209,60, VS jen ve `VAR_DAL`, údaje homebankingu
      *                           `H*`/`PARTRAN`) s haléřovým vyrovnáním 548/311 0,40 (vazba na tutéž
      *                           fakturu), úhrada VF 250006, poplatek a kurzový zisk 311/663 bez vazby;
@@ -392,6 +395,9 @@ final class SyntheticPremierBackup
             self::payroll($tables, !empty($flags['payroll_mismatch']), !empty($flags['payroll_detail']), !empty($flags['payroll_unknown_codes']));
             if (!empty($flags['payroll_detail']) && !empty($flags['payroll_nonresident'])) {
                 self::nonResident($tables);
+            }
+            if (!empty($flags['payroll_detail']) && !empty($flags['payroll_benefits'])) {
+                self::benefits($tables);
             }
         }
         if (!empty($flags['bank_split'])) {
@@ -829,6 +835,29 @@ final class SyntheticPremierBackup
             $items,
         ];
         return [['SR_OST1', 'N', 12, 2]];
+    }
+
+    /**
+     * Trvalé příjmy vztahu INTER 5 (`payroll_benefits`): příspěvek na penzijní připojištění
+     * 1 000 Kč měsíčně (422, v mzdách `MZ_PENZ`), stravenkový paušál 129,50 Kč za směnu (712)
+     * a příspěvek na praní 500 Kč (862), vše od 1/2025 bez konce.
+     *
+     * @param array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}> $tables MĚNÍ SE
+     */
+    private static function benefits(array &$tables): void
+    {
+        $card = static fn (int $sra, string $code, string $text, float $amount): array => ['S_INTER' => 5, 'S_SRAINT' => $sra, 'S_KOD' => $code,
+            'S_POPIS' => $text, 'S_CASTKA' => $amount, 'S_MES_OD' => 1, 'S_ROK_OD' => 2025, 'ID' => "SR5-{$sra}"];
+        array_push(
+            $tables['MZ_SRAZ'][1],
+            $card(11, '422', 'Příspěvek na penzijní připojištění', 1000),
+            $card(12, '712', 'Stravenkový paušál', 129.5),
+            $card(13, '862', 'Příspěvek na praní', 500),
+        );
+        $tables['MZDY'][0][] = ['MZ_PENZ', 'N', 12, 2];
+        foreach ($tables['MZDY'][1] as $i => $row) {
+            $tables['MZDY'][1][$i]['MZ_PENZ'] = (int) $row['INTER'] === 5 ? 1000 : 0;
+        }
     }
 
     /**

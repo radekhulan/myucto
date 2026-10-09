@@ -2787,7 +2787,7 @@
         "MZ_SRAZ": {
             "rows_seen": 216,
             "status": "mapped",
-            "target": "karty srážek: exekuce, insolvence, dohody (PremierPayrollDeductions); trvalé osobní ohodnocení (303) jako opakovaná složka vztahu (PayrollTakeoverEmploymentWriter::recurringComponents)",
+            "target": "karty srážek: exekuce, insolvence, dohody (PremierPayrollDeductions); trvalé příjmy (303 osobní ohodnocení, 422 penzijní připojištění, 712 stravenkový paušál, 862 praní) jako opakované složky vztahu (PayrollTakeoverEmploymentWriter::recurringComponents)",
             "readers": [
                 "PayrollImporter",
                 "PremierPayrollDeductions"
@@ -3438,7 +3438,8 @@
                     "status": "ignored"
                 },
                 "MZ_PENZ": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PremierPayroll"
                 },
                 "MZ_PRISUP": {
                     "status": "ignored"
@@ -6113,9 +6114,8 @@
                     "reason": "Složka mzdy (mzda, příplatek, odměna, náhrada, pojistné, daň): převzatý měsíc ji nese v úhrnech MZDY, účty složky čte návrh kontací."
                 },
                 "422": {
-                    "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ, kterou nejde založit jako opakovanou složku pevnou částkou: příspěvek na penzijní připojištění nese koš osvobození podle smlouvy, stravenkový paušál se počítá ze směn, příspěvek na praní je náhrada mimo hrubou mzdu. V úhrnech MZDY.",
-                    "review": "Tato plnění MyÚčto od prvního vlastního měsíce nevyplatí, dokud je účetní nezaloží."
+                    "status": "mapped",
+                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PRISPEVEK_PENZE_ZIVOTNI (koš § 6 odst. 9 písm. p) ZDP, pevná částka, kalendářní dny) pro měsíce počítané MyÚčtem; převzaté měsíce nesou příspěvek (MZDY.MZ_PENZ) v čerpání koše"
                 },
                 "430": {
                     "status": "ignored",
@@ -6346,9 +6346,8 @@
                     "target": "srážka (karta MZ_SRAZ, sražené částky DNY)"
                 },
                 "712": {
-                    "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ, kterou nejde založit jako opakovanou složku pevnou částkou: příspěvek na penzijní připojištění nese koš osvobození podle smlouvy, stravenkový paušál se počítá ze směn, příspěvek na praní je náhrada mimo hrubou mzdu. V úhrnech MZDY.",
-                    "review": "Tato plnění MyÚčto od prvního vlastního měsíce nevyplatí, dokud je účetní nezaloží."
+                    "status": "mapped",
+                    "target": "trvalý příjem z karty MZ_SRAZ (sazba za směnu): opakovaná složka PRISPEVEK_STRAVOVANI s předpisem k ručnímu určení částky (sazba v poznámce předpisu); osvobozenou část za směny počítá MyÚčto z docházky (koš meal_per_shift)"
                 },
                 "714": {
                     "status": "mapped",
@@ -6387,9 +6386,8 @@
                     "reason": "Složka mzdy (mzda, příplatek, odměna, náhrada, pojistné, daň): převzatý měsíc ji nese v úhrnech MZDY, účty složky čte návrh kontací."
                 },
                 "862": {
-                    "status": "ignored",
-                    "reason": "Trvalá složka příjmu na kartě MZ_SRAZ, kterou nejde založit jako opakovanou složku pevnou částkou: příspěvek na penzijní připojištění nese koš osvobození podle smlouvy, stravenkový paušál se počítá ze směn, příspěvek na praní je náhrada mimo hrubou mzdu. V úhrnech MZDY.",
-                    "review": "Tato plnění MyÚčto od prvního vlastního měsíce nevyplatí, dokud je účetní nezaloží."
+                    "status": "mapped",
+                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PREMIER_862 (příspěvek na praní mimo hrubou mzdu: není předmětem daně § 6 odst. 7 ZDP, mimo pojistné, průměr, srážky i JMHZ; pevná částka, kalendářní dny) pro měsíce počítané MyÚčtem"
                 },
                 "900": {
                     "status": "ignored",

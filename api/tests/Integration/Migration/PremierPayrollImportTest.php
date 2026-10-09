@@ -563,6 +563,39 @@ final class PremierPayrollImportTest extends TestCase
         self::assertSame(1, self::stepCounts($again, 'payroll')['recurring_components_existing'] ?? 0, 'Opakovaný převod předpis nezdvojí.');
     }
 
+    /**
+     * Trvalé příjmy karty vztahu (`MZ_SRAZ` 422, 712, 862): penzijní připojištění na výchozí
+     * složku koše § 6 odst. 9 písm. p), stravenkový paušál jako předpis k ručnímu určení
+     * částky a příspěvek na praní jako vlastní složka mimo daň, pojistné i JMHZ. Převzaté
+     * měsíce nesou příspěvek na penzijní připojištění do čerpání koše.
+     */
+    public function testRecurringBenefitsAndTakenOverOldAgeSavings(): void
+    {
+        $supplierId = $this->supplier(true);
+        $backup = $this->backup(['payroll' => true, 'payroll_detail' => true, 'payroll_benefits' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(4, self::stepCounts($protocol, 'payroll')['recurring_components'] ?? 0, $this->explain($protocol));
+        self::assertSame([
+            ['PREMIER_303', 'fixed_amount', '200000', 'hours'],
+            ['PREMIER_862', 'fixed_amount', '50000', 'calendar_days'],
+            ['PRISPEVEK_PENZE_ZIVOTNI', 'fixed_amount', '100000', 'calendar_days'],
+            ['PRISPEVEK_STRAVOVANI', 'manual_review', null, 'calendar_days'],
+        ], $this->fetch('SELECT d.code, r.calculation_kind, r.amount_minor, r.allocation_rule
+              FROM payroll_recurring_components r
+              JOIN payroll_component_definitions d ON d.supplier_id = r.supplier_id AND d.id = r.component_id
+              JOIN payroll_employments e ON e.supplier_id = r.supplier_id AND e.id = r.employment_id
+             WHERE r.supplier_id = ? AND e.code = \'5\' ORDER BY d.code', $supplierId));
+        self::assertSame([['other', 'regular', 'exempt', 'not_subject_to_tax', 'excluded', 'excluded', 'excluded']], $this->fetch('SELECT component_kind,
+                frequency_kind, tax_treatment, exemption_basis, social_treatment, health_treatment, jmhz_treatment
+              FROM payroll_component_definitions WHERE supplier_id = ? AND code = \'PREMIER_862\'', $supplierId));
+        $taken = $this->fetch('SELECT COUNT(*), SUM(t.old_age_savings_contribution_minor) FROM payroll_migration_reference_totals t
+              JOIN payroll_employments e ON e.supplier_id = t.supplier_id AND e.id = t.employment_id
+             WHERE t.supplier_id = ? AND e.code = \'5\' AND t.old_age_savings_contribution_minor > 0', $supplierId);
+        self::assertGreaterThan(0, (int) $taken[0][0]);
+        self::assertSame((int) $taken[0][0] * 100000, (int) $taken[0][1]);
+    }
+
     public function testLedgerMismatchIsAWarningNotAnError(): void
     {
         $supplierId = $this->supplier(true);

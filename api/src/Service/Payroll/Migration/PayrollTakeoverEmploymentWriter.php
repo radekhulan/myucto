@@ -434,10 +434,12 @@ final class PayrollTakeoverEmploymentWriter
      * mzda v MyÚčtu plnění tiše vynechala.
      *
      * Složka se hledá podle kódu; chybí-li, založí se jako pravidelná (`regular`), zdanitelná
-     * a s pojistným, s druhem podle zdroje. Existující složka s jinou četností se nepoužije
-     * (předpis jde jen na pravidelnou) a protokol to spočítá. Předpis leží uvnitř trvání
-     * vztahu i platnosti složky. Vztah, který už předpis téže složky má (ruční nebo z dřívějšího
-     * převodu), se nemění.
+     * a s pojistným, s druhem podle zdroje (zařazení, které zdroj dokládá jinak, nese položka
+     * v `definition`). Existující složka s jinou četností se nepoužije (předpis jde jen na
+     * pravidelnou) a protokol to spočítá. Předpis leží uvnitř trvání vztahu i platnosti složky.
+     * Vztah, který už předpis téže složky má (ruční nebo z dřívějšího převodu), se nemění.
+     * Plnění, jehož měsíční částku zdroj nevede (`calculation` = `manual_review`, např. sazba
+     * za směnu), dostane předpis bez částky: MyÚčto ho každý měsíc pošle k ručnímu určení.
      *
      * @return array<string,int>
      */
@@ -453,6 +455,7 @@ final class PayrollTakeoverEmploymentWriter
             if ($minor <= 0) {
                 continue;
             }
+            $manual = ($item['calculation'] ?? 'fixed_amount') === 'manual_review';
             $component = $this->regularComponent($supplierId, $item);
             if ($component === null) {
                 $counts['recurring_components_not_regular'] = ($counts['recurring_components_not_regular'] ?? 0) + 1;
@@ -484,14 +487,15 @@ final class PayrollTakeoverEmploymentWriter
             $this->recurring->create($supplierId, $this->recurringValidator->validate([
                 'employment_id' => $employmentId,
                 'component_id' => $componentId,
-                'calculation_kind' => 'fixed_amount',
-                'amount_minor' => $minor,
+                'calculation_kind' => $manual ? 'manual_review' : 'fixed_amount',
+                'amount_minor' => $manual ? null : $minor,
                 'rate_basis_points' => null,
                 'valid_from' => $from,
                 'valid_to' => $to,
                 'allocation_rule' => $item['allocation'] ?? 'calendar_days',
                 'maximum_amount_minor' => null,
-                'note' => $policy->note(mb_substr('opakovaná složka „' . $item['name'] . '" z karty vztahu.', 0, 200)),
+                'note' => $policy->note(mb_substr('opakovaná složka „' . $item['name'] . '" z karty vztahu'
+                    . (is_string($item['note'] ?? null) ? '; ' . $item['note'] : '.'), 0, 300)),
                 'is_active' => true,
             ]), $userId);
             $counts['recurring_components'] = ($counts['recurring_components'] ?? 0) + 1;
@@ -503,7 +507,7 @@ final class PayrollTakeoverEmploymentWriter
     /**
      * Pravidelná složka podle kódu; chybějící se založí ze zdroje.
      *
-     * @param array{code:string,name:string,kind:string,amount:float,from:string,to:?string} $item
+     * @param array{code:string,name:string,kind:string,amount:float,from:string,to:?string,definition?:array<string,string>} $item
      * @return array<string,mixed>|null `null` = složka s tím kódem není pravidelná
      */
     private function regularComponent(int $supplierId, array $item): ?array
@@ -517,7 +521,7 @@ final class PayrollTakeoverEmploymentWriter
         $find->execute([$supplierId, $item['code']]);
         $found = $find->fetch(\PDO::FETCH_ASSOC);
         if ($found === false) {
-            $this->components->create($supplierId, [
+            $this->components->create($supplierId, (array) ($item['definition'] ?? []) + [
                 'code' => $item['code'],
                 'name' => mb_substr($item['name'], 0, 120),
                 'component_kind' => $item['kind'],

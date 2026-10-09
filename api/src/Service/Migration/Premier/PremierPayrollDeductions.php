@@ -62,14 +62,47 @@ final class PremierPayrollDeductions
     public const INCOME_CODES = ['303', '422', '712', '862'];
 
     /**
-     * Trvalé příjmy pevnou měsíční částkou, ze kterých převod zakládá opakovanou složku
-     * ({@see self::recurringIncomes()}): kód => druh složky. Osobní ohodnocení (303) je
-     * v číselníku `MZDY_POL` hrubá mzda se sociálním i zdravotním pojištěním a do průměru.
-     * Ostatní příjmy z {@see self::INCOME_CODES} se nezakládají: příspěvek na penzijní
-     * připojištění (422) nese koš osvobození podle smlouvy, stravenkový paušál (712) se
-     * počítá ze směn a příspěvek na praní (862) je náhrada vyplácená mimo hrubou mzdu.
+     * Trvalé příjmy z karty vztahu, ze kterých převod zakládá opakovanou složku
+     * ({@see self::recurringIncomes()}): kód => druh složky.
+     *
+     *  - 303 osobní ohodnocení: v číselníku `MZDY_POL` hrubá mzda se sociálním
+     *    i zdravotním pojištěním a do průměru => vlastní složka `PREMIER_303`,
+     *  - 422 příspěvek zaměstnavatele na penzijní připojištění pevnou částkou =>
+     *    výchozí složka `PRISPEVEK_PENZE_ZIVOTNI` (koš § 6 odst. 9 písm. p) ZDP; zařazení
+     *    smlouvy ověří účetní na složce),
+     *  - 712 stravenkový paušál: karta nese sazbu ZA SMĚNU, ne měsíční částku =>
+     *    výchozí složka `PRISPEVEK_STRAVOVANI` s předpisem k ručnímu určení částky
+     *    (počet směn s nárokem dodá docházka MyÚčta, sazba je v poznámce předpisu),
+     *  - 862 příspěvek na praní pracovních oděvů: PREMIER ho vyplácí mimo hrubou mzdu
+     *    (`IS_NETTO`, sloupec `JD_OST`), nedaní ani nepojišťuje => vlastní složka
+     *    `PREMIER_862`, která není předmětem daně (§ 6 odst. 7 ZDP).
      */
-    public const RECURRING_INCOME = ['303' => 'bonus'];
+    public const RECURRING_INCOME = ['303' => 'bonus', '422' => 'benefit_pension', '712' => 'benefit_meal', '862' => 'other'];
+
+    /** Složka MyÚčta, kterou převod použije místo vlastní `PREMIER_<kód>`. */
+    private const RECURRING_COMPONENT = ['422' => 'PRISPEVEK_PENZE_ZIVOTNI', '712' => 'PRISPEVEK_STRAVOVANI'];
+
+    /** Předpisy, jejichž částku převod netvrdí (`manual_review`). */
+    private const RECURRING_CALCULATION = ['712' => 'manual_review'];
+
+    /**
+     * Zařazení vlastní složky, kterou převod zakládá a která není zdanitelnou mzdou:
+     * příspěvek na praní jako náhrada mimo hrubou mzdu, vyměřovací základy, průměr, srážky
+     * i úhrny JMHZ (stejně jako `NAHRADA_VYDAJU_PREVZATA`).
+     */
+    private const RECURRING_DEFINITION = [
+        '862' => [
+            'tax_treatment' => 'exempt',
+            'exemption_basis' => 'not_subject_to_tax',
+            'social_participation_treatment' => 'excluded',
+            'social_treatment' => 'excluded',
+            'health_participation_treatment' => 'excluded',
+            'health_treatment' => 'excluded',
+            'average_earning_treatment' => 'excluded',
+            'enforcement_treatment' => 'excluded',
+            'jmhz_treatment' => 'excluded',
+        ],
+    ];
 
     /**
      * Rozpočítání opakované složky podle kódu (výchozí `calendar_days`).
@@ -86,7 +119,8 @@ final class PremierPayrollDeductions
     /**
      * Karty `MZ_SRAZ` s trvalým příjmem ({@see self::RECURRING_INCOME}) po vztazích.
      *
-     * @return array<int,list<array{code:string,name:string,kind:string,amount:float,from:?string,to:?string,allocation:string}>>
+     * @return array<int,list<array{code:string,name:string,kind:string,amount:float,from:?string,to:?string,allocation:string,
+     *         calculation:string,definition:array<string,string>,note:?string}>>
      *         `S_INTER` => karty; `from`/`to` jsou měsíce `YYYY-MM` (`null` = neomezeno)
      */
     public static function recurringIncomes(PremierBackup $backup): array
@@ -104,14 +138,20 @@ final class PremierPayrollDeductions
                 continue;
             }
             $name = self::text($row['S_POPIS'] ?? '') ?: ($names[$code] ?? '') ?: "Složka {$code}";
+            $amount = round((float) ($row['S_CASTKA'] ?? 0), 2);
             $out[$inter][] = [
-                'code' => 'PREMIER_' . $code,
+                'code' => self::RECURRING_COMPONENT[$code] ?? 'PREMIER_' . $code,
                 'name' => $name,
                 'kind' => $kind,
-                'amount' => round((float) ($row['S_CASTKA'] ?? 0), 2),
+                'amount' => $amount,
                 'from' => self::month($row['S_ROK_OD'] ?? null, $row['S_MES_OD'] ?? null),
                 'to' => self::month($row['S_ROK_DO'] ?? null, $row['S_MES_DO'] ?? null),
                 'allocation' => self::RECURRING_ALLOCATION[$code] ?? 'calendar_days',
+                'calculation' => self::RECURRING_CALCULATION[$code] ?? 'fixed_amount',
+                'definition' => self::RECURRING_DEFINITION[$code] ?? [],
+                'note' => $code === '712'
+                    ? 'sazba ' . number_format($amount, 2, ',', ' ') . ' Kč za směnu; částku měsíce určete podle směn s nárokem.'
+                    : null,
             ];
         }
 

@@ -143,7 +143,8 @@ final class PremierPayrollTakeover
      * měsíce počítané MyÚčtem. Skončená karta se nepřebírá.
      *
      * @param array<string,mixed> $relation
-     * @return list<array{code:string,name:string,kind:string,amount:float,from:string,to:?string,allocation:string}>
+     * @return list<array{code:string,name:string,kind:string,amount:float,from:string,to:?string,allocation:string,
+     *     calculation:string,definition:array<string,string>,note:?string}>
      */
     public static function recurringComponents(array $relation, string $until, ?string $moduleStart = null): array
     {
@@ -166,6 +167,9 @@ final class PremierPayrollTakeover
                 'from' => ($card['from'] ?? substr((string) $relation['start'], 0, 7)) . '-01',
                 'to' => $card['to'] === null ? null : (new \DateTimeImmutable($card['to'] . '-01'))->format('Y-m-t'),
                 'allocation' => (string) ($card['allocation'] ?? 'calendar_days'),
+                'calculation' => (string) ($card['calculation'] ?? 'fixed_amount'),
+                'definition' => (array) ($card['definition'] ?? []),
+                'note' => is_string($card['note'] ?? null) ? $card['note'] : null,
             ];
         }
 

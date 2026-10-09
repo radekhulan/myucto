@@ -426,6 +426,9 @@ final class PremierPayroll
             'signed' => ($row['POD_DAN'] ?? false) === true,
             // Uplatněná sleva na pojistném pracujícího důchodce (Kč za měsíc).
             'pensioner_discount' => $num('SLEVA_SOC') > 0,
+            // Příspěvek zaměstnavatele na penzijní připojištění (karta MZ_SRAZ 422, na záloze
+            // shodný s položkou 422 v DNY): čerpání koše § 6 odst. 9 písm. p) ZDP v převzatém měsíci.
+            'old_age_savings' => max(0.0, $num('MZ_PENZ')),
             'pension_participation' => $participates,
             'insurance_days' => $participates ? max(0, min($calendarDays, 31)) : 0,
             // `VYL_DND` je v reálných zálohách vždy prázdný; kalendářní dny nemoci
