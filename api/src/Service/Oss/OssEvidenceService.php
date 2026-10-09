@@ -558,6 +558,8 @@ final class OssEvidenceService
     /**
      * Bod h) — datum a částka přijatých úhrad. Váže se na DOKLAD, ne na položku:
      * úhrada se v systému páruje na fakturu a rozpad na položky by byl domyšlený.
+     * Zápočet dobropisu (`source = 'credit_note'`) přijatá platba není: jen snižuje tutéž
+     * pohledávku a OSS ho vykazuje opravou základu dobropisem.
      *
      * @param list<int> $invoiceIds
      * @return array<int, list<array{paid_on:string, amount:float, currency:string}>>
@@ -572,7 +574,7 @@ final class OssEvidenceService
         $stmt = $this->db->pdo()->prepare(
             "SELECT invoice_id, paid_on, amount, currency
                FROM invoice_payments
-              WHERE supplier_id = ? AND invoice_id IN ({$ph})
+              WHERE supplier_id = ? AND invoice_id IN ({$ph}) AND source <> 'credit_note'
            ORDER BY paid_on, id"
         );
         $stmt->execute([$supplierId, ...$invoiceIds]);

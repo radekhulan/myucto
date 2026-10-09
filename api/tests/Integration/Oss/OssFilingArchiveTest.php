@@ -195,6 +195,31 @@ final class OssFilingArchiveTest extends TestCase
         self::assertArrayNotHasKey('EUR', $rates, 'Měna podání sama sebe nepřepočítává.');
     }
 
+    /**
+     * Bod 63c(1)(h) jsou přijaté platby. Zápočet dobropisu platbou není: jen snižuje
+     * tutéž pohledávku a OSS ho vykazuje opravou základu dobropisem, ne úhradou.
+     */
+    public function testCreditNoteOffsetIsNotRecordedAsReceivedPayment(): void
+    {
+        $invoiceId = $this->ossSale($this->euConsumer('PL'), '2099-02-10', 1000.0, 23.0);
+        $insert = $this->db->pdo()->prepare(
+            "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source)
+             VALUES (?, ?, ?, ?, 'EUR', ?)"
+        );
+        $insert->execute([$this->supplierId, $invoiceId, '2099-02-20', 230.0, 'credit_note']);
+        $insert->execute([$this->supplierId, $invoiceId, '2099-03-01', 1000.0, 'bank']);
+
+        [$submissionId, $preview] = $this->archive(2099, 1);
+        $this->evidence->capture($this->supplierId, $submissionId, 2099, 1, $preview, $this->userId);
+
+        $r = $this->evidence->records($this->supplierId, 2099, 1)['records'][0];
+        self::assertEquals(
+            [['paid_on' => '2099-03-01', 'amount' => 1000.0, 'currency' => 'EUR']],
+            $r['payments'],
+            'zápočet dobropisu není přijatá platba',
+        );
+    }
+
     /** Evidence je write-once — trigger migrace 1300 odmítne UPDATE i DELETE. */
     public function testEvidenceIsWriteOnce(): void
     {
