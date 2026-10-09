@@ -66,6 +66,48 @@ final class CashJournalPurchaseCreditNoteRefundTest extends CashJournalTestCase
         self::assertEqualsWithDelta(-210.0, $result['totals']['vydaj_nedanovy'], 0.001);
     }
 
+    /**
+     * Dobropis převzatý z cizího systému nebo přepnutý z faktury nese kladné součty. Znaménko
+     * určuje druh dokladu (shodně s VatLedgerService), ne uložená částka: ručně uhrazený
+     * dobropis výdaj snižuje. Dřív ho noha ručně zaplacených dokladů vedla jako výdaj.
+     */
+    public function testManuallyPaidCreditNoteWithPositiveTotalsReducesExpense(): void
+    {
+        $this->creditNote(1000.0, 1210.0, ['status' => 'paid', 'paid_at' => self::YEAR . '-06-20']);
+
+        $result = $this->fullYear($this->supplierId, true);
+
+        self::assertEqualsWithDelta(-1000.0, $result['totals']['vydaj_danovy'], 0.001);
+        self::assertEqualsWithDelta(-210.0, $result['totals']['vydaj_nedanovy'], 0.001);
+    }
+
+    public function testManuallyPaidCreditNoteWithPositiveTotalsReducesExpenseForNonPayer(): void
+    {
+        $this->creditNote(1000.0, 1210.0, ['status' => 'paid', 'paid_at' => self::YEAR . '-06-20']);
+
+        $result = $this->fullYear($this->supplierId, false);
+
+        self::assertEqualsWithDelta(-1210.0, $result['totals']['vydaj_danovy'], 0.001);
+        self::assertEqualsWithDelta(0.0, $result['totals']['vydaj_nedanovy'], 0.001);
+    }
+
+    /** Kladně uložený dobropis k odpisovanému majetku se posuzuje podle původní faktury. */
+    public function testRefundOfPositiveCreditNoteToDepreciatedAssetStaysOutsideTaxExpense(): void
+    {
+        $asset = $this->purchaseInvoice($this->supplierId, [
+            'without' => 100000.0, 'with' => 121000.0, 'is_fixed_asset' => 1,
+        ]);
+        $creditNote = $this->creditNote(1000.0, 1210.0, ['is_fixed_asset' => 1]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$asset, $creditNote]);
+        $this->bankRefund($creditNote, 1210.0);
+
+        $result = $this->fullYear($this->supplierId, true);
+
+        self::assertEqualsWithDelta(0.0, $result['totals']['vydaj_danovy'], 0.001);
+        self::assertEqualsWithDelta(-1210.0, $result['totals']['vydaj_nedanovy'], 0.001);
+    }
+
     /** Krácený odpočet: neodpočtená polovina DPH je daňový výdaj, vratka ji snižuje taky. */
     public function testRefundOfProportionalDeductionKeepsTheSameRatio(): void
     {

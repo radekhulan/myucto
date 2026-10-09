@@ -91,7 +91,12 @@ final class TaxExpenseAllocationCalculator
      */
     private function isDepreciatedAsset(int $supplierId, array $invoice, array $allocations, bool $isVatPayer, int $year, float $fixedAssetLimit): bool
     {
-        if ((float) $invoice['total_with_vat'] < 0.0 && ($invoice['parent_purchase_invoice_id'] ?? null) !== null) {
+        $isCreditNote = (float) $invoice['total_with_vat'] < 0.0
+            || \MyInvoice\Service\Report\VatLedgerService::purchaseDocumentSign(
+                isset($invoice['document_kind']) ? (string) $invoice['document_kind'] : null,
+                (float) $invoice['total_with_vat'],
+            ) < 0.0;
+        if ($isCreditNote && ($invoice['parent_purchase_invoice_id'] ?? null) !== null) {
             $stmt = $this->db->pdo()->prepare(
                 'SELECT id, is_fixed_asset, total_vat, total_with_vat, vat_deduction, vat_deduction_percent
                    FROM purchase_invoices WHERE id = ? AND supplier_id = ?'

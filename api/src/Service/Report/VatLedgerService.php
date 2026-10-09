@@ -72,6 +72,26 @@ final class VatLedgerService
     }
 
     /**
+     * Znaménko přijatého dokladu: dobropis (`document_kind = 'credit_note'`) snižuje odpočet
+     * i výdaj, i když ho import z cizího systému nebo přepnutí druhu dokladu uložilo
+     * s KLADNÝMI součty. Rozhoduje druh dokladu, ne uložená částka. Násobí se celý doklad
+     * jedním znaménkem podle součtu (vnitřní poměr znamének položek zůstává, viz komentář
+     * u `inv_total` ve {@see fetchPurchases()}); u záporně uloženého dobropisu je to no-op.
+     *
+     * Jediné místo pravidla pro evidenci DPH i peněžní deník daňové evidence.
+     */
+    public static function purchaseDocumentSignSql(string $alias = 'pi'): string
+    {
+        return "(CASE WHEN {$alias}.document_kind = 'credit_note' AND {$alias}.total_with_vat > 0 THEN -1 ELSE 1 END)";
+    }
+
+    /** PHP podoba {@see purchaseDocumentSignSql()} pro už načtený doklad. */
+    public static function purchaseDocumentSign(?string $documentKind, float $totalWithVat): float
+    {
+        return $documentKind === 'credit_note' && $totalWithVat > 0 ? -1.0 : 1.0;
+    }
+
+    /**
      * @return list<array<string,mixed>> kanonické řádky (sale i purchase) za období
      */
     public function rows(int $supplierId, string $start, string $end, bool $includeDrafts = false): array
@@ -807,6 +827,7 @@ final class VatLedgerService
         // Vnitřní CASE u 'manual' = GREATEST(received_at, DUZP, vystavení) rozepsané.
         // Sdílený výraz → WHERE (BETWEEN) i ORDER BY jsou vždy konzistentní.
         $periodExpr = self::purchaseClaimDateExpr();
+        $docSign = self::purchaseDocumentSignSql('pi');
 
         // Předfiltr odvozené tabulky položek. Období odpočtu je vždy jedno z dat DUZP,
         // vystavení nebo doručení (viz purchaseClaimDateExpr), takže doklad, kterému
@@ -845,8 +866,7 @@ final class VatLedgerService
                    -- přiznání o 31 Kč proti skutečně podanému. Dokladová normalizace
                    -- vnitřní poměr znamének zachová a u správně uloženého (záporného)
                    -- dobropisu je no-op.
-                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * pi.total_with_vat AS inv_total,
+                   {$docSign} * pi.total_with_vat AS inv_total,
                    pi.reverse_charge AS rc_flag,
                    COALESCE(pii.vat_deduction, pi.vat_deduction) AS vat_deduction,
                    COALESCE(pii.vat_deduction_percent, pi.vat_deduction_percent) AS vat_deduction_percent,
@@ -887,16 +907,11 @@ final class VatLedgerService
                    pii.vat_rate_snapshot AS vat_rate,
                    pii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
-                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * COALESCE(pii.total_without_vat, 0) AS base,
-                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * COALESCE(pii.total_vat, 0) AS vat,
-                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * pii.import_tax_base_czk AS import_tax_base_czk,
-                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * pii.import_tax_vat_czk AS import_tax_vat_czk,
-                   (CASE WHEN pi.document_kind = 'credit_note' AND pi.total_with_vat > 0
-                         THEN -1 ELSE 1 END) * pii.import_projection_vat_czk AS import_projection_vat_czk
+                   {$docSign} * COALESCE(pii.total_without_vat, 0) AS base,
+                   {$docSign} * COALESCE(pii.total_vat, 0) AS vat,
+                   {$docSign} * pii.import_tax_base_czk AS import_tax_base_czk,
+                   {$docSign} * pii.import_tax_vat_czk AS import_tax_vat_czk,
+                   {$docSign} * pii.import_projection_vat_czk AS import_projection_vat_czk
               FROM purchase_invoices pi
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN countries co ON co.id = c.country_id

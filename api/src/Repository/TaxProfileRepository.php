@@ -266,8 +266,10 @@ final class TaxProfileRepository
     public function monthExpenses(int $supplierId, string $ym, bool $isVatPayer): float
     {
         $col = self::paidInvoiceBaseSql('pi', $isVatPayer);
+        // Kladně uložený dobropis náklad snižuje, stejně jako v evidenci DPH a peněžním deníku.
+        $docSign = \MyInvoice\Service\Report\VatLedgerService::purchaseDocumentSignSql('pi');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM({$col} * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)), 0)
+            "SELECT COALESCE(SUM({$docSign} * {$col} * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)), 0)
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?

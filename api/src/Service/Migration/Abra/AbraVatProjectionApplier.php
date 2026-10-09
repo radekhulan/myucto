@@ -33,7 +33,10 @@ final class AbraVatProjectionApplier
             empty($item['import_tax_excluded']) && ($item['source_vat_class'] ?? '') === $group['class']));
         if (count($items) !== 1) return ['updated' => 0, 'warning' => null];
         $item = $items[0];
-        $sign = $plan['document_kind'] === 'credit_note' && $plan['total_with_vat'] > 0 ? -1 : 1;
+        $sign = \MyInvoice\Service\Report\VatLedgerService::purchaseDocumentSign(
+            $plan['document_kind'] !== null ? (string) $plan['document_kind'] : null,
+            (float) $plan['total_with_vat'],
+        );
         $rate = $plan['exchange_rate'] ?? 1.0;
         $baseCzk = $item['import_tax_base_czk'] !== null
             ? (float) $item['import_tax_base_czk'] : round((float) $item['base'] * (float) $rate, 2);

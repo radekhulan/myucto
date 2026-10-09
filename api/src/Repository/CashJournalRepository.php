@@ -357,10 +357,14 @@ final class CashJournalRepository
         $cnOffsets = "COALESCE((SELECT SUM(cno.amount) FROM credit_note_offsets cno
                                  WHERE cno.supplier_id = pi.supplier_id AND cno.doc_type = 'purchase_invoice'
                                    AND cno.invoice_id = pi.id), 0)";
+        // Směr je u ruční úhrady vždy 'out'; dobropis se od faktury liší znaménkem částky.
+        // Kladně uložený dobropis (import z cizího systému, přepnutý druh dokladu) se otočí
+        // týmž pravidlem jako v evidenci DPH, jinak by výdaj místo snížení zvýšil.
+        $docSign = \MyInvoice\Service\Report\VatLedgerService::purchaseDocumentSignSql('pi');
         $legs[] =
             "SELECT 'purchase_invoice' AS source_type, pi.id AS source_id, pi.paid_at AS movement_date,
                     'out' AS direction,
-                    ROUND((COALESCE(pi.amount_to_pay, pi.total_with_vat) - {$cnOffsets}) * {$this->piRateSql()}, 2) AS amount,
+                    ROUND({$docSign} * (COALESCE(pi.amount_to_pay, pi.total_with_vat) - {$cnOffsets}) * {$this->piRateSql()}, 2) AS amount,
                     COALESCE(pi.vendor_invoice_number, '') AS doc_no, COALESCE(pv.company_name, '') AS partner,
                     '' AS description,
                     NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
