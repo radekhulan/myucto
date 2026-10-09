@@ -44,6 +44,7 @@ final class RegistrationXmlFixtures
             'fdr' => null,
             // Celý element `pens` (pobíraný důchod), např. `<pens typ="1" tak="2026-03-01" early="A"/>`.
             'pens' => null,
+            'highedu' => 'M',
         ];
         $fdr = $o['fdr'] === null ? '' : '<fdr str="Pobytová" num="7" pnu="' . $o['fdr'] . '" cit="Brno"/>';
         $pens = $o['pens'] ?? '';
@@ -91,7 +92,7 @@ final class RegistrationXmlFixtures
               </job>
               {$pens}
               {$insurer}
-              <fact highedu="M"/>
+              <fact highedu="{$o['highedu']}"/>
             </employee>
             XML);
     }

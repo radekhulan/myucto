@@ -763,10 +763,24 @@ final readonly class PayrollRegistrationIdentityService
                 $this->repository->protectedLaborMarket($supplierId),
             );
 
+            $warnings = $this->registrationWarnings($supplierId, $employmentId);
+            $educationWarning = PayrollRegistrationEducationRule::warning(
+                is_string($identity['citizenship_country_code'] ?? null)
+                    ? $identity['citizenship_country_code']
+                    : null,
+                is_string($input['employment']['activity_code'] ?? null)
+                    ? $input['employment']['activity_code']
+                    : null,
+                $input['facts']['highest_education_code'] ?? null,
+            );
+            if ($educationWarning !== null) {
+                $warnings[] = $educationWarning;
+            }
+
             return [
                 'complete' => $problems === [],
                 'problems' => $problems,
-                'warnings' => $this->registrationWarnings($supplierId, $employmentId),
+                'warnings' => $warnings,
             ];
         });
     }

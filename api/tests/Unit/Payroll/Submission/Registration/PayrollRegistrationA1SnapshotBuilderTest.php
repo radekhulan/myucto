@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\Import\Registration\RegistrationXmlReader;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1SnapshotBuilder;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationProfileCompletion;
+use MyInvoice\Tests\Unit\Payroll\Import\Registration\RegistrationXmlFixtures;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEducationRule;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityRequirements;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshot;
@@ -47,6 +50,9 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
      * REGZEC25-fact.highedu-07 (Zásady REGZEC 1.4.6, ID 10091): občan ČR
      * s DPČ (A až J) nebo DPP (T až ZC) má vzdělání „Z" (nerelevantní).
      * U pracovního poměru a u cizince s dohodou se vzdělání uvádí.
+     *
+     * Je to pokyn k vyplnění, ne logická kontrola EDV, a ČSSZ jiný kód přijímá.
+     * Jiná hodnota proto sestavení neblokuje, jen se na ni upozorní.
      */
     public function testCzechCitizenWithAgreementMustHaveEducationNotRelevant(): void
     {
@@ -54,15 +60,16 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
         foreach (['A', 'J', 'T', 'ZC'] as $activity) {
             $source = self::source($activity, null);
             $source['facts']['highest_education_code'] = 'T';
-            $problem = self::educationProblem($builder->problems(
+            self::assertNull(self::educationProblem($builder->problems(
                 $source,
                 self::identity(),
                 self::scope(),
-            ));
-            self::assertNotNull($problem, $activity);
-            self::assertSame('registration_regzec_a1_field_value_invalid', $problem['code']);
-            self::assertSame('education_not_relevant', $problem['message_key']);
-            self::assertSame(['activity' => $activity, 'value' => 'T'], $problem['params']);
+            )), $activity);
+            $warning = PayrollRegistrationEducationRule::warning('CZ', $activity, 'T');
+            self::assertNotNull($warning, $activity);
+            self::assertSame('registration_education_not_relevant', $warning['code']);
+            self::assertSame('facts.highest_education_code', $warning['field']);
+            self::assertStringContainsString('„T"', $warning['message']);
 
             $source['facts']['highest_education_code'] = 'Z';
             self::assertNull(self::educationProblem($builder->problems(
@@ -70,6 +77,7 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
                 self::identity(),
                 self::scope(),
             )), $activity);
+            self::assertNull(PayrollRegistrationEducationRule::warning('CZ', $activity, 'Z'));
         }
 
         $employment = self::source('1', '1');
@@ -79,6 +87,7 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             self::identity(),
             self::scope(),
         )));
+        self::assertNull(PayrollRegistrationEducationRule::warning('CZ', '1', 'T'));
 
         $foreigner = self::source('A', null);
         $foreigner['facts']['highest_education_code'] = 'T';
@@ -89,6 +98,59 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             $identity,
             self::scope(),
         )));
+        self::assertNull(PayrollRegistrationEducationRule::warning('SK', 'A', 'T'));
+    }
+
+    /**
+     * Převzatá A1 dohodáře, kterou ČSSZ přijala se skutečným vzděláním (C):
+     * profil z ní musí jít sestavit pro přihlášku A1 i pro dohlášení A3.
+     * Blokace snižovala na reálných datech počet sestavitelných vět.
+     */
+    public function testImportedAcceptedAgreementWithRealEducationStillBuilds(): void
+    {
+        $read = (new RegistrationXmlReader(new PayrollRegistrationSchemaCatalog()))->read(
+            RegistrationXmlFixtures::regzecA1(['rel' => 'A', 'detail' => '1', 'highedu' => 'C']),
+        );
+        $imported = $read['records'][0]->a1Profile;
+        self::assertSame('C', $imported['facts']['highest_education_code']);
+        // Import přepíše návrh profilu údaji z věty (RegistrationImportWriter::overlay).
+        $profile = self::overlay(self::source('A', null), $imported);
+        self::assertSame('C', $profile['facts']['highest_education_code']);
+
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        self::assertNull(self::educationProblem($builder->problems(
+            $profile,
+            self::identity(),
+            self::scope(),
+        )));
+        $a1 = $builder->build($profile, self::identity(), self::scope());
+        self::assertSame('C', $a1->facts['highest_education_code']);
+        $a3 = $builder->build(
+            $profile,
+            self::identity(),
+            self::scope(),
+            false,
+            PayrollRegistrationIdentityRequirements::completionIdentityFields(
+                PayrollRegistrationProfileCompletion::FULL,
+            ),
+        );
+        self::assertSame('C', $a3->facts['highest_education_code']);
+    }
+
+    /**
+     * @param array<string,mixed> $base
+     * @param array<string,mixed> $overlay
+     * @return array<string,mixed>
+     */
+    private static function overlay(array $base, array $overlay): array
+    {
+        foreach ($overlay as $key => $value) {
+            $base[$key] = is_array($value) && !array_is_list($value) && is_array($base[$key] ?? null)
+                ? self::overlay($base[$key], $value)
+                : $value;
+        }
+
+        return $base;
     }
 
     /**
