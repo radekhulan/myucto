@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Response;
 
 /**
  * Hodnota atributu JMHZ podle scénáře (brána G3, řádky scenario_value v
@@ -231,6 +234,277 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
     }
 
     /**
+     * Jednatel (druh činnosti S, formulář cinnostKS) s prohlášením, 30 000 Kč:
+     * záloha jako u zaměstnance (10297 = 30 000, 10305 = 4 500 - 2 570), účast
+     * na pojištění s kódem S++ a vyměřovacím základem = příjem, fondy 10259
+     * a 10260 nulové a týdenní doba 99 (Pokyny MH k 10259 až 10261 pro K–S).
+     * Formulář cinnostKS zdravotní pojistné zaměstnavatele nenese (XSD).
+     */
+    public function testBoardMemberIsTaxedByAdvanceAndInsuredWithoutWorkingTimeFund(): void
+    {
+        $person = $this->hire('Radim Jednatel', 'male', '1975-05-15', employmentType: 'statutory_body',
+            relationType: 'statutory_body', activityCode: 'S', taxpayerType: 'managing_partner');
+        $this->approveMonth($person['employment_id'], []);
+        $this->pay($person, 3_000_000);
+
+        $xml = $this->submission('board-member');
+
+        self::assertStringContainsString('<form:cinnostKS', $xml);
+        self::assertStringContainsString(
+            '<form:zalohaNaDan><form:zakladDane>30000</form:zakladDane><form:vypoctenaZaloha>4500</form:vypoctenaZaloha>'
+                . '<form:danZalohaPoSleve>1930</form:danZalohaPoSleve>',
+            $xml,
+        );
+        self::assertSame(['30000'], $this->relationshipTaxBases($xml));
+        self::assertStringContainsString(
+            '<form:kod>S++</form:kod><form:platnostOd>2026-07-01</form:platnostOd><form:platnostDo>2026-07-31</form:platnostDo>'
+                . '<form:pocetDnu>31</form:pocetDnu><form:vymerovaciZaklad>30000</form:vymerovaciZaklad>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:zdravPojZamestnanec><form:zdravotniPojisteni>1350</form:zdravotniPojisteni>', $xml);
+        self::assertStringNotContainsString('<form:zdravPojZamestnavatel>', $xml);
+        self::assertStringContainsString(
+            '<form:stanovenyFond>0.000</form:stanovenyFond><form:sjednanyFond>0.000</form:sjednanyFond>'
+                . '<form:stanovenaTydenniDoba>99.00</form:stanovenaTydenniDoba>',
+            $xml,
+        );
+    }
+
+    /**
+     * Odsouzený zařazený do práce (formulář vezen) s prohlášením, 20 000 Kč:
+     * záloha 3 000 - 2 570 = 430, 10535 = příjem, ELDP 1++ s vyměřovacím
+     * základem = příjem. Čistá mzda 10344 = 20 000 - 430 - 1 420 (7,1 %)
+     * - 900 (4,5 % zdravotního, formulář ho nevykazuje, ale zaměstnanec ho platí).
+     */
+    public function testPrisonerValuesOnVezenForm(): void
+    {
+        $person = $this->hire('Petr Odsouzený', 'male', '1990-03-15');
+        $this->classify($person['employment_id'], '1', '2');
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 2_000_000);
+
+        $xml = $this->submission('prisoner');
+
+        self::assertStringContainsString('<form:vezen', $xml);
+        self::assertStringContainsString(
+            '<form:zalohaNaDan><form:zakladDane>20000</form:zakladDane><form:vypoctenaZaloha>3000</form:vypoctenaZaloha>'
+                . '<form:danZalohaPoSleve>430</form:danZalohaPoSleve>',
+            $xml,
+        );
+        self::assertSame(['20000'], $this->relationshipTaxBases($xml));
+        self::assertStringContainsString('<form:mzdaCista><form:mzdaCista>17250</form:mzdaCista>', $xml);
+        self::assertStringContainsString('<form:kod>1++</form:kod>', $xml);
+        self::assertStringContainsString('<form:vymerovaciZaklad>20000</form:vymerovaciZaklad>', $xml);
+    }
+
+    /**
+     * Jiný příjem ze závislé činnosti (druh 13, formulář jinyPrijem) s prohlášením,
+     * 8 000 Kč: záloha 1 200 po slevě 2 570 klesne na 0, bonus 0 (bez dětí).
+     * Pojištění formulář nemá, 10535 = příjem.
+     */
+    public function testOtherIncomeValuesOnJinyPrijemForm(): void
+    {
+        $person = $this->hire('Olga Provize', 'female', '1982-11-02');
+        $this->classify($person['employment_id'], '13', '1');
+        $this->approveMonth($person['employment_id'], []);
+        $this->pay($person, 800_000);
+
+        $xml = $this->submission('other-income');
+
+        self::assertStringContainsString(
+            '<form:zalohaNaDan><form:zakladDane>8000</form:zakladDane><form:vypoctenaZaloha>1200</form:vypoctenaZaloha>'
+                . '<form:danZalohaPoSleve>0</form:danZalohaPoSleve><form:danBonus>0</form:danBonus></form:zalohaNaDan>',
+            $xml,
+        );
+        self::assertSame(['8000'], $this->relationshipTaxBases($xml));
+        self::assertStringNotContainsString('<form:pojisteni>', $xml);
+    }
+
+    /**
+     * Mezinárodní pronájem pracovní síly (druh 12) s prohlášením, 50 000 Kč:
+     * záloha 7 500 - 2 570 = 4 930, bez bonusu 10306 (formulář ho nevede)
+     * a bez pojištění; pojistná část je nulová.
+     */
+    public function testInternationalHireValues(): void
+    {
+        $person = $this->hire('Jan Pronajatý', 'male', '1975-06-20');
+        $this->classify($person['employment_id'], '12', '1');
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 5_000_000);
+
+        $xml = $this->submission('international-hire');
+
+        self::assertStringContainsString(
+            '<form:zalohaNaDan><form:zakladDane>50000</form:zakladDane><form:vypoctenaZaloha>7500</form:vypoctenaZaloha>'
+                . '<form:danZalohaPoSleve>4930</form:danZalohaPoSleve></form:zalohaNaDan>',
+            $xml,
+        );
+        self::assertSame(['50000'], $this->relationshipTaxBases($xml));
+        self::assertStringContainsString('<pvpoj:pojistneUhrada>0</pvpoj:pojistneUhrada>', $xml);
+    }
+
+    /**
+     * Daňový nerezident s prohlášením (kontrola 243): uplatní jen základní slevu
+     * na poplatníka, jiné slevy (10300 až 10304) ve formuláři nejsou. Uplatněná
+     * sleva na průkaz ZTP/P výpočet mzdy zastaví (nonresident-monthly-credit-not-supported),
+     * takže zakázaný atribut do hlášení nedojde.
+     *
+     * Element danBonus (10306) s nulou ale formulář nerezidenta nese, i když ho
+     * kontrola 243 zakazuje stejně jako kontrola 244 u zaměstnance bez
+     * prohlášení. Proto se tu jeho nepřítomnost netestuje; viz defekt G3-3 a
+     * řádek JMHZ-SV-10306-02.
+     */
+    public function testNonResidentWithDeclarationClaimsOnlyTaxpayerCredit(): void
+    {
+        $person = $this->hire('Jana Nerezidentka', 'female', '1988-08-08');
+        $this->makeNonResident($person['employee_id']);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 4_000_000);
+
+        $xml = $this->submission('nonresident');
+
+        self::assertStringContainsString(
+            '<form:prohlaseniPoplatnikaDane><form:zakladniSleva>2570</form:zakladniSleva></form:prohlaseniPoplatnikaDane>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:danZalohaPoSleve>3430</form:danZalohaPoSleve>', $xml);
+        self::assertSame(['40000'], $this->relationshipTaxBases($xml));
+        self::assertStringNotContainsString('<form:zvlastniSazbaDane>', $xml);
+    }
+
+    /** Nerezident se slevou na průkaz ZTP/P: výpočet mzdy se zastaví (kontrola 243 nad zdrojem). */
+    public function testNonResidentWithOtherTaxCreditStopsThePayrollRun(): void
+    {
+        $other = $this->hire('Juraj Nerezident', 'male', '1984-04-04');
+        $this->makeNonResident($other['employee_id']);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_credit_claims
+                (supplier_id, employee_id, credit_kind, evidence_status, effective_from, effective_to, evidence_reference)
+             VALUES (?, ?, "ztp-p", "verified", "2026-01-01", NULL, "document:synthetic-ztpp")',
+        )->execute([$this->supplierId, $other['employee_id']]);
+        $this->approveMonth($other['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($other, 4_000_000);
+        $run = $this->runPayrollMonth(self::PERIOD_START, self::PAYDAY, $this->officeId, 'sv-nonresident-ztpp');
+
+        self::assertNull($run['approved']);
+        self::assertContains('statutory_calculation_manual_review', array_column($run['blockers'], 'code'));
+        self::assertStringContainsString(
+            'U daňového nerezidenta je uplatněna sleva nebo zvýhodnění nepodporované',
+            CanonicalJson::encode($run['blockers']),
+        );
+    }
+
+    /**
+     * Daňový bonus (10306): HPP 12 000 Kč s prohlášením a dvěma dětmi. Záloha
+     * 1 800 Kč pokryje sleva na poplatníka, na slevu na děti 10304 nezbude nic
+     * a celé zvýhodnění 1 267 + 1 860 = 3 127 Kč (10303) se vyplatí jako bonus
+     * (§ 35d ZDP; příjem přesahuje polovinu minimální mzdy).
+     */
+    public function testChildCreditAboveTheAdvanceIsPaidAsTaxBonus(): void
+    {
+        $person = $this->hire('Tereza Bonusová', 'female', '1991-01-11');
+        $this->claimChild($person['employee_id'], $this->createChild($person['employee_id'], 'Syntetické Dítě První', '2018-03-03', 1), 1);
+        $this->claimChild($person['employee_id'], $this->createChild($person['employee_id'], 'Syntetické Dítě Druhé', '2021-04-04', 2), 2);
+        $this->approveMonth($person['employment_id'], self::workdays(self::PERIOD));
+        $this->pay($person, 1_200_000);
+
+        $xml = $this->submission('tax-bonus');
+
+        self::assertStringContainsString(
+            '<form:zalohaNaDan><form:zakladDane>12000</form:zakladDane><form:vypoctenaZaloha>1800</form:vypoctenaZaloha>'
+                . '<form:danZalohaPoSleve>0</form:danZalohaPoSleve><form:danBonus>3127</form:danBonus></form:zalohaNaDan>',
+            $xml,
+        );
+        self::assertStringContainsString('<form:danoveZvyhodneniDetiMesic>3127</form:danoveZvyhodneniDetiMesic>', $xml);
+        self::assertStringContainsString('<form:slevaDite>0</form:slevaDite>', $xml);
+    }
+
+    private function createChild(int $employeeId, string $name, string $birthDate, int $sequence): int
+    {
+        $birthNumber = self::syntheticBirthNumber($birthDate, 'male', 200 + $sequence);
+        [$givenName, $familyName] = explode(' ', $name, 2);
+        $response = $this->dependants()->create(
+            $this->request('POST', "/api/payroll/people/{$employeeId}/dependants")->withParsedBody([
+                'relation' => 'child_own',
+                'full_name' => $name,
+                'given_name' => $givenName,
+                'family_name' => $familyName,
+                'birth_date' => $birthDate,
+                'birth_number' => substr($birthNumber, 0, 6) . '/' . substr($birthNumber, 6),
+                'ztp_p' => false,
+                'student' => false,
+                'existence_from' => $birthDate,
+                'existence_to' => null,
+                'note' => null,
+            ]),
+            new Response(),
+            ['id' => (string) $employeeId],
+        );
+        self::assertSame(200, $response->getStatusCode(), 'Zaseknutí: vyživovaná osoba. ' . (string) $response->getBody());
+        foreach ($this->json($response)['dependants'] as $dependant) {
+            if ($dependant['full_name'] === $name) {
+                return (int) $dependant['id'];
+            }
+        }
+        self::fail("Vyživovaná osoba {$name} chybí.");
+    }
+
+    private function claimChild(int $employeeId, int $dependantId, int $order): void
+    {
+        $response = $this->dependants()->createClaim(
+            $this->request('POST', "/api/payroll/people/{$employeeId}/dependants/{$dependantId}/claims")
+                ->withParsedBody([
+                    'child_order' => $order,
+                    'claim_reason' => 'own_household',
+                    'evidence_status' => 'verified',
+                    'evidence_reference' => 'document:child-claim',
+                    'shared_household_confirmed' => true,
+                    'other_claimant_excluded' => true,
+                    'other_household_caregiver_status' => 'none',
+                    'ztp_p' => false,
+                    'effective_from' => '2026-01-01',
+                    'effective_to' => null,
+                ]),
+            new Response(),
+            ['id' => (string) $employeeId, 'dependantId' => (string) $dependantId],
+        );
+        self::assertSame(200, $response->getStatusCode(), 'Zaseknutí: nárok na dítě. ' . (string) $response->getBody());
+    }
+
+    private function dependants(): PayrollDependantAction
+    {
+        $action = $this->container->get(PayrollDependantAction::class);
+        self::assertInstanceOf(PayrollDependantAction::class, $action);
+
+        return $action;
+    }
+
+    private function classify(int $employmentId, string $activityCode, string $detailCode): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET activity_code = ?, jmhz_relationship_detail_code = ?
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$activityCode, $detailCode, $this->supplierId, $employmentId]);
+    }
+
+    /** Daňový nerezident se slovenskou rezidencí; prohlášení zůstává podepsané. */
+    private function makeNonResident(int $employeeId): void
+    {
+        $evidence = $this->container->get(PayrollPersonStatutoryEvidenceRepository::class);
+        self::assertInstanceOf(PayrollPersonStatutoryEvidenceRepository::class, $evidence);
+        $payload = $this->statutoryEvidence(self::PERIOD_START, true, true, $this->createHealthEvidenceDocument(900 + $employeeId));
+        $payload['sections']['tax_residences'] = [[
+            'residence' => 'non-resident',
+            'country_code' => 'SK',
+            'evidence_reference' => 'document:synthetic-tax-residence-sk',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+        ]];
+        $evidence->save($this->supplierId, $employeeId, $payload, '2026-07-31', $this->actors[0], null, 'g3-nonresident');
+    }
+
+    /**
      * 10535 všech formulářů v pořadí podání.
      *
      * @return list<string>
@@ -264,6 +538,8 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
         int $weeklyHours = 40,
         int $workload = 10_000,
         bool $taxDeclarationSigned = true,
+        ?string $activityCode = null,
+        string $taxpayerType = 'employee',
     ): array {
         $sequence = ++$this->sequence;
         $person = $this->createEmployment(
@@ -276,9 +552,10 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
             $workload,
             $taxDeclarationSigned,
             self::PERIOD_START,
+            taxpayerType: $taxpayerType,
         );
         [$firstName, $lastName] = explode(' ', $name, 2);
-        $this->completeJmhzEmployment($person, identity: [
+        $this->completeJmhzEmployment($person, $activityCode, [
             'first_name' => $firstName,
             'last_name' => $lastName,
             'birth_date' => $birthDate,
