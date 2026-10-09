@@ -155,7 +155,8 @@ final class PayrollSensitiveDataTest extends TestCase
     public static function largeSnapshotSizes(): iterable
     {
         yield 'nad 10 MB' => [10_600_000];
-        yield 'nad 50 MB' => [52_000_000];
+        // Dvojnásobek dřívějšího stropu; víc by v paralelním workeru (memory_limit 512M) nestačilo na paměť testu.
+        yield 'nad 20 MB' => [21_000_000];
     }
 
     #[DataProvider('largeSnapshotSizes')]
