@@ -198,7 +198,10 @@ final class PremierPayrollTakeoverTest extends TestCase
             $items['PREMIER_862']['definition']['exemption_basis'], $items['PREMIER_862']['definition']['social_treatment'],
             $items['PREMIER_862']['definition']['jmhz_treatment']]);
         self::assertSame([], $items['PREMIER_303']['definition']);
-        self::assertSame(1000.0, $relations['5']['months']['2025-03']['old_age_savings']);
+        // § 6 odst. 9 písm. m) ZDP: koš nese penzijní připojištění (MZ_PENZ)
+        // i soukromé životní pojištění (MZ_ZIV).
+        self::assertSame(1250.0, $relations['5']['months']['2025-03']['old_age_savings']);
+        self::assertSame(1000.0, $relations['5']['months']['2025-04']['old_age_savings']);
     }
 
     public function testPolicyKeepsPremierBehaviour(): void

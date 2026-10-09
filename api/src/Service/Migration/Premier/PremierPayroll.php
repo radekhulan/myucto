@@ -434,7 +434,8 @@ final class PremierPayroll
             'pensioner_discount' => $num('SLEVA_SOC') > 0,
             // Příspěvek zaměstnavatele na penzijní připojištění (karta MZ_SRAZ 422, na záloze
             // shodný s položkou 422 v DNY): čerpání koše § 6 odst. 9 písm. m) ZDP v převzatém měsíci.
-            'old_age_savings' => max(0.0, $num('MZ_PENZ')),
+            // Koš zahrnuje i soukromé životní pojištění (`MZ_ZIV`), proto se obě částky sčítají.
+            'old_age_savings' => max(0.0, round($num('MZ_PENZ') + $num('MZ_ZIV'), 2)),
             'pension_participation' => $participates,
             'insurance_days' => $participates ? max(0, min($calendarDays, 31)) : 0,
             // `VYL_DND` je v reálných zálohách vždy prázdný; kalendářní dny nemoci

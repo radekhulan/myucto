@@ -855,8 +855,11 @@ final class SyntheticPremierBackup
             $card(13, '862', 'Příspěvek na praní', 500),
         );
         $tables['MZDY'][0][] = ['MZ_PENZ', 'N', 12, 2];
+        // Soukromé životní pojištění 250 Kč v březnu 2025: patří do téhož koše.
+        $tables['MZDY'][0][] = ['MZ_ZIV', 'N', 12, 2];
         foreach ($tables['MZDY'][1] as $i => $row) {
             $tables['MZDY'][1][$i]['MZ_PENZ'] = (int) $row['INTER'] === 5 ? 1000 : 0;
+            $tables['MZDY'][1][$i]['MZ_ZIV'] = (int) $row['INTER'] === 5 && (int) $row['ROK'] === 2025 && (int) $row['MESIC'] === 3 ? 250 : 0;
         }
     }
 

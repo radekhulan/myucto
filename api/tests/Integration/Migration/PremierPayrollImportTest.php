@@ -608,7 +608,8 @@ final class PremierPayrollImportTest extends TestCase
               JOIN payroll_employments e ON e.supplier_id = t.supplier_id AND e.id = t.employment_id
              WHERE t.supplier_id = ? AND e.code = \'5\' AND t.old_age_savings_contribution_minor > 0', $supplierId);
         self::assertGreaterThan(0, (int) $taken[0][0]);
-        self::assertSame((int) $taken[0][0] * 100000, (int) $taken[0][1]);
+        // Březen 2025 nese navíc 250 Kč soukromého životního pojištění (MZ_ZIV).
+        self::assertSame((int) $taken[0][0] * 100000 + 25000, (int) $taken[0][1]);
     }
 
     public function testLedgerMismatchIsAWarningNotAnError(): void
