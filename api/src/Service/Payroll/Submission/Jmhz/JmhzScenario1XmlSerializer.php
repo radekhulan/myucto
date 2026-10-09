@@ -1350,7 +1350,9 @@ final class JmhzScenario1XmlSerializer
         // Příspěvky zaměstnavatele (10417 a rozpad) jsou rozšíření příjmů jen
         // formulářů bez příznaku a činnosti K–S; matice scénářů 4 až 6 je
         // nevedou a příspěvek zůstává součástí osvobozeného úhrnu 10289.
-        if ($form === 'bezPriznaku' || $cinnostKs) {
+        // Při nulovém úhrnu je interakce IN34 odebírá stejně jako 10289
+        // (kontrola 283 bere za vyplněnou i nulu).
+        if (($form === 'bezPriznaku' || $cinnostKs) && $incomeTotal !== 0) {
             $this->appendEmployerContributions($dom, $income, $summary);
         }
         $node->appendChild($income);

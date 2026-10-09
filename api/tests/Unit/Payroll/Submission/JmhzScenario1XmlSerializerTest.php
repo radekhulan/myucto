@@ -3267,6 +3267,87 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
+    /**
+     * Interakce IN34: při nulovém zúčtovaném příjmu (10286 = 0) se z příjmů
+     * odebírají osvobozený úhrn (10289) i příspěvky zaměstnavatele (10417,
+     * 10418, 10292–10296); kontrola 283 je za vyplněné bere i s nulou.
+     * Serializér vynechával jen 10289, příspěvky s nulou zapsal a kontrola
+     * 283 pak podání zastavila.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('summaryFormBodies')]
+    public function testZeroIncomeOmitsTheIncomeBreakdown(string $body): void
+    {
+        $document = $this->summaryMatrixDocument($body);
+        $summary = &$document['people'][0]['summary'];
+        $summary['income_total_czk'] = 0;
+        $summary['employer_contributions_czk'] = ['10417' => 0, '10292' => 0];
+        $summary['withholding_tax_czk'] = null;
+        unset($summary);
+        $xpath = $this->summaryMatrixXpath($document);
+
+        self::assertSame(['0'], array_map(
+            static fn (\DOMNode $node): string => $node->textContent,
+            iterator_to_array($xpath->query(self::formQuery($body, 'souhrnDataZec/prijmy/zuctovanoCelkem'))),
+        ));
+        foreach (['osvobozenoCelkem', 'prispevekZamestnavatele'] as $element) {
+            self::assertSame(
+                0,
+                $xpath->query(self::formQuery($body, 'souhrnDataZec/prijmy/' . $element))->length,
+                "{$body}: {$element}",
+            );
+        }
+        $xml = $this->summaryMatrixXml($document);
+        self::assertSame([JmhzControlOutcome::Passed], $this->controlOutcomes($xml, 283), $body);
+    }
+
+    /**
+     * Neodpracované hodiny z důvodu ošetřování člena domácnosti (10280) jsou
+     * součástí bloku neodpracovaných hodin (interakce IN07); bez bloku se
+     * neuvádějí.
+     */
+    public function testCareHoursAreReportedInsideTheUnworkedHoursBlock(): void
+    {
+        $document = $this->summaryMatrixDocument('bezPriznaku');
+        $values = &$document['people'][0]['employments'][0]['work_month']['jmhz_work_summary']['values'];
+        $values['worked_millihours'] = 168_000;
+        $values['unworked_total_millihours'] = 16_000;
+        $values['unworked_paid_millihours'] = 16_000;
+        $values['vacation_millihours'] = 8_000;
+        $values['care_millihours'] = 8_000;
+        unset($values);
+        $read = fn (array $document, string $path): array => array_map(
+            static fn (\DOMNode $node): string => $node->textContent,
+            iterator_to_array($this->summaryMatrixXpath($document)->query(self::formQuery('bezPriznaku', $path))),
+        );
+        $block = 'prubehZamestnani/neodpracovaneHodiny/';
+
+        self::assertSame(['16.000'], $read($document, $block . 'hodinyNeodpracCelkem'));
+        self::assertSame(['8.000'], $read($document, $block . 'hodinyNeodpracDovol'));
+        self::assertSame(['8.000'], $read($document, $block . 'hodinyNeodpracOcr'));
+
+        $document['people'][0]['employments'][0]['work_month']['jmhz_work_summary']['values']['unworked_total_millihours'] = null;
+        self::assertSame([], $read($document, $block . 'hodinyNeodpracOcr'));
+    }
+
+    /**
+     * Kód chyby v protokolu: ID kontroly + 20000 u kontrol DIS a ID kontroly
+     * + 40000 u kontrol cJMHZ.
+     */
+    public function testControlFindingsCarryTheProtocolErrorCode(): void
+    {
+        $report = JmhzControlValidatorFactory::create()->validate(
+            $this->summaryMatrixXml($this->summaryMatrixDocument('bezPriznaku')),
+            new JmhzControlContext('2026-08-14', schemaValidated: true),
+        );
+        $codes = [];
+        foreach ($report->findings as $finding) {
+            $codes[$finding->controlId] = $finding->errorCode;
+        }
+
+        self::assertSame(20156, $codes[156] ?? null, 'kontrola 156 (DIS)');
+        self::assertSame(40001, $codes[1] ?? null, 'kontrola 1 (cJMHZ)');
+    }
+
     /** @return array<string,mixed> */
     private function positionDocument(string $body, string $kind): array
     {
