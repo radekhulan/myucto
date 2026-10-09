@@ -407,6 +407,7 @@ final class GlobalSeedTables
         'payroll_jmhz_preparation_idempotency_claims', 'payroll_jmhz_preparation_snapshots',
         'payroll_jmhz_protocol_form_outcomes', 'payroll_jmhz_work_month_revisions',
         'payroll_leave_entitlement_snapshots', 'payroll_leave_ledger', 'payroll_migration_reference_totals',
+        'payroll_takeover_invariant_checks',
         'payroll_monthly_records', 'payroll_net_results', 'payroll_obligations',
         'payroll_operational_reconciliation_issue_events', 'payroll_operational_reconciliation_issues',
         'payroll_overtime_averaging_periods', 'payroll_overtime_compensations', 'payroll_overtime_consents',

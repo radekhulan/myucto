@@ -28,6 +28,35 @@ describe('TakeoverCheckSection', () => {
     expect(wrapper.find('[data-test="takeover-check-ok"]').exists()).toBe(true)
   })
 
+  /** Brána G2: porušení invariantů převzetí je nález i v roce bez převzatých měsíců. */
+  it('porušení invariantů převzetí ukáže podle druhu a zdroje', () => {
+    const wrapper = mount(TakeoverCheckSection, {
+      props: {
+        check: {
+          takeover_months: [],
+          missing_openings: [],
+          differences: [],
+          opening_only: [],
+          takeover_only: [],
+          invariants: {
+            live: [{ code: 'takeover_terms_overlap', text: 'Verze podmínek vztahu 1001 se překrývají.', context: {} }],
+            stored: [{
+              source: 'pamica',
+              checked_at: '2026-10-09 12:00:00',
+              violations: [{ code: 'takeover_totals_mismatch', text: 'Převzaté úhrny osoby 7 za 2026-01 nesedí na zdroj.', context: {} }],
+            }],
+          },
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-test="takeover-check-ok"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="takeover-invariant-takeover_terms_overlap"]').text()).toContain('Verze podmínek vztahu 1001')
+    const stored = wrapper.find('[data-test="takeover-invariant-takeover_totals_mismatch"]')
+    expect(stored.text()).toContain('pamica')
+    expect(stored.text()).toContain('nesedí na zdroj')
+  })
+
   /** CO, U KOHO a KDE: jméno, měsíce a proklik na kartu osoby. */
   it('chybějící počáteční stavy vypíše po lidech s proklikem na kartu', () => {
     const wrapper = mount(TakeoverCheckSection, {
