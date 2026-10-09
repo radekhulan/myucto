@@ -640,7 +640,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source = $this->maternitySource('2026-06-01', '2026-12-31', '2026-07-20', null, 176_000);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('vyloučené doby');
+        $this->expectExceptionMessage('den porodu');
         $builder = new JmhzEldpEvidenceBuilder();
         $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
     }

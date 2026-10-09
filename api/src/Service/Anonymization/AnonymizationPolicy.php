@@ -172,6 +172,7 @@ final class AnonymizationPolicy
         'cars' => ['brand' => 'keep', 'model' => 'keep', 'name' => 'text', 'note' => 'text', 'registration' => 'shape', 'vin' => 'shape'],
         'cash_document_vat_lines' => ['vat_classification_code' => 'keep'],
         'cash_documents' => ['counter_account_code' => 'keep', 'currency_code' => 'keep', 'description' => 'text', 'doc_number' => 'keep', 'external_barcode' => 'keep', 'partner_dic' => 'dic', 'partner_ic' => 'ico', 'partner_name' => 'party_name', 'rule_key' => 'keep'],
+        'cash_journal_notes' => ['body' => 'text'],
         'cash_registers' => ['account_code' => 'keep', 'currency_code' => 'keep', 'name' => 'text'],
         'catalog_import_profiles' => ['config_json' => 'json', 'name' => 'text'],
         'catalog_import_sources' => ['original_name' => 'file_name', 'sha256' => 'keep', 'storage_key' => 'keep'],

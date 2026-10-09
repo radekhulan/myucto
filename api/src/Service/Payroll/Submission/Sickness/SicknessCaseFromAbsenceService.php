@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use MyInvoice\Service\Payroll\Time\PayrollWorkCalendarSchedule;
 
 /**
@@ -188,7 +189,7 @@ final readonly class SicknessCaseFromAbsenceService
         if ($userId === null || $userId <= 0) {
             return [];
         }
-        $endingFrom = (new \DateTimeImmutable('today'))->modify('-1 year')->format('Y-m-d');
+        $endingFrom = PayrollSubmissionCalendar::now()->modify('-1 year')->format('Y-m-d');
         $startDay = $this->startDay($supplierId);
         if ($startDay !== null && $startDay > $endingFrom) {
             $endingFrom = $startDay;

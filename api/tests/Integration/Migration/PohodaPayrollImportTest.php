@@ -676,8 +676,9 @@ final class PohodaPayrollImportTest extends TestCase
                 'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '3', 'Obec' => 'Brno',
                 'PSC' => '60200', 'Stat' => 'CZ']);
             // Karta nese dnešní plný úvazek; leden a únor PAMICA počítala s polovičním.
+            // `DUvazek` je stanovená denní doba zaměstnavatele (8 h), ne sjednaný úvazek.
             $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'JeDPP' => 0, 'DatNast' => '2025-01-01', 'TUvazek' => 40, 'DUvazek' => 8]);
-            foreach ([1 => [20, 4, 80, 10000], 2 => [20, 4, 80, 10000], 3 => [40, 8, 176, 20000]] as $month => [$weekly, $daily, $hours, $gross]) {
+            foreach ([1 => [20, 8, 80, 10000], 2 => [20, 8, 80, 10000], 3 => [40, 8, 176, 20000]] as $month => [$weekly, $daily, $hours, $gross]) {
                 $row('MZ', ['ID' => 10 + $month, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => $month, 'HodFond' => $hours * 40 / $weekly,
                     'DnyFond2' => 20, 'TUvazek' => $weekly, 'DUvazek' => $daily, 'HodOdpra' => $hours, 'RefPoj' => 1, 'KcHrubaM' => $gross,
                     'KcCistaM' => (int) ($gross * 0.8), 'Prohlas' => 1, 'JeSocPP' => 1, 'KcSoc' => (int) ($gross * 0.071), 'KcZaklM' => $gross,

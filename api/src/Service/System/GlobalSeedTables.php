@@ -322,7 +322,7 @@ final class GlobalSeedTables
         'bank_notice_ignore_transfers',
         'bank_transfer_matches',
         'cars',
-        'cash_document_vat_lines', 'cash_documents', 'cash_registers',
+        'cash_document_vat_lines', 'cash_documents', 'cash_journal_notes', 'cash_registers',
         'catalog_job_items', 'catalog_job_lanes', 'catalog_jobs',
         'client_bank_accounts', 'client_email_contacts', 'client_revenue_cache',
         'clients',
