@@ -82,6 +82,18 @@ final class PayrollComponentRepository
             );
     }
 
+    /** Začátek nejbližší pozdější verze složky (`YYYY-MM-DD`), nebo null. */
+    public function nextVersionStart(int $supplierId, string $code, string $after): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(valid_from) FROM payroll_component_definitions WHERE supplier_id = ? AND code = ? AND valid_from > ?'
+        );
+        $stmt->execute([$supplierId, $code, $after]);
+        $from = $stmt->fetchColumn();
+
+        return is_string($from) && $from !== '' ? substr($from, 0, 10) : null;
+    }
+
     /**
      * @param array<string,mixed> $data
      * @return array<string,mixed>

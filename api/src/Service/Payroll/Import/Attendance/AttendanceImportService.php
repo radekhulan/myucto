@@ -1268,7 +1268,14 @@ final class AttendanceImportService
             if (!isset($byCode[$code]) || $this->inputRepository->resolveComponent($supplierId, $code, $periodStart) !== null) {
                 continue;
             }
-            $this->components->create($supplierId, AttendanceProfileComponents::definition($byCode[$code], $validFrom));
+            // Import staršího roku po novějším (převod předchozího roku až po letošním):
+            // složka už má pozdější verzi, starší tedy končí den před ní.
+            $definition = AttendanceProfileComponents::definition($byCode[$code], $validFrom);
+            $next = $this->components->nextVersionStart($supplierId, $code, $validFrom);
+            if ($next !== null) {
+                $definition['valid_to'] = (new \DateTimeImmutable($next))->modify('-1 day')->format('Y-m-d');
+            }
+            $this->components->create($supplierId, $definition);
             $created[] = $code;
         }
 
