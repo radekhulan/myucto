@@ -172,7 +172,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   // ale API vrátí 403.
   'accounting-small-assets': ['accounting'],
   'accounting-period-closing': ['accounting.periods.close'], 'accounting-closing-package': ['reports.export'], 'accounting-statement-notes': ['accounting'], 'accounting-retention': ['accounting'], 'accounting-transition-report': ['tax_evidence'], 'accounting-cash': ['cash'], 'accounting-cash-new': ['cash.document.write', 'write'], 'accounting-cash-edit': ['cash.document.write', 'write'], 'accounting-cash-book': ['cash'],
-  'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'],
+  'tax-evidence-cash-journal': ['tax_evidence'], 'tax-evidence-receivables-payables': ['tax_evidence'], 'tax-evidence-tax-estimate': ['tax_evidence'],
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
   'stock-opening-import': ['stock.documents.write', 'write'],

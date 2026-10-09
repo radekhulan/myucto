@@ -456,6 +456,26 @@ odstranit z vlastní navigace, přímá adresa průvodce zůstává dostupná.
 - Přechodová sestava, kontrolní seznam uzávěrky ani validace proti XSD nejsou právním posouzením. Zvláštní zahraniční operace,
   nestandardní zápočty, rezervy a opravné položky dokončete ručně.
 
+### 74.9.14 Odhad daně a pojistného během roku
+
+Stránka `Daňová evidence → Odhad daně a pojistného` ukáže pro zvolený rok, kolik vychází daň z příjmů a sociální a zdravotní
+pojištění OSVČ podle dosud zapsaných pohybů. Počítá stejnými pravidly jako přiznání DPFO a přehledy pro ČSSZ a zdravotní
+pojišťovnu, takže se po dokončení roku čísla nerozejdou.
+
+- **Podklady § 7**: daňové příjmy a výdaje z peněžního deníku, potvrzené daňové odpisy, daňová zůstatková cena prodaného nebo
+  zlikvidovaného majetku a úpravy základu z roční uzávěrky. Navíc přičte daňové odpisy roku, které ještě nejsou potvrzené: v daňové
+  evidenci se potvrzují až k roční uzávěrce, ale do výdajů roku patří.
+- **Skutečné výdaje a výdajový paušál**: obě varianty vedle sebe se stejnými příjmy, dílčím základem § 7, daní po slevách a
+  zvýhodnění na děti (podle profilu v `Daně → Daň z příjmů`), pojistným a celkovou zátěží. Varianta zvolená v profilu je označená,
+  levnější varianta má štítek **výhodnější**. Paušál respektuje zákonný strop podle § 7 odst. 7 ZDP. Profil s jednotlivými
+  činnostmi se srovnává jen ve zvolené variantě.
+- **Zálohy a vypořádání**: odhad za rok, zaplacené zálohy (ruční údaj v přiznání, jinak spárované zálohy z předpisu), zálohy, které
+  podle předpisu ještě zbývá zaplatit, a výsledný doplatek nebo přeplatek.
+
+Odhad příjmy a výdaje do konce roku nepromítá, pojistné ale počítá s ročním minimem vyměřovacího základu. Na začátku roku proto
+často vychází pojistné z minima, i když za celý rok bude vyšší. Způsob uplatnění výdajů měňte v profilu přiznání; při přechodu mezi
+paušálem a skutečnými výdaji upravte základ podle § 23 odst. 8 ZDP.
+
 ## 74.10 Související kapitoly
 
 - [Pokladna](32_Pokladna.md) - pokladní doklady, které se promítají do peněžního deníku.

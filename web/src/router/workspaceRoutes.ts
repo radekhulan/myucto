@@ -302,6 +302,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Daňová evidence (Epic DE) — jen supplier.accounting_mode === 'tax_evidence' (zrcadlo requiresDoubleEntry)
       { path: 'tax-evidence/cash-journal',         name: 'tax-evidence-cash-journal',         component: () => import('@/pages/tax-evidence/CashJournal.vue'),         meta: { requiresTaxEvidence: true } },
       { path: 'tax-evidence/receivables-payables', name: 'tax-evidence-receivables-payables', component: () => import('@/pages/tax-evidence/ReceivablesPayables.vue'), meta: { requiresTaxEvidence: true } },
+      { path: 'tax-evidence/tax-estimate',         name: 'tax-evidence-tax-estimate',         component: () => import('@/pages/tax-evidence/TaxEstimate.vue'),         meta: { requiresTaxEvidence: true } },
       // Sklad (Epic SKLAD) — gate requiresStock (supplier.stock_enabled); role client nemá
       // clientAllowed → guard ho pošle na /portal (deny-by-default, žádný deniedRoles).
       { path: 'stock/items',            name: 'stock-items',           component: () => import('@/pages/stock/ItemList.vue'),     meta: { requiresStock: true } },

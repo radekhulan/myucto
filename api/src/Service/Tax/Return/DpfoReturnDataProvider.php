@@ -55,6 +55,9 @@ final class DpfoReturnDataProvider
     /**
      * @param array<string,mixed> $inputs ruční vstupy přiznání (jen manual_increase_items/
      *   manual_decrease_items se použijí, a jen pro accounting_mode='double_entry')
+     * @param 'actual'|'pausal'|null $expenseModeOverride způsob uplatnění výdajů místo
+     *   volby v profilu; jen pro srovnání variant v odhadu daně, přiznání ho nepředává.
+     *   Na podvojné účetnictví nemá vliv (výdaje jsou vždy náklady z VH).
      * @return array{
      *   profile: array<string,mixed>,
      *   s7_income: float, s7_expenses: float, s7_base: float,
@@ -64,7 +67,7 @@ final class DpfoReturnDataProvider
      *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
      * }
      */
-    public function gather(int $supplierId, int $year, array $inputs = []): array
+    public function gather(int $supplierId, int $year, array $inputs = [], ?string $expenseModeOverride = null): array
     {
         $warnings = [];
         $blockingIssues = [];
@@ -76,10 +79,11 @@ final class DpfoReturnDataProvider
 
         $profile = $this->profiles->find($supplierId, $year) ?? $this->defaultProfile($year);
         $rate = (int) ($profile['activity_rate'] ?? 60);
-        $useActual = !empty($profile['use_actual_expenses']);
+        $profileActual = !empty($profile['use_actual_expenses']);
+        $useActual = $expenseModeOverride !== null ? $expenseModeOverride === 'actual' : $profileActual;
         $previousProfile = $this->profiles->find($supplierId, $year - 1);
-        if ($previousProfile !== null && !empty($previousProfile['use_actual_expenses']) !== $useActual) {
-            $warnings[] = $this->expenseModeTransitionWarning($supplierId, $year, $useActual);
+        if ($previousProfile !== null && !empty($previousProfile['use_actual_expenses']) !== $profileActual) {
+            $warnings[] = $this->expenseModeTransitionWarning($supplierId, $year, $profileActual);
         }
 
         if (($profile['flat_tax_band'] ?? 'none') !== 'none') {
@@ -172,6 +176,9 @@ final class DpfoReturnDataProvider
             // k datu; null = agenda nic za rok nedává (nevyplňuje se a nevaruje se).
             'payroll_gross' => $payrollGross,
             'source_manifest' => (array) ($cash['source_manifest'] ?? []),
+            // Rozpad skutečných výdajů daňové evidence (peněžní deník, potvrzené daňové
+            // odpisy, zůstatkové ceny vyřazeného majetku); null mimo daňovou evidenci.
+            'cash_expense_parts' => $cash['parts'] ?? null,
             'blocking_issues' => $blockingIssues,
             'warnings' => $warnings,
             'bank_account' => $this->bankAccount($supplierId),
@@ -285,7 +292,7 @@ final class DpfoReturnDataProvider
         return [$revenues, $expenses, $warnings];
     }
 
-    /** @return array{income:float|null,expenses:float,warnings:list<string>,blocking_issues:list<array<string,mixed>>,source_manifest:list<array<string,mixed>>} */
+    /** @return array{income:float|null,expenses:float,parts:array{cash_journal:float,confirmed_depreciation:float,disposal_residuals:float}|null,warnings:list<string>,blocking_issues:list<array<string,mixed>>,source_manifest:list<array<string,mixed>>} */
     private function cashBase(int $supplierId, int $year): array
     {
         try {
@@ -293,12 +300,14 @@ final class DpfoReturnDataProvider
             $totals = (array) ($j['totals'] ?? []);
             $income = round((float) ($totals['prijem_danovy'] ?? 0), 2);
             $expenses = round((float) ($totals['vydaj_danovy'] ?? 0), 2);
+            $cashExpenses = $expenses;
             $depreciation = $this->db->pdo()->prepare(
                 "SELECT COALESCE(SUM(amount), 0) FROM depreciation_entries
                   WHERE supplier_id = ? AND fiscal_year = ? AND kind = 'tax' AND status = 'confirmed'"
             );
             $depreciation->execute([$supplierId, $year]);
-            $expenses = round($expenses + (float) $depreciation->fetchColumn(), 2);
+            $confirmedDepreciation = round((float) $depreciation->fetchColumn(), 2);
+            $expenses = round($expenses + $confirmedDepreciation, 2);
             $warn = [];
             $blocking = [];
             // Daňová zůstatková cena majetku prodaného nebo zlikvidovaného v roce je výdajem
@@ -359,11 +368,23 @@ final class DpfoReturnDataProvider
                 'base' => round((float) ($row['base'] ?? 0), 2),
                 'vat' => round((float) ($row['vat'] ?? 0), 2),
             ], (array) ($j['rows'] ?? []));
-            return ['income' => $income, 'expenses' => $expenses, 'warnings' => $warn, 'blocking_issues' => $blocking, 'source_manifest' => $manifest];
+            return [
+                'income' => $income,
+                'expenses' => $expenses,
+                'parts' => [
+                    'cash_journal' => $cashExpenses,
+                    'confirmed_depreciation' => $confirmedDepreciation,
+                    'disposal_residuals' => round($residualExpense, 2),
+                ],
+                'warnings' => $warn,
+                'blocking_issues' => $blocking,
+                'source_manifest' => $manifest,
+            ];
         } catch (\Throwable $e) {
             return [
                 'income' => null,
                 'expenses' => 0.0,
+                'parts' => null,
                 'warnings' => ['Pracovní náhled použil příjem ze zaplacených faktur, protože se peněžní deník nepodařilo načíst.'],
                 'blocking_issues' => [['key' => 'cash_journal_error', 'message' => 'Peněžní deník se nepodařilo načíst: ' . $e->getMessage()]],
                 'source_manifest' => [],

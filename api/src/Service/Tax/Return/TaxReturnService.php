@@ -246,6 +246,29 @@ final class TaxReturnService
             ];
         }
 
+        $read = $this->readOnlyInputs($supplierId, $year, $type);
+        $computation = $this->compute($supplierId, $year, $type, $read['inputs'], 'radne');
+
+        return [
+            'status' => $read['status'],
+            'result' => $computation['result'],
+            'podklady' => $computation['podklady'],
+            'advances_source' => $read['advances_source'],
+        ];
+    }
+
+    /**
+     * Ruční vstupy řádného přiznání tak, jak s nimi počítá náhled jen ke čtení: uložené
+     * vstupy a do PRÁZDNÉHO pole zaplacených záloh na daň jisté spárované zálohy z evidence
+     * § 38a (jen v paměti, nic se neukládá). Sdílí ho {@see previewReadOnly()} a odhad daně
+     * daňové evidence, aby oba počítaly se stejnými zálohami.
+     *
+     * @return array{inputs:array<string,mixed>, status:'none'|'draft'|'final', advances_source:'return'|'schedules'|'none'}
+     */
+    public function readOnlyInputs(int $supplierId, int $year, string $type): array
+    {
+        $this->assertType($type);
+        $row = $this->returns->find($supplierId, $year, $type, 'radne', 1);
         $inputs = $row !== null ? (array) $row['inputs'] : [];
         $source = 'none';
         if ((float) ($inputs['tax_paid_advances'] ?? 0) > 0.0) {
@@ -257,12 +280,10 @@ final class TaxReturnService
                 $source = 'schedules';
             }
         }
-        $computation = $this->compute($supplierId, $year, $type, $inputs, 'radne');
 
         return [
+            'inputs' => $inputs,
             'status' => $row === null ? 'none' : (string) $row['status'],
-            'result' => $computation['result'],
-            'podklady' => $computation['podklady'],
             'advances_source' => $source,
         ];
     }

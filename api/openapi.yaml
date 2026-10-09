@@ -21601,6 +21601,22 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '403': { description: Přechod se na firmu nevztahuje, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/tax-evidence/tax-estimate:
+    get:
+      tags: [Tax]
+      summary: Odhad daně z příjmů a pojistného OSVČ během roku
+      description: |
+        Read-only. Počítá vrstvou přiznání DPFO z peněžního deníku, potvrzených i dosud
+        nepotvrzených daňových odpisů roku a zůstatkových cen vyřazeného majetku; srovná
+        skutečné výdaje s výdajovým paušálem a ukáže zaplacené a zbývající zálohy.
+        Jen pro rok vedený v daňové evidenci.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, schema: { type: integer } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TaxEvidenceTaxEstimate' } } } }
+        '403': { description: Rok není vedený v daňové evidenci, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/tax-evidence/closing/{year}:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -33286,6 +33302,89 @@ components:
             links: { type: array, items: { $ref: '#/components/schemas/DocumentLink' } }
             attachments: { type: array, items: { $ref: '#/components/schemas/Document' } }
             dms_message: { $ref: '#/components/schemas/DocumentDmsMessage' }
+    TaxEvidenceTaxEstimateVariant:
+      type: object
+      properties:
+        mode: { type: string, enum: [actual, pausal] }
+        expense_rate: { type: integer }
+        income: { type: number }
+        expenses: { type: number }
+        s7_base: { type: number, description: Dílčí základ § 7 (ř. 113 Přílohy 1) }
+        tax_base: { type: number, description: Zaokrouhlený základ daně }
+        tax_before_credits: { type: number }
+        credits: { type: number, description: Slevy § 35ba }
+        child_benefit: { type: number, description: Daňové zvýhodnění na děti § 35c }
+        tax: { type: number, description: Daň po slevách a zvýhodnění (záporná = bonus) }
+        tax_advances: { type: number }
+        social:
+          type: object
+          properties:
+            assessment_base: { type: number }
+            min_base: { type: number }
+            insurance: { type: number }
+            monthly_advance: { type: number }
+            participates: { type: boolean }
+        health:
+          type: object
+          properties:
+            assessment_base: { type: number }
+            min_base: { type: number }
+            insurance: { type: number }
+            monthly_advance: { type: number }
+        total_burden: { type: number, description: Daň + sociální + zdravotní pojištění }
+        warnings: { type: array, items: { type: string } }
+    TaxEvidenceTaxEstimate:
+      type: object
+      required: [applicable, year]
+      properties:
+        applicable: { type: boolean }
+        reason: { type: string, nullable: true, enum: [taxpayer_po, missing_tax_constants, null] }
+        year: { type: integer }
+        as_of: { type: string, format: date }
+        year_closed: { type: boolean }
+        return_status: { type: string, enum: [none, draft, final] }
+        selected_mode: { type: string, enum: [actual, pausal] }
+        recommended_mode: { type: string, nullable: true, enum: [actual, pausal, null] }
+        has_activities: { type: boolean }
+        flat_tax_band: { type: string }
+        is_secondary: { type: boolean }
+        sources:
+          type: object
+          properties:
+            income: { type: number }
+            cash_journal_expenses: { type: number, nullable: true }
+            confirmed_depreciation: { type: number, nullable: true }
+            disposal_residuals: { type: number, nullable: true }
+            pending_depreciation: { type: number }
+            planned_depreciation: { type: number, nullable: true }
+            increase: { type: number }
+            decrease: { type: number }
+        pausal:
+          type: object
+          properties:
+            rate: { type: integer }
+            cap: { type: number }
+            cap_reached: { type: boolean }
+        variants:
+          type: object
+          properties:
+            actual: { $ref: '#/components/schemas/TaxEvidenceTaxEstimateVariant' }
+            pausal: { $ref: '#/components/schemas/TaxEvidenceTaxEstimateVariant' }
+        advances:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              paid: { type: number }
+              source: { type: string, enum: [return, schedules, none] }
+              remaining: { type: number }
+        settlement:
+          type: object
+          properties:
+            tax: { type: number }
+            social: { type: number }
+            health: { type: number }
+        warnings: { type: array, items: { type: string } }
     Error:
       type: object
       required: [error]

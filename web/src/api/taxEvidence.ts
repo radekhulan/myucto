@@ -184,6 +184,72 @@ export const taxEvidenceApi = {
     api.get<TransitionReport>('/tax-evidence/transition-report', {
       params: { as_of: asOf, direction },
     }).then(r => r.data),
+  taxEstimate: (year: number) =>
+    api.get<TaxEstimate>('/tax-evidence/tax-estimate', { params: { year } }).then(r => r.data),
+}
+
+// ── Odhad daně a pojistného OSVČ během roku ─────────────────────────────────
+export type ExpenseMode = 'actual' | 'pausal'
+
+export interface TaxEstimateInsurance {
+  assessment_base: number
+  min_base: number
+  insurance: number
+  monthly_advance: number
+  participates?: boolean
+}
+
+export interface TaxEstimateVariant {
+  mode: ExpenseMode
+  expense_rate: number
+  income: number
+  expenses: number
+  s7_base: number
+  tax_base: number
+  tax_before_credits: number
+  credits: number
+  child_benefit: number
+  tax: number
+  tax_advances: number
+  social: TaxEstimateInsurance
+  health: TaxEstimateInsurance
+  total_burden: number
+  warnings: string[]
+}
+
+export interface TaxEstimateAdvance {
+  paid: number
+  source: 'return' | 'schedules' | 'none'
+  remaining: number
+}
+
+export interface TaxEstimate {
+  applicable: boolean
+  reason: 'taxpayer_po' | 'missing_tax_constants' | null
+  year: number
+  as_of?: string
+  year_closed?: boolean
+  return_status?: 'none' | 'draft' | 'final'
+  selected_mode?: ExpenseMode
+  recommended_mode?: ExpenseMode | null
+  has_activities?: boolean
+  flat_tax_band?: string
+  is_secondary?: boolean
+  sources?: {
+    income: number
+    cash_journal_expenses: number | null
+    confirmed_depreciation: number | null
+    disposal_residuals: number | null
+    pending_depreciation: number
+    planned_depreciation: number | null
+    increase: number
+    decrease: number
+  }
+  pausal?: { rate: number; cap: number; cap_reached: boolean }
+  variants?: Partial<Record<ExpenseMode, TaxEstimateVariant>>
+  advances?: Record<'tax' | 'social' | 'health', TaxEstimateAdvance>
+  settlement?: Record<'tax' | 'social' | 'health', number>
+  warnings?: string[]
 }
 
 // ── Přechodový můstek § 7b ↔ § 24 ZDP ───────────────────────────────────────

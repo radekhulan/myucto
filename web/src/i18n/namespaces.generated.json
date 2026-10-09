@@ -716,6 +716,9 @@
     "tax-evidence-receivables-payables": [
       "tax_evidence"
     ],
+    "tax-evidence-tax-estimate": [
+      "tax_evidence"
+    ],
     "stock-items": [
       "eshop",
       "imports",

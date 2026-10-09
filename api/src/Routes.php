@@ -4171,6 +4171,8 @@ final class Routes
             $g->delete('/classification/{source_type:bank|cash}/{source_id:[0-9]+}', [\MyInvoice\Action\TaxEvidence\MovementClassificationAction::class, 'delete']);
             // G7 (audit 2026-07) — podklady pro přechodový můstek §7b→§24 ZDP (příloha č. 3).
             $g->get('/transition-report',            [\MyInvoice\Action\TaxEvidence\TransitionReportAction::class, 'get']);
+            // Odhad daně z příjmů a pojistného OSVČ během roku (vrstva přiznání DPFO).
+            $g->get('/tax-estimate',                 [\MyInvoice\Action\TaxEvidence\TaxEstimateAction::class, 'get']);
         });
 
         // Epic DP (issue #18) — přiznání k dani z příjmů (DPPO/DPFO). Nové routy,
