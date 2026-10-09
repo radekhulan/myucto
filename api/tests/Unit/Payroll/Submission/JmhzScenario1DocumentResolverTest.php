@@ -1216,6 +1216,102 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     }
 
     /**
+     * DS 1.4.1.6 a Pokyny MH 1.4.14 kap. 3.4 k 10535: „částka základu pro
+     * výpočet zálohy na daň nebo částka základu pro výpočet daně podle srážkové
+     * daně". Dohoda pod limitem bez prohlášení (11 999 Kč srážkou) vykazuje
+     * v 10535 základ srážky, ne nulu — s rozpadem daně po vztazích i bez něj
+     * (starší zmrazená revize s jediným vztahem).
+     */
+    public function testWithholdingRelationshipReportsWithholdingBaseIn10535(): void
+    {
+        foreach ([true, false] as $withRelationships) {
+            $payload = $this->currentPayload();
+            $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+            $tax['advance_tax'] = [
+                'taxable_income_minor_units' => 0,
+                'rounded_tax_base_minor_units' => 0,
+                'tax_before_credits_minor_units' => 0,
+                'non_refundable_credits_minor_units' => 0,
+                'child_credit_minor_units' => 0,
+                'tax_after_credits_minor_units' => 0,
+                'tax_bonus_minor_units' => 0,
+            ];
+            $tax['withholding_base_minor_units'] = 1_199_900;
+            $tax['withholding_tax_minor_units'] = 179_900;
+            $tax['withholding_groups'] = [['group' => 'dpp']];
+            if ($withRelationships) {
+                $tax['relationships'] = [[
+                    'relationship_reference' => 'employment:101',
+                    'kind' => 'dpp',
+                    'taxable_base_minor_units' => 1_199_900,
+                    'regime' => 'withholding',
+                    'withholding_group' => 'dpp',
+                ]];
+            }
+            unset($tax);
+            $payload['people'][0]['employments'][0]['calculation'] = [
+                'employment_id' => 101,
+                'inputs' => [$this->calculationInput(1, 'ODMENA_DPP', 1_199_900, 1_199_900)],
+            ];
+
+            $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+                $this->withVersionedPayload(
+                    $this->preparation(),
+                    JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                    $payload,
+                ),
+                $this->pvpoj(),
+            );
+
+            self::assertSame(
+                11_999,
+                $resolution->candidate?->payload['people'][0]['employments'][0]['taxable_income_czk'],
+                $withRelationships ? 's rozpadem po vztazích' : 'bez rozpadu po vztazích',
+            );
+        }
+    }
+
+    /**
+     * Rozpad srážky po vztazích musí složit základ srážkové daně 10307 (úhrn
+     * skupiny zaokrouhlený dolů, § 36 odst. 3 ZDP). Nesedí-li, hlášení se
+     * zablokuje, místo aby 10535 tvrdil jiné číslo než souhrn.
+     */
+    public function testWithholdingBreakdownNotMatchingTheWithholdingBaseBlocks(): void
+    {
+        $payload = $this->currentPayload();
+        $tax = &$payload['people'][0]['person_summary']['statutory']['income_tax'];
+        $tax['advance_tax']['taxable_income_minor_units'] = 0;
+        $tax['advance_tax']['rounded_tax_base_minor_units'] = 0;
+        $tax['advance_tax']['tax_before_credits_minor_units'] = 0;
+        $tax['advance_tax']['tax_after_credits_minor_units'] = 0;
+        $tax['withholding_base_minor_units'] = 1_100_000;
+        $tax['withholding_tax_minor_units'] = 165_000;
+        $tax['withholding_groups'] = [['group' => 'dpp']];
+        $tax['relationships'] = [[
+            'relationship_reference' => 'employment:101',
+            'kind' => 'dpp',
+            'taxable_base_minor_units' => 1_199_900,
+            'regime' => 'withholding',
+            'withholding_group' => 'dpp',
+        ]];
+        unset($tax);
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withVersionedPayload(
+                $this->preparation(),
+                JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                $payload,
+            ),
+            $this->pvpoj(),
+        );
+
+        self::assertContains(
+            'jmhz_scenario1_income_tax_result_not_calculated',
+            array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers),
+        );
+    }
+
+    /**
      * Pokyny MPSV k 10297: úhrn příjmů „bez zaokrouhlení". Zaokrouhlený základ
      * (23 300) slouží jen k výpočtu 10298 a do hlášení nepatří.
      */

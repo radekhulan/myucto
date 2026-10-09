@@ -346,7 +346,9 @@ final class JmhzScenario1DocumentResolver
             $taxableIncomeCzk = $this->relationshipTaxableIncomeCzk(
                 $tax,
                 $employments,
-                $advanceTaxCzk['taxable_income'],
+                $advanceTaxCzk['taxable_income'] === null || ($withholdingTaxCzk !== null && $withholdingTaxCzk['base'] === null)
+                    ? null
+                    : $advanceTaxCzk['taxable_income'] + ($withholdingTaxCzk['base'] ?? 0),
                 $employeeId,
                 $blockers,
             );
@@ -1473,18 +1475,23 @@ final class JmhzScenario1DocumentResolver
      * souhrn na primárním formuláři. 10535 ale stojí v každém formuláři
      * zvlášť a vykazuje příjem TOHO vztahu, takže se bere z rozpadu výsledku
      * daně po vztazích. `taxable_base_minor_units` je součet složek se
-     * zdaňovaným příjmem (osvobozené do něj nevstupují) a do základu zálohy
-     * vstupuje jen u vztahu v režimu zálohy. Vztah zdaněný srážkou (§ 6 odst. 4)
-     * do základu zálohy nepatří a vykazuje nulu, stejně jako dosud osoba
-     * zdaněná výhradně srážkou.
+     * zdaňovaným příjmem (osvobozené do něj nevstupují).
      *
-     * Součet přes vztahy se musí rovnat základu zálohy osoby na haléř. Jinak by
-     * 10535 formulářů neodpovídal souhrnu a rozpor se zmrazeným výsledkem by se
-     * v XML už nedohledal.
+     * Datový slovník 1.4.1.6 i Pokyny MH 1.4.14 kap. 3.4 k 10535: „uvádí se
+     * částka základu pro výpočet zálohy na daň nebo částka základu pro výpočet
+     * daně podle srážkové daně". Vztah zdaněný srážkou (§ 6 odst. 4 ZDP)
+     * proto vykazuje svůj základ, ne nulu. Kontroly 245
+     * a 325 katalogu podle součtu 10535 po druzích činnosti rozhodují, zda
+     * jde o zálohu, nebo srážku, a nula by jim srážku zatajila.
+     *
+     * Součet vztahů v režimu zálohy se musí rovnat základu zálohy osoby (10297)
+     * na haléř a součet vztahů se srážkou po skupinách zaokrouhlený dolů
+     * základu srážkové daně (10307). Jinak by 10535 formulářů neodpovídal
+     * souhrnu a rozpor se zmrazeným výsledkem by se v XML už nedohledal.
      *
      * Výsledek daně bez rozpadu po vztazích (starší zmrazená revize) se u osoby
-     * s jediným vztahem vykáže jako dosud, základem osoby. U víc vztahů se
-     * rozdělit nedá a hlášení se zablokuje.
+     * s jediným vztahem vykáže základem osoby (záloha nebo srážka). U víc
+     * vztahů se rozdělit nedá a hlášení se zablokuje.
      *
      * @param array<string,mixed> $tax
      * @param list<array<string,mixed>> $employments
@@ -1525,8 +1532,9 @@ final class JmhzScenario1DocumentResolver
 
             return $unavailable();
         }
-        $advanceByReference = [];
+        $baseByReference = [];
         $advanceTotal = 0;
+        $withholdingByGroup = [];
         foreach ($relationships as $relationship) {
             $row = is_array($relationship) ? $relationship : [];
             $reference = $row['relationship_reference'] ?? null;
@@ -1535,21 +1543,40 @@ final class JmhzScenario1DocumentResolver
             if (!is_string($reference)
                 || !is_int($base)
                 || !is_string($regime)
-                || array_key_exists($reference, $advanceByReference)
+                || array_key_exists($reference, $baseByReference)
             ) {
                 return $unavailable();
             }
-            $minor = $regime === TaxRegime::Advance->value ? $base : 0;
-            $advanceByReference[$reference] = $minor;
-            $advanceTotal += $minor;
+            $minor = 0;
+            if ($regime === TaxRegime::Advance->value) {
+                $minor = $base;
+                $advanceTotal += $base;
+            } elseif ($regime === TaxRegime::Withholding->value) {
+                $group = $row['withholding_group'] ?? null;
+                if (!is_string($group)) {
+                    return $unavailable();
+                }
+                $minor = $base;
+                $withholdingByGroup[$group] = ($withholdingByGroup[$group] ?? 0) + $base;
+            }
+            $baseByReference[$reference] = $minor;
         }
         $advance = $this->object($tax['advance_tax'] ?? null);
         if (($advance['taxable_income_minor_units'] ?? null) !== $advanceTotal) {
             return $unavailable();
         }
+        // Základ srážkové daně (10307) je úhrn skupiny zaokrouhlený na celé
+        // koruny dolů (§ 36 odst. 3 ZDP); rozpad po vztazích ho musí složit.
+        $withholdingRounded = 0;
+        foreach ($withholdingByGroup as $groupBase) {
+            $withholdingRounded += intdiv($groupBase, 100) * 100;
+        }
+        if ($withholdingRounded !== ($withholdingByGroup === [] ? 0 : ($tax['withholding_base_minor_units'] ?? null))) {
+            return $unavailable();
+        }
         $result = [];
         foreach ($employmentIds as $employmentId) {
-            $minor = $advanceByReference["employment:{$employmentId}"] ?? null;
+            $minor = $baseByReference["employment:{$employmentId}"] ?? null;
             if ($minor === null) {
                 return $unavailable();
             }

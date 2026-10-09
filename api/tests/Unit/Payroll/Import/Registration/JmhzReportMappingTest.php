@@ -113,6 +113,36 @@ final class JmhzReportMappingTest extends TestCase
         self::assertSame(216_300, $row['advance_tax_minor_units']);
     }
 
+    /**
+     * Souběh HPP se zálohou a DPP se srážkovou daní: 10535 u dohody nese základ
+     * srážky (DS 1.4.1.6, Pokyny MH 1.4.14 kap. 3.4), do základu zálohy ale
+     * nepatří. Základ zálohy je 10297 (40 000), ne Σ 10535 (51 999); hlášení,
+     * které srážku v 10535 nevykazuje, dá týž výsledek.
+     */
+    public function testWithholdingBaseIn10535IsNotCountedIntoTheAdvanceBase(): void
+    {
+        foreach ([11_999, 0] as $secondaryTaxable) {
+            $primary = JmhzReportFixtures::person(['withholding' => ['base' => 11_999, 'tax' => 1_799]]);
+            $secondary = JmhzReportFixtures::person([
+                'employment_id' => 102,
+                'id_ppv' => '200000000000000000202',
+                'primary' => false,
+                'wage' => 11_999,
+                'taxable' => $secondaryTaxable,
+                'social_base' => 0,
+            ]);
+
+            $result = JmhzOpeningBalancePlanner::monthRow(
+                2,
+                $this->items(JmhzReportFixtures::report([$primary, $secondary], 2026, 2)),
+            );
+
+            self::assertNull($result['reason'], (string) $result['reason']);
+            self::assertSame(4_000_000, $result['row']['advance_base_minor_units']);
+            self::assertSame(1_199_900, $result['row']['withholding_base_minor_units']);
+        }
+    }
+
     public function testClaimedCreditIsTakenFromTheMonthAndImportedClaimEndsWhenAbsent(): void
     {
         $reference = 'jmhz-import:' . str_repeat('a', 64) . ':' . JmhzReportFixtures::guid(1, 101);

@@ -2895,9 +2895,10 @@ final class JmhzScenario1XmlSerializer
     }
 
     /**
-     * 10535 je zdanitelný příjem TOHOTO vztahu; resolver ho bere z rozpadu
-     * výsledku daně po vztazích a součet přes formuláře osoby se rovná
-     * základu zálohy v souhrnu. Dokument bez per-vztahové hodnoty vznikl
+     * 10535 je zdanitelný příjem TOHOTO vztahu (základ zálohy, nebo základ
+     * srážkové daně); resolver ho bere z rozpadu výsledku daně po vztazích
+     * a součet vztahů v režimu zálohy se rovná základu zálohy v souhrnu.
+     * Dokument bez per-vztahové hodnoty vznikl
      * v době, kdy měla osoba vždy jen jeden formulář, a tam je to základ osoby.
      *
      * @param array<string,mixed> $summary

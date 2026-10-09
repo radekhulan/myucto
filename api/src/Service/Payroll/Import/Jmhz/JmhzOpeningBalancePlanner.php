@@ -146,7 +146,22 @@ final class JmhzOpeningBalancePlanner
                 return ['row' => null, 'reason' => "Hlášení za {$period} neuvádí základ daně po vztazích (10535), "
                     . 'ze kterého se kumuluje základ zálohy; počáteční stav nejde doložit.'];
             }
+            // 10535 nese u vztahu se srážkovou daní základ srážky (DS 1.4.1.6,
+            // Pokyny MH 1.4.14 kap. 3.4), do základu zálohy ale nepatří. Osoba
+            // se zálohou i srážkou v témže měsíci proto základ zálohy dostane
+            // z 10297; Σ 10535 ho musí doložit buď bez srážky (hlášení, které
+            // srážku v 10535 nevykazovalo), nebo i se základem srážky 10307.
             $advanceBase = $taxable;
+            $withholdingBase = $summary->withholding['base'] ?? 0;
+            $declared = $summary->advance['base'] ?? null;
+            if ($withholdingBase > 0 && is_int($declared) && $taxable !== $declared) {
+                if ($taxable - $withholdingBase !== $declared) {
+                    return ['row' => null, 'reason' => "Hlášení za {$period} nese zálohu i srážkovou daň a součet základů "
+                        . 'po vztazích (10535) neodpovídá základu zálohy (10297) ani se základem srážky (10307); '
+                        . 'počáteční stav nejde doložit.'];
+                }
+                $advanceBase = $declared;
+            }
         }
         $appliedChild = $summary->childCredit['applied'] ?? 0;
         $appliedCredits = $computed - $afterCredits - $appliedChild;
