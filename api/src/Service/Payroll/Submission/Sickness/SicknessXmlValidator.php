@@ -344,6 +344,22 @@ final readonly class SicknessXmlValidator
                 . 'Větu bez akce ČSSZ odmítne.',
             );
         }
+        // Doporučené kombinace akcí (FAQ ČSSZ k dávkám NP, dotaz 6; Elektronizace
+        // dávek NP, str. 5-6): je-li k dispozici ukončení, trvání je nadbytečné.
+        if ($kind->hasActions() && $application->actionContinuation && $application->actionEnd) {
+            if ($application->actionStart) {
+                $this->invalid(
+                    'nempri_care_actions_all_three',
+                    'Vznik, trvání a ukončení současně ČSSZ nepoužívá. Je-li potřeba péče už '
+                    . 'ukončená, zvolte u případu jen Vznik a Ukončení (trvání je nadbytečné).',
+                );
+            }
+            $this->invalid(
+                'nempri_care_continuation_with_end',
+                'Trvání spolu s ukončením je podle ČSSZ nadbytečné. Je-li potřeba péče ukončená, '
+                . 'zvolte u případu jen Ukončení.',
+            );
+        }
         $starts = !$kind->hasActions() || $application->actionStart;
         if ($starts && $application->fromDate === null) {
             $this->invalid(

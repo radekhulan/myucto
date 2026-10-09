@@ -107,6 +107,27 @@ final class NempriBenefitApplicationXmlTest extends TestCase
         $this->expectRejected('nempri_care_action_missing', $payload);
     }
 
+    /**
+     * NEMPRI25-ose-3 a NEMPRI25-dlo-3 (FAQ k dávkám NP, dotaz 6; Elektronizace
+     * dávek NP, str. 5-6): Vznik+Trvání+Ukončení se nepoužívá, při známém
+     * ukončení se posílá Vznik+Ukončení. Trvání+Ukončení je nadbytečné, posílá
+     * se jen Ukončení. Obě kombinace se u ošetřovného i dlouhodobého
+     * ošetřovného odmítnou s vysvětlením.
+     */
+    public function testCareActionCombinationsThatCsszDoesNotUseAreRefused(): void
+    {
+        foreach ([SicknessBenefitKind::Ose, SicknessBenefitKind::Dlo] as $kind) {
+            $this->expectRejected('nempri_care_actions_all_three', $this->payload(
+                $kind,
+                $this->careApplication(actionStart: true, actionContinuation: true, actionEnd: true),
+            ));
+            $this->expectRejected('nempri_care_continuation_with_end', $this->payload(
+                $kind,
+                $this->careApplication(actionStart: false, actionContinuation: true, actionEnd: true),
+            ));
+        }
+    }
+
     public function testCareStartNeedsCaredPersonAndReason(): void
     {
         $withoutPerson = $this->payload(

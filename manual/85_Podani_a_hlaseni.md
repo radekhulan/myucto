@@ -2491,7 +2491,10 @@ ve spodní liště a tyto sekce:
 - **Žádost o dávku** (ošetřovné, dlouhodobé ošetřovné, otcovská, peněžitá
   pomoc v mateřství). Zaměstnavatel žádost přijímá a předává ČSSZ, údaje
   proto opisujete ze žádosti, kterou vám zaměstnanec předal. U ošetřovného
-  zaškrtněte akce Vznik, Trvání nebo Ukončení, alespoň jednu. Potvrzení
+  zaškrtněte akce Vznik, Trvání nebo Ukončení, alespoň jednu. ČSSZ používá
+  každou akci samostatně, Vznik s Ukončením a Vznik s Trváním. Všechny tři
+  akce naráz ani Trvání s Ukončením se nepřipraví: je-li péče ukončená, zvolte
+  Vznik a Ukončení, nebo jen Ukončení. Potvrzení
   zaměstnavatele, rozhodné období, platební spojení, ošetřovaná osoba, důvod
   péče, prohlášení zaměstnance a den, od kterého se o dávku žádá, se posílají
   jen s akcí Vznik; u samotného trvání nebo ukončení je ČSSZ odmítá. Naopak
