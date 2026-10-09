@@ -59,7 +59,8 @@ final class TaxConstantsTest extends TestCase
         self::assertSame(1762812, $c['tax_high_threshold']);     // 36× prům. mzda 48 967
         self::assertSame(146901, $c['advance_tax_high_threshold']); // 3× prům. mzda 48 967
         self::assertSame(0.50, $c['health_assessment_pct']);
-        self::assertSame(235044, $c['social_min_base_main']);    // 40 % × 48 967 × 12
+        // z. 90/2026 Sb.: 35 % průměrné mzdy pro celý rok 2026 (čl. II bod 5), 17 139 × 12
+        self::assertSame(205668, $c['social_min_base_main']);
         self::assertSame(64644, $c['social_min_base_secondary']);
         self::assertSame(117521, $c['social_secondary_participation_threshold']); // rozhodná částka vedlejší SVČ 2026 (ČSSZ)
         self::assertSame(293802, $c['health_min_base']);         // 50 % × 48 967 × 12

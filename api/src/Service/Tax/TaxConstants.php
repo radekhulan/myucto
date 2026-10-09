@@ -23,8 +23,8 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  *    složka 1. pásma)
  *  - průměrná mzda 2024 43 967 Kč, 2025 46 557 Kč, 2026 48 967 Kč → hranice 23 % = 36×
  *  - vyměřovací základ: sociální 55 % zisku, zdravotní 50 % zisku (§7)
- *  - min. roční vyměřovací základ: soc. hlavní 30 % (2024) / 35 % (2025) / 40 % (2026) prům. mzdy,
- *    zdravotní 50 % prům. mzdy × 12
+ *  - min. roční vyměřovací základ: soc. hlavní 30 % (2024) / 35 % (2025) / 35 % (2026, z. 90/2026 Sb.
+ *    místo původních 40 %) prům. mzdy, zdravotní 50 % prům. mzdy × 12
  *
  * Ročníky 2019–2023 slouží importu historického účetnictví. Ověřeny k 2026-09 dle
  * NV o minimální mzdě a o VVZ, ČSSZ (rozhodné částky, minimální zálohy), MF/GFŘ
@@ -1523,7 +1523,11 @@ final class TaxConstants
             'health_rate'         => 0.135,
             'social_assessment_pct' => 0.55,
             'health_assessment_pct' => 0.50,
-            'social_min_base_main'      => 235044, // 40 % × 48 967 × 12
+            // § 14 odst. 5 věta první z. 589/1992 Sb. ve znění z. 90/2026 Sb.: 35 % průměrné
+            // mzdy (dřív 40 % od 2026). Podle čl. II bodu 5 téže novely platí 35 % pro roční
+            // minimum § 5b odst. 2 písm. a) za CELÝ rok 2026, i když zálohy do června šly
+            // ze 40 %: 17 138,45 → 17 139 × 12.
+            'social_min_base_main'      => 205668,
             'social_min_base_secondary' => 64644,  // min. roční zákl. vedlejší činnost
             'social_max_base'           => 2350416, // 48 × průměrná mzda (§15a z. 589/1992 Sb.)
             'social_secondary_participation_threshold' => 117521, // 2026 (ČSSZ)

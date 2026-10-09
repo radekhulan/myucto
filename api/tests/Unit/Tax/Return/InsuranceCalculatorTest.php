@@ -50,6 +50,19 @@ final class InsuranceCalculatorTest extends TestCase
         self::assertSame(57098.0, $r['insurance']);
     }
 
+    /**
+     * Zákon 90/2026 Sb. vrátil nejnižší měsíční VZ hlavní činnosti na 35 % průměrné mzdy
+     * a čl. II bod 5 ho použil i pro roční minimum celého roku 2026. Přehled za 2026
+     * proto nesmí počítat s původními 40 % (235 044 Kč, záloha 5 720 Kč).
+     */
+    public function testSocialMainMinimum2026FollowsAct90Of2026(): void
+    {
+        $r = $this->social->compute(0, false, 0, false, null, TaxConstants::forYear(2026));
+        self::assertSame(205668.0, $r['assessment_base']);   // 17 139 × 12
+        self::assertSame(60056.0, $r['insurance']);          // ceil(205 668 × 0,292)
+        self::assertSame(5005.0, $r['monthly_advance']);     // ceil(17 139 × 0,292)
+    }
+
     public function testSocialAssessmentBaseIsCappedAtFortyEightAverageWages(): void
     {
         foreach ([2025 => 2234736.0, 2026 => 2350416.0] as $year => $maximum) {
