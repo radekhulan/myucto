@@ -3,6 +3,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { authApi } from '@/api/auth'
 import type { SupplierBrief } from '@/api/auth'
+import { LOCATABLE, abortManualSupplierSwitch, beginManualSupplierSwitch, isLocatableRoute } from '@/router/locatableRoutes'
 
 /** Normalizace pro hledání firmy: bez diakritiky, malá písmena. */
 function fold(value: string): string {
@@ -54,18 +55,46 @@ export function supplierSwitchDestination(path: string, search = ''): string | n
  * otevře i v jiném prohlížeči), znovu se načte /auth/me a stránka se přenačte —
  * z detailu záznamu, který v jiné firmě neexistuje, se přejde na jeho seznam.
  */
+/**
+ * Kam po ručním přepnutí z aktuální routy. Z routy dokladu (`LOCATABLE`) se odchází
+ * vždy, i když cesta nemá číselný segment: zůstat na ní by znamenalo, že ji guard
+ * odkazu otevře znovu a firmu vrátí vlastníkovi dokladu.
+ */
+export function manualSwitchDestination(route: { name?: unknown, path: string, fullPath: string }): string | null {
+  const queryIndex = route.fullPath.indexOf('?')
+  const search = queryIndex >= 0 ? route.fullPath.slice(queryIndex) : ''
+  const parent = supplierSwitchDestination(route.path, search)
+  if (!isLocatableRoute(route.name)) return parent
+  if (parent) return parent
+  return LOCATABLE[route.name as string].query ? route.path : '/'
+}
+
+async function currentRoute(): Promise<{ name?: unknown, path: string, fullPath: string }> {
+  try {
+    const { router } = await import('@/router')
+    return router.currentRoute.value
+  } catch {
+    return { path: window.location.pathname, fullPath: window.location.pathname + window.location.search }
+  }
+}
+
+/** Sdílené napříč přepínačem, hledáním i paletou: druhé přepnutí během prvního se ignoruje. */
+const switching = ref(false)
+
 export function useSupplierSwitch() {
   const supplierStore = useSupplierStore()
   const auth = useAuthStore()
-  const switching = ref(false)
 
   /**
    * `destination` = kam po přepnutí (odkaz na doklad jiné firmy, viz
-   * `router/supplierDeepLink.ts`); bez něj se detail vrací na seznam.
+   * `router/supplierDeepLink.ts`); bez něj jde o ruční přepnutí a detail se vrací na seznam.
    */
   async function switchTo(id: number, destination?: string): Promise<void> {
     if (id === supplierStore.currentSupplierId || switching.value) return
     switching.value = true
+    const manual = destination === undefined
+    if (manual) beginManualSupplierSwitch()
+    const from = manual ? await currentRoute() : null
     auth.clearPermissions()
     supplierStore.setSupplier(id)
 
@@ -75,11 +104,12 @@ export function useSupplierSwitch() {
 
     const refreshed = await auth.refresh()
     if (!refreshed) {
+      if (manual) abortManualSupplierSwitch()
       switching.value = false
       return
     }
 
-    const target = destination ?? supplierSwitchDestination(window.location.pathname, window.location.search)
+    const target = from ? manualSwitchDestination(from) : destination ?? null
     if (target) {
       window.location.href = target
     } else {
