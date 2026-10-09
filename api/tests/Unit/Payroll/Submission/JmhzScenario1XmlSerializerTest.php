@@ -2388,6 +2388,210 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * Formuláře vězně, jiného příjmu a mezinárodního pronájmu síly staví
+     * souhrnná data zaměstnance toutéž cestou jako formulář bez příznaku.
+     * Test projde všechny daňové údaje souhrnu (příjmy, záloha, srážková daň,
+     * slevy, měsíční a roční zvýhodnění na děti, výsledek ročního zúčtování)
+     * a u každého typu formuláře ověří, že hodnota stojí pod jeho elementem.
+     * Pronájem síly vede zúžený souhrn, takže se u něj ověřuje i vynechání.
+     */
+    public function testSpecialFormsCarryTheEmployeeTaxSummary(): void
+    {
+        foreach ($this->specialFormSummaryCases() as $body => [$source, $international]) {
+            $payload = $this->payloadWithChildCredit();
+            $payload['scope'] = $source['scope'];
+            $payload['people'][0]['employments'][0] = $source['people'][0]['employments'][0];
+            $payload['people'][0]['employments'][0]['term']['tax_declaration_signed'] = true;
+            $payload['people'][0]['person_summary']['statutory']['social_insurance']
+                = $source['people'][0]['person_summary']['statutory']['social_insurance'];
+            $document = $this->resolutionFor($payload)->requireResolvedDocument()->payload;
+            $document['people'][0]['summary'] = self::richTaxSummary(
+                $document['people'][0]['summary'],
+                $international,
+            );
+
+            $xml = (new JmhzScenario1XmlValidator())->dryRun(
+                new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($document), []),
+                $this->envelope(),
+            )['xml'];
+            $dom = new \DOMDocument();
+            $dom->loadXML($xml);
+            $xpath = new \DOMXPath($dom);
+            $xpath->registerNamespace('j', 'http://schemas.cssz.cz/JMHZ/podani/1.0');
+            $xpath->registerNamespace('form', 'http://schemas.cssz.cz/JMHZ/form/1.0');
+
+            foreach (self::expectedSummaryValues($international) as $path => $expected) {
+                $query = '/j:jmhz/j:formulareOsob/j:formularOsoby/form:' . $body . '/'
+                    . implode('/', array_map(static fn (string $step): string => 'form:' . $step, explode('/', $path)));
+                $nodes = $xpath->query($query);
+                if ($expected === null) {
+                    self::assertSame(0, $nodes->length, "{$body}: {$path} se nemá vykázat.");
+                    continue;
+                }
+                self::assertSame(
+                    (array) $expected,
+                    array_map(static fn (\DOMNode $node): string => $node->textContent, iterator_to_array($nodes)),
+                    "{$body}: {$path}",
+                );
+            }
+        }
+    }
+
+    /** @return array<string, array{array<string,mixed>, bool}> */
+    private function specialFormSummaryCases(): array
+    {
+        return [
+            'vezen' => [$this->specialScenarioPayload('scenario_4', '1', '2'), false],
+            'jinyPrijem' => [$this->uninsuredPayload('scenario_5', '13'), false],
+            'mezinarodniPronajemSily' => [$this->uninsuredPayload('scenario_6', '12'), true],
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $summary
+     * @return array<string,mixed>
+     */
+    private static function richTaxSummary(array $summary, bool $international): array
+    {
+        $summary['income_total_czk'] = 20_000;
+        $summary['exempt_income_czk'] = $international ? null : 500;
+        $summary['advance_tax_czk'] = [
+            'base' => 19_500,
+            'computed' => 2_925,
+            'after_credits' => 355,
+            'bonus' => $international ? 0 : 1_200,
+            'taxable_income' => 19_500,
+        ];
+        $summary['withholding_tax_czk'] = ['base' => 3_000, 'tax' => 450];
+        $summary['tax_credits_czk'] = [
+            'basic' => 2_570,
+            'disability_basic' => $international ? null : 210,
+            'disability_extended' => $international ? null : 420,
+            'ztp_p' => $international ? null : 1_345,
+        ];
+        $summary['child_credit'] = $international ? null : [
+            'monthly_credit_czk' => 2_000,
+            'applied_credit_czk' => 1_800,
+            'other_household_caregiver' => true,
+            'other_household_caregivers' => [
+                ['given_name' => 'Petr', 'family_name' => 'Novák', 'birth_number' => '9004110000'],
+            ],
+            'children' => [
+                [
+                    'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková', 'birth_date' => '2015-04-11'],
+                    'ztp_p' => true,
+                    'order' => '1',
+                ],
+                [
+                    'identity' => ['given_name' => 'Eva', 'family_name' => 'Nováková', 'birth_number' => '1752030000'],
+                    'ztp_p' => false,
+                    'order' => '2',
+                ],
+            ],
+        ];
+        $summary['annual'] = [
+            'withholding' => ['paid_income_czk' => 36_000, 'withholding_tax_czk' => 5_400],
+            'requested' => true,
+            'performed' => true,
+            'result' => [
+                'settlement_difference_czk' => 1_500,
+                'tax_difference_czk' => 1_000,
+                'bonus_difference_czk' => 500,
+                'spouse_credit_claimed' => false,
+                'child_credit_claimed' => true,
+                'child_credit_details' => [
+                    'other_household_caregiver' => true,
+                    'other_household_caregivers' => [[
+                        'identity' => ['given_name' => 'Petr', 'family_name' => 'Novák', 'birth_date' => '1990-04-11'],
+                        'months_mask' => 'AAAAAANNNNNN',
+                    ]],
+                    'children' => [[
+                        'identity' => ['given_name' => 'Jana', 'family_name' => 'Nováková', 'birth_number' => '1554110000'],
+                        'ztp_p_months_mask' => 'NNNNNNAAAAAA',
+                        'order_months_mask' => '111111111111',
+                    ]],
+                ],
+            ],
+        ];
+
+        return $summary;
+    }
+
+    /**
+     * Cesta pod souhrnem => očekávané hodnoty (výskyty v pořadí), null = nesmí být.
+     *
+     * @return array<string, list<string>|string|null>
+     */
+    private static function expectedSummaryValues(bool $international): array
+    {
+        $base = 'souhrnDataZec/';
+        $declaration = $base . 'prohlaseniPoplatnikaDane/';
+        $monthly = $declaration . 'zvyhodneniDetiMesic/';
+        $annual = $base . 'rocniUhrny/';
+        $result = $annual . 'vysledekRocnihoZuctovani/';
+        $annualChildren = $result . 'zvyhodneniNaDeti/';
+        $common = [
+            $base . 'prijmy/zuctovanoCelkem' => '20000',
+            $base . 'zalohaNaDan/zakladDane' => '19500',
+            $base . 'zalohaNaDan/vypoctenaZaloha' => '2925',
+            $base . 'zalohaNaDan/danZalohaPoSleve' => '355',
+            $base . 'zvlastniSazbaDane/zakladDane' => '3000',
+            $base . 'zvlastniSazbaDane/srazenaDan' => '450',
+            $base . 'prohlaseniPoplatnika' => 'true',
+            $declaration . 'zakladniSleva' => '2570',
+            $annual . 'prijemSrazkDanZvlSazba' => '36000',
+            $annual . 'danSrazenaZvlSazba' => '5400',
+            $annual . 'rocniZuctovaniZadost' => 'true',
+            $annual . 'rocniZuctovaniProvedeno' => 'true',
+            $result . 'preplatekRok' => '1500',
+        ];
+        if ($international) {
+            return $common + [
+                $base . 'prijmy/osvobozenoCelkem' => null,
+                $base . 'zalohaNaDan/danBonus' => null,
+                $declaration . 'zakladniSlevaInvalidita12' => null,
+                $monthly . 'vyzivujeJinaOsoba' => null,
+                $result . 'danPreplatekRok' => null,
+                $result . 'uplatnenoZvyhodneniNaDeti' => null,
+            ];
+        }
+
+        return $common + [
+            $base . 'prijmy/osvobozenoCelkem' => '500',
+            $base . 'zalohaNaDan/danBonus' => '1200',
+            $declaration . 'zakladniSlevaInvalidita12' => '210',
+            $declaration . 'rozsirenaSlevaInvalidita3' => '420',
+            $declaration . 'slevaZTPP' => '1345',
+            $declaration . 'danoveZvyhodneniDetiMesic' => '2000',
+            $declaration . 'slevaDite' => '1800',
+            $monthly . 'vyzivujeJinaOsoba' => 'true',
+            $monthly . 'jineOsoby/jinaOsoba/jmeno' => 'Petr',
+            $monthly . 'jineOsoby/jinaOsoba/prijmeni' => 'Novák',
+            $monthly . 'jineOsoby/jinaOsoba/rodneCislo' => '9004110000',
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/jmeno' => ['Jana', 'Eva'],
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/prijmeni' => ['Nováková', 'Nováková'],
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/datumNarozeni' => '2015-04-11',
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/rodneCislo' => '1752030000',
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/prukazZtpp' => ['true', 'false'],
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/poradi' => ['1', '2'],
+            $result . 'danPreplatekRok' => '1000',
+            $result . 'danBonusPreplatekRok' => '500',
+            $result . 'uplatnenaSlevaNaPartnera' => 'false',
+            $result . 'uplatnenoZvyhodneniNaDeti' => 'true',
+            $annualChildren . 'vyzivujeJinaOsoba' => 'true',
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/jmeno' => 'Petr',
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/prijmeni' => 'Novák',
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/datumNarozeni' => '1990-04-11',
+            $annualChildren . 'jineOsoby/jinaOsoba/mesiceVyzivovani' => 'AAAAAANNNNNN',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/jmeno' => 'Jana',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/prijmeni' => 'Nováková',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/rodneCislo' => '1554110000',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/prukazZtpp' => 'NNNNNNAAAAAA',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/poradi' => '111111111111',
+        ];
+    }
+
     public function testInternationalHireWithChildCreditIsRefused(): void
     {
         $payload = $this->payloadWithChildCredit();
