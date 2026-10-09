@@ -991,13 +991,21 @@ final readonly class HealthInsuranceSubmissionService
         string $period,
         string $insurerCode,
         ?int $createdBy = null,
+        bool $correction = false,
     ): array {
         $bundle = $this->bulkNotificationBundle(
             $supplierId,
             $period,
             $insurerCode,
         );
-        $payload = $bundle['payload'];
+        $subjectReference =
+            'health_bulk_notification:' . $period . ':' . $insurerCode;
+        $bounds = $this->periodBounds($period);
+        $payload = HealthBulkNotificationCorrectionGuard::apply(
+            $this->deliveredBulkNotificationLines($supplierId, $environment, $subjectReference, $bounds),
+            $bundle['payload'],
+            $correction,
+        );
         $window = $bundle['window'];
         $xml = $this->serializer->serializeBulkNotification($payload);
         $channel = $this->channelDescription($supplierId, $insurerCode);
@@ -1014,9 +1022,6 @@ final readonly class HealthInsuranceSubmissionService
             (string) ($channel['isds_attachment_format'] ?? ''),
         ) ?? HealthInsurerIsdsAttachmentFormat::None;
 
-        $subjectReference =
-            'health_bulk_notification:' . $period . ':' . $insurerCode;
-        $bounds = $this->periodBounds($period);
         $sourceHash = hash('sha256', CanonicalJson::encode([
             'schema_reference' =>
                 'payroll-health-bulk-notification-submission.v2',
@@ -1056,13 +1061,6 @@ final readonly class HealthInsuranceSubmissionService
                     'Firma hromadného oznámení nebyla nalezena.',
                 );
             }
-            $this->assertNoCorrectionOfDeliveredBulkNotification(
-                $supplierId,
-                $environment,
-                $subjectReference,
-                $bounds,
-                $payload,
-            );
             $obligation = $this->obligations->register(
                 $supplierId,
                 self::AGENDA_BULK_NOTIFICATION,
@@ -1908,19 +1906,19 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
-     * HOZ téhož období a pojišťovny, které už pojišťovně odešlo, se nesmí
-     * „opravit“ novým HOZ s druhou větou P nebo O
-     * ({@see HealthBulkNotificationCorrectionGuard}).
+     * Věty HOZ téhož období a pojišťovny, které už pojišťovně odešlo
+     * (stav submitted a dál). Podle nich {@see HealthBulkNotificationCorrectionGuard}
+     * pozná opravu, kterou nejde poslat jako novou větu P nebo O.
      *
      * @param array{from:string,to:string} $bounds
+     * @return list<array{code:string,date:string,number:string,first:string,last:string}>
      */
-    private function assertNoCorrectionOfDeliveredBulkNotification(
+    private function deliveredBulkNotificationLines(
         int $supplierId,
         string $environment,
         string $subjectReference,
         array $bounds,
-        HealthBulkNotificationPayload $payload,
-    ): void {
+    ): array {
         $previous = $this->submissionRepository->latestSubmissionForScopeForUpdate(
             $supplierId,
             $environment,
@@ -1932,20 +1930,17 @@ final readonly class HealthInsuranceSubmissionService
             ['submitted', 'processing', 'accepted', 'partially_accepted', 'correction_required'],
         );
         if ($previous === null) {
-            return;
+            return [];
         }
         $artifactId = $this->submissionRepository->findOutboundXmlArtifactId(
             $supplierId,
             $environment,
             $previous['id'],
         );
-        $delivered = HealthBulkNotificationCorrectionGuard::linesFromXml(
+
+        return HealthBulkNotificationCorrectionGuard::linesFromXml(
             $artifactId === null ? '' : $this->submissions->artifactBytes($supplierId, $artifactId),
         );
-        $conflicts = HealthBulkNotificationCorrectionGuard::conflicts($delivered, $payload->changes);
-        if ($conflicts !== []) {
-            throw HealthBulkNotificationCorrectionGuard::exception($conflicts);
-        }
     }
 
     /**

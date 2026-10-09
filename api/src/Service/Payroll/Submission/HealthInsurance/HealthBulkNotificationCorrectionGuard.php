@@ -94,6 +94,101 @@ final class HealthBulkNotificationCorrectionGuard
     }
 
     /**
+     * Payload, které se smí odeslat po už doručeném HOZ téhož období a pojišťovny.
+     *
+     * Bez rozporu zůstává payload beze změny. Oprava čísla pojištěnce je
+     * v poučení VZP, ZP MV i v anotaci XSD rev. 08 popsaná jednoznačně: řádek
+     * „X“ s chybným číslem, jménem a původním datem změny, další řádek „P“
+     * se správným číslem a pak ostatní hlášení, která šla pod chybným číslem.
+     * Takové opravné HOZ aplikace sestaví, ale jen na výslovné potvrzení
+     * (`$correction`). Opravu data přihlášky (Y) a odhlášky (Z) zdroje
+     * nepopisují (které datum věta nese), proto zůstává ruční.
+     *
+     * @param list<array{code:string,date:string,number:string,first:string,last:string}> $delivered
+     */
+    public static function apply(
+        array $delivered,
+        HealthBulkNotificationPayload $payload,
+        bool $correction,
+    ): HealthBulkNotificationPayload {
+        $conflicts = self::conflicts($delivered, $payload->changes);
+        if ($conflicts === []) {
+            return $payload;
+        }
+        foreach ($conflicts as $conflict) {
+            if ($conflict['correction'] !== 'X') {
+                throw self::exception($conflicts);
+            }
+        }
+        if (!$correction) {
+            throw new HealthNotificationException(
+                'zp_bulk_notification_correction_x_available',
+                'Pojišťovna už dostala hromadné oznámení za toto období s jiným číslem pojištěnce: '
+                    . implode('; ', array_map(
+                        static fn (array $c): string => sprintf('%s %s (dříve „%s“, nyní „%s“)', $c['last'], $c['first'], $c['was'], $c['now']),
+                        $conflicts,
+                    ))
+                    . '. Aplikace může sestavit opravné oznámení: řádek X s chybným číslem a řádek P se správným. '
+                    . 'Potvrďte vytvoření opravy.',
+            );
+        }
+
+        $key = static fn (string $last, string $first): string => mb_strtolower($last) . '|' . mb_strtolower($first);
+        $corrected = [];
+        foreach ($conflicts as $conflict) {
+            $corrected[$key($conflict['last'], $conflict['first'])] = $conflict['now'];
+        }
+        // Řádek X nese původní datum přihlášky; bez ní v tomtéž HOZ ho nejde
+        // sestavit (přihláška odešla v jiném období) a oprava zůstává ruční.
+        foreach (array_keys($corrected) as $person) {
+            $hasArrival = false;
+            foreach ($delivered as $line) {
+                if ($key($line['last'], $line['first']) === $person
+                    && in_array($line['code'], self::ARRIVAL_CODES, true)
+                ) {
+                    $hasArrival = true;
+                }
+            }
+            if (!$hasArrival) {
+                throw self::exception($conflicts);
+            }
+        }
+        $addresses = [];
+        foreach ($payload->changes as $change) {
+            $addresses[$key($change->lastName, $change->firstName)] ??= $change->address;
+        }
+        $deliveredKeys = [];
+        $changes = [];
+        foreach ($delivered as $line) {
+            $person = $key($line['last'], $line['first']);
+            $deliveredKeys[$person . '|' . $line['code'] . '|' . $line['date']] = true;
+            if (!isset($corrected[$person])) {
+                continue;
+            }
+            $address = $addresses[$person] ?? null;
+            if (in_array($line['code'], self::ARRIVAL_CODES, true)) {
+                $changes[] = new HealthNotificationChange('X', $line['date'], $line['number'], $line['first'], $line['last'], $address);
+                $changes[] = new HealthNotificationChange('P', $line['date'], $corrected[$person], $line['first'], $line['last'], $address);
+            } else {
+                $changes[] = new HealthNotificationChange($line['code'], $line['date'], $corrected[$person], $line['first'], $line['last'], $address);
+            }
+        }
+        foreach ($payload->changes as $change) {
+            $person = $key($change->lastName, $change->firstName);
+            if (!isset($deliveredKeys[$person . '|' . $change->changeCode . '|' . $change->changedOn])) {
+                $changes[] = $change;
+            }
+        }
+
+        return new HealthBulkNotificationPayload(
+            insurerCode: $payload->insurerCode,
+            employer: $payload->employer,
+            changes: $changes,
+            internalReference: $payload->internalReference,
+        );
+    }
+
+    /**
      * @param list<array{last:string,first:string,code:string,correction:string,was:string,now:string}> $conflicts
      */
     public static function exception(array $conflicts): HealthNotificationException

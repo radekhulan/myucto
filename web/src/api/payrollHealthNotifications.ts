@@ -391,10 +391,11 @@ export const payrollHealthNotificationApi = {
     period: string,
     insurerCode: string,
     environment: 'production' | 'test' = 'production',
+    correction = false,
   ) =>
     api.post<HealthPreparedBulkNotification>(
       `/payroll/submissions/health-notifications/bulk/${period}/${insurerCode}/prepare`,
-      { environment },
+      correction ? { environment, correction: true } : { environment },
     ).then(response => response.data),
 
   /**

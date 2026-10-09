@@ -17,6 +17,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { usePayrollServerMessage } from './payrollServerMessage'
+import { apiErrorCode } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollHealthNotificationApi,
@@ -161,6 +162,7 @@ const prepareBulkInsurer = ref<string | null>(null)
 const preparingBulk = ref(false)
 const preparedBulk = ref<HealthPreparedBulkNotification | null>(null)
 const prepareBulkError = ref('')
+const bulkCorrectionAvailable = ref(false)
 const downloadingBulk = ref(false)
 const downloadBulkError = ref('')
 const isdsBulkBusy = ref(false)
@@ -376,9 +378,10 @@ async function prepare() {
   }
 }
 
-async function prepareBulk() {
+async function prepareBulk(correction = false) {
   if (prepareBulkInsurer.value === null) return
   prepareBulkError.value = ''
+  bulkCorrectionAvailable.value = false
   downloadBulkError.value = ''
   isdsBulkError.value = ''
   isdsBulkResult.value = null
@@ -391,8 +394,12 @@ async function prepareBulk() {
       period.value,
       prepareBulkInsurer.value,
       environment.value,
+      correction,
     )
   } catch (exception) {
+    // HOZ za období už odešlo s jiným číslem pojištěnce: opravné HOZ (X + P)
+    // se sestaví až na výslovné potvrzení účetní.
+    bulkCorrectionAvailable.value = apiErrorCode(exception) === 'zp_bulk_notification_correction_x_available'
     prepareBulkError.value = serverErrorMessage(
       exception,
       t('payroll.health_notifications.prepare_bulk.failed'),
@@ -1437,7 +1444,7 @@ onMounted(() => {
             :class="[btnFilledSm('primary'), 'mt-3']"
             :disabled="!canPrepareBulk"
             data-test="health-prepare-bulk-action"
-            @click="prepareBulk"
+            @click="prepareBulk()"
           >
             <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.doc" />
@@ -1460,6 +1467,21 @@ onMounted(() => {
         >
           {{ prepareBulkError }}
         </p>
+        <div v-if="bulkCorrectionAvailable && canWrite" class="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            :class="btnFilledSm('warning')"
+            class="whitespace-nowrap"
+            :disabled="preparingBulk"
+            data-test="health-prepare-bulk-correction"
+            @click="prepareBulk(true)"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.edit" />
+            </svg>
+            {{ t('payroll.health_notifications.prepare_bulk.correction_x') }}
+          </button>
+        </div>
 
         <div
           v-if="preparedBulk"

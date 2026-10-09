@@ -1266,8 +1266,13 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         }
     }
 
-    /** Opravené číslo pojištěnce po odeslaném HOZ: ruší se kódem X, ne novou větou P. */
-    public function testCorrectedInsuranceNumberAfterDeliveredBulkNotificationRequiresManualCorrectionX(): void
+    /**
+     * Opravené číslo pojištěnce po odeslaném HOZ. Poučení VZP, ZP MV i anotace
+     * XSD rev. 08: řádek „X“ s chybným číslem, jménem a původním datem změny,
+     * pak řádek „P“ se správným číslem. Bez potvrzení se nová přihláška
+     * neodešle; s potvrzením aplikace sestaví právě tyto dva řádky.
+     */
+    public function testCorrectedInsuranceNumberAfterDeliveredBulkNotificationBuildsCorrectionX(): void
     {
         $this->deliverMarchBulkNotification();
         $this->db->pdo()->prepare(
@@ -1277,11 +1282,26 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
 
         try {
             $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
-            self::fail('Opravené číslo pojištěnce nesmí odejít jako nová přihláška P.');
+            self::fail('Opravené číslo pojištěnce nesmí bez potvrzení odejít jako nová přihláška P.');
         } catch (HealthNotificationException $exception) {
-            self::assertSame('zp_bulk_notification_correction_required', $exception->errorCode);
-            self::assertStringContainsString('oprava kódem X', $exception->getMessage());
+            self::assertSame('zp_bulk_notification_correction_x_available', $exception->errorCode);
         }
+
+        $result = $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111', null, true);
+        $xml = (string) preg_replace('/>\s+</', '><', $this->submissions->artifactBytes($this->supplierId, (int) $result['artifact_id']));
+
+        self::assertSame(2, $result['changes_count']);
+        self::assertSame($this->schemas->isBundleAvailable(), $result['schema_validated']);
+        self::assertStringContainsString(
+            '<kodzmeny>X</kodzmeny><datumZmeny>2026-03-01</datumZmeny><cisloPojistence>9052224321</cisloPojistence>'
+                . '<jmeno>Jana</jmeno><prijmeni>Nováková</prijmeni>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<kodzmeny>P</kodzmeny><datumZmeny>2026-03-01</datumZmeny><cisloPojistence>9052224313</cisloPojistence>',
+            $xml,
+        );
+        self::assertLessThan(strpos($xml, '<kodzmeny>P</kodzmeny>'), strpos($xml, '<kodzmeny>X</kodzmeny>'));
     }
 
     /** Nezměněné HOZ po odeslání dál jen zopakuje to, co odešlo. */

@@ -307,11 +307,14 @@ následujícího měsíce):
 3. Ruční sestavení: rozbalte **Podrobnosti: oznámení HOZ, ruční sestavení
    a historie**, vyberte pojišťovnu a klikněte na **Sestavit HOZ**.
 
-Opravíte-li po odeslání HOZ datum nástupu, datum skončení nebo číslo
-pojištěnce, aplikace nové HOZ za totéž období a pojišťovnu nesestaví:
-pojišťovna by dostala druhou přihlášku nebo odhlášku. Hláška jmenuje osobu
-a opravný kód (`X` u čísla pojištěnce, `Y` u data přihlášky, `Z` u data
-odhlášky). Opravnou větu podejte ručně podle poučení pojišťovny.
+Opravíte-li po odeslání HOZ číslo pojištěnce, aplikace nabídne tlačítko
+**Sestavit opravné HOZ (X + P)**: oznámení nese řádek `X` s chybným číslem,
+jménem a původním datem a za ním řádek `P` se správným číslem, jak to popisuje
+poučení pojišťovny. Opravíte-li datum nástupu nebo skončení, nové HOZ se
+nesestaví, protože pojišťovna by dostala druhou přihlášku nebo odhlášku.
+Hláška jmenuje osobu a opravný kód (`Y` u data přihlášky, `Z` u data
+odhlášky); poučení neříká, které datum taková věta nese, proto ji podejte
+ručně podle pokynů pojišťovny.
 
 **Jak poznáte, že je hotovo:** Přihláška má po načtení protokolu stav
 přijato a na kartě osoby a vztahu se objeví OIČ a ID PPV s původem „protokol

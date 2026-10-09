@@ -1027,7 +1027,7 @@ describe('PayrollHealthNotificationPanel', () => {
     await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
     await flushPromises()
 
-    expect(m.prepareBulk).toHaveBeenCalledWith(payrollWorkingPeriod(), '111', 'production')
+    expect(m.prepareBulk).toHaveBeenCalledWith(payrollWorkingPeriod(), '111', 'production', false)
 
     const result = wrapper.find('[data-test="health-prepare-bulk-result"]')
     expect(result.exists()).toBe(true)
@@ -1174,6 +1174,32 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(box.text()).toContain('rodné číslo ani EČP')
     expect(box.text()).not.toContain('payroll.health_notifications.prepare_bulk.failed')
   })
+
+  it('po odeslaném HOZ s jiným číslem pojištěnce nabídne opravné HOZ (X + P)', async () => {
+    m.prepareBulk.mockRejectedValueOnce({
+      response: {
+        data: {
+          error: {
+            code: 'zp_bulk_notification_correction_x_available',
+            message: 'Pojišťovna už dostala hromadné oznámení s jiným číslem pojištěnce.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-bulk-insurer', '111')
+    await flushPromises()
+    expect(wrapper.find('[data-test="health-prepare-bulk-correction"]').exists()).toBe(false)
+    await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
+    await flushPromises()
+
+    const correction = wrapper.get('[data-test="health-prepare-bulk-correction"]')
+    await correction.trigger('click')
+    await flushPromises()
+    expect(m.prepareBulk).toHaveBeenLastCalledWith(payrollWorkingPeriod(), '111', 'production', true)
+  })
 })
 
 describe('PayrollHealthNotificationPanel — oznámení přímo z karty zaměstnance', () => {
@@ -1209,7 +1235,7 @@ describe('PayrollHealthNotificationPanel — oznámení přímo z karty zaměstn
     await flushPromises()
 
     expect(m.registerPeriod).toHaveBeenCalledWith('2026-10')
-    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111', 'production')
+    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111', 'production', false)
     expect(m.duties).toHaveBeenLastCalledWith('2026-10', expect.objectContaining({ insurer_code: '111' }))
   })
 
@@ -1224,7 +1250,7 @@ describe('PayrollHealthNotificationPanel — oznámení přímo z karty zaměstn
     })
     await flushPromises()
 
-    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111', 'test')
+    expect(m.prepareBulk).toHaveBeenCalledWith('2026-10', '111', 'test', false)
   })
 
   it('bez hoz=1 pojišťovnu jen předvybere a nic nesestavuje', async () => {

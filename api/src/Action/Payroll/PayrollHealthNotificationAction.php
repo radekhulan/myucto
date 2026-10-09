@@ -317,6 +317,8 @@ final class PayrollHealthNotificationAction
                 (string) ($args['period'] ?? ''),
                 (string) ($args['insurerCode'] ?? ''),
                 $this->userId($request),
+                // Opravné HOZ (řádek X + P) jen na výslovné potvrzení účetní.
+                ($body['correction'] ?? false) === true,
             );
         } catch (HealthNotificationException $exception) {
             return Json::error(
