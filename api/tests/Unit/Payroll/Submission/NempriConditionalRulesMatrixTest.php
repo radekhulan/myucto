@@ -62,6 +62,12 @@ final class NempriConditionalRulesMatrixTest extends TestCase
         yield 'dlo rozvrh směn od po do' => ['dlo', ['actionStart' => false, 'actionEnd' => true, 'shiftSchedule' => [['from' => '2026-09-11', 'to' => '2026-09-07']]], [], 'nempri_period_invalid'];
         yield 'dlo bez akce' => ['dlo', ['actionStart' => false, 'actionContinuation' => false, 'actionEnd' => false], [], 'nempri_care_action_missing'];
         yield 'dlo bez čísla rozhodnutí' => ['dlo', [], ['decisionNumber' => null], 'nempri_decision_number_missing'];
+        foreach (['nem', 'ose', 'dlo'] as $kind) {
+            yield "{$kind} převedení bez data" => [$kind, [], ['transferredOtherWork' => true, 'transferredOn' => null], 'nempri_transfer_date_mismatch'];
+            yield "{$kind} rozhodné období přes 13 měsíců" => [$kind, [], ['decisivePeriod' => new NempriDecisivePeriod('2025-08-01', '2026-08-31', self::months('2025-08', 13), true)], 'nempri_decisive_period_too_long'];
+        }
+        yield 'ose bez čísla rozhodnutí' => ['ose', [], ['decisionNumber' => null], 'nempri_decision_number_missing'];
+        yield 'dlo nárok jiné osoby bez § 57' => ['dlo', ['otherMaternityClaim' => true, 'otherPersonS57' => null], [], 'nempri_other_claim_details_missing'];
         yield 'nem název programu nad 64 znaků' => ['nem', [], ['productName' => str_repeat('a', 65)], 'nempri_vendor_invalid'];
         yield 'nem verze programu nad 16 znaků' => ['nem', [], ['productVersion' => str_repeat('1', 17)], 'nempri_vendor_invalid'];
     }
