@@ -191,7 +191,12 @@ final class PayrollRegistrationA1SnapshotBuilder
         }
         $healthInsuranceCode = $variant === PayrollRegistrationBusinessMatrix::VARIANT_10
             ? null
-            : $this->code($input, 'health_insurance_code', 3);
+            : $this->coded(
+                'health_insurance_code',
+                $this->code($input, 'health_insurance_code', 3),
+                PayrollRegistrationCodebooks::HEALTH_INSURER,
+                'C_ZPOJ',
+            );
         $facts = null;
         if ($variant !== PayrollRegistrationBusinessMatrix::VARIANT_10) {
             $factsInput = $this->object($input, 'facts');
@@ -560,6 +565,17 @@ final class PayrollRegistrationA1SnapshotBuilder
                 'identity.' . $key,
                 'missing',
             );
+        }
+        // EDV 1.4.0.6, ID 10051 (client/birth/@stat): stát narození je kód
+        // z číselníku C_STAT stejně jako ostatní státy věty.
+        $birthCountry = $identity['birth_country_code'] ?? null;
+        if (is_string($birthCountry) && trim($birthCountry) !== '') {
+            $this->within('identity', fn () => $this->coded(
+                'birth_country_code',
+                strtoupper(trim($birthCountry)),
+                PayrollRegistrationCodebooks::COUNTRY,
+                'C_STAT',
+            ));
         }
     }
 

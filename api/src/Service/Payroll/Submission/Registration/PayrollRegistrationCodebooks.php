@@ -35,6 +35,11 @@ final class PayrollRegistrationCodebooks
         'VG', 'VI', 'VN', 'VU', 'WF', 'WS', 'XK', 'YE', 'YT', 'ZA', 'ZM', 'ZW',
     ];
 
+    /** Zdravotní pojišťovny (C_ZPOJ) */
+    public const HEALTH_INSURER = [
+        '111', '201', '205', '207', '209', '211', '213', '300', '999',
+    ];
+
     /** Druh důchodu (C_DUCH) */
     public const PENSION_TYPE = [
         '1', '2', '8', 'A', 'B', 'C',

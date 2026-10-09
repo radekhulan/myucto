@@ -40,6 +40,21 @@ final class PayrollRegistrationCodebookTest extends TestCase
 
             return $s;
         }, true, 'tax_residency.country_code', PayrollRegistrationCodebooks::COUNTRY];
+        yield 'zdravotní pojišťovna' => [static function (array $s, string $v): array {
+            $s['health_insurance_code'] = $v;
+
+            return $s;
+        }, false, 'health_insurance_code', PayrollRegistrationCodebooks::HEALTH_INSURER];
+        yield 'stát bydliště v rezidenci' => [static function (array $s, string $v): array {
+            $s['tax_residency'] = [
+                'country_code' => $v === 'QQ' ? 'SK' : $v,
+                'identifier_type' => 'D',
+                'identifier' => 'SYN-1',
+                'residence_address' => ['street' => 'Testovacia', 'house_number' => '1', 'city' => 'Testov', 'postal_code' => '81101', 'country_code' => $v],
+            ];
+
+            return $s;
+        }, true, 'tax_residency.residence_address.country_code', ['SK', 'AT', 'DE', 'UA']];
         yield 'stát dokladu' => [static function (array $s, string $v): array {
             $s['proof_identity']['country_code'] = $v;
 
@@ -121,7 +136,11 @@ final class PayrollRegistrationCodebookTest extends TestCase
     public function testCodeOutsideTheCodebookIsAFieldProblem(callable $set, bool $foreigner, string $field, array $codebook): void
     {
         $builder = new PayrollRegistrationA1SnapshotBuilder();
-        $invalid = $codebook === PayrollRegistrationCodebooks::COUNTRY ? 'QQ' : 'Q';
+        $invalid = match (true) {
+            str_ends_with($field, 'country_code') => 'QQ',
+            $field === 'health_insurance_code' => '123',
+            default => 'Q',
+        };
         $problem = self::problem($builder->problems($set(self::source($foreigner), $invalid), self::identity($foreigner), self::scope()), $field);
         self::assertNotNull($problem, "{$field}: kód mimo číselník prošel");
         self::assertSame('codebook', $problem['message_key']);
@@ -134,6 +153,27 @@ final class PayrollRegistrationCodebookTest extends TestCase
                 "{$field}: kód {$code} z číselníku byl odmítnut",
             );
         }
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function identityCountries(): iterable
+    {
+        yield 'státní občanství' => ['citizenship_country_code', 'citizenship_country_code'];
+        yield 'stát narození' => ['birth_country_code', 'identity.birth_country_code'];
+    }
+
+    #[DataProvider('identityCountries')]
+    public function testIdentityCountryMustComeFromCStat(string $key, string $field): void
+    {
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        $identity = self::identity(false);
+        $identity[$key] = 'QQ';
+        $problem = self::problem($builder->problems(self::source(false), $identity, self::scope()), $field);
+        self::assertNotNull($problem, "{$field}: stát mimo C_STAT prošel");
+        self::assertSame('codebook', $problem['message_key']);
+
+        $identity[$key] = 'CZ';
+        self::assertNull(self::problem($builder->problems(self::source(false), $identity, self::scope()), $field));
     }
 
     public function testCodebooksMatchTheirOfficialSize(): void
