@@ -63,6 +63,24 @@ function blobItems(?array $blob): array
 }
 
 /**
+ * Položky blobu rozdělené po blocích `order2`. Věta měsíčního hlášení (MHitems) nese v jednom blobu
+ * všechna souběžná PPV osoby: blok 0 je primární PPV se souhrnnými daty osoby, každý další blok
+ * samostatný formulář osoby (typicky souběžná DPP). Bez rozdělení by se zapsal jen blok 0.
+ *
+ * @param array<string,mixed>|null $blob
+ * @return array<int,array<int,list<array{value:string,order:int,section:int,flag:int}>>>
+ */
+function blobBlocks(?array $blob): array
+{
+    $blocks = [];
+    foreach (($blob['items'] ?? []) as $item) {
+        $blocks[(int) ($item['order2'] ?? 0)]['items'][] = $item;
+    }
+    ksort($blocks);
+    return array_map(fn (array $block): array => blobItems($block), $blocks);
+}
+
+/**
  * @param array<int,array{occurrences:int,nonempty:int}> $seen
  * @param array<int,list<array{value:string,order:int,section:int,flag:int}>> $items
  */
@@ -304,6 +322,14 @@ function probeValidate(string $xmlFile, string $xsdFile, string $type): ?bool
                 $element->appendChild($dom->createElementNS($element->namespaceURI, 'druhCinnosti', '1'));
             }
         }
+        // PPM bez dne nástupu (NEMPRIpol.OdeDne prázdné): zadostODavku nemá jediný údaj a nezapíše se.
+        foreach ($dom->getElementsByTagNameNS('*', 'ppm') as $element) {
+            if ($element->getElementsByTagNameNS('*', 'zadostODavku')->length === 0) {
+                $request = $dom->createElementNS($element->namespaceURI, 'zadostODavku');
+                $request->appendChild($dom->createElementNS($element->namespaceURI, 'odeDne', '2000-01-01'));
+                $element->appendChild($request);
+            }
+        }
     } elseif ($type === 'HZUPN20') {
         foreach ($dom->getElementsByTagNameNS('*', 'dokument') as $element) {
             $ns = $element->namespaceURI;
@@ -481,9 +507,10 @@ if (wanted($only, 'JMHZ')) {
         $summary = new PamicaIdResolver($summaryItems, null, $derived);
         $people = [];
         foreach ($items[$id] ?? [] as $row) {
-            $personItems = blobItems($row['Data'] ?? null);
-            noteSeen($attributeReport['JMHZ']['seen'], $personItems);
-            $people[] = new PamicaIdResolver($personItems, $summary);
+            foreach (blobBlocks($row['Data'] ?? null) as $personItems) {
+                noteSeen($attributeReport['JMHZ']['seen'], $personItems);
+                $people[] = new PamicaIdResolver($personItems, $summary);
+            }
         }
         noteSeen($attributeReport['JMHZ']['seen'], $summaryItems);
         $summary->withRepeat(['formularOsoby' => $people]);
@@ -491,7 +518,7 @@ if (wanted($only, 'JMHZ')) {
         $period = sprintf('%04d-%02d', (int) $header['Rok'], (int) $header['RelMesic']);
         $relative = saveXml($doc, $corpus, $cfg['dir'], $period . '_' . $id . '.xml');
         $valid = recordValidation($validation, $errorCounts, 'JMHZ', $relative, $corpus, $xsdRoot . $cfg['xsd']);
-        addIndex($index, $messages, 'JMHZ', ((int) ($header['RelTyp'] ?? 1)) === 2 ? 'O' : 'R', $period, $header, count($items[$id] ?? []), [$relative], [$valid], 'RelStavDP');
+        addIndex($index, $messages, 'JMHZ', ((int) ($header['RelTyp'] ?? 1)) === 2 ? 'O' : 'R', $period, $header, count($people), [$relative], [$valid], 'RelStavDP');
     }
     $attributeReport['JMHZ']['used'] = PamicaIdResolver::$used;
 }
@@ -581,6 +608,23 @@ $nempriMap = [
     'ucetCZ.bankaKod' => 'KodBankyCR', 'ucetCZ.specSymbol' => 'SpecSymCR',
 ];
 
+/**
+ * Druh dávky NEMPRI25. PAMICA vede ošetřovné pod starým kódem OCR (formáty před NEMPRI25);
+ * NEMPRI25 zná jen NEM, VPM, OPP, PPM, OSE a DLO, ošetřovné je OSE.
+ */
+function nempriKind(array $row): string
+{
+    $kind = strtoupper(trim((string) ($row['DruhDavky'] ?? '')));
+    return $kind === 'OCR' ? 'OSE' : $kind;
+}
+
+/**
+ * Číselníkové hodnoty NEMPRI25 (duvodOtcovske, duvodPece, kodVztah, kodRodVztah). PAMICA drží
+ * nevyplněný číselník jako 0, kterou žádný z číselníků ČSSZ nezná (CIS_DUVPREVZETI: DOH, ONE, ROZ, UMR);
+ * prvek je pak nepovinný a vynechá se.
+ */
+const NEMPRI_CODEBOOK_KEYS = ['zadostODavku.duvodOtcovske', 'zadostODavku.duvodPece', 'zadostODavku.kodVztah', 'zadostODavku.kodRodVztah'];
+
 if (wanted($only, 'NEMPRI25')) {
     $cfg = $schemas['NEMPRI25'];
     [$model, $root, $writer, $version, $xsdFile] = modelFor($cfg, $xsdRoot);
@@ -597,7 +641,7 @@ if (wanted($only, 'NEMPRI25')) {
     $chooseKind = static function (array $row) {
         return static function (array $names, array $path) use ($row): ?string {
             if (in_array('nem', $names, true)) {
-                $kind = strtolower((string) ($row['DruhDavky'] ?? ''));
+                $kind = strtolower(nempriKind($row));
                 return in_array($kind, $names, true) ? $kind : null;
             }
             $columns = ['onemocnela' => 'Onemocnela', 'narizenaKarantena' => 'NarizenKaran', 'nemuzePecovatODite' => 'NemuzePecovat', 'uzavrenaSkola' => 'ZarizeniUzavreno'];
@@ -616,7 +660,13 @@ if (wanted($only, 'NEMPRI25')) {
         $kinds = [];
         foreach ($sentences[$id] ?? [] as $row) {
             $values = mapped($row, $nempriMap);
-            $kinds[(string) ($row['DruhDavky'] ?? '')] = true;
+            $values['dokument.druhDavky'] = nempriKind($row) ?: null;
+            foreach (NEMPRI_CODEBOOK_KEYS as $key) {
+                if (($values[$key] ?? null) !== null && trim($values[$key], '0 ') === '') {
+                    $values[$key] = null;
+                }
+            }
+            $kinds[nempriKind($row)] = true;
             $account = (string) ($row['UcetCR'] ?? '');
             if ($account !== '') {
                 if (str_contains($account, '-')) {
