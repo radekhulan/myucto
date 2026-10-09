@@ -52,19 +52,7 @@ final class EldpStatementCopyService
             'prepared_on' => is_string($form['prepared_on'] ?? null) ? $form['prepared_on'] : null,
             'period_from' => (string) ($scope['period_from'] ?? ''),
             'period_to' => (string) ($scope['period_to'] ?? ''),
-            'sections' => array_map(
-                static fn (array $section): array => [
-                    'code' => (string) $section['code'],
-                    'valid_from' => is_string($section['valid_from'] ?? null) ? $section['valid_from'] : null,
-                    'valid_to' => is_string($section['valid_to'] ?? null) ? $section['valid_to'] : null,
-                    'insurance_days' => (int) $section['insurance_days'],
-                    'months_without_insurance' => array_map(intval(...), (array) ($section['months_without_insurance'] ?? [])),
-                    'excluded_days_total' => (int) $section['excluded_days_total'],
-                    'deducted_days_total' => (int) ($section['deducted_days_total'] ?? 0),
-                    'assessment_base_czk' => (int) $section['assessment_base_czk'],
-                ],
-                array_values(array_filter((array) ($payload['eldp_sections'] ?? []), is_array(...))),
-            ),
+            'sections' => self::sections($payload),
             'employer' => $this->employer($supplierId),
             'employee' => $this->employee($supplierId, (int) ($scope['employee_id'] ?? 0)),
             'renderer_version' => self::VERSION,
@@ -80,7 +68,7 @@ final class EldpStatementCopyService
         $mpdf->SetTitle('Stejnopis evidenčního listu důchodového pojištění');
         $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->AddCustomProperty('PayrollRendererVersion', self::VERSION);
-        $mpdf->WriteHTML($this->twig()->render('eldp-copy.twig', $template));
+        $mpdf->WriteHTML($this->html($template));
         $pdf = $mpdf->Output('', 'S');
         if (!is_string($pdf) || !str_starts_with($pdf, '%PDF-')) {
             throw new \UnexpectedValueException('mPDF nevytvořilo platný stejnopis evidenčního listu.');
@@ -90,6 +78,36 @@ final class EldpStatementCopyService
             'pdf' => $pdf,
             'filename' => sprintf('stejnopis-eldp-%d-%d.pdf', $year, (int) $statement['id']),
         ];
+    }
+
+    /**
+     * Řádky stejnopisu ze zmrazených sekcí listu.
+     *
+     * @param array<string,mixed> $payload
+     * @return list<array<string,mixed>>
+     */
+    public static function sections(array $payload): array
+    {
+        return array_map(
+            static fn (array $section): array => [
+                'code' => (string) $section['code'],
+                'valid_from' => is_string($section['valid_from'] ?? null) ? $section['valid_from'] : null,
+                'valid_to' => is_string($section['valid_to'] ?? null) ? $section['valid_to'] : null,
+                'insurance_days' => (int) $section['insurance_days'],
+                'months_without_insurance' => array_map(intval(...), (array) ($section['months_without_insurance'] ?? [])),
+                'whole_year_without_insurance' => ($section['whole_year_without_insurance'] ?? false) === true,
+                'excluded_days_total' => (int) $section['excluded_days_total'],
+                'deducted_days_total' => (int) ($section['deducted_days_total'] ?? 0),
+                'assessment_base_czk' => (int) $section['assessment_base_czk'],
+            ],
+            array_values(array_filter((array) ($payload['eldp_sections'] ?? []), is_array(...))),
+        );
+    }
+
+    /** @param array<string,mixed> $template */
+    public function html(array $template): string
+    {
+        return $this->twig()->render('eldp-copy.twig', $template);
     }
 
     /** @return array{name:string,identification_number:string,address:string} */

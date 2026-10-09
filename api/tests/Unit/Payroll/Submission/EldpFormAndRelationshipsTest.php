@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatement;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatementBuilder;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementCopyService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlValidator;
@@ -259,6 +260,54 @@ final class EldpFormAndRelationshipsTest extends TestCase
         self::assertSame([6], $this->build($revisions)->sections()[0]['months_without_insurance']);
     }
 
+    /**
+     * ELDP12 údaj 37 (třináctý prostor „1-12"): celoroční rodičovská dovolená
+     * nedává ani jeden den pojištění, a tiskopis proto nese X v prostoru „1-12"
+     * místo dvanácti X u jednotlivých měsíců. Stejnopis ukáže „1-12".
+     */
+    public function testWholeYearWithoutInsuranceIsMarkedInTheThirteenthSpace(): void
+    {
+        $revisions = [];
+        for ($month = 1; $month <= 12; ++$month) {
+            $periodStart = sprintf('2025-%02d-01', $month);
+            $revisions[] = $this->revision(2025, $month, absences: [[
+                'id' => 9400 + $month,
+                'absence_type' => 'parental',
+                'date_from' => $periodStart,
+                'date_to' => (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d'),
+            ]], employmentStart: '2019-05-01', baseMinor: 0);
+        }
+
+        $statement = $this->build($revisions);
+
+        $section = $statement->sections()[0];
+        self::assertCount(1, $statement->sections());
+        self::assertSame(0, $section['insurance_days']);
+        self::assertTrue($section['whole_year_without_insurance'] ?? false);
+        $copy = EldpStatementCopyService::sections($statement->payload);
+        self::assertTrue($copy[0]['whole_year_without_insurance']);
+        $html = $this->copyHtml($copy);
+        self::assertStringContainsString('<td>1-12</td>', $html);
+        self::assertStringNotContainsString('1, 2, 3', $html);
+    }
+
+    /** Měsíce X jen v části roku třináctý prostor nevyplní. */
+    public function testPartYearWithoutInsuranceKeepsIndividualMonths(): void
+    {
+        $revisions = $this->months(2025, 1, 12);
+        $revisions[5] = $this->revision(2025, 6, absences: [[
+            'id' => 9310,
+            'absence_type' => 'unpaid_leave',
+            'date_from' => '2025-06-01',
+            'date_to' => '2025-06-30',
+        ]], baseMinor: 0);
+
+        $statement = $this->build($revisions);
+
+        self::assertArrayNotHasKey('whole_year_without_insurance', $statement->sections()[0]);
+        self::assertStringContainsString('<td>6</td>', $this->copyHtml(EldpStatementCopyService::sections($statement->payload)));
+    }
+
     /** Opravný list nese typ 5x podle opravovaného listu a odkaz na něj. */
     public function testCorrectiveStatementCarriesTypeAndReference(): void
     {
@@ -300,6 +349,29 @@ final class EldpFormAndRelationshipsTest extends TestCase
 
         $later = EldpDeadlinePolicy::standaloneStatementAllowed(2027, null, false);
         self::assertStringContainsString('Za rok 2027', $later['reason']);
+    }
+
+    /** @param list<array<string,mixed>> $sections */
+    private function copyHtml(array $sections): string
+    {
+        $copies = (new \ReflectionClass(EldpStatementCopyService::class))->newInstanceWithoutConstructor();
+
+        return $copies->html([
+            'statement_id' => 1,
+            'year' => 2025,
+            'environment' => 'test',
+            'eldp_type' => '01',
+            'employed_from' => '2019-05-01',
+            'prepared_on' => '2025-12-31',
+            'period_from' => '2025-01-01',
+            'period_to' => '2025-12-31',
+            'sections' => $sections,
+            'employer' => ['name' => 'Syntetická s.r.o.', 'identification_number' => '00000001', 'address' => 'Zkušební 1, 100 00 Testov'],
+            'employee' => ['name' => 'Dana Testovací', 'birth_date' => '1991-02-03'],
+            'renderer_version' => EldpStatementCopyService::VERSION,
+            'manifest_sha256' => str_repeat('0', 64),
+            'totals' => ['insurance_days' => 0, 'excluded_days_total' => 0, 'deducted_days_total' => 0, 'assessment_base_czk' => 0],
+        ]);
     }
 
     /** @param list<array<string,mixed>> $revisions */

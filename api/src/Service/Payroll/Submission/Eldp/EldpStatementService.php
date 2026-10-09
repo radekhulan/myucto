@@ -985,7 +985,12 @@ final readonly class EldpStatementService
         $content = static fn (array $payload): string => CanonicalJson::encode([
             'sections' => array_map(
                 static fn (mixed $section): array => is_array($section)
-                    ? array_diff_key($section, ['months_without_insurance' => true, 'post_termination_periods' => true])
+                    ? array_diff_key($section, [
+                        'months_without_insurance' => true,
+                        'post_termination_periods' => true,
+                        // Odvozený údaj „1-12" z měsíců a dnů, které se porovnávají.
+                        'whole_year_without_insurance' => true,
+                    ])
                     : [],
                 is_array($payload['eldp_sections'] ?? null) ? $payload['eldp_sections'] : [],
             ),

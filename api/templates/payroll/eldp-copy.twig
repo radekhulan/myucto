@@ -63,7 +63,7 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
       <td>{{ section.valid_from is not null ? section.valid_from|cz_date : '' }}</td>
       <td>{{ section.valid_to is not null ? section.valid_to|cz_date : '' }}</td>
       <td class="num">{{ section.insurance_days }}</td>
-      <td>{{ section.months_without_insurance is empty ? '' : section.months_without_insurance|join(', ') }}</td>
+      <td>{{ section.whole_year_without_insurance ? '1-12' : (section.months_without_insurance is empty ? '' : section.months_without_insurance|join(', ')) }}</td>
       <td class="num">{{ section.excluded_days_total }}</td>
       <td class="num">{{ section.deducted_days_total }}</td>
       <td class="num">{{ section.assessment_base_czk|czk }}</td>

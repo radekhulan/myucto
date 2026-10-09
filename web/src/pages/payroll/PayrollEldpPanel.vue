@@ -301,6 +301,7 @@ interface EldpFormSection {
   insurance_days: number
   assessment_base_czk: number
   months_without_insurance: number[]
+  whole_year_without_insurance?: boolean
 }
 
 const formSheet = computed<EldpFormSheet | null>(() => {
@@ -328,6 +329,8 @@ function sectionPeriod(section: EldpFormSection): string {
 }
 
 function monthsX(section: EldpFormSection): string {
+  // Celý rok bez pojištění se vyznačuje X ve třináctém prostoru „1-12", ne dvanácti X.
+  if (section.whole_year_without_insurance === true) return '1-12'
   const months = Array.isArray(section.months_without_insurance)
     ? section.months_without_insurance
     : []

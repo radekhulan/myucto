@@ -3029,6 +3029,20 @@ final class EldpAnnualStatementBuilder
         if ($current !== null) {
             $sections[] = $current;
         }
+        /*
+         * Údaj „1-12" (ELDP12 údaj 37, 58, 79; Všeobecné zásady, údaje 1 až 12):
+         * nepřichází-li po celý kalendářní rok v úvahu zápočet ani jednoho dne
+         * pojištění (např. celoroční rodičovská dovolená), vyznačí se X ve
+         * třináctém prostoru místo dvanácti X u jednotlivých měsíců. Seznam
+         * měsíců zůstává jako podklad (potvrzení o době pojištění ho čte),
+         * tiskopis a údaje k opisu ukážou jen „1-12". Klíč jen tam, kde nastal:
+         * otisk ostatních listů zůstává stejný.
+         */
+        foreach ($sections as $index => $section) {
+            if (self::wholeYearWithoutInsurance($section)) {
+                $sections[$index]['whole_year_without_insurance'] = true;
+            }
+        }
         $sections = self::moveBaseIntoPensionAgeSection($sections);
         /*
          * Dodatečně zúčtovaný příjem po skončení vztahu tvoří vlastní řádek
@@ -3137,6 +3151,24 @@ final class EldpAnnualStatementBuilder
         return is_string($relation)
             && $relation === ($line['relation'] ?? null)
             && !in_array($relation, ['small_scale_employment', 'dpp'], true);
+    }
+
+    /** @param array<string,mixed> $section */
+    private static function wholeYearWithoutInsurance(array $section): bool
+    {
+        $from = $section['valid_from'] ?? null;
+        $to = $section['valid_to'] ?? null;
+        if (!is_string($from) || !is_string($to)
+            || !str_ends_with($from, '-01-01')
+            || $to !== substr($from, 0, 4) . '-12-31'
+            || (int) $section['insurance_days'] !== 0
+        ) {
+            return false;
+        }
+        $months = array_values(array_unique(array_map(intval(...), (array) $section['months_without_insurance'])));
+        sort($months);
+
+        return $months === range(1, 12);
     }
 
     /** @param array<string,mixed> $line */
