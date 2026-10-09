@@ -44,6 +44,17 @@ final readonly class SicknessXmlValidator
     /** Hodiny posledního dne: interval 0 až 24 (DV HZUPN20, NEMPRI25 StDoublePracDoba). */
     private const MAX_DAY_HOURS = 24.0;
 
+    /**
+     * Číselník ČSSZ CIS_DRUHCIN (aktualizace 9. 3. 2026) pro `druhCinnosti`
+     * v NEMPRI25: 1 až 9, A až Z a ZA až ZC. Kódy 10 až 16 (specifické
+     * skupiny v REGZEC) v něm nejsou.
+     */
+    private const ACTIVITY_CODES = [
+        '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
+        'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC',
+    ];
+
     public function __construct(
         private CsszSchemaCatalog $schemas,
         private NempriXmlSerializer $nempri,
@@ -74,7 +85,7 @@ final readonly class SicknessXmlValidator
                 );
             }
         }
-        if (preg_match('/^[0-9A-Z]{1,3}$/D', $payload->activityCode) !== 1) {
+        if (!in_array($payload->activityCode, self::ACTIVITY_CODES, true)) {
             $this->invalid(
                 'nempri_activity_code_invalid',
                 'Druh činnosti musí být kód z číselníku ČSSZ (1 až 3 znaky 0-9 a A-Z). '
