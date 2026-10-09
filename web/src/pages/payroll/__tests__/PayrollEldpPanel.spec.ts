@@ -533,7 +533,11 @@ describe('PayrollEldpPanel', () => {
     // Stejnopis pro zaměstnance se tiskne ze zmrazeného listu téhož rozsahu.
     await wrapper.get('[data-test="eldp-copy"]').trigger('click')
     await flushPromises()
-    expect(m.downloadEldpCopy).toHaveBeenCalledWith({ employment_id: 101, year: 2025, environment: 'production' })
+    expect(m.downloadEldpCopy).toHaveBeenCalledWith({ employment_id: 101, year: 2025, environment: 'production', variant: 'employee' })
+    // Druhý stejnopis pro evidenci zaměstnavatele (s podpisem pojištěnce).
+    await wrapper.get('[data-test="eldp-copy-employer"]').trigger('click')
+    await flushPromises()
+    expect(m.downloadEldpCopy).toHaveBeenLastCalledWith({ employment_id: 101, year: 2025, environment: 'production', variant: 'employer' })
 
     await wrapper.get('[data-test="eldp-correction"]').setValue(true)
     await wrapper.get('[data-test="eldp-prepared-on"]').setValue('2025-10-05')
