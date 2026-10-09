@@ -27,7 +27,8 @@ use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
  *  - `gross`: zúčtovaný příjem celkem (10286) proti hrubé mzdě,
  *  - `social_base`: vyměřovací základ SP (10477) proti převzatému základu,
  *  - `advance_tax`: záloha po slevách (10305) proti převzaté záloze,
- *  - `health_insurance`: pojistné ZP zaměstnance a zaměstnavatele (10371 + 10482).
+ *  - `health_insurance`: pojistné ZP zaměstnance a zaměstnavatele (10371 + 10482),
+ *    jen ve složkách, které formulář nese (chybějící složka není nula).
  *    Vyměřovací základ zdravotního pojištění hlášení JMHZ nenese (XSD má jen
  *    pojistné), takže zdravotní stranu zastupuje pojistné.
  *
@@ -123,7 +124,7 @@ final class PayrollTakeoverJmhzFormCheck
      */
     public static function compare(array $months, array $forms): array
     {
-        /** @var array<string,array{employee_id:int,period:string,employments:array<int,true>,values:array<string,int>}> $takeover */
+        /** @var array<string,array{employee_id:int,period:string,employments:array<int,true>,values:array<string,int>,health:array{employee:int,employer:int}}> $takeover */
         $takeover = [];
         foreach ($months as $month) {
             if ($month->employeeId === null || $month->employmentId === null
@@ -137,15 +138,17 @@ final class PayrollTakeoverJmhzFormCheck
                 'period' => $month->period,
                 'employments' => [],
                 'values' => array_fill_keys(self::METRIC_NAMES, 0),
+                'health' => ['employee' => 0, 'employer' => 0],
             ];
             $takeover[$key]['employments'][$month->employmentId] = true;
             $takeover[$key]['values']['gross'] += $month->grossMinor;
             $takeover[$key]['values']['social_base'] += $month->socialBaseMinor;
             $takeover[$key]['values']['advance_tax'] += $month->advanceTaxMinor;
-            $takeover[$key]['values']['health_insurance'] += $month->employeeHealthMinor + $month->employerHealthMinor;
+            $takeover[$key]['health']['employee'] += $month->employeeHealthMinor;
+            $takeover[$key]['health']['employer'] += $month->employerHealthMinor;
         }
 
-        /** @var array<string,array{employments:array<int,true>,values:array<string,?int>,submission:array<string,mixed>}> $reported */
+        /** @var array<string,array{employments:array<int,true>,values:array<string,?int>,health:array<string,int>,submission:array<string,mixed>}> $reported */
         $reported = [];
         foreach ($forms as $entry) {
             $employeeId = $entry['employee_id'];
@@ -156,6 +159,7 @@ final class PayrollTakeoverJmhzFormCheck
             $reported[$key] ??= [
                 'employments' => [],
                 'values' => array_fill_keys(self::METRIC_NAMES, null),
+                'health' => [],
                 'submission' => $entry,
             ];
             $reported[$key]['employments'][$entry['employment_id']] = true;
@@ -164,19 +168,22 @@ final class PayrollTakeoverJmhzFormCheck
                 $reported[$key]['submission'] = $entry;
             }
             $form = $entry['form'];
-            $health = $form->employeeHealth === null && $form->employerHealth === null
-                ? null
-                : (int) $form->employeeHealth + (int) $form->employerHealth;
             foreach ([
                 'gross' => $form->incomeTotal,
                 'social_base' => $form->socialBase,
                 'advance_tax' => $form->advance['after_credits'] ?? null,
-                'health_insurance' => $health,
             ] as $metric => $crowns) {
                 if ($crowns === null) {
                     continue;
                 }
                 $reported[$key]['values'][$metric] = ($reported[$key]['values'][$metric] ?? 0) + $crowns * 100;
+            }
+            // Zdravotní pojistné po složkách: složku, kterou formulář nenese, nejde brát
+            // jako nulu, jinak kontrola hlásí celé pojistné zaměstnavatele jako rozdíl.
+            foreach (['employee' => $form->employeeHealth, 'employer' => $form->employerHealth] as $part => $crowns) {
+                if ($crowns !== null) {
+                    $reported[$key]['health'][$part] = ($reported[$key]['health'][$part] ?? 0) + $crowns * 100;
+                }
             }
         }
 
@@ -192,6 +199,12 @@ final class PayrollTakeoverJmhzFormCheck
             sort($reportedEmployments, SORT_NUMERIC);
             if ($employments !== $reportedEmployments) {
                 continue;
+            }
+            // Zdravotní pojistné se srovnává jen ve složkách, které formulář nese.
+            $healthParts = $other['health'];
+            if ($healthParts !== []) {
+                $other['values']['health_insurance'] = array_sum($healthParts);
+                $side['values']['health_insurance'] = array_sum(array_intersect_key($side['health'], $healthParts));
             }
             $differences = [];
             foreach (self::METRIC_NAMES as $metric) {

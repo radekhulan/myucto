@@ -110,6 +110,30 @@ final class PayrollTakeoverJmhzFormCheckTest extends TestCase
         self::assertSame([], $rows);
     }
 
+    /** Formulář bez pojistného ZP zaměstnavatele: chybějící složka není nula. */
+    public function testMissingEmployerHealthIsNotCompared(): void
+    {
+        $rows = PayrollTakeoverJmhzFormCheck::compare(
+            [self::wage(2, 21, 40_000_00, 40_000_00, 4_880_00, 1_800_00, 3_600_00)],
+            [self::entry(2, 21, self::form(40_000, 40_000, 4_880, 1_800, null))],
+        );
+
+        self::assertSame([], $rows);
+    }
+
+    public function testEmployerHealthDifferenceIsReported(): void
+    {
+        $rows = PayrollTakeoverJmhzFormCheck::compare(
+            [self::wage(2, 21, 40_000_00, 40_000_00, 4_880_00, 1_800_00, 3_600_00)],
+            [self::entry(2, 21, self::form(40_000, 40_000, 4_880, 1_800, 3_900))],
+        );
+
+        self::assertCount(1, $rows);
+        self::assertSame([
+            ['metric' => 'health_insurance', 'takeover_minor' => 5_400_00, 'jmhz_minor' => 5_700_00, 'difference_minor' => 300_00],
+        ], $rows[0]['differences']);
+    }
+
     private static function wage(int $employeeId, int $employmentId, int $gross, int $socialBase, int $advance, int $employeeHealth, int $employerHealth, string $source = 'pamica'): PayrollTakeoverMonth
     {
         return PayrollTakeoverMonth::fromRow([
@@ -142,7 +166,7 @@ final class PayrollTakeoverJmhzFormCheckTest extends TestCase
         ];
     }
 
-    private static function form(int $income, int $socialBase, int $advance, int $employeeHealth, int $employerHealth): JmhzReportForm
+    private static function form(int $income, int $socialBase, int $advance, ?int $employeeHealth, ?int $employerHealth): JmhzReportForm
     {
         return new JmhzReportForm(
             1,
