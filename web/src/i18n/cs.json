@@ -10655,6 +10655,7 @@
       "unfrozen_note": "Bez zmrazeného rozpadu: {count} - údaj je neúplný a nedopočítává se.",
       "drift_note": "Zmrazený rozpad neodpovídá dnešnímu limitu; limit se v pravidlech po schválení změnil.",
       "reversed_note": "Stornem uvolněno: {count} (celkem {amount}) - do čerpání koše už nevstupuje.",
+      "taken_over_note": "Z toho převzaté měsíce z předchozího mzdového programu: {count} (celkem {amount}).",
       "col": {
         "employee": "Zaměstnanec",
         "basket": "Koš",

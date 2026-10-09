@@ -76,6 +76,8 @@ final class PayrollBenefitBasketOverviewService
                 negativeCount: (int) $row['negative_count'],
                 reversedCount: (int) $row['reversed_count'],
                 reversedMinor: (int) $row['reversed_minor'],
+                takenOverMinor: (int) $row['taken_over_minor'],
+                takenOverMonths: (int) $row['taken_over_months'],
             );
         }
 

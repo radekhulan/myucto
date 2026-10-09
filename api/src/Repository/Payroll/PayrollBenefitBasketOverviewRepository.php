@@ -27,6 +27,12 @@ use PDO;
  *    pořadím schválení a zpětný přepočet by u dřívějšího vstupu změnil daňový
  *    dopad, který už je v uzavřené revizi mzdového běhu.
  *
+ * Roční koš spoření na stáří čerpají v roce přechodu i měsíce převzaté z jiného
+ * mzdového programu (`payroll_migration_reference_totals`). Ty jsou v „vyčerpáno"
+ * stejně jako v {@see PayrollInputRepository::annualBasketTotal()} a jdou ven i zvlášť
+ * (`taken_over_minor`, `taken_over_months`), protože rozpad na osvobozenou a nadlimitní
+ * část za ně nevede MyÚčto.
+ *
  * Agreguje se na `employee_id`, ne na `employment_id` — koš je podle § 6 odst. 9
  * ZDP za osobu u zaměstnavatele, takže souběžné vztahy sdílí jeden koš — a přes
  * `component.exemption_basket`, takže se sečtou i různé mzdové složky téhož koše.
@@ -98,6 +104,7 @@ final class PayrollBenefitBasketOverviewRepository
             $search,
             $limit,
             $offset,
+            $taxYear,
         );
     }
 
@@ -142,6 +149,9 @@ final class PayrollBenefitBasketOverviewRepository
     /**
      * @param string $basketList Seznam košů pro `IN (…)`, viz konstanty výše.
      * @param string $windowClause Podmínka rozhodného období s jedním `?`.
+     * @param ?int $takenOverYear zdaňovací období, za které se připočte čerpání koše
+     *        v převzatých měsících ({@see PayrollInputRepository::takenOverOldAgeSavingsSql()});
+     *        `null` u měsíčního přehledu
      * @return array{items: list<array<string,int|string>>, total: int}
      */
     private function scan(
@@ -153,6 +163,7 @@ final class PayrollBenefitBasketOverviewRepository
         string $search,
         int $limit,
         int $offset,
+        ?int $takenOverYear = null,
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
@@ -163,9 +174,23 @@ final class PayrollBenefitBasketOverviewRepository
             ? ''
             : ' AND ' . PayrollPeopleRepository::fullNameExpression()
                 . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'";
+        $takenOver = $takenOverYear !== null
+            && ($basket === null || $basket === PayrollBenefitExemptionBasket::OldAgeSavings);
+
+        $params = [$supplierId, $windowValue];
+        if ($basket !== null) {
+            $params[] = $basket->value;
+        }
+        if ($takenOver) {
+            array_push($params, $supplierId, sprintf('%04d-01-01', $takenOverYear), sprintf('%04d-01-01', $takenOverYear + 1));
+        }
+        $params[] = $supplierId;
+        if ($search !== '') {
+            $params[] = '%' . self::escapeLike($search) . '%';
+        }
 
         $countStmt = $this->db->pdo()->prepare(
-            $this->totalsCte($basketList, $windowClause, $basketClause)
+            $this->totalsCte($basketList, $windowClause, $basketClause, $takenOver)
             . 'SELECT COUNT(*)
                  FROM basket_totals totals
                  JOIN payroll_employees employee
@@ -173,25 +198,12 @@ final class PayrollBenefitBasketOverviewRepository
                   AND employee.id = totals.employee_id
                 WHERE 1 = 1' . $searchClause
         );
-        $position = 1;
-        $countStmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
-        $countStmt->bindValue(
-            $position++,
-            $windowValue,
-            is_int($windowValue) ? PDO::PARAM_INT : PDO::PARAM_STR,
-        );
-        if ($basket !== null) {
-            $countStmt->bindValue($position++, $basket->value);
-        }
-        $countStmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
-        if ($search !== '') {
-            $countStmt->bindValue($position, '%' . self::escapeLike($search) . '%');
-        }
+        self::bindAll($countStmt, $params);
         $countStmt->execute();
         $total = (int) $countStmt->fetchColumn();
 
         $stmt = $this->db->pdo()->prepare(
-            $this->totalsCte($basketList, $windowClause, $basketClause)
+            $this->totalsCte($basketList, $windowClause, $basketClause, $takenOver)
             . 'SELECT totals.employee_id,
                       totals.basket,
                       totals.used_minor,
@@ -202,6 +214,8 @@ final class PayrollBenefitBasketOverviewRepository
                       totals.negative_count,
                       totals.reversed_count,
                       totals.reversed_minor,
+                      totals.taken_over_minor,
+                      totals.taken_over_months,
                       ' . PayrollPeopleRepository::fullNameExpression() . ' AS employee_name
                  FROM basket_totals totals
                  JOIN payroll_employees employee
@@ -211,22 +225,7 @@ final class PayrollBenefitBasketOverviewRepository
                 ORDER BY employee_name ASC, totals.employee_id ASC, totals.basket ASC
                 LIMIT ? OFFSET ?'
         );
-        $position = 1;
-        $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
-        $stmt->bindValue(
-            $position++,
-            $windowValue,
-            is_int($windowValue) ? PDO::PARAM_INT : PDO::PARAM_STR,
-        );
-        if ($basket !== null) {
-            $stmt->bindValue($position++, $basket->value);
-        }
-        $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
-        if ($search !== '') {
-            $stmt->bindValue($position++, '%' . self::escapeLike($search) . '%');
-        }
-        $stmt->bindValue($position++, $limit, PDO::PARAM_INT);
-        $stmt->bindValue($position, $offset, PDO::PARAM_INT);
+        self::bindAll($stmt, [...$params, $limit, $offset]);
         $stmt->execute();
 
         $items = [];
@@ -264,10 +263,26 @@ final class PayrollBenefitBasketOverviewRepository
                     $row['reversed_minor'] ?? null,
                     'reversed_minor',
                 ),
+                'taken_over_minor' => PayrollTimeValue::int(
+                    $row['taken_over_minor'] ?? null,
+                    'taken_over_minor',
+                ),
+                'taken_over_months' => PayrollTimeValue::int(
+                    $row['taken_over_months'] ?? null,
+                    'taken_over_months',
+                ),
             ];
         }
 
         return ['items' => $items, 'total' => $total];
+    }
+
+    /** @param list<int|string> $params */
+    private static function bindAll(\PDOStatement $stmt, array $params): void
+    {
+        foreach ($params as $index => $value) {
+            $stmt->bindValue($index + 1, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
     }
 
     /**
@@ -280,8 +295,9 @@ final class PayrollBenefitBasketOverviewRepository
      */
     public function years(int $supplierId): array
     {
+        // Rok přechodu, ve kterém koš čerpaly zatím jen převzaté měsíce, se nabízí taky.
         $stmt = $this->db->pdo()->prepare(
-            'SELECT DISTINCT accumulator.tax_year
+            'SELECT accumulator.tax_year
                FROM payroll_benefit_accumulators accumulator
                JOIN payroll_component_definitions component
                  ON component.supplier_id = accumulator.supplier_id
@@ -289,9 +305,15 @@ final class PayrollBenefitBasketOverviewRepository
               WHERE accumulator.supplier_id = ?
                 AND accumulator.status IN ("active", "reversed")
                 AND component.exemption_basket IN (' . self::ANNUAL_BASKETS . ')
-              ORDER BY accumulator.tax_year DESC'
+             UNION
+             SELECT YEAR(taken.period_start)
+               FROM payroll_migration_reference_totals taken
+              WHERE taken.supplier_id = ?
+                AND taken.employee_id IS NOT NULL
+                AND taken.old_age_savings_contribution_minor > 0
+              ORDER BY 1 DESC'
         );
-        $stmt->execute([$supplierId]);
+        $stmt->execute([$supplierId, $supplierId]);
 
         return array_map(
             static fn (mixed $year): int => (int) $year,
@@ -342,30 +364,45 @@ final class PayrollBenefitBasketOverviewRepository
         string $basketList,
         string $windowClause,
         string $basketClause,
+        bool $takenOver = false,
     ): string {
-        return 'WITH basket_totals AS (
+        // Převzaté měsíce (rok přechodu z jiného mzdového programu) čerpají koš spoření na
+        // stáří stejně jako v PayrollInputRepository::annualBasketTotal(): do „vyčerpáno" se
+        // započtou, ale nejsou to mzdové vstupy, takže se nepočítají mezi vstupy a nemají
+        // zmrazený rozpad; jdou ven zvlášť jako `taken_over_minor` a `taken_over_months`.
+        $takenOverSource = $takenOver
+            ? ' UNION ALL
+                SELECT taken.employee_id, "old_age_savings", taken.contribution,
+                       0, 0, 0, 0, 0, 0, 0, taken.contribution, taken.period_start
+                  FROM (' . PayrollInputRepository::takenOverOldAgeSavingsSql(false) . ') taken
+                 WHERE taken.contribution > 0'
+            : '';
+
+        return 'WITH basket_sources AS (
                     SELECT accumulator.employee_id AS employee_id,
                            component.exemption_basket AS basket,
-                           SUM(CASE WHEN accumulator.status = "active"
-                                    THEN accumulator.amount_minor ELSE 0 END) AS used_minor,
-                           SUM(CASE WHEN accumulator.status = "active"
-                                    THEN COALESCE(input.benefit_exempt_minor, 0)
-                                    ELSE 0 END) AS exempt_minor,
-                           SUM(CASE WHEN accumulator.status = "active"
-                                    THEN COALESCE(input.benefit_taxable_minor, 0)
-                                    ELSE 0 END) AS taxable_minor,
-                           SUM(CASE WHEN accumulator.status = "active" THEN 1 ELSE 0 END)
+                           CASE WHEN accumulator.status = "active"
+                                THEN accumulator.amount_minor ELSE 0 END AS used_minor,
+                           CASE WHEN accumulator.status = "active"
+                                THEN COALESCE(input.benefit_exempt_minor, 0)
+                                ELSE 0 END AS exempt_minor,
+                           CASE WHEN accumulator.status = "active"
+                                THEN COALESCE(input.benefit_taxable_minor, 0)
+                                ELSE 0 END AS taxable_minor,
+                           CASE WHEN accumulator.status = "active" THEN 1 ELSE 0 END
                                AS input_count,
-                           SUM(CASE WHEN accumulator.status = "active"
-                                     AND input.benefit_basket IS NULL
-                                    THEN 1 ELSE 0 END) AS unfrozen_count,
-                           SUM(CASE WHEN accumulator.status = "active"
-                                     AND accumulator.amount_minor < 0
-                                    THEN 1 ELSE 0 END) AS negative_count,
-                           SUM(CASE WHEN accumulator.status = "reversed" THEN 1 ELSE 0 END)
+                           CASE WHEN accumulator.status = "active"
+                                 AND input.benefit_basket IS NULL
+                                THEN 1 ELSE 0 END AS unfrozen_count,
+                           CASE WHEN accumulator.status = "active"
+                                 AND accumulator.amount_minor < 0
+                                THEN 1 ELSE 0 END AS negative_count,
+                           CASE WHEN accumulator.status = "reversed" THEN 1 ELSE 0 END
                                AS reversed_count,
-                           SUM(CASE WHEN accumulator.status = "reversed"
-                                    THEN accumulator.amount_minor ELSE 0 END) AS reversed_minor
+                           CASE WHEN accumulator.status = "reversed"
+                                THEN accumulator.amount_minor ELSE 0 END AS reversed_minor,
+                           0 AS taken_over_minor,
+                           CAST(NULL AS DATE) AS taken_over_period
                       FROM payroll_benefit_accumulators accumulator
                       JOIN payroll_component_definitions component
                         ON component.supplier_id = accumulator.supplier_id
@@ -377,8 +414,24 @@ final class PayrollBenefitBasketOverviewRepository
                        AND ' . $windowClause . '
                        AND accumulator.status IN ("active", "reversed")
                        AND component.exemption_basket IN (' . $basketList . ')'
-                       . $basketClause . '
-                     GROUP BY accumulator.employee_id, component.exemption_basket
+                       . $basketClause
+                       . $takenOverSource . '
+                ),
+                basket_totals AS (
+                    SELECT employee_id,
+                           basket,
+                           SUM(used_minor) AS used_minor,
+                           SUM(exempt_minor) AS exempt_minor,
+                           SUM(taxable_minor) AS taxable_minor,
+                           SUM(input_count) AS input_count,
+                           SUM(unfrozen_count) AS unfrozen_count,
+                           SUM(negative_count) AS negative_count,
+                           SUM(reversed_count) AS reversed_count,
+                           SUM(reversed_minor) AS reversed_minor,
+                           SUM(taken_over_minor) AS taken_over_minor,
+                           COUNT(DISTINCT taken_over_period) AS taken_over_months
+                      FROM basket_sources
+                     GROUP BY employee_id, basket
                 ) ';
     }
 

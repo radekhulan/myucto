@@ -78,6 +78,10 @@ export interface BenefitBasketUsage {
   reversed_count: number
   /** Úhrn plnění uvolněných stornem. */
   reversed_minor: number
+  /** Čerpání v měsících převzatých z jiného mzdového programu — je součástí `used_minor`. */
+  taken_over_minor: number
+  /** Počet převzatých měsíců s čerpáním. */
+  taken_over_months: number
   status: BenefitBasketStatus
   /** Zmrazený rozpad se rozešel s dnešním limitem (limit se v rulesetu změnil). */
   split_drift: boolean

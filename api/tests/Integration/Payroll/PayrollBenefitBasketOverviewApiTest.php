@@ -213,6 +213,48 @@ final class PayrollBenefitBasketOverviewApiTest extends TestCase
         self::assertSame([2026], $body['years']);
     }
 
+    /**
+     * Rok přechodu z jiného mzdového programu: příspěvky na spoření na stáří z převzatých
+     * měsíců čerpají koš § 6 odst. 9 písm. p) ZDP stejně jako v annualBasketTotal() (měsíc
+     * a vztah jednou, dva vztahy téhož měsíce oba). Přehled je musí ukázat v „vyčerpáno"
+     * i zvlášť, a osoba jen s převzatými měsíci v něm nesmí chybět.
+     */
+    public function testTakenOverMonthsCountTowardsTheOldAgeSavingsBasket(): void
+    {
+        $this->insertTakenOverSavings('2026-01-01', 'SYN-REL-1', $this->employmentId, 100_000);
+        $this->insertTakenOverSavings('2026-02-01', 'SYN-REL-1', $this->employmentId, 100_000);
+        $this->insertTakenOverSavings('2026-02-01', 'SYN-REL-2', $this->secondEmploymentId, 50_000);
+        $this->insertTakenOverSavings('2025-12-01', 'SYN-REL-1', $this->employmentId, 900_000);
+
+        $onlyTakenOver = $this->rows($this->fetch(['year' => '2026']));
+        self::assertCount(1, $onlyTakenOver);
+        self::assertSame(['old_age_savings', 250_000, 250_000, 2, 0], [$onlyTakenOver[0]['basket'], $onlyTakenOver[0]['used_minor'],
+            $onlyTakenOver[0]['taken_over_minor'], $onlyTakenOver[0]['taken_over_months'], $onlyTakenOver[0]['input_count']]);
+
+        $component = $this->createBasketComponent('PREH_PENZE_A', 'old_age_savings');
+        $this->approve($component, 300_000, $this->employmentId, 'p-penze');
+
+        $row = $this->rows($this->fetch(['year' => '2026', 'basket' => 'old_age_savings']))[0];
+        self::assertSame(550_000, $row['used_minor']);
+        self::assertSame(300_000, $row['exempt_minor']);
+        self::assertSame(250_000, $row['taken_over_minor']);
+        self::assertSame(1, $row['input_count']);
+        self::assertSame(5_000_000 - 550_000, $row['remaining_minor']);
+        self::assertFalse($row['split_drift']);
+        self::assertSame([], $this->rows($this->fetch(['year' => '2026', 'basket' => 'non_cash_leisure'])));
+        self::assertContains(2025, $this->fetch(['year' => '2026'])['years']);
+    }
+
+    private function insertTakenOverSavings(string $periodStart, string $relationRef, int $employmentId, int $contributionMinor): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_migration_reference_totals
+                (supplier_id, source, period_start, external_person_ref, external_relationship_ref,
+                 employee_id, employment_id, old_age_savings_contribution_minor)
+             VALUES (?, "pamica", ?, "SYN-PERSON", ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $periodStart, $relationRef, $this->employeeId, $employmentId, $contributionMinor]);
+    }
+
     /** Neznámý koš ani nesmyslný rok se netiší na výchozí hodnotu. */
     public function testInvalidFilterIsRejectedInsteadOfSilentlyIgnored(): void
     {

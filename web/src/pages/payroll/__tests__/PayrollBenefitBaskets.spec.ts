@@ -61,6 +61,8 @@ function usage(overrides: Partial<BenefitBasketUsage> = {}): BenefitBasketUsage 
     unfrozen_count: 0,
     reversed_count: 0,
     reversed_minor: 0,
+    taken_over_minor: 0,
+    taken_over_months: 0,
     status: 'ok',
     split_drift: false,
     ...overrides,

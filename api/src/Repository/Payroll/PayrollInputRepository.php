@@ -2266,19 +2266,32 @@ final class PayrollInputRepository
             return 0;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT COALESCE(SUM(contribution), 0)
-               FROM (SELECT MAX(old_age_savings_contribution_minor) AS contribution
-                       FROM payroll_migration_reference_totals
-                      WHERE supplier_id = ?
-                        AND employee_id = ?
-                        AND period_start >= ?
-                        AND period_start < ?
-                        AND old_age_savings_contribution_minor IS NOT NULL
-                      GROUP BY period_start, COALESCE(employment_id, external_relationship_ref)) taken_over'
+            'SELECT COALESCE(SUM(contribution), 0) FROM (' . self::takenOverOldAgeSavingsSql(true) . ') taken_over'
         );
         $stmt->execute([$supplierId, $employeeId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
 
         return PayrollTimeValue::int($stmt->fetchColumn(), 'taken_over_basket_total');
+    }
+
+    /**
+     * Převzaté měsíce s příspěvkem na produkty spoření na stáří: jeden řádek za osobu,
+     * měsíc a vztah (`employee_id`, `period_start`, `contribution`). Sdílí ho roční úhrn koše
+     * ({@see annualBasketTotal()}) i přehled čerpání košů
+     * ({@see PayrollBenefitBasketOverviewRepository}), aby „vyčerpáno" znamenalo na obou
+     * místech totéž.
+     *
+     * Parametry v pořadí: firma, [osoba], první den roku, první den dalšího roku.
+     */
+    public static function takenOverOldAgeSavingsSql(bool $oneEmployee): string
+    {
+        return 'SELECT employee_id, period_start, MAX(old_age_savings_contribution_minor) AS contribution
+                  FROM payroll_migration_reference_totals
+                 WHERE supplier_id = ?'
+                 . ($oneEmployee ? ' AND employee_id = ?' : ' AND employee_id IS NOT NULL') . '
+                   AND period_start >= ?
+                   AND period_start < ?
+                   AND old_age_savings_contribution_minor IS NOT NULL
+                 GROUP BY employee_id, period_start, COALESCE(employment_id, external_relationship_ref)';
     }
 
     /**

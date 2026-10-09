@@ -66,6 +66,13 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
          */
         public int $reversedCount = 0,
         public int $reversedMinor = 0,
+        /**
+         * Čerpání v měsících převzatých z jiného mzdového programu (rok přechodu). Je
+         * součástí `usedMinor` (limit platí za celý rok), ale zmrazený rozpad za ně MyÚčto
+         * nevede: koš z nich čerpá jako první, protože leží před začátkem vedení mezd.
+         */
+        public int $takenOverMinor = 0,
+        public int $takenOverMonths = 0,
     ) {}
 
     public function remainingMinor(): ?int
@@ -90,6 +97,11 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
     public function status(): string
     {
         if ($this->taxableMinor > 0) {
+            return 'exceeded';
+        }
+        // Převzaté měsíce rozpad nemají; nad limit se koš dostal, i když zdanění nadlimitní
+        // části proběhlo v předchozím programu.
+        if ($this->takenOverMinor > 0 && $this->limitMinor !== null && $this->usedMinor > $this->limitMinor) {
             return 'exceeded';
         }
         if ($this->limitMinor === null) {
@@ -126,7 +138,12 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
             return false;
         }
 
-        return $this->exemptMinor !== min($this->usedMinor, $this->limitMinor);
+        // Převzaté měsíce čerpají koš dřív než vstupy MyÚčta, takže na zmrazené rozpady
+        // vstupů zbývá limit snížený o ně.
+        return $this->exemptMinor !== max(
+            0,
+            min($this->usedMinor, $this->limitMinor) - min($this->takenOverMinor, $this->limitMinor),
+        );
     }
 
     /** @return array<string,mixed> */
@@ -147,6 +164,8 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
             'unfrozen_count' => $this->unfrozenCount,
             'reversed_count' => $this->reversedCount,
             'reversed_minor' => $this->reversedMinor,
+            'taken_over_minor' => $this->takenOverMinor,
+            'taken_over_months' => $this->takenOverMonths,
             'status' => $this->status(),
             'split_drift' => $this->splitDrift(),
         ];

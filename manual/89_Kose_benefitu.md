@@ -97,6 +97,12 @@ odmítne, jinak by se totéž plnění mohlo započítat do limitu dvakrát. Opr
 proveďte opačným zápisem a pak zadejte správnou částku. Stornem uvolněná
 čerpání do koše nevstupují a přehled je u řádku uvede poznámkou.
 
+**Rok přechodu z jiného mzdového programu.** Příspěvky na spoření na stáří
+z měsíců převzatých převodem mezd čerpají roční koš stejně jako vstupy
+MyÚčta: náhled vstupu i přehled je započtou do **Vyčerpáno** a přehled u řádku
+poznámkou uvede, kolik měsíců a jaká částka jsou převzaté. Rozpad na
+osvobozenou a zdaněnou část za převzaté měsíce vedl předchozí program.
+
 Pole **Roční limit** u složky je něco jiného: **vlastní strop zaměstnavatele**,
 nad který schválení vstupu neprojde.
 

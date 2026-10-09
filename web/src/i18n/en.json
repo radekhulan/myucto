@@ -10655,6 +10655,7 @@
       "unfrozen_note": "Without a frozen split: {count} — the figure is incomplete and is not recalculated.",
       "drift_note": "The frozen split does not match today's limit; the limit changed in the rules after approval.",
       "reversed_note": "Released by reversal: {count} (total {amount}) — no longer counted against the basket.",
+      "taken_over_note": "Of which months taken over from the previous payroll program: {count} (total {amount}).",
       "col": {
         "employee": "Employee",
         "basket": "Basket",

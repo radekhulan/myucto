@@ -432,6 +432,13 @@ onMounted(load)
                 >
                   {{ t('payroll.benefit_baskets.reversed_note', { count: row.reversed_count, amount: money(row.reversed_minor) }) }}
                 </div>
+                <div
+                  v-if="row.taken_over_months > 0"
+                  class="text-[11px] text-neutral-600 mt-0.5"
+                  :data-test="`basket-taken-over-${row.employee_id}-${row.basket}`"
+                >
+                  {{ t('payroll.benefit_baskets.taken_over_note', { count: row.taken_over_months, amount: money(row.taken_over_minor) }) }}
+                </div>
               </td>
             </tr>
           </tbody>
@@ -467,6 +474,9 @@ onMounted(load)
           </p>
           <p v-if="row.reversed_count > 0" class="text-[11px] text-neutral-600 mt-1">
             {{ t('payroll.benefit_baskets.reversed_note', { count: row.reversed_count, amount: money(row.reversed_minor) }) }}
+          </p>
+          <p v-if="row.taken_over_months > 0" class="text-[11px] text-neutral-600 mt-1">
+            {{ t('payroll.benefit_baskets.taken_over_note', { count: row.taken_over_months, amount: money(row.taken_over_minor) }) }}
           </p>
         </div>
       </div>
