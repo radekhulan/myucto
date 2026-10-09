@@ -30393,6 +30393,7 @@
       "sickness_window_continued": "sick leaves continuing a previous one",
       "absences_without_dates": "absences without a start and end date",
       "monthly_wage_settled": "wage versions into a settled period",
+      "monthly_wage_history_kept": "older wage rates kept in the employment history",
       "recurring_wage": "monthly wage prescriptions",
       "recurring_wage_hourly": "of which relations with hourly or task pay too",
       "absences_approved": "absences approved",

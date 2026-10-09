@@ -151,6 +151,14 @@ final class PayrollTakeoverEmploymentWriter
             return ['monthly_wage_ended' => 1];
         }
         $counts = $wages[0]['prorated'] === true ? ['monthly_wage_max' => 1] : [];
+        // Sazba, kterou ještě před první verzí podmínek vystřídala další, do vztahu nepatří;
+        // jinak by se první verze opravovala tam a zpátky při každém převodu.
+        $firstFrom = (string) ($this->termsAt($supplierId, $employmentId, '0000-01-01')['effective_from'] ?? '');
+        $wages = array_values(array_filter(
+            $wages,
+            static fn (array $wage, int $index): bool => !isset($wages[$index + 1]) || $wages[$index + 1]['from'] > $firstFrom,
+            ARRAY_FILTER_USE_BOTH,
+        ));
         $written = 0;
         $settled = 0;
         foreach ($wages as $index => $wage) {
@@ -160,11 +168,17 @@ final class PayrollTakeoverEmploymentWriter
             }
             $current = $this->employments->currentTerms($supplierId, $employmentId)
                 ?? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.');
-            // První mzda se zapisuje opravou verze na místě, takže když ji verze už
-            // nese, není co psát, i když verze začíná dřív než mzda ve zdroji.
-            if ((int) ($current['monthly_gross_minor'] ?? 0) === $minor
-                && ($index === 0 || (string) $current['effective_from'] >= $wage['from'])
-            ) {
+            // Sazba se srovnává s verzí platnou k jejímu datu, ne s nejnovější: opakovaný
+            // převod by jinak historickou sazbou přepsal pozdější verzi. Nese-li ji verze,
+            // není co psát, i když verze začíná dřív než mzda ve zdroji.
+            $at = $this->termsAt($supplierId, $employmentId, $wage['from']);
+            if ((int) ($at['monthly_gross_minor'] ?? 0) === $minor) {
+                continue;
+            }
+            // Jinou sazbu ve verzi, po které už následuje další, převod nepřepisuje:
+            // oprava jde jen na poslední verzi a nová verze jen za ni.
+            if ((int) $at['id'] !== (int) $current['id']) {
+                $counts['monthly_wage_history_kept'] = ($counts['monthly_wage_history_kept'] ?? 0) + 1;
                 continue;
             }
             // Verze vztahu se po každém zápisu mění, proto se čte znovu před každou verzí mzdy.
@@ -211,6 +225,27 @@ final class PayrollTakeoverEmploymentWriter
             $counts['monthly_wage_settled'] = $settled;
         }
         return $written > 0 ? $counts + ['monthly_wage' => $written] : $counts;
+    }
+
+    /**
+     * Verze podmínek platná k datu; před první verzí ta první.
+     *
+     * @return array{id:int|string,effective_from:string,monthly_gross_minor:int|string|null}
+     */
+    private function termsAt(int $supplierId, int $employmentId, string $date): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, effective_from, monthly_gross_minor FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from <= ? DESC,
+                       CASE WHEN effective_from <= ? THEN effective_from END DESC,
+                       effective_from, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, $date, $date]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return $row === false ? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.') : $row;
     }
 
     /**
