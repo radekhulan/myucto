@@ -261,6 +261,12 @@ platby by to mohlo podhodnotit základ daně. Místo toho ho označí jako **Nez
 Výjimkou jsou odchozí bankovní pohyby, jejichž popis odpovídá typickému **bankovnímu poplatku** (například obsahuje slovo
 „poplatek", „fee", „vedení účtu"), ty se automaticky zařadí jako daňový výdaj bez nutnosti zásahu.
 
+Druhou výjimkou je bankovní pohyb, který je **celý** přiřazený v `Daňová evidence → Ostatní pohledávky a závazky` ke splátce
+**přijaté půjčky**, k vrácení **kauce k vrácení** nebo k vrácené **vratné kauci**. Takové peníze nejsou příjmem ani výdajem, takže
+se zařadí jako nedaňový příjem nebo výdaj. Příchozí platba k **poskytnuté půjčce nebo splátce** zůstává nezařazená, protože splátka
+prodeje je daňovým příjmem. Stejně tak pohyb přiřazený jen zčásti (splátka i s úrokem) nebo k jinému druhu (nájem, pojištění,
+poplatek, náhrada): o zařazení rozhodnete sami.
+
 Pokud v žádném spárovaném bankovním výpisu nefiguruje část historie účtu (typicky po změně čísla účtu v nastavení), zobrazí se
 navíc samostatné blokující upozornění na **počet bankovních úhrad mimo spárované výpisy**. Bez opravy by tato část historie v
 základu daně chyběla úplně.

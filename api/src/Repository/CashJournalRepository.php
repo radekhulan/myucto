@@ -134,7 +134,9 @@ final class CashJournalRepository
                     cpi.tax_deductible AS pi_deductible, cpi.document_kind AS pi_kind,
                     cpi.vat_deduction AS pi_vat_deduction, cpi.vat_deduction_percent AS pi_vat_deduction_percent,
                     cpi.is_fixed_asset AS pi_is_fixed_asset,
-                    ccls.tax_bucket AS override_bucket
+                    ccls.tax_bucket AS override_bucket,
+                    " . self::otherItemKindSql($sid, 'cash_document_id', 'cd.id') . " AS other_item_kind,
+                    " . self::otherItemAllocatedSql($sid, 'cash_document_id', 'cd.id') . " AS other_item_allocated
                FROM cash_documents cd
                LEFT JOIN (SELECT cash_document_id,
                                   SUM(CASE WHEN tax_treatment = 'deductible'
@@ -211,7 +213,9 @@ final class CashJournalRepository
                         bpi.tax_deductible AS pi_deductible, bpi.document_kind AS pi_kind,
                         bpi.vat_deduction AS pi_vat_deduction, bpi.vat_deduction_percent AS pi_vat_deduction_percent,
                         bpi.is_fixed_asset AS pi_is_fixed_asset,
-                        bcls.tax_bucket AS override_bucket
+                        bcls.tax_bucket AS override_bucket,
+                        " . self::otherItemKindSql($sid, 'bank_transaction_id', 'bt.id') . " AS other_item_kind,
+                        " . self::otherItemAllocatedSql($sid, 'bank_transaction_id', 'bt.id') . " AS other_item_allocated
                    FROM bank_transactions bt
                    LEFT JOIN (
                         SELECT ip.bank_transaction_id AS btid,
@@ -300,7 +304,8 @@ final class CashJournalRepository
                     ii.income_tax_exempt AS inv_exempt, ii.status AS inv_status,
                     NULL AS purchase_invoice_id, NULL AS pi_without_vat, NULL AS pi_vat, NULL AS pi_with_vat,
                     NULL AS pi_deductible, NULL AS pi_kind, NULL AS pi_vat_deduction,
-                    NULL AS pi_vat_deduction_percent, NULL AS pi_is_fixed_asset, NULL AS override_bucket
+                    NULL AS pi_vat_deduction_percent, NULL AS pi_is_fixed_asset, NULL AS override_bucket,
+                    NULL AS other_item_kind, NULL AS other_item_allocated
                FROM invoice_payments ip
                JOIN invoices ii      ON ii.id = ip.invoice_id AND ii.supplier_id = {$sid}
                LEFT JOIN clients icl ON icl.id = ii.client_id
@@ -329,7 +334,8 @@ final class CashJournalRepository
                     pi.total_with_vat AS pi_with_vat, pi.tax_deductible AS pi_deductible,
                     pi.document_kind AS pi_kind, pi.vat_deduction AS pi_vat_deduction,
                     pi.vat_deduction_percent AS pi_vat_deduction_percent,
-                    pi.is_fixed_asset AS pi_is_fixed_asset, NULL AS override_bucket
+                    pi.is_fixed_asset AS pi_is_fixed_asset, NULL AS override_bucket,
+                    NULL AS other_item_kind, NULL AS other_item_allocated
                FROM purchase_invoices pi
                LEFT JOIN currencies pcur ON pcur.id = pi.currency_id
                LEFT JOIN clients pv      ON pv.id = pi.vendor_id
@@ -593,8 +599,33 @@ final class CashJournalRepository
      *
      * @param array<string,mixed> $r @return array<string,mixed>
      */
+    /**
+     * Strana a druh ostatní pohledávky nebo závazku, ke kterému je pohyb přiřazen
+     * (other_item_allocations), ve tvaru `payable:loan`; 'mixed' u více různých, NULL bez
+     * přiřazení. Zařazení v deníku podle něj rozhoduje
+     * {@see \MyInvoice\Service\TaxEvidence\CashJournalService::isOtherItemPrincipal()}.
+     */
+    private static function otherItemKindSql(int $sid, string $column, string $sourceExpr): string
+    {
+        return "(SELECT CASE WHEN COUNT(*) = 0 THEN NULL
+                             WHEN COUNT(DISTINCT oi.side, oi.kind) = 1 THEN MIN(CONCAT(oi.side, ':', oi.kind))
+                             ELSE 'mixed' END
+                   FROM other_item_allocations oia
+                   JOIN other_items oi ON oi.id = oia.other_item_id AND oi.supplier_id = oia.supplier_id
+                  WHERE oia.supplier_id = {$sid} AND oia.{$column} = {$sourceExpr} AND oia.reversed_on IS NULL)";
+    }
+
+    /** Součet částek pohybu přiřazených k ostatním položkám (CZK, jiná měna se přiřadit nedá). */
+    private static function otherItemAllocatedSql(int $sid, string $column, string $sourceExpr): string
+    {
+        return "(SELECT SUM(oia.amount) FROM other_item_allocations oia
+                  WHERE oia.supplier_id = {$sid} AND oia.{$column} = {$sourceExpr} AND oia.reversed_on IS NULL)";
+    }
+
     private function castRow(array $r): array
     {
+        $r['other_item_kind'] = isset($r['other_item_kind']) ? (string) $r['other_item_kind'] : null;
+        $r['other_item_allocated'] = isset($r['other_item_allocated']) ? round((float) $r['other_item_allocated'], 2) : null;
         $r['fx_rate_missing'] = !array_key_exists('amount', $r) || $r['amount'] === null;
         $r['source_id']    = (int) $r['source_id'];
         $r['amount']       = $r['fx_rate_missing'] ? 0.0 : round((float) $r['amount'], 2);

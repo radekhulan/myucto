@@ -443,6 +443,11 @@ final class CashJournalService
 
         // 4) Banka bez vazby → bankovní poplatek (heuristika) nebo NEZAŘAZENO (R10).
         if ($source === 'bank') {
+            if ($this->isOtherItemPrincipal($r, $amount)) {
+                return $direction === 'in'
+                    ? $this->single('income_nontax', $amount, 'income_nontax')
+                    : $this->single('expense_nontax', $amount, 'expense_nontax');
+            }
             if ($direction === 'out' && $this->looksLikeOwnTaxOrInsurance((string) $r['description'])) {
                 return $this->single('expense_nontax', $amount, 'expense_nontax');
             }
@@ -744,6 +749,28 @@ final class CashJournalService
      * pohybu (description), NE protistranu — jinak by partner 'Coffee'/'Feeder s.r.o.'
      * planě spadl do daňového výdaje. Vzory s hranicí slova, ať 'fee' nematchne 'Feeder'.
      */
+    /**
+     * Bankovní pohyb CELÝ přiřazený k ostatním položkám, jejichž peníze nejsou příjmem ani
+     * výdajem: splátka přijaté půjčky, vrácení přijaté kauce a vrácení složené kauce.
+     * Jdou mimo základ bez dalšího rozhodování (k závazku se přiřazuje jen odchozí platba,
+     * k pohledávce jen příchozí).
+     *
+     * Příchozí platba k poskytnuté půjčce zůstává nezařazená: druh se v aplikaci jmenuje
+     * „Poskytnutá půjčka nebo splátka" a splátka prodeje je daňovým příjmem, takže by tiché
+     * zařazení mezi nedaňové mohlo podhodnotit základ. Stejně pohyb přiřazený jen zčásti (např.
+     * splátka i s úrokem) a ostatní druhy (nájem, pojištění, poplatek, náhrada): rozhoduje uživatel.
+     *
+     * @param array<string,mixed> $r
+     */
+    private function isOtherItemPrincipal(array $r, float $amount): bool
+    {
+        $allocated = $r['other_item_allocated'] ?? null;
+
+        return $allocated !== null
+            && abs((float) $allocated - $amount) < 0.005
+            && in_array($r['other_item_kind'] ?? null, ['payable:loan', 'payable:deposit', 'receivable:deposit'], true);
+    }
+
     private function looksLikeBankFee(string $description): bool
     {
         $hay = mb_strtolower($description);
