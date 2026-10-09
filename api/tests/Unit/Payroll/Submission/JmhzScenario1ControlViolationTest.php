@@ -373,6 +373,24 @@ final class JmhzScenario1ControlViolationTest extends TestCase
         );
         $this->assertPasses(194, $employerAnnual('12'));
         $this->assertFails(194, $employerAnnual('11'));
+
+        // Kontrola 192: 10319 musí být v lednovém a únorovém podání u součásti se
+        // souhrnnými daty (primární PPV). Vedlejší PPV ho nést nesmí (kontrola 248),
+        // takže bez něj projde. Kontrola 191 povinnost 10320 nezakládá.
+        $january = static fn (bool $primary, string $content): string => JmhzXmlSample::document(
+            str_replace(
+                '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+                ($content !== '' ? "<form:rocniUhrny>{$content}</form:rocniUhrny>" : '')
+                    . '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+                JmhzXmlSample::form('1000000001', '2000000000000000000001', primary: $primary),
+            ),
+            month: '1',
+        );
+        $askedFor = '<form:rocniZuctovaniZadost>true</form:rocniZuctovaniZadost>';
+        $this->assertFails(192, $january(true, ''));
+        $this->assertPasses(192, $january(true, $askedFor));
+        $this->assertPasses(192, $january(false, ''));
+        $this->assertNotFailed(191, $january(true, $askedFor));
     }
 
     /** Kontroly 150 a 151: číselníky ročních údajů zaměstnavatele. */

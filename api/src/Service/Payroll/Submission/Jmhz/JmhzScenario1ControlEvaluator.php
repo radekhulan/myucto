@@ -3023,10 +3023,10 @@ final class JmhzScenario1ControlEvaluator
         return $this->perForm(
             $projection,
             static function (JmhzAttributeScope $form) use ($month, $annualIds): ?string {
+                // Katalog kontroly 191 roční atributy jen omezuje na leden až březen,
+                // povinnost 10320 nezakládá: v těch měsících není co zamítnout.
                 if ($month >= 1 && $month <= 3) {
-                    return $form->has('10320')
-                        ? null
-                        : 'Atribut 10320 musí být uveden v lednovém až březnovém podání.';
+                    return null;
                 }
                 // all() místo has(): přítomnost se musí započítat jako přečtený
                 // údaj, jinak perForm() součást přeskočí a nález se ztratí.
@@ -3052,8 +3052,15 @@ final class JmhzScenario1ControlEvaluator
         return $this->perForm(
             $projection,
             static function (JmhzAttributeScope $form) use ($month): ?string {
+                // Povinnost platí jen pro součást se souhrnnými daty zaměstnance
+                // (primární PPV): vedlejší PPV je nést nesmí (kontrola 248). Příznak
+                // se čte přes boolean(), takže se součást započítá i bez 10319.
                 if ($month === 1 || $month === 2) {
-                    return $form->has('10319')
+                    if ($form->boolean('10495') !== true) {
+                        return null;
+                    }
+
+                    return $form->all('10319') !== []
                         ? null
                         : 'Atribut 10319 musí být uveden v lednovém a únorovém podání.';
                 }
