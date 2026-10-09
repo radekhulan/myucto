@@ -48,7 +48,7 @@ final class PayrollRunGarnishmentProcessor
                 $person,
                 $context['requires_net_pay'],
             );
-            [$input, $result, $income] = $this->evaluate(
+            [$input, $result, $income, $cashReduction] = $this->evaluate(
                 $context,
                 $person,
                 $employeeId,
@@ -75,7 +75,7 @@ final class PayrollRunGarnishmentProcessor
                     : self::add(
                         $result->employeePaymentMinorUnits,
                         $income->excludedMinorUnits,
-                    ),
+                    ) - $cashReduction,
                 $annualSettlement,
             ) - $voluntaryDeducted;
             // Záporná výplata je přípustná JEN u záporné čisté mzdy. Tam, kde
@@ -130,13 +130,17 @@ final class PayrollRunGarnishmentProcessor
             if ($netCashPayable === null) {
                 continue;
             }
-            [$input, $result] = $this->evaluate(
+            [$input, $result, $income, $cashReduction] = $this->evaluate(
                 $context,
                 $person,
                 $employeeId,
                 $netCashPayable,
                 $statutoryShares[$employeeId] ?? null,
             );
+            $payableBeforeAgreements = self::add(
+                $result->employeePaymentMinorUnits,
+                $income->excludedMinorUnits,
+            ) - $cashReduction;
             // Dohody o srážkách se berou jen ze mzdy měsíce výplaty, ne
             // z násobků odstupného — viz severanceMultiples(). Kapacita se proto
             // počítá z výsledku samotné mzdy; pořadí mzda → násobky zaručuje,
@@ -144,8 +148,12 @@ final class PayrollRunGarnishmentProcessor
             if ($input->severanceMultiples !== []) {
                 $result = $this->calculator->calculate($input->withoutSeverance());
             }
-            $capacities[$employeeId] =
-                $this->calculator->voluntaryDeductionCapacity($result);
+            $capacities[$employeeId] = $cashReduction > 0
+                ? min(
+                    $this->calculator->voluntaryDeductionCapacity($result),
+                    max(0, $payableBeforeAgreements),
+                )
+                : $this->calculator->voluntaryDeductionCapacity($result);
         }
 
         return $capacities;
@@ -415,6 +423,18 @@ final class PayrollRunGarnishmentProcessor
         if ($nonCash > 0) {
             $grossEnforcementBase = max(0, $grossEnforcementBase - $nonCash);
         }
+        /*
+         * ZÁPORNÁ PENĚŽNÍ složka mimo základ srážek (vrácená nebo dobropisovaná
+         * náhrada výdajů, odpočet zálohy na pracovní cestu) snižuje výplatu, ale
+         * základ srážek ne. Náhrada výdajů podle § 6 odst. 7 ZDP není mzdou ani
+         * jiným příjmem podle § 299 OSŘ: kladná se do čisté mzdy pro srážky
+         * (§ 277 OSŘ) nepočítá, a záporná ji proto nemůže snižovat. Exekuce se
+         * počítá ze mzdy, vrácení náhrady jde jen proti výplatě.
+         *
+         * Základ srážek tak smí převýšit výplatu právě o tuto doloženou částku,
+         * ne víc. Kontrola rozporu pod tím zůstává.
+         */
+        $excludedCashReduction = self::excludedCashReduction($person);
         $cashPayable = $grossCashPayable;
         $enforcementBase = $grossEnforcementBase;
         $statutoryUnavailable = false;
@@ -441,10 +461,14 @@ final class PayrollRunGarnishmentProcessor
             ?? throw new \UnexpectedValueException(
                 'Snapshot neobsahuje exekuční důkazy zaměstnance.',
             );
+        $cashReduction = min(
+            $excludedCashReduction,
+            max(0, $enforcementBase - $cashPayable),
+        );
         $consistent = !$statutoryUnavailable
             && $cashPayable >= 0
             && $enforcementBase >= 0
-            && $enforcementBase <= $cashPayable;
+            && $enforcementBase <= $cashPayable + $cashReduction;
         $wageBase = $enforcementBase;
         $severanceMultiples = [];
         $severanceItems = [];
@@ -481,17 +505,17 @@ final class PayrollRunGarnishmentProcessor
                     $wageBase,
                     "supplier-{$supplierId}",
                 ),
-                $cashPayable === $enforcementBase
+                $cashPayable + $cashReduction === $enforcementBase
                     ? null
                     : new GarnishableIncomeItem(
                         "revision-person-{$employeeId}-excluded",
                         GarnishableIncomeKind::TravelReimbursement,
-                        $cashPayable - $enforcementBase,
+                        $cashPayable + $cashReduction - $enforcementBase,
                         "supplier-{$supplierId}",
                     ),
                 ...$severanceItems,
             ])), true));
-        $input = new GarnishmentInput(
+        $buildInput = static fn (GarnishableIncomeResult $income): GarnishmentInput => new GarnishmentInput(
             $context['period'],
             $context['payment_date'],
             $income,
@@ -510,8 +534,69 @@ final class PayrollRunGarnishmentProcessor
             $context['agreements'][$employeeId] ?? [],
             $income->status === GarnishmentStatus::Supported ? $severanceMultiples : [],
         );
+        $input = $buildInput($income);
+        $result = $this->calculator->calculate($input);
+        if ($income->status !== GarnishmentStatus::Supported) {
+            return [$input, $result, $income, 0];
+        }
+        // Vrácení náhrady se bere z toho, co po exekuci zbylo zaměstnanci.
+        // Na to, aby ho přesáhlo, zákon odpověď nedává (pořadí s exekucí,
+        // nezabavitelná částka) — rozhodne účetní, ne odhad.
+        if ($cashReduction > 0
+            && self::add($result->employeePaymentMinorUnits, $income->excludedMinorUnits) < $cashReduction
+        ) {
+            $income = new GarnishableIncomeResult(
+                GarnishmentStatus::ManualReview,
+                0,
+                0,
+                ['excluded_cash_reduction_exceeds_payment'],
+                [],
+            );
+            $input = $buildInput($income);
 
-        return [$input, $this->calculator->calculate($input), $income];
+            return [$input, $this->calculator->calculate($input), $income, 0];
+        }
+
+        return [$input, $result, $income, $cashReduction];
+    }
+
+    /**
+     * O kolik výplatu snižují záporné peněžní složky, které do základu srážek
+     * nepatří. Bere se z rozpadu po vstupech: peněžní vstup (výplata = částka)
+     * se základem srážek vyšším než výplata. Snímek bez rozpadu vrací nulu
+     * a počítá se jako dřív.
+     *
+     * @param array<string,mixed> $person
+     */
+    private static function excludedCashReduction(array $person): int
+    {
+        $employments = $person['employments'] ?? null;
+        if (!is_array($employments) || !array_is_list($employments)) {
+            return 0;
+        }
+        $reduction = 0;
+        foreach ($employments as $employment) {
+            $inputs = is_array($employment) ? ($employment['inputs'] ?? null) : null;
+            if (!is_array($inputs) || !array_is_list($inputs)) {
+                continue;
+            }
+            foreach ($inputs as $input) {
+                $totals = is_array($input) && is_array($input['totals'] ?? null)
+                    ? $input['totals']
+                    : [];
+                $source = self::intOrNull($totals, 'source_amount_minor');
+                $cash = self::intOrNull($totals, 'cash_payable_minor');
+                $base = self::intOrNull($totals, 'enforcement_base_minor');
+                if ($source === null || $cash === null || $base === null
+                    || $source !== $cash || $cash >= $base
+                ) {
+                    continue;
+                }
+                $reduction = self::add($reduction, $base - $cash);
+            }
+        }
+
+        return $reduction;
     }
 
     /**

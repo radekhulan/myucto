@@ -288,6 +288,107 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
     }
 
     /**
+     * N8: záporná převzatá náhrada výdajů (vrácení náhrady, § 6 odst. 7 ZDP)
+     * snižuje výplatu, ale do základu srážek nepatří. Exekuce se počítá ze mzdy
+     * bez ní a vrácení jde jen proti výplatě, místo aby osoba spadla do ručního
+     * posouzení s rozporem základu a výplaty.
+     */
+    public function testNegativeReimbursementOutsideTheBaseReducesOnlyThePayout(): void
+    {
+        $result = $this->processor()->calculate(
+            $this->snapshot(),
+            $this->negativeReimbursementBaseResult(-1_500),
+        );
+        $person = $result['people'][0];
+
+        self::assertNotContains(
+            'income:cash_payable_enforcement_base_inconsistent',
+            $person['enforcement']['result']['issues'] ?? [],
+        );
+        self::assertSame('supported', $person['enforcement']['result']['status']);
+        // Základ srážek je čistá mzda bez vrácené náhrady, tedy stejný jako
+        // u osoby bez ní.
+        self::assertSame(
+            self::NET_BEFORE_DEDUCTIONS,
+            $person['enforcement']['input']['income']['garnishable_minor_units'],
+        );
+        self::assertSame(529_900, $person['enforcement']['result']['total_withheld_minor_units']);
+        self::assertSame(
+            self::NET_BEFORE_DEDUCTIONS - 1_500 - 529_900,
+            $person['payable_after_enforcement_minor'],
+        );
+    }
+
+    /**
+     * NEGATIVNÍ test: záporná složka mimo základ vysvětlí jen svou vlastní
+     * částku. Rozdíl větší než ona je pořád rozpor podkladů.
+     */
+    public function testNegativeReimbursementDoesNotExplainALargerGap(): void
+    {
+        $base = $this->negativeReimbursementBaseResult(-1_500);
+        $base['people'][0]['totals']['enforcement_base_minor'] = 4_010_000;
+
+        $person = $this->processor()->calculate($this->snapshot(), $base)['people'][0];
+
+        self::assertContains(
+            'income:cash_payable_enforcement_base_inconsistent',
+            $person['enforcement']['result']['issues'] ?? [],
+        );
+    }
+
+    /**
+     * Mzda 40 000 Kč a převzatá náhrada výdajů se zápornou částkou: výplata
+     * i úhrn nesou zápornou náhradu, základ srážek ne. Rozpad po vstupech má
+     * tvar, který vyrábí {@see \MyInvoice\Service\Payroll\Run\PayrollRunCalculator}.
+     *
+     * @return array<string,mixed>
+     */
+    private function negativeReimbursementBaseResult(int $reimbursement): array
+    {
+        $gross = 4_000_000;
+        $net = self::NET_BEFORE_DEDUCTIONS + $reimbursement;
+        $wage = [
+            'source_amount_minor' => $gross,
+            'cash_payable_minor' => $gross,
+            'enforcement_base_minor' => $gross,
+        ];
+        $refund = [
+            'source_amount_minor' => $reimbursement,
+            'cash_payable_minor' => $reimbursement,
+            'enforcement_base_minor' => 0,
+        ];
+        $totals = [
+            'source_amount_minor' => $gross + $reimbursement,
+            'cash_payable_minor' => $gross + $reimbursement,
+            'enforcement_base_minor' => $gross,
+        ];
+        $base = $this->baseResult(null);
+        $base['people'][0]['employments'] = [[
+            'employment_id' => 101,
+            'inputs' => [
+                ['input_id' => 1, 'component_code' => 'MZDA', 'totals' => $wage],
+                ['input_id' => 2, 'component_code' => 'NAHRADA_VYDAJU_PREVZATA', 'totals' => $refund],
+            ],
+            'totals' => $totals,
+        ]];
+        $base['people'][0]['totals'] = $totals;
+        $base['statutory'] = ['status' => 'calculated'];
+        $base['people'][0]['statutory'] = [
+            'person_reference' => 'employee:' . self::EMPLOYEE_ID,
+            'status' => 'calculated',
+            'net_payable_minor_units' => $net,
+            'net_pay' => [
+                'net_before_deductions_minor_units' => $net,
+                'deducted_minor_units' => 0,
+                'net_payable_minor_units' => $net,
+                'deductions' => [],
+            ],
+        ];
+
+        return $base;
+    }
+
+    /**
      * Osoba s peněžní mzdou 40 000 Kč a nepeněžním stravováním 600 Kč:
      * `source_amount` nese obojí, `cash_payable` jen peníze, základ srážek
      * obojí — přesně tvar, který vyrábí zdanitelné stravování.

@@ -298,9 +298,40 @@ final class PayrollEnforcementEvidenceScopeRunTest extends TestCase
     }
 
     /**
+     * N8: záporná převzatá náhrada výdajů (vrácení náhrady podle § 6 odst. 7
+     * ZDP) u osoby s exekucí. Náhrada do čisté mzdy pro srážky nepatří, takže
+     * ji nesnižuje: srážka se počítá ze stejné mzdy jako bez ní a vrácení jde
+     * jen proti výplatě. Dřív základ přerostl výplatu o 15 Kč a běh zastavil
+     * blokátor `enforcement_manual_review`.
+     */
+    public function testNegativeTakenOverReimbursementDoesNotStopTheEnforcementRun(): void
+    {
+        $this->seedClaim();
+        $this->seedMonthEvidence(claimRegister: true, dependants: true, spouse: true);
+        $this->seedNegativeReimbursement(-1_500);
+
+        $run = $this->calculateRun();
+        $enforcement = $run['enforcement'];
+
+        self::assertSame('supported', $enforcement['status'], sprintf(
+            "Srážka nedoběhla. Celý výsledek:\n%s",
+            CanonicalJson::encode($enforcement),
+        ));
+        self::assertNotContains('enforcement_manual_review', $run['validation_codes']);
+        // Čistá mzda 25 690 Kč z regresní kotvy, bez vrácené náhrady.
+        self::assertSame(2_569_000, $run['garnishable']);
+        self::assertSame(self::EXPECTED_WITHHELD_MINOR, $enforcement['total_withheld_minor_units']);
+        self::assertSame($run['net_payable'] - self::EXPECTED_WITHHELD_MINOR, $run['payable']);
+        self::assertSame($run['garnishable'] - 1_500 - self::EXPECTED_WITHHELD_MINOR, $run['payable']);
+    }
+
+    /**
      * @return array{
      *     statutory:array<string,mixed>,
      *     enforcement:array<string,mixed>,
+     *     garnishable:int,
+     *     payable:int,
+     *     net_payable:?int,
      *     validation_codes:list<string>
      * }
      */
@@ -332,6 +363,9 @@ final class PayrollEnforcementEvidenceScopeRunTest extends TestCase
         return [
             'statutory' => $snapshot['statutory'],
             'enforcement' => $snapshot['people'][0]['enforcement']['result'],
+            'garnishable' => $snapshot['people'][0]['enforcement']['input']['income']['garnishable_minor_units'],
+            'payable' => $snapshot['people'][0]['payable_after_enforcement_minor'],
+            'net_payable' => $snapshot['people'][0]['statutory']['net_payable_minor_units'] ?? null,
             'validation_codes' => array_column(
                 $this->repository->validations(
                     $this->supplierId,
@@ -509,6 +543,77 @@ final class PayrollEnforcementEvidenceScopeRunTest extends TestCase
 
     private function seedWageComponent(): void
     {
+        $this->componentId = $this->seedComponent('MZDA_MESICNI', 'Měsíční mzda', 'base_wage', 'included', [
+            'social_treatment' => 'included',
+            'health_treatment' => 'included',
+            'average_earning_treatment' => 'included',
+            'enforcement_treatment' => 'included',
+            'jmhz_treatment' => 'included',
+        ], null);
+    }
+
+    private function seedWage(): void
+    {
+        $this->seedInput(
+            $this->componentId,
+            'MZDA_MESICNI',
+            'Měsíční mzda',
+            'base_wage',
+            'included',
+            [
+                'social_treatment' => 'included',
+                'health_treatment' => 'included',
+                'average_earning_treatment' => 'included',
+                'enforcement_treatment' => 'included',
+                'jmhz_treatment' => 'included',
+            ],
+            null,
+            self::GROSS_MINOR,
+        );
+    }
+
+    /**
+     * Převzatá náhrada výdajů se zápornou částkou: peněžní, mimo daň, pojistné,
+     * průměr, srážky i JMHZ (řádek výchozího číselníku).
+     */
+    private function seedNegativeReimbursement(int $amountMinor): void
+    {
+        $treatments = [
+            'social_treatment' => 'excluded',
+            'health_treatment' => 'excluded',
+            'average_earning_treatment' => 'excluded',
+            'enforcement_treatment' => 'excluded',
+            'jmhz_treatment' => 'excluded',
+        ];
+        $componentId = $this->seedComponent(
+            'NAHRADA_VYDAJU_PREVZATA',
+            'Náhrada výdajů nepodléhající dani - převzatá',
+            'other',
+            'exempt',
+            $treatments,
+            'not_subject_to_tax',
+        );
+        $this->seedInput(
+            $componentId,
+            'NAHRADA_VYDAJU_PREVZATA',
+            'Náhrada výdajů nepodléhající dani - převzatá',
+            'other',
+            'exempt',
+            $treatments,
+            'not_subject_to_tax',
+            $amountMinor,
+        );
+    }
+
+    /** @param array<string,string> $treatments */
+    private function seedComponent(
+        string $code,
+        string $name,
+        string $kind,
+        string $tax,
+        array $treatments,
+        ?string $exemptionBasis,
+    ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_component_definitions
@@ -518,41 +623,64 @@ final class PayrollEnforcementEvidenceScopeRunTest extends TestCase
                  health_participation_treatment, health_treatment,
                  average_earning_treatment, enforcement_treatment,
                  jmhz_treatment, statistics_treatment,
-                 accounting_debit_code, accounting_credit_code, valid_from)
-             VALUES (?, "MZDA_MESICNI", "Měsíční mzda", "base_wage",
-                     "monetary", "regular", "included", "included", "included",
-                     "included", "included", "included", "included",
-                     "included", "included", "521", "331", "2026-01-01")'
-        )->execute([$this->supplierId]);
-        $this->componentId = (int) $pdo->lastInsertId();
+                 accounting_debit_code, accounting_credit_code, exemption_basis, valid_from)
+             VALUES (?, ?, ?, ?, "monetary", "regular", ?, "included", ?,
+                     "included", ?, ?, ?, ?, "included", "521", "331", ?, "2026-01-01")'
+        )->execute([
+            $this->supplierId,
+            $code,
+            $name,
+            $kind,
+            $tax,
+            $treatments['social_treatment'],
+            $treatments['health_treatment'],
+            $treatments['average_earning_treatment'],
+            $treatments['enforcement_treatment'],
+            $treatments['jmhz_treatment'],
+            $exemptionBasis,
+        ]);
+
+        return (int) $pdo->lastInsertId();
     }
 
-    private function seedWage(): void
-    {
+    /** @param array<string,string> $treatments */
+    private function seedInput(
+        int $componentId,
+        string $code,
+        string $name,
+        string $kind,
+        string $tax,
+        array $treatments,
+        ?string $exemptionBasis,
+        int $amountMinor,
+    ): void {
         $pdo = $this->db->pdo();
         $snapshot = [
-            'code' => 'MZDA_MESICNI',
-            'name' => 'Měsíční mzda',
-            'component_kind' => 'base_wage',
+            'code' => $code,
+            'name' => $name,
+            'component_kind' => $kind,
             'value_kind' => 'monetary',
             'frequency_kind' => 'regular',
-            'tax_treatment' => 'included',
+            'tax_treatment' => $tax,
             'social_participation_treatment' => 'included',
-            'social_treatment' => 'included',
+            'social_treatment' => $treatments['social_treatment'],
             'health_participation_treatment' => 'included',
-            'health_treatment' => 'included',
-            'average_earning_treatment' => 'included',
-            'enforcement_treatment' => 'included',
-            'jmhz_treatment' => 'included',
+            'health_treatment' => $treatments['health_treatment'],
+            'average_earning_treatment' => $treatments['average_earning_treatment'],
+            'enforcement_treatment' => $treatments['enforcement_treatment'],
+            'jmhz_treatment' => $treatments['jmhz_treatment'],
             'statistics_treatment' => 'included',
             'accounting_debit_code' => '521',
             'accounting_credit_code' => '331',
             'annual_limit_minor' => null,
-            'component_id' => $this->componentId,
+            'component_id' => $componentId,
             'component_row_version' => 1,
             'valid_from' => '2026-01-01',
             'valid_to' => null,
         ];
+        if ($exemptionBasis !== null) {
+            $snapshot['exemption_basis'] = $exemptionBasis;
+        }
         $json = CanonicalJson::encode($snapshot);
         $pdo->prepare(
             'INSERT INTO payroll_inputs
@@ -565,8 +693,8 @@ final class PayrollEnforcementEvidenceScopeRunTest extends TestCase
             $this->supplierId,
             $this->employeeId,
             $this->employmentId,
-            $this->componentId,
-            self::GROSS_MINOR,
+            $componentId,
+            $amountMinor,
             $json,
             hash('sha256', $json, true),
             $this->actorId,
