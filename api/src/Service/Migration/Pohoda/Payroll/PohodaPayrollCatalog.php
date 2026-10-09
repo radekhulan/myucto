@@ -51,6 +51,16 @@ final class PohodaPayrollCatalog
     /** Odstupné: složka výchozího číselníku (druh `severance`, bez pojistného). */
     public const SEVERANCE = 'ODSTUPNE';
 
+    /**
+     * Náhrada výdajů, která není předmětem daně (§ 6 odst. 7 ZDP): PAMICA „Náhrada
+     * nezdaněná" (J03, J09). Vyplácí se nad čistou mzdu mimo hrubou mzdu, mimo
+     * vyměřovací základy i mimo úhrny JMHZ 10286 a 10289.
+     */
+    public const UNTAXED_REIMBURSEMENT = 'NAHRADA_VYDAJU_PREVZATA';
+
+    /** Sloupec sešitu pro nezdaněnou náhradu výdajů; J03 i J09 se v měsíci sčítají. */
+    private const UNTAXED_REIMBURSEMENT_HEADER = 'Náhrada výdajů nepodléhající dani (Kč)';
+
     /** Zákonné příplatky katalogu PAMICA => složka výchozího číselníku a sloupec sešitu. */
     private const STATUTORY_PREMIUMS = [
         'P01' => ['PRIPLATEK_PRESCAS', 'Příplatek za práci přesčas (Kč)'],
@@ -81,9 +91,11 @@ final class PohodaPayrollCatalog
     private const OTHER_DEDUCTION_HEADER = 'Srážka ze mzdy (Kč)';
 
     /**
+     * @param array<string,mixed> $catalog řádek číselníku `sMZslozky`; u položek, které
+     *        rozlišuje jen daňový režim (nezdaněná náhrada), rozhodují jeho příznaky
      * @return array{meaning:string,kind:?string,code:?string,header:string}
      */
-    public static function component(string $number, string $name, bool $sharedNumber): array
+    public static function component(string $number, string $name, bool $sharedNumber, array $catalog = []): array
     {
         $number = strtoupper(trim($number));
         $label = trim("{$number} {$name}");
@@ -165,6 +177,9 @@ final class PohodaPayrollCatalog
         }
         if ($number === 'J03' && str_contains($normalized, 'obed')) {
             return ['meaning' => 'meal', 'kind' => null, 'code' => null, 'header' => self::MEAL_HEADER];
+        }
+        if (self::untaxedReimbursement($normalized, $catalog)) {
+            return ['meaning' => 'component', 'kind' => 'other', 'code' => self::UNTAXED_REIMBURSEMENT, 'header' => self::UNTAXED_REIMBURSEMENT_HEADER];
         }
         // Stravenkový paušál: osvobozenou část a nadlimitní část (`Hodnota4`) rozdělí
         // sešit ({@see self::mealAllowanceSplit()}). Druh v profilu jen pro případ, že
@@ -328,6 +343,25 @@ final class PohodaPayrollCatalog
             'P03' => ['meaning' => 'holiday_work_hours', 'header' => 'Práce ve svátek (h)'],
             default => null,
         };
+    }
+
+    /**
+     * Nezdaněná náhrada výdajů: název „náhrada … nezdaněná" a v číselníku bez daně
+     * (`RelTpDan` 4), bez sociálního i zdravotního pojistného. Číslo složky nerozhoduje:
+     * J03 je v jiné instalaci srážka za obědy. Bez řádku číselníku, nebo když příznaky
+     * názvu neodpovídají, zůstává položka neznámá a převod ji vypíše.
+     *
+     * @param array<string,mixed> $catalog
+     */
+    private static function untaxedReimbursement(string $normalized, array $catalog): bool
+    {
+        if ($catalog === [] || preg_match('/\bnahrad.*\bnezdan/', $normalized) !== 1) {
+            return false;
+        }
+
+        return trim(PohodaXml::text($catalog, 'RelTpDan')) === '4'
+            && trim(PohodaXml::text($catalog, 'JeSoc')) === '0'
+            && trim(PohodaXml::text($catalog, 'JeZdr')) === '0';
     }
 
     private static function bool(string $value): bool

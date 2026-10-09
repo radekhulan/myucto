@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Attendance;
 
+use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
+
 /**
  * Mzdové složky, které profil importu potřebuje: `{code, name, kind}`.
  *
@@ -72,10 +74,29 @@ final class AttendanceProfileComponents
     /**
      * Data pro {@see \MyInvoice\Repository\Payroll\PayrollComponentRepository::create()}.
      *
+     * Kód výchozího číselníku (převzatý příspěvek na stravování, nezdaněná náhrada
+     * výdajů) import nezakládá s obecným zacházením: složka tu chybí jen proto, že
+     * výchozí číselník platí od pozdějšího dne (převod staršího roku), a stejný kód
+     * musí mít v každém roce stejné zdanění, pojistné i zařazení do hlášení.
+     *
      * @param AttendanceProfileComponent $component
      * @return array<string,mixed>
      */
     public static function definition(array $component, string $validFrom): array
+    {
+        $template = PayrollComponentDefaults::template($component['code']);
+        if ($template !== null) {
+            return array_replace(self::generic($component, $validFrom), $template);
+        }
+
+        return self::generic($component, $validFrom);
+    }
+
+    /**
+     * @param AttendanceProfileComponent $component
+     * @return array<string,mixed>
+     */
+    private static function generic(array $component, string $validFrom): array
     {
         return [
             'code' => $component['code'],

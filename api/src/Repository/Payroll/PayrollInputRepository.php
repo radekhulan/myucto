@@ -2403,8 +2403,17 @@ final class PayrollInputRepository
      * smí založit jen import (`import`) nebo jeho oprava (`correction`). Ruční
      * částka by obešla limit za směnu § 6 odst. 9 písm. b) ZDP, který u vlastních
      * vstupů hlídá {@see PayrollMealShiftEvidenceService} na složce PRISPEVEK_STRAVOVANI.
+     * Převzatá náhrada výdajů je mimo daň jen proto, že ji tak posoudil zdrojový program;
+     * ruční částka by bez dokladu obešla daň i pojistné.
+     *
+     * @var array<string,string> kód => důvod odmítnutí ručního vstupu
      */
-    private const IMPORT_ONLY_CODES = ['PRISPEVEK_STRAVOVANI_PREVZATY'];
+    private const IMPORT_ONLY_CODES = [
+        'PRISPEVEK_STRAVOVANI_PREVZATY' => 'Převzatý příspěvek na stravování vzniká jen převodem mezd. Vlastní příspěvek zadejte '
+            . 'na složku Příspěvek na stravování, osvobození se pak spočítá ze směn.',
+        'NAHRADA_VYDAJU_PREVZATA' => 'Převzatá náhrada výdajů vzniká jen převodem mezd. Vlastní cestovní náhradu zadejte '
+            . 'vyúčtováním pracovní cesty, jinou náhradu na složku, jejíž daňový režim odpovídá dokladu.',
+    ];
 
     /**
      * Kontrola referencí mzdového vstupu.
@@ -2456,13 +2465,10 @@ final class PayrollInputRepository
                 'Náhradu mzdy při DPN ani za dovolenou nelze zadat ručně; vzniká ze schválené absence.'
             );
         }
-        if (in_array((string) $row['code'], self::IMPORT_ONLY_CODES, true)
+        if (isset(self::IMPORT_ONLY_CODES[(string) $row['code']])
             && !in_array((string) ($data['source_kind'] ?? ''), ['import', 'correction'], true)
         ) {
-            throw new \InvalidArgumentException(
-                'Převzatý příspěvek na stravování vzniká jen převodem mezd. Vlastní příspěvek zadejte '
-                . 'na složku Příspěvek na stravování, osvobození se pak spočítá ze směn.'
-            );
+            throw new \InvalidArgumentException(self::IMPORT_ONLY_CODES[(string) $row['code']]);
         }
     }
 

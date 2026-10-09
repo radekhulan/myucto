@@ -437,9 +437,10 @@ final class PohodaPayrollImporter
             foreach ($profile['components'] as $component) {
                 // Složku výchozího číselníku zakládá číselník se svou klasifikací; druh
                 // v profilu je jen náhradní. Osvobozený benefit zařazení do rozpadu nepotřebuje.
+                // Plnění mimo hlášení (nezdaněná náhrada výdajů) zařazení nepotřebuje vůbec.
                 $default = PayrollComponentDefaults::classification($component['code'])
-                    ?? ['component_kind' => $component['kind'], 'frequency_kind' => 'one_off', 'tax_treatment' => 'included'];
-                if (JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', $default['tax_treatment'], $default['component_kind'])) {
+                    ?? ['component_kind' => $component['kind'], 'frequency_kind' => 'one_off', 'tax_treatment' => 'included', 'jmhz_treatment' => 'included'];
+                if (JmhzComponentSourceRule::issueCode($default['jmhz_treatment'], null, $default['tax_treatment'], $default['component_kind']) === null) {
                     continue;
                 }
                 if (PayrollComponentJmhzMappingDefaults::targetFor($component['code'], $default['component_kind'], $default['frequency_kind'], $default['tax_treatment']) === null) {

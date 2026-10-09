@@ -301,7 +301,7 @@ final class PohodaPayrollPeople
             // Příplatky a odměny (i ty pod sběrným kódem O01) chodí do běhu z podkladů docházky
             // a v porovnání s PAMICA sedí, takže do seznamu k ručnímu doplnění nepatří. Zůstanou
             // jen ostatní plnění, hlavně zdanitelná část stravování.
-            $component = PohodaPayrollCatalog::component($code, $name, true);
+            $component = PohodaPayrollCatalog::component($code, $name, true, $catalog);
             if (!in_array($component['meaning'], ['component', 'meal_allowance'], true) || in_array($component['kind'], ['premium', 'bonus'], true)) {
                 continue;
             }

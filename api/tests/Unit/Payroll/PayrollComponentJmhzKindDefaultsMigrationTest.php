@@ -119,7 +119,9 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
             'ODMENA_MIMORADNA' => null,
             'ODMENA_HOTOVOSTNI' => null,
             'ODMENA_SENIOR' => null,
-            'DOPLATEK_MZDY' => '10329',
+            // Kód výchozího číselníku: složka má jeho klasifikaci (doplatek mzdy za
+            // minulé období), ne druh z profilu, stejně jako ve firmě, která ji už má.
+            'DOPLATEK_MZDY' => null,
             'MZDA_SKOLENI' => '10329',
         ];
         $actual = [];

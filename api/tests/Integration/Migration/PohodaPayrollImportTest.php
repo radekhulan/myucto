@@ -458,6 +458,12 @@ final class PohodaPayrollImportTest extends TestCase
         $component->execute([$supplierId, 'PRISPEVEK_STRAVOVANI_PREVZATY']);
         self::assertSame(['tax_treatment' => 'exempt', 'social_treatment' => 'excluded', 'exemption_basis' => 'statutory_exempt'], $component->fetch(\PDO::FETCH_ASSOC));
 
+        // Nezdaněná náhrada výdajů jde do výplaty mimo daň, pojistné i hlášení.
+        self::assertSame(75_000, $this->scalar($input, [$supplierId, $employment['id'], 'NAHRADA_VYDAJU_PREVZATA']), $this->explain($protocol));
+        $component = $this->db->pdo()->prepare('SELECT tax_treatment, social_treatment, jmhz_treatment, exemption_basis FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $component->execute([$supplierId, 'NAHRADA_VYDAJU_PREVZATA']);
+        self::assertSame(['tax_treatment' => 'exempt', 'social_treatment' => 'excluded', 'jmhz_treatment' => 'excluded', 'exemption_basis' => 'not_subject_to_tax'], $component->fetch(\PDO::FETCH_ASSOC));
+
         // Sick days 7,5 h × průměr 200 Kč jako placené volno.
         self::assertSame(150_000, $this->scalar($input, [$supplierId, $employment['id'], 'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC']), $this->explain($protocol));
         $summary = $this->db->pdo()->prepare(
@@ -497,6 +503,39 @@ final class PohodaPayrollImportTest extends TestCase
         ], array_map(static fn (array $r): array => [$r['date_from'], $r['date_to'], (int) $r['sickness_window_carried_days']], $stmt->fetchAll(\PDO::FETCH_ASSOC)),
             $this->explain($protocol));
         self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE)['absences_existing'] ?? 0, $this->explain($protocol));
+    }
+
+    /**
+     * Výchozí číselník platí od 2026, převod roku 2025 proto zakládá převzatý příspěvek
+     * na stravování a nezdaněnou náhradu výdajů jako starší verzi složky. Dřív ji založil
+     * s obecným zacházením běžné mzdy: v roce 2025 se obě plnění tvářila jako zdanitelná,
+     * pojistná a hlášená, v roce 2026 tatáž plnění ne.
+     */
+    public function testDefaultComponentOfEarlierYearKeepsItsClassification(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $this->db->pdo()->prepare("UPDATE payroll_module_state SET start_period = '2027-01-01' WHERE supplier_id = ?")->execute([$supplierId]);
+        $file = $this->writeTwoYearSicknessPayroll(true);
+
+        foreach ([2025, 2026] as $year) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $file, $year, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT code, valid_from, valid_to, component_kind, tax_treatment, social_treatment, health_treatment, jmhz_treatment, exemption_basis
+               FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code IN ('NAHRADA_VYDAJU_PREVZATA', 'PRISPEVEK_STRAVOVANI_PREVZATY')
+              ORDER BY code, valid_from"
+        );
+        $stmt->execute([$supplierId]);
+        $untaxed = ['other', 'exempt', 'excluded', 'excluded', 'excluded', 'not_subject_to_tax'];
+        $meal = ['benefit_meal', 'exempt', 'excluded', 'excluded', 'included', 'statutory_exempt'];
+        self::assertSame([
+            ['NAHRADA_VYDAJU_PREVZATA', '2025-01-01', '2025-12-31', ...$untaxed],
+            ['NAHRADA_VYDAJU_PREVZATA', '2026-01-01', null, ...$untaxed],
+            ['PRISPEVEK_STRAVOVANI_PREVZATY', '2025-01-01', '2025-12-31', ...$meal],
+            ['PRISPEVEK_STRAVOVANI_PREVZATY', '2026-01-01', null, ...$meal],
+        ], array_map('array_values', $stmt->fetchAll(\PDO::FETCH_ASSOC)), $this->explain($protocol));
     }
 
     /**
@@ -561,7 +600,7 @@ final class PohodaPayrollImportTest extends TestCase
      * Osoba s neschopností od 20. 12. 2025 do 10. 1. 2026, kterou PAMICA vede po měsících
      * (prosincová a lednová mzda). Syntetická data, žádné reálné doklady ani osoby.
      */
-    private function writeTwoYearSicknessPayroll(): string
+    private function writeTwoYearSicknessPayroll(bool $exemptItems = false): string
     {
         $dir = $this->tmp . '/12345678_2026_2y';
         if (!is_dir($dir)) {
@@ -590,6 +629,14 @@ final class PohodaPayrollImportTest extends TestCase
             $row('MZslozky', ['ID' => $i + 1, 'RefAg' => $id, 'RefSlozka' => 1, 'KcMzda' => 35000, 'Hodnota1' => 35000]);
             $row('MZneprit', ['ID' => $i + 1, 'RefAg' => $id, 'RefSlozka' => 1, 'HodPrac' => $hours, 'KcNahr' => 3000,
                 'DatZac' => $from, 'DatKon' => $to]);
+            if ($exemptItems) {
+                $row('MZslozky', ['ID' => $i + 11, 'RefAg' => $id, 'RefSlozka' => 2, 'KcMzda' => 1200, 'Hodnota1' => 120, 'Hodnota3' => 10]);
+                $row('MZslozky', ['ID' => $i + 21, 'RefAg' => $id, 'RefSlozka' => 3, 'KcMzda' => 500, 'Hodnota1' => 500]);
+            }
+        }
+        if ($exemptItems) {
+            $row('sMZslozky', ['ID' => 2, 'Cislo' => 'Z21', 'Nazev' => 'Stravenkový paušál']);
+            $row('sMZslozky', ['ID' => 3, 'Cislo' => 'J03', 'Nazev' => 'Náhrada nezdaněná', 'RelTpDan' => 4, 'JeSoc' => 0, 'JeZdr' => 0]);
         }
 
         $file = $dir . '/91_mzdy.xml';
@@ -640,6 +687,9 @@ final class PohodaPayrollImportTest extends TestCase
             // Položka, kterou převod nezná: nepřevede se, ale protokol ji vypíše.
             $row('sMZslozky', ['ID' => 3, 'Cislo' => 'Z20', 'Nazev' => 'Osvobozené příjmy']);
             $row('MZslozky', ['ID' => 3, 'RefAg' => 30, 'RefSlozka' => 3, 'KcMzda' => 700]);
+            // Nezdaněná náhrada výdajů nad čistou mzdu (bez daně, bez pojistného).
+            $row('sMZslozky', ['ID' => 4, 'Cislo' => 'J03', 'Nazev' => 'Náhrada nezdaněná', 'RelTpDan' => 4, 'JeSoc' => 0, 'JeZdr' => 0]);
+            $row('MZslozky', ['ID' => 4, 'RefAg' => 30, 'RefSlozka' => 4, 'KcMzda' => 750, 'Hodnota1' => 750]);
         }
 
         $file = $dir . '/91_mzdy.xml';

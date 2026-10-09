@@ -277,6 +277,16 @@ final class PayrollComponentDefaults
                 // které se započítává. Účetní protiúčet (pohledávka za
                 // zaměstnancem, 335) doplní mzdový můstek podle kódu složky.
                 ['CESTOVNI_NAHRADA_ZALOHA', 'Odpočet zálohy na pracovní cestu', 'travel_reimbursement', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', null, 'not_subject_to_tax'],
+                // Náhrada výdajů převzatá z jiného mzdového programu (PAMICA „Náhrada
+                // nezdaněná"), kterou zdroj vyplatil nad čistou mzdu jako plnění, které
+                // není předmětem daně (§ 6 odst. 7 ZDP): mimo hrubou mzdu, vyměřovací
+                // základy i úhrny JMHZ 10286 a 10289, stejně jako přijatá hlášení zdroje.
+                // Jaký výdaj nahrazuje (opotřebení nářadí, práce z domova, cesta), export
+                // nevede; posouzení udělal zdrojový program. Druh `other`, ne cestovní
+                // náhrada, ať se neúčtuje jako cestovné. Ruční vstup ji nezaloží
+                // ({@see \MyInvoice\Repository\Payroll\PayrollInputRepository}): vlastní
+                // náhrady výdajů jdou přes cestovní náhrady, kde se limit dokládá.
+                ['NAHRADA_VYDAJU_PREVZATA', 'Náhrada výdajů nepodléhající dani - převzatá', 'other', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', null, 'not_subject_to_tax'],
             ],
         ],
     ];
@@ -317,7 +327,7 @@ final class PayrollComponentDefaults
      * `null`, když kód do výchozího číselníku nepatří. Pro volající, kteří složku
      * jen pojmenují (profil importu) a zakládá ji číselník sám.
      *
-     * @return array{component_kind:string, frequency_kind:string, tax_treatment:string}|null
+     * @return array{component_kind:string, frequency_kind:string, tax_treatment:string, jmhz_treatment:string}|null
      */
     public static function classification(string $code): ?array
     {
@@ -325,12 +335,53 @@ final class PayrollComponentDefaults
         foreach (self::VERSIONS as $version) {
             foreach ($version['rows'] as $row) {
                 if ($row[0] === $code) {
-                    $found = ['component_kind' => $row[2], 'frequency_kind' => $row[4], 'tax_treatment' => $row[5]];
+                    $found = ['component_kind' => $row[2], 'frequency_kind' => $row[4], 'tax_treatment' => $row[5], 'jmhz_treatment' => $row[10]];
                 }
             }
         }
 
         return $found;
+    }
+
+    /**
+     * Klasifikace výchozí složky podle poslední verze ve tvaru definice složky, nebo
+     * `null`, když kód do výchozího číselníku nepatří. Pro import, který složku
+     * zakládá k dřívějšímu dni, než od kdy výchozí číselník platí (převod staršího
+     * roku): bez ní by ji založil s obecným zdanitelným zacházením.
+     *
+     * @return array<string,?string>|null
+     */
+    public static function template(string $code): ?array
+    {
+        $found = null;
+        foreach (self::VERSIONS as $version) {
+            foreach ($version['rows'] as $row) {
+                if ($row[0] === $code) {
+                    $found = $row;
+                }
+            }
+        }
+        if ($found === null) {
+            return null;
+        }
+
+        return [
+            'name' => $found[1],
+            'component_kind' => $found[2],
+            'value_kind' => $found[3],
+            'frequency_kind' => $found[4],
+            'tax_treatment' => $found[5],
+            'social_participation_treatment' => $found[6],
+            'social_treatment' => $found[6],
+            'health_participation_treatment' => $found[7],
+            'health_treatment' => $found[7],
+            'average_earning_treatment' => $found[8],
+            'enforcement_treatment' => $found[9],
+            'jmhz_treatment' => $found[10],
+            'statistics_treatment' => $found[11],
+            'exemption_basket' => $found[12],
+            'exemption_basis' => $found[13],
+        ];
     }
 
     /**

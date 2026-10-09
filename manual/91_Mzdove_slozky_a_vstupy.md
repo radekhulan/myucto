@@ -226,6 +226,14 @@ na `PRISPEVEK_STRAVOVANI_ZDANITELNY`, běžný zdanitelný příjem. Vlastní p�
 pro další měsíce zadávejte na `PRISPEVEK_STRAVOVANI`, u kterého aplikace
 osvobozenou část spočítá ze směn v docházce.
 
+**Nezdaněná náhrada převzatá z jiného programu** (PAMICA „Náhrada nezdaněná",
+v číselníku bez daně a bez pojistného) jde na `NAHRADA_VYDAJU_PREVZATA`. Je to
+náhrada výdajů, která není předmětem daně (§ 6 odst. 7 zákona o daních
+z příjmů): vyplácí se nad čistou mzdu, není v hrubé mzdě, ve vyměřovacích
+základech ani v úhrnech hlášení (10286, 10289). Jaký výdaj nahrazuje, export
+nevede, proto složku zakládá jen převod a ručně ji zadat nejde. Vlastní
+cestovní náhrady zadávejte vyúčtováním pracovní cesty.
+
 ### 91.12.3 Koncept, schválení a filtry
 
 Jednorázový vstup vzniká jako **Koncept**, jen tak jde upravit i zrušit.

@@ -273,6 +273,8 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC',
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL',
             'NAHRADA_MZDY_SVATEK',
+            // Nezdaněná náhrada výdajů převzatá z jiného programu (PAMICA J03).
+            'NAHRADA_VYDAJU_PREVZATA',
             'NEPENEZNI_PRIJEM',
             'ODMENA',
             'ODMENA_POHOTOVOST',
@@ -356,6 +358,27 @@ final class PayrollComponentsInputsApiTest extends TestCase
 
         self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
         self::assertStringContainsString('vzniká jen převodem mezd', (string) $response->getBody());
+    }
+
+    /**
+     * Převzatá náhrada výdajů je mimo daň a pojistné jen proto, že ji tak posoudil
+     * zdrojový program. Ruční částka by bez dokladu obešla daň i pojistné.
+     */
+    public function testTakenOverUntaxedReimbursementCannotBeEnteredByHand(): void
+    {
+        $response = $this->inputs->create(
+            $this->request('POST', '/api/payroll/inputs')->withParsedBody(
+                $this->inputPayload(
+                    $this->defaultComponentId('NAHRADA_VYDAJU_PREVZATA'),
+                    75_000,
+                    'manual-untaxed-reimbursement',
+                ),
+            ),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString('Převzatá náhrada výdajů vzniká jen převodem mezd', (string) $response->getBody());
     }
 
     private function defaultComponentId(string $code): int

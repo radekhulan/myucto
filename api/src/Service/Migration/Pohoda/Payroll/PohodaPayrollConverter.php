@@ -276,7 +276,7 @@ final class PohodaPayrollConverter
             foreach ($this->items['MZslozky'][$mzId] ?? [] as $item) {
                 $catalog = $this->byId['sMZslozky'][PohodaXml::text($item, 'RefSlozka')] ?? null;
                 $number = strtoupper(PohodaXml::text($catalog ?? [], 'Cislo'));
-                $class = PohodaPayrollCatalog::component($number, PohodaXml::text($catalog ?? [], 'Nazev'), ($this->numberUse[$number] ?? 0) > 1);
+                $class = PohodaPayrollCatalog::component($number, PohodaXml::text($catalog ?? [], 'Nazev'), ($this->numberUse[$number] ?? 0) > 1, $catalog ?? []);
                 $amount = PohodaXml::num($item, 'KcMzda');
                 if ($class['meaning'] === 'meal') {
                     $column($class['header'], 'net_meal_deduction', 'amount');
