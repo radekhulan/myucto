@@ -245,12 +245,8 @@ final class PohodaPayrollPeople
                 }
                 $catalog = $byId['sMZneprit'][PohodaXml::text($row, 'RefSlozka')] ?? [];
                 $number = PohodaXml::text($catalog, 'Cislo');
-                $code = strtoupper(trim($number));
                 $childbirth = self::realDate(PohodaXml::date($row, 'DatPorod'));
-                $type = self::ABSENCE_CODES[$code] ?? null;
-                if ($type === null && $childbirth !== null) {
-                    $type = 'ppm';
-                }
+                $type = self::absenceType($number, $childbirth);
                 if ($type === null) {
                     continue;
                 }
@@ -439,6 +435,17 @@ final class PohodaPayrollPeople
         usort($records, static fn (array $a, array $b): int => strcmp((string) $a['personal_number'], (string) $b['personal_number']));
 
         return $records;
+    }
+
+    /**
+     * Druh nepřítomnosti, který převod zapisuje s daty do evidence nepřítomností, nebo
+     * null, když ji evidence nezná. Bez čísla v číselníku rozhoduje den porodu (PPM).
+     */
+    public static function absenceType(string $number, ?string $childbirth): ?string
+    {
+        $type = self::ABSENCE_CODES[strtoupper(trim($number))] ?? null;
+
+        return $type ?? ($childbirth !== null ? 'ppm' : null);
     }
 
     /**

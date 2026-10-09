@@ -502,6 +502,15 @@ final class PohodaPayrollImporter
                     implode(', ', $list),
                 ));
             }
+            // Položka katalogu, kterou převod nezná, by jinak zmizela beze stopy: chyběla by
+            // ve mzdě, v souhrnu hodin i v hlášení, a nikdo by se to nedozvěděl.
+            $unconverted = PohodaPayrollConverter::unconvertedItemsMessage($months, self::MESSAGE_LIMIT);
+            if ($unconverted !== null) {
+                $protocol->count(self::STEP_MONTHS, 'items_not_converted', count(array_unique(array_merge(
+                    ...array_map(static fn (array $month): array => array_keys($month['unconverted_items'] ?? []), $months),
+                ))));
+                $protocol->warn(self::STEP_MONTHS, 'items_not_converted', $unconverted);
+            }
             foreach ($periods as $index => $period) {
                 if ($shouldCancel !== null && $shouldCancel()) {
                     $protocol->fail('cancelled');

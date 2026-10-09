@@ -445,6 +445,10 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $codes = array_column(array_merge(...array_column($protocol->toArray()['steps'], 'messages')), 'code');
         self::assertNotContains('components_without_jmhz', $codes, $this->explain($protocol));
+        $messages = array_merge(...array_column($protocol->toArray()['steps'], 'messages'));
+        $unconverted = array_values(array_filter($messages, static fn (array $m): bool => $m['code'] === 'items_not_converted'));
+        self::assertCount(1, $unconverted, $this->explain($protocol));
+        self::assertStringContainsString('Z20 Osvobozené příjmy (1 vstup, 700,00 Kč)', $unconverted[0]['text']);
         $employment = $this->employment($supplierId, '5001');
 
         $input = "SELECT COALESCE(SUM(i.amount_minor), 0) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
@@ -575,6 +579,9 @@ final class PohodaPayrollImportTest extends TestCase
             $row('MZslozky', ['ID' => 2, 'RefAg' => 30, 'RefSlozka' => 2, 'KcMzda' => 2478, 'Hodnota1' => 123.9, 'Hodnota3' => 20]);
             $row('MZneprit', ['ID' => 2, 'RefAg' => 30, 'RefSlozka' => 2, 'HodPrac' => 7.5, 'KcNahr' => 1500,
                 'DatZac' => '2026-03-20', 'DatKon' => '2026-03-20']);
+            // Položka, kterou převod nezná: nepřevede se, ale protokol ji vypíše.
+            $row('sMZslozky', ['ID' => 3, 'Cislo' => 'Z20', 'Nazev' => 'Osvobozené příjmy']);
+            $row('MZslozky', ['ID' => 3, 'RefAg' => 30, 'RefSlozka' => 3, 'KcMzda' => 700]);
         }
 
         $file = $dir . '/91_mzdy.xml';

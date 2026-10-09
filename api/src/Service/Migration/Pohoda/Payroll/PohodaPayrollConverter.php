@@ -63,7 +63,7 @@ final class PohodaPayrollConverter
     /** Sloupce položek mezd, které čte skládání sešitu. */
     private const ITEM_COLUMNS = [
         'MZslozky' => ['RefAg', 'RefSlozka', 'KcMzda', 'PocHodin', 'Hodnota1', 'Hodnota4'],
-        'MZneprit' => ['RefAg', 'RefSlozka', 'HodPrac', 'KcNahr', 'DatZac', 'DatKon'],
+        'MZneprit' => ['RefAg', 'RefSlozka', 'HodPrac', 'KcNahr', 'DatZac', 'DatKon', 'DatPorod'],
         'MZsrazky' => ['RefAg', 'RefSlozka', 'KcSrazeno'],
         'MZdoch' => ['RefAg', 'Hodin1', 'Hodin2', 'Hodin3', 'Hodin4', 'Hodin5', 'Hodin6', 'Hodin7', 'Hodin8', 'Hodin9', 'Hodin10',
             'Hodin11', 'Hodin12', 'Hodin13', 'Hodin14', 'Hodin15', 'Hodin16', 'Hodin17', 'Hodin18', 'Hodin19', 'Hodin20',
@@ -216,9 +216,15 @@ final class PohodaPayrollConverter
      * jim v exportu chybí řádek číselníku `sMZsrazky`; zahodit je tiše nelze (mohla by to
      * být exekuce), takže je převod předá protokolu k ručnímu dořešení.
      *
+     * `unconverted_items` nese mzdové složky a nepřítomnosti, které převod nezná
+     * ({@see PohodaPayrollCatalog} význam `unknown`): klíč `druh:kód` => počet vstupů
+     * s částkou nebo hodinami, jejich součet a hodiny. Nepřítomnost, kterou převod
+     * zapisuje s daty do evidence nepřítomností, sem patří jen tehdy, když data nemá.
+     *
      * @return array{period:string, columns:array<string,array{meaning:string,unit:?string,kind:?string,code:?string}>,
      *     rows:list<array<string,string|float|null>>, totals:array<string,int>, omitted:list<string>,
-     *     unclassified_deductions:array<string,array{code:string,name:string,inputs:int}>}
+     *     unclassified_deductions:array<string,array{code:string,name:string,inputs:int}>,
+     *     unconverted_items:array<string,array{code:string,name:string,kind:string,inputs:int,amount:float,hours:float}>}
      */
     public function month(string $period): array
     {
@@ -237,6 +243,18 @@ final class PohodaPayrollConverter
         $omitted = [];
         /** @var array<string,array{code:string,name:string,inputs:int}> $unclassifiedDeductions */
         $unclassifiedDeductions = [];
+        /** @var array<string,array{code:string,name:string,kind:string,inputs:int,amount:float,hours:float}> $unconverted */
+        $unconverted = [];
+        $skip = static function (string $kind, string $code, string $name, float $amount, float $hours) use (&$unconverted): void {
+            if (round($amount, 2) == 0.0 && round($hours, 2) == 0.0) {
+                return;
+            }
+            $key = $kind . ':' . ($code !== '' ? $code : '?');
+            $unconverted[$key] ??= ['code' => $code, 'name' => $name, 'kind' => $kind, 'inputs' => 0, 'amount' => 0.0, 'hours' => 0.0];
+            $unconverted[$key]['inputs']++;
+            $unconverted[$key]['amount'] = round($unconverted[$key]['amount'] + $amount, 2);
+            $unconverted[$key]['hours'] = round($unconverted[$key]['hours'] + $hours, 2);
+        };
         $totals = ['rows' => 0, 'gross_minor' => 0, 'net_minor' => 0, 'components_minor' => 0, 'meal_minor' => 0, 'deduction_minor' => 0, 'worked_millihours' => 0];
         /** @var array<int,true> $obstacleRates procento průměru, se kterým PAMICA platila překážky na straně zaměstnavatele */
         $obstacleRates = [];
@@ -277,6 +295,8 @@ final class PohodaPayrollConverter
                         $add($part['header'], $part['amount']);
                         $totals['components_minor'] += self::minor($part['amount']);
                     }
+                } elseif ($class['meaning'] === 'unknown') {
+                    $skip('component', $number, PohodaXml::text($catalog ?? [], 'Nazev'), $amount, 0.0);
                 }
                 $hours = PohodaPayrollCatalog::workHours($number);
                 if ($hours !== null) {
@@ -313,7 +333,14 @@ final class PohodaPayrollConverter
                 $number = PohodaXml::text($catalog, 'Cislo');
                 $name = PohodaXml::text($catalog, 'Nazev');
                 $class = PohodaPayrollCatalog::absence($number, $name);
-                if ($class['meaning'] === 'ignore') {
+                if ($class['meaning'] === 'unknown') {
+                    // Druh, který převod zapíše s daty do evidence nepřítomností, se
+                    // neztrácí; bez dat ale nejde ani tam.
+                    $dated = PohodaPayrollPeople::absenceType($number, self::date(PohodaXml::text($item, 'DatPorod'))) !== null
+                        && PohodaPayrollPeople::absenceDates($item, $year) !== null;
+                    if (!$dated) {
+                        $skip('absence', strtoupper(trim($number)), $name, PohodaXml::num($item, 'KcNahr'), PohodaXml::num($item, 'HodPrac'));
+                    }
                     continue;
                 }
                 $meaning = $class['meaning'];
@@ -442,9 +469,54 @@ final class PohodaPayrollConverter
         uasort($unclassifiedDeductions, static fn (array $a, array $b): int => [$b['inputs'], $a['code']] <=> [$a['inputs'], $b['code']]);
 
         ksort($obstacleRates);
+        ksort($unconverted);
 
         return ['period' => $period, 'columns' => $columns, 'rows' => $rows, 'totals' => $totals, 'omitted' => $omitted,
-            'unclassified_deductions' => $unclassifiedDeductions, 'obstacle_rates' => array_keys($obstacleRates)];
+            'unclassified_deductions' => $unclassifiedDeductions, 'obstacle_rates' => array_keys($obstacleRates),
+            'unconverted_items' => $unconverted];
+    }
+
+    /**
+     * Varování protokolu o položkách, které převod nezná, přes všechny měsíce; `null`,
+     * když žádná není. Kód a název položky, počet vstupů, částka a u nepřítomností hodiny.
+     *
+     * @param list<array{unconverted_items?:array<string,array{code:string,name:string,kind:string,inputs:int,amount:float,hours:float}>}> $months
+     */
+    public static function unconvertedItemsMessage(array $months, int $limit = 20): ?string
+    {
+        $items = [];
+        foreach ($months as $month) {
+            foreach ($month['unconverted_items'] ?? [] as $key => $entry) {
+                $items[$key] ??= ['code' => $entry['code'], 'name' => $entry['name'], 'inputs' => 0, 'amount' => 0.0, 'hours' => 0.0];
+                $items[$key]['inputs'] += $entry['inputs'];
+                $items[$key]['amount'] += $entry['amount'];
+                $items[$key]['hours'] += $entry['hours'];
+            }
+        }
+        if ($items === []) {
+            return null;
+        }
+        uasort($items, static fn (array $a, array $b): int => [$b['inputs'], $a['code']] <=> [$a['inputs'], $b['code']]);
+        $list = [];
+        foreach (array_slice($items, 0, $limit) as $entry) {
+            $inputs = $entry['inputs'];
+            $parts = [$inputs . ' ' . ($inputs === 1 ? 'vstup' : ($inputs < 5 ? 'vstupy' : 'vstupů')),
+                number_format($entry['amount'], 2, ',', ' ') . ' Kč'];
+            if (round($entry['hours'], 2) != 0.0) {
+                $parts[] = rtrim(rtrim(number_format($entry['hours'], 2, ',', ' '), '0'), ',') . ' h';
+            }
+            $list[] = trim($entry['code'] . ' ' . $entry['name']) . ' (' . implode(', ', $parts) . ')';
+        }
+        if (count($items) > $limit) {
+            $list[] = sprintf('a dalších %d', count($items) - $limit);
+        }
+
+        return sprintf(
+            'Položky mezd PAMICA, které převod nezná: %s. Do mzdových vstupů ani souhrnu hodin se nepřevedly. '
+            . 'V převzatých měsících jsou v úhrnech PAMICA; v měsících, které počítá MyÚčto, je doplňte '
+            . 'v Mzdy → Vstupy (složky) nebo v Mzdy → Absence (nepřítomnosti).',
+            implode(', ', $list),
+        );
     }
 
     /**

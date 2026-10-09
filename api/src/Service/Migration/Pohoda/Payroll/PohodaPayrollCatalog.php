@@ -18,9 +18,11 @@ use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
  * `JeDepon` a název), ne číslo složky - to si uživatel v PAMICA přidává a přepisuje,
  * takže `S01a` / `S07` viděné na jedné instalaci nejsou kontrakt.
  *
- * Co import MyÚčta nepřebírá (základní mzdu počítá ze sjednané mzdy vztahu, náhrady
- * z hodin a průměru a zákonné položky jinak), vrací význam `ignore` - takový
- * sloupec do sešitu pro import vůbec nejde.
+ * Co import MyÚčta vědomě nepřebírá sešitem, protože to nese jiná cesta převodu
+ * (základní mzdu sloupec měsíční mzdy, zákonné srážky krok exekucí), vrací význam
+ * `ignore`. Položka, kterou převod nezná, vrací `unknown`: do sešitu nejde, ale
+ * měsíc ji vrátí k varování v protokolu ({@see PohodaPayrollConverter::month()}),
+ * aby se nic neztratilo tiše.
  */
 final class PohodaPayrollCatalog
 {
@@ -87,11 +89,13 @@ final class PohodaPayrollCatalog
         $label = trim("{$number} {$name}");
         $code = 'PAM_' . preg_replace('/[^A-Z0-9]/', '', $number) . ($sharedNumber ? '_' . self::slug($name, 20) : '');
         $normalized = AttendanceText::normalize($name);
-        $ignore = ['meaning' => 'ignore', 'kind' => null, 'code' => null, 'header' => $label];
         $component = static fn (string $kind): array => ['meaning' => 'component', 'kind' => $kind, 'code' => $code, 'header' => "{$label} (Kč)"];
 
+        // Základní měsíční mzda: sešit ji nese ve sloupci „Měsíční mzda" (sazba
+        // `Hodnota1`) a běh ji počítá ze sjednané mzdy vztahu, krácenou na odpracovanou
+        // dobu. Jako složka by se vyplatila podruhé.
         if (in_array($number, ['M01', 'M09'], true)) {
-            return $ignore;
+            return ['meaning' => 'ignore', 'kind' => null, 'code' => null, 'header' => $label];
         }
         if ($number === 'C01') {
             return $component('hourly_wage');
@@ -171,7 +175,7 @@ final class PohodaPayrollCatalog
         if ($number === 'Z21A') {
             return ['meaning' => 'component', 'kind' => 'other', 'code' => self::MEAL_ALLOWANCE_TAXABLE, 'header' => self::MEAL_ALLOWANCE_TAXABLE_HEADER];
         }
-        return $ignore;
+        return ['meaning' => 'unknown', 'kind' => null, 'code' => null, 'header' => $label];
     }
 
     /**
@@ -212,7 +216,10 @@ final class PohodaPayrollCatalog
             in_array($number, ['H01', 'H02', 'H03', 'H04'], true) => ['meaning' => 'sick_hours', 'header' => 'Nemoc (h)'],
             in_array($number, ['H05', 'H06'], true) => ['meaning' => 'care_hours', 'header' => 'OČR (h)'],
             $number === 'H15' => ['meaning' => 'paternity_hours', 'header' => 'Otcovská (h)'],
-            default => ['meaning' => 'ignore', 'header' => trim("Nepřítomnost {$number}")],
+            // Mateřská, rodičovská, dlouhodobé ošetřovné a další druhy evidence převod
+            // zapisuje s daty ({@see PohodaPayrollPeople::absenceType()}); co nezná ani
+            // tam, nebo co data nemá, vrací měsíc k varování.
+            default => ['meaning' => 'unknown', 'header' => trim("Nepřítomnost {$number}")],
         };
     }
 
