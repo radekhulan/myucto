@@ -48,7 +48,7 @@ final class TaxExpenseAllocationCalculator
         float $fixedAssetLimit,
     ): float {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, status, document_kind, tax_deductible, is_fixed_asset,
+            'SELECT id, status, document_kind, tax_deductible, is_fixed_asset, parent_purchase_invoice_id,
                     total_without_vat, total_vat, total_with_vat, vat_deduction, vat_deduction_percent
                FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
         );
@@ -75,12 +75,39 @@ final class TaxExpenseAllocationCalculator
         }
 
         $allocations = $this->allocations($supplierId, $purchaseInvoiceId);
-        $entryPrice = $this->taxableAmount($supplierId, $invoice, $allocations, (float) $invoice['total_with_vat'], $isVatPayer, $year);
-        if ((int) $invoice['is_fixed_asset'] === 1 && $entryPrice > $fixedAssetLimit) {
+        if ($this->isDepreciatedAsset($supplierId, $invoice, $allocations, $isVatPayer, $year, $fixedAssetLimit)) {
             return 0.0;
         }
 
         return round($this->taxableAmount($supplierId, $invoice, $allocations, $paidAmountCzk, $isVatPayer, $year), 2);
+    }
+
+    /**
+     * Majetek nad limitem se do výdajů dostává odpisy, ne úhradou. Dobropis k němu mění
+     * vstupní cenu, ne peněžní výdaj, proto se u navázaného dobropisu posuzuje původní
+     * faktura; nenavázaný dobropis podle vlastní (absolutní) částky.
+     *
+     * @param array<string,mixed> $invoice @param list<array<string,mixed>> $allocations
+     */
+    private function isDepreciatedAsset(int $supplierId, array $invoice, array $allocations, bool $isVatPayer, int $year, float $fixedAssetLimit): bool
+    {
+        if ((float) $invoice['total_with_vat'] < 0.0 && ($invoice['parent_purchase_invoice_id'] ?? null) !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id, is_fixed_asset, total_vat, total_with_vat, vat_deduction, vat_deduction_percent
+                   FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+            );
+            $stmt->execute([(int) $invoice['parent_purchase_invoice_id'], $supplierId]);
+            $parent = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($parent !== false) {
+                $invoice = $parent;
+                $allocations = $this->allocations($supplierId, (int) $parent['id']);
+            }
+        }
+        if ((int) $invoice['is_fixed_asset'] !== 1) {
+            return false;
+        }
+        $entryPrice = $this->taxableAmount($supplierId, $invoice, $allocations, (float) $invoice['total_with_vat'], $isVatPayer, $year);
+        return abs($entryPrice) > $fixedAssetLimit;
     }
 
     public function forBankPayment(
@@ -167,11 +194,21 @@ final class TaxExpenseAllocationCalculator
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    /** @param array<string,mixed> $invoice @param list<array<string,mixed>> $allocations */
+    /**
+     * Daňová část uhrazené částky. Počítá se poměrem daňové části k brutto dokladu, a ten
+     * je u dobropisu (záporné brutto i DPH) stejný jako u faktury. Výsledek má znaménko
+     * $paidAmount; směr peněz (vratka snižuje výdaj) určuje volající podle směru pohybu.
+     * Dřív záporné brutto vracelo nulu, takže vratka k přijatému dobropisu daňový výdaj
+     * nesnížila. Zrcadlo CashJournalService::prorateBase na příjmové straně.
+     *
+     * @param array<string,mixed> $invoice @param list<array<string,mixed>> $allocations
+     */
     private function taxableAmount(int $supplierId, array $invoice, array $allocations, float $paidAmount, bool $isVatPayer, int $year): float
     {
-        $gross = max(0.0, (float) $invoice['total_with_vat']);
-        if ($gross <= 0.0 || $paidAmount <= 0.0) {
+        $signedGross = (float) $invoice['total_with_vat'];
+        $sign = $signedGross < 0.0 ? -1.0 : 1.0;
+        $gross = abs($signedGross);
+        if ($gross < 0.005 || $paidAmount == 0.0) {
             return 0.0;
         }
         if ($allocations === []) {
@@ -180,7 +217,7 @@ final class TaxExpenseAllocationCalculator
             }
             // The paid gross can include document rounding. Only the stored VAT
             // is deductible; gross - net would wrongly treat rounding as VAT.
-            $vat = min($gross, max(0.0, (float) $invoice['total_vat']));
+            $vat = min($gross, max(0.0, $sign * (float) $invoice['total_vat']));
             $deductible = $gross - $vat * $this->deductionRatio(
                 $supplierId,
                 (string) $invoice['vat_deduction'],
@@ -191,7 +228,7 @@ final class TaxExpenseAllocationCalculator
         }
 
         $allocationGross = array_sum(array_map(static fn (array $a): float => (float) $a['total_amount'], $allocations));
-        if ($allocationGross <= 0.0) {
+        if (abs($allocationGross) < 0.005) {
             throw new \RuntimeException('Řádkové daňové alokace přijaté faktury mají nulový součet.');
         }
         $ratio = $paidAmount / $allocationGross;

@@ -450,7 +450,7 @@ final class CashJournalService
                 $year,
                 (float) ($taxConstants['fixed_asset_limit'] ?? 80000),
             );
-            return $this->bankExpenseAlloc($amount, $base);
+            return $this->bankExpenseAlloc($amount, $direction, $base);
         }
 
         // 2) Vazba na vydanou fakturu → příjem (i dobropis: out = záporný příjem, R11).
@@ -664,14 +664,16 @@ final class CashJournalService
      * Bankovní VÝDAJ z předpočítané agregace (repo, CZK): jeden odchozí pohyb může uhradit
      * N přijatých faktur (payment_matches, H3). Daňový základ = jen deductible ne-zálohové PF
      * (R8, per-PF proratou); zbytek (nedaňové PF, zálohy, DPH složka) → expense_nontax.
+     * Příchozí pohyb (vratka k přijatému dobropisu) výdaj snižuje, zrcadlo bankIncomeAlloc().
+     * Dřív se směr nebral v úvahu a vratka výdaj zvýšila.
      *
-     * @param array<string,mixed> $r
      * @return array{alloc:array<string,float>, bucket:string, base:float, vat:float, unclassified:bool, blocking:bool}
      */
-    private function bankExpenseAlloc(float $amount, float $taxableAmount): array
+    private function bankExpenseAlloc(float $amount, string $direction, float $taxableAmount): array
     {
-        $base   = round($taxableAmount, 2);
-        $nontax = round($amount - $base, 2);
+        $sign   = $direction === 'out' ? 1.0 : -1.0;
+        $base   = round($sign * $taxableAmount, 2);
+        $nontax = round($sign * ($amount - $taxableAmount), 2);
 
         $alloc = [];
         if ($base   != 0.0) $alloc['expense_taxable'] = $base;
