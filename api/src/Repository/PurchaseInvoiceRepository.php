@@ -1946,6 +1946,23 @@ final class PurchaseInvoiceRepository
             static fn (array $item): array => TimeBilling::normalizeInvoiceItem($item),
             array_values($items),
         );
+        // Uložené řádky s tuzemským kódem a jejich daň PŘED přepisem: nezměněný řádek
+        // si kód 40/41 smí nechat, jen když už nesl daň dodavatele.
+        $storedDomestic = [];
+        if ($keepDomesticItemCodes) {
+            $marks = implode(',', array_fill(0, count(self::MIXED_DOCUMENT_DOMESTIC_CODES), '?'));
+            $old = $pdo->prepare(
+                "SELECT description, quantity, duration_minutes, unit, unit_price_without_vat, vat_rate_id,
+                        vat_classification_code, total_vat
+                   FROM purchase_invoice_items
+                  WHERE purchase_invoice_id = ? AND vat_classification_code IN ({$marks})"
+            );
+            $old->execute([$purchaseInvoiceId, ...self::MIXED_DOCUMENT_DOMESTIC_CODES]);
+            foreach ($old->fetchAll(PDO::FETCH_ASSOC) ?: [] as $o) {
+                $storedDomestic[self::itemSignature($o)][] = (float) $o['total_vat'];
+            }
+        }
+        $keepItemIds = [];
         $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')
             ->execute([$purchaseInvoiceId]);
 
@@ -2077,9 +2094,25 @@ final class PurchaseInvoiceRepository
                 $accrualTo,
                 $stockItemId,
             ]);
+
+            if ($keepDomesticItemCodes && in_array((string) $code, self::MIXED_DOCUMENT_DOMESTIC_CODES, true)) {
+                $sig = self::itemSignature([
+                    'description' => $item['description'] ?? '', 'quantity' => $item['quantity'] ?? 1,
+                    'duration_minutes' => $item['duration_minutes'], 'unit' => $item['unit'] ?? 'ks',
+                    'unit_price_without_vat' => $item['unit_price_without_vat'] ?? 0,
+                    'vat_rate_id' => $vatRateId, 'vat_classification_code' => $code,
+                ]);
+                // Nezměněný řádek: rozhoduje uložená daň. Nový nebo změněný: nese daň, má-li sazbu.
+                $carriesSupplierVat = isset($storedDomestic[$sig]) && $storedDomestic[$sig] !== []
+                    ? abs((float) array_shift($storedDomestic[$sig])) > 0.0
+                    : $rate > 0.0;
+                if ($carriesSupplierVat) {
+                    $keepItemIds[] = (int) $pdo->lastInsertId();
+                }
+            }
         }
 
-        $this->reconcileReverseChargeItemCodes($purchaseInvoiceId, $keepDomesticItemCodes);
+        $this->reconcileReverseChargeItemCodes($purchaseInvoiceId, $keepDomesticItemCodes, $keepDomesticItemCodes ? $keepItemIds : null);
 
         // Odrážky hlášení AI extrakce u řádků, které teď druh nákladu mají, zmizí.
         if ($supplierId > 0) {
@@ -2105,15 +2138,19 @@ final class PurchaseInvoiceRepository
      * nemá, odvodí se znovu jako u nového řádku. Jiné kódy řádků (23/24/24e/25/5,
      * mimo, osvobozené) zůstávají, jsou to vědomá volba.
      *
-     * `$keepDomesticItemCodes`: doklad měl přenesení v hlavičce už před uložením, takže
-     * kód 40/41 na řádku nepochází z doby před zatržením, ale je to tuzemská položka
-     * smíšeného dokladu s daní dodavatele (§ 92a vedle běžného plnění). Ta zůstává.
+     * `$keepDomesticItemCodes`: doklad měl přenesení v hlavičce už před uložením. Kód 40/41
+     * pak zůstává u tuzemské položky smíšeného dokladu s daní dodavatele (§ 92a vedle
+     * běžného plnění): uložený řádek, který daň dodavatele už nesl (total_vat ≠ 0), nebo
+     * řádek v tomto uložení nový či změněný se sazbou ({@see replaceItems()} předá jejich
+     * id v `$keepItemIds`). Starý doklad s kódem 40 a nulovou daní se dál přepíše, jinak
+     * by mu uložení samo zvedlo částku k úhradě o daň.
      * Neplátci (identifikované osobě) a u zahraničního dodavatele se přepisuje vždy:
      * odpočet tuzemské daně dodavatele tam nedává smysl.
      *
      * @return int počet opravených řádků
      */
-    public function reconcileReverseChargeItemCodes(int $purchaseInvoiceId, bool $keepDomesticItemCodes = false): int
+    /** @param list<int>|null $keepItemIds */
+    public function reconcileReverseChargeItemCodes(int $purchaseInvoiceId, bool $keepDomesticItemCodes = false, ?array $keepItemIds = null): int
     {
         $pdo = $this->db->pdo();
         $metaStmt = $pdo->prepare(
@@ -2131,7 +2168,7 @@ final class PurchaseInvoiceRepository
         }
         $marks = implode(',', array_fill(0, count(self::DOMESTIC_INPUT_CODES), '?'));
         $itemsStmt = $pdo->prepare(
-            "SELECT id, vat_rate_id, description, vat_classification_code FROM purchase_invoice_items
+            "SELECT id, vat_rate_id, description, vat_classification_code, total_vat FROM purchase_invoice_items
               WHERE purchase_invoice_id = ? AND vat_classification_code IN ({$marks})"
         );
         $itemsStmt->execute([$purchaseInvoiceId, ...self::DOMESTIC_INPUT_CODES]);
@@ -2172,6 +2209,9 @@ final class PurchaseInvoiceRepository
         foreach ($items as $item) {
             if ($keepDomesticItemCodes && $tenantIsVatPayer && $vendorIsDomestic
                 && in_array((string) $item['vat_classification_code'], self::MIXED_DOCUMENT_DOMESTIC_CODES, true)
+                && ($keepItemIds !== null
+                    ? in_array((int) $item['id'], $keepItemIds, true)
+                    : abs((float) $item['total_vat']) > 0.0)
             ) {
                 continue;
             }
@@ -2190,6 +2230,26 @@ final class PurchaseInvoiceRepository
             $fixed++;
         }
         return $fixed;
+    }
+
+    /**
+     * Otisk řádku pro poznání nezměněné položky mezi uloženým stavem a novým tělem
+     * ({@see replaceItems()} řádky maže a vkládá znovu, id se nezachovají).
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function itemSignature(array $row): string
+    {
+        $num = static fn (mixed $v): string => number_format((float) ($v ?? 0), 4, '.', '');
+        return implode('|', [
+            trim((string) ($row['description'] ?? '')),
+            $num($row['quantity'] ?? 1),
+            ($row['duration_minutes'] ?? null) === null ? '' : (string) (int) $row['duration_minutes'],
+            (string) ($row['unit'] ?? ''),
+            $num($row['unit_price_without_vat'] ?? 0),
+            (string) (int) ($row['vat_rate_id'] ?? 0),
+            (string) ($row['vat_classification_code'] ?? ''),
+        ]);
     }
 
     /**

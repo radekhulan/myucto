@@ -141,6 +141,14 @@ final class MixedReverseChargeSaveTest extends TestCase
         self::assertSame([['5', 0.0], ['40', 4200.0]], $this->itemCodesAndVat($id));
         self::assertEqualsWithDelta(74200.0, $this->totalWithVat($id), 0.005, 'Závazek včetně daně dodavatele.');
 
+        // Opětovné uložení beze změny: řádek už daň dodavatele nese, zůstává.
+        $res = $this->put($id, $this->payload(true, [
+            $this->item('Stavební práce § 92a', 50000.0, '5'),
+            $this->item('Materiál s daní dodavatele', 20000.0, '40'),
+        ]));
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame([['5', 0.0], ['40', 4200.0]], $this->itemCodesAndVat($id));
+
         $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'received' WHERE id = ?")->execute([$id]);
 
         // Evidence DPH: § 92a samovyměření ř. 10, tuzemský řádek odpočet ř. 40 s daní dodavatele.
@@ -194,6 +202,35 @@ final class MixedReverseChargeSaveTest extends TestCase
         self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
 
         self::assertSame([['5', 0.0], ['40', 4200.0]], $this->itemCodesAndVat($id));
+    }
+
+    /**
+     * Starý doklad z doby před #119: přenesení v hlavičce, kód 40 a nulová daň. Uložení
+     * beze změny ho přepíše na kód přenesení jako dřív, částka k úhradě se nezvedne o daň.
+     * Bez podmínky na uloženou daň by si kód 40 nechal a dopočetla by se mu daň 21 %.
+     */
+    public function testLegacyDomesticCodeWithoutVatIsStillRewrittenOnResave(): void
+    {
+        $id = $this->createInvoice(reverseCharge: true, items: [$this->item('Stavební práce', 50000.0, '5')]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_items SET vat_classification_code = '40' WHERE purchase_invoice_id = ?")
+            ->execute([$id]);
+        self::assertSame([['40', 0.0]], $this->itemCodesAndVat($id));
+
+        $res = $this->put($id, $this->payload(true, [$this->item('Stavební práce', 50000.0, '40')]));
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+
+        self::assertSame([['5', 0.0]], $this->itemCodesAndVat($id));
+        self::assertEqualsWithDelta(50000.0, $this->totalWithVat($id), 0.005, 'Uložení nesmí samo zvednout částku o daň.');
+
+        // Totéž při úpravě hlavičky bez položek v těle.
+        $this->db->pdo()->prepare("UPDATE purchase_invoice_items SET vat_classification_code = '40' WHERE purchase_invoice_id = ?")
+            ->execute([$id]);
+        $body = $this->payload(true, []);
+        unset($body['items']);
+        $res = $this->put($id, $body);
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame([['5', 0.0]], $this->itemCodesAndVat($id));
+        self::assertEqualsWithDelta(50000.0, $this->totalWithVat($id), 0.005);
     }
 
     /** Záměrná funkčnost (#119): zapnutí přenesení v hlavičce přepne tuzemské kódy řádků. */
