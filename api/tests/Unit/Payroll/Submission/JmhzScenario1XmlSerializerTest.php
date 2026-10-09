@@ -2592,6 +2592,313 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         ];
     }
 
+    /** @return iterable<string, array{string}> */
+    public static function summaryFormBodies(): iterable
+    {
+        foreach (['bezPriznaku', 'cinnostKS', 'odlozenyPrijem', 'vezen', 'jinyPrijem'] as $body) {
+            yield $body => [$body];
+        }
+    }
+
+    /**
+     * Matice souhrnných dat zaměstnance přes všechny formuláře, které souhrn
+     * vedou celý: každý údaj souhrnu (příjmy s příspěvky zaměstnavatele, záloha
+     * a srážková daň, slevy, měsíční a roční zvýhodnění na děti se dvěma jinými
+     * vyživujícími osobami, výsledek ročního zúčtování, čistá mzda a zdravotní
+     * pojištění) má pod elementem daného formuláře přesně očekávanou hodnotu,
+     * nebo tam podle typu souhrnu není vůbec. Výstup projde připnutým XSD.
+     *
+     * Jiná osoba a dítě se identifikují buď datem narození, nebo rodným číslem:
+     * ten z údajů, který chybí, se nevypíše (datum 10433/10443/10437/10448
+     * a rodné číslo 10434/10444/10438/10449 jsou nepovinné, pokud je druhý
+     * vyplněn). Průkaz ZTP/P bez jediného měsíce se v roční části neuvádí.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('summaryFormBodies')]
+    public function testEveryFormBodyCarriesTheFullEmployeeSummary(string $body): void
+    {
+        $xpath = $this->summaryMatrixXpath($this->summaryMatrixDocument($body));
+
+        foreach (self::fullSummaryExpectations($body) as $path => $expected) {
+            $nodes = $xpath->query(self::formQuery($body, $path));
+            if ($expected === null) {
+                self::assertSame(0, $nodes->length, "{$body}: {$path} se nemá vykázat.");
+                continue;
+            }
+            self::assertSame(
+                (array) $expected,
+                array_map(static fn (\DOMNode $node): string => $node->textContent, iterator_to_array($nodes)),
+                "{$body}: {$path}",
+            );
+        }
+    }
+
+    /**
+     * Bez jiné vyživující osoby (10453 a 10455 = ne) se seznam jiných osob
+     * nevede ani v měsíční, ani v roční části: jméno, příjmení, datum
+     * narození, rodné číslo a měsíce vyživování jsou povinné jen v rámci
+     * interakcí IN23 (roční) a obdobné měsíční.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('summaryFormBodies')]
+    public function testOtherHouseholdCaregiversAreOmittedWithoutTheInteraction(string $body): void
+    {
+        $document = $this->summaryMatrixDocument($body);
+        $summary = &$document['people'][0]['summary'];
+        $summary['child_credit']['other_household_caregiver'] = false;
+        $summary['child_credit']['other_household_caregivers'] = [];
+        $summary['annual']['result']['child_credit_details']['other_household_caregiver'] = false;
+        $summary['annual']['result']['child_credit_details']['other_household_caregivers'] = [];
+        unset($summary);
+        $xpath = $this->summaryMatrixXpath($document);
+
+        $declaration = 'souhrnDataZec/prohlaseniPoplatnikaDane/zvyhodneniDetiMesic/';
+        $annual = 'souhrnDataZec/rocniUhrny/vysledekRocnihoZuctovani/zvyhodneniNaDeti/';
+        foreach ([
+            $declaration . 'vyzivujeJinaOsoba' => ['false'],
+            $declaration . 'jineOsoby' => [],
+            $annual . 'vyzivujeJinaOsoba' => ['false'],
+            $annual . 'jineOsoby' => [],
+            $annual . 'vyzivovaneDeti/vyzivovaneDite/dite/jmeno' => ['Jana', 'Eva'],
+        ] as $path => $expected) {
+            self::assertSame(
+                $expected,
+                array_map(
+                    static fn (\DOMNode $node): string => $node->textContent,
+                    iterator_to_array($xpath->query(self::formQuery($body, $path))),
+                ),
+                "{$body}: {$path}",
+            );
+        }
+    }
+
+    /**
+     * Roční údaje souhrnu patří jen do hlášení za určené měsíce: výsledek
+     * ročního zúčtování a jeho rozpad do ledna až března (kontrola 191),
+     * žádost o roční zúčtování do ledna a února (kontrola 192) a roční úhrny
+     * srážkové daně jen do ledna (kontrola 193). Hlášení za jiný měsíc
+     * s týmiž údaji kontroly zamítnou na každém formuláři.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('summaryFormBodies')]
+    public function testAnnualSummaryDataAreAcceptedOnlyInTheirMonths(string $body): void
+    {
+        foreach ([1 => [], 2 => [193], 3 => [192, 193], 7 => [191, 192, 193]] as $month => $failed) {
+            $xml = $this->summaryMatrixXml($this->summaryMatrixDocument($body, $month));
+
+            self::assertSame($failed, $this->failedControls($xml, [191, 192, 193]), "{$body}: měsíc {$month}");
+        }
+    }
+
+    /**
+     * Rozpad příspěvku zaměstnavatele (10292–10296, 10418) a úhrn 10417 jsou
+     * v XSD typu `cislo14Type`/`cisloN14Type` celé číslo bez desetinné části:
+     * hodnota mimo vzor se nedostane ani přes serializér, ani přes schéma.
+     */
+    public function testEmployerContributionOutsideTheNumericPatternFailsTheSchema(): void
+    {
+        $document = $this->summaryMatrixDocument('bezPriznaku');
+        $xml = $this->summaryMatrixXml($document);
+        $broken = str_replace(
+            '<form:prispevekZivotPoj>30</form:prispevekZivotPoj>',
+            '<form:prispevekZivotPoj>-30</form:prispevekZivotPoj>',
+            $xml,
+        );
+        self::assertNotSame($xml, $broken);
+
+        $this->expectException(JmhzXmlException::class);
+        (new JmhzScenario1XmlValidator())->validateFrozen($broken);
+    }
+
+    /** @return array<string,mixed> */
+    private function summaryMatrixDocument(string $body, int $month = 7): array
+    {
+        $payload = $this->payloadWithChildCredit();
+        $source = match ($body) {
+            'vezen' => $this->specialScenarioPayload('scenario_4', '1', '2'),
+            'jinyPrijem' => $this->uninsuredPayload('scenario_5', '13'),
+            default => null,
+        };
+        if ($source !== null) {
+            $payload['scope'] = $source['scope'];
+            $payload['people'][0]['employments'][0] = $source['people'][0]['employments'][0];
+            $payload['people'][0]['employments'][0]['term']['tax_declaration_signed'] = true;
+            $payload['people'][0]['person_summary']['statutory']['social_insurance']
+                = $source['people'][0]['person_summary']['statutory']['social_insurance'];
+        }
+        $document = $this->resolutionFor($payload)->requireResolvedDocument()->payload;
+        $employment = &$document['people'][0]['employments'][0];
+        if ($body === 'cinnostKS') {
+            $employment['selector'] = [
+                'scenario_key' => 'scenario_3',
+                'activity_code' => 'K',
+                'relationship_detail_code' => '1',
+            ];
+        }
+        if ($body === 'odlozenyPrijem') {
+            $employment['selector']['scenario_key'] = 'scenario_8';
+            $employment['eldp']['deferred_income'] = [
+                'type' => '1',
+                'periods' => [['month' => 6, 'year' => 2026]],
+            ];
+        }
+        unset($employment);
+        $document['header']['month'] = $month;
+        $document['people'][0]['summary'] = self::fullTaxSummary($document['people'][0]['summary']);
+
+        return $document;
+    }
+
+    /** @param array<string,mixed> $document */
+    private function summaryMatrixXml(array $document): string
+    {
+        return (new JmhzScenario1XmlValidator())->dryRun(
+            new JmhzScenario1Resolution(new JmhzScenario1NormalizedDocument($document), []),
+            $this->envelope(),
+        )['xml'];
+    }
+
+    /** @param array<string,mixed> $document */
+    private function summaryMatrixXpath(array $document): \DOMXPath
+    {
+        $dom = new \DOMDocument();
+        $dom->loadXML($this->summaryMatrixXml($document));
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('j', 'http://schemas.cssz.cz/JMHZ/podani/1.0');
+        $xpath->registerNamespace('form', 'http://schemas.cssz.cz/JMHZ/form/1.0');
+
+        return $xpath;
+    }
+
+    private static function formQuery(string $body, string $path): string
+    {
+        return '/j:jmhz/j:formulareOsob/j:formularOsoby/form:' . $body . '/'
+            . implode('/', array_map(static fn (string $step): string => 'form:' . $step, explode('/', $path)));
+    }
+
+    /**
+     * @param array<string,mixed> $summary
+     * @return array<string,mixed>
+     */
+    private static function fullTaxSummary(array $summary): array
+    {
+        $summary = self::richTaxSummary($summary, false);
+        $summary['employer_contributions_czk'] = [
+            '10417' => 300,
+            '10418' => 40,
+            '10292' => 100,
+            '10293' => 60,
+            '10294' => 50,
+            '10295' => 30,
+            '10296' => 20,
+        ];
+        $summary['net_income_czk'] = 15_000;
+        $summary['deductions_recorded'] = true;
+        $summary['employee_health_czk'] = 900;
+        $summary['employer_health_czk'] = 1_800;
+        $summary['child_credit']['other_household_caregivers'] = [
+            ['given_name' => 'Petr', 'family_name' => 'Novák', 'birth_date' => '1990-04-11'],
+            ['given_name' => 'Karel', 'family_name' => 'Dvořák', 'birth_number' => '8501010000'],
+        ];
+        $details = &$summary['annual']['result']['child_credit_details'];
+        $details['other_household_caregivers'] = [
+            [
+                'identity' => ['given_name' => 'Petr', 'family_name' => 'Novák', 'birth_date' => '1990-04-11'],
+                'months_mask' => 'AAAAAANNNNNN',
+            ],
+            [
+                'identity' => ['given_name' => 'Karel', 'family_name' => 'Dvořák', 'birth_number' => '8501010000'],
+                'months_mask' => 'NNNNNNAAAAAA',
+            ],
+        ];
+        $details['children'][] = [
+            'identity' => ['given_name' => 'Eva', 'family_name' => 'Nováková', 'birth_date' => '2017-02-03'],
+            'ztp_p_months_mask' => 'NNNNNNNNNNNN',
+            'order_months_mask' => '222222222222',
+        ];
+        unset($details);
+
+        return $summary;
+    }
+
+    /**
+     * Cesta pod formulářem => očekávané hodnoty (výskyty v pořadí), null = nesmí být.
+     *
+     * @return array<string, list<string>|string|null>
+     */
+    private static function fullSummaryExpectations(string $body): array
+    {
+        $base = 'souhrnDataZec/';
+        $contributions = $base . 'prijmy/prispevekZamestnavatele/';
+        $declaration = $base . 'prohlaseniPoplatnikaDane/';
+        $monthly = $declaration . 'zvyhodneniDetiMesic/';
+        $annual = $base . 'rocniUhrny/';
+        $result = $annual . 'vysledekRocnihoZuctovani/';
+        $annualChildren = $result . 'zvyhodneniNaDeti/';
+        $withContributions = in_array($body, ['bezPriznaku', 'cinnostKS', 'odlozenyPrijem'], true);
+        $withNetPay = in_array($body, ['bezPriznaku', 'vezen', 'odlozenyPrijem'], true);
+        $withEmployerHealth = in_array($body, ['bezPriznaku', 'odlozenyPrijem'], true);
+        $withEmployeeHealth = in_array($body, ['bezPriznaku', 'cinnostKS', 'odlozenyPrijem'], true);
+
+        return [
+            $base . 'prijmy/zuctovanoCelkem' => '20000',
+            $base . 'prijmy/osvobozenoCelkem' => '500',
+            $contributions . 'prispevekZelSporeniOsvob' => $withContributions ? '300' : null,
+            $contributions . 'prispevekZelPojDlPece' => $withContributions ? '40' : null,
+            $contributions . 'prispevekPenzPripoj' => $withContributions ? '100' : null,
+            $contributions . 'prispevekDoplnPenzPripoj' => $withContributions ? '60' : null,
+            $contributions . 'prispevekPenzPoj' => $withContributions ? '50' : null,
+            $contributions . 'prispevekZivotPoj' => $withContributions ? '30' : null,
+            $contributions . 'prispevekDip' => $withContributions ? '20' : null,
+            $base . 'zalohaNaDan/zakladDane' => '19500',
+            $base . 'zalohaNaDan/vypoctenaZaloha' => '2925',
+            $base . 'zalohaNaDan/danZalohaPoSleve' => '355',
+            $base . 'zalohaNaDan/danBonus' => '1200',
+            $base . 'zvlastniSazbaDane/zakladDane' => '3000',
+            $base . 'zvlastniSazbaDane/srazenaDan' => '450',
+            $base . 'prohlaseniPoplatnika' => 'true',
+            $declaration . 'zakladniSleva' => '2570',
+            $declaration . 'zakladniSlevaInvalidita12' => '210',
+            $declaration . 'rozsirenaSlevaInvalidita3' => '420',
+            $declaration . 'slevaZTPP' => '1345',
+            $declaration . 'danoveZvyhodneniDetiMesic' => '2000',
+            $declaration . 'slevaDite' => '1800',
+            $monthly . 'vyzivujeJinaOsoba' => 'true',
+            $monthly . 'jineOsoby/jinaOsoba/jmeno' => ['Petr', 'Karel'],
+            $monthly . 'jineOsoby/jinaOsoba/prijmeni' => ['Novák', 'Dvořák'],
+            $monthly . 'jineOsoby/jinaOsoba/datumNarozeni' => '1990-04-11',
+            $monthly . 'jineOsoby/jinaOsoba/rodneCislo' => '8501010000',
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/jmeno' => ['Jana', 'Eva'],
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/prijmeni' => ['Nováková', 'Nováková'],
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/datumNarozeni' => '2015-04-11',
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/dite/rodneCislo' => '1752030000',
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/prukazZtpp' => ['true', 'false'],
+            $monthly . 'vyzivovaneDeti/vyzivovaneDite/poradi' => ['1', '2'],
+            $annual . 'prijemSrazkDanZvlSazba' => '36000',
+            $annual . 'danSrazenaZvlSazba' => '5400',
+            $annual . 'rocniZuctovaniZadost' => 'true',
+            $annual . 'rocniZuctovaniProvedeno' => 'true',
+            $result . 'preplatekRok' => '1500',
+            $result . 'danPreplatekRok' => '1000',
+            $result . 'danBonusPreplatekRok' => '500',
+            $result . 'uplatnenaSlevaNaPartnera' => 'false',
+            $result . 'uplatnenoZvyhodneniNaDeti' => 'true',
+            $annualChildren . 'vyzivujeJinaOsoba' => 'true',
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/jmeno' => ['Petr', 'Karel'],
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/prijmeni' => ['Novák', 'Dvořák'],
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/datumNarozeni' => '1990-04-11',
+            $annualChildren . 'jineOsoby/jinaOsoba/osoba/rodneCislo' => '8501010000',
+            $annualChildren . 'jineOsoby/jinaOsoba/mesiceVyzivovani' => ['AAAAAANNNNNN', 'NNNNNNAAAAAA'],
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/jmeno' => ['Jana', 'Eva'],
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/prijmeni' => ['Nováková', 'Nováková'],
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/rodneCislo' => '1554110000',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/dite/datumNarozeni' => '2017-02-03',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/prukazZtpp' => 'NNNNNNAAAAAA',
+            $annualChildren . 'vyzivovaneDeti/vyzivovaneDite/poradi' => ['111111111111', '222222222222'],
+            $base . 'mzdaCista/mzdaCista' => $withNetPay ? '15000' : null,
+            $base . 'mzdaCista/srazkyZeMzdyEvidovany' => $withNetPay ? 'true' : null,
+            $base . 'zdravPojZamestnavatel/zdravotniPojisteni' => $withEmployerHealth ? '1800' : null,
+            $base . 'zdravPojZamestnanec/zdravotniPojisteni' => $withEmployeeHealth ? '900' : null,
+        ];
+    }
+
     public function testInternationalHireWithChildCreditIsRefused(): void
     {
         $payload = $this->payloadWithChildCredit();
