@@ -30296,6 +30296,7 @@
       "annual_requests_requested": "žádostí o roční zúčtování převzatých",
       "annual_requests_not_requested": "převzatých prohlášení bez žádosti o roční zúčtování",
       "annual_requests_existing": "žádostí o roční zúčtování už v evidenci",
+      "items_not_converted": "položek mezd, které převod nezná",
       "data_omitted": "údajů osob vynecháno k doplnění",
       "rules": "pravidel profilu",
       "components": "mzdových složek",

@@ -30296,6 +30296,7 @@
       "annual_requests_requested": "annual tax settlement requests taken over",
       "annual_requests_not_requested": "employees taken over without an annual settlement request",
       "annual_requests_existing": "annual settlement requests already recorded",
+      "items_not_converted": "payroll items the conversion does not know",
       "data_omitted": "person details omitted to fill in",
       "rules": "profile rules",
       "components": "payroll components",
