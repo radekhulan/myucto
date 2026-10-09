@@ -272,7 +272,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Drobný majetek (§DM) — evidence dle §28/5 ZoÚ. Vlastní stránka vedle DHM: jiný
       // režim (jednorázový náklad na 501 bez odpisů) i jiné oprávnění (`accounting`,
       // protože API /api/accounting/small-assets spadá pod fallback, ne pod `assets`).
-      { path: 'accounting/small-assets',          name: 'accounting-small-assets', component: () => import('@/pages/accounting/SmallAssets.vue'), meta: { requiresDoubleEntry: true } },
+      { path: 'accounting/small-assets',          name: 'accounting-small-assets', component: () => import('@/pages/accounting/SmallAssets.vue'), meta: { requiresAccountingMode: true } },
       // Pravidla zaúčtování nákladů se přesunula pod Šablony (záložka „Pravidla nákladů").
       // Původní cesta se zachovává jako redirect kvůli starým odkazům/záložkám.
       { path: 'accounting/expense-rules', redirect: { path: '/templates', query: { section: 'expense' } } },

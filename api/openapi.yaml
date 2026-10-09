@@ -11439,6 +11439,10 @@ paths:
     get:
       tags: [Accounting]
       summary: Seznam karet drobného majetku (§DM)
+      description: |
+        Karty drobného majetku jsou evidence věcí v podvojném účetnictví i v daňové
+        evidenci (nic neúčtují). Soupis a pohyby (`/accounting/reports/small-assets/*`)
+        mají oba režimy, rozpis nákladu 501 jen podvojné účetnictví.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: status, schema: { type: string, enum: [in_use, disposed, sold] } }
@@ -12235,6 +12239,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Rozpad nákladu 501 drobného majetku podle druhu za období
+      description: Jen podvojné účetnictví; v daňové evidenci vrátí `wrong_accounting_mode` (403).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: from, required: true, schema: { type: string, format: date } }

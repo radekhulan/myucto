@@ -471,8 +471,10 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/accounting/assets',       label: t('nav.accounting_assets'), icon: ICONS.accounting, newTo: '/accounting/assets/new' },
         ] : []),
         // Daňová evidence vede hmotný majetek a daňové odpisy (§ 7b, § 26–33 ZDP) bez
-        // účtů; drobný majetek je evidence podle účetních předpisů, tady chybí.
+        // účtů. Drobný majetek tam povinný není (§ 28/5 ZoÚ je účetní předpis), evidence
+        // ale pomáhá doložit výdaj a inventuru, takže ji nabízíme také.
         ...(auth.hasCommercialFeatures && isTaxEvidence ? [
+          { to: '/accounting/small-assets', label: t('nav.small_assets'),      icon: ICONS.tag,        permission: 'accounting' as PermissionKey },
           { to: '/accounting/assets',       label: t('nav.accounting_assets'), icon: ICONS.accounting, newTo: '/accounting/assets/new' },
         ] : []),
       ],

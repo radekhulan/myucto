@@ -91,7 +91,12 @@ final class SmallAssetReportAction
     private function serve(Request $request, Response $response, string $report, bool $export): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        // Soupis a pohyby jsou evidence věcí (i v daňové evidenci); rozpis 501 je rozpad
+        // účetního nákladu podle data plnění, který daňová evidence (výdaj při úhradě) nemá.
+        $guarded = $report === 'expense_breakdown'
+            ? $this->requireDoubleEntry($this->db, $supplierId, $response, $err)
+            : $this->requireAccountingMode($this->db, $supplierId, $response, $err);
+        if (!$guarded) return $err;
 
         $format = null;
         if ($export) {

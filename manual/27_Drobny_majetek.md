@@ -27,8 +27,11 @@
 
 ## 27.2 Než začnete
 
-- Modul je dostupný jen firmám v **podvojném účetnictví** a vyžaduje oprávnění k účetnictví. Pro čtení, sestavy a export stačí
-  čtecí varianta, pro založení, úpravu, vyřazení, prodej, obnovení a smazání je potřeba zápisová varianta.
+- Modul je dostupný firmám v **podvojném účetnictví** i v **daňové evidenci** a vyžaduje oprávnění k účetnictví. Pro čtení,
+  sestavy a export stačí čtecí varianta, pro založení, úpravu, vyřazení, prodej, obnovení a smazání je potřeba zápisová varianta.
+- V **daňové evidenci** evidence povinná není (§ 28 odst. 5 zákona o účetnictví je účetní předpis), pomáhá ale doložit výdaj
+  a inventuru. Karty fungují stejně, jen nic neúčtují: výdaj nese peněžní deník při úhradě dokladu. Sestava **Rozpis nákladů**
+  (účet 501) tu chybí, soupis k datu a pohyby za období jsou k dispozici.
 - Drobný majetek je operativní evidence hmotných a nehmotných věcí dlouhodobějšího použití, které firma podle své vnitřní
   směrnice účtuje při pořízení přímo do nákladů. Nejde o zjednodušenou kartu dlouhodobého majetku: nemá odpisový plán
   ani zůstatkovou cenu.
@@ -271,4 +274,5 @@ pokynem k automatickému doúčtování bez kontroly zdroje.
 ### 27.9.6 Oprávnění a bezpečnost
 
 Čtení, sestavy a export používají oprávnění k účetnictví, založení, úprava, vyřazení, prodej, obnovení a smazání jeho zápisovou
-variantu. Modul je dostupný jen v podvojném účetnictví. API je omezené na firmu.
+variantu. Modul je dostupný v podvojném účetnictví i v daňové evidenci, rozpis nákladů jen v podvojném účetnictví. API je
+omezené na firmu.

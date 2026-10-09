@@ -17,6 +17,7 @@ import {
 } from '@/api/smallAssets'
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
@@ -33,6 +34,10 @@ const toast = useToast()
 const pageId = useId()
 
 const canWrite = computed(() => auth.canWrite('accounting'))
+// Daňová evidence vede drobný majetek jen jako evidenci věcí; výdaj nese peněžní deník při
+// úhradě, takže rozpis účtu 501 podle data plnění tam nedává smysl (API ho odmítne).
+const supplierStore = useSupplierStore()
+const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 
 // ── seznam ──────────────────────────────────────────────────────────────────
 const items = ref<SmallAsset[]>([])
@@ -819,7 +824,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="border border-neutral-200 rounded-lg p-3">
+      <div v-if="!isTaxEvidence" class="border border-neutral-200 rounded-lg p-3">
         <h3 class="text-sm font-medium mb-1">{{ t('accounting.small_assets.report_breakdown') }}</h3>
         <p class="text-xs text-neutral-500 mb-2">{{ t('accounting.small_assets.report_breakdown_hint') }}</p>
         <div class="flex flex-wrap items-end gap-2">

@@ -21,6 +21,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * (defense-in-depth vedle PermissionMiddleware), vše přes ATTR_CURRENT_ID. Role „client"
  * na tyhle cesty nedosáhne — nemá oprávnění `accounting`, pod které
  * /api/accounting/small-assets spadá fallbackem v RoutePermissionMap.
+ *
+ * Dostupné v podvojném účetnictví i v daňové evidenci: karta je jen evidence věci
+ * (prokázání výdaje a inventura), nic neúčtuje, výdaj nese peněžní deník při úhradě.
  */
 final class SmallAssetAction
 {
@@ -41,7 +44,7 @@ final class SmallAssetAction
     public function list(Request $request, Response $response): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $q = $request->getQueryParams();
         $status = self::nn($q['status'] ?? null);
         if ($status !== null && !in_array($status, self::STATUSES, true)) {
@@ -70,7 +73,7 @@ final class SmallAssetAction
     public function get(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $card = $this->cards->find($supplierId, (int) $args['id']);
         if ($card === null) {
             return Json::error($response, 'not_found', 'Karta nenalezena.', 404);
@@ -82,7 +85,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         try {
             $data = $this->normalizeCard((array) ($request->getParsedBody() ?? []));
             $id = $this->service->create($supplierId, $data, $this->userId($request));
@@ -97,7 +100,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         $existing = $this->cards->find($supplierId, $id);
         if ($existing === null) {
@@ -122,7 +125,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         $body = (array) ($request->getParsedBody() ?? []);
         try {
@@ -147,7 +150,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         $body = (array) ($request->getParsedBody() ?? []);
         try {
@@ -171,7 +174,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         try {
             $this->service->restore($supplierId, $id);
@@ -186,7 +189,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $id = (int) $args['id'];
         if (!$this->cards->delete($supplierId, $id)) {
             return Json::error($response, 'not_found', 'Karta nenalezena.', 404);
@@ -203,7 +206,7 @@ final class SmallAssetAction
     {
         if (!$this->requireWrite($request, $response, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
         $invoiceId = (int) $args['id'];
         try {
             $result = $this->service->generateFromPurchaseInvoice($supplierId, $invoiceId, $this->userId($request));
