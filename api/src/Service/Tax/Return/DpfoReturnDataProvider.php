@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Accounting\Assets\DisposalResiduals;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\PayrollMonthlyRecordRepository;
 use MyInvoice\Repository\TaxProfileRepository;
@@ -300,6 +301,33 @@ final class DpfoReturnDataProvider
             $expenses = round($expenses + (float) $depreciation->fetchColumn(), 2);
             $warn = [];
             $blocking = [];
+            // Daňová zůstatková cena majetku prodaného nebo zlikvidovaného v roce je výdajem
+            // § 24 odst. 2 písm. b) ZDP. Pořízení majetku peněžní deník z výdajů vyřazuje
+            // (is_fixed_asset), takže se ZC uplatní jen tady a jen jednou.
+            $residuals = (new DisposalResiduals($this->db))->forPeriod(
+                $supplierId,
+                sprintf('%04d-01-01', $year),
+                sprintf('%04d-12-31', $year),
+            );
+            $residualExpense = 0.0;
+            foreach ($residuals['rows'] as $row) {
+                $deductibility = DisposalResiduals::deductibility($row['disposal_type']);
+                if ($deductibility === 'full' && $row['tax_residual_value'] !== null) {
+                    $residualExpense += $row['tax_residual_value'];
+                } elseif ($deductibility === 'limited') {
+                    $warn[] = 'Majetek ' . $row['inventory_number'] . ' vyřazený jako škoda: daňová zůstatková cena je výdajem jen '
+                        . 'do výše náhrad, nebo při živelní pohromě či neznámém pachateli (§ 24 odst. 2 písm. l) ZDP). '
+                        . 'Uznatelnou část zadejte v roční uzávěrce daňové evidence.';
+                }
+            }
+            foreach ($residuals['warnings'] as $residualWarning) {
+                $warn[] = $residualWarning;
+            }
+            if ($residualExpense > 0.0) {
+                $expenses = round($expenses + $residualExpense, 2);
+                $warn[] = 'Do výdajů § 7 je zahrnuta daňová zůstatková cena prodaného nebo zlikvidovaného majetku '
+                    . number_format($residualExpense, 2, ',', ' ') . ' Kč (§ 24 odst. 2 písm. b) ZDP).';
+            }
             if (!empty($j['warnings'])) {
                 $warn[] = 'Peněžní deník obsahuje nezařazené/varovné pohyby — zkontrolujte daňovou evidenci před podáním.';
                 foreach ((array) $j['warnings'] as $warning) {

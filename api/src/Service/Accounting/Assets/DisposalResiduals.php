@@ -54,6 +54,23 @@ final class DisposalResiduals
     public function __construct(private readonly Connection $db) {}
 
     /**
+     * Daňová uznatelnost zůstatkové ceny podle způsobu vyřazení. Prodej a likvidace
+     * plně (§ 24 odst. 2 písm. b) ZDP), dar vůbec, škoda jen do výše náhrad nebo při
+     * živelní pohromě či neznámém pachateli (§ 24 odst. 2 písm. l) ZDP), tedy jen ruční
+     * položkou. Platí stejně pro DPPO (můstek ZC) i pro DPFO v daňové evidenci.
+     *
+     * @return 'full'|'none'|'limited'
+     */
+    public static function deductibility(string $disposalType): string
+    {
+        return match ($disposalType) {
+            'sold', 'liquidated' => 'full',
+            'donated' => 'none',
+            default => 'limited',
+        };
+    }
+
+    /**
      * Účetní ZC ke dni vyřazení: neodpisovaný majetek celou (zvýšenou) vstupní cenou,
      * odpisovaný zvýšenou vstupní cenou po odečtení oprávek, nejméně nula.
      */

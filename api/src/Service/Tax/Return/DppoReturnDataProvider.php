@@ -760,7 +760,7 @@ final class DppoReturnDataProvider
         $warnings = $residuals['warnings'];
         $hasLimited = false;
         foreach ($residuals['rows'] as $row) {
-            $deductibility = $this->classifyDisposal($row['disposal_type']);
+            $deductibility = DisposalResiduals::deductibility($row['disposal_type']);
             $bookResidual = $row['book_residual_value'];
             $taxResidual = $row['tax_residual_value'];
 
@@ -803,14 +803,5 @@ final class DppoReturnDataProvider
         }
 
         return [round($increase, 2), round($decrease, 2), $disposals, $warnings, $decreaseGroups];
-    }
-
-    private function classifyDisposal(string $type): string
-    {
-        return match ($type) {
-            'sold', 'liquidated' => 'full',
-            'donated' => 'none',
-            default => 'limited', // damaged + neznámé
-        };
     }
 }
