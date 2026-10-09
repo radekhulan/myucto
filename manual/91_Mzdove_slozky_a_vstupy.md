@@ -213,8 +213,9 @@ náhrada (§ 147 odst. 1 písm. e) zákoníku práce): zadejte ji **zápornou č
 v měsíci srážky. Sníží hrubou mzdu, základ daně i pojistného a v hlášení náhrady
 za dovolenou (10338). Běh ji přijme, zůstane-li úhrn vztahu v měsíci nezáporný;
 jiná záporná částka nebo částka za jiný měsíc patří do opravy původního běhu.
-Tuto složku zakládá i převod z PAMICA (složky J07 a J10) a sekce skončení vztahu
-na kartě zaměstnance.
+Tuto složku zakládá i převod z PAMICA (proplacená nebo vrácená dovolená
+a proplacení nevyčerpané dovolené ve dnech i v hodinách, typicky J07, J08, J10
+a J11) a sekce skončení vztahu na kartě zaměstnance.
 
 **Stravenkový paušál převzatý z jiného programu** (PAMICA Z21) má dvě složky.
 Část do limitu za směnu (§ 6 odst. 9 písm. b) zákona o daních z příjmů) jde na

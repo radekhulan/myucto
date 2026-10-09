@@ -5120,7 +5120,7 @@
             "table": "sMZslozky",
             "key": "Cislo",
             "classifier": "pamica_component",
-            "note": "Druh určuje PohodaPayrollCatalog::component() podle čísla (u O.. a J03/J09 i podle názvu). Neznámá položka jde do protokolu jako varování (warned).",
+            "note": "Druh určuje PohodaPayrollCatalog::component() podle čísla, u O.. a položek s by_name podle názvu a daňových příznaků číselníku (RelTpDan, JeSoc, JeZdr; vzorové hodnoty v probe). Neznámá položka jde do protokolu jako varování (warned).",
             "code_sources": [
                 "MyInvoice\\Service\\Migration\\Pohoda\\Payroll\\PohodaPayrollPeople::HOURLY_WAGE_CODES",
                 "MyInvoice\\Service\\Migration\\Pohoda\\Payroll\\PohodaPayrollPeople::WAGE_CODES",
@@ -5204,8 +5204,17 @@
                     "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
                 },
                 "C20": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component bonus PAM_C20",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Os. ohodnocení",
+                        "catalog": {
+                            "RelTpDan": "1",
+                            "JeSoc": "1",
+                            "JeZdr": "1"
+                        }
+                    }
                 },
                 "D01": {
                     "status": "warned",
@@ -5236,8 +5245,17 @@
                     "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
                 },
                 "J01": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component compensation PAM_J01",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Náhrada celkovou částkou",
+                        "catalog": {
+                            "RelTpDan": "1",
+                            "JeSoc": "1",
+                            "JeZdr": "1"
+                        }
+                    }
                 },
                 "J02": {
                     "status": "warned",
@@ -5268,8 +5286,17 @@
                     "target": "component compensation NAHRADA_MZDY_DOVOLENA_VYROVNANI"
                 },
                 "J08": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component compensation NAHRADA_MZDY_DOVOLENA_VYROVNANI",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Proplacení nevyčerpané dovolené (dny)",
+                        "catalog": {
+                            "RelTpDan": "1",
+                            "JeSoc": "1",
+                            "JeZdr": "1"
+                        }
+                    }
                 },
                 "J09": {
                     "status": "mapped",
@@ -5290,11 +5317,20 @@
                 },
                 "J11": {
                     "status": "mapped",
-                    "target": "component compensation PAM_J11"
+                    "target": "component compensation NAHRADA_MZDY_DOVOLENA_VYROVNANI"
                 },
                 "L01": {
                     "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "reason": "Pravidelná záloha na mzdu: MyÚčto zálohy během měsíce nevyplácí (jen srážku vrácení zálohy § 147 ZP), takže ji převod nemá kam založit. Převzatý měsíc ji má ve vyúčtování k výplatě; v měsících MyÚčta ji účetní řeší platbou a srážkou.",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Řádná záloha",
+                        "catalog": {
+                            "RelTpDan": "4",
+                            "JeSoc": "0",
+                            "JeZdr": "0"
+                        }
+                    }
                 },
                 "L02": {
                     "status": "warned",
@@ -5571,8 +5607,17 @@
                     "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
                 },
                 "Z03": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "nepřevádí se jako složka: doplatek zdravotního pojištění do minima počítá MyÚčto samo z minimálního vyměřovacího základu, výjimku „nedoplácet do minima\" přebírá převod osoby (health_minimum_exempt_periods)",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Doplatek zdravotního pojištění do minima",
+                        "catalog": {
+                            "RelTpDan": "4",
+                            "JeSoc": "0",
+                            "JeZdr": "0"
+                        }
+                    }
                 },
                 "Z04": {
                     "status": "warned",
@@ -5611,16 +5656,34 @@
                     "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
                 },
                 "Z13": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "ignored",
+                    "reason": "Přeplatek z ročního zúčtování spočítaného mimo PAMICA není mzda: vrátil se v čisté mzdě převzatého měsíce, který ho nese v úhrnech MZ. MyÚčto ho znovu nevyplácí.",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Roční zúčtování - přeplatek na dani",
+                        "catalog": {
+                            "RelTpDan": "4",
+                            "JeSoc": "0",
+                            "JeZdr": "0"
+                        }
+                    }
                 },
                 "Z14": {
                     "status": "warned",
                     "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
                 },
                 "Z15": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "ignored",
+                    "reason": "Oprava přeplatku z ročního zúčtování: tentýž důvod jako Z13 (vrací se v čisté mzdě převzatého měsíce).",
+                    "by_name": true,
+                    "probe": {
+                        "name": "Oprava ročního zúčtování - přeplatek na dani",
+                        "catalog": {
+                            "RelTpDan": "4",
+                            "JeSoc": "0",
+                            "JeZdr": "0"
+                        }
+                    }
                 },
                 "Z16": {
                     "status": "warned",

@@ -161,13 +161,12 @@ final class PohodaPayrollCatalog
             }
             return $component('other');
         }
-        if ($number === 'J11') {
-            return $component('compensation');
-        }
         // „Proplacená / vrácená dovolená" zadaná částkou; vrácená (přečerpaná dovolená,
         // § 147 odst. 1 písm. e) ZP) je v PAMICA záporná a snižuje hrubou mzdu měsíce.
-        // Vlastní standardní složka, na které běh zápornou částku přijme.
-        if (in_array($number, ['J07', 'J10'], true)) {
+        // Vlastní standardní složka, na které běh zápornou částku přijme. Proplacení
+        // nevyčerpané dovolené (J11 v hodinách, J08 ve dnech) je totéž plnění: PAMICA ho
+        // v podaném hlášení vykazuje v 10338 (náhrada za dovolenou), ne jen v 10337.
+        if (in_array($number, ['J07', 'J10', 'J11'], true) || self::leavePayout($normalized, $catalog)) {
             return ['meaning' => 'component', 'kind' => 'compensation', 'code' => VacationCompensationReturn::SETTLEMENT_CODE, 'header' => 'Proplacená / vrácená náhrada za dovolenou (Kč)'];
         }
         // Odstupné má v MyÚčtu vlastní složku (bez pojistného, JMHZ jako odstupné). Měsíc,
@@ -189,6 +188,32 @@ final class PohodaPayrollCatalog
         }
         if ($number === 'Z21A') {
             return ['meaning' => 'component', 'kind' => 'other', 'code' => self::MEAL_ALLOWANCE_TAXABLE, 'header' => self::MEAL_ALLOWANCE_TAXABLE_HEADER];
+        }
+        // Dál rozhoduje jen název a daňové příznaky číselníku: čísla těchto položek si
+        // firmy přečíslovávají. Bez řádku číselníku zůstane položka neznámá.
+        if (self::wageFlags($catalog)) {
+            // Osobní ohodnocení: pohyblivá složka mzdy krácená na odpracovanou dobu
+            // (PAMICA ji počítá do průměru i do minimální mzdy). Pravidelnost a s ní
+            // JMHZ 10330/10331 rozhodne účetní u složky.
+            if (preg_match('/\bohodnoc/', $normalized) === 1) {
+                return $component('bonus');
+            }
+            // Náhrada mzdy zadaná celkovou částkou: druh překážky z ní nejde poznat,
+            // proto obecná náhrada mzdy (JMHZ 10337).
+            if (preg_match('/^nahrada\b.*\bcastk/', $normalized) === 1) {
+                return $component('compensation');
+            }
+        }
+        // Doplatek zdravotního pojištění do minima PAMICA generuje sama z rozdílu
+        // vyměřovacího základu; MyÚčto ho počítá stejně z minimálního základu a výjimku
+        // „nedoplácet do minima" přebírá převod osoby. Jako složka by se zaplatil dvakrát.
+        if (self::untaxedFlags($catalog) && preg_match('/\bdoplatek\b.*\bzdravot.*\bminim/', $normalized) === 1) {
+            return ['meaning' => 'ignore', 'kind' => null, 'code' => null, 'header' => $label];
+        }
+        // Přeplatek z ročního zúčtování spočítaného mimo PAMICA (a jeho oprava) není
+        // mzda: vrací se v čisté mzdě převzatého měsíce, který ho nese v úhrnech MZ.
+        if (self::untaxedFlags($catalog) && preg_match('/\brocni\w* zuctovani\b.*\bpreplatek\b/', $normalized) === 1) {
+            return ['meaning' => 'ignore', 'kind' => null, 'code' => null, 'header' => $label];
         }
         return ['meaning' => 'unknown', 'kind' => null, 'code' => null, 'header' => $label];
     }
@@ -355,11 +380,45 @@ final class PohodaPayrollCatalog
      */
     private static function untaxedReimbursement(string $normalized, array $catalog): bool
     {
-        if ($catalog === [] || preg_match('/\bnahrad.*\bnezdan/', $normalized) !== 1) {
-            return false;
-        }
+        return preg_match('/\bnahrad.*\bnezdan/', $normalized) === 1 && self::untaxedFlags($catalog);
+    }
 
-        return trim(PohodaXml::text($catalog, 'RelTpDan')) === '4'
+    /**
+     * Proplacená nebo vrácená dovolená podle názvu („proplacení nevyčerpané dovolené"),
+     * zdaněná a s pojistným jako mzda.
+     *
+     * @param array<string,mixed> $catalog
+     */
+    private static function leavePayout(string $normalized, array $catalog): bool
+    {
+        return self::wageFlags($catalog)
+            && str_contains($normalized, 'dovolen')
+            && preg_match('/\bproplac|\bvracen/', $normalized) === 1;
+    }
+
+    /**
+     * Příznaky číselníku pro zdanitelnou mzdu: daň zálohou (`RelTpDan` 1), sociální
+     * i zdravotní pojištění.
+     *
+     * @param array<string,mixed> $catalog
+     */
+    private static function wageFlags(array $catalog): bool
+    {
+        return $catalog !== []
+            && trim(PohodaXml::text($catalog, 'RelTpDan')) === '1'
+            && trim(PohodaXml::text($catalog, 'JeSoc')) === '1'
+            && trim(PohodaXml::text($catalog, 'JeZdr')) === '1';
+    }
+
+    /**
+     * Příznaky číselníku pro položku mimo daň i pojistné (`RelTpDan` 4).
+     *
+     * @param array<string,mixed> $catalog
+     */
+    private static function untaxedFlags(array $catalog): bool
+    {
+        return $catalog !== []
+            && trim(PohodaXml::text($catalog, 'RelTpDan')) === '4'
             && trim(PohodaXml::text($catalog, 'JeSoc')) === '0'
             && trim(PohodaXml::text($catalog, 'JeZdr')) === '0';
     }

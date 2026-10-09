@@ -514,6 +514,20 @@ složky neplyne, například u příspěvku, převod nic nehádá: složku zalo�
 zařazení a protokol ji vypíše s kódem a počtem vstupů. Zařaďte je
 v `Mzdy → Mzdové složky a vstupy`, jinak nepůjde zmrazit měsíční hlášení.
 
+U položek, které si firmy v PAMICA přečíslovávají, rozhoduje název a daňové
+příznaky číselníku (daň zálohou, sociální a zdravotní pojištění), ne číslo:
+
+| Položka PAMICA | Do MyÚčta |
+|---|---|
+| osobní ohodnocení | odměna; pravidelnost (10330 nebo 10331) zařadíte vy |
+| náhrada mzdy zadaná celkovou částkou | náhrada mzdy (10337) |
+| proplacení nevyčerpané dovolené (dny i hodiny) | *Proplacená / vrácená náhrada za dovolenou* (10338), kam ji vykazuje i PAMICA |
+| doplatek zdravotního pojištění do minima | nepřevádí se, MyÚčto ho počítá samo z minimálního vyměřovacího základu |
+| přeplatek z ročního zúčtování zadaný ručně a jeho oprava | nepřevádí se, je v čisté mzdě převzatého měsíce |
+
+Pravidelnou zálohu na mzdu MyÚčto nevyplácí; převzatý měsíc ji má ve
+vyúčtování k výplatě a v dalších měsících ji řešíte platbou a srážkou.
+
 ### 108.9.3 Srážky, exekuce a insolvence
 
 Trvalé srážky z karty zaměstnance i srážky ve zpracovaných mzdách převod
