@@ -162,6 +162,8 @@ final class PremierPayrollTakeoverTest extends TestCase
             PremierPayrollTakeover::record($relations['5'], '2025-12-31')->employment->recurringComponents,
         );
         self::assertSame([], PremierPayrollTakeover::recurringComponents($relations['5'], '2025-12-31', '2025-01'));
+        self::assertSame([], PremierPayrollTakeover::recurringComponents(['end' => '2025-09-30'] + $relations['5'], '2025-12-31'),
+            'Vztah skončený před posledním převzatým měsícem opakovanou složku nedostane.');
         self::assertSame([], PremierPayrollTakeover::record($relations['6'], '2025-12-31')->employment->recurringComponents);
     }
 

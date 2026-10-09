@@ -148,6 +148,11 @@ final class PremierPayrollTakeover
     public static function recurringComponents(array $relation, string $until, ?string $moduleStart = null): array
     {
         $last = self::lastPeriod($until, $moduleStart);
+        // Vztah skončený před posledním převzatým měsícem už nic nedostane, i když karta
+        // příjmu konec nemá (stejně jako u srážek).
+        if (is_string($relation['end'] ?? null) && substr($relation['end'], 0, 7) < $last) {
+            return [];
+        }
         $out = [];
         foreach ((array) ($relation['recurring_incomes'] ?? []) as $card) {
             if (($card['from'] !== null && $card['from'] > $last) || ($card['to'] !== null && $card['to'] < $last) || $card['amount'] <= 0) {
