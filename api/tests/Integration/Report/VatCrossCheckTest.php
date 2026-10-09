@@ -220,9 +220,9 @@ final class VatCrossCheckTest extends TestCase
     public function testDocInReturnButMissingInKhIsDetected(): void
     {
         $cust = $this->client('Odběratel nesoulad', 'CZ11111118');
-        // Klasifikace '1' (tuzemsko na výstupu → DPHDP3 ř.1), ALE příznak reverse_charge=1
-        // → KH doklad odsměruje do A.1 (ne A.4/A.5). Přesně ten nesoulad, který FÚ chytí.
-        $s1 = $this->sale('FV-2048-B1', $cust, '1', true, 50000.0, 10500.0, 21.0);
+        // Vlastní kód firmy míří na DPHDP3 ř.1, ale nemá oddíl KH → doklad v KH chybí.
+        // Přesně ten nesoulad, který FÚ chytí.
+        $s1 = $this->sale('FV-2048-B1', $cust, $this->saleCodeOutsideKh(), false, 50000.0, 10500.0, 21.0);
 
         $findings = $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly');
 
@@ -242,7 +242,7 @@ final class VatCrossCheckTest extends TestCase
     public function testDownloadBlockedWithoutAcknowledge(): void
     {
         $cust = $this->client('Odběratel blok', 'CZ11111118');
-        $this->sale('FV-2048-C1', $cust, '1', true, 50000.0, 10500.0, 21.0);
+        $this->sale('FV-2048-C1', $cust, $this->saleCodeOutsideKh(), false, 50000.0, 10500.0, 21.0);
 
         $res = $this->download();
         self::assertSame(409, $res['status'], 'Nenulový rozdíl bez potvrzení → 409.');
@@ -255,7 +255,7 @@ final class VatCrossCheckTest extends TestCase
     public function testDownloadPassesWithAcknowledgeAndLogs(): void
     {
         $cust = $this->client('Odběratel ack', 'CZ11111118');
-        $this->sale('FV-2048-D1', $cust, '1', true, 50000.0, 10500.0, 21.0);
+        $this->sale('FV-2048-D1', $cust, $this->saleCodeOutsideKh(), false, 50000.0, 10500.0, 21.0);
 
         $res = $this->download(['acknowledge_mismatch' => '1']);
         self::assertSame(200, $res['status'], 'S potvrzením projde i přes rozdíl.');
@@ -985,6 +985,17 @@ final class VatCrossCheckTest extends TestCase
         );
         $stmt->execute([$this->supplierId, $name, $countryId ?? $this->czId, $dic, $this->currencyId]);
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** Vlastní kód firmy na ř. 1 bez oddílu KH (úklid zajistí rollback transakce testu). */
+    private function saleCodeOutsideKh(): string
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO vat_classifications
+                (supplier_id, code, label, direction, dphdp3_line, kh_section, vat_rate, is_reverse_charge)
+             VALUES (?, 'T1NOKH', 'Test ř. 1 bez KH', 'sale', '1', NULL, 21, 0)"
+        )->execute([$this->supplierId]);
+        return 'T1NOKH';
     }
 
     private function sale(string $varsymbol, int $clientId, string $code, bool $rc, float $base, float $vat, float $rate): int

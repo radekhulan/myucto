@@ -42,7 +42,7 @@ use MyInvoice\Service\Accounting\PostingException;
  *   document_kind:?string, status:string, is_draft:bool, tax_date:?string, issue_date:?string,
  *   counterparty_name:string, counterparty_dic:?string, country_iso2:?string,
  *   code:?string, dphdp3_line:?string, dphdp3_line_secondary:?string, kh_section:?string,
- *   is_reverse_charge:bool, code_estimated:bool, vat_deduction_partial:bool, vat_rate:float, base_czk:float, vat_czk:float,
+ *   is_reverse_charge:bool, classification_reverse_charge:bool, code_estimated:bool, vat_deduction_partial:bool, vat_rate:float, base_czk:float, vat_czk:float,
  *   total_with_vat_czk:float, is_fixed_asset:bool, exchange_rate:float, exchange_rate_missing:bool
  * }
  */
@@ -1016,7 +1016,12 @@ final class VatLedgerService
             $vatRaw = 0.0;
         }
         $clsf = $code !== null ? ($map[$code] ?? null) : null;
-        $isRc = ($clsf['is_reverse_charge'] ?? false) || (bool) $r['rc_flag'];
+        // Dvě různé otázky. `$isRc` (klasifikace NEBO příznak v hlavičce) řídí samovyměření
+        // daně. Zda je ŘÁDEK tuzemským plněním (ř. 1/2, 40/41, KH A.4/A.5, B.2/B.3), rozhoduje
+        // jen klasifikace řádku: smíšený doklad s příznakem v hlavičce nese vedle řádku § 92a
+        // i řádek kódu 40 s daní dodavatele a přiznání ho vykazuje na ř. 40.
+        $codeIsRc = (bool) ($clsf['is_reverse_charge'] ?? false);
+        $isRc = $codeIsRc || (bool) $r['rc_flag'];
 
         // RC samovyměření jen u přijatých plnění (vendor fakturuje bez DPH).
         // Fallback sazby (issue #116): zahraniční doklad importovaný s řádkovou sazbou
@@ -1145,7 +1150,7 @@ final class VatLedgerService
         $clsfRate = $clsf !== null && ($clsf['vat_rate'] ?? null) !== null ? (float) $clsf['vat_rate'] : null;
         $rateContradictsCode = $clsfRate !== null && $clsfRate > 0
             && (($clsfRate >= $bucket) !== ($vatRate >= $bucket));
-        if (!$isRc && $vatRate > 0 && $rateContradictsCode) {
+        if (!$codeIsRc && $vatRate > 0 && $rateContradictsCode) {
             $domesticPairs = $vatRate < $bucket
                 ? ['1' => '2', '40' => '41']   // kód pro základní sazbu na sníženém řádku
                 : ['2' => '1', '41' => '40'];  // a obráceně
@@ -1192,6 +1197,7 @@ final class VatLedgerService
             'kh_regime_code'         => $clsf['kh_regime_code'] ?? null,
             'kh_bad_debt'            => $clsf['kh_bad_debt'] ?? null,
             'is_reverse_charge'     => $isRc,
+            'classification_reverse_charge' => $codeIsRc,
             // Kód nebyl na dokladu, jen odhadnut fallbackem pro zahraniční RC (24e/24).
             'code_estimated'        => !empty($r['code_estimated']),
             'vat_deduction_partial' => $isPartialDeduction,

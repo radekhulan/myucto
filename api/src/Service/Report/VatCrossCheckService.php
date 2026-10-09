@@ -940,7 +940,10 @@ final class VatCrossCheckService
             $docNo[$key] ??= $r['doc_number'] !== null ? (string) $r['doc_number'] : null;
             if ($r['source'] === 'sale') {
                 $contribution = (float) $r['vat_czk'];
-            } elseif (!empty($r['is_reverse_charge'])) {
+            } elseif (!empty($r['is_reverse_charge'])
+                && (!empty($r['classification_reverse_charge']) || ($r['dphdp3_line'] ?? null) === null)) {
+                // Tuzemský řádek smíšeného dokladu (příznak přenesení v hlavičce, kód 40/41)
+                // přiznání odečítá na ř. 40/41 bez výstupní daně, takže se nevyruší.
                 $contribution = 0.0;
             } else {
                 $contribution = -(float) $r['vat_czk'];

@@ -949,6 +949,10 @@ final class KontrolniHlaseniBuilder
      * do KH nepatří), bez přenesené daně a se sekcí odpovídající směru dokladu. Který
      * z dvojice A.4/A.5 nebo B.2/B.3 to bude, rozhoduje doklad, ne řádek.
      *
+     * Přenesenou daň posuzuje KLASIFIKACE řádku, ne příznak v hlavičce dokladu. Smíšený
+     * doklad (řádek § 92a + řádek kódu 40 s daní dodavatele) vykazuje přiznání na ř. 10
+     * i ř. 40, takže tuzemský řádek patří do B.2/B.3 stejně jako na ř. 40.
+     *
      * @param array<string,mixed> $r
      * @return list<string>
      */
@@ -961,7 +965,7 @@ final class KontrolniHlaseniBuilder
         $sale = ($r['source'] ?? '') === 'sale';
         $domestic = $sale ? ['A.4', 'A.5'] : ['B.2', 'B.3'];
         $eligible = $sale || ($r['dphdp3_line'] ?? null) !== null;
-        return $eligible && in_array($kh, $domestic, true) && empty($r['is_reverse_charge']) ? $domestic : [];
+        return $eligible && in_array($kh, $domestic, true) && empty($r['classification_reverse_charge']) ? $domestic : [];
     }
 
     /** @param array<string,mixed> $r */
@@ -1099,14 +1103,13 @@ final class KontrolniHlaseniBuilder
                     // celý doklad odešel pod jedním (často cizím) kódem.
                     'a1_by_code'            => [],
                     'b1_by_code'            => [],
-                    'is_rc' => false, 'has_a1' => false, 'has_a2' => false, 'has_b1' => false, 'is_pomer' => false,
+                    'has_a1' => false, 'has_a2' => false, 'has_b1' => false, 'is_pomer' => false,
                     'dom_base21' => 0.0, 'dom_vat21' => 0.0, 'dom_base12' => 0.0, 'dom_vat12' => 0.0,
                     'a2_base21' => 0.0, 'a2_vat21' => 0.0, 'a2_base12' => 0.0, 'a2_vat12' => 0.0,
                     'kh_regime_codes' => [], 'kh_bad_debt_codes' => [],
                 ];
             }
             $g = &$inv[$key];
-            if ($r['is_reverse_charge']) $g['is_rc'] = true;
             if ($r['kh_section'] === 'A.1') $g['has_a1'] = true;
             if ($r['kh_section'] === 'A.2') $g['has_a2'] = true;
             if ($r['kh_section'] === 'B.1') $g['has_b1'] = true;
