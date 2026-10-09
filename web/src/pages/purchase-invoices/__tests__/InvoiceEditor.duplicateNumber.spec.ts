@@ -93,8 +93,6 @@ vi.mock('@/stores/supplier', () => ({
 
 import InvoiceEditor from '@/pages/purchase-invoices/InvoiceEditor.vue'
 
-const PROJECT_TYPE = 7
-
 function item(id: number, description: string) {
   return {
     id,
