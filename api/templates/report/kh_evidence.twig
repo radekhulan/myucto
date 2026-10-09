@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Soupis dokladů kontrolního hlášení</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .title { font-size: 13pt; font-weight: bold; }
+    .meta { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm 0; }
+    .meta td { font-size: 8pt; padding: 0.5mm 0; vertical-align: top; }
+    .meta-label { color: #555; width: 28mm; }
+    .section-title { font-size: 9pt; font-weight: bold; margin-top: 4mm; padding: 1mm 0; border-bottom: 0.5pt solid #999; }
+    table.list { width: 100%; border-collapse: collapse; margin: 0; }
+    table.list thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: left; padding: 1mm 1.2mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom; }
+    table.list tbody td { padding: 0.8mm 1.2mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    table.list tfoot td { font-weight: bold; font-size: 8pt; padding: 1.5mm 1.2mm; border-top: 0.5pt solid #333; border-bottom: 0.5pt solid #333; }
+    .num { text-align: right; }
+    .status-diff { color: #b45309; font-weight: bold; }
+    .status-missing { color: #b91c1c; font-weight: bold; }
+    .note { font-size: 7pt; color: #666; margin-top: 1mm; }
+    .warn { font-size: 7.5pt; color: #92400e; margin-top: 1mm; }
+    .disclaimer { text-align: center; font-size: 7pt; color: #888; margin-top: 6mm; font-style: italic; }
+    .col-doc { width: 9%; }
+    .col-int { width: 7%; }
+    .col-partner { width: 18%; }
+    .col-dic { width: 8%; }
+    .col-date { width: 6%; }
+    .col-num { width: 8%; }
+    .col-status { width: 8%; }
+</style>
+</head>
+<body>
+
+<div class="title">Soupis dokladů kontrolního hlášení</div>
+<table class="meta">
+    <tr><td class="meta-label">Firma:</td><td><strong>{{ supplier.company_name }}</strong>{% if supplier.ic %}, IČO {{ supplier.ic }}{% endif %}{% if supplier.dic %}, DIČ {{ supplier.dic }}{% endif %}</td></tr>
+    <tr><td class="meta-label">Období:</td><td>{{ period.label }} ({{ period.start|cz_date }} - {{ period.end|cz_date }})</td></tr>
+    <tr><td class="meta-label">Filtr:</td><td>{{ filter_label }}</td></tr>
+    <tr><td class="meta-label">Zdroj:</td><td>{{ source_label }}</td></tr>
+    <tr><td class="meta-label">Sestaveno:</td><td>{{ generated_at|cz_datetime }}</td></tr>
+</table>
+
+{% for key, section in sections %}
+    <div class="section-title">{{ key == 'none' ? 'Mimo KH' : 'Oddíl ' ~ key }} - {{ section_labels[key] ?? '' }}</div>
+    {% if section.rows is empty %}
+        <p class="note">Oddíl neobsahuje žádné doklady.</p>
+    {% else %}
+    <table class="list">
+        <thead>
+            <tr>
+                {% if comparison is defined and comparison %}<th class="col-status">Stav</th>{% endif %}
+                <th class="col-doc">Číslo dokladu<br>(v KH)</th>
+                <th class="col-int">Interní číslo</th>
+                <th class="col-partner">Odběratel / dodavatel</th>
+                <th class="col-dic">DIČ</th>
+                <th class="col-date">Rozhodné<br>datum</th>
+                <th class="num col-num">Základ<br>zákl. sazba</th>
+                <th class="num col-num">DPH<br>zákl. sazba</th>
+                <th class="num col-num">Základ<br>sníž. sazba</th>
+                <th class="num col-num">DPH<br>sníž. sazba</th>
+                <th class="num col-num">Základ<br>celkem</th>
+                <th class="num col-num">DPH<br>celkem</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for row in section.rows %}
+            <tr>
+                {% if comparison is defined and comparison %}
+                    <td class="col-status {{ row.status == 'match' ? '' : (row.status == 'amount_diff' ? 'status-diff' : 'status-missing') }}">{{ status_labels[row.status] ?? row.status }}</td>
+                {% endif %}
+                <td class="col-doc">{{ row.doc_number }}{% if row.is_correction %} (oprava){% endif %}</td>
+                <td class="col-int">{{ row.internal_number }}</td>
+                <td class="col-partner">{{ row.counterparty_name|slice(0, 40) }}</td>
+                <td class="col-dic">{{ row.counterparty_dic }}</td>
+                <td class="col-date">{{ row.tax_date|cz_date }}</td>
+                <td class="num col-num">{{ row.base21|cz_money }}</td>
+                <td class="num col-num">{{ row.vat21|cz_money }}</td>
+                <td class="num col-num">{{ row.base12|cz_money }}</td>
+                <td class="num col-num">{{ row.vat12|cz_money }}</td>
+                <td class="num col-num">{{ row.base_total|cz_money }}</td>
+                <td class="num col-num">{{ row.vat_total|cz_money }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="{{ comparison is defined and comparison ? 6 : 5 }}">Celkem {{ section.totals.count }} dokladů</td>
+                <td class="num">{{ section.totals.base21|cz_money }}</td>
+                <td class="num">{{ section.totals.vat21|cz_money }}</td>
+                <td class="num">{{ section.totals.base12|cz_money }}</td>
+                <td class="num">{{ section.totals.vat12|cz_money }}</td>
+                <td class="num">{{ section.totals.base_total|cz_money }}</td>
+                <td class="num">{{ section.totals.vat_total|cz_money }}</td>
+            </tr>
+        </tfoot>
+    </table>
+    <p class="note">
+        Zaokrouhleno na celé Kč (jako v přiznání k DPH): základ {{ section.totals.base_total_whole|cz_money }}, DPH {{ section.totals.vat_total_whole|cz_money }}.
+        {% if section.totals.rounding_difference != 0 %}
+            Souhrnná věta oddílu se v KH počítá z nezaokrouhlených částek dokladů, proti součtu řádků se liší o {{ section.totals.rounding_difference|cz_money }} Kč.
+        {% endif %}
+    </p>
+    {% endif %}
+{% endfor %}
+
+{% if excluded is not empty %}
+    <div class="section-title">Doklady vyřazené z kontrolního hlášení</div>
+    {% for row in excluded %}
+        <p class="warn">{{ row.section }}: {{ row.doc_number }} {{ row.counterparty_name }} - {{ row.reason == 'missing_dic' ? 'chybí platné DIČ protistrany' : 'položky mají rozdílný režim plnění nebo příznak opravy' }}</p>
+    {% endfor %}
+{% endif %}
+
+{% if warnings is not empty %}
+    <div class="section-title">Upozornění</div>
+    {% for w in warnings %}<p class="warn">{{ w }}</p>{% endfor %}
+{% endif %}
+
+<div class="disclaimer">
+    Částky dokladů jsou v Kč s haléři, jak se uvádějí ve větách kontrolního hlášení. Součty se počítají z haléřových částek a zaokrouhlují až na konci.
+</div>
+
+</body>
+</html>

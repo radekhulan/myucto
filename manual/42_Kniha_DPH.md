@@ -12,7 +12,8 @@ Kapitolu otevřete, když:
 - potřebujete zjistit, z jakých dokladů vznikl konkrétní řádek přiznání,
 - vám součet v knize nesedí s náhledem přiznání,
 - přijatý doklad skončil v jiném měsíci, než jste čekali,
-- potřebujete pracovní podklad v PDF pro účetní nebo auditora.
+- potřebujete pracovní podklad v PDF pro účetní nebo auditora,
+- finanční úřad chce soupis dokladů uvedených v oddílu kontrolního hlášení.
 
 Kniha DPH je interní kontrolní sestava za měsíc nebo čtvrtletí. Není
 formulářem EPO, neodesílá se správci daně a její PDF se neukládá do Archivu
@@ -25,6 +26,7 @@ podání. Kde se podává přiznání a kontrolní hlášení, popisuje kapitola
 | před každým podáním DPH | Projít knihu za stejné období jako přiznání a odstranit koncepty a chybějící klasifikace | `Daně → Kniha DPH`, postup v [§ 42.3](#423-krok-za-krokem-kontrola-knihy-pred-podanim-dph) |
 | když doklad nesedí do období | Dohledat, podle jakého data se doklad zařadil | sloupec **Období odpočtu**, postup v [§ 42.4](#424-krok-za-krokem-proc-je-doklad-v-jinem-obdobi) |
 | po podání, změnil-li se doklad | Posoudit, zda je nutné opravné nebo dodatečné podání | `Daně → DPH přiznání`, fronta změn po podání |
+| při kontrole finančního úřadu | Vytisknout soupis dokladů oddílu KH (např. A.4) se součty | pole **Oddíl KH**, postup v [§ 42.5](#425-krok-za-krokem-soupis-dokladu-oddilu-kh-pro-kontrolu-financniho-uradu) |
 
 ## 42.2 Než začnete
 
@@ -96,7 +98,51 @@ získali, a u data už není hvězdička s neodpovídajícím datem.
 > odpočtu nevstupuje. Doklad, který jste po vytěžení upravili, tak skončí ve
 > stejném období jako ten, kterého jste se nedotkli.
 
-## 42.5 Když něco nejde
+## 42.5 Krok za krokem: soupis dokladů oddílu KH pro kontrolu finančního úřadu
+
+Při kontrole nebo postupu k odstranění pochybností chce správce daně často
+vidět, které doklady jste uvedli v určitém oddílu kontrolního hlášení,
+typicky v A.4. Soupis sestavíte přímo z Knihy DPH.
+
+1. Otevřete `Daně → Kniha DPH` a zvolte období kontrolního hlášení.
+2. V poli **Oddíl KH** vyberte oddíl, například **A.4 - Uskutečněná plnění nad
+   10 000 Kč**. Volba **Soupis KH - všechny oddíly** ukáže všechny oddíly
+   najednou, **Mimo KH** doklady z evidence DPH, které do kontrolního hlášení
+   nepatří (například osvobozená plnění nebo vývoz).
+3. Kniha se přepne na soupis dokladů. U každého dokladu vidíte číslo dokladu
+   tak, jak je uvedené v KH, interní číslo, odběratele nebo dodavatele, DIČ,
+   rozhodné datum (DUZP, resp. datum povinnosti přiznat daň) a základy daně
+   a DPH podle sazeb.
+4. Pod tabulkou je součet jen za doklady oddílu a tentýž součet zaokrouhlený
+   na celé Kč, jak se objevuje v přiznání k DPH.
+5. Klikněte na **Stáhnout PDF** nebo **Stáhnout XLSX**. Export nese název
+   firmy, DIČ, období, použitý filtr, zdroj (aktuální data) a datum a čas
+   sestavení.
+6. Volbou **Kniha DPH (všechny doklady)** se vrátíte do běžné knihy.
+
+**Jak poznáte, že je hotovo:** Soupis oddílu má stejné součty jako náhled
+kontrolního hlášení za totéž období a export obsahuje hlavičku s obdobím
+a filtrem.
+
+> [!NOTE]
+> Doklady se do oddílů zařazují stejnou logikou, jakou se sestavuje kontrolní
+> hlášení. Limit 10 000 Kč se posuzuje podle celkové částky **dokladu**
+> včetně DPH, ne podle jednotlivých položek, a přesně 10 000 Kč patří do
+> souhrnného oddílu A.5/B.3. Soupis neobsahuje koncepty. Doklad, který by do KH
+> nešel kvůli chybějícímu DIČ nebo rozdílnému režimu položek, je vypsaný pod
+> soupisem zvlášť.
+
+Částky dokladů jsou v Kč s haléři, jak se uvádějí ve větách kontrolního
+hlášení. Součty se počítají z haléřových částek a zaokrouhlují se až na
+konci. U souhrnných oddílů A.5 a B.3 odpovídá součet hodnotě souhrnné věty
+KH; když se kvůli kurzovému přepočtu liší od součtu zaokrouhlených řádků
+o haléře, soupis rozdíl uvede.
+
+> [!WARNING]
+> Soupis z Knihy DPH ukazuje **aktuální data**. Pokud se doklady po podání
+> kontrolního hlášení změnily, nemusí odpovídat tomu, co jste podali.
+
+## 42.6 Když něco nejde
 
 <!-- cols: 30 34 36 -->
 | Co vidíte | Proč | Co udělat |
@@ -109,9 +155,9 @@ získali, a u data už není hvězdička s neodpovídajícím datem.
 | Součet knihy se liší od přiznání o několik korun | XML přiznání zaokrouhluje údaje na celé Kč, evidence drží haléře | Jde o zákonné zaokrouhlení; větší rozdíl hledejte v konceptech a v klasifikaci. |
 | Doklad v knize chybí | Je stornovaný, jde o zálohovou výzvu, nebo je mimo zvolené období | Stornované doklady a zálohové výzvy se do knihy nezahrnují. |
 
-## 42.6 Podrobnosti a pravidla
+## 42.7 Podrobnosti a pravidla
 
-### 42.6.1 Zdroj dat a rozhodné období
+### 42.7.1 Zdroj dat a rozhodné období
 
 Kniha používá stejnou řádkovou evidenci DPH jako přiznání (DPHDP3) a kontrolní
 hlášení (DPHKH1), a proto je stejná v daňové evidenci i v podvojném
@@ -132,7 +178,7 @@ Stornované doklady a zálohové výzvy se nezahrnují. Ostré DPHDP3 a KH naopa
 koncepty neobsahují, proto se před podáním ujistěte, že v knize nezůstaly
 neuzavřené doklady.
 
-### 42.6.2 Členění knihy
+### 42.7.2 Členění knihy
 
 Řádky se seskupují podle dokladu, klasifikace a sazby. Kód sekce kombinuje
 pracovní skupinu a řádek přiznání, například:
@@ -147,7 +193,7 @@ Každý řádek uvádí datum plnění, datum zaúčtování, období odpočtu, 
 dokladu, popis, základ, DPH a celkem v Kč, protistranu a DIČ, původní číslo
 dokladu a účinnou sekci KH. Doklady se řadí přirozeně podle čísla.
 
-### 42.6.3 Období odpočtu u přijatých dokladů
+### 42.7.3 Období odpočtu u přijatých dokladů
 
 Sloupec **Období odpočtu** ukazuje datum, podle kterého přijatý doklad spadl
 do zobrazeného období, a pod ním důvod: *dle DUZP*, *dle data vystavení*,
@@ -173,7 +219,7 @@ nevstupuje. Když datum přijetí neodpovídá skutečnosti, opravte ho na dokla
 Přijaté zahraniční reverse charge se řídí DUZP bez ohledu na datum přijetí
 (§ 25, § 24), viz [Výkazy DPH](41_Vykazy_DPH.md).
 
-### 42.6.4 Poměrný a krácený odpočet
+### 42.7.4 Poměrný a krácený odpočet
 
 U poměrného odpočtu (§ 75) se základ a DPH na vstupu krátí zadaným
 procentem. U kráceného odpočtu (§ 76) kniha oddělí částku do krácené
@@ -181,7 +227,7 @@ skupiny; zálohový koeficient a konečné roční vypořádání se uplatní a�
 v DPHDP3, nikoli jako samostatný pokladní pohyb v knize. Plnění bez nároku
 nevytváří odpočet, ale u samovyměření zůstává daň na výstupu.
 
-## 42.7 Související kapitoly
+## 42.8 Související kapitoly
 
 - [Výkazy DPH](41_Vykazy_DPH.md) - přiznání, kontrolní hlášení a souhrnné hlášení
 - [Přijaté faktury](23_Prijate_faktury.md) - datum přijetí a zařazení odpočtu

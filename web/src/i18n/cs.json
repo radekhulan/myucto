@@ -25133,6 +25133,60 @@
       "missing_count": "{count} chybí",
       "gaps_found": "Nalezené mezery: {count}"
     },
+    "kh_evidence": {
+      "title": "Soupis dokladů kontrolního hlášení",
+      "filter_label": "Oddíl KH",
+      "filter_none": "Kniha DPH (všechny doklady)",
+      "filter_all": "Soupis KH - všechny oddíly",
+      "outside": "Mimo KH",
+      "section_prefix": "Oddíl",
+      "section_label": {
+        "A1": "Uskutečněná plnění v režimu přenesení daňové povinnosti",
+        "A2": "Přijatá plnění, u kterých daň přiznává příjemce",
+        "A4": "Uskutečněná plnění nad 10 000 Kč",
+        "A5": "Uskutečněná plnění do 10 000 Kč (souhrnně)",
+        "B1": "Přijatá plnění v režimu přenesení daňové povinnosti",
+        "B2": "Přijatá plnění nad 10 000 Kč",
+        "B3": "Přijatá plnění do 10 000 Kč (souhrnně)",
+        "none": "Doklady evidence DPH mimo kontrolní hlášení"
+      },
+      "doc_count": "{n} dokladů",
+      "section_empty": "Oddíl neobsahuje žádné doklady.",
+      "no_data": "Pro zvolené období a oddíl nejsou žádné doklady.",
+      "download_pdf": "Stáhnout PDF",
+      "download_xlsx": "Stáhnout XLSX",
+      "source_current": "Zdroj: aktuální data. Doklady jsou zařazené stejnou logikou, jakou se sestavuje kontrolní hlášení; koncepty nejsou zahrnuté.",
+      "rule_note": "Limit 10 000 Kč se posuzuje podle celkové částky dokladu včetně DPH, ne podle jednotlivých položek.",
+      "total": "Celkem",
+      "correction": "oprava",
+      "whole_crowns": "Zaokrouhleno na celé Kč (jako v přiznání k DPH): základ {base}, DPH {vat}.",
+      "rounding_difference": "Souhrnná věta oddílu se v KH počítá z nezaokrouhlených částek dokladů, proti součtu řádků se liší o {amount} Kč.",
+      "excluded_title": "Doklady vyřazené z kontrolního hlášení",
+      "excluded_reason": {
+        "missing_dic": "chybí platné DIČ protistrany",
+        "attribute_conflict": "položky mají rozdílný režim plnění nebo příznak opravy"
+      },
+      "col": {
+        "status": "Stav",
+        "doc_number": "Číslo dokladu (v KH)",
+        "internal_number": "Interní číslo",
+        "partner": "Odběratel / dodavatel",
+        "dic": "DIČ",
+        "tax_date": "Rozhodné datum",
+        "base21": "Základ zákl. sazba",
+        "vat21": "DPH zákl. sazba",
+        "base12": "Základ sníž. sazba",
+        "vat12": "DPH sníž. sazba",
+        "base_total": "Základ celkem",
+        "vat_total": "DPH celkem"
+      },
+      "status": {
+        "match": "Shoda",
+        "only_submitted": "Jen v podaném KH",
+        "only_current": "Jen v aktuálních datech",
+        "amount_diff": "Rozdíl částky"
+      }
+    },
     "dph_book": {
       "nil_row_note": "Nulový základ i daň (typicky vyúčtování plně uhrazené zálohy)",
       "nil_kh": "nevykazuje se",

@@ -9385,6 +9385,49 @@ paths:
             application/pdf:
               schema: { type: string, format: binary }
 
+  /api/v1/reports/kh-evidence/preview:
+    get:
+      tags: [Reports]
+      summary: Soupis dokladů oddílu kontrolního hlášení (aktuální data)
+      description: |
+        Evidence pro kontrolu správce daně. Doklady jsou do oddílů zařazené stejnou logikou, jakou se sestavuje
+        XML kontrolního hlášení (limit 10 000 Kč na celý doklad včetně DPH, DIČ protistrany, opravy § 46 / § 74b).
+        Koncepty nejsou zahrnuté. Řádky nesou částky v Kč s haléři tak, jak jdou do vět KH; součty oddílu se počítají
+        v haléřích a u souhrnných oddílů A.5/B.3 odpovídají hodnotě souhrnné věty. `base_total_whole` a `vat_total_whole`
+        jsou součty zaokrouhlené na celé Kč jako v přiznání k DPH.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, required: true, schema: { type: integer } }
+        - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 }, description: "U čtvrtletí libovolný měsíc čtvrtletí." }
+        - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
+        - { in: query, name: section, schema: { type: string, enum: [all, A.1, A.2, A.4, A.5, B.1, B.2, B.3, none], default: all }, description: "Oddíl KH; none = doklady evidence DPH mimo KH." }
+      responses:
+        '200': { description: Soupis dokladů, content: { application/json: { schema: { $ref: '#/components/schemas/KhEvidenceReport' } } } }
+        '400': { description: Neplatné období nebo oddíl }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/reports/kh-evidence:
+    get:
+      tags: [Reports]
+      summary: Export soupisu dokladů oddílu KH do PDF nebo XLSX
+      description: Hlavička exportu nese firmu, období, použitý filtr, zdroj (aktuální data) a okamžik sestavení. Součty jsou tytéž jako v náhledu, v XLSX jako čísla.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, required: true, schema: { type: integer } }
+        - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
+        - { in: query, name: section, schema: { type: string, enum: [all, A.1, A.2, A.4, A.5, B.1, B.2, B.3, none], default: all } }
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+      responses:
+        '200':
+          description: Soubor sestavy
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/reports/oss/preview:
     get:
       tags: [Reports]
@@ -33226,6 +33269,78 @@ components:
                 type: array
                 items: { type: string }
               example: { name: ["Název zakázky je povinný"], payment_due_days: ["Splatnost musí být 1–365 dní"] }
+
+    KhEvidenceRow:
+      type: object
+      description: Doklad v soupisu oddílu KH. Částky v Kč s haléři, jak jdou do věty KH; u A.1 jen základ celkem (věta nemá rozpad sazeb).
+      properties:
+        section: { type: string, example: A.4 }
+        source: { type: string, enum: [sale, purchase] }
+        invoice_id: { type: [integer, 'null'] }
+        doc_number: { type: string, description: Evidenční číslo dokladu tak, jak se uvádí v KH }
+        internal_number: { type: [string, 'null'] }
+        counterparty_name: { type: string }
+        counterparty_dic: { type: string, description: "DIČ ve tvaru věty KH (u A.2 kód státu + VAT ID)" }
+        tax_date: { type: [string, 'null'], format: date, description: DUZP / datum povinnosti přiznat daň }
+        base21: { type: [number, 'null'] }
+        vat21: { type: [number, 'null'] }
+        base12: { type: [number, 'null'] }
+        vat12: { type: [number, 'null'] }
+        base_total: { type: number }
+        vat_total: { type: number }
+        is_correction: { type: boolean, description: Oprava nedobytné pohledávky (zdph_44 = P) }
+        status: { type: string, enum: [match, only_submitted, only_current, amount_diff], description: Jen u porovnání s podaným KH }
+
+    KhEvidenceTotals:
+      type: object
+      properties:
+        count: { type: integer }
+        base21: { type: number }
+        vat21: { type: number }
+        base12: { type: number }
+        vat12: { type: number }
+        base_total: { type: number }
+        vat_total: { type: number }
+        base_total_whole: { type: number, description: Součet zaokrouhlený na celé Kč jako v přiznání k DPH }
+        vat_total_whole: { type: number }
+        rounding_difference: { type: number, description: "Haléřový rozdíl souhrnné věty (A.5/B.3) proti součtu zaokrouhlených řádků" }
+
+    KhEvidenceReport:
+      type: object
+      properties:
+        source: { type: string, enum: [current, submitted] }
+        comparison: { type: boolean }
+        submission: { type: [object, 'null'], additionalProperties: true }
+        supplier:
+          type: object
+          properties:
+            company_name: { type: string }
+            ic: { type: string }
+            dic: { type: string }
+        period:
+          type: object
+          properties:
+            year: { type: integer }
+            month: { type: integer }
+            period_type: { type: string, enum: [monthly, quarterly] }
+            quarter: { type: [integer, 'null'] }
+            start: { type: string, format: date }
+            end: { type: string, format: date }
+            label: { type: string }
+        section: { type: string }
+        generated_at: { type: string, example: '2026-10-09 14:30:00' }
+        sections:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              rows: { type: array, items: { $ref: '#/components/schemas/KhEvidenceRow' } }
+              totals: { $ref: '#/components/schemas/KhEvidenceTotals' }
+        excluded:
+          type: array
+          description: Doklady vyřazené z KH (chybí DIČ, rozdílný režim plnění)
+          items: { $ref: '#/components/schemas/KhEvidenceRow' }
+        warnings: { type: array, items: { type: string } }
 
     InvoiceSeriesCompletenessResult:
       type: object

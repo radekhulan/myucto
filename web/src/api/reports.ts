@@ -188,6 +188,59 @@ export interface DphBookPreview {
   }
 }
 
+/** Oddíl KH pro soupis dokladů (issue #142); `none` = mimo KH, `all` = všechny oddíly. */
+export type KhEvidenceSection = 'all' | 'A.1' | 'A.2' | 'A.4' | 'A.5' | 'B.1' | 'B.2' | 'B.3' | 'none'
+export const KH_EVIDENCE_SECTIONS: KhEvidenceSection[] = ['A.1', 'A.2', 'A.4', 'A.5', 'B.1', 'B.2', 'B.3', 'none']
+
+export type KhEvidenceStatus = 'match' | 'only_submitted' | 'only_current' | 'amount_diff'
+
+export interface KhEvidenceRow {
+  section: string
+  source: 'sale' | 'purchase' | string
+  invoice_id: number | null
+  doc_number: string
+  internal_number: string | null
+  counterparty_name: string
+  counterparty_dic: string
+  tax_date: string | null
+  base21: number | null
+  vat21: number | null
+  base12: number | null
+  vat12: number | null
+  base_total: number
+  vat_total: number
+  is_correction: boolean
+  status?: KhEvidenceStatus
+  current?: Partial<KhEvidenceRow> | null
+}
+
+export interface KhEvidenceTotals {
+  count: number
+  base21: number
+  vat21: number
+  base12: number
+  vat12: number
+  base_total: number
+  vat_total: number
+  base_total_whole: number
+  vat_total_whole: number
+  rounding_difference: number
+}
+
+export interface KhEvidenceReport {
+  source: 'current' | 'submitted'
+  comparison?: boolean
+  submission: { id: number; submitted_at: string | null; variant: string | null; variant_label: string | null } | null
+  supplier: { company_name: string; ic: string; dic: string }
+  period: DphBookPreview['period']
+  section: KhEvidenceSection
+  generated_at: string
+  sections: Record<string, { rows: KhEvidenceRow[]; totals: KhEvidenceTotals; current_totals?: KhEvidenceTotals }>
+  excluded: (KhEvidenceRow & { reason: string })[]
+  warnings: string[]
+  status_counts?: Record<KhEvidenceStatus, number>
+}
+
 export interface KhPreview {
   summary: {
     period: string
@@ -762,6 +815,19 @@ export const reportsApi = {
     if (period) params.set('period', period)
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/reports/dph-book?${params.toString()}`
+  },
+
+  // Evidence pro KH (issue #142) — soupis dokladů oddílu z aktuálních dat
+  khEvidencePreview: (year: number, month: number, period: 'monthly' | 'quarterly', section: KhEvidenceSection) =>
+    api.get<KhEvidenceReport>('/reports/kh-evidence/preview', {
+      params: { year, month, period, section },
+    }).then(r => r.data),
+
+  khEvidenceDownloadUrl: (year: number, month: number, period: 'monthly' | 'quarterly', section: KhEvidenceSection, format: 'pdf' | 'xlsx') => {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    const params = new URLSearchParams({ year: String(year), month: String(month), period, section, format })
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    return `/api/reports/kh-evidence?${params.toString()}`
   },
 
   ossPreview: (year: number, quarter: number) =>

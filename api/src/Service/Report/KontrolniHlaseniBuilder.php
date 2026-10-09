@@ -219,29 +219,11 @@ final class KontrolniHlaseniBuilder
             );
         }
 
-        // Všechny sekce z jedné projekce kanonických řádků (VatLedgerService).
+        // Všechny sekce z jedné projekce kanonických řádků (VatLedgerService), už ve tvaru,
+        // v jakém odcházejí do XML. Tentýž výsledek čte soupis dokladů oddílu.
         ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3,
          'missing_rates' => $missingRates]
-            = $this->collectSections($supplierId, $start, $end);
-        // #238: doklady v cizí měně bez kurzu — akce je při stažení doplní z ČNB.
-        if ($missingRates !== []) {
-            $warnings[] = 'Chybí kurz u dokladů v cizí měně: '
-                . implode(', ', VatLedgerService::missingExchangeRateLabels($missingRates))
-                . '. Při stažení XML se doplní z ČNB.';
-        }
-        $a1 = $this->filterReverseChargeRowsWithDic($a1, 'A.1', $warnings);
-        $b1 = $this->filterReverseChargeRowsWithDic($b1, 'B.1', $warnings);
-        // A.2 — doplnění identifikace dodavatele. Řádek se nevyřazuje ani bez ní; musí
-        // předcházet rekapitulaci VetaC, ať celk_zd_a2 sedí s tím, co odešlo.
-        $a2 = $this->resolveA2Identification($a2, $warnings);
-        $a4 = $this->filterKhAttributeConflicts($a4, 'A.4', $warnings);
-        $b2 = $this->filterKhAttributeConflicts($b2, 'B.2', $warnings);
-        // § 74b korekce odpočtu dlužníka — do B.2 se zdph_44='P' VŽDY (i pod 10 000 Kč);
-        // musí předcházet rekapitulaci VetaC, ať pln23/pln5 sedí s DPHDP3 ř. 40/41.
-        $this->appendSection74bCorrections($b2, $supplierId, $year, $month, $period, $warnings);
-        // § 46 věřitelská oprava u nedobytné pohledávky — zrcadlo výše na vydané straně:
-        // do A.4 se zdph_44='P' VŽDY (i pod 10 000 Kč), před rekapitulací VetaC.
-        $this->appendSection46Corrections($a4, $supplierId, $year, $month, $period, $warnings);
+            = $this->finalSections($supplierId, $year, $month, $period, $start, $end, $warnings);
 
         [$dom, $dphkh] = EpoEnvelope::create('DPHKH1', '03.01');
 
@@ -818,10 +800,173 @@ final class KontrolniHlaseniBuilder
      *   a4:list<array<string,mixed>>, a5:array<string,mixed>, b1:list<array<string,mixed>>,
      *   b2:list<array<string,mixed>>, b3:array<string,mixed>, missing_rates:list<array<string,mixed>>}
      */
-    private function collectSections(int $supplierId, string $start, string $end): array
+    private function finalSections(int $supplierId, int $year, int $month, string $period, string $start, string $end, array &$warnings, array &$excluded = []): array
     {
         $r = $this->buildSections($supplierId, $start, $end);
-        return $r['sections'] + ['missing_rates' => $r['missing_rates']];
+        ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3] = $r['sections'];
+        $missingRates = $r['missing_rates'];
+        // #238: doklady v cizí měně bez kurzu — akce je při stažení doplní z ČNB.
+        if ($missingRates !== []) {
+            $warnings[] = 'Chybí kurz u dokladů v cizí měně: '
+                . implode(', ', VatLedgerService::missingExchangeRateLabels($missingRates))
+                . '. Při stažení XML se doplní z ČNB.';
+        }
+        $a1 = $this->filterReverseChargeRowsWithDic($a1, 'A.1', $warnings, $excluded);
+        $b1 = $this->filterReverseChargeRowsWithDic($b1, 'B.1', $warnings, $excluded);
+        // A.2 — doplnění identifikace dodavatele. Řádek se nevyřazuje ani bez ní; musí
+        // předcházet rekapitulaci VetaC, ať celk_zd_a2 sedí s tím, co odešlo.
+        $a2 = $this->resolveA2Identification($a2, $warnings);
+        $a4 = $this->filterKhAttributeConflicts($a4, 'A.4', $warnings, $excluded);
+        $b2 = $this->filterKhAttributeConflicts($b2, 'B.2', $warnings, $excluded);
+        // § 74b korekce odpočtu dlužníka — do B.2 se zdph_44='P' VŽDY (i pod 10 000 Kč);
+        // musí předcházet rekapitulaci VetaC, ať pln23/pln5 sedí s DPHDP3 ř. 40/41.
+        $this->appendSection74bCorrections($b2, $supplierId, $year, $month, $period, $warnings);
+        // § 46 věřitelská oprava u nedobytné pohledávky — zrcadlo výše na vydané straně:
+        // do A.4 se zdph_44='P' VŽDY (i pod 10 000 Kč), před rekapitulací VetaC.
+        $this->appendSection46Corrections($a4, $supplierId, $year, $month, $period, $warnings);
+
+        return ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3,
+                'missing_rates' => $missingRates, 'outside' => $r['outside']];
+    }
+
+    /** Oddíly KH v pořadí výkazu; `none` = doklady evidence DPH mimo KH. */
+    public const SOUPIS_SECTIONS = ['A.1', 'A.2', 'A.4', 'A.5', 'B.1', 'B.2', 'B.3', 'none'];
+
+    /**
+     * Soupis dokladů po oddílech KH (issue #142) — evidence pro kontrolu správce daně.
+     *
+     * Čte TENTÝŽ výsledek {@see finalSections()}, ze kterého build() skládá XML, takže
+     * zařazení dokladu (limit 10 000 Kč na DOKLAD, DIČ, vyřazení konfliktních řádků,
+     * opravy § 46 / § 74b) nemůže mít vlastní kopii pravidla.
+     *
+     * Částky: řádky nesou haléřové hodnoty tak, jak jdou do věty KH (2 desetinná místa).
+     * Součty oddílu se počítají v haléřích: u vět s jednotlivými doklady (A.1, A.2, A.4,
+     * B.1, B.2) jako součet řádků, u souhrnných vět A.5/B.3 z nezaokrouhlených částek
+     * dokladů a zaokrouhlují se až na konci — přesně jako hodnota věty A.5/B.3 v XML.
+     *
+     * @return array{period: array<string,mixed>, sections: array<string, array{rows: list<array<string,mixed>>, totals: array<string,mixed>}>,
+     *               excluded: list<array<string,mixed>>, warnings: list<string>}
+     */
+    public function sectionDocuments(int $supplierId, int $year, int $month, string $period = 'monthly'): array
+    {
+        [$start, $end, $quarter] = self::periodBounds($year, $month, $period);
+        $warnings = [];
+        $excludedRaw = [];
+        $s = $this->finalSections($supplierId, $year, $month, $period, $start, $end, $warnings, $excludedRaw);
+
+        $map = [
+            'A.1' => [$s['a1'], 'sale'], 'A.2' => [$s['a2'], 'purchase'], 'A.4' => [$s['a4'], 'sale'],
+            'A.5' => [$s['a5']['docs'], 'sale'], 'B.1' => [$s['b1'], 'purchase'], 'B.2' => [$s['b2'], 'purchase'],
+            'B.3' => [$s['b3']['docs'], 'purchase'], 'none' => [$s['outside'], null],
+        ];
+        $sections = [];
+        foreach ($map as $section => [$rows, $defaultSource]) {
+            $out = [];
+            foreach ($rows as $row) {
+                $out[] = self::soupisRow($section, $row, $defaultSource);
+            }
+            $aggregate = match ($section) { 'A.5' => $s['a5'], 'B.3' => $s['b3'], default => null };
+            $sections[$section] = ['rows' => $out, 'totals' => self::soupisTotals($out, $aggregate)];
+        }
+        $excluded = [];
+        foreach ($excludedRaw as $row) {
+            $excluded[] = self::soupisRow((string) $row['excluded_section'], $row, null)
+                + ['reason' => (string) $row['excluded_reason']];
+        }
+
+        return [
+            'period' => [
+                'year' => $year, 'month' => $month, 'period_type' => $period, 'quarter' => $quarter,
+                'start' => $start, 'end' => $end,
+                'label' => $quarter !== null ? sprintf('%d. čtvrtletí %04d', $quarter, $year) : sprintf('%02d/%04d', $month, $year),
+            ],
+            'sections' => $sections,
+            'excluded' => $excluded,
+            'warnings' => $warnings,
+        ];
+    }
+
+    /** @param array<string,mixed> $r */
+    private static function soupisRow(string $section, array $r, ?string $defaultSource): array
+    {
+        $source = (string) ($r['source'] ?? $defaultSource ?? '');
+        if ($source === '') {
+            $source = str_starts_with($section, 'A.') && $section !== 'A.2' ? 'sale' : 'purchase';
+        }
+        // Evidenční číslo dokladu přesně tak, jak jde do věty KH (c_evid_dd).
+        $docNumber = $source === 'sale'
+            ? (string) ($r['varsymbol'] ?? $r['vendor_invoice_number'] ?? '')
+            : (string) ($r['vendor_invoice_number'] ?? '');
+        $dic = match ($section) {
+            'A.2'   => (string) ($r['k_stat'] ?? '') . (string) ($r['vatid_dod'] ?? ''),
+            'none'  => (string) ($r['counterparty_dic'] ?? ''),
+            default => self::cleanDic($r['counterparty_dic'] ?? ''),
+        };
+        $h = static fn (mixed $v): int => (int) round(((float) $v) * 100);
+        if ($section === 'A.1') {
+            // VetaA1 nese jen základ (zakl_dane1) bez rozpadu sazeb — daň přiznává odběratel.
+            $cents = ['base21' => null, 'vat21' => null, 'base12' => null, 'vat12' => null,
+                      'base_total' => $h($r['base'] ?? 0), 'vat_total' => 0];
+        } else {
+            $b21 = $h($r['base21'] ?? 0); $v21 = $h($r['vat21'] ?? 0);
+            $b12 = $h($r['base12'] ?? 0); $v12 = $h($r['vat12'] ?? 0);
+            $cents = ['base21' => $b21, 'vat21' => $v21, 'base12' => $b12, 'vat12' => $v12,
+                      'base_total' => $b21 + $b12 + $h($r['base0'] ?? 0), 'vat_total' => $v21 + $v12];
+        }
+        $amounts = array_map(static fn (?int $c): ?float => $c === null ? null : $c / 100, $cents);
+
+        return [
+            'section'           => $section,
+            'source'            => $source,
+            'invoice_id'        => isset($r['invoice_id']) ? (int) $r['invoice_id'] : (isset($r['purchase_invoice_id']) ? (int) $r['purchase_invoice_id'] : null),
+            'doc_number'        => $docNumber,
+            'internal_number'   => isset($r['internal_number']) ? (string) $r['internal_number'] : null,
+            'counterparty_name' => (string) ($r['counterparty_name'] ?? ''),
+            'counterparty_dic'  => $dic,
+            'tax_date'          => $r['tax_date'] ?? null,
+            'kod_pred_pl'       => $r['kod_pred_pl'] ?? null,
+            'kh_regime_code'    => $r['kh_regime_code'] ?? null,
+            'kh_bad_debt'       => $r['kh_bad_debt'] ?? null,
+            'is_correction'     => ($r['kh_bad_debt'] ?? null) === 'P',
+        ] + $amounts;
+    }
+
+    /**
+     * Součty oddílu v haléřích. Souhrnná věta (A.5/B.3) se v XML skládá z nezaokrouhlených
+     * částek dokladů a zaokrouhluje až výsledek — součet se proto bere z agregátu, ne z řádků.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @param array<string,mixed>|null $aggregate
+     * @return array<string,mixed>
+     */
+    private static function soupisTotals(array $rows, ?array $aggregate): array
+    {
+        $keys = ['base21', 'vat21', 'base12', 'vat12', 'base_total', 'vat_total'];
+        $cents = array_fill_keys($keys, 0);
+        foreach ($rows as $row) {
+            foreach ($keys as $k) {
+                $cents[$k] += (int) round(((float) ($row[$k] ?? 0)) * 100);
+            }
+        }
+        $rowsCents = $cents;
+        if ($aggregate !== null) {
+            foreach (['base21', 'vat21', 'base12', 'vat12'] as $k) {
+                $cents[$k] = (int) round(((float) $aggregate[$k]) * 100);
+            }
+            $cents['base_total'] = $cents['base21'] + $cents['base12'];
+            $cents['vat_total'] = $cents['vat21'] + $cents['vat12'];
+        }
+        $totals = ['count' => count($rows)];
+        foreach ($keys as $k) {
+            $totals[$k] = $cents[$k] / 100;
+        }
+        // DPHDP3 vykazuje celé koruny: zaokrouhluje se až součet, nikdy jednotlivé řádky.
+        $totals['base_total_whole'] = (float) round($cents['base_total'] / 100);
+        $totals['vat_total_whole'] = (float) round($cents['vat_total'] / 100);
+        // Haléřový rozdíl mezi součtem zaokrouhlených řádků a souhrnnou větou (A.5/B.3).
+        $totals['rounding_difference'] = ($cents['base_total'] - $rowsCents['base_total']
+            + $cents['vat_total'] - $rowsCents['vat_total']) / 100;
+        return $totals;
     }
 
     /**
@@ -859,6 +1004,10 @@ final class KontrolniHlaseniBuilder
                     // Číslo opravované faktury (rodiče dobropisu) pro obrannou pojistku KH.
                     'parent_vendor_invoice_number' => $r['parent_vendor_invoice_number'] ?? null,
                     'tax_date'              => $r['tax_date'],
+                    // Pro soupis dokladů oddílu (issue #142) — do XML se nepropisují.
+                    'counterparty_name'     => (string) ($r['counterparty_name'] ?? ''),
+                    'internal_number'       => $r['doc_number'],
+                    'all_base21' => 0.0, 'all_vat21' => 0.0, 'all_base12' => 0.0, 'all_vat12' => 0.0, 'all_base0' => 0.0,
                     'dic'                   => self::cleanDic($r['counterparty_dic']),
                     'dic_raw'               => $r['counterparty_dic'], // syrové VAT ID pro A.2 (EU alfanum.)
                     'country_iso2'          => $r['country_iso2'],
@@ -887,6 +1036,9 @@ final class KontrolniHlaseniBuilder
             $base = (float) $r['base_czk'];
             $vat  = (float) $r['vat_czk'];
             $is21 = $r['vat_rate'] >= $bucket;
+            if ($is21) { $g['all_base21'] += $base; $g['all_vat21'] += $vat; }
+            elseif ($r['vat_rate'] > 0) { $g['all_base12'] += $base; $g['all_vat12'] += $vat; }
+            else { $g['all_base0'] += $base; }
             // Rozřazení základu/daně do KH kbelíků PODLE SEKCE klasifikace — každá položka
             // přispěje jen do JEDNÉ sekce. Tím se mixed faktura (např. §92 RC řádek +
             // běžný 21% řádek) rozdělí správně (RC část do A.1/B.1, zdanitelná do A.4/B.2),
@@ -925,9 +1077,19 @@ final class KontrolniHlaseniBuilder
         }
 
         $a1 = []; $a2 = []; $a4 = []; $b1 = []; $b2 = [];
-        $a5 = ['count' => 0, 'base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0];
-        $b3 = ['count' => 0, 'base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0];
+        // `docs` = doklady, ze kterých se souhrnná věta skládá (soupis oddílu, issue #142).
+        $a5 = ['count' => 0, 'base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0, 'docs' => []];
+        $b3 = ['count' => 0, 'base21' => 0.0, 'vat21' => 0.0, 'base12' => 0.0, 'vat12' => 0.0, 'docs' => []];
         $invoices = [];
+        // Doklady z evidence DPH, které do žádného oddílu KH nepatří (soupis „mimo KH").
+        $outside = [];
+        // Identifikace dokladu pro soupis; XML emise tyhle klíče nečte.
+        $meta = static fn (array $g): array => [
+            'source'            => $g['source'],
+            'invoice_id'        => $g['invoice_id'],
+            'counterparty_name' => $g['counterparty_name'],
+            'internal_number'   => $g['internal_number'],
+        ];
 
         // Per-doklad tag pro křížovou kontrolu C8' (VatCrossCheckService::invoiceSections).
         // Mixed doklad přispívá do VÍCE sekcí (RC část do A.1/B.1 + tuzemská do A.4/A.5/B.2/B.3),
@@ -947,6 +1109,7 @@ final class KontrolniHlaseniBuilder
         };
 
         foreach ($inv as $g) {
+            $taggedBefore = count($invoices);
             $hasDic = $g['dic'] !== '';
             // § 101e: „nad 10 000 Kč" = OSTŘE více → přesně 10 000 patří do sumace
             // A.5/B.3, ne do jednotlivé A.4/B.2. Proto '>' (ne '>=').
@@ -974,7 +1137,7 @@ final class KontrolniHlaseniBuilder
                         }
                         $a1[] = ['counterparty_dic' => $g['dic_raw'], 'vendor_invoice_number' => $g['varsymbol'],
                                  'tax_date' => $g['tax_date'], 'base' => $codeBase,
-                                 'kod_pred_pl' => $code !== '' ? $code : null];
+                                 'kod_pred_pl' => $code !== '' ? $code : null] + $meta($g);
                         $a1Total += $codeBase;
                     }
                     if (abs($a1Total) >= 0.005) {
@@ -990,13 +1153,14 @@ final class KontrolniHlaseniBuilder
                             'base12' => $g['dom_base12'], 'vat12' => $g['dom_vat12'],
                             'kh_regime_code' => count($regimeCodes) === 1 ? $regimeCodes[0] : null,
                             'kh_bad_debt' => count($badDebtCodes) === 1 ? $badDebtCodes[0] : null,
-                            'kh_attribute_conflict' => count($regimeCodes) > 1 || count($badDebtCodes) > 1];
+                            'kh_attribute_conflict' => count($regimeCodes) > 1 || count($badDebtCodes) > 1] + $meta($g);
                     if (($overLimit || $row['kh_bad_debt'] === 'P') && $hasDic) {
                         $a4[] = $row;
                         $tag($g, 'A.4', $g['dom_base21'], $g['dom_base12']);
                     } else {
                         $a5['count']++; $a5['base21'] += $g['dom_base21']; $a5['vat21'] += $g['dom_vat21'];
                         $a5['base12'] += $g['dom_base12']; $a5['vat12'] += $g['dom_vat12'];
+                        $a5['docs'][] = $row;
                         $tag($g, 'A.5', $g['dom_base21'], $g['dom_base12']);
                     }
                 }
@@ -1014,7 +1178,7 @@ final class KontrolniHlaseniBuilder
                              'counterparty_dic' => $g['dic_raw'], 'country_iso2' => $g['country_iso2'],
                              'country_is_eu' => $g['country_is_eu'],
                              'base21' => $g['a2_base21'], 'vat21' => $g['a2_vat21'],
-                             'base12' => $g['a2_base12'], 'vat12' => $g['a2_vat12']];
+                             'base12' => $g['a2_base12'], 'vat12' => $g['a2_vat12']] + $meta($g);
                 }
                 // B.1 — tuzemský režim přenesení (§ 92a–92e) příjemce. Per-sazbové agregáty
                 // nesou i samovyměřenou daň (vat z rcSelfAssess) — B.1 ji vykazuje, ne jen základ.
@@ -1029,7 +1193,7 @@ final class KontrolniHlaseniBuilder
                                  'tax_date' => $g['tax_date'], 'base' => $sums['base21'] + $sums['base12'],
                                  'base21' => $sums['base21'], 'vat21' => $sums['vat21'],
                                  'base12' => $sums['base12'], 'vat12' => $sums['vat12'],
-                                 'kod_pred_pl' => $code !== '' ? $code : null];
+                                 'kod_pred_pl' => $code !== '' ? $code : null] + $meta($g);
                         $b1Base21 += $sums['base21'];
                         $b1Base12 += $sums['base12'];
                     }
@@ -1045,22 +1209,32 @@ final class KontrolniHlaseniBuilder
                             'document_kind' => $g['document_kind'],
                             'parent_vendor_invoice_number' => $g['parent_vendor_invoice_number'],
                             'kh_bad_debt' => count($badDebtCodes) === 1 ? $badDebtCodes[0] : null,
-                            'kh_attribute_conflict' => count($badDebtCodes) > 1];
+                            'kh_attribute_conflict' => count($badDebtCodes) > 1] + $meta($g);
                     if (($overLimit || $row['kh_bad_debt'] === 'P') && $hasDic) {
                         $b2[] = $row;
                         $tag($g, 'B.2', $g['dom_base21'], $g['dom_base12']);
                     } else {
                         $b3['count']++; $b3['base21'] += $g['dom_base21']; $b3['vat21'] += $g['dom_vat21'];
                         $b3['base12'] += $g['dom_base12']; $b3['vat12'] += $g['dom_vat12'];
+                        $b3['docs'][] = $row;
                         $tag($g, 'B.3', $g['dom_base21'], $g['dom_base12']);
                     }
                 }
+            }
+            if (count($invoices) === $taggedBefore) {
+                $outside[] = [
+                    'varsymbol' => $g['varsymbol'], 'vendor_invoice_number' => $g['vendor_invoice_number'],
+                    'tax_date' => $g['tax_date'], 'counterparty_dic' => $g['dic_raw'],
+                    'base21' => $g['all_base21'], 'vat21' => $g['all_vat21'],
+                    'base12' => $g['all_base12'], 'vat12' => $g['all_vat12'], 'base0' => $g['all_base0'],
+                ] + $meta($g);
             }
         }
 
         return [
             'sections' => ['a1' => $a1, 'a2' => $a2, 'a4' => $a4, 'a5' => $a5, 'b1' => $b1, 'b2' => $b2, 'b3' => $b3],
             'invoices' => $invoices,
+            'outside' => $outside,
             'missing_rates' => $missingRates,
         ];
     }
@@ -1119,14 +1293,15 @@ final class KontrolniHlaseniBuilder
      * @param list<string> $warnings
      * @return list<array<string,mixed>>
      */
-    private function filterReverseChargeRowsWithDic(array $rows, string $section, array &$warnings): array
+    private function filterReverseChargeRowsWithDic(array $rows, string $section, array &$warnings, array &$excluded = []): array
     {
-        return array_values(array_filter($rows, static function (array $row) use ($section, &$warnings): bool {
+        return array_values(array_filter($rows, static function (array $row) use ($section, &$warnings, &$excluded): bool {
             if (self::isValidCzechDic($row['counterparty_dic'] ?? '')) {
                 return true;
             }
             $number = (string) ($row['vendor_invoice_number'] ?? 'bez čísla');
             $warnings[] = "Doklad {$number} nelze uvést v KH {$section}: chybí platné české DIČ protistrany. Doplňte DIČ před podáním.";
+            $excluded[] = $row + ['excluded_section' => $section, 'excluded_reason' => 'missing_dic'];
             return false;
         }));
     }
@@ -1241,14 +1416,15 @@ final class KontrolniHlaseniBuilder
      * @param list<string> $warnings
      * @return list<array<string,mixed>>
      */
-    private function filterKhAttributeConflicts(array $rows, string $section, array &$warnings): array
+    private function filterKhAttributeConflicts(array $rows, string $section, array &$warnings, array &$excluded = []): array
     {
-        return array_values(array_filter($rows, static function (array $row) use ($section, &$warnings): bool {
+        return array_values(array_filter($rows, static function (array $row) use ($section, &$warnings, &$excluded): bool {
             if (empty($row['kh_attribute_conflict'])) {
                 return true;
             }
             $number = (string) ($row['varsymbol'] ?? $row['vendor_invoice_number'] ?? 'bez čísla');
             $warnings[] = "Doklad {$number} nelze uvést v KH {$section}: položky mají rozdílný režim plnění nebo příznak opravy nedobytné pohledávky. Sjednoťte klasifikaci před podáním.";
+            $excluded[] = $row + ['excluded_section' => $section, 'excluded_reason' => 'attribute_conflict'];
             return false;
         }));
     }

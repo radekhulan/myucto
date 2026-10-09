@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { reportsApi, type DphBookPreview, type DphBookRow } from '@/api/reports'
+import {
+  reportsApi, KH_EVIDENCE_SECTIONS,
+  type DphBookPreview, type DphBookRow, type KhEvidenceReport, type KhEvidenceSection,
+} from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import KhEvidenceSections from '@/components/reports/KhEvidenceSections.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -20,11 +24,22 @@ const preview = ref<DphBookPreview | null>(null)
 const loading = ref(false)
 const error = ref('')
 
+// Filtr „Oddíl KH" (issue #142): prázdný = celá Kniha DPH, jinak soupis dokladů
+// oddílu sestavený stejnou logikou jako kontrolní hlášení.
+const khSection = ref<KhEvidenceSection | ''>('')
+const khReport = ref<KhEvidenceReport | null>(null)
+const khSectionOptions: KhEvidenceSection[] = ['all', ...KH_EVIDENCE_SECTIONS]
+
 async function loadPreview() {
   loading.value = true
   error.value = ''
   try {
-    preview.value = await reportsApi.dphBookPreview(year.value, month.value, periodType.value)
+    if (khSection.value === '') {
+      khReport.value = null
+      preview.value = await reportsApi.dphBookPreview(year.value, month.value, periodType.value)
+    } else {
+      khReport.value = await reportsApi.khEvidencePreview(year.value, month.value, periodType.value, khSection.value)
+    }
   } catch (e) {
     error.value = apiErrorMessage(e)
   } finally {
@@ -34,6 +49,17 @@ async function loadPreview() {
 
 function downloadPdf() {
   window.open(reportsApi.dphBookPdfUrl(year.value, month.value, periodType.value), '_blank')
+}
+
+function downloadKh(format: 'pdf' | 'xlsx') {
+  if (khSection.value === '') return
+  window.open(reportsApi.khEvidenceDownloadUrl(year.value, month.value, periodType.value, khSection.value, format), '_blank')
+}
+
+function khSectionLabel(s: KhEvidenceSection): string {
+  if (s === 'all') return t('reports.kh_evidence.filter_all')
+  if (s === 'none') return t('reports.kh_evidence.outside')
+  return `${s} - ${t(`reports.kh_evidence.section_label.${s.replace('.', '')}`)}`
 }
 
 const monthOptions = computed(() =>
@@ -90,7 +116,7 @@ const anyClaimShifted = computed(() =>
   (preview.value?.sections ?? []).some(s => s.rows.some(claimShifted))
 )
 
-watch([year, month, periodType], loadPreview)
+watch([year, month, periodType, khSection], loadPreview)
 onMounted(loadPreview)
 </script>
 
@@ -127,11 +153,30 @@ onMounted(loadPreview)
         <select v-model.number="year" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
         </select>
-        <button v-if="auth.canRead('reports.export')" type="button" @click="downloadPdf" :disabled="loading || !preview"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-          {{ t('reports.dph_book.download_pdf') }}
-        </button>
+        <select v-model="khSection" :aria-label="t('reports.kh_evidence.filter_label')"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm max-w-full">
+          <option value="">{{ t('reports.kh_evidence.filter_none') }}</option>
+          <option v-for="s in khSectionOptions" :key="s" :value="s">{{ khSectionLabel(s) }}</option>
+        </select>
+        <template v-if="auth.canRead('reports.export')">
+          <button v-if="khSection === ''" type="button" @click="downloadPdf" :disabled="loading || !preview"
+            :class="btnOutline('primary')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('reports.dph_book.download_pdf') }}
+          </button>
+          <template v-else>
+            <button type="button" @click="downloadKh('pdf')" :disabled="loading || !khReport"
+              :class="btnOutline('primary')" class="whitespace-nowrap">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              {{ t('reports.kh_evidence.download_pdf') }}
+            </button>
+            <button type="button" @click="downloadKh('xlsx')" :disabled="loading || !khReport"
+              :class="btnOutline('neutral')" class="whitespace-nowrap">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+              {{ t('reports.kh_evidence.download_xlsx') }}
+            </button>
+          </template>
+        </template>
       </div>
     </div>
 
@@ -142,7 +187,19 @@ onMounted(loadPreview)
       {{ error }}
     </div>
 
-    <div v-else-if="preview" class="space-y-4">
+    <div v-else-if="khSection !== '' && khReport" class="space-y-4">
+      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
+        <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">
+          {{ t('reports.kh_evidence.title') }}
+        </div>
+        <div class="text-lg font-semibold font-mono">{{ khReport.period.label }}</div>
+        <p class="text-xs text-neutral-500 mt-2">{{ t('reports.kh_evidence.source_current') }}</p>
+        <p class="text-xs text-neutral-500 mt-1">{{ t('reports.kh_evidence.rule_note') }}</p>
+      </div>
+      <KhEvidenceSections :report="khReport" />
+    </div>
+
+    <div v-else-if="khSection === '' && preview" class="space-y-4">
       <!-- Period info -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <div class="text-xs uppercase tracking-wide text-neutral-500 font-medium mb-1">

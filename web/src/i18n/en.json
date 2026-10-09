@@ -25133,6 +25133,60 @@
       "missing_count": "{count} missing",
       "gaps_found": "Gaps found: {count}"
     },
+    "kh_evidence": {
+      "title": "Control statement document list",
+      "filter_label": "Control statement section",
+      "filter_none": "VAT ledger (all documents)",
+      "filter_all": "Control statement - all sections",
+      "outside": "Outside the control statement",
+      "section_prefix": "Section",
+      "section_label": {
+        "A1": "Supplies made under the domestic reverse charge",
+        "A2": "Supplies received where the recipient declares the tax",
+        "A4": "Supplies made over CZK 10,000",
+        "A5": "Supplies made up to CZK 10,000 (aggregated)",
+        "B1": "Supplies received under the domestic reverse charge",
+        "B2": "Supplies received over CZK 10,000",
+        "B3": "Supplies received up to CZK 10,000 (aggregated)",
+        "none": "VAT records outside the control statement"
+      },
+      "doc_count": "{n} documents",
+      "section_empty": "The section contains no documents.",
+      "no_data": "There are no documents for the selected period and section.",
+      "download_pdf": "Download PDF",
+      "download_xlsx": "Download XLSX",
+      "source_current": "Source: current data. Documents are assigned by the same logic that builds the control statement; drafts are not included.",
+      "rule_note": "The CZK 10,000 limit applies to the document total including VAT, not to individual items.",
+      "total": "Total",
+      "correction": "correction",
+      "whole_crowns": "Rounded to whole CZK (as in the VAT return): base {base}, VAT {vat}.",
+      "rounding_difference": "The aggregated section line is computed from unrounded document amounts and differs from the sum of rows by CZK {amount}.",
+      "excluded_title": "Documents excluded from the control statement",
+      "excluded_reason": {
+        "missing_dic": "valid counterparty VAT ID is missing",
+        "attribute_conflict": "items have a different supply regime or bad-debt correction flag"
+      },
+      "col": {
+        "status": "Status",
+        "doc_number": "Document number (in statement)",
+        "internal_number": "Internal number",
+        "partner": "Customer / vendor",
+        "dic": "VAT ID",
+        "tax_date": "Decisive date",
+        "base21": "Base standard rate",
+        "vat21": "VAT standard rate",
+        "base12": "Base reduced rate",
+        "vat12": "VAT reduced rate",
+        "base_total": "Base total",
+        "vat_total": "VAT total"
+      },
+      "status": {
+        "match": "Match",
+        "only_submitted": "Only in filed statement",
+        "only_current": "Only in current data",
+        "amount_diff": "Amount differs"
+      }
+    },
     "dph_book": {
       "nil_row_note": "Zero base and VAT (typically settlement of a fully paid advance)",
       "nil_kh": "not reported",

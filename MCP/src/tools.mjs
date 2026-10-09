@@ -2729,16 +2729,24 @@ export const TOOLS = [
     name: 'vat_ledger',
     title: 'Záznamní evidence DPH',
     description:
-      'Doklady, ze kterých se DPH za období skládá — na dohledání, proč vychází taková částka.',
+      'Doklady, ze kterých se DPH za období skládá — na dohledání, proč vychází taková částka. '
+      + 'S parametrem kh_section vrátí soupis dokladů oddílu kontrolního hlášení (zařazení stejnou logikou jako KH) se součty.',
     inputSchema: schema({
       year: int('Rok.', { minimum: 2020, maximum: 2050 }),
       month: int('Měsíc 1–12.', { minimum: 1, maximum: 12 }),
       period: str('Zdaňovací období.', { enum: ['monthly', 'quarterly'] }),
+      kh_section: str('Oddíl kontrolního hlášení; none = doklady mimo KH, all = všechny oddíly.', {
+        enum: ['all', 'A.1', 'A.2', 'A.4', 'A.5', 'B.1', 'B.2', 'B.3', 'none'],
+      }),
     }),
     write: false,
-    run: (c, a, tool) => c.get('/reports/dph-book/preview', {
-      year: a.year, month: a.month, period: a.period,
-    }, tool),
+    run: (c, a, tool) => (a.kh_section
+      ? c.get('/reports/kh-evidence/preview', {
+        year: a.year, month: a.month, period: a.period ?? 'monthly', section: a.kh_section,
+      }, tool)
+      : c.get('/reports/dph-book/preview', {
+        year: a.year, month: a.month, period: a.period,
+      }, tool)),
   },
   {
     name: 'vat_summary_report_preview',
