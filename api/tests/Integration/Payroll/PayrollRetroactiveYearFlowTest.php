@@ -5,6 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollDependantAction;
+use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessSubmissionService;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
@@ -77,6 +83,9 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         $this->configureSocialInsuranceOutput($this->officeId);
         $this->configureHealthInsuranceOutput();
         $this->configureIncomeTaxOutput();
+        // Kód OSSZ podle číselníku pracovišť; bez něj případ NEMPRI nevznikne.
+        $this->db->pdo()->prepare('UPDATE payroll_employer_settings SET social_security_office_code = "115" WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
         $this->baseComponentId = $this->createComponent('MZDA_G7', 'base_wage', 'regular');
         $mappings = $this->container->get(PayrollComponentJmhzMappingRepository::class);
         self::assertInstanceOf(PayrollComponentJmhzMappingRepository::class, $mappings);
@@ -101,6 +110,109 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
             $failures = [...$failures, ...$this->processMonth($period)];
         }
         self::assertSame([], $failures, implode("\n", $failures));
+
+        $this->assertSicknessReports();
+        $this->assertHealthOverview();
+        $this->assertAnnualEldp();
+    }
+
+    /**
+     * NEMPRI a HZUPN z nemoci 25. 3. – 10. 4. (17 dnů, případ vzniká).
+     * Rozhodné období 1. 3. 2025 – 28. 2. 2026: leden a únor 2026 z běhů
+     * MyÚčta (40 000 Kč), březen až prosinec 2025 ručně z výplatních listin.
+     */
+    private function assertSicknessReports(): void
+    {
+        $employmentId = $this->people['nemoc']['person']['employment_id'];
+        $caseId = (int) $this->scalar(
+            'SELECT id FROM payroll_sickness_cases WHERE supplier_id = ? AND employment_id = ? AND benefit_kind = "NEM" ORDER BY id DESC LIMIT 1',
+            [$this->supplierId, $employmentId],
+        );
+        self::assertGreaterThan(0, $caseId, 'Nemoc delší než 14 dnů musí založit případ NEMPRI: ' . CanonicalJson::encode($this->people['nemoc']['absences'][0]['sickness_case'] ?? null));
+        $environment = (string) $this->scalar('SELECT environment FROM payroll_sickness_cases WHERE supplier_id = ? AND id = ?', [$this->supplierId, $caseId]);
+        $cases = $this->container->get(SicknessCaseService::class);
+        self::assertInstanceOf(SicknessCaseService::class, $cases);
+        $case = $cases->requireCase($this->supplierId, $environment, $caseId);
+        self::assertSame('2026-03-25', $case['incapacity_from']);
+        self::assertSame('2026-04-10', $case['incapacity_to']);
+        $months = [];
+        for ($cursor = new \DateTimeImmutable('2025-03-01'); $cursor->format('Y-m') <= '2025-12'; $cursor = $cursor->modify('+1 month')) {
+            $months[] = ['period' => $cursor->format('Y-m'), 'income_minor' => 40_000_00, 'excluded_days' => 0];
+        }
+        $this->db->pdo()->prepare('UPDATE payroll_employee_profiles SET payout_method = "cash" WHERE supplier_id = ? AND employee_id = ?')
+            ->execute([$this->supplierId, $this->people['nemoc']['person']['employee_id']]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_addresses (supplier_id, employee_id, address_type, street_line, city, postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", "Zkušební 12", "Testov", "11000", "CZ", "2026-01-01")',
+        )->execute([$this->supplierId, $this->people['nemoc']['person']['employee_id']]);
+        $cases->update($this->supplierId, $environment, $caseId, (int) $case['row_version'], [
+            'decision_number' => 'E7654321',
+            'daily_working_hours' => '8',
+            'issued_on' => '2026-04-13',
+            'returned_to_work' => '1',
+            'returned_on' => '2026-04-13',
+            'hours_worked_last_day' => '8',
+            'shift_hours_last_day' => '8',
+            'decisive_months' => $months,
+        ]);
+        $submissions = $this->container->get(SicknessSubmissionService::class);
+        self::assertInstanceOf(SicknessSubmissionService::class, $submissions);
+        $nempri = (string) preg_replace('/>\s+</', '><', (string) $submissions->preview($this->supplierId, $environment, $caseId, SicknessDocumentKind::Nempri)['xml']);
+        self::assertStringContainsString('<rozhodneObdobiOd>2025-03-01</rozhodneObdobiOd>', $nempri);
+        self::assertStringContainsString('<rozhodneObdobiDo>2026-02-28</rozhodneObdobiDo>', $nempri);
+        self::assertSame(12, substr_count($nempri, '<zapocitatelnyPrijem>'), $nempri);
+        self::assertStringContainsString('<zapocitatelnyPrijemCelkem>480000</zapocitatelnyPrijemCelkem>', $nempri);
+        $hzupn = (string) $submissions->preview($this->supplierId, $environment, $caseId, SicknessDocumentKind::Hzupn)['xml'];
+        self::assertStringContainsString('<datumNavratDoPrace>2026-04-13</datumNavratDoPrace>', $hzupn);
+    }
+
+    /** Přehled o platbě pojistného ZP za září: jedna pojišťovna, souhrn ze schválené revize. */
+    private function assertHealthOverview(): void
+    {
+        $action = $this->container->get(PayrollHealthInsuranceOverviewAction::class);
+        self::assertInstanceOf(PayrollHealthInsuranceOverviewAction::class, $action);
+        $revisionId = (int) $this->scalar(
+            'SELECT revision.id FROM payroll_run_revisions revision JOIN payroll_runs run ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+              WHERE run.supplier_id = ? AND run.period_start = "2026-09-01" ORDER BY revision.id DESC LIMIT 1',
+            [$this->supplierId],
+        );
+        $response = $action->index(
+            $this->request('GET', "/api/payroll/submissions/health-overviews/{$revisionId}"),
+            new Response(),
+            ['revisionId' => (string) $revisionId],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $overview = $this->json($response);
+        self::assertSame('111', $overview['items'][0]['insurer']['code'] ?? null, CanonicalJson::encode($overview));
+        $download = $action->download(
+            $this->request('GET', "/api/payroll/submissions/health-overviews/{$revisionId}/111/download"),
+            new Response(),
+            ['revisionId' => (string) $revisionId, 'insurerCode' => '111'],
+        );
+        self::assertSame(200, $download->getStatusCode(), (string) $download->getBody());
+    }
+
+    /** Evidenční list stálé zaměstnankyně za leden až září na výzvu: 273 dnů, základ 360 000 Kč. */
+    private function assertAnnualEldp(): void
+    {
+        $service = $this->container->get(EldpStatementService::class);
+        self::assertInstanceOf(EldpStatementService::class, $service);
+        $employmentId = $this->people['stala']['person']['employment_id'];
+        try {
+            $service->prepare($this->supplierId, $employmentId, 2026, 'test', [
+                'excluded_days_confirmed' => true,
+                'deducted_days_none' => true,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                'requested_by_authority' => true,
+                'authority_request_received_on' => '2026-10-05',
+                'note' => 'Syntetická výzva G7.',
+            ], 'g7-eldp-stala', $this->actors[0]);
+        } catch (EldpValidationException $exception) {
+            self::fail("ELDP odmítnut ({$exception->validationCode}): " . CanonicalJson::encode($exception->blockers));
+        }
+        $sections = $service->statement($this->supplierId, 'test', $employmentId, 2026)['payload']['eldp_sections'] ?? [];
+        self::assertSame(273, array_sum(array_map(static fn (array $s): int => (int) ($s['days'] ?? $s['insurance_days'] ?? 0), $sections)));
+        self::assertSame(360_000, array_sum(array_map(static fn (array $s): int => (int) ($s['assessment_base_czk'] ?? 0), $sections)));
     }
 
     /**
@@ -419,6 +531,7 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
                         return ["{$period} {$key}: schválení nepřítomnosti {$absence['type']}: " . (string) $decision->getBody()];
                     }
                     $p['absences'][$index]['id'] = (int) $row['id'];
+                    $p['absences'][$index]['sickness_case'] = $this->json($decision)['sickness_case'] ?? null;
                 }
                 $birth = $absence['childbirth'] ?? null;
                 if ($birth !== null && substr($birth, 0, 7) === $period) {
