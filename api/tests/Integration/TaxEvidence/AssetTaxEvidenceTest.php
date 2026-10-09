@@ -86,6 +86,58 @@ final class AssetTaxEvidenceTest extends CashJournalTestCase
         }
     }
 
+    /**
+     * Hromadné potvrzení odpisů, přerušení odpisu a technické zhodnocení mění daňové odpisy
+     * roku, ze kterých je dokončená uzávěrka. Musí proto respektovat její zámek stejně jako
+     * vyřazení a ruční přepis.
+     */
+    public function testFinalAnnualClosingLocksBookingPauseAndImprovement(): void
+    {
+        $assetId = $this->carInUse();
+        $this->depreciation->bookYear($this->supplierId, self::YEAR - 1, ['user_id' => $this->userId]);
+        $improvement = $this->assets->addImprovement($this->supplierId, $assetId,
+            ['completed_on' => self::YEAR . '-02-01', 'amount' => 90000], ['user_id' => $this->userId]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_evidence_closings (supplier_id, year, status) VALUES (?, ?, 'final')"
+        )->execute([$this->supplierId, self::YEAR]);
+
+        $attempts = [
+            'bookYear' => fn () => $this->depreciation->bookYear($this->supplierId, self::YEAR, ['user_id' => $this->userId]),
+            'pauseYear' => fn () => $this->assets->pauseYear($this->supplierId, $assetId, self::YEAR),
+            'addImprovement' => fn () => $this->assets->addImprovement($this->supplierId, $assetId,
+                ['completed_on' => self::YEAR . '-05-01', 'amount' => 95000], ['user_id' => $this->userId]),
+            'deleteImprovement' => fn () => $this->assets->deleteImprovement($this->supplierId, $assetId,
+                (int) $improvement['improvement']['id']),
+        ];
+        foreach ($attempts as $name => $attempt) {
+            try {
+                $attempt();
+                self::fail($name . ': rok s dokončenou roční uzávěrkou se nesmí měnit.');
+            } catch (AssetException $e) {
+                self::assertSame('closing_final', $e->errorCode, $name);
+            }
+        }
+        self::assertNull($this->entries->findYear($assetId, 'tax', self::YEAR), 'Odpis roku nevznikl.');
+    }
+
+    public function testFinalAnnualClosingLocksUnpause(): void
+    {
+        $assetId = $this->carInUse();
+        $this->depreciation->bookYear($this->supplierId, self::YEAR - 1, ['user_id' => $this->userId]);
+        $this->assets->pauseYear($this->supplierId, $assetId, self::YEAR);
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_evidence_closings (supplier_id, year, status) VALUES (?, ?, 'final')"
+        )->execute([$this->supplierId, self::YEAR]);
+
+        try {
+            $this->assets->unpauseYear($this->supplierId, $assetId, self::YEAR);
+            self::fail('Přerušení v roce s dokončenou uzávěrkou se nesmí zrušit.');
+        } catch (AssetException $e) {
+            self::assertSame('closing_final', $e->errorCode);
+        }
+        self::assertTrue((bool) $this->entries->findYear($assetId, 'tax', self::YEAR)['is_paused']);
+    }
+
     /** Odpisy roku i daňová ZC prodaného majetku jsou výdajem § 7, ZC jen u prodeje a likvidace. */
     public function testDpfoExpensesIncludeTaxResidualOfSoldAsset(): void
     {

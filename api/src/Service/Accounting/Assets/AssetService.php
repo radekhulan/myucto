@@ -15,6 +15,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 
 /**
  * AssetService — CRUD + lifecycle majetkových karet (Epic F3, §3.3).
@@ -459,6 +460,7 @@ final class AssetService
             throw new AssetException('validation_failed', 'Částka TZ musí být kladná.');
         }
         $year = $this->fiscalYearOf($supplierId, $completedOn);
+        $this->assertTaxEvidenceYearOpenIfTaxEvidence($supplierId, $year);
         $this->assertYearNotConfirmed($id, $year);
         $this->assertNoLaterConfirmedYear($id, $year);
         $piId = isset($data['purchase_invoice_id']) && $data['purchase_invoice_id'] !== null
@@ -502,6 +504,7 @@ final class AssetService
             throw new AssetException('not_found', 'Technické zhodnocení nenalezeno.', 404);
         }
         $impYear = $this->fiscalYearOf($supplierId, (string) $imp['completed_on']);
+        $this->assertTaxEvidenceYearOpenIfTaxEvidence($supplierId, $impYear);
         $this->assertYearNotConfirmed($id, $impYear);
         $this->assertNoLaterConfirmedYear($id, $impYear);
         $this->assets->deleteImprovement($supplierId, $improvementId);
@@ -1097,6 +1100,7 @@ final class AssetService
         if ($fiscalYear < $firstYear) {
             throw new AssetException('validation_failed', 'Rok přerušení nesmí předcházet prvnímu roku odpisování (' . $firstYear . ').');
         }
+        $this->assertTaxEvidenceYearOpenIfTaxEvidence($supplierId, $fiscalYear);
         if ($this->entries->findYear($id, 'tax', $fiscalYear) !== null) {
             throw new AssetException('year_already_confirmed', 'Pro rok ' . $fiscalYear . ' už existuje potvrzený daňový řádek.');
         }
@@ -1162,6 +1166,7 @@ final class AssetService
         if ($row === null || !$row['is_paused']) {
             throw new AssetException('not_found', 'Pro rok ' . $fiscalYear . ' neexistuje přerušení odpisu.', 404);
         }
+        $this->assertTaxEvidenceYearOpenIfTaxEvidence($supplierId, $fiscalYear);
         $lastTax = $this->entries->lastConfirmedYear($id, 'tax');
         if ($lastTax !== null && $lastTax > $fiscalYear) {
             throw new AssetException(
@@ -1886,16 +1891,16 @@ final class AssetService
     /** Rok s dokončenou roční uzávěrkou daňové evidence se už nemění. */
     private function assertTaxEvidenceYearOpen(int $supplierId, int $year): void
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM tax_evidence_closings WHERE supplier_id = ? AND year = ? AND status = 'final'"
-        );
-        $stmt->execute([$supplierId, $year]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new AssetException(
-                'closing_final',
-                'Roční uzávěrka daňové evidence ' . $year . ' je dokončená — nejdřív ji vraťte do rozpracovaného stavu.',
-                409,
-            );
+        if (TaxEvidenceYearLock::isFinal($this->db, $supplierId, $year)) {
+            throw new AssetException(TaxEvidenceYearLock::ERROR_CODE, TaxEvidenceYearLock::message($year), 409);
+        }
+    }
+
+    /** Přerušení a technické zhodnocení: v daňové evidenci jen v roce bez dokončené uzávěrky. */
+    private function assertTaxEvidenceYearOpenIfTaxEvidence(int $supplierId, int $year): void
+    {
+        if ($this->isTaxEvidence($supplierId)) {
+            $this->assertTaxEvidenceYearOpen($supplierId, $year);
         }
     }
 

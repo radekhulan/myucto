@@ -12,6 +12,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -57,6 +58,11 @@ final class DepreciationPostingService
     public function bookYear(int $supplierId, int $fiscalYear, array $meta = [], bool $allowClosingPeriod = false): array
     {
         $taxEvidence = $this->isTaxEvidence($supplierId);
+        // Daňová evidence: rok s dokončenou roční uzávěrkou se nemění (tamtéž vyřazení, přepis,
+        // přerušení i TZ v AssetService). Podvojné účetnictví hlídá období přes PostingService.
+        if ($taxEvidence && TaxEvidenceYearLock::isFinal($this->db, $supplierId, $fiscalYear)) {
+            throw new AssetException(TaxEvidenceYearLock::ERROR_CODE, TaxEvidenceYearLock::message($fiscalYear), 409);
+        }
         $result = [
             'booked' => 0,
             'skipped' => 0,

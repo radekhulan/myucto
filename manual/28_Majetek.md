@@ -464,7 +464,7 @@ Firma v daňové evidenci (§ 7b ZDP) nemá účtovou osnovu ani deník. Karta m
 | Odpisy roku | Tlačítko **Potvrdit odpisy roku** potvrdí daňové odpisy u všech karet v užívání. Potvrzené odpisy vstupují do výdajů § 7 v přiznání k dani z příjmů fyzických osob, ne do peněžního deníku. |
 | Vyřazení | Dopočte se daňový odpis roku vyřazení (u rovnoměrných a zrychlených odpisů polovina, § 26 odst. 7 ZDP). Daňová zůstatková cena prodaného nebo zlikvidovaného majetku je výdajem (§ 24 odst. 2 písm. b) ZDP) a přiznání ji do výdajů zahrne samo. Darovaný majetek výdaj nemá. U škody je zůstatková cena výdajem jen do výše náhrad nebo při živelní pohromě či neznámém pachateli, uznatelnou část zadejte ručně v roční uzávěrce daňové evidence. |
 | Prodej | Příjem z prodeje se z karty nezapisuje. Vystavte fakturu, do peněžního deníku vstoupí jejím zaplacením. |
-| Zámek roku | Rok s dokončenou roční uzávěrkou daňové evidence už nejde měnit: vyřazení, vrácení vyřazení ani ruční přepis odpisu. Nejdřív uzávěrku vraťte do rozpracovaného stavu. |
+| Zámek roku | Rok s dokončenou roční uzávěrkou daňové evidence už nejde měnit: hromadné potvrzení odpisů roku, vyřazení, vrácení vyřazení, ruční přepis odpisu, přerušení odpisu ani jeho zrušení a technické zhodnocení dokončené v tom roce (přidání i smazání). Nejdřív uzávěrku vraťte do rozpracovaného stavu. |
 | Nedostupné | Souhrnná karta z účtu, import a export Excelem a drobný majetek patří k účetnictví, v daňové evidenci nejsou. |
 
 Pořízení majetku peněžní deník do výdajů nezapočítá, pokud je přijatá faktura označená jako dlouhodobý majetek. Výdajem jsou
