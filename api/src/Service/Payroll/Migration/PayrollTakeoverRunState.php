@@ -17,6 +17,8 @@ final class PayrollTakeoverRunState
     public array $invalidOic = [];
     /** @var list<string> osobní čísla osob podléhajících cizím právním předpisům */
     public array $foreignLegislation = [];
+    /** @var list<string> osobní čísla osob s převzatou výjimkou z minima ZP bez důvodu */
+    public array $healthMinimumUnverified = [];
     public int $accountsToVerify = 0;
     public int $accountsVerified = 0;
     /** Aktivní účty ověřené už dřívějším během (opakovaný převod je jinak hlásil jako nic). */

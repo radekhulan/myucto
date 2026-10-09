@@ -153,7 +153,42 @@ final class PohodaPayrollTakeover
             childrenWithoutCredit: (int) $record['children_without_credit'],
             firstSignedPeriod: is_string($record['first_signed_period']) ? $record['first_signed_period'] : null,
             openingMonths: $openings,
+            healthMinimumExemptions: self::healthMinimumExemptions((array) ($record['health_minimum_exempt_periods'] ?? [])),
         );
+    }
+
+    /**
+     * Měsíce s příznakem „Nedoplácet ZP do minima" (`MZ.NeDopZdr`) jako souvislé úseky výjimky
+     * z minimálního vyměřovacího základu. Důvod (§ 3 odst. 8 zák. č. 592/1992 Sb.) PAMICA nevede,
+     * úsek je proto `unverified`: mzdový běh za něj stojí, dokud důvod nedoplní účetní, ale doplatek
+     * do minima, který PAMICA nesrážela, tiše nesrazí.
+     *
+     * @param list<string> $periods měsíce `YYYY-MM` vzestupně
+     * @return list<PayrollTakeoverEvidencePeriod>
+     */
+    private static function healthMinimumExemptions(array $periods): array
+    {
+        $runs = [];
+        foreach ($periods as $period) {
+            $last = array_key_last($runs);
+            $next = $last === null ? null : (new \DateTimeImmutable($runs[$last]['to'] . '-01'))->modify('+1 month')->format('Y-m');
+            if ($next === $period) {
+                $runs[$last]['to'] = $period;
+            } else {
+                $runs[] = ['from' => $period, 'to' => $period];
+            }
+        }
+
+        return array_map(static fn (array $run): PayrollTakeoverEvidencePeriod => new PayrollTakeoverEvidencePeriod(
+            'unverified',
+            $run['from'] . '-01',
+            (new \DateTimeImmutable($run['to'] . '-01'))->modify('last day of this month')->format('Y-m-d'),
+            'pamica:mz-nedopzdr:' . $run['from'],
+            self::NOTE . 'PAMICA nedoplácela zdravotní pojištění do minimálního vyměřovacího základu (příznak „Nedoplácet ZP do minima") za '
+                . PayrollTakeoverFormat::czechPeriod($run['from'])
+                . ($run['to'] !== $run['from'] ? ' až ' . PayrollTakeoverFormat::czechPeriod($run['to']) : '')
+                . '. Důvod výjimky PAMICA nevede, doplňte ho.',
+        ), $runs);
     }
 
     /** @param array<string,mixed> $record */

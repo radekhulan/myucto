@@ -610,6 +610,55 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * PAMICA u osoby nedoplácela zdravotní pojištění do minimálního vyměřovacího
+     * základu (`MZ.NeDopZdr`, „Nedoplácet ZP do minima“). Převod příznak nečetl,
+     * takže MyÚčto pak doplatek do minima srazilo, ačkoli PAMICA ne. Výjimka se
+     * převezme do zákonné evidence za dotčené měsíce. Důvod (§ 3 odst. 8 zák.
+     * č. 592/1992 Sb.) PAMICA nevede, zapíše se proto jako neověřený a protokol
+     * ho dá doplnit; opakovaný převod nic nezdvojí.
+     */
+    public function testHealthMinimumExemptionFromPamicaIsTakenOverAsUnverifiedReduction(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = $this->payrollXml('health_minimum', 2026, static function (\Closure $row): void {
+            $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
+            $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
+            $row('ZAM', ['ID' => 1, 'OsCislo' => '6101', 'Jmeno' => 'Bára', 'Prijmeni' => 'Minimální', 'DatNar' => '1990-07-08',
+                'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '2', 'Obec' => 'Brno',
+                'PSC' => '60200', 'Stat' => 'CZ']);
+            $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'JeDPP' => 0, 'DatNast' => '2025-01-01', 'TUvazek' => 20]);
+            foreach ([1 => 1, 2 => 1, 3 => 0] as $month => $exempt) {
+                $row('MZ', ['ID' => 10 + $month, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => $month, 'HodFond' => 80,
+                    'DnyFond2' => 20, 'TUvazek' => 20, 'HodOdpra' => 80, 'RefPoj' => 1, 'KcHrubaM' => 11000, 'KcCistaM' => 9500,
+                    'Prohlas' => 1, 'JeSocPP' => 1, 'KcSoc' => 781, 'KcZdr' => 495, 'NeDopZdr' => $exempt, 'KcZaklM' => 11000,
+                    'DnyPrac' => 20, 'DnyOdpra' => 20, 'Datum' => sprintf('2026-%02d-10', $month + 1), 'KcVyplat' => 9500]);
+                $row('MZslozky', ['ID' => $month, 'RefAg' => 10 + $month, 'RefSlozka' => 1, 'KcMzda' => 11000, 'Hodnota1' => 11000]);
+            }
+        });
+        $reductions = 'SELECT reason, evidence_reference, effective_from, effective_to FROM payroll_person_health_minimum_reductions
+                        WHERE supplier_id = ? AND employee_id = ? ORDER BY effective_from';
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $employeeId = (int) $this->employment($supplierId, '6101')['employee_id'];
+        $stmt = $this->db->pdo()->prepare($reductions);
+        $stmt->execute([$supplierId, $employeeId]);
+        self::assertSame([[
+            'reason' => 'unverified',
+            'evidence_reference' => null,
+            'effective_from' => '2026-01-01',
+            'effective_to' => '2026-02-28',
+        ]], $stmt->fetchAll(\PDO::FETCH_ASSOC), $this->explain($protocol));
+        $codes = array_column(array_merge(...array_column($protocol->toArray()['steps'], 'messages')), 'code');
+        self::assertContains('health_minimum_exemption_unverified', $codes, $this->explain($protocol));
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, 2026, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $stmt->execute([$supplierId, $employeeId]);
+        self::assertCount(1, $stmt->fetchAll(\PDO::FETCH_ASSOC), $this->explain($again));
+    }
+
+    /**
      * Soubor `91_mzdy.xml` ze zadaných řádků tabulek. Syntetická data.
      *
      * @param \Closure(\Closure(string,array<string,mixed>):void):void $fill

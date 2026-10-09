@@ -129,6 +129,8 @@ final class PohodaPayrollPeople
         $transferStart = null;
         /** @var array<string,string> $lastPaid osoba => den poslední výplaty (`MZ.Datum` mzdy s výplatou) */
         $lastPaid = [];
+        /** @var array<string,array<int,true>> $healthMinimumExempt osoba => měsíce s příznakem `NeDopZdr` */
+        $healthMinimumExempt = [];
         // Číselníky, karty a mzdy jedním průchodem souborem (desítky MB), nepřítomnosti
         // a složky mzdy druhým - potřebují už znát mzdy roku.
         $leaveCards = [];
@@ -202,6 +204,11 @@ final class PohodaPayrollPeople
             $sums['bonus'] += self::minor(PohodaXml::num($mz, 'KcDanBon'));
             $sums['signed'] = $sums['signed'] || self::bool(PohodaXml::text($mz, 'Prohlas'));
             $personMonths[$person][$month] = $sums;
+            // „Nedoplácet ZP do minima": PAMICA v měsíci nedoplatila pojistné do minimálního
+            // vyměřovacího základu (výjimka podle § 3 odst. 8 zák. č. 592/1992 Sb.).
+            if (self::bool(PohodaXml::text($mz, 'NeDopZdr'))) {
+                $healthMinimumExempt[$person][$month] = true;
+            }
         }
         $relationCount = [];
         foreach ($byId['ZAMpomer'] ?? [] as $relation) {
@@ -414,6 +421,11 @@ final class PohodaPayrollPeople
                 },
                 'tax_residence_country' => self::country(PohodaXml::text($person, 'ResCisSTOBC')),
                 'declarations' => self::declarations($months, $year),
+                // Měsíce osoby, ve kterých PAMICA nedoplácela zdravotní pojištění do minima.
+                'health_minimum_exempt_periods' => array_map(
+                    static fn (int $month): string => sprintf('%04d-%02d', $year, $month),
+                    self::sortedKeys($healthMinimumExempt[$personId] ?? []),
+                ),
                 // Sleva pracujícího důchodce: bez podaného hlášení ji převod zná jen u osoby, která
                 // důchod nemá (neuplatňuje se). Důchodci ji doplní hlášení, jinak zůstane k ověření.
                 'pensioner' => self::pensioner($person, $relation),
@@ -441,6 +453,18 @@ final class PohodaPayrollPeople
         usort($records, static fn (array $a, array $b): int => strcmp((string) $a['personal_number'], (string) $b['personal_number']));
 
         return $records;
+    }
+
+    /**
+     * @param array<int,true> $set
+     * @return list<int>
+     */
+    private static function sortedKeys(array $set): array
+    {
+        $keys = array_keys($set);
+        sort($keys);
+
+        return $keys;
     }
 
     /**

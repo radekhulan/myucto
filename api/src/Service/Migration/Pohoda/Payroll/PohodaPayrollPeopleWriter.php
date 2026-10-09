@@ -163,6 +163,10 @@ final class PohodaPayrollPeopleWriter
                         if ($manual === 'tax_residence') {
                             throw new \DomainException('PAMICA vede zaměstnance jako daňového nerezidenta bez státu rezidence. Daňovou rezidenci doplňte ručně.');
                         }
+                        if ($manual === 'health_minimum_reduction') {
+                            $state->healthMinimumUnverified[] = $number;
+                            return;
+                        }
                         // Příslušnost k sociálnímu pojištění osoby podléhající cizím právním
                         // předpisům se ručně ověří; souhrn je na konci protokolu.
                         $state->foreignLegislation[] = $number;
@@ -353,6 +357,18 @@ final class PohodaPayrollPeopleWriter
             $protocol->warn($step, 'social_jurisdiction_manual', sprintf(
                 'Příslušnost k sociálnímu pojištění převod nevyplnil u %d osob: PAMICA je vede jako podléhající cizím právním předpisům. Stát a doklad A1 doplňte ručně.',
                 count($state->foreignLegislation),
+            ));
+        }
+        if ($state->healthMinimumUnverified !== []) {
+            $protocol->count($step, 'health_minimum_exemption_unverified', count($state->healthMinimumUnverified));
+            $protocol->warn($step, 'health_minimum_exemption_unverified', sprintf(
+                'PAMICA u %d osob (osobní čísla %s) nedoplácela zdravotní pojištění do minimálního vyměřovacího základu '
+                . '(příznak „Nedoplácet ZP do minima"). Převod výjimku zapsal do zákonné evidence za dotčené měsíce, '
+                . 'důvod ale PAMICA nevede: doplňte ho v zákonné evidenci osoby (§ 3 odst. 8 zák. č. 592/1992 Sb., '
+                . 'např. státní pojištěnec, ZTP/P). Dokud důvod chybí, mzdový běh za tyto měsíce nepůjde spočítat; '
+                . 'pokud výjimka pokračuje i po převedených měsících, prodlužte ji.',
+                count($state->healthMinimumUnverified),
+                implode(', ', array_slice($state->healthMinimumUnverified, 0, 30)),
             ));
         }
         if ($state->completed !== []) {

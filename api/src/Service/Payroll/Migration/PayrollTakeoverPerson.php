@@ -39,6 +39,10 @@ final readonly class PayrollTakeoverPerson
      * @param int $childrenWithoutCredit děti vedené bez zvýhodnění (jen do počtů)
      * @param ?string $firstSignedPeriod první měsíc (`YYYY-MM`) s podepsaným prohlášením
      * @param array<int,PayrollTakeoverOpeningMonth> $openingMonths úhrny měsíců roku podle čísla měsíce
+     * @param list<PayrollTakeoverEvidencePeriod> $healthMinimumExemptions úseky, ve kterých zdroj
+     *        nedoplácel zdravotní pojištění do minimálního vyměřovacího základu; stav = důvod
+     *        podle {@see \MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason}
+     *        (`unverified`, když ho zdroj nevede)
      */
     public function __construct(
         public string $key,
@@ -60,5 +64,6 @@ final readonly class PayrollTakeoverPerson
         public ?string $firstSignedPeriod = null,
         public array $openingMonths = [],
         public array $healthCoverageHistory = [],
+        public array $healthMinimumExemptions = [],
     ) {}
 }

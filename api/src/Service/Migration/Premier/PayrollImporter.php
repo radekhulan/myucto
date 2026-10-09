@@ -706,6 +706,10 @@ final class PayrollImporter
                     $this->warn($ctx->protocol, 'tax_residence_manual', "Osobní číslo {$number}: PREMIER vede osobu jako daňového nerezidenta. Daňovou rezidenci doplňte ručně.");
                     return;
                 }
+                if ($manual === 'health_minimum_reduction') {
+                    $this->warn($ctx->protocol, 'health_minimum_exemption_unverified', "Osobní číslo {$number}: výjimka z minima zdravotního pojištění je převzatá bez důvodu. Důvod doplňte v zákonné evidenci osoby.");
+                    return;
+                }
                 $this->warn($ctx->protocol, 'social_jurisdiction_manual', "Osobní číslo {$number}: PREMIER vede osobu jako vyslanou nebo pojištěnou v cizině. Příslušnost k sociálnímu pojištění doplňte ručně.");
             },
         ));

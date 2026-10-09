@@ -171,6 +171,8 @@ final class PayrollTakeoverPersonWriter
      * Údaj, který převod vyplnit nesmí (nerezident bez státu rezidence, osoba podléhající
      * cizím právním předpisům), ohlásí přes `$manual` (`tax_residence`,
      * `social_jurisdiction`); volající rozhodne, jestli jde o výjimku, nebo upozornění.
+     * Výjimku z minima zdravotního pojištění bez doloženého důvodu zapíše a ohlásí
+     * (`health_minimum_reduction`): důvod musí doplnit účetní.
      *
      * @param callable(string):void $manual
      * @return array<string,int>
@@ -272,6 +274,39 @@ final class PayrollTakeoverPersonWriter
                     'evidence_note' => $social->note,
                 ]];
                 $counts['social_jurisdiction'] = 1;
+            }
+        }
+        // Výjimky z minima zdravotního pojištění: jen úseky, do kterých dosud žádná výjimka
+        // nezasahuje (účetní ji mohla zapsat i s důvodem). Na rozdíl od ostatních řad se
+        // doplňují i do neprázdné řady, protože každý převáděný rok nese své měsíce.
+        $reductions = $sections['health_minimum_reductions'] ?? [];
+        $added = 0;
+        $unverified = false;
+        foreach ($person->healthMinimumExemptions as $exemption) {
+            foreach ($reductions as $existing) {
+                $existingTo = $existing['effective_to'] ?? null;
+                if ((string) $existing['effective_from'] <= (string) $exemption->to
+                    && ($existingTo === null || (string) $existingTo >= $exemption->from)
+                ) {
+                    continue 2;
+                }
+            }
+            $verified = $exemption->status !== 'unverified';
+            $reductions[] = [
+                'reason' => $exemption->status,
+                'evidence_reference' => $verified ? $exemption->reference : null,
+                'effective_from' => $exemption->from,
+                'effective_to' => $exemption->to,
+                'evidence_note' => $exemption->note,
+            ];
+            $unverified = $unverified || !$verified;
+            $added++;
+        }
+        if ($added > 0) {
+            $sections['health_minimum_reductions'] = $reductions;
+            $counts['health_minimum_reduction'] = $added;
+            if ($unverified) {
+                $manual('health_minimum_reduction');
             }
         }
         if (($sections['social_discount_claims'] ?? []) === [] && $person->socialDiscountClaims !== []) {
