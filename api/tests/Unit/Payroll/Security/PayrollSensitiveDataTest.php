@@ -294,6 +294,7 @@ final class PayrollSensitiveDataTest extends TestCase
             PayrollRevealPurpose::DOCUMENT_PAYROLL_SHEET,
             PayrollRevealPurpose::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
             PayrollRevealPurpose::DOCUMENT_ANNUAL_SETTLEMENT,
+            PayrollRevealPurpose::DOCUMENT_PENSION_RECORD_COPY,
             PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
             PayrollRevealPurpose::SUBMISSION_CSSZ_SICKNESS,
             PayrollRevealPurpose::SUBMISSION_HEALTH_BULK_NOTIFICATION,

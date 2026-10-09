@@ -37,6 +37,13 @@ enum PayrollRevealPurpose: string
     /** Výpočet ročního zúčtování záloh a daňového zvýhodnění. */
     case DOCUMENT_ANNUAL_SETTLEMENT = 'document:annual_settlement';
 
+    /**
+     * Stejnopis evidenčního listu důchodového pojištění (§ 38 odst. 4 a 5
+     * zákona č. 582/1991 Sb. ve znění do 31. 12. 2025) — rodné číslo občana
+     * je náležitostí stejnopisu.
+     */
+    case DOCUMENT_PENSION_RECORD_COPY = 'document:pension_record_copy';
+
     /** Registrační a evidenční podání na ČSSZ (PREZEC/REGZEC, evidence ECP/VCP, A1). */
     case SUBMISSION_CSSZ_REGISTRATION = 'submission:cssz_registration';
 
@@ -90,6 +97,7 @@ enum PayrollRevealPurpose: string
             self::DOCUMENT_PAYROLL_SHEET,
             self::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
             self::DOCUMENT_ANNUAL_SETTLEMENT,
+            self::DOCUMENT_PENSION_RECORD_COPY,
             self::SUBMISSION_CSSZ_REGISTRATION,
             self::SUBMISSION_CSSZ_SICKNESS,
             self::SUBMISSION_HEALTH_BULK_NOTIFICATION => true,

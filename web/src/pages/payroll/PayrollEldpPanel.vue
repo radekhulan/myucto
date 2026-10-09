@@ -20,6 +20,7 @@ import { eldpRemediation, type EldpBlocker } from './payrollRemediation'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
+import { usePayrollServerMessage } from './payrollServerMessage'
 import { documentsApi, type DocItem } from '@/api/documents'
 import {
   payrollApi,
@@ -42,6 +43,7 @@ import { formatDate } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
+const { reasonText } = usePayrollServerMessage()
 const auth = useAuthStore()
 const route = useRoute()
 
@@ -540,11 +542,29 @@ async function downloadCopy(): Promise<void> {
       year: year.value,
       environment: environment.value,
     })
-  } catch {
-    copyError.value = t('payroll.eldp.copy.failed')
+  } catch (exception) {
+    copyError.value = await copyFailureMessage(exception)
   } finally {
     copyDownloading.value = false
   }
+}
+
+/** Chyba stahování PDF přijde jako Blob; věta serveru (v jiném jazyce překlad kódu), jinak obecná hláška. */
+async function copyFailureMessage(exception: unknown): Promise<string> {
+  const data: unknown = isAxiosError(exception) ? exception.response?.data : null
+  if (data instanceof Blob) {
+    try {
+      const error = JSON.parse(await data.text())?.error
+      const text = reasonText(
+        typeof error?.code === 'string' ? error.code : null,
+        typeof error?.message === 'string' ? error.message : null,
+      )
+      if (text !== '') return text
+    } catch {
+      // Tělo není JSON: zůstane obecná hláška.
+    }
+  }
+  return t('payroll.eldp.copy.failed')
 }
 
 async function downloadControlXml(): Promise<void> {

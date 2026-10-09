@@ -145,8 +145,13 @@ vydat do 8 dnů):
 **Stejnopis evidenčního listu pro zaměstnance:** na obrazovce evidenčního
 listu (`Mzdy → Podání a hlášení`, **Mimořádná podání ▾ → Evidenční list DP**)
 klikněte na **Stejnopis pro zaměstnance (PDF)**. Tiskne se ze zmrazeného
-listu, takže říká přesně to, co jde na ČSSZ. Předání zapište u výzvy na kartě
-osoby (**Stejnopis předán zaměstnanci**).
+listu, takže říká přesně to, co jde na ČSSZ. Stejnopis nese identifikaci
+zaměstnance (jméno, příjmení, rodné příjmení, rodné číslo, datum a místo
+narození, trvalý pobyt) a zaměstnavatele (název z rejstříku, IČ, sídlo,
+variabilní symbol účtárny) a u každého řádku příznak malého rozsahu MR.
+Chybí-li některý z těchto údajů, aplikace stejnopis nevydá a řekne, co
+doplnit. Předání zapište u výzvy na kartě osoby (**Stejnopis předán
+zaměstnanci**).
 
 **Jak poznáte, že je hotovo:** Žádost má stav **Vyřízeno** a termín zmizí
 z hlídače termínů. Ostatní druhy výzev a evidenční list na výzvu popisuje

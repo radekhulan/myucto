@@ -9,7 +9,9 @@ use MyInvoice\Action\Payroll\PayrollPensionRequestAction;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollPensionRequestRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementCopyService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use MyInvoice\Service\Payroll\Submission\Eldp\PensionInsuranceCertificateService;
 use MyInvoice\Tests\Support\PayrollFullFlowTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -163,6 +165,7 @@ final class EldpScenarioFlowTest extends TestCase
             ['id' => (string) $employeeId],
         ));
         self::assertSame('2026-08-27', $copied['requests'][0]['copy_delivered_on']);
+        $this->completeCopyIdentity($employeeId);
         $copy = $eldp->copy(
             $this->request('GET', '/api/payroll/submissions/eldp/copy')->withQueryParams([
                 'employment_id' => (string) $agreement['employment_id'],
@@ -193,6 +196,87 @@ final class EldpScenarioFlowTest extends TestCase
         self::assertSame([['from' => '2026-07-01', 'to' => '2026-07-31', 'days' => 31, 'months_without_insurance' => []]], $data['periods']);
         $pdf = $certificates->render($this->supplierId, $employeeId, $confirmation['id']);
         self::assertStringStartsWith('%PDF-', $pdf['pdf']);
+    }
+
+    /**
+     * § 38 odst. 4 a 5 zákona č. 582/1991 Sb. ve znění do 31. 12. 2025:
+     * stejnopis nese údaje listu podle odst. 4, tedy identifikaci občana
+     * (jméno, příjmení, rodné příjmení, rodné číslo, datum a místo narození,
+     * trvalý pobyt) a zaměstnavatele (název, IČ, sídlo, variabilní symbol).
+     * Chybějící údaj stejnopis zastaví, nedoplňuje se odhadem.
+     */
+    public function testCopyCarriesIdentificationOfCitizenAndEmployer(): void
+    {
+        [$person, $agreement] = $this->approvedJuly();
+        $this->prepareOnAuthorityRequest($agreement['employment_id'], 'eldp-copy-identity');
+        $copies = $this->container->get(EldpStatementCopyService::class);
+        self::assertInstanceOf(EldpStatementCopyService::class, $copies);
+
+        try {
+            $copies->template($this->supplierId, 'test', $agreement['employment_id'], 2026);
+            self::fail('Bez rodného příjmení a trvalého pobytu se stejnopis vydat nesmí.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_copy_identity_incomplete', $exception->validationCode);
+            self::assertContains('rodné příjmení občana', $exception->blockers[0]['detail']['missing']);
+            self::assertContains('adresa trvalého pobytu občana', $exception->blockers[0]['detail']['missing']);
+        }
+
+        $this->completeCopyIdentity((int) $person['employee_id']);
+        $template = $copies->template($this->supplierId, 'test', $agreement['employment_id'], 2026);
+        self::assertSame(self::syntheticBirthNumber('1985-03-14', 'female', 1), $template['employee']['birth_number']);
+        self::assertSame('Syntetický zaměstnavatel', $template['employer']['name']);
+        self::assertNotSame('', $template['employer']['variable_symbol']);
+        $html = $copies->html($template);
+        foreach ([
+            'Dohodová Olga',
+            'Rodné příjmení: Nováková',
+            'Rodné číslo: ' . self::syntheticBirthNumber('1985-03-14', 'female', 1),
+            'Datum narození: 14.03.1985',
+            'Místo narození: Testov',
+            'Trvalý pobyt: Zkušební 7, 110 00 Praha 1',
+            'IČ: 00000019',
+            'Variabilní symbol: ' . $template['employer']['variable_symbol'],
+            '<td>N</td>',
+        ] as $expected) {
+            self::assertStringContainsString($expected, $html);
+        }
+    }
+
+    private function prepareOnAuthorityRequest(int $employmentId, string $idempotencyKey): void
+    {
+        $service = $this->container->get(EldpStatementService::class);
+        self::assertInstanceOf(EldpStatementService::class, $service);
+        $service->prepare(
+            $this->supplierId,
+            $employmentId,
+            2026,
+            'test',
+            [
+                'excluded_days_confirmed' => true,
+                'deducted_days_none' => true,
+                'pension_status' => ['pension_age_reached_on' => null, 'early_pension_from' => null, 'full_pension_paid_from' => null, 'foreign_insurance' => false],
+                'requested_by_authority' => true,
+                'authority_request_received_on' => '2026-08-20',
+                'note' => 'Syntetická výzva ČSSZ.',
+            ],
+            $idempotencyKey,
+            $this->actors[0],
+        );
+    }
+
+    /** Rodné příjmení a trvalý pobyt, které sdílený tok nezakládá. */
+    private function completeCopyIdentity(int $employeeId): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history SET birth_surname = "Nováková"
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_addresses
+                (supplier_id, employee_id, address_type, street_line, city, postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", "Zkušební 7", "Praha 1", "110 00", "CZ", "2026-01-01")',
+        )->execute([$this->supplierId, $employeeId]);
     }
 
     /**

@@ -33,12 +33,17 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
       <div class="label">Zaměstnavatel</div>
       <div class="value">{{ employer.name }}</div>
       {% if employer.identification_number != '' %}<div>IČ: {{ employer.identification_number }}</div>{% endif %}
-      <div>{{ employer.address }}</div>
+      <div>Sídlo: {{ employer.address }}</div>
+      <div>Variabilní symbol: {{ employer.variable_symbol }}</div>
     </td>
     <td style="width:35%">
-      <div class="label">Zaměstnanec</div>
-      <div class="value">{{ employee.name }}</div>
-      {% if employee.birth_date is not null %}<div>Datum narození: {{ employee.birth_date|cz_date }}</div>{% endif %}
+      <div class="label">Občan</div>
+      <div class="value">{{ employee.last_name }} {{ employee.first_name }}</div>
+      <div>Rodné příjmení: {{ employee.birth_surname }}</div>
+      {% if employee.birth_number is not null %}<div>Rodné číslo: {{ employee.birth_number }}</div>{% endif %}
+      <div>Datum narození: {{ employee.birth_date|cz_date }}</div>
+      <div>Místo narození: {{ employee.birth_place }}</div>
+      <div>Trvalý pobyt: {{ employee.address }}</div>
     </td>
     <td>
       <div class="label">Typ ELDP</div>

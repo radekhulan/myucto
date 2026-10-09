@@ -11477,6 +11477,7 @@
         "eldp_post_termination_small_scale_unsupported": "For small-scale employment and agreements to perform work, income after termination is not written as a P+ row, it belongs to the month of termination. Recalculate that month or submit a corrective record outside the application.",
         "eldp_death_date_invalid": "The date of the employee's death must be a valid date not before the reported year.",
         "eldp_year_out_of_range": "An ELDP12 pension insurance record sheet can only be built for 2009 or later, and at most for the current year. File a sheet for an earlier year outside the application.",
+        "eldp_copy_identity_incomplete": "The record sheet copy must carry the identification of the citizen (first name, surname, birth surname, date and place of birth, permanent address) and of the employer (name, company ID, registered office, variable symbol). Fill in the missing details in the employee card or in Payroll settings → Employer and payroll offices.",
         "eldp_takeover_insurance_days_exceed_period": "The taken-over month reports more insurance participation days than the employment actually lasted in the month.",
         "eldp_takeover_insurance_days_missing": "The taken-over month participates in pension insurance but has no participation days filled in. Add the value in the payroll takeover review.",
         "eldp_takeover_month_ambiguous": "More than one taken-over payroll month exists for this employment in this period. Keep only one row per month in the payroll takeover review.",

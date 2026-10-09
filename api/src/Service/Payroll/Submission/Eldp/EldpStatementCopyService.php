@@ -8,6 +8,10 @@ use Mpdf\Mpdf;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollEmployerIdentifierSql;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use MyInvoice\Service\Pdf\TwigCache;
 use PDO;
@@ -31,39 +35,13 @@ final class EldpStatementCopyService
     public function __construct(
         private readonly Connection $db,
         private readonly EldpStatementService $statements,
+        private readonly PayrollSensitiveData $sensitiveData,
     ) {}
 
     /** @return array{pdf:string,filename:string} */
     public function render(int $supplierId, string $environment, int $employmentId, int $year): array
     {
-        $statement = $this->statements->statement($supplierId, $environment, $employmentId, $year);
-        if ($statement === null) {
-            throw new \OutOfBoundsException('Za tento rok a vztah zatím žádný evidenční list zmrazený není.');
-        }
-        $payload = $statement['payload'];
-        $scope = is_array($payload['scope'] ?? null) ? $payload['scope'] : [];
-        $form = is_array($payload['form'] ?? null) ? $payload['form'] : [];
-        $template = [
-            'statement_id' => (int) $statement['id'],
-            'year' => $year,
-            'environment' => $environment,
-            'eldp_type' => (string) ($form['eldp_type'] ?? ''),
-            'employed_from' => is_string($form['employed_from'] ?? null) ? $form['employed_from'] : null,
-            'prepared_on' => is_string($form['prepared_on'] ?? null) ? $form['prepared_on'] : null,
-            'period_from' => (string) ($scope['period_from'] ?? ''),
-            'period_to' => (string) ($scope['period_to'] ?? ''),
-            'sections' => self::sections($payload),
-            'employer' => $this->employer($supplierId),
-            'employee' => $this->employee($supplierId, (int) ($scope['employee_id'] ?? 0)),
-            'renderer_version' => self::VERSION,
-            'manifest_sha256' => (string) ($statement['xml_sha256'] ?? ''),
-        ];
-        $template['totals'] = [
-            'insurance_days' => array_sum(array_column($template['sections'], 'insurance_days')),
-            'excluded_days_total' => array_sum(array_column($template['sections'], 'excluded_days_total')),
-            'deducted_days_total' => array_sum(array_column($template['sections'], 'deducted_days_total')),
-            'assessment_base_czk' => array_sum(array_column($template['sections'], 'assessment_base_czk')),
-        ];
+        $template = $this->template($supplierId, $environment, $employmentId, $year);
         $mpdf = $this->mpdf();
         $mpdf->SetTitle('Stejnopis evidenčního listu důchodového pojištění');
         $mpdf->SetCreator('MyÚčto.cz');
@@ -76,8 +54,73 @@ final class EldpStatementCopyService
 
         return [
             'pdf' => $pdf,
-            'filename' => sprintf('stejnopis-eldp-%d-%d.pdf', $year, (int) $statement['id']),
+            'filename' => sprintf('stejnopis-eldp-%d-%d.pdf', $year, (int) $template['statement_id']),
         ];
+    }
+
+    /**
+     * Údaje stejnopisu: zmrazené řádky listu a identifikace podle § 38 odst. 4
+     * písm. a) a b) zákona č. 582/1991 Sb. ve znění do 31. 12. 2025 (občan:
+     * jméno, příjmení, rodné příjmení, rodné číslo, datum a místo narození,
+     * trvalý pobyt; zaměstnavatel: název, IČ, sídlo a variabilní symbol).
+     * Chybí-li některý údaj, stejnopis se nevydá: doplňovat ho odhadem nejde.
+     *
+     * @return array<string,mixed>
+     */
+    public function template(int $supplierId, string $environment, int $employmentId, int $year): array
+    {
+        $statement = $this->statements->statement($supplierId, $environment, $employmentId, $year);
+        if ($statement === null) {
+            throw new \OutOfBoundsException('Za tento rok a vztah zatím žádný evidenční list zmrazený není.');
+        }
+        $payload = $statement['payload'];
+        $scope = is_array($payload['scope'] ?? null) ? $payload['scope'] : [];
+        $form = is_array($payload['form'] ?? null) ? $payload['form'] : [];
+        $missing = [];
+        $employer = $this->employer($supplierId, $employmentId, $environment, $missing);
+        $employee = $this->employee(
+            $supplierId,
+            (int) ($scope['employee_id'] ?? 0),
+            (string) ($scope['period_to'] ?? sprintf('%04d-12-31', $year)),
+            $missing,
+        );
+        if ($missing !== []) {
+            throw new EldpValidationException(
+                'eldp_copy_identity_incomplete',
+                'Stejnopis evidenčního listu musí nést identifikaci občana a zaměstnavatele podle '
+                    . '§ 38 odst. 4 zákona č. 582/1991 Sb. Chybí: ' . implode(', ', $missing)
+                    . '. Doplňte je v kartě zaměstnance (Identita a adresy), u zaměstnavatele '
+                    . 'v Nastavení mezd → Zaměstnavatel a účtárny.',
+                [[
+                    'code' => 'eldp_copy_identity_incomplete',
+                    'message' => 'Chybí: ' . implode(', ', $missing) . '.',
+                    'detail' => ['missing' => $missing],
+                ]],
+            );
+        }
+        $template = [
+            'statement_id' => (int) $statement['id'],
+            'year' => $year,
+            'environment' => $environment,
+            'eldp_type' => (string) ($form['eldp_type'] ?? ''),
+            'employed_from' => is_string($form['employed_from'] ?? null) ? $form['employed_from'] : null,
+            'prepared_on' => is_string($form['prepared_on'] ?? null) ? $form['prepared_on'] : null,
+            'period_from' => (string) ($scope['period_from'] ?? ''),
+            'period_to' => (string) ($scope['period_to'] ?? ''),
+            'sections' => self::sections($payload),
+            'employer' => $employer,
+            'employee' => $employee,
+            'renderer_version' => self::VERSION,
+            'manifest_sha256' => (string) ($statement['xml_sha256'] ?? ''),
+        ];
+        $template['totals'] = [
+            'insurance_days' => array_sum(array_column($template['sections'], 'insurance_days')),
+            'excluded_days_total' => array_sum(array_column($template['sections'], 'excluded_days_total')),
+            'deducted_days_total' => array_sum(array_column($template['sections'], 'deducted_days_total')),
+            'assessment_base_czk' => array_sum(array_column($template['sections'], 'assessment_base_czk')),
+        ];
+
+        return $template;
     }
 
     /**
@@ -112,40 +155,143 @@ final class EldpStatementCopyService
         return $this->twig()->render('eldp-copy.twig', $template);
     }
 
-    /** @return array{name:string,identification_number:string,address:string} */
-    private function employer(int $supplierId): array
+    /**
+     * Zaměstnavatel podle § 38 odst. 4 písm. b): název, jak je zapsán
+     * v rejstříku (ne zobrazovaný název firmy), IČ, sídlo a variabilní symbol
+     * účtárny vztahu pro dané prostředí ({@see PayrollEmployerIdentifierSql}).
+     *
+     * @param list<string> $missing
+     * @return array{name:string,identification_number:string,address:string,variable_symbol:string}
+     */
+    private function employer(int $supplierId, int $employmentId, string $environment, array &$missing): array
     {
         $statement = $this->db->pdo()->prepare(
-            'SELECT COALESCE(NULLIF(TRIM(display_name), ""), TRIM(company_name)) AS name,
-                    TRIM(COALESCE(ic, "")) AS ic,
-                    TRIM(CONCAT_WS(", ", NULLIF(TRIM(street), ""), NULLIF(TRIM(CONCAT_WS(" ", zip, city)), ""))) AS address
-               FROM supplier WHERE id = ?'
+            'SELECT TRIM(COALESCE(supplier.company_name, "")) AS name,
+                    TRIM(COALESCE(supplier.ic, "")) AS ic,
+                    TRIM(CONCAT_WS(", ", NULLIF(TRIM(supplier.street), ""), NULLIF(TRIM(CONCAT_WS(" ", supplier.zip, supplier.city)), ""))) AS address,
+                    ' . PayrollEmployerIdentifierSql::SELECT . '
+               FROM supplier
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = supplier.id AND employment.id = ?
+               ' . PayrollEmployerIdentifierSql::JOINS . '
+              WHERE supplier.id = ?'
         );
-        $statement->execute([$supplierId]);
+        $statement->execute([$employmentId, $supplierId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
-            throw new \OutOfBoundsException('Zaměstnavatel nenalezen.');
+            throw new \OutOfBoundsException('Zaměstnavatel nebo pracovní vztah nenalezen.');
+        }
+        $row = PayrollEmployerIdentifierSql::resolveVariableSymbol($row, $environment);
+        $variableSymbol = trim((string) ($row['employer_variable_symbol'] ?? ''));
+        foreach ([
+            'název zaměstnavatele' => (string) $row['name'],
+            'IČ zaměstnavatele' => (string) $row['ic'],
+            'sídlo zaměstnavatele' => (string) $row['address'],
+            'variabilní symbol zaměstnavatele' => $variableSymbol,
+        ] as $label => $value) {
+            if ($value === '') {
+                $missing[] = $label;
+            }
         }
 
         return [
             'name' => (string) $row['name'],
             'identification_number' => (string) $row['ic'],
             'address' => (string) $row['address'],
+            'variable_symbol' => $variableSymbol,
         ];
     }
 
-    /** @return array{name:string,birth_date:?string} */
-    private function employee(int $supplierId, int $employeeId): array
+    /**
+     * Občan podle § 38 odst. 4 písm. a): údaje platné ke dni „Do" listu.
+     * Rodné číslo se odhaluje jako náležitost stejnopisu; nemá-li ho občan
+     * přidělené, nese stejnopis datum narození (jako tiskopis ELDP).
+     *
+     * @param list<string> $missing
+     * @return array<string,?string>
+     */
+    private function employee(int $supplierId, int $employeeId, string $periodTo, array &$missing): array
     {
-        $statement = $this->db->pdo()->prepare(
-            'SELECT full_name, birth_date FROM payroll_employees WHERE supplier_id = ? AND id = ?'
+        $pdo = $this->db->pdo();
+        $identity = $pdo->prepare(
+            'SELECT first_name, last_name, full_name, birth_surname, birth_date, birth_place, birth_country_code
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ? AND effective_from <= ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
         );
-        $statement->execute([$supplierId, $employeeId]);
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        $identity->execute([$supplierId, $employeeId, $periodTo]);
+        $person = $identity->fetch(PDO::FETCH_ASSOC);
+        $person = is_array($person) ? $person : [];
+        $employee = $pdo->prepare('SELECT full_name, birth_date FROM payroll_employees WHERE supplier_id = ? AND id = ?');
+        $employee->execute([$supplierId, $employeeId]);
+        $employeeRow = $employee->fetch(PDO::FETCH_ASSOC);
+        $employeeRow = is_array($employeeRow) ? $employeeRow : [];
 
-        return is_array($row)
-            ? ['name' => (string) $row['full_name'], 'birth_date' => $row['birth_date'] === null ? null : (string) $row['birth_date']]
-            : ['name' => '', 'birth_date' => null];
+        $address = $pdo->prepare(
+            'SELECT street_line, city, postal_code, country_code
+               FROM payroll_person_addresses
+              WHERE supplier_id = ? AND employee_id = ? AND address_type = "residence"
+                AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $address->execute([$supplierId, $employeeId, $periodTo, $periodTo]);
+        $addressRow = $address->fetch(PDO::FETCH_ASSOC);
+
+        $identifier = $pdo->prepare(
+            'SELECT id, value_ciphertext FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ? AND identifier_type = "birth_number"
+              ORDER BY id DESC
+              LIMIT 1'
+        );
+        $identifier->execute([$supplierId, $employeeId]);
+        $identifierRow = $identifier->fetch(PDO::FETCH_ASSOC);
+        $birthNumber = is_array($identifierRow)
+            ? $this->sensitiveData->reveal(
+                (string) $identifierRow['value_ciphertext'],
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $supplierId,
+                (int) $identifierRow['id'],
+                PayrollRevealPurpose::DOCUMENT_PENSION_RECORD_COPY,
+            )
+            : null;
+
+        $text = static fn (mixed $value): ?string => is_string($value) && trim($value) !== '' ? trim($value) : null;
+        $birthPlace = $text($person['birth_place'] ?? null);
+        $birthCountry = $text($person['birth_country_code'] ?? null);
+        $result = [
+            'name' => $text($person['full_name'] ?? null) ?? (string) ($employeeRow['full_name'] ?? ''),
+            'first_name' => $text($person['first_name'] ?? null),
+            'last_name' => $text($person['last_name'] ?? null),
+            'birth_surname' => $text($person['birth_surname'] ?? null),
+            'birth_number' => $text($birthNumber),
+            'birth_date' => $text($person['birth_date'] ?? null) ?? $text($employeeRow['birth_date'] ?? null),
+            'birth_place' => $birthPlace === null
+                ? null
+                : ($birthCountry !== null && $birthCountry !== 'CZ' ? $birthPlace . ', ' . $birthCountry : $birthPlace),
+            'address' => is_array($addressRow)
+                ? implode(', ', array_filter([
+                    $text($addressRow['street_line'] ?? null),
+                    $text(trim((string) ($addressRow['postal_code'] ?? '') . ' ' . (string) ($addressRow['city'] ?? ''))),
+                    ($addressRow['country_code'] ?? 'CZ') !== 'CZ' ? (string) $addressRow['country_code'] : null,
+                ]))
+                : null,
+        ];
+        foreach ([
+            'first_name' => 'jméno občana',
+            'last_name' => 'příjmení občana',
+            'birth_surname' => 'rodné příjmení občana',
+            'birth_date' => 'datum narození občana',
+            'birth_place' => 'místo narození občana',
+            'address' => 'adresa trvalého pobytu občana',
+        ] as $key => $label) {
+            if ($result[$key] === null || $result[$key] === '') {
+                $missing[] = $label;
+            }
+        }
+
+        return $result;
     }
 
     private function mpdf(): Mpdf
