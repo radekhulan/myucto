@@ -197,6 +197,57 @@ final class PayrollRegistrationNormCoverageRulesTest extends TestCase
         self::assertNotNull($builder->build(self::scope(), $ecpIgnoresDate)->regzecA1);
     }
 
+    /**
+     * REGZEC25-client.bno-09 (Zásady REGZEC 1.4.6, ID 10057): občan SR
+     * narozený po 31. 12. 1992 je cizinec, slovenské RČ do A1 nepatří.
+     * Narozený před 1. 1. 1993 RČ uvést smí, bez RČ přihláška projde.
+     */
+    public function testSlovakCitizenBornAfter1992CannotBeRegisteredWithBirthNumber(): void
+    {
+        $builder = new PayrollRegistrationIdentitySnapshotBuilder();
+        $after = self::identitySource('935203/0006', null);
+        $after['identity']['birth_date'] = '1993-02-03';
+        $after['identity']['citizenship_country_code'] = 'SK';
+        $this->expectCode(
+            'registration_identity_slovak_birth_number_after_1992',
+            fn () => $builder->build(self::scope(), $after),
+        );
+
+        $withoutDate = $after;
+        $withoutDate['identity']['birth_date'] = null;
+        $this->expectCode(
+            'registration_identity_slovak_birth_number_after_1992',
+            fn () => $builder->build(self::scope(), $withoutDate),
+        );
+
+        $before = self::identitySource('915203/0008', null);
+        $before['identity']['citizenship_country_code'] = 'SK';
+        self::assertNotSame(
+            'registration_identity_slovak_birth_number_after_1992',
+            self::failureCode(fn () => $builder->build(self::scope(), $before)),
+        );
+
+        $withoutNumber = self::identitySource(null, null);
+        $withoutNumber['identity']['birth_date'] = '1993-02-03';
+        $withoutNumber['identity']['citizenship_country_code'] = 'SK';
+        self::assertNotSame(
+            'registration_identity_slovak_birth_number_after_1992',
+            self::failureCode(fn () => $builder->build(self::scope(), $withoutNumber)),
+        );
+    }
+
+    /** Kód, se kterým sestavení skončilo; `null`, když prošlo. */
+    private static function failureCode(callable $build): ?string
+    {
+        try {
+            $build();
+        } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+            return $exception->validationCode;
+        }
+
+        return null;
+    }
+
     /** @return array<string,mixed> */
     private static function scope(): array
     {
