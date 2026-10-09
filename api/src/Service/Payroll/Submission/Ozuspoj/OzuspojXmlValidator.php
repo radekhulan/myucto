@@ -145,6 +145,24 @@ final readonly class OzuspojXmlValidator
                 );
             }
         }
+        // Popis datové věty: VENDOR/@productName 0 až 64 znaků,
+        // @productVersion 0 až 16, SENDER/@EmailNotifikace 0 až 250 ve tvaru
+        // e-mailové adresy. XSD je má jako volný xs:string, takže to neuhlídá.
+        if (mb_strlen($payload->productName) > 64 || mb_strlen($payload->productVersion) > 16) {
+            $this->invalid(
+                'ozuspoj_vendor_invalid',
+                'Název programu smí mít nejvýš 64 znaků a jeho verze 16 znaků.',
+            );
+        }
+        if ($payload->notificationEmail !== null
+            && (mb_strlen($payload->notificationEmail) > 250
+                || preg_match('/^[^@\s]+@[^.@\s]+\..+$/uD', $payload->notificationEmail) !== 1)
+        ) {
+            $this->invalid(
+                'ozuspoj_notification_email_invalid',
+                'E-mail pro oznámení o výsledku zpracování nemá tvar e-mailové adresy nebo je delší než 250 znaků.',
+            );
+        }
         $this->exactDate($payload->employeeBirthDate);
         if ($payload->intentFrom !== null) {
             $this->exactDate($payload->intentFrom);
