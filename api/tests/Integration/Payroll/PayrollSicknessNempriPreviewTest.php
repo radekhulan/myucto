@@ -665,6 +665,63 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
     }
 
     /**
+     * NEMPRI25-lhuta-15 (FAQ ČSSZ k dávkám NP, dotazy 1, 3 a 5): ošetřovné,
+     * dlouhodobé ošetřovné, otcovská a PPM z roku 2024 se vyřizují NEMPRI20,
+     * který MyÚčto nesestavuje. Příprava se zastaví s výzvou podat ho mimo
+     * aplikaci. Bez zastavení by úplný případ odešel jako NEMPRI25.
+     */
+    public function testCareFrom2024IsNotPreparedAsNempri25(): void
+    {
+        [$employeeId, $employmentId] = $this->employee();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = "2024-01-01", actual_start_date = "2024-01-01"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET effective_from = "2024-01-01", planned_start_on = "2024-01-01",
+                    actual_start_on = "2024-01-01"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $cases = $this->service(SicknessCaseService::class);
+        $submissions = $this->service(SicknessSubmissionService::class);
+        $care = $cases->create(
+            $this->supplierId,
+            'test',
+            $employmentId,
+            'OSE',
+            [
+                'incapacity_from' => '2024-12-16',
+                'incapacity_to' => '2024-12-20',
+                'decision_number' => '1234567N',
+                'daily_working_hours' => '8',
+                'action_start' => true,
+                'action_end' => true,
+                'worked_last_day' => false,
+                'cared_dependant_id' => $this->dependant($employeeId),
+                'care_reason' => 'ill',
+                'care_days' => [['from' => '2024-12-16', 'to' => '2024-12-20']],
+                'relationship_code' => 'PL',
+                'shared_household' => true,
+                'child_under_16' => true,
+                'cared_personally' => true,
+                'planned_shifts' => true,
+                'planned_shifts_worked' => false,
+                'decisive_months' => self::months(['2024-01', '2024-02', '2024-03', '2024-04', '2024-05', '2024-06', '2024-07', '2024-08', '2024-09', '2024-10', '2024-11']),
+            ],
+            $this->userId,
+        );
+
+        try {
+            $submissions->preview($this->supplierId, 'test', (int) $care['id'], SicknessDocumentKind::Nempri);
+            self::fail('Ošetřovné z roku 2024 se nesmí připravit jako NEMPRI25.');
+        } catch (SicknessException $exception) {
+            self::assertSame('nempri_legacy_form_required', $exception->validationCode);
+            self::assertStringContainsString('NEMPRI20', $exception->getMessage());
+        }
+    }
+
+    /**
      * NRO-03 (§ 19 odst. 11): zaměstnání skončilo 27. 3., neschopnost 2. 4.
      * v ochranné lhůtě. Rozhodný den je 28. 3., takže období končí únorem
      * — ne březnem, jak by vyšlo ze dne vzniku neschopnosti.

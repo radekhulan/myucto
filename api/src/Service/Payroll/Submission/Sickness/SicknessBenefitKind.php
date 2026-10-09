@@ -101,6 +101,48 @@ enum SicknessBenefitKind: string
         return $this === self::Nem || $this === self::Ose || $this === self::Dlo;
     }
 
+    /** První den, od kterého se rozhodnutí o vzniku nebo potvrzení vyřizují NEMPRI25. */
+    public const NEMPRI25_FROM = '2025-01-01';
+
+    /**
+     * Patří událost ještě k formuláři NEMPRI20? (FAQ ČSSZ k dávkám NP, dotazy
+     * 1, 3 a 5; Elektronizace dávek NP, str. 5.)
+     *
+     * Ošetřovné, dlouhodobé ošetřovné, otcovská a PPM s rozhodnutím nebo
+     * potvrzením vystaveným do konce roku 2024 se vyřizují NEMPRI20 až do
+     * ukončení případu; ošetřovné zahájené v roce 2024 i při trvání nebo
+     * ukončení v roce 2025. Lékař rozhodnutí nebo potvrzení vystavuje nejpozději
+     * se vznikem události, takže událost z roku 2024 má i rozhodnutí z roku 2024.
+     * U otcovské a převzetí dítěte do péče rozhoduje den podání žádosti, který
+     * aplikace neeviduje: událost z roku 2024 se proto zastaví také a účetní ji
+     * vyřídí mimo aplikaci. Nemocenské smí jít NEMPRI25 i ze starého období
+     * (FAQ dotaz 3), VPM pravidlo nejmenuje.
+     *
+     * MyÚčto NEMPRI20 nesestavuje, takže vrací důvod zastavení, nebo `null`.
+     *
+     * @return array{code:string,message:string}|null
+     */
+    public function legacyFormProblem(string $eventOn, bool $hasCareReason): ?array
+    {
+        if (!in_array($this, [self::Ose, self::Dlo, self::Opp, self::Ppm], true)
+            || $eventOn >= self::NEMPRI25_FROM
+        ) {
+            return null;
+        }
+        $message = 'Sociální událost vznikla ' . $eventOn . ', před 1. 1. 2025. Ošetřovné, dlouhodobé '
+            . 'ošetřovné, otcovská a peněžitá pomoc v mateřství s rozhodnutím nebo potvrzením '
+            . 'vystaveným do konce roku 2024 se vyřizují formulářem NEMPRI20 až do ukončení '
+            . 'případu (FAQ ČSSZ k dávkám NP). MyÚčto sestavuje jen NEMPRI25, oznámení proto '
+            . 'podejte jako NEMPRI20 mimo aplikaci, například přes ePortál ČSSZ.';
+        if ($this === self::Opp || ($this === self::Ppm && $hasCareReason)) {
+            $message .= ' U otcovské a u převzetí dítěte do péče rozhoduje den podání žádosti; '
+                . 'podal-li ji zaměstnanec až od 1. 1. 2025, patří k ní NEMPRI25, aplikace ale '
+                . 'den podání žádosti neeviduje, a tak i ten podejte mimo aplikaci.';
+        }
+
+        return ['code' => 'nempri_legacy_form_required', 'message' => $message];
+    }
+
     public const DECISION_REQUIRED = 'required';
     public const DECISION_OPTIONAL = 'optional';
     public const DECISION_FORBIDDEN = 'forbidden';

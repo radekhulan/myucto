@@ -12046,6 +12046,7 @@
       "nempri_payment_connection_invalid": "Výplatní účet zaměstnance není platný český účet ani IBAN, takže ho nelze zapsat do NEMPRI. Opravte ho na kartě osoby.",
       "nempri_payment_connection_missing": "Zaměstnanec nemá ve výplatním profilu účet, na který se mu vyplácí mzda. Bez něj si ČSSZ způsob výplaty vyžádá výzvou a dávka se zdrží. Doplňte účet na kartě osoby.",
       "nempri_periods_invalid": "Dny péče musí být seznam období od–do.",
+      "nempri_legacy_form_required": "Událost vznikla před 1. 1. 2025. Ošetřovné, dlouhodobé ošetřovné, otcovská a peněžitá pomoc v mateřství s rozhodnutím z roku 2024 se vyřizují formulářem NEMPRI20, který MyÚčto nesestavuje. Podejte oznámení jako NEMPRI20 mimo aplikaci, například přes ePortál ČSSZ.",
       "nempri_care_actions_all_three": "Vznik, trvání a ukončení současně ČSSZ nepoužívá. Je-li potřeba péče už ukončená, zvolte u případu jen Vznik a Ukončení (trvání je nadbytečné).",
       "nempri_care_continuation_with_end": "Trvání spolu s ukončením je podle ČSSZ nadbytečné. Je-li potřeba péče ukončená, zvolte u případu jen Ukončení.",
       "nempri_decision_number_forbidden": "U tohoto druhu dávky se číslo rozhodnutí nevyplňuje. Smažte ho v případu dávky.",

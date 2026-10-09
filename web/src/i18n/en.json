@@ -12046,6 +12046,7 @@
       "nempri_payment_connection_invalid": "The employee's payout account is neither a valid Czech account nor an IBAN, so it cannot be written to NEMPRI. Correct it on the person card.",
       "nempri_payment_connection_missing": "The employee's payout profile has no account the wage is paid to. Without it ČSSZ will request the payment method and the benefit will be delayed. Add the account on the person card.",
       "nempri_periods_invalid": "Care days must be a list of from–to periods.",
+      "nempri_legacy_form_required": "The event arose before 1 January 2025. Nursing benefit, long-term nursing benefit, paternity benefit and maternity benefit with a decision issued in 2024 are handled with the NEMPRI20 form, which MyÚčto does not build. Submit the notification as NEMPRI20 outside the application, for example through the ČSSZ ePortal.",
       "nempri_care_actions_all_three": "ČSSZ does not use Start, Continuation and End together. If the need for care has already ended, select only Start and End in the case (Continuation is redundant).",
       "nempri_care_continuation_with_end": "According to ČSSZ, Continuation together with End is redundant. If the need for care has ended, select only End in the case.",
       "nempri_decision_number_forbidden": "The decision number is not filled in for this benefit type. Remove it on the benefit case.",

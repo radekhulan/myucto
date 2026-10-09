@@ -395,6 +395,15 @@ final readonly class SicknessSubmissionService
         $employmentId = (int) $row['employment_id'];
         $incapacityFrom = (string) $row['incapacity_from'];
         $incapacityTo = $this->nullableText($row['incapacity_to'] ?? null);
+        if ($document->isNempri()) {
+            $legacy = $kind->legacyFormProblem(
+                $incapacityFrom,
+                $this->nullableText($row['maternity_care_reason'] ?? null) !== null,
+            );
+            if ($legacy !== null) {
+                throw new SicknessException($legacy['code'], $legacy['message']);
+            }
+        }
         $context = PayrollEmployerIdentifierSql::resolveVariableSymbol(
             $this->caseService->requireContext(
                 $supplierId,

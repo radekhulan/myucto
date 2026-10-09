@@ -2598,6 +2598,13 @@ způsob výplaty ve výplatním profilu osoby, nebo oznámení podejte mimo
 aplikaci. Ve větě jsou vždy všechny čtyři volby způsobu výplaty (účet v ČR,
 účet v zahraničí, adresa, hotovost), vybraná jako „ano“ a ostatní jako „ne“.
 
+**Události z roku 2024.** Ošetřovné, dlouhodobé ošetřovné, otcovská
+a peněžitá pomoc v mateřství, které vznikly před 1. 1. 2025, se vyřizují
+starším formulářem NEMPRI20 až do ukončení případu. MyÚčto sestavuje jen
+NEMPRI25, takže příprava takového oznámení se zastaví s výzvou podat NEMPRI20
+mimo aplikaci (například přes ePortál ČSSZ). Nemocenské z roku 2024 se
+nezastaví, ČSSZ ho přijímá i jako NEMPRI25.
+
 **Jméno a příjmení pojištěnce** nesou NEMPRI i HZUPN v podobě platné v den
 přípravy podání, i když se změnily až po vzniku události (například sňatkem).
 Ostatní údaje se berou ke dni události.
