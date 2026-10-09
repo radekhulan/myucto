@@ -276,7 +276,16 @@ se mohou vykázat jen v úhrnu příjmů bez zařazení do rozpadu mzdy.
 
 U složky zahrnuté do JMHZ nastavte konkrétní cílový atribut. Stav **Chybí
 mapování** výpočtu mzdy nebrání, ale složku zatím nelze bezpečně převést do
-hlášení. Celkové cíle používejte jen pro částky, které nejde zařadit do
+hlášení. Prémie a odměny se v hlášení dělí na pravidelně měsíčně zúčtované
+(10330, včetně pohyblivých složek mzdy) a nepravidelné (10331). Odměna
+z pravidelného předpisu se zařadí do pravidelných sama. U odměny, která se
+zadává za měsíc (ručně, importem docházky nebo převodem z jiného programu),
+aplikace pravidelnost nezná, a když takovou složku nově založíte, zařazení
+nechá na vás. Výchozí složka *Odměna* je zařazená mezi nepravidelné. Odměna,
+kterou aplikace dřív sama zařadila mezi nepravidelné, zařazení drží dál, jen
+u ní katalog i kontrola před mzdovým během ukážou upozornění **Ověřte
+pravidelnost odměny**. Upozornění nic neblokuje. Zmizí, když v **Nastavit
+JMHZ** zvolíte správné pole a uložíte, i když zůstane stejné. Celkové cíle používejte jen pro částky, které nejde zařadit do
 detailního rozpadu; aplikace je viditelně odlišuje. Mapování lze auditovatelně
 deaktivovat (**Zrušit mapování**) a teprve potom složku z JMHZ vyloučit
 (**Vyloučeno**) nebo převést do ručního posouzení (**Ruční posouzení**). Samotné

@@ -109,6 +109,9 @@ final class PayrollRunReadinessImpact
         'component_jmhz_mapping_missing' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'component_jmhz_manual_review' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
         'component_jmhz_treatment_invalid' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
+        // Zařazení odměny z dřívějšího výchozího pravidla k ověření: platí dál,
+        // nic neblokuje, jen se má potvrdit pravidelnost (10330/10331).
+        'component_jmhz_bonus_regularity_unverified' => [self::IMPACT_ANYTIME, self::SCOPE_SETUP],
     ];
 
     /** Nálezy identity pro ČSSZ mají společné zařazení — všechny do skupiny 1. */

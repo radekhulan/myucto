@@ -363,6 +363,23 @@ final class PayrollComponentJmhzMappingRepository
                         $target['attribute_id'],
                     )
                 ) {
+                    // Účetní uložila tentýž cíl, který předvyplnila aplikace:
+                    // obsah se nemění, ale zařazení je od teď její rozhodnutí.
+                    // Bez toho by upozornění na neověřené výchozí zařazení
+                    // ({@see \MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults::unverifiedBonusDefaults()})
+                    // nešlo potvrzením odstranit.
+                    if ($userId !== null) {
+                        $pdo->prepare(
+                            'UPDATE payroll_component_jmhz_mappings
+                                SET updated_by = ?
+                              WHERE supplier_id = ? AND id = ?
+                                AND created_by IS NULL AND updated_by IS NULL',
+                        )->execute([
+                            $userId,
+                            $supplierId,
+                            PayrollTimeValue::int($row['id'] ?? null, 'id'),
+                        ]);
+                    }
                     if ($ownsTransaction) {
                         $pdo->commit();
                     }

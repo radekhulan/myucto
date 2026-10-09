@@ -12,6 +12,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
 use MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessService;
@@ -121,7 +122,9 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         $this->components->ensureDefaults($this->supplierId);
 
         self::assertSame('10332', $this->mappings->find($this->supplierId, $bozp)['target_attribute_id'] ?? null);
-        self::assertSame('10331', $this->mappings->find($this->supplierId, $bonus)['target_attribute_id'] ?? null);
+        // Odměna zadávaná za měsíc může být pravidelná (10330) i nepravidelná
+        // (10331); z dat to neplyne, rozhodne účetní (Pokyny MH 1.4.14 kap. 3.5.1).
+        self::assertNull($this->mappings->find($this->supplierId, $bonus));
         self::assertNull($this->mappings->find($this->supplierId, $auto));
         // Zařazení je v balíku, který snímek hlášení čte.
         self::assertSame('10332', $this->mappings->snapshot($this->supplierId, $bozp)['target_attribute_id']);
@@ -148,7 +151,8 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         $expected = [
             'MZDA_HODINOVA_DOCH' => '10329',
             'PRIPLATEK_BOZP' => '10332',
-            'ODMENA_MIMORADNA' => '10331',
+            // Pravidelnost odměny z importu neplyne; varování a rozhodnutí účetní.
+            'ODMENA_MIMORADNA' => null,
             'NAHRADA_TEST' => '10337',
             'DOCH_KONTEJNERY' => null,
         ];
@@ -163,14 +167,18 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
 
         self::assertSame(['component_jmhz_mapping_missing'], array_column($findings, 'code'));
         $finding = $findings[0];
-        self::assertSame(1, $finding['count']);
-        self::assertSame(1, $finding['entity_total']);
-        self::assertCount(1, $finding['entities']);
-        self::assertSame($ids['DOCH_KONTEJNERY'], $finding['entities'][0]['entity_id']);
+        self::assertSame(2, $finding['count']);
+        self::assertSame(2, $finding['entity_total']);
+        self::assertCount(2, $finding['entities']);
+        $entities = array_column($finding['entities'], null, 'entity_id');
+        ksort($entities);
+        $missing = [$ids['ODMENA_MIMORADNA'], $ids['DOCH_KONTEJNERY']];
+        sort($missing);
+        self::assertSame($missing, array_keys($entities));
         self::assertStringContainsString('DOCH_KONTEJNERY', $finding['message']);
         self::assertSame(
             '/payroll/components?tab=catalog&component=' . $ids['DOCH_KONTEJNERY'] . '&panel=jmhz',
-            $finding['entities'][0]['remediation_path'],
+            $entities[$ids['DOCH_KONTEJNERY']]['remediation_path'],
         );
         self::assertSame('/payroll/components?tab=catalog&jmhz=missing', $finding['remediation_path']);
 
@@ -211,6 +219,54 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         self::assertSame($manual['row_version'], $kept['row_version'] ?? null);
         $disabled = $this->mappings->find($this->supplierId, $odmena);
         self::assertFalse($disabled['is_active'] ?? true, 'Vědomě zrušené zařazení se nesmí obnovit.');
+    }
+
+    /**
+     * Zařazení odměny zadávané za měsíc do 10331, které vytvořilo dřívější
+     * výchozí pravidlo, ZŮSTÁVÁ: firmě s podanými měsíci se příprava hlášení
+     * nesmí bez zásahu zastavit. Obrazovka zařazení i kontrola před během ho
+     * jen neblokujícím upozorněním předloží k ověření pravidelnosti. Rozhodnutí
+     * účetní (i stejné 10331) a výchozí ODMENA podle kódu se nehlásí. Uložením
+     * stejného cíle účetní zařazení potvrdí a upozornění zmizí.
+     */
+    public function testExistingBonusDefaultStaysAndIsOnlyFlaggedForReview(): void
+    {
+        $this->components->ensureDefaults($this->supplierId);
+        $byDefault = $this->insertComponent('PAM_O01_PREMIE_PEVNOU_CASTKO', 'bonus');
+        $byAccountant = $this->insertComponent('ODMENA_ROCNI', 'bonus');
+        // Stav z dřívějška: výchozí pravidlo zařadilo odměnu za měsíc do 10331.
+        $this->mappings->put($this->supplierId, $byDefault, '10331', null, null);
+        $this->mappings->put($this->supplierId, $byAccountant, '10331', null, $this->userId);
+        $odmena = $this->componentId('ODMENA');
+
+        $this->components->ensureDefaults($this->supplierId);
+        self::assertSame('10331', $this->mappings->find($this->supplierId, $byDefault)['target_attribute_id'] ?? null);
+        self::assertSame('10331', $this->mappings->find($this->supplierId, $odmena)['target_attribute_id'] ?? null);
+
+        $defaults = $this->container->get(PayrollComponentJmhzMappingDefaults::class);
+        self::assertInstanceOf(PayrollComponentJmhzMappingDefaults::class, $defaults);
+        self::assertSame([$byDefault => true], $defaults->unverifiedBonusDefaults($this->supplierId));
+
+        $hints = $this->suggestions('review_hint');
+        self::assertSame('bonus_regularity_unverified', $hints[$byDefault]);
+        self::assertNull($hints[$byAccountant]);
+        self::assertNull($hints[$odmena]);
+
+        $probe = $this->container->get(PayrollRunJmhzReadinessProbe::class);
+        self::assertInstanceOf(PayrollRunJmhzReadinessProbe::class, $probe);
+        $findings = $probe->inspect($this->supplierId, self::PERIOD, $this->snapshotWith([$byDefault, $byAccountant, $odmena]));
+        self::assertSame(['component_jmhz_bonus_regularity_unverified'], array_column($findings, 'code'));
+        self::assertSame('info', $findings[0]['severity']);
+        self::assertSame('anytime', $findings[0]['impact']);
+        self::assertSame([$byDefault], array_column($findings[0]['entities'], 'entity_id'));
+        self::assertStringContainsString('PAM_O01_PREMIE_PEVNOU_CASTKO', $findings[0]['message']);
+
+        // Potvrzení stejným cílem: obsah ani verze se nemění, upozornění zmizí.
+        $before = $this->mappings->find($this->supplierId, $byDefault);
+        $confirmed = $this->mappings->put($this->supplierId, $byDefault, '10331', (int) ($before['row_version'] ?? 0), $this->userId);
+        self::assertSame($before['row_version'] ?? null, $confirmed['row_version']);
+        self::assertSame([], $defaults->unverifiedBonusDefaults($this->supplierId));
+        self::assertSame([], $probe->inspect($this->supplierId, self::PERIOD, $this->snapshotWith([$byDefault])));
     }
 
     public function testReadinessReportsTheRealNumberOfPeopleNotTheListedOnes(): void
@@ -269,7 +325,7 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
     }
 
     /** @return array<int,?string> */
-    private function suggestions(): array
+    private function suggestions(string $field = 'suggested_target_attribute_id'): array
     {
         $action = $this->container->get(PayrollComponentJmhzMappingsAction::class);
         self::assertInstanceOf(PayrollComponentJmhzMappingsAction::class, $action);
@@ -286,7 +342,7 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
         $result = [];
         foreach (PayrollTimeValue::rows($body['items'] ?? null, 'items') as $item) {
             $result[PayrollTimeValue::int($item['component_id'] ?? null, 'component_id')]
-                = $item['suggested_target_attribute_id'] ?? null;
+                = $item[$field] ?? null;
         }
 
         return $result;

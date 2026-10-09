@@ -121,7 +121,7 @@ final class PayrollComponentJmhzMappingDefaults
      *    ({@see PayrollComponentJmhzTargetCatalog}), takže ji druh sám neurčí.
      *
      * `bonus` řeší {@see self::bonusTarget()}: rozdělení 10330/10331 je podle
-     * pravidelnosti, a tu nese četnost složky, ne její druh.
+     * pravidelnosti; doložit ji umí jen opakující se složka (`regular`).
      *
      * Ostatní druhy (`commission`, `allowance`, `severance`, `backpay`,
      * `other`, benefity, …) záměrně nemají nic — z druhu jejich zařazení
@@ -341,17 +341,89 @@ final class PayrollComponentJmhzMappingDefaults
 
     /**
      * Prémie a odměny se v hlášení dělí na PRAVIDELNÉ (10330) a NEPRAVIDELNÉ
-     * (10331). Druh `bonus` to nerozliší, četnost složky ano: jednorázová
-     * složka je nepravidelná (tak je zařazená i výchozí ODMENA), opakující se
-     * složka z podmínek vztahu je pravidelná.
+     * (10331). Datový slovník 1.4.1.6 a Pokyny MH 1.4.14 kap. 3.5.1: do 10330
+     * „prémie a odměny pravidelně měsíčně zúčtované se mzdou … zahrnou se
+     * i pohyblivé složky mzdy", do 10331 „prémie a odměny nepravidelně
+     * zúčtované". Druh `bonus` to nerozliší, četnost složky jen zčásti:
+     *
+     *  - `regular` je opakující se složka z podmínek vztahu, tedy pravidelně
+     *    měsíčně zúčtovaná → 10330;
+     *  - `one_off` znamená jen to, že se částka zadává za měsíc (tak vznikají
+     *    i všechny složky z importu docházky a z převodu mezd, které jinou
+     *    četnost mít nesmějí). O pravidelnosti nic neříká: měsíční prémie
+     *    pevnou částkou je `one_off` stejně jako mimořádná odměna. Výchozí
+     *    10331 tu bylo hádání, které tiše přesunulo pravidelné prémie do
+     *    nepravidelných (převod PAMICA, vada A10). U NOVĚ zakládané složky proto
+     *    rozhodne účetní; obrazovka zařazení ho hlásí jako chybějící a převod ho
+     *    vypíše. Zařazení, která dřívější pravidlo už vytvořilo, zůstávají a jen
+     *    se neblokujícím upozorněním předloží k ověření
+     *    ({@see self::unverifiedBonusDefaults()}).
+     *    Výchozí ODMENA má zařazení podle kódu (nepravidelná odměna číselníku).
      */
     private static function bonusTarget(string $frequencyKind): ?string
     {
         return match ($frequencyKind) {
-            'one_off' => '10331',
             'regular' => '10330',
             default => null,
         };
+    }
+
+    /**
+     * Složky, jejichž zařazení do 10331 vytvořilo DŘÍVĚJŠÍ výchozí pravidlo
+     * (odměna `one_off` → nepravidelné) a účetní ho zatím nepotvrdila.
+     *
+     * Pravidlo se změnilo jen pro nově zakládané složky ({@see self::bonusTarget()}).
+     * Existující zařazení zůstávají, jinak by se firmám s podanými měsíci bez
+     * zásahu zastavila příprava hlášení. Účetní je jen upozorněna, ať pravidelnost
+     * ověří; upozornění nic neblokuje a zmizí, jakmile zařazení uloží sama
+     * (i se stejným cílem, viz {@see PayrollComponentJmhzMappingRepository::put()}).
+     * Jediné místo té podmínky pro obrazovku zařazení i kontrolu před během.
+     *
+     * Rozhodnutí účetní (autor nebo úprava) se nehlásí, výchozí ODMENA podle
+     * kódu také ne: o ní pravidlo rozhoduje dál.
+     *
+     * @param list<int>|null $componentIds jen tyto složky; `null` = celá firma
+     * @return array<int,true> id složky => true
+     */
+    public function unverifiedBonusDefaults(int $supplierId, ?array $componentIds = null): array
+    {
+        if ($componentIds === []) {
+            return [];
+        }
+        $sql = "SELECT definition.id, definition.code, definition.component_kind,
+                       definition.frequency_kind, definition.tax_treatment
+                  FROM payroll_component_jmhz_mappings mapping
+                  JOIN payroll_component_definitions definition
+                    ON definition.supplier_id = mapping.supplier_id
+                   AND definition.id = mapping.component_definition_id
+                 WHERE mapping.supplier_id = ?
+                   AND mapping.is_active = 1
+                   AND mapping.target_attribute_id = '10331'
+                   AND mapping.created_by IS NULL
+                   AND mapping.updated_by IS NULL
+                   AND definition.component_kind = 'bonus'
+                   AND definition.jmhz_treatment = 'included'";
+        $params = [$supplierId];
+        if ($componentIds !== null) {
+            $sql .= ' AND definition.id IN (' . implode(',', array_fill(0, count($componentIds), '?')) . ')';
+            array_push($params, ...$componentIds);
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $result = [];
+        foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'payroll_component_definitions') as $row) {
+            $target = self::targetFor(
+                PayrollTimeValue::string($row['code'] ?? null, 'code'),
+                PayrollTimeValue::string($row['component_kind'] ?? null, 'component_kind'),
+                PayrollTimeValue::string($row['frequency_kind'] ?? null, 'frequency_kind'),
+                PayrollTimeValue::string($row['tax_treatment'] ?? null, 'tax_treatment'),
+            );
+            if ($target === null) {
+                $result[PayrollTimeValue::int($row['id'] ?? null, 'component_id')] = true;
+            }
+        }
+
+        return $result;
     }
 
     /**

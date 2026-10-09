@@ -15,9 +15,9 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
  * Zařazení do JMHZ dostane složka při založení podle svého druhu z jediného
  * zdroje {@see \MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults::targetFor()}
  * (hodinová a úkolová mzda → tarifní mzdy, příplatek → příplatky celkem,
- * odměna → prémie a odměny nepravidelné, náhrada → náhrady mzdy). Druh `other`
- * a ostatní druhy bez jednoznačného zařazení zůstanou nezařazené — složku
- * „podle hlavičky" musí zařadit účetní.
+ * náhrada → náhrady mzdy). Druh `other`, odměna (pravidelná, nebo nepravidelná,
+ * z importu neplyne) a ostatní druhy bez jednoznačného zařazení zůstanou
+ * nezařazené — rozhodne účetní.
  *
  * @phpstan-type AttendanceProfileComponent array{code:string,name:string,kind:string}
  */

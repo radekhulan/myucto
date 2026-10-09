@@ -433,8 +433,9 @@ final class PohodaPayrollImporter
                 }
                 $protocol->warn(self::STEP_PROFILE, 'components_without_jmhz', sprintf(
                     'Mzdové složky bez zařazení do JMHZ: %s. Zařazení z druhu složky neplyne a převod ho '
-                    . 'nehádá, protože chybná hodnota by prošla do hlášení tiše. Zařaďte je v Mzdy → '
-                    . 'Mzdové složky, jinak nepůjde zmrazit měsíční hlášení.',
+                    . 'nehádá, protože chybná hodnota by prošla do hlášení tiše. U prémií a odměn rozhodněte, '
+                    . 'zda se zúčtovávají pravidelně každý měsíc (10330), nebo nepravidelně (10331). Zařaďte je '
+                    . 'v Mzdy → Mzdové složky, jinak nepůjde zmrazit měsíční hlášení.',
                     implode(', ', $list),
                 ));
             }

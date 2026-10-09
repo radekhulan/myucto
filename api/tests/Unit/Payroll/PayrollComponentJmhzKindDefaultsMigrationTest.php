@@ -43,6 +43,19 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
 
     private const PACKAGE_TRANSITION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
 
+    /**
+     * Výchozí zařazení, která backfill 1839/1903 ještě dělal, ale pravidlo pro
+     * NOVĚ zakládané složky už ne: druh => četnost => true. Zařazení, která
+     * backfill vytvořil, zůstávají (žádná migrace je nemaže) a účetní je jen
+     * neblokujícím upozorněním předložena k ověření
+     * ({@see PayrollComponentJmhzMappingDefaults::unverifiedBonusDefaults()}).
+     *
+     * @var array<string,array<string,true>>
+     */
+    private const SUPERSEDED_FOR_NEW = [
+        'bonus' => ['one_off' => true],
+    ];
+
     /** @var list<string> component_kind z payroll_component_definitions (migrace 1501) */
     private const KINDS = [
         'base_wage', 'hourly_wage', 'task_wage', 'bonus', 'premium', 'commission',
@@ -59,7 +72,10 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         yield 'úkolová mzda' => ['X', 'task_wage', 'one_off', 'included', '10329'];
         yield 'měsíční mzda' => ['X', 'base_wage', 'regular', 'included', '10329'];
         yield 'příplatek' => ['X', 'premium', 'one_off', 'included', '10332'];
-        yield 'jednorázová odměna' => ['X', 'bonus', 'one_off', 'included', '10331'];
+        // Odměna zadávaná za měsíc může být pravidelná i nepravidelná (Pokyny MH
+        // 1.4.14 kap. 3.5.1); rozhodne účetní. Výchozí ODMENA má zařazení kódem.
+        yield 'odměna zadávaná za měsíc' => ['X', 'bonus', 'one_off', 'included', null];
+        yield 'výchozí odměna číselníku' => ['ODMENA', 'bonus', 'one_off', 'included', '10331'];
         yield 'pravidelná odměna' => ['X', 'bonus', 'regular', 'included', '10330'];
         yield 'zdaněná náhrada' => ['X', 'compensation', 'one_off', 'included', '10337'];
         yield 'osvobozená náhrada (DPN)' => ['X', 'compensation', 'one_off', 'exempt', null];
@@ -96,10 +112,12 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
             'PRIPLATKY_K_HODINOVE' => '10332',
             'PRIPLATEK_ODPOLEDNI' => '10332',
             'PRIPLATEK_BOZP' => '10332',
-            'ODMENA_KONTEJNERY' => '10331',
-            'ODMENA_MIMORADNA' => '10331',
-            'ODMENA_HOTOVOSTNI' => '10331',
-            'ODMENA_SENIOR' => '10331',
+            // Odměny z importu jsou `one_off` z povahy importu; o pravidelnosti
+            // rozhodne účetní.
+            'ODMENA_KONTEJNERY' => null,
+            'ODMENA_MIMORADNA' => null,
+            'ODMENA_HOTOVOSTNI' => null,
+            'ODMENA_SENIOR' => null,
             'DOPLATEK_MZDY' => '10329',
             'MZDA_SKOLENI' => '10329',
         ];
@@ -185,9 +203,14 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         foreach (self::KINDS as $kind) {
             foreach (['one_off', 'regular'] as $frequency) {
                 foreach (['included', 'exempt', 'manual_review'] as $tax) {
+                    $migrated = self::evaluate($clauses, $kind, $frequency, $tax);
+                    if (isset(self::SUPERSEDED_FOR_NEW[$kind][$frequency])) {
+                        self::assertSame('10331', $migrated, "Backfill u {$kind}/{$frequency} měl zařazovat do 10331.");
+                        $migrated = null;
+                    }
                     self::assertSame(
                         PayrollComponentJmhzMappingDefaults::targetFor('__BEZ_KODU__', $kind, $frequency, $tax),
-                        self::evaluate($clauses, $kind, $frequency, $tax),
+                        $migrated,
                         "Druh {$kind}, četnost {$frequency}, daň {$tax}: SQL backfill a PHP se rozcházejí.",
                     );
                 }
@@ -221,6 +244,30 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         self::assertSame(self::kindClauses($original), self::kindClauses($transition));
         self::assertStringContainsString('existing.component_definition_id = target.id', $transition);
         self::assertStringContainsString("controls-source-1.4.2.10_manifest-v1", $transition);
+    }
+
+    /**
+     * Pravidlo změněné jen pro nové složky nesmí mít migraci, která by stávající
+     * zařazení smazala nebo přepsala: firmě s podanými měsíci by se bez zásahu
+     * zastavila příprava hlášení. Výchozí ODMENA zůstává podle kódu v 10331.
+     */
+    public function testSupersededRuleKeepsExistingMappings(): void
+    {
+        $migrations = glob(dirname(__DIR__, 4) . '/db/migrations/*.sql') ?: [];
+        foreach ($migrations as $file) {
+            $sql = (string) preg_replace('/^\s*--.*$/m', '', (string) file_get_contents($file));
+            self::assertDoesNotMatchRegularExpression(
+                '/(DELETE|UPDATE)\b[^;]*payroll_component_jmhz_mappings[^;]*component_kind\s*=\s*\'bonus\'/is',
+                $sql,
+                basename($file) . ': stávající zařazení odměn se nesmí měnit migrací.',
+            );
+        }
+        foreach (self::SUPERSEDED_FOR_NEW as $kind => $frequencies) {
+            foreach (array_keys($frequencies) as $frequency) {
+                self::assertNull(PayrollComponentJmhzMappingDefaults::targetFor('__BEZ_KODU__', $kind, $frequency, 'included'));
+            }
+        }
+        self::assertSame('10331', PayrollComponentJmhzMappingDefaults::targetForCode('ODMENA'));
     }
 
     public function testMigrationIsIdempotentAndNeverTouchesExistingChoice(): void

@@ -67,10 +67,15 @@ final class PayrollComponentJmhzMappingsAction
             $this->audit($request, 'payroll.component_jmhz_mapping.default_applied', $default, null);
         }
         $mappings = $this->mappings->listForSupplier($supplierId);
+        $unverified = $this->mappingDefaults->unverifiedBonusDefaults($supplierId);
         $items = [];
         foreach ($this->components->list($supplierId) as $component) {
             $componentId = PayrollTimeValue::int($component['id'] ?? null, 'component_id');
-            $items[] = $this->responsePayload($component, $mappings[$componentId] ?? null);
+            $items[] = $this->responsePayload(
+                $component,
+                $mappings[$componentId] ?? null,
+                isset($unverified[$componentId]),
+            );
         }
 
         return Json::ok($response, ['items' => $items]);
@@ -92,6 +97,7 @@ final class PayrollComponentJmhzMappingsAction
         return Json::ok($response, $this->responsePayload(
             $component,
             $this->mappings->find($supplierId, $componentId),
+            $this->mappingDefaults->unverifiedBonusDefaults($supplierId, [$componentId]) !== [],
         ));
     }
 
@@ -119,6 +125,7 @@ final class PayrollComponentJmhzMappingsAction
         }
         try {
             $expectedVersion = $this->optionalVersion($body['row_version'] ?? null);
+            $unverifiedBefore = $this->mappingDefaults->unverifiedBonusDefaults($supplierId, [$componentId]) !== [];
             $mapping = $this->saveMapping(
                 $request,
                 $supplierId,
@@ -126,6 +133,13 @@ final class PayrollComponentJmhzMappingsAction
                 $targetId,
                 $expectedVersion,
             );
+            if ($unverifiedBefore
+                && $this->mappingDefaults->unverifiedBonusDefaults($supplierId, [$componentId]) === []
+            ) {
+                // Potvrzení výchozího zařazení stejným cílem obsah nemění, ale
+                // je to rozhodnutí účetní a má být dohledatelné.
+                $this->audit($request, 'payroll.component_jmhz_mapping.default_confirmed', $mapping, $mapping);
+            }
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\OutOfBoundsException $e) {
@@ -137,7 +151,11 @@ final class PayrollComponentJmhzMappingsAction
                 'current_row_version' => $e->currentVersion,
             ]);
         }
-        return Json::ok($response, $this->responsePayload($component, $mapping));
+        return Json::ok($response, $this->responsePayload(
+            $component,
+            $mapping,
+            $this->mappingDefaults->unverifiedBonusDefaults($supplierId, [$componentId]) !== [],
+        ));
     }
 
     /** @param array<string,string> $args */
@@ -218,7 +236,7 @@ final class PayrollComponentJmhzMappingsAction
      * @param array<string,mixed>|null $mapping
      * @return array<string,mixed>
      */
-    private function responsePayload(array $component, ?array $mapping): array
+    private function responsePayload(array $component, ?array $mapping, bool $bonusRegularityUnverified = false): array
     {
         $treatment = PayrollTimeValue::string($component['jmhz_treatment'] ?? null, 'jmhz_treatment');
         $active = $mapping !== null
@@ -251,6 +269,10 @@ final class PayrollComponentJmhzMappingsAction
                     PayrollTimeValue::string($component['tax_treatment'] ?? null, 'tax_treatment'),
                 )
                 : null,
+            // Neblokující upozornění: zařazení odměny do nepravidelných (10331)
+            // vytvořilo dřívější výchozí pravidlo a účetní ho neověřila. Uložením
+            // zařazení (i stejného) upozornění zmizí.
+            'review_hint' => $bonusRegularityUnverified ? 'bonus_regularity_unverified' : null,
         ];
     }
 

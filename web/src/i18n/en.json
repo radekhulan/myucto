@@ -3772,6 +3772,8 @@
         "removed": "The JMHZ mapping was deactivated.",
         "remove_failed": "The JMHZ mapping could not be deactivated.",
         "catch_all_warning": "This target is a total for amounts that cannot be classified into the detailed breakdown. JMHZ preparation must not count it twice with details.",
+        "review_hint_short": "Check whether the bonus is regular",
+        "review_hint": "The classification as irregular bonuses (10331) was filled in by the application earlier and nobody has confirmed it yet. A bonus paid regularly every month, including a variable wage component, belongs to regular bonuses (10330). Choose the correct field and save, even if it stays the same; the notice then disappears. Neither the report nor the payroll run is restricted.",
         "legacy_mapping": "This mapping comes from an older JMHZ specification package. Deactivate it before selecting a target from the current package.",
         "status": {
           "configured": "Mapped",

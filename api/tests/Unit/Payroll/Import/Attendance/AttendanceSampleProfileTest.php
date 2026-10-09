@@ -39,16 +39,21 @@ final class AttendanceSampleProfileTest extends TestCase
      * Složka vzoru musí mít zařazení pro JMHZ: bez něj nejde zmrazit měsíční
      * hlášení a účetní by ho musela doplňovat ručně. Buď je složka deklarovaná
      * ve vzoru (druh určí zařazení), nebo je ve výchozím číselníku složek.
+     *
+     * Výjimkou jsou odměny (druh `bonus`): zda je odměna pravidelná (10330),
+     * nebo nepravidelná (10331), vzor ani import neví (Pokyny MH 1.4.14
+     * kap. 3.5.1) a rozhodne účetní jednou za firmu.
      */
     public function testEveryComponentOfTheSampleHasJmhzTarget(): void
     {
         /*
-         * Žádná složka vzoru nesmí zůstat bez zařazení: chodí z importu každý měsíc
-         * a bez zařazení nejde zmrazit měsíční hlášení. Zdanitelná část stravování
-         * má proto vlastní složku číselníku se sběrným uzlem 10328, ne obecný
-         * nepeněžní příjem, u kterého zařazení rozhoduje účetní.
+         * Žádná jiná složka vzoru nesmí zůstat bez zařazení: chodí z importu každý
+         * měsíc a bez zařazení nejde zmrazit měsíční hlášení. Zdanitelná část
+         * stravování má proto vlastní složku číselníku se sběrným uzlem 10328, ne
+         * obecný nepeněžní příjem, u kterého zařazení rozhoduje účetní.
          */
         $declared = array_column(AttendanceSampleProfile::components(), null, 'code');
+        $bonuses = [];
         foreach (AttendanceSampleProfile::rules() as $rule) {
             $code = $rule['component_code'] ?? null;
             if ($rule['meaning'] !== 'component' || $code === null || $code === AttendanceRules::AUTO_COMPONENT) {
@@ -62,11 +67,16 @@ final class AttendanceSampleProfileTest extends TestCase
                     'included',
                 )
                 : PayrollComponentJmhzMappingDefaults::targetForCode($code);
+            if (($declared[$code]['kind'] ?? null) === 'bonus') {
+                self::assertNull($target, "Odměna {$code} nesmí mít výchozí zařazení.");
+                $bonuses[] = $code;
+                continue;
+            }
             self::assertNotNull($target, "Složka {$code} nemá zařazení pro JMHZ.");
         }
-        self::assertSame('10331', PayrollComponentJmhzMappingDefaults::targetFor('ODMENA_KONTEJNERY', 'bonus', 'one_off', 'included'));
+        self::assertContains('ODMENA_KONTEJNERY', $bonuses);
         // Sloupce, které bývají prázdné, ale s částkou by jinak vyrobily nezařazenou složku.
-        foreach (['ODMENA_SENIOR' => '10331', 'DOPLATEK_MZDY' => '10329', 'MZDA_SKOLENI' => '10329'] as $code => $expected) {
+        foreach (['ODMENA_SENIOR' => null, 'DOPLATEK_MZDY' => '10329', 'MZDA_SKOLENI' => '10329'] as $code => $expected) {
             self::assertArrayHasKey($code, $declared, "Složka {$code} není ve vzoru deklarovaná.");
             self::assertSame($expected, PayrollComponentJmhzMappingDefaults::targetFor(
                 $code,

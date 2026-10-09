@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use PDO;
@@ -54,6 +55,7 @@ final class PayrollRunJmhzReadinessProbe
     public function __construct(
         private readonly Connection $db,
         private readonly JmhzPreparationSnapshotService $preparation,
+        private readonly PayrollComponentJmhzMappingDefaults $mappingDefaults,
     ) {}
 
     /**
@@ -96,6 +98,7 @@ final class PayrollRunJmhzReadinessProbe
             ]];
         }
 
+        $issues = [...$issues, ...$this->bonusRegularityIssues($supplierId, $snapshotData)];
         if ($issues === []) {
             return [];
         }
@@ -154,6 +157,53 @@ final class PayrollRunJmhzReadinessProbe
 
         /** @var list<array{code:string,severity:string,impact:string,scope:string,message:string,remediation_path:?string,count:int,entities:list<array{entity_type:string,entity_id:?int,label:?string}>}> $findings */
         return $findings;
+    }
+
+    /**
+     * Odměny použité v období, jejichž zařazení do nepravidelných (10331)
+     * vytvořilo dřívější výchozí pravidlo a účetní ho neověřila
+     * ({@see PayrollComponentJmhzMappingDefaults::unverifiedBonusDefaults()}).
+     *
+     * Jen upozornění: zařazení platí dál, hlášení se sestaví a nic se
+     * nezastaví. Kontrola, která selže, nesmí shodit ostatní nálezy.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     */
+    private function bonusRegularityIssues(int $supplierId, array $snapshotData): array
+    {
+        $componentIds = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            foreach ((array) (is_array($person) ? ($person['employments'] ?? []) : []) as $employment) {
+                foreach ((array) (is_array($employment) ? ($employment['inputs'] ?? []) : []) as $input) {
+                    $id = is_array($input) && is_array($input['component'] ?? null)
+                        ? ($input['component']['component_id'] ?? null)
+                        : null;
+                    if (is_int($id)) {
+                        $componentIds[$id] = true;
+                    }
+                }
+            }
+        }
+        if ($componentIds === []) {
+            return [];
+        }
+        try {
+            $unverified = $this->mappingDefaults->unverifiedBonusDefaults($supplierId, array_keys($componentIds));
+        } catch (\Throwable) {
+            return [];
+        }
+        $issues = [];
+        foreach (array_keys($unverified) as $componentId) {
+            $issues[] = [
+                'code' => 'component_jmhz_bonus_regularity_unverified',
+                'entity_type' => 'component',
+                'entity_id' => $componentId,
+                'attribute_ids' => ['10330', '10331'],
+            ];
+        }
+
+        return $issues;
     }
 
     /**
@@ -234,6 +284,16 @@ final class PayrollRunJmhzReadinessProbe
                 . 'omezený není — spočítat a vyplatit jde i teď.',
                 $named !== '' ? $named : $count . '× mzdová složka',
             ),
+            'component_jmhz_bonus_regularity_unverified' => sprintf(
+                'Ověřte zařazení odměny do měsíčního hlášení: %s. Aplikace ji dřív '
+                . 'sama zařadila mezi prémie a odměny nepravidelné (10331). Odměna '
+                . 'zúčtovaná pravidelně každý měsíc, včetně pohyblivé složky mzdy, '
+                . 'ale patří mezi pravidelné (10330). Otevřete Mzdy → Mzdové složky '
+                . '→ Číselník, u složky zvolte „Zařazení do JMHZ" a uložte správné '
+                . 'pole; uložením se upozornění vyřeší. Hlášení ani mzdový běh tím '
+                . 'omezené nejsou.',
+                $named !== '' ? $named : $count . '× mzdová složka',
+            ),
             'component_jmhz_manual_review' => sprintf(
                 'Zařazení do měsíčního hlášení čeká na potvrzení u: %s. '
                 . 'Otevřete Mzdy → Mzdové složky a zařazení potvrďte.',
@@ -287,7 +347,8 @@ final class PayrollRunJmhzReadinessProbe
         return match ($code) {
             'component_jmhz_mapping_missing',
             'component_jmhz_manual_review',
-            'component_jmhz_treatment_invalid' => self::componentPath($code, $entityId),
+            'component_jmhz_treatment_invalid',
+            'component_jmhz_bonus_regularity_unverified' => self::componentPath($code, $entityId),
             default => '/payroll/submissions/jmhz',
         };
     }
@@ -307,7 +368,9 @@ final class PayrollRunJmhzReadinessProbe
         if ($componentId !== null) {
             $query['component'] = $componentId;
             $query['panel'] = 'jmhz';
-        } else {
+        } elseif ($code !== 'component_jmhz_bonus_regularity_unverified') {
+            // Neověřené zařazení odměny je zařazení, ne chybějící stav — filtr
+            // stavů ho nemá, souhrnný nález proto vede na celý číselník.
             $query['jmhz'] = match ($code) {
                 'component_jmhz_manual_review' => 'manual_review',
                 'component_jmhz_treatment_invalid' => 'invalid',

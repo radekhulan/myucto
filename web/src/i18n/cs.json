@@ -3772,6 +3772,8 @@
         "removed": "Mapování JMHZ bylo deaktivováno.",
         "remove_failed": "Mapování JMHZ se nepodařilo deaktivovat.",
         "catch_all_warning": "Tento cíl je celková částka pro případy, které nelze přesně zařadit do detailního rozpadu. Při přípravě JMHZ se s detaily nesmí započítat dvakrát.",
+        "review_hint_short": "Ověřte pravidelnost odměny",
+        "review_hint": "Zařazení mezi prémie a odměny nepravidelné (10331) sem dřív doplnila aplikace sama a zatím ho nikdo neověřil. Odměna zúčtovaná pravidelně každý měsíc, včetně pohyblivé složky mzdy, patří mezi pravidelné (10330). Zvolte správné pole a uložte, i když zůstane stejné; upozornění tím zmizí. Hlášení ani mzdový běh tím omezené nejsou.",
         "legacy_mapping": "Mapování pochází ze staršího balíku specifikace JMHZ. Nejprve je deaktivujte a potom zvolte cíl z aktuálního balíku.",
         "status": {
           "configured": "Namapováno",

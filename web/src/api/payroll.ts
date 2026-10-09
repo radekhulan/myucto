@@ -2006,6 +2006,8 @@ export interface PayrollComponentJmhzMappingState {
   jmhz_treatment: PayrollComponentInclusion
   status: PayrollComponentJmhzMappingStatus
   mapping: PayrollComponentJmhzMapping | null
+  /** Neblokující upozornění: zařazení odměny do 10331 z dřívějšího výchozího pravidla čeká na ověření. */
+  review_hint?: 'bonus_regularity_unverified' | null
 }
 
 export type PayrollRecurringCalculationKind =
