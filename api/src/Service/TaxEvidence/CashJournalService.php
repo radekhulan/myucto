@@ -686,14 +686,21 @@ final class CashJournalService
         throw new \LogicException('Nedostupná větev pokladní klasifikace.');
     }
 
-    /** R7: z uhrazeného brutto se vyloučí pouze evidovaná DPH; zaokrouhlení patří do základu. */
+    /**
+     * R7: z uhrazeného brutto se vyloučí pouze evidovaná DPH; zaokrouhlení patří do základu.
+     *
+     * Poměr DPH platí i pro dobropis: ten má DPH i brutto záporné, poměr je tedy stejný
+     * jako u faktury. Dřív podmínka `with <= 0` poslala celé brutto dobropisu do základu,
+     * takže vratka plátce snížila daňový příjem i o DPH. Stejné pravidlo drží agregace
+     * bankovní nohy (CashJournalRepository, binc.czk_base a czk_exempt).
+     */
     private function prorateBase(float $amount, mixed $vat, mixed $with, bool $isVatPayer): float
     {
         if (!$isVatPayer || $vat === null || $with === null) {
             return round($amount, 2);
         }
         $w = (float) $with;
-        if ($w <= 0.0) {
+        if ($w == 0.0) {
             return round($amount, 2);
         }
         return round($amount * (1 - min(1.0, max(0.0, (float) $vat / $w))), 2);

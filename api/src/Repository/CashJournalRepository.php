@@ -223,7 +223,7 @@ final class CashJournalRepository
                                -- Paid gross contains rounding. Only the stored VAT is
                                -- excluded from income (same rule as CashJournalService::prorateBase).
                                SUM(ROUND(CASE WHEN i.income_tax_exempt = 1 THEN 0
-                                              WHEN {$payerAtIp} = 1 AND i.total_with_vat > 0
+                                              WHEN {$payerAtIp} = 1 AND i.total_with_vat <> 0
                                                    THEN ip.amount * (1 - LEAST(1, GREATEST(0, i.total_vat / i.total_with_vat)))
                                               ELSE ip.amount END
                                          * {$ipRateBank}, 2)) AS czk_base,
@@ -233,7 +233,7 @@ final class CashJournalRepository
                                -- poplatníka. Zbytek (amount − czk_base − czk_exempt) padne do
                                -- income_nontax v CashJournalService::bankIncomeAlloc().
                                SUM(ROUND(CASE WHEN i.income_tax_exempt <> 1 THEN 0
-                                              WHEN {$payerAtIp} = 1 AND i.total_with_vat > 0
+                                              WHEN {$payerAtIp} = 1 AND i.total_with_vat <> 0
                                                    THEN ip.amount * (1 - LEAST(1, GREATEST(0, i.total_vat / i.total_with_vat)))
                                               ELSE ip.amount END
                                          * {$ipRateBank}, 2)) AS czk_exempt,
