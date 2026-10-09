@@ -9,6 +9,11 @@ declare(strict_types=1);
  *   matice/<formular>.json    pozadavky vytazene z oficialnich dokumentu CSSZ/MPSV/ZP
  *   pokryti/<formular>.json   stav pokryti po zpetnem auditu (JMHZ: pokryti/jmhz-1..6.json)
  *   pokryti/ZPETNY-AUDIT-DEFEKTY.json   overene otevrene defekty (volitelne)
+ *   pokryti/PRETRIDENI-*.json  prekryvy pokryti z pretrideni (volitelne): {"rows":[{form, req, to,
+ *                              test_ref, note, reason}]}; aplikuji se v poradi nazvu souboru
+ *   scenare/<formular>.json    radky druhu scenario_value (hodnota atributu podle scenare, volitelne):
+ *                              [{id, xpath, data_id, scenario{rozmer: hodnota}, rule, source,
+ *                              severity, status, test_ref, note}]
  * Vystup: pouze api/resources/payroll/norms/ (<formular>.json a pri prvnim behu baseline.json).
  * Format: kazdy soubor ma meta, test_refs (unikatni "Plne\Kvalifikovana\Trida::metoda" nebo samotna
  * trida) a requirements; polozka requirements.tests je seznam indexu do test_refs.
@@ -16,6 +21,11 @@ declare(strict_types=1);
  *
  * Pouziti:
  *   php tools/norms/build-norm-coverage.php [--private=<cesta k private/normy>] [--raise-baseline]
+ *       [--sync-from-repo]
+ *
+ * --sync-from-repo pred sestavenim prepise v pokryti/<formular>.json status, test_ref a u otevrenych
+ * stavu note tam, kde se commitnuty stav v api/resources/payroll/norms lisi (rucni uprava v repu
+ * spolu s opravou). Bez nej by novy beh takove upravy vratil.
  *
  * Vychozi --private je <koren repa>/private/normy. Baseline (ratchet pro PayrollNormCoverageTest)
  * se vytvori jen pokud chybi; s --raise-baseline se hodnoty pouze zvysuji, nikdy nesnizuji.
@@ -30,11 +40,14 @@ const MAX_TOTAL_BYTES = 5 * 1024 * 1024;
 $root = dirname(__DIR__, 2);
 $privateDir = $root . '/private/normy';
 $raiseBaseline = false;
+$syncFromRepo = false;
 foreach (array_slice($argv, 1) as $arg) {
     if (str_starts_with($arg, '--private=')) {
         $privateDir = rtrim(substr($arg, 10), '/\\');
     } elseif ($arg === '--raise-baseline') {
         $raiseBaseline = true;
+    } elseif ($arg === '--sync-from-repo') {
+        $syncFromRepo = true;
     } else {
         fwrite(STDERR, "Neznamy argument: {$arg}\n");
         exit(2);
@@ -135,6 +148,10 @@ const STATUSES = [
     'not_applicable', 'unclear', 'accepted_gap',
 ];
 const GAP_STATUSES = ['missing', 'violated', 'unclear', 'accepted_gap'];
+/** Rozmery scenare u radku scenario_value (PayrollNormCoverageTest::SCENARIO_DIMENSIONS). */
+const SCENARIO_DIMENSIONS = [
+    'vztah', 'dan', 'pojisteni', 'nepritomnost', 'svatek', 'soubeh', 'mesic', 'slevy', 'prijem', 'obdobi',
+];
 
 function clean(string $s): string
 {
@@ -296,7 +313,95 @@ function encodeForm(array $doc): string
         . "\n  ],\n  \"requirements\": [\n" . implode(",\n", $lines) . "\n  ]\n}\n";
 }
 
+function testRefFromFqcn(string $ref): string
+{
+    [$class, $method] = array_pad(explode('::', $ref, 2), 2, null);
+    $path = 'api/tests/' . str_replace('\\', '/', substr((string) $class, strlen('MyInvoice\\Tests\\'))) . '.php';
+
+    return $method === null ? $path : $path . '::' . $method;
+}
+
+/** Commitnuty stav repa zpet do pokryti (status, test_ref, note u otevrenych stavu). */
+function syncCoverageFromRepo(string $privateDir, string $outDir, array $index): int
+{
+    $changed = 0;
+    foreach (FORMS as $form => $cfg) {
+        $repoFile = "{$outDir}/{$form}.json";
+        if (!is_file($repoFile)) {
+            continue;
+        }
+        $repo = loadJson($repoFile);
+        $pool = $repo['test_refs'];
+        $want = [];
+        foreach ($repo['requirements'] as $r) {
+            $want[$r['id']] = $r;
+        }
+        foreach ($cfg['coverage'] as $cov) {
+            $path = "{$privateDir}/pokryti/{$cov}.json";
+            $entries = loadJson($path);
+            $dirty = false;
+            foreach ($entries as &$c) {
+                $r = $want[$c['req_id']] ?? null;
+                if ($r === null) {
+                    continue;
+                }
+                $repoTests = array_map(static fn (int $i): string => $pool[$i], $r['tests'] ?? []);
+                sort($repoTests, SORT_STRING);
+                $ownTests = normalizeTests((string) ($c['test_ref'] ?? ''), $index);
+                $ownStatus = (string) $c['status'];
+                if ($ownStatus === 'implemented_tested' && $ownTests === []) {
+                    $ownStatus = 'implemented_untested';
+                }
+                if ($ownStatus === $r['status'] && $ownTests === $repoTests) {
+                    continue;
+                }
+                $c['status'] = $r['status'];
+                $c['test_ref'] = implode('; ', array_map('testRefFromFqcn', $repoTests));
+                if (in_array($r['status'], GAP_STATUSES, true) && short((string) ($c['note'] ?? ''), 200) !== ($r['gap'] ?? '')) {
+                    $c['note'] = (string) ($r['gap'] ?? '');
+                }
+                $dirty = true;
+                $changed++;
+            }
+            unset($c);
+            if ($dirty) {
+                file_put_contents($path, json_encode($entries, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
+            }
+        }
+    }
+
+    return $changed;
+}
+
+/**
+ * Prekryvy z pretrideni (pokryti/PRETRIDENI-*.json).
+ *
+ * @return array<string, array<string, array<string, mixed>>> form => req => prekryv
+ */
+function loadOverlays(string $privateDir): array
+{
+    $out = [];
+    $files = glob("{$privateDir}/pokryti/PRETRIDENI-*.json") ?: [];
+    sort($files, SORT_STRING);
+    foreach ($files as $file) {
+        $data = loadJson($file);
+        foreach ($data['rows'] ?? [] as $row) {
+            if (!isset($row['form'], $row['req'], $row['to']) || !in_array($row['to'], STATUSES, true)) {
+                fwrite(STDERR, "Neplatny prekryv v {$file}: " . json_encode($row, JSON_UNESCAPED_UNICODE) . "\n");
+                exit(1);
+            }
+            $out[(string) $row['form']][(string) $row['req']] = $row;
+        }
+    }
+
+    return $out;
+}
+
 $index = indexTests($root);
+if ($syncFromRepo) {
+    echo 'Srovnano z repa: ' . syncCoverageFromRepo($privateDir, $outDir, $index) . "\n";
+}
+$overlays = loadOverlays($privateDir);
 
 $defects = [];
 $defectFile = $privateDir . '/pokryti/ZPETNY-AUDIT-DEFEKTY.json';
@@ -321,6 +426,33 @@ foreach (FORMS as $form => $cfg) {
     foreach ($cfg['coverage'] as $cov) {
         foreach (loadJson("{$privateDir}/pokryti/{$cov}.json") as $c) {
             $coverage[$c['req_id']] = $c;
+        }
+    }
+    $scenarioFile = "{$privateDir}/scenare/{$form}.json";
+    if (is_file($scenarioFile)) {
+        foreach (loadJson($scenarioFile) as $s) {
+            $sid = (string) ($s['id'] ?? '');
+            $dims = $s['scenario'] ?? null;
+            if ($sid === '' || isset($coverage[$sid]) || !is_array($dims) || $dims === []
+                || array_diff(array_keys($dims), SCENARIO_DIMENSIONS) !== []) {
+                fwrite(STDERR, "Neplatny radek scenare ({$form}): {$sid}\n");
+                exit(1);
+            }
+            $reqs[] = $s + ['kind' => 'scenario_value'];
+            $coverage[$sid] = ['req_id' => $sid, 'status' => $s['status'], 'test_ref' => $s['test_ref'] ?? '', 'note' => $s['note'] ?? ''];
+        }
+    }
+    foreach ($overlays[$form] ?? [] as $req => $o) {
+        if (!isset($coverage[$req])) {
+            fwrite(STDERR, "Prekryv na neexistujici pozadavek ({$form}): {$req}\n");
+            exit(1);
+        }
+        $coverage[$req]['status'] = $o['to'];
+        if (array_key_exists('test_ref', $o)) {
+            $coverage[$req]['test_ref'] = (string) $o['test_ref'];
+        }
+        if (array_key_exists('note', $o)) {
+            $coverage[$req]['note'] = (string) $o['note'];
         }
     }
 
@@ -359,7 +491,11 @@ foreach (FORMS as $form => $cfg) {
         if (!empty($r['condition'])) {
             $row['condition'] = short((string) $r['condition'], 110);
         }
-        $row['rule'] = short((string) ($r['rule'] ?? ''), 160);
+        if ($row['kind'] === 'scenario_value') {
+            $row['data_id'] = (string) ($r['data_id'] ?? '');
+            $row['scenario'] = array_map(static fn ($v): string => short((string) $v, 60), $r['scenario']);
+        }
+        $row['rule'] = short((string) ($r['rule'] ?? ''), $row['kind'] === 'scenario_value' ? 240 : 160);
         $src = sourceText($r['source'] ?? null, $abbr);
         if ($src !== '') {
             $row['source'] = $src;

@@ -23,7 +23,15 @@ final class PayrollNormCoverageTest extends TestCase
     private const GAP_STATUSES = ['missing', 'violated', 'unclear', 'accepted_gap'];
     private const KINDS = [
         'required', 'forbidden', 'conditional', 'format', 'codebook',
-        'logical_check', 'deadline', 'semantics',
+        'logical_check', 'deadline', 'semantics', 'scenario_value',
+    ];
+    /**
+     * Rozměry řádku scenario_value: jaká hodnota atributu patří do podání v konkrétní
+     * kombinaci (druh vztahu, daňový režim, účast, nepřítomnost, svátek, souběh, převzatý měsíc...).
+     * Shodně s SCENARIO_DIMENSIONS v tools/norms/build-norm-coverage.php.
+     */
+    private const SCENARIO_DIMENSIONS = [
+        'vztah', 'dan', 'pojisteni', 'nepritomnost', 'svatek', 'soubeh', 'mesic', 'slevy', 'prijem', 'obdobi',
     ];
 
     /** @var array<string, array{meta: array<string, mixed>, test_refs: list<string>, requirements: list<array<string, mixed>>}>|null */
@@ -139,6 +147,54 @@ final class PayrollNormCoverageTest extends TestCase
             foreach ($r['tests'] ?? [] as $idx) {
                 if (!is_int($idx) || !isset($pool[$idx])) {
                     $errors[] = "{$form} {$r['id']}: neplatny index tests " . json_encode($idx);
+                }
+            }
+        }
+        self::assertSame([], array_slice($errors, 0, 20), implode("\n", array_slice($errors, 0, 20)));
+    }
+
+    /**
+     * Hodnota podle scénáře se nedá doložit testem tvaru ani izolovaného pravidla:
+     * řádek musí říct scénář a hodnotu a jako otestovaný smí platit jen s testem,
+     * který hodnotu spočítá celým tokem (integrační test).
+     */
+    #[DataProvider('formNames')]
+    public function testScenarioValueRowsNameScenarioValueAndFullFlowTest(string $form): void
+    {
+        $data = self::forms()[$form];
+        $pool = $data['test_refs'] ?? [];
+        $errors = [];
+        foreach ($data['requirements'] as $r) {
+            if (($r['kind'] ?? null) !== 'scenario_value') {
+                continue;
+            }
+            $id = (string) $r['id'];
+            $scenario = $r['scenario'] ?? null;
+            if (!is_array($scenario) || $scenario === []) {
+                $errors[] = "{$form} {$id}: chybi scenario";
+            } else {
+                foreach ($scenario as $dim => $value) {
+                    if (!in_array($dim, self::SCENARIO_DIMENSIONS, true)) {
+                        $errors[] = "{$form} {$id}: neznamy rozmer scenare {$dim}";
+                    }
+                    if (!is_string($value) || trim($value) === '') {
+                        $errors[] = "{$form} {$id}: prazdna hodnota rozmeru {$dim}";
+                    }
+                }
+            }
+            if (!is_string($r['data_id'] ?? null) || $r['data_id'] === '') {
+                $errors[] = "{$form} {$id}: chybi data_id atributu";
+            }
+            if (!str_starts_with((string) ($r['rule'] ?? ''), 'hodnota')) {
+                $errors[] = "{$form} {$id}: rule musi zacinat 'hodnota'";
+            }
+            if (($r['status'] ?? null) === 'implemented_tested') {
+                $flow = array_filter(
+                    $r['tests'] ?? [],
+                    static fn (mixed $i): bool => is_int($i) && str_starts_with((string) ($pool[$i] ?? ''), 'MyInvoice\\Tests\\Integration\\'),
+                );
+                if ($flow === []) {
+                    $errors[] = "{$form} {$id}: implemented_tested bez integracniho testu celym tokem";
                 }
             }
         }
