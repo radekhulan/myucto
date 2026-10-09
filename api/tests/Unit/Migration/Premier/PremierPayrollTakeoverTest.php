@@ -8,6 +8,7 @@ use MyInvoice\Service\Geo\CountryNameMatcher;
 use MyInvoice\Service\Migration\Premier\PremierBackup;
 use MyInvoice\Service\Migration\Premier\PremierPayroll;
 use MyInvoice\Service\Migration\Premier\PremierPayrollTakeover;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEvidencePeriod;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\TestCase;
 
@@ -56,6 +57,25 @@ final class PremierPayrollTakeoverTest extends TestCase
         self::assertSame('2025-06-30', $ended->employment->end);
         self::assertSame([], $ended->person->payoutAccounts);
         self::assertNull($ended->person->healthCoverage);
+    }
+
+    /**
+     * Zákonnou evidenci osoby zapíše vztah, který převod zpracuje první, ale začínat má
+     * nejstarším vztahem osoby. Začátek osoby přes všechny její vztahy dodává importér
+     * ({@see PayrollTakeoverEvidencePeriod::earliestByPerson()}); pozdější začátek ho nepřebije.
+     */
+    public function testStatutoryEvidenceStartsWithTheOldestRelationOfThePerson(): void
+    {
+        [$statutory] = $this->relations();
+        $person = PremierPayrollTakeover::record($statutory, '2025-12-31', null, null, '2023-04-01')->person;
+
+        self::assertSame(['2023-04-01', '2023-04-01', '2023-04-01'], [
+            $person->taxResidence?->from, $person->healthCoverage?->from, $person->socialJurisdiction?->from,
+        ]);
+        self::assertSame('2025-01-01', PremierPayrollTakeover::record($statutory, '2025-12-31', null, null, '2025-06-01')->person->healthCoverage?->from);
+        self::assertSame(['p1' => '2023-04-01', 'p2' => '2025-01-01'], PayrollTakeoverEvidencePeriod::earliestByPerson([
+            ['p1', '2025-01-01'], ['p2', '2025-01-01'], ['p1', '2023-04-01'],
+        ]));
     }
 
     /**

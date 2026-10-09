@@ -561,6 +561,79 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(1, self::stepCounts($again, PohodaPayrollImporter::STEP_PEOPLE)['absences_lone_carer'] ?? 0, $this->explain($again));
     }
 
+    /**
+     * Začátek zákonné evidence osoby (zdravotní pojištění, příslušnost k sociálnímu
+     * pojištění, daňová rezidence) se řídí NEJSTARŠÍM vztahem osoby. Převod ho bral
+     * z vztahu, který zpracoval první (podle osobního čísla), takže osoba s novým
+     * hlavním vztahem a starší souběžnou dohodou měla evidenci až od nového nástupu
+     * a měsíce dohody před ním zůstaly bez zdravotního pojištění.
+     */
+    public function testStatutoryEvidenceStartsWithTheOldestRelationOfThePerson(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = $this->payrollXml('two_relations', 2026, static function (\Closure $row): void {
+            $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
+            $row('sMZslozky', ['ID' => 2, 'Cislo' => 'C01', 'Nazev' => 'Časová mzda']);
+            $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
+            $row('ZAM', ['ID' => 1, 'OsCislo' => '6001', 'Jmeno' => 'Dana', 'Prijmeni' => 'Souběžná', 'DatNar' => '1991-03-04',
+                'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '1', 'Obec' => 'Brno',
+                'PSC' => '60200', 'Stat' => 'CZ']);
+            // Pořadí 1 je NOVÝ pracovní poměr, pořadí 2 starší dohoda, která trvá dál.
+            $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'JeDPP' => 0, 'DatNast' => '2026-01-05', 'TUvazek' => 40]);
+            $row('ZAMpomer', ['ID' => 2, 'RefZAM' => 1, 'Poradi' => 2, 'JeDPP' => 1, 'DatNast' => '2024-06-10']);
+            $row('MZ', ['ID' => 10, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => 1, 'HodFond' => 152, 'DnyFond2' => 19,
+                'TUvazek' => 40, 'HodOdpra' => 152, 'RefPoj' => 1, 'KcHrubaM' => 30000, 'KcCistaM' => 23000, 'Prohlas' => 1,
+                'JeSocPP' => 1, 'KcSoc' => 2130, 'KcZaklM' => 30000, 'DnyPrac' => 19, 'DnyOdpra' => 19, 'Datum' => '2026-02-10', 'KcVyplat' => 23000]);
+            $row('MZ', ['ID' => 11, 'RefZAM' => 1, 'RefPomer' => 2, 'Rok' => 2026, 'RelMes' => 1, 'HodFond' => 0,
+                'HodOdpra' => 10, 'RefPoj' => 1, 'KcHrubaM' => 2000, 'KcCistaM' => 2000, 'Prohlas' => 0, 'JeSocPP' => 0,
+                'KcSraDanZak' => 2000, 'KcSraDan' => 300, 'Datum' => '2026-02-10', 'KcVyplat' => 1700]);
+            $row('MZslozky', ['ID' => 1, 'RefAg' => 10, 'RefSlozka' => 1, 'KcMzda' => 30000, 'Hodnota1' => 30000]);
+            $row('MZslozky', ['ID' => 2, 'RefAg' => 11, 'RefSlozka' => 2, 'KcMzda' => 2000, 'PocHodin' => 10]);
+        });
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $employeeId = (int) $this->employment($supplierId, '6001')['employee_id'];
+        self::assertSame($employeeId, (int) $this->employment($supplierId, '6001-2')['employee_id'], $this->explain($protocol));
+
+        $starts = [];
+        foreach (['payroll_person_health_coverage_history', 'payroll_person_social_jurisdictions', 'payroll_person_tax_residences'] as $table) {
+            $stmt = $this->db->pdo()->prepare("SELECT MIN(effective_from) FROM {$table} WHERE supplier_id = ? AND employee_id = ?");
+            $stmt->execute([$supplierId, $employeeId]);
+            $starts[$table] = $stmt->fetchColumn();
+        }
+        self::assertSame([
+            'payroll_person_health_coverage_history' => '2024-06-01',
+            'payroll_person_social_jurisdictions' => '2024-06-01',
+            'payroll_person_tax_residences' => '2024-06-01',
+        ], $starts, $this->explain($protocol));
+    }
+
+    /**
+     * Soubor `91_mzdy.xml` ze zadaných řádků tabulek. Syntetická data.
+     *
+     * @param \Closure(\Closure(string,array<string,mixed>):void):void $fill
+     */
+    private function payrollXml(string $name, int $year, \Closure $fill): string
+    {
+        $dir = $this->tmp . '/12345678_' . $year . '_' . $name;
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $x = '';
+        $fill(static function (string $table, array $cols) use (&$x): void {
+            $x .= "<{$table}>";
+            foreach ($cols as $k => $v) {
+                $x .= "<{$k}>" . htmlspecialchars((string) $v, ENT_XML1) . "</{$k}>";
+            }
+            $x .= "</{$table}>";
+        });
+        $file = $dir . '/91_mzdy.xml';
+        file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+            . '<mdbExport version="1" group="mzdy" ico="12345678" year="' . $year . '" source="POHODA" state="ok">' . $x . '</mdbExport>');
+        return $file;
+    }
+
     /** Osoba s ošetřovným osamělého pracovníka v březnu 2025. Syntetická data. */
     private function writeLoneCarerPayroll(): string
     {

@@ -45,16 +45,40 @@ final class PohodaPayrollTakeover
         );
     }
 
-    /** @param array<string,mixed> $record */
-    public static function record(array $record): PayrollTakeoverRecord
+    /**
+     * @param array<string,mixed> $record
+     * @param ?string $personFrom začátek evidence osoby přes všechny její vztahy
+     *        ({@see self::personEvidenceStarts()}); bez něj začátek tohoto vztahu
+     */
+    public static function record(array $record, ?string $personFrom = null): PayrollTakeoverRecord
     {
-        return new PayrollTakeoverRecord(self::person($record), self::employment($record));
+        return new PayrollTakeoverRecord(self::person($record, $personFrom), self::employment($record));
+    }
+
+    /**
+     * Začátek zákonné evidence každé osoby: nejstarší vztah osoby mezi převáděnými.
+     *
+     * @param list<array<string,mixed>> $records {@see PohodaPayrollPeople::read()}
+     * @return array<string,string> klíč osoby => `YYYY-MM-01`
+     */
+    public static function personEvidenceStarts(array $records): array
+    {
+        return PayrollTakeoverEvidencePeriod::earliestByPerson(array_map(
+            static fn (array $record): array => [
+                (string) $record['person_key'],
+                self::monthStart((string) $record['first_period'], $record['start']),
+            ],
+            $records,
+        ));
     }
 
     /** @param array<string,mixed> $record */
-    private static function person(array $record): PayrollTakeoverPerson
+    private static function person(array $record, ?string $personFrom): PayrollTakeoverPerson
     {
         $from = self::monthStart((string) $record['first_period'], $record['start']);
+        if ($personFrom !== null && $personFrom < $from) {
+            $from = $personFrom;
+        }
         $residence = match ($record['tax_residence']) {
             'czech-resident' => new PayrollTakeoverEvidencePeriod('czech-resident', $from, null, 'pamica:zam:rezident',
                 self::NOTE . 'zaměstnanec není v PAMICA veden jako daňový nerezident.'),

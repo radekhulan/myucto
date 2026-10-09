@@ -123,6 +123,8 @@ final class PohodaPayrollPeopleWriter
         $moduleStart = $this->moduleStart($supplierId);
         $employees = [];
         $unconfirmed = 0;
+        // Evidenci osoby zapíše vztah zpracovaný první; začátek ale patří nejstaršímu vztahu.
+        $personStarts = PohodaPayrollTakeover::personEvidenceStarts($records);
         foreach ($records as $record) {
             $number = (string) $record['personal_number'];
             $employment = $this->employmentByCode($supplierId, $number);
@@ -145,7 +147,7 @@ final class PohodaPayrollPeopleWriter
                 'relation_type' => PayrollTakeoverFormat::text($employment['relation_type'] ?? null),
                 'activity_code' => $this->employmentActivityCode($supplierId, $employmentId),
             ];
-            $takeover = PohodaPayrollTakeover::record($record);
+            $takeover = PohodaPayrollTakeover::record($record, $personStarts[(string) $record['person_key']] ?? null);
             $person = $takeover->person;
             $relation = $takeover->employment;
             foreach ($relation->regularBenefits as $benefit) {

@@ -15,6 +15,7 @@ use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEvidencePeriod;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonLookup;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
 
@@ -140,6 +141,10 @@ final class PohodaPayrollRelations
         $policy = PohodaPayrollTakeover::policy();
         $created = ['persons_created' => 0, 'employments_added' => 0];
         $messages = 0;
+        $personStarts = PayrollTakeoverEvidencePeriod::earliestByPerson(array_map(
+            static fn (array $relation): array => [(string) $relation['person_key'], substr((string) $relation['start'], 0, 7) . '-01'],
+            $relations,
+        ));
         foreach ($relations as $relation) {
             $number = (string) $relation['personal_number'];
             if ($this->employmentId($supplierId, $number) !== null) {
@@ -158,8 +163,14 @@ final class PohodaPayrollRelations
                         $relation['relation_type'], $relation['start'], null, $relation['weekly_hours'], $userId);
                     $created['employments_added']++;
                 } else {
+                    // Osobu zakládá vztah s nejnižším pořadím, který nemusí být nejstarší.
+                    // Zdravotní pojištění od jeho nástupu by nechalo měsíce staršího vztahu
+                    // bez pojištění; takovou osobu založí bez pojišťovny a evidenci od
+                    // nejstaršího vztahu zapíše krok osob (PohodaPayrollTakeover::personEvidenceStarts).
+                    $olderRelation = substr((string) $relation['start'], 0, 7) . '-01'
+                        > ($personStarts[(string) $relation['person_key']] ?? '');
                     [$employeeId, $employmentId] = $this->license->mutatePayrollEmployees(
-                        fn (): array => $this->createPerson($supplierId, $relation, $fullName, $userId),
+                        fn (): array => $this->createPerson($supplierId, $relation, $fullName, $userId, !$olderRelation),
                     );
                     $created['persons_created']++;
                 }
@@ -196,7 +207,7 @@ final class PohodaPayrollRelations
      * @param array<string,mixed> $relation
      * @return array{0:int,1:int}
      */
-    private function createPerson(int $supplierId, array $relation, string $fullName, ?int $userId): array
+    private function createPerson(int $supplierId, array $relation, string $fullName, ?int $userId, bool $seedInsurer = true): array
     {
         $birthNumber = $relation['birth_number'];
         if ($birthNumber !== null) {
@@ -212,7 +223,7 @@ final class PohodaPayrollRelations
             'last_name' => $relation['last_name'],
             'birth_date' => $relation['birth_date'],
             'birth_number' => $birthNumber,
-            'health_insurer_code' => $relation['insurer_code'],
+            'health_insurer_code' => $seedInsurer ? $relation['insurer_code'] : null,
             'relation_type' => $relation['relation_type'],
             'planned_start_on' => $relation['start'],
             'weekly_hours' => $relation['weekly_hours'],

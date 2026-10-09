@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollPostingMapProposalService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverAbsenceWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverDeductionsWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEvidencePeriod;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInstitutionWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverOpeningMonth;
@@ -79,6 +80,8 @@ final class PayrollImporter
     private array $openSickness = [];
     /** První měsíc vedení mezd v MyÚčtu (`YYYY-MM`), nebo null. */
     private ?string $moduleStart = null;
+    /** @var array<string,string> klíč osoby => začátek zákonné evidence (nejstarší vztah osoby) */
+    private array $personStarts = [];
     /** Vztahy s časovou evidencí roku, pro který MyÚčto nemá mzdová pravidla. */
     private int $timeEvidenceSkipped = 0;
     /** @var array<int,bool> rok => má pravidla pro průměry a náhrady */
@@ -182,6 +185,11 @@ final class PayrollImporter
         // Trvalé srážky (`MZ_SRAZ`) převod zakládá; bez nich zbývají jen sražené částky měsíců.
         $deductionCards = $ctx->backup->hasRows('MZ_SRAZ');
         $created = [];
+        // Evidenci osoby zapíše vztah zpracovaný první; začátek ale patří nejstaršímu vztahu.
+        $this->personStarts = PayrollTakeoverEvidencePeriod::earliestByPerson(array_map(
+            static fn (array $relation): array => [(string) $relation['person_key'], substr((string) $relation['start'], 0, 7) . '-01'],
+            $relations,
+        ));
         foreach ($relations as $relation) {
             $pair = $this->inSavepoint($ctx, $relation, fn (): ?array => $this->relation($ctx, $relation));
             if ($pair === null) {
@@ -684,7 +692,8 @@ final class PayrollImporter
         $this->activate($ctx, $employmentId, $relation);
         $policy = PremierPayrollTakeover::policy();
         $this->countries ??= CountryNameMatcher::fromDatabase($this->db);
-        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn(), $this->countries, $this->moduleStart);
+        $takeover = PremierPayrollTakeover::record($relation, $ctx->endsOn(), $this->countries, $this->moduleStart,
+            $this->personStarts[(string) $relation['person_key']] ?? null);
         $person = $takeover->person;
         $state = $this->state;
         $this->detail($ctx, $number, 'Sjednaná mzda', fn (): array => $this->wages($ctx, $employmentId, $relation));
@@ -799,7 +808,11 @@ final class PayrollImporter
             'birth_number' => $relation['birth_number'],
             // Historii pojišťoven z oznámení zapíše zákonná evidence celou; založení osoby
             // by jinak zapsalo jen poslední pojišťovnu od nástupu a historie by se nevešla.
-            'health_insurer_code' => ($relation['insurer_history'] ?? []) === [] ? $relation['insurer_code'] : null,
+            // Totéž u osoby, kterou zakládá jiný než její nejstarší vztah: pojištění od jeho
+            // nástupu by nechalo měsíce staršího vztahu bez pojištění, zapíše ho zákonná evidence.
+            'health_insurer_code' => ($relation['insurer_history'] ?? []) === []
+                && substr((string) $relation['start'], 0, 7) . '-01' <= ($this->personStarts[(string) $relation['person_key']] ?? '9999')
+                ? $relation['insurer_code'] : null,
             'relation_type' => $relation['relation_type'],
             'planned_start_on' => $relation['start'],
             'monthly_gross' => self::firstWage($relation, $ctx->endsOn()),

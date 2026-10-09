@@ -51,13 +51,18 @@ final class PremierPayrollTakeover
      * @param string $until poslední den převáděného období (prohlášení po měsících mezd do něj)
      * @param ?string $moduleStart první měsíc vedení mezd v MyÚčtu (`YYYY-MM`); časové evidence
      *        (nepřítomnosti, dovolená, průměry) se berou jen z měsíců před ním
+     * @param ?string $personFrom začátek evidence osoby přes všechny její vztahy
+     *        ({@see PayrollTakeoverEvidencePeriod::earliestByPerson()}); bez něj nástup tohoto vztahu
      */
-    public static function record(array $relation, string $until, ?CountryNameMatcher $countries = null, ?string $moduleStart = null): PayrollTakeoverRecord
+    public static function record(array $relation, string $until, ?CountryNameMatcher $countries = null, ?string $moduleStart = null, ?string $personFrom = null): PayrollTakeoverRecord
     {
         $start = (string) $relation['start'];
         // Zákonná evidence má účinnost po celých měsících (čte se k prvnímu dni měsíce);
         // nástup uprostřed měsíce by uložení celé evidence odmítl.
         $from = substr($start, 0, 7) . '-01';
+        if ($personFrom !== null && $personFrom < $from) {
+            $from = $personFrom;
+        }
         $surname = $relation['birth_surname'];
         $declarations = [];
         foreach (self::declarations($relation, $until) as $run) {
