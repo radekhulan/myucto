@@ -65,6 +65,94 @@ final class EldpFormAndRelationshipsTest extends TestCase
         (new EldpXmlValidator())->validate($statement, $xml);
     }
 
+    /**
+     * Logické testy ELDP12 31 a Zadání ELDP12 (Měsíce bez pojištění, Odečtené
+     * doby): řádek s druhou pozicí kódu P neuvádí měsíce bez pojištění ani
+     * odečtené doby a stejnopis je nevypíše.
+     */
+    public function testPostTerminationRowCarriesNoMonthsWithoutInsuranceNorDeductedDays(): void
+    {
+        $statement = $this->build([
+            $this->revision(2026, 1, employmentEnd: '2026-02-28'),
+            $this->revision(2026, 2, employmentEnd: '2026-02-28'),
+            $this->revision(2026, 3, employmentEnd: '2026-02-28', baseMinor: 500_000),
+        ], 2026);
+
+        $sections = $statement->sections();
+        self::assertSame('1P+', $sections[1]['code']);
+        self::assertSame([], $sections[1]['months_without_insurance']);
+        self::assertSame(0, $sections[1]['deducted_days_total']);
+        $copy = EldpStatementCopyService::sections($statement->payload)[1];
+        self::assertSame('1P+', $copy['code']);
+        self::assertSame([], $copy['months_without_insurance']);
+        self::assertFalse($copy['whole_year_without_insurance']);
+        self::assertSame(0, $copy['deducted_days_total']);
+    }
+
+    /**
+     * Logické testy ELDP12 37, 55 a 56: řádky listu mají Od <= Do, vzájemně
+     * se nepřekrývají a vyloučené doby nepřevýší započtené dny — i u listu se
+     * dvěma řádky a nemocí přes konec prvního řádku.
+     */
+    public function testRowsAreOrderedDisjointAndExcludedDaysFitTheCountedDays(): void
+    {
+        $revisions = [
+            $this->revision(2026, 1, employmentEnd: '2026-02-28'),
+            $this->revision(2026, 2, employmentEnd: '2026-02-28', absences: [[
+                'id' => 9101,
+                'absence_type' => 'dpn',
+                'date_from' => '2026-02-20',
+                'date_to' => '2026-03-10',
+            ]]),
+            $this->revision(2026, 3, employmentEnd: '2026-02-28', baseMinor: 300_000),
+        ];
+
+        $sections = $this->build($revisions, 2026)->sections();
+
+        $intervals = [];
+        foreach ($sections as $section) {
+            if (($section['excluded_days_total'] ?? 0) > 0) {
+                self::assertLessThanOrEqual($section['insurance_days'], $section['excluded_days_total']);
+            }
+            if ($section['valid_from'] === null) {
+                continue;
+            }
+            self::assertLessThanOrEqual(0, strcmp($section['valid_from'], $section['valid_to']));
+            foreach ($intervals as [$from, $to]) {
+                self::assertTrue(
+                    strcmp($section['valid_to'], $from) < 0 || strcmp($section['valid_from'], $to) > 0,
+                    'Řádky ELDP se nesmí překrývat.',
+                );
+            }
+            $intervals[] = [$section['valid_from'], $section['valid_to']];
+        }
+        self::assertSame(9, $sections[0]['excluded_days_total']);
+        self::assertSame(59, $sections[0]['insurance_days']);
+    }
+
+    /**
+     * Zadání ELDP12, údaj Kód: u dohody o provedení práce (1. pozice T až ZC)
+     * nesmí být 2. pozice P. Dodatečně zúčtovaný příjem z DPP proto nevznikne
+     * jako řádek „TP+".
+     */
+    public function testAgreementToPerformWorkNeverGetsAPostTerminationRow(): void
+    {
+        $revisions = [
+            $this->revision(2025, 1, employmentEnd: '2025-01-31', baseMinor: 1_200_000, relationType: 'dpp', activityCode: 'T', detailCode: null),
+            $this->revision(2025, 2, employmentEnd: '2025-01-31', baseMinor: 500_000, relationType: 'dpp', activityCode: 'T', detailCode: null),
+        ];
+
+        try {
+            $this->build($revisions);
+            self::fail('Příjem z DPP po skončení nesmí vzniknout jako řádek TP+.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame(
+                ['eldp_post_termination_small_scale_unsupported'],
+                array_column($exception->blockers, 'code'),
+            );
+        }
+    }
+
     /** Měsíc po skončení bez vyměřovacího základu do listu nepatří vůbec. */
     public function testMonthAfterTerminationWithoutBaseIsIgnored(): void
     {
