@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
@@ -199,6 +200,49 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         $item = $items[$stala['employment_id']];
         self::assertTrue($item['existing_outdated'] ?? null, 'Schválený průměr Q2 je po opravě března neaktuální: ' . CanonicalJson::encode($item));
         self::assertFalse($items[$this->people['soubeh']['person']['employment_id']]['existing_outdated'] ?? null);
+    }
+
+    /**
+     * G7-D2: mateřská přes očekávaný den porodu bez skutečného dne porodu.
+     * Příprava JMHZ musí říct konkrétně „doplňte den porodu", ne obecné
+     * „nepřítomnost nelze bezpečně odvodit, zpracujte individuálně".
+     */
+    public function testMaternityWithoutChildbirthDateNamesTheFix(): void
+    {
+        $this->hire('matka', 'Syntetická Matka', '1993-03-03', 'female', 'hpp', 40, true,
+            gross: static fn (string $p): int => $p < '2026-07' ? 30_000 : 0);
+        $this->absenceFrom('matka', 'ppm', '2026-07-01', '2026-12-31');
+
+        $failures = $this->quarterAverages(1);
+        foreach (array_slice(self::MONTHS, 0, 7) as $period) {
+            $month = (int) substr($period, 5, 2);
+            if ($month === 4 || $month === 7) {
+                $failures = [...$failures, ...$this->quarterAverages(intdiv($month - 1, 3) + 1)];
+            }
+            $failures = [...$failures, ...$this->processMonth($period)];
+        }
+        self::assertSame([], $failures, implode("\n", $failures));
+
+        $august = implode("\n", $this->processMonth('2026-08'));
+        self::assertStringContainsString('jmhz_eldp_ppm_childbirth_missing', $august);
+        self::assertStringNotContainsString('jmhz_eldp_absences_unsupported', $august);
+        self::assertStringContainsString('den porodu', JmhzBlockerExplainer::action('jmhz_eldp_ppm_childbirth_missing'));
+
+        // Účetní doplní den porodu a příprava projde.
+        $absenceId = (int) $this->people['matka']['absences'][0]['id'];
+        $recorded = $this->absences->childbirth(
+            $this->request('POST', "/api/payroll/absences/{$absenceId}/childbirth")->withParsedBody([
+                'row_version' => (int) $this->scalar('SELECT row_version FROM payroll_absences WHERE supplier_id = ? AND id = ?', [$this->supplierId, $absenceId]),
+                'childbirth_date' => '2026-08-18',
+            ]),
+            new Response(),
+            ['id' => (string) $absenceId],
+        );
+        self::assertSame(200, $recorded->getStatusCode(), (string) $recorded->getBody());
+        // Revize běhu nepřítomnosti zmrazila, den porodu se do ní dostane opravou běhu.
+        $corrected = $this->correctPayrollRun($this->approvedRuns['2026-08'], 'g7-august-birth', 'Doplněn den porodu.');
+        $preparation = $this->prepareJmhz((int) $corrected->revision['id'], 'g7-august-after-birth');
+        self::assertSame('source_ready', $preparation['body']['readiness_status'] ?? null, CanonicalJson::encode($preparation['body']));
     }
 
     public function testRetroactiveRegistrationsKeepHistoricalDates(): void

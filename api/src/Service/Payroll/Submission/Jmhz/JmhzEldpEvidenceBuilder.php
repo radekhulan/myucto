@@ -1770,6 +1770,14 @@ final class JmhzEldpEvidenceBuilder
             $concurrentIncomeDays,
         );
         if ($derived['blockers'] !== []) {
+            // Chybějící den porodu u mateřské má konkrétní nápravu; obecný
+            // nález by účetní poslal „zpracovat individuálně".
+            if (in_array('eldp_ppm_childbirth_missing', array_column($derived['blockers'], 'code'), true)) {
+                $this->invalid(
+                    'jmhz_eldp_ppm_childbirth_missing',
+                    'Peněžitá pomoc v mateřství nemá doplněný den porodu; doplňte ho u nepřítomnosti.',
+                );
+            }
             $this->invalid(
                 'jmhz_eldp_absences_unsupported',
                 'Nepřítomnost nelze bezpečně převést na vyloučené doby evidenčního listu.',

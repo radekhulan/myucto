@@ -267,6 +267,7 @@ final class JmhzBlockerCatalog
         'jmhz_effective_state_protocol_conflict' => 'support',
         'jmhz_effective_state_root_invalid' => 'support',
         'jmhz_eldp_absences_unsupported' => 'absences',
+        'jmhz_eldp_ppm_childbirth_missing' => 'absences',
         'jmhz_eldp_assessment_base_mismatch' => 'runs',
         'jmhz_eldp_assessment_base_not_whole_czk' => 'runs',
         'jmhz_eldp_capped_base_unsupported' => 'runs',
