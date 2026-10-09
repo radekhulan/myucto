@@ -386,10 +386,23 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'overtime_minutes' => (int) $workedSource['overtime_minutes'],
         ];
         $entryIssues = $workedSource['issues'];
+        $derivedAbsences = $this->absenceHours->derive(
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $periodEnd->format('Y-m-d'),
+            $absences,
+        );
         [$agreedMinutes, $calendarIssues] = match (true) {
             !self::requiresShiftCalendar($employment['relation_type']) => [0, []],
-            self::isAgreement($employment['relation_type']) =>
-                self::agreementFundMinutes($employment, $period, $periodEnd, $calendars, $worked),
+            self::isAgreement($employment['relation_type']) => self::agreementFundMinutes(
+                $employment,
+                $period,
+                $periodEnd,
+                $calendars,
+                $worked,
+                $derivedAbsences['supported'] ? (int) ($derivedAbsences['minutes']['vacation'] ?? 0) : 0,
+            ),
             default => self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo),
         };
         $holidayMinutes = !self::requiresShiftCalendar($employment['relation_type'])
@@ -426,13 +439,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'worked_hours' => self::minutesSuggestion($worked['minutes']),
                 'worked_days' => $worked['days'],
                 'overtime_hours' => self::minutesSuggestion($worked['overtime_minutes']),
-            ] + self::conditionalSuggestions($this->absenceHours->derive(
-                $supplierId,
-                $employmentId,
-                $periodStart,
-                $periodEnd->format('Y-m-d'),
-                $absences,
-            )),
+            ] + self::conditionalSuggestions($derivedAbsences),
             'issues' => array_merge(
                 $employmentIssues,
                 $calendarIssues,
@@ -505,7 +512,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $period,
                 $periodEnd,
                 $calendars,
-                $workedSuggestion,
+                $worked['worked_millihours'],
+                is_int($summary['values']['vacation_hours'] ?? null) ? $summary['values']['vacation_hours'] : 0,
             ),
             default => (static function () use ($calendars, $evidenceFrom, $evidenceTo): array {
                 [$minutes, $issues] = self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo);
@@ -702,7 +710,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     /**
      * Sjednaný fond (10260) u dohody ze souhrnu importu — týž postup jako
      * {@see agreementFundMinutes()}: plán směn, bez jednoznačného rozvrhu
-     * odpracovaná doba.
+     * odpracovaná doba a dovolená z podkladů (`vacation_hours`).
      *
      * @param array<string,mixed> $employment
      * @param list<array<string,mixed>> $calendars
@@ -713,15 +721,19 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         \DateTimeImmutable $period,
         \DateTimeImmutable $periodEnd,
         array $calendars,
-        ?string $workedSuggestion,
+        ?int $workedMillihours,
+        int $vacationMillihours,
     ): array {
+        $fallback = $workedMillihours === null
+            ? null
+            : self::millihoursSuggestion(self::agreementFallbackFund($workedMillihours, $vacationMillihours));
         [$from, $to] = self::employmentInterval($employment, $period, $periodEnd);
         if ($from === null || $calendars === []) {
-            return [$workedSuggestion, []];
+            return [$fallback, []];
         }
         [$planned, $issues] = self::agreedFundMinutes($calendars, $from, $to);
 
-        return $issues === [] ? [self::minutesSuggestion($planned), []] : [$workedSuggestion, []];
+        return $issues === [] ? [self::minutesSuggestion($planned), []] : [$fallback, []];
     }
 
     /**
@@ -1474,8 +1486,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * pracovní doby v příslušném měsíci včetně plánované dovolené". Dohoda
      * nemá evidenční interval (10265 = 0), takže se plán směn sčítá přes
      * trvání vztahu v měsíci. Bez jednoznačného rozvrhu je nejlepším
-     * předpokladem odpracovaná doba — návrh potvrzuje účetní jako každý jiný
-     * a dohoda bez rozvrhu kvůli němu nesmí zůstat neschválitelná.
+     * předpokladem odpracovaná doba a k ní vyčerpaná dovolená — rozsah se
+     * podle Pokynů uvádí „včetně plánované dovolené", takže dohoda s dovolenou
+     * nesmí mít fond menší o dobu dovolené ({@see agreementFallbackFund()}).
+     * Návrh potvrzuje účetní jako každý jiný a dohoda bez rozvrhu kvůli němu
+     * nesmí zůstat neschválitelná.
      *
      * @param array<string,mixed> $employment
      * @param list<array<string,mixed>> $calendars
@@ -1488,14 +1503,30 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         \DateTimeImmutable $periodEnd,
         array $calendars,
         array $worked,
+        int $vacationMinutes,
     ): array {
+        $fallback = self::agreementFallbackFund($worked['minutes'], $vacationMinutes);
         [$from, $to] = self::employmentInterval($employment, $period, $periodEnd);
         if ($from === null || $calendars === []) {
-            return [$worked['minutes'], []];
+            return [$fallback, []];
         }
         [$planned, $issues] = self::agreedFundMinutes($calendars, $from, $to);
 
-        return $issues === [] ? [$planned, []] : [$worked['minutes'], []];
+        return $issues === [] ? [$planned, []] : [$fallback, []];
+    }
+
+    /**
+     * Sjednaný fond dohody bez rozvrhu: odpracovaná doba a dovolená.
+     *
+     * Pokyny MH 1.4.14 kap. 3.2.7 k 10260: „V případě zaměstnanců pracujících
+     * na základě dohody o pracích konaných mimo pracovní poměr se uvede
+     * předpokládaný rozsah pracovní doby v příslušném měsíci včetně plánované
+     * dovolené." Jediné místo pro souhrn z intervalů i ze souhrnu importu
+     * (jednotky jsou na volajícím: minuty, nebo tisíciny hodiny).
+     */
+    public static function agreementFallbackFund(int $worked, int $vacation): int
+    {
+        return $worked + max(0, $vacation);
     }
 
     /**
