@@ -2223,6 +2223,9 @@ onMounted(async () => {
                   status: t(`payroll_absence.average_status.${candidate.existing.status}`),
                 }) }}
               </span>
+              <span v-if="candidate.existing && candidate.existing_outdated" class="mt-1 block text-xs text-warning-700">
+                {{ t('payroll_absence.averages.bulk_existing_outdated') }}
+              </span>
               <span v-else-if="candidate.ready && candidate.source_kind === 'actual'" class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll_absence.averages.bulk_actual_summary', {
                   gross: money(candidate.gross_earnings_minor ?? 0),

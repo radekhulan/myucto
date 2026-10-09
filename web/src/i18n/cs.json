@@ -28124,6 +28124,7 @@
       "bulk_inputs_changed": "Podklady se od načtení seznamu změnily. Seznam byl znovu načten, zkontrolujte výběr a odešlete znovu.",
       "bulk_empty": "Pro toto čtvrtletí nejsou žádné pracovní vztahy.",
       "bulk_existing": "Existující průměr: {amount} · {status}",
+      "bulk_existing_outdated": "Mzdový běh rozhodného období se po schválení opravil, průměr na něj nesedí. Založte novou revizi průměru a zkontrolujte náhrady a hlášení JMHZ ve čtvrtletí.",
       "bulk_actual_summary": "Skutečný průměr · mzda {gross}, odpracováno {hours}, {days} dnů",
       "bulk_probable_summary": "Pravděpodobný výdělek {amount} · {source}",
       "bulk_longer_period_note": "Hromadně založený skutečný průměr nezohledňuje poměrnou část mzdy za období delší než čtvrtletí (§ 358 zákoníku práce). U osob s roční odměnou založte průměr ručně na kartě osoby.",

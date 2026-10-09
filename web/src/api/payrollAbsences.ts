@@ -249,6 +249,8 @@ export interface AverageEarningCandidate {
     source_kind: 'actual' | 'probable'
     average_hourly_minor: number
   } | null
+  /** Běh rozhodného období se po schválení průměru opravil a průměr na něj nesedí. */
+  existing_outdated?: boolean
 }
 
 export interface AverageEarningCandidatesPage {

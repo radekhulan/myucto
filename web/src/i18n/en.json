@@ -28124,6 +28124,7 @@
       "bulk_inputs_changed": "The underlying data changed since the list was loaded. The list has been reloaded, please check your selection and submit again.",
       "bulk_empty": "There are no employments for this quarter.",
       "bulk_existing": "Existing average: {amount} · {status}",
+      "bulk_existing_outdated": "A payroll run of the decisive period was corrected after approval and the average no longer matches it. Create a new revision of the average and review compensations and JMHZ reports in the quarter.",
       "bulk_actual_summary": "Actual average · earnings {gross}, worked {hours}, {days} days",
       "bulk_probable_summary": "Probable earning {amount} · {source}",
       "bulk_longer_period_note": "A bulk-created actual average does not account for a proportional share of wages for a period longer than one quarter (§ 358 of the Labour Code). For people with an annual bonus, create the average manually on their employment card.",

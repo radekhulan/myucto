@@ -308,6 +308,7 @@ final class AverageEarningBatchService
             'worked_days' => $suggestion['worked_days'],
             'input_version' => $suggestion['input_version'],
             'existing' => $existing,
+            'existing_outdated' => $existing !== null && self::existingOutdated($suggestion, $existing),
         ];
     }
 
@@ -324,7 +325,8 @@ final class AverageEarningBatchService
         }
         $in = implode(', ', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, employment_id, status, source_kind, average_hourly_minor, revision_no
+            "SELECT id, employment_id, status, source_kind, average_hourly_minor, revision_no,
+                    gross_earnings_minor, longer_period_allocated_minor, worked_minutes, worked_days
                FROM payroll_average_earning_snapshots
               WHERE supplier_id = ? AND applicable_year = ? AND applicable_quarter = ?
                 AND employment_id IN ({$in})
@@ -339,10 +341,52 @@ final class AverageEarningBatchService
                 'status' => (string) $row['status'],
                 'source_kind' => (string) $row['source_kind'],
                 'average_hourly_minor' => (int) $row['average_hourly_minor'],
+                'gross_earnings_minor' => (int) $row['gross_earnings_minor'],
+                'longer_period_allocated_minor' => (int) $row['longer_period_allocated_minor'],
+                'worked_minutes' => (int) $row['worked_minutes'],
+                'worked_days' => (int) $row['worked_days'],
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Platí založený skutečný průměr pořád? Mzdový běh rozhodného období
+     * se mohl po schválení průměru opravit (zpětně doplněná odměna, oprava
+     * docházky). Průměr pak nesedí na uzavřené běhy a s ním náhrady
+     * i atribut 10345 JMHZ v měsících čtvrtletí. Porovnávají se úhrny
+     * z aktuálních běhů s úhrny uloženými v průměru; ruční průměr
+     * z podkladů mimo MyÚčto (měsíce bez běhu) se posoudit nedá.
+     *
+     * @param array<string,mixed> $suggestion
+     * @param array<string,mixed> $existing
+     */
+    private static function existingOutdated(array $suggestion, array $existing): bool
+    {
+        if ($existing['source_kind'] !== 'actual') {
+            return false;
+        }
+        $gross = 0;
+        $minutes = 0;
+        $days = 0;
+        foreach ((array) ($suggestion['months'] ?? []) as $month) {
+            if ((array) ($month['blockers'] ?? []) !== []
+                || ($month['takeover'] ?? false) === true
+                || !is_int($month['gross_earnings_minor'] ?? null)
+                || !is_int($month['worked_minutes'] ?? null)
+                || !is_int($month['worked_days'] ?? null)
+            ) {
+                return false;
+            }
+            $gross += $month['gross_earnings_minor'];
+            $minutes += $month['worked_minutes'];
+            $days += $month['worked_days'];
+        }
+
+        return $gross !== $existing['gross_earnings_minor'] - $existing['longer_period_allocated_minor']
+            || $minutes !== $existing['worked_minutes']
+            || $days !== $existing['worked_days'];
     }
 
     private function lockEmployment(int $supplierId, int $employmentId): void
