@@ -978,11 +978,15 @@ final class PayrollRegistrationA1SnapshotBuilder
                 $this->missing('health_restrictions[]');
                 continue;
             }
-            $normalized[] = [
+            $item = [
                 'type_code' => $this->text($restriction, 'type_code', 3),
                 'from' => $this->date($restriction, 'from'),
                 'to' => $this->optionalDate($restriction, 'to'),
             ];
+            // EDV 1.4.0.6, ID 10086 a 10087: „přiznané do" musí být pozdější
+            // než „přiznané od".
+            $this->periodOrder('health_restrictions', $item['from'], $item['to']);
+            $normalized[] = $item;
         }
         // REGZEC25.xsd (`fact/healtrest`) nemá `maxOccurs`, takže schéma
         // připouští jediné zdravotní omezení. Víc řádků by prošlo formulářem
@@ -1014,6 +1018,11 @@ final class PayrollRegistrationA1SnapshotBuilder
         $country = $this->optionalText($input, 'country_code', 2);
         if ($applies && $country === null) {
             $this->missing('country_code');
+        }
+        // EDV 1.4.0.6, ID 10428: bez příslušnosti k cizím předpisům je kód
+        // státu ZAKÁZANÝ; hodnota ze zdroje se zahodí.
+        if (!$applies) {
+            $country = null;
         }
 
         return ['applies' => $applies, 'country_code' => $country];
@@ -1050,6 +1059,19 @@ final class PayrollRegistrationA1SnapshotBuilder
         if ($freeAccess && $reason === null) {
             $this->missing('free_access_reason_code');
         }
+        // EDV 1.4.0.6, ID 10106 až 10110 a 10415: při volném přístupu jsou
+        // údaje o pracovním oprávnění ZAKÁZANÉ, bez něj důvod volného
+        // přístupu. Hodnota ze zdroje se zahodí, ne pošle.
+        if ($freeAccess) {
+            $permitType = null;
+            $permitId = null;
+            $permitFrom = null;
+            $permitTo = null;
+            $issuingOffice = null;
+        } else {
+            $reason = null;
+        }
+        $this->periodOrder('permit_to', $permitFrom, $permitTo);
         if (!$freeAccess
             && ($permitType === null || $permitId === null
                 || $permitFrom === null || $permitTo === null)
@@ -1266,6 +1288,21 @@ final class PayrollRegistrationA1SnapshotBuilder
         }
 
         return $value;
+    }
+
+    /** Konec období (`$to`) musí být pozdější než jeho začátek. */
+    private function periodOrder(string $field, ?string $from, ?string $to): void
+    {
+        if ($from === null || $from === '' || $to === null || $to === '' || $to > $from) {
+            return;
+        }
+        $this->malformed(
+            $field,
+            'musí končit později, než začíná: datum do (' . $to
+                . ') není pozdější než datum od (' . $from . ').',
+            'date_period',
+            ['from' => $from, 'to' => $to],
+        );
     }
 
     /** @param array<string,mixed> $input */

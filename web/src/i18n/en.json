@@ -6834,6 +6834,7 @@
             "attachment_file_size": "Attachment {name} is larger than 2 MB, the most ČSSZ accepts.",
             "attachment_total_size": "The attachments together are larger than 4 MB, the most ČSSZ accepts.",
             "health_restrictions_max": "{field} may contain a single restriction, it has {count} now. Keep the one valid on the start date.",
+            "date_period": "{field} must be later than the start date ({from}), it is {to} now.",
             "foreign_insurance_current": "{field} must be P (last carrier) or S (current carrier), it is now “{value}”.",
             "foreign_insurance_sector": "{field} must be a code from the Sector codebook (01 to 08), it is now “{value}”."
           },

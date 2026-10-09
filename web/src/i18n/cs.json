@@ -6834,6 +6834,7 @@
             "attachment_file_size": "Příloha {name} je větší než 2 MB, což je nejvíc, co ČSSZ přijme.",
             "attachment_total_size": "Přílohy jsou dohromady větší než 4 MB, což je nejvíc, co ČSSZ přijme.",
             "health_restrictions_max": "{field} smí obsahovat jediné omezení, teď jich je {count}. Ponechte omezení platné ke dni nástupu.",
+            "date_period": "{field} musí být pozdější než datum od ({from}), teď je {to}.",
             "foreign_insurance_current": "{field} musí být P (poslední nositel), nebo S (současný nositel), teď je „{value}“.",
             "foreign_insurance_sector": "{field} musí být kód z číselníku Sektor (01 až 08), teď je „{value}“."
           },
