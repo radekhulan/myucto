@@ -36,7 +36,17 @@ final class PohodaPayrollPeople
     private const OSSZ_COLUMNS = ['ONZpol' => 'OSSZ', 'NEMPRIpol' => 'KodOSSZ', 'HZUPNpol' => 'KodOSSZ'];
 
     private const TABLES = ['ZAM', 'ZAMpomer', 'sMzMist', 'sMzPoj', 'ZAMzp', 'RegZAM', 'RegZAMitems', 'ONZ', 'ONZpol', 'ELDP', 'ELDPpol', 'ZAMpDet',
-        'ZAMucet', 'sMZneprit', 'sMZslozky'];
+        'ZAMucet', 'sMZneprit', 'sMZslozky', 'SocPojSleva'];
+
+    /**
+     * Důvod slevy zaměstnavatele na pojistném (`SocPojSleva.RelDuvod`) => důvod podle § 7a odst. 1
+     * zák. č. 589/1992 Sb. PAMICA čísluje písmena a) až g) od 1; ověřeno na přijatém hlášení
+     * (`RelDuvod` 2 = `duvodUplatneni` B, péče o dítě do 10 let).
+     */
+    private const PART_TIME_DISCOUNT_REASONS = [
+        '1' => 'age_55_plus', '2' => 'child_care_under_10', '3' => 'dependent_close_person_care', '4' => 'study_under_26',
+        '5' => 'retraining_jobseeker', '6' => 'disabled_person', '7' => 'under_21',
+    ];
 
     /**
      * Druh nepřítomnosti MyÚčta podle ČÍSLA složky nepřítomnosti v PAMICA. Číslo je
@@ -119,6 +129,8 @@ final class PohodaPayrollPeople
         // Číselníky, karty a mzdy jedním průchodem souborem (desítky MB), nepřítomnosti
         // a složky mzdy druhým - potřebují už znát mzdy roku.
         $leaveCards = [];
+        /** @var array<string,array{requested?:bool,granted?:bool}> $partTime vztah => žádost a nárok na slevu zaměstnavatele */
+        $partTime = [];
         foreach (PohodaXml::scan($file, [...self::TABLES, 'MZ', 'Dovolena']) as $table => $mz) {
             if ($table === 'Dovolena') {
                 self::leaveCard($leaveCards, $mz, $year);
@@ -171,7 +183,12 @@ final class PohodaPayrollPeople
                 'withholding_tax' => 0, 'non_refundable' => 0, 'child' => 0, 'bonus' => 0, 'signed' => false,
                 'pensioner_discount' => false,
             ];
-            $sums['pensioner_discount'] = $sums['pensioner_discount'] || self::bool(PohodaXml::text($mz, 'SocPojSlevaZadost'));
+            // `SocPojSlevaZadost` a `SocPojSlevaNarok` jsou v PAMICA sleva ZAMĚSTNAVATELE na kratší
+            // úvazek (§ 7a zák. č. 589/1992 Sb.: žádost a přiznaný nárok), ne sleva pracujícího
+            // důchodce (§ 7d). Ověřeno na přijatých hlášeních: měsíc s nárokem má 10372 = ano,
+            // 10490 = ne. Slevu důchodce převod bere z podaného hlášení ({@see self::withSubmittedDiscounts()}).
+            $partTime[$relationKey]['requested'] = ($partTime[$relationKey]['requested'] ?? false) || self::bool(PohodaXml::text($mz, 'SocPojSlevaZadost'));
+            $partTime[$relationKey]['granted'] = ($partTime[$relationKey]['granted'] ?? false) || self::bool(PohodaXml::text($mz, 'SocPojSlevaNarok'));
             $sums['social'] += self::minor(PohodaXml::num($mz, 'KcSocZak'));
             $sums['advance_base'] += self::minor(PohodaXml::num($mz, 'KcZdaM'));
             $sums['advance_tax'] += self::minor(PohodaXml::num($mz, 'KcZalDan'));
@@ -395,7 +412,12 @@ final class PohodaPayrollPeople
                 },
                 'tax_residence_country' => self::country(PohodaXml::text($person, 'ResCisSTOBC')),
                 'declarations' => self::declarations($months, $year),
-                'pensioner_discounts' => self::declarations($months, $year, 'pensioner_discount', 'verified', 'not_claimed'),
+                // Sleva pracujícího důchodce: bez podaného hlášení ji převod zná jen u osoby, která
+                // důchod nemá (neuplatňuje se). Důchodci ji doplní hlášení, jinak zůstane k ověření.
+                'pensioner' => self::pensioner($person, $relation),
+                'pensioner_discounts' => self::pensioner($person, $relation) ? [] : self::declarations($months, $year, 'pensioner_discount', 'verified', 'not_claimed'),
+                'birth_date' => self::realDate(PohodaXml::date($person, 'DatNar')),
+                'part_time_discount' => self::partTimeDiscount($byId['SocPojSleva'] ?? [], (string) $relationId, $partTime[$relationId] ?? []),
                 'first_signed' => self::bool(PohodaXml::text($periods[array_key_first($periods)][0], 'Prohlas'))
                     || (bool) ($months[(int) substr((string) array_key_first($periods), 5, 2)]['signed'] ?? false),
                 'months' => $months,
@@ -827,6 +849,93 @@ final class PohodaPayrollPeople
             ];
         }
         return $out;
+    }
+
+    /**
+     * Osoba pobírá důchod podle karty PAMICA (`ZAM.DDrDuch` druh důchodu, příznak `JeDuch`).
+     *
+     * @param array<string,mixed> $person
+     * @param array<string,mixed> $relation
+     */
+    private static function pensioner(array $person, array $relation): bool
+    {
+        return !in_array(trim(PohodaXml::text($person, 'DDrDuch')), ['', '0'], true)
+            || self::bool(PohodaXml::text($person, 'JeDuch')) || self::bool(PohodaXml::text($relation, 'JeDuch'));
+    }
+
+    /**
+     * Sleva zaměstnavatele na pojistném (§ 7a zák. č. 589/1992 Sb.) u vztahu: důvod a den,
+     * od kterého ho PAMICA vede (`SocPojSleva`), a jestli ji v roce žádala a přiznala
+     * (`MZ.SocPojSlevaZadost` / `SocPojSlevaNarok`).
+     *
+     * @param array<string,array<string,mixed>> $rows `SocPojSleva` podle ID
+     * @param array{requested?:bool,granted?:bool} $flags
+     * @return array{reason:?string,source_reason:string,from:?string,requested:bool,granted:bool}|null
+     */
+    private static function partTimeDiscount(array $rows, string $relationId, array $flags): ?array
+    {
+        $found = null;
+        foreach ($rows as $row) {
+            if (PohodaXml::text($row, 'RefPomer') !== $relationId) {
+                continue;
+            }
+            $from = self::realDate(PohodaXml::date($row, 'DatumOd'));
+            if ($found === null || (string) $from >= (string) $found['from']) {
+                $code = trim(PohodaXml::text($row, 'RelDuvod'));
+                $found = ['reason' => self::PART_TIME_DISCOUNT_REASONS[$code] ?? null, 'source_reason' => $code, 'from' => $from];
+            }
+        }
+        if ($found === null && ($flags['requested'] ?? false) === false && ($flags['granted'] ?? false) === false) {
+            return null;
+        }
+
+        return ($found ?? ['reason' => null, 'source_reason' => '', 'from' => null])
+            + ['requested' => $flags['requested'] ?? false, 'granted' => $flags['granted'] ?? false];
+    }
+
+    /**
+     * Sleva pracujícího důchodce (§ 7d zák. č. 589/1992 Sb.) po měsících tak, jak ji PAMICA
+     * podala v měsíčním hlášení (10490) a ČSSZ přijala. Měsíce s hlášením přepíší odhad
+     * z karty; měsíc bez hlášení se nedomýšlí.
+     *
+     * Sleva důchodce u osoby, která podle karty důchod nemá a podle data narození ho mít
+     * nemůže (mladší 55 let), se NEPŘEVEZME: je to chyba dat předchozího programu a tichý
+     * přenos by z ní v MyÚčtu udělal dluh na pojistném (§ 7c odst. 3). Záznam dostane
+     * příznak `pensioner_discount_doubtful` a převod ho ohlásí k ověření.
+     *
+     * @param list<array<string,mixed>> $records {@see self::read()}
+     * @param array<string,array<string,array{form:\MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm,report:array<string,mixed>}>> $effective
+     *        {@see PohodaPayrollJmhzReports::effective()}
+     * @return list<array<string,mixed>>
+     */
+    public static function withSubmittedDiscounts(array $records, array $effective, int $year): array
+    {
+        foreach ($records as $index => $record) {
+            $forms = $effective[(string) $record['relation_key']] ?? [];
+            $months = [];
+            foreach ($forms as $period => $entry) {
+                if ((int) substr((string) $period, 0, 4) !== $year || !is_bool($entry['form']->socialDiscount)) {
+                    continue;
+                }
+                $months[(int) substr((string) $period, 5, 2)] = ['pensioner_discount' => $entry['form']->socialDiscount];
+            }
+            if ($months === []) {
+                continue;
+            }
+            ksort($months);
+            $claimed = in_array(true, array_column($months, 'pensioner_discount'), true);
+            $birth = is_string($record['birth_date'] ?? null) ? (string) $record['birth_date'] : null;
+            $tooYoung = $birth !== null && (int) substr($birth, 0, 4) > $year - 55;
+            if ($claimed && ($record['pensioner'] ?? false) !== true && $tooYoung) {
+                $records[$index]['pensioner_discounts'] = [];
+                $records[$index]['pensioner_discount_doubtful'] = true;
+                continue;
+            }
+            $records[$index]['pensioner_discounts'] = self::declarations($months, $year, 'pensioner_discount', 'verified', 'not_claimed');
+            $records[$index]['pensioner_discount_source'] = 'jmhz';
+        }
+
+        return $records;
     }
 
     /**

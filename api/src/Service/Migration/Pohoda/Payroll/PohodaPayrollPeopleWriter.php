@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPerson;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPersonWriter;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverPolicy;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 
 /**
  * Doplnění osob a pracovních vztahů po převodu mezd z PAMICA ({@see PohodaPayrollPeople}).
@@ -176,6 +177,14 @@ final class PohodaPayrollPeopleWriter
             $this->part($protocol, $step, $number, 'Zůstatek dovolené', fn (): array => $this->absences->leaveCarryover($supplierId, $employmentId, $relation, $userId, $policy, $state));
             $this->part($protocol, $step, $number, 'Pracoviště JMHZ', fn (): array => $this->employments->workplace($supplierId, $employmentId, $relation, $userId, $policy));
             $this->part($protocol, $step, $number, 'Kód CZ-ISCO', fn (): array => $this->employments->czIsco($supplierId, $employmentId, $relation, $userId, $policy));
+            $this->partTimeDiscount($supplierId, $employmentId, (string) ($employment['relation_type'] ?? ''), $record, $number, $userId, $policy, $protocol, $step);
+            if (($record['pensioner_discount_doubtful'] ?? false) === true) {
+                $protocol->count($step, 'pensioner_discount_doubtful');
+                $this->warn($protocol, $step, 'pensioner_discount_doubtful', "Osobní číslo {$number}: PAMICA v podaném hlášení uplatnila slevu "
+                    . 'pracujícího důchodce (10490), osoba ale podle karty důchod nepobírá a podle data narození starobní důchod mít '
+                    . 'nemůže. Převod slevu nepřevzal: ověřte, zda jde o chybu předchozího programu (pojistné bylo sraženo nižší), '
+                    . 'a stav slevy zadejte v zákonné evidenci osoby.', $number);
+            }
             if ($relation->oic !== null || $relation->idPpv !== null) {
                 if ($confirmIdentifiers) {
                     $this->part($protocol, $step, $number, 'OIČ a ID PPV', fn (): array => $this->employments->identifiers($supplierId, $employeeId, $employmentId, $relation, $userId, $policy, $state));
@@ -486,6 +495,65 @@ final class PohodaPayrollPeopleWriter
         $stmt->execute([$supplierId]);
         $value = $stmt->fetchColumn();
         return is_string($value) && $value !== '' ? substr($value, 0, 10) : null;
+    }
+
+    /**
+     * Sleva zaměstnavatele na pojistném (§ 7a zák. č. 589/1992 Sb.) z karty PAMICA: důvod do
+     * podmínek pracovního poměru, jen když ji PAMICA v roce přiznala (`SocPojSlevaNarok`) a důvod
+     * sedí na věk osoby. Žádost bez nároku, neznámý nebo nemožný důvod se ohlásí, nic se nehádá.
+     *
+     * @param array<string,mixed> $record
+     */
+    private function partTimeDiscount(int $supplierId, int $employmentId, string $relationType, array $record, string $number, ?int $userId, PayrollTakeoverPolicy $policy, ImportProtocol $protocol, string $step): void
+    {
+        $discount = $record['part_time_discount'] ?? null;
+        if (!is_array($discount)) {
+            return;
+        }
+        if ($discount['granted'] !== true) {
+            if ($discount['requested'] === true) {
+                $protocol->count($step, 'part_time_discount_not_granted');
+                $this->warn($protocol, $step, 'part_time_discount_not_granted', "Osobní číslo {$number}: PAMICA vede žádost o slevu "
+                    . 'zaměstnavatele na pojistném (§ 7a zák. č. 589/1992 Sb.), nárok ale v převáděném roce nepřiznala a slevu '
+                    . 'neuplatnila. Převod ji nepřevzal; pokud nárok je, zadejte důvod v podmínkách vztahu a podejte záměr OZUSPOJ.', $number);
+            }
+            return;
+        }
+        $reason = $discount['reason'];
+        $doubt = match (true) {
+            $relationType !== 'employment' => 'sleva náleží jen k pracovnímu poměru',
+            $reason === null => "PAMICA vede neznámý důvod slevy ({$discount['source_reason']})",
+            default => self::reasonAgeDoubt($reason, $record['birth_date'] ?? null, $discount['from'] ?? null),
+        };
+        if ($doubt !== null) {
+            $protocol->count($step, 'part_time_discount_doubtful');
+            $this->warn($protocol, $step, 'part_time_discount_doubtful', "Osobní číslo {$number}: slevu zaměstnavatele na pojistném "
+                . "z PAMICA převod nepřevzal - {$doubt}. Ověřte důvod podle § 7a odst. 1 a zadejte ho v podmínkách vztahu.", $number);
+            return;
+        }
+        $from = is_string($discount['from'] ?? null) ? PayrollTakeoverFormat::czechDate($discount['from']) : '?';
+        $letter = SocialPartTimeDiscountReason::from((string) $reason)->paragraph7aLetter();
+        $this->part($protocol, $step, $number, 'Sleva zaměstnavatele na pojistném', fn (): array => $this->employments->partTimeDiscountReason(
+            $supplierId, $employmentId, (string) $reason,
+            self::NOTE . "důvod slevy zaměstnavatele § 7a odst. 1 písm. {$letter}) od {$from}; nárok přiznaný v PAMICA.",
+            $userId, $policy,
+        ));
+    }
+
+    /** Důvod slevy, který věk osoby vylučuje (písm. a) od 55 let, písm. g) do 21 let). */
+    private static function reasonAgeDoubt(string $reason, mixed $birthDate, mixed $from): ?string
+    {
+        if (!is_string($birthDate) || !in_array($reason, ['age_55_plus', 'under_21'], true)) {
+            return null;
+        }
+        $on = new \DateTimeImmutable(is_string($from) ? $from : 'today');
+        $age = (new \DateTimeImmutable($birthDate))->diff($on)->y;
+
+        return match (true) {
+            $reason === 'age_55_plus' && $age < 55 => "důvod a) věk nad 55 let, osobě je ale ke dni uplatnění {$age} let",
+            $reason === 'under_21' && $age >= 21 => "důvod g) věk do 21 let, osobě je ale ke dni uplatnění {$age} let",
+            default => null,
+        };
     }
 
     /** @param callable():array<string,int> $work */

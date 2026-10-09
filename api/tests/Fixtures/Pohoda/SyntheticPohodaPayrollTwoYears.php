@@ -39,6 +39,8 @@ final class SyntheticPohodaPayrollTwoYears
     /** Kódy složek, které převod zakládá ({@see \MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollCatalog::component()}). */
     public const BONUS_CODE = 'PAM_O01';
     public const HOURLY_CODE = 'PAM_C01';
+    /** Důvod slevy zaměstnavatele Aleny (§ 7a odst. 1 písm. b). */
+    public const ALENA_DISCOUNT_REASON = 'child_care_under_10';
 
     public static function write(string $root): string
     {
@@ -71,6 +73,10 @@ final class SyntheticPohodaPayrollTwoYears
         // Trvající DPP Aleny bez výplaty (nástup 2026) a dávno skončená dohoda Bohumila bez mzdy.
         $row('ZAMpomer', ['ID' => 5, 'RefZAM' => 1, 'Poradi' => 3, 'JeDPP' => 1, 'DatNast' => self::ALENA_OPEN_START]);
         $row('ZAMpomer', ['ID' => 6, 'RefZAM' => 2, 'Poradi' => 3, 'JeDPP' => 1, 'DatNast' => '2019-01-01', 'DatOdch' => '2019-06-30']);
+        // Sleva zaměstnavatele na pojistném (§ 7a): Alena z důvodu b) péče o dítě, Bohumil s důvodem a) věk nad 55 let,
+        // který jeho věk vylučuje (chyba dat předchozího programu). Obojí PAMICA přiznala (SocPojSlevaNarok).
+        $row('SocPojSleva', ['ID' => 1, 'RefPomer' => 1, 'RelDuvod' => 2, 'DatumOd' => '2024-01-01']);
+        $row('SocPojSleva', ['ID' => 2, 'RefPomer' => 3, 'RelDuvod' => 1, 'DatumOd' => '2025-01-01']);
 
         $id = 0;
         $item = 0;
@@ -85,7 +91,8 @@ final class SyntheticPohodaPayrollTwoYears
                         'HodFond' => $dpp ? 0 : 160, 'DnyFond2' => $dpp ? 0 : 20, 'TUvazek' => $dpp ? 0 : 40, 'HodOdpra' => $dpp ? 20 : 160,
                         'RefPoj' => 1, 'KcHrubaM' => $gross, 'KcCistaM' => $dpp ? 3400 : 25000, 'Prohlas' => $dpp ? 0 : 1,
                         'JeSocPP' => $dpp ? 0 : 1, 'KcZaklM' => $dpp ? 0 : 30000, 'DnyPrac' => 20, 'DnyOdpra' => 20, 'KcPrum' => 190,
-                        'Datum' => sprintf('%04d-%02d-10', $year, $month + 1), 'KcVyplat' => $dpp ? 3400 : 25000]);
+                        'Datum' => sprintf('%04d-%02d-10', $year, $month + 1), 'KcVyplat' => $dpp ? 3400 : 25000,
+                        'SocPojSlevaZadost' => $dpp ? 0 : 1, 'SocPojSlevaNarok' => $dpp ? 0 : 1]);
                     if ($dpp) {
                         $row('MZslozky', ['ID' => ++$item, 'RefAg' => $id, 'RefSlozka' => 3, 'KcMzda' => 4000, 'PocHodin' => 20]);
                         continue;

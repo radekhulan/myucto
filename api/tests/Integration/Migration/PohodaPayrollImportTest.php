@@ -238,10 +238,12 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM payroll_person_social_discount_claims WHERE supplier_id = ? AND employee_id = ? AND status = 'not_claimed'", [$supplierId, $jana['employee_id']]));
         $discounts = $pdo->prepare('SELECT status, effective_from, effective_to FROM payroll_person_social_discount_claims WHERE supplier_id = ? AND employee_id = ? ORDER BY effective_from');
         $discounts->execute([$supplierId, $petr['employee_id']]);
+        // Únorová žádost o slevu (SocPojSlevaZadost) je sleva zaměstnavatele podle § 7a, ne sleva
+        // důchodce: Petr důchod nemá, sleva důchodce se neuplatňuje a žádost bez nároku se jen ohlásí.
         self::assertSame([
-            ['status' => 'not_claimed', 'effective_from' => '2026-01-01', 'effective_to' => '2026-01-31'],
-            ['status' => 'verified', 'effective_from' => '2026-02-01', 'effective_to' => null],
+            ['status' => 'not_claimed', 'effective_from' => '2026-01-01', 'effective_to' => null],
         ], $discounts->fetchAll(\PDO::FETCH_ASSOC));
+        self::assertSame(1, self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE)['part_time_discount_not_granted'] ?? 0, $this->explain($protocol));
 
         // S potvrzením se uloží platné OIČ a ID PPV; OIČ s chybnou kontrolní číslicí ne.
         $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, true, startDecision: PohodaPayrollImporter::START_KEEP);

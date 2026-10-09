@@ -808,6 +808,30 @@ final class PayrollTakeoverEmploymentWriter
     }
 
     /**
+     * Důvod slevy zaměstnavatele na pojistném (§ 7a odst. 1 zák. č. 589/1992 Sb.) do platné
+     * verze podmínek, pokud ho ještě nemá. Jen důvod: nárok zakládá až přijatý záměr OZUSPOJ
+     * (§ 7a odst. 5), který se z předchozího programu převezme zvlášť; bez něj výpočet slevu
+     * neuplatní a kontrola převodu ho vyjmenuje ({@see PayrollTakeoverDiscountIntentCheck}).
+     *
+     * @return array<string,int>
+     */
+    public function partTimeDiscountReason(int $supplierId, int $employmentId, string $reason, string $evidence, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        $current = $this->employments->currentTerms($supplierId, $employmentId)
+            ?? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.');
+        $existing = (string) ($current['social_part_time_discount_reason'] ?? 'none');
+        if ($existing !== '' && $existing !== 'none') {
+            return $existing === $reason ? ['part_time_discount_existing' => 1] : ['part_time_discount_differs' => 1];
+        }
+        $this->correctTerms($supplierId, $employmentId, $current, [
+            'social_part_time_discount_reason' => $reason,
+            'social_part_time_discount_evidence' => mb_substr($evidence, 0, 190),
+        ], $userId, $policy);
+
+        return ['part_time_discount' => 1];
+    }
+
+    /**
      * Očekávané odmítnutí položky: konflikt verze, chybějící vztah nebo položka a zamítnutí
      * kontrolou (datum nástupu). Chyba databáze ani jiná RuntimeException mezi ně nepatří,
      * projde výš a převod ji ohlásí, místo aby položka tiše zůstala neodškrtnutá.

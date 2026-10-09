@@ -79,8 +79,8 @@ final class PohodaPayrollTakeover
                 $run['status'],
                 $run['from'],
                 $run['to'],
-                $claimed ? 'pamica:mz-socpojslevazadost:' . $run['period'] : null,
-                self::NOTE . ($claimed ? 'sleva pracujícího důchodce uplatněná' : 'sleva pracujícího důchodce se neuplatňuje')
+                $claimed ? 'pamica:jmhz-10490:' . $run['period'] : null,
+                self::NOTE . ($claimed ? 'sleva pracujícího důchodce uplatněná v podaném hlášení' : 'sleva pracujícího důchodce se neuplatňuje')
                     . ' od mzdy za ' . PayrollTakeoverFormat::czechPeriod($run['period']) . '.',
             );
         }

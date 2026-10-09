@@ -132,6 +132,36 @@ final class PohodaPayrollOlderYearImportTest extends TestCase
         self::assertCount(1, self::messages($newer, 'payslip_outside_employment'), $this->explain($newer));
     }
 
+    /**
+     * `SocPojSlevaZadost`/`SocPojSlevaNarok` jsou v PAMICA sleva ZAMĚSTNAVATELE na pojistném
+     * (§ 7a zák. č. 589/1992 Sb.), ne sleva pracujícího důchodce. Dřív z nich převod udělal
+     * slevu důchodce (Alena, nar. 1990). Teď jde důvod slevy do podmínek pracovního poměru;
+     * důvod, který věk osoby vylučuje, se nepřevezme a ohlásí.
+     */
+    public function testPamicaDiscountFlagIsEmployerPartTimeDiscount(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = Payroll::write($this->tmp);
+
+        $protocol = $this->import($supplierId, $file, 2025);
+
+        $alena = $this->employment($supplierId, Payroll::ALENA_HPP);
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_person_social_discount_claims WHERE supplier_id = ? AND employee_id = ? AND status = 'verified'",
+            [$supplierId, $alena['employee_id']],
+        ), 'Žádost o slevu zaměstnavatele není sleva pracujícího důchodce. ' . $this->explain($protocol));
+        $reason = $this->db->pdo()->prepare(
+            'SELECT social_part_time_discount_reason FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC LIMIT 1'
+        );
+        $reason->execute([$supplierId, $alena['id']]);
+        self::assertSame(Payroll::ALENA_DISCOUNT_REASON, $reason->fetchColumn(), $this->explain($protocol));
+        $bohumil = $this->employment($supplierId, Payroll::BOHUMIL_HPP);
+        $reason->execute([$supplierId, $bohumil['id']]);
+        self::assertSame('none', $reason->fetchColumn(), 'Důvod a) u osoby mladší 55 let se nepřebírá.');
+        self::assertCount(1, self::messages($protocol, 'part_time_discount_doubtful'), $this->explain($protocol));
+    }
+
     public function testRepeatedOlderYearChangesNothing(): void
     {
         $supplierId = $this->payrollSupplier();

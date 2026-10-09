@@ -112,7 +112,8 @@ final class SyntheticPohodaPayroll
                 // Sjednaná měsíční mzda a čtvrtletní průměr, se kterým PAMICA počítala náhrady.
                 'KcZaklM' => $m === 2 ? 42000 : 40000, 'DnyPrac' => 20, 'DnyOdpra' => 20, 'KcPrum' => 250,
                 'KcSocZak' => 43000, 'KcZdaM' => 43000, 'KcDanPrS' => 6450, 'KcNzdZak' => 2570, 'KcDanZal' => 3880, 'KcZalDan' => 3880]);
-            // Petr (DPP pod limitem) bez účasti na pojištění; v únoru žádá o slevu pracujícího důchodce.
+            // Petr (DPP pod limitem) bez účasti na pojištění; v únoru PAMICA vede žádost o slevu zaměstnavatele na pojistném
+            // (§ 7a, SocPojSlevaZadost) bez přiznaného nároku - k DPP sleva nenáleží.
             $row('MZ', ['ID' => $petr, 'RefZAM' => 2, 'RefPomer' => 2, 'Rok' => self::YEAR, 'RelMes' => $m, 'HodFond' => 0, 'HodOdpra' => 25,
                 'RefPoj' => 2, 'KcHrubaM' => self::GROSS[1], 'KcCistaM' => 5000, 'Prohlas' => 0, 'JeSocPP' => 0, 'KcSraDanZak' => 5000, 'KcSraDan' => 750,
                 'SocPojSlevaZadost' => $m === 2 ? 1 : 0]);

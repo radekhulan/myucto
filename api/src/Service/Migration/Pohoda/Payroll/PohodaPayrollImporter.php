@@ -632,6 +632,8 @@ final class PohodaPayrollImporter
                 if ($progress !== null) {
                     $progress(self::STEP_PEOPLE, 0, 1);
                 }
+                // Slevu pracujícího důchodce nese podané hlášení, ne karta.
+                $records = PohodaPayrollPeople::withSubmittedDiscounts($records, $jmhz['effective'], $year);
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file));
                 $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn);
