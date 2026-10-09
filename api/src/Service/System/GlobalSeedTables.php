@@ -203,6 +203,7 @@ final class GlobalSeedTables
         'tax_submission_settings', 'submission_channel_credentials',
         'submission_inbox_storage_settings', 'submission_isds_mobile_credentials',
         'isds_gateway_registrations', 'submission_recipients',
+        'submission_inbox_categories', 'submission_inbox_category_rules',
         // E-mail / bankovní avíza (konfigurace, NE zpracované zprávy).
         'bank_email_imap_settings', 'bank_email_account_mappings', 'email_templates', 'email_profiles',
         'bank_email_notice_providers', 'bank_email_notice_provider_overrides',

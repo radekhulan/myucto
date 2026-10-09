@@ -587,6 +587,8 @@ final class AnonymizationPolicy
         'stock_valuation_rows' => ['cursor_json' => 'keep'],
         'submission_channel_credentials' => ['box_id' => 'data_box', 'certificate_ciphertext' => 'wipe', 'certificate_fingerprint' => 'keep', 'certificate_passphrase_ciphertext' => 'wipe', 'label' => 'text'],
         'submission_defect_notices' => ['note' => 'text', 'notice_reference' => 'keep'],
+        'submission_inbox_categories' => ['code' => 'keep', 'name' => 'text'],
+        'submission_inbox_category_rules' => ['pattern' => 'text'],
         'submission_inbox_messages' => ['delivery_note' => 'text', 'external_message_id' => 'keep', 'raw_sha256' => 'keep', 'sender_box_id' => 'data_box', 'sender_ident' => 'shape', 'sender_name' => 'party_name', 'subject' => 'text'],
         'submission_inbox_polls' => ['last_error_code' => 'keep', 'last_error_message' => 'text'],
         'submission_inbox_purge_manifest' => ['internal_filename' => 'file_path', 'last_error' => 'text', 'sha256' => 'keep', 'thumb_filename' => 'file_path'],
