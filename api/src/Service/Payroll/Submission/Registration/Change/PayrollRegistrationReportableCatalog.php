@@ -44,14 +44,15 @@ final class PayrollRegistrationReportableCatalog
     public const ACTION_CHANGE = 3;
 
     /**
-     * Vznik příslušnosti k cizím právním předpisům. Část G sice příznak
-     * příslušnosti vede, ale jeho VZNIK a SKONČENÍ jsou samostatné akce
-     * A6 a A7 — poslat je jako A3 by bylo podání ve špatné akci.
+     * Vznik příslušnosti k českým právním předpisům (A6), tedy konec
+     * příslušnosti k cizím. Část G sice příznak cizí příslušnosti vede, ale
+     * přechod mezi cizími a českými předpisy jsou samostatné akce A6 a A7
+     * (Zásady REGZEC 1.4.6) — poslat je jako A3 by bylo podání ve špatné akci.
      */
-    public const ACTION_FOREIGN_LEGISLATION_START = 6;
+    public const ACTION_CZECH_LEGISLATION_START = 6;
 
-    /** Skončení příslušnosti k cizím právním předpisům. */
-    public const ACTION_FOREIGN_LEGISLATION_END = 7;
+    /** Skončení příslušnosti k českým právním předpisům (A7): začne cizí. */
+    public const ACTION_CZECH_LEGISLATION_END = 7;
 
     public const GROUP_IDENTITY = 'identity';
     public const GROUP_IDENTIFIERS = 'identifiers';

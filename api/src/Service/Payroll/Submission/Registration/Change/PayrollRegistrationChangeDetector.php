@@ -21,10 +21,14 @@ namespace MyInvoice\Service\Payroll\Submission\Registration\Change;
  *
  * ## Proč se příslušnost k cizím předpisům chová jinak
  *
- * Kód státu při trvající příslušnosti je běžná změna údaje (A3), ale VZNIK
- * a SKONČENÍ příslušnosti mají vlastní akce A6 a A7. Detektor proto u
- * `foreign_legislation.applies` podle směru vrátí 6 nebo 7 — poslat je jako
- * A3 by znamenalo podat správnou skutečnost špatnou akcí.
+ * Kód státu při trvající příslušnosti je běžná změna údaje (A3), ale přechod
+ * mezi cizími a českými předpisy má vlastní akce (Zásady REGZEC 1.4.6, kódy
+ * akce 6 a 7): začne-li zaměstnanec podléhat cizím předpisům, skončila
+ * příslušnost k českým (A7); přestane-li jim podléhat, vznikla příslušnost
+ * k českým (A6). Detektor proto u `foreign_legislation.applies` podle směru
+ * vrátí 7 nebo 6 — poslat je jako A3 by znamenalo podat správnou skutečnost
+ * špatnou akcí. Byla-li cizí příslušnost přihlášená už v A1, A6 odmítne až
+ * schválení události (Specifický postup č. 1: A2 a nová A1).
  */
 final class PayrollRegistrationChangeDetector
 {
@@ -67,11 +71,11 @@ final class PayrollRegistrationChangeDetector
             return $catalogAction;
         }
 
-        // '1' → cokoliv jiného je skončení příslušnosti (A7), opačný směr
-        // její vznik (A6). Katalog drží 6 jako výchozí hodnotu; směr zná až
-        // porovnání, protože z jednoho údaje ho vyčíst nelze.
+        // '1' → cokoliv jiného: cizí předpisy skončily, vznikla příslušnost
+        // k českým (A6); opačný směr je skončení příslušnosti k českým (A7).
+        // Směr zná až porovnání, z jednoho údaje ho vyčíst nelze.
         return $from === '1'
-            ? PayrollRegistrationReportableCatalog::ACTION_FOREIGN_LEGISLATION_END
-            : PayrollRegistrationReportableCatalog::ACTION_FOREIGN_LEGISLATION_START;
+            ? PayrollRegistrationReportableCatalog::ACTION_CZECH_LEGISLATION_START
+            : PayrollRegistrationReportableCatalog::ACTION_CZECH_LEGISLATION_END;
     }
 }

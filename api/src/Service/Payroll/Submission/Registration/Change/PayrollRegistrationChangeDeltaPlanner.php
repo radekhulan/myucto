@@ -127,8 +127,8 @@ final class PayrollRegistrationChangeDeltaPlanner
         $handled = [];
         foreach ($findings as $finding) {
             if ($finding->actionCode !== PayrollRegistrationReportableCatalog::ACTION_CHANGE) {
-                // Vznik a skončení příslušnosti k cizím předpisům se podává
-                // akcí A6/A7, která má vlastní vstup (nositel pojištění).
+                // Přechod mezi cizími a českými předpisy se podává akcí
+                // A6/A7, která má vlastní vstup (nositel pojištění).
                 // Do A3 ji přimíchat nelze.
                 $unsupported[] = [
                     'path' => $finding->path,
@@ -274,8 +274,9 @@ final class PayrollRegistrationChangeDeltaPlanner
                     if ($finding->from === null
                         || $current->get('foreign_legislation.applies') !== '1'
                     ) {
-                        // Stát se objevil společně se vznikem příslušnosti
-                        // (nebo příslušnost netrvá): to je A6, ne změna A3.
+                        // Stát se objevil společně se vznikem cizí
+                        // příslušnosti (nebo ta netrvá): to je A7 (resp.
+                        // A6), ne změna A3.
                         $unsupported[] = [
                             'path' => $finding->path,
                             'reason_code' => 'registration_change_requires_other_action',

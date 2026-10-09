@@ -202,8 +202,10 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
     }
 
     /**
-     * Vznik a skončení příslušnosti k cizím předpisům jde akcemi A6/A7,
-     * ne A3 — poslat je jako A3 by byla správná skutečnost ve špatné akci.
+     * Přechod mezi cizími a českými předpisy jde akcemi A6/A7, ne A3 — poslat
+     * je jako A3 by byla správná skutečnost ve špatné akci. Zásady REGZEC
+     * 1.4.6: začátek cizích předpisů je skončení příslušnosti k českým (A7),
+     * jejich konec je vznik příslušnosti k českým (A6).
      */
     public function testForeignLegislationStartAndEndUseTheirOwnActions(): void
     {
@@ -227,8 +229,8 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
             static fn ($finding): bool => $finding->path === 'foreign_legislation.applies',
         ))[0]->actionCode;
 
-        self::assertSame(6, $applies($start));
-        self::assertSame(7, $applies($end));
+        self::assertSame(7, $applies($start));
+        self::assertSame(6, $applies($end));
     }
 
     /** Hodnoty citlivých identifikátorů se z návrhu nesmí dostat ven. */

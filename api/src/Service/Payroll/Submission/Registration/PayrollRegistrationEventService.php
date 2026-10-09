@@ -2829,8 +2829,10 @@ final readonly class PayrollRegistrationEventService
                 'registration_a3_foreign_legislation_requires_other_action',
                 'Skončení příslušnosti k cizím předpisům se přes '
                     . $this->actionName(3)
-                    . ' nehlásí. Použijte oznámení o skončení příslušnosti'
-                    . ' (REGZEC A7).'
+                    . ' nehlásí. Jde o vznik příslušnosti k českým předpisům'
+                    . ' (REGZEC A6); byl-li ale vztah přihlášen s cizí'
+                    . ' příslušností už od počátku, podává se skončení'
+                    . ' (REGZEC A2) a nová přihláška (REGZEC A1).'
                     . PayrollRegistrationFieldVocabulary::reference(
                         'foreign_legislation.applies',
                     ),
