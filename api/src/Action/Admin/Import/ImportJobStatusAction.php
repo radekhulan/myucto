@@ -38,7 +38,7 @@ final class ImportJobStatusAction
 
         $supplierId = SupplierGuard::currentId($request);
         $job = $this->jobs->find($id, $supplierId);
-        if ($job === null) {
+        if ($job === null || ($job['source'] ?? '') === 'myucto_import') {
             return Json::error($response, 'not_found', 'Import job nenalezen.', 404);
         }
 

@@ -11,10 +11,10 @@ final class MigrationCompanyLock
 {
     public function __construct(private readonly Connection $db) {}
 
-    public function acquire(string $source, int $supplierId): bool
+    public function acquire(string $source, int $supplierId, int $timeoutSeconds = 0): bool
     {
-        $stmt = $this->db->pdo()->prepare("SELECT GET_LOCK(CONCAT(?, ':', DATABASE(), ':', ?), 0)");
-        $stmt->execute([$source, $supplierId]);
+        $stmt = $this->db->pdo()->prepare("SELECT GET_LOCK(CONCAT(?, ':', DATABASE(), ':', ?), ?)");
+        $stmt->execute([$source, $supplierId, $timeoutSeconds]);
         return (int) $stmt->fetchColumn() === 1;
     }
 

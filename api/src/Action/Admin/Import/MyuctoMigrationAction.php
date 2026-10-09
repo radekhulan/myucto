@@ -11,14 +11,19 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Migration\Myucto\MyuctoImportException;
 use MyInvoice\Service\Migration\Myucto\MyuctoImportWorkflow;
+use MyInvoice\Service\Migration\Myucto\MyuctoImportJobService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
 
-/** Browser-only native import into the selected company; passwords are never persisted. */
+/** Browser-only native import into the selected company through the shared worker. */
 final class MyuctoMigrationAction
 {
-    public function __construct(private readonly MyuctoImportWorkflow $workflow) {}
+    public function __construct(
+        private readonly MyuctoImportWorkflow $workflow,
+        private readonly MyuctoImportJobService $jobs,
+    ) {
+    }
 
     public function initChunked(Request $request, Response $response): Response
     {
@@ -60,22 +65,47 @@ final class MyuctoMigrationAction
                 || (isset($body['password']) && (!is_string($body['password']) || strlen($body['password']) > 1024))) {
                 throw new MyuctoImportException('invalid_options', 'Vyplňte zdroj a platný režim importu.');
             }
-            return $this->workflow->run($supplier, $actor, (string) $args['token'], $body['source'],
-                $body['password'] ?? null, $mode === 'import', ($body['confirmed'] ?? false) === true);
-        });
+            $started = $this->jobs->start(
+                $supplier,
+                $actor,
+                (string) $args['token'],
+                $body['source'],
+                $body['password'] ?? null,
+                $mode === 'import',
+                ($body['confirmed'] ?? false) === true
+            );
+            $this->jobs->launch((int) $started['job_id']);
+            return $started;
+        }, 202);
     }
 
-    private function handle(Request $request, Response $response, \Closure $operation): Response
+    public function runs(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        return $this->handle($request, $response, fn (int $supplier, int $actor): array => $this->jobs->history($supplier, $actor));
+    }
+
+    public function status(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, fn (int $supplier, int $actor): array => $this->jobs->status($supplier, $actor, (int) $args['id']));
+    }
+
+    private function handle(Request $request, Response $response, \Closure $operation, int $status = 200): Response
+    {
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
+        }
         foreach (['utilities.import', 'accounting.journal.write', 'settings.company.write'] as $permission) {
-            if (!RequestAuthorization::allows($request, $permission, AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'K převodu firmy potřebujete právo importu, účetního deníku a nastavení firmy.', 403);
+            if (!RequestAuthorization::allows($request, $permission, AccessLevel::WRITE)) {
+                return Json::error($response, 'forbidden', 'K převodu firmy potřebujete právo importu, účetního deníku a nastavení firmy.', 403);
+            }
         }
         $supplier = SupplierGuard::currentId($request);
         $actor = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
-        if ($supplier <= 0 || $actor <= 0) return Json::error($response, 'no_supplier', 'Vyberte cílovou firmu.', 400);
+        if ($supplier <= 0 || $actor <= 0) {
+            return Json::error($response, 'no_supplier', 'Vyberte cílovou firmu.', 400);
+        }
         try {
-            return Json::ok($response, $operation($supplier, $actor));
+            return Json::ok($response, $operation($supplier, $actor), $status);
         } catch (MyuctoImportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->getCode(), $e->context);
         } catch (\JsonException $e) {

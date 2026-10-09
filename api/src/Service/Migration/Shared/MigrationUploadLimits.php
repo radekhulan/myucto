@@ -26,6 +26,8 @@ final class MigrationUploadLimits
     public const POHODA_MAX_BYTES = 2 * 1024 * 1024 * 1024;
     /** Záloha dat PREMIER (.izip/.icab). */
     public const PREMIER_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+    /** Kompletní export MyÚčta (ZIP); vybraná data mají samostatný paměťový limit. */
+    public const MYUCTO_MAX_BYTES = 2 * 1024 * 1024 * 1024;
     /** Šifrovaná záloha Stereo NX (ZIP). */
     public const STEREO_NX_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 }

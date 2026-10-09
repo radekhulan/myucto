@@ -38,6 +38,10 @@ final class DeleteImportJobAction
 
         $id = (int) ($args['id'] ?? 0);
         $supplierId = SupplierGuard::currentId($request);
+        $job = $this->jobs->find($id, $supplierId);
+        if (($job['source'] ?? '') === 'myucto_import') {
+            return Json::error($response, 'native_import', 'Nativní obnovu spravujte v průvodci MyÚčto.', 403);
+        }
         if (!$this->jobs->delete($id, $supplierId)) {
             return Json::error($response, 'not_found',
                 'Job nelze smazat (neexistuje nebo patří jinému tenantovi).', 404);

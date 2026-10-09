@@ -2933,6 +2933,8 @@ final class Routes
         $app->post   ('/api/admin/import/batches/{batch:[A-Za-z0-9]{4,32}}/delete',
             \MyInvoice\Action\Admin\Import\DeleteImportBatchAction::class);
         // Přenos firmy ze stávajícího Kompletního exportu dat MyÚčta.
+        $app->get('/api/admin/imports/myucto/runs', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'runs']);
+        $app->get('/api/admin/imports/myucto/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'status']);
         $app->post('/api/admin/imports/myucto/uploads/chunked', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'initChunked']);
         $app->post('/api/admin/imports/myucto/uploads/{token:[a-f0-9]{16}}/chunks', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'chunk']);
         $app->post('/api/admin/imports/myucto/uploads/{token:[a-f0-9]{16}}/complete', [\MyInvoice\Action\Admin\Import\MyuctoMigrationAction::class, 'complete']);

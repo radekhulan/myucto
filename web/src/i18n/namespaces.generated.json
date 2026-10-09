@@ -368,6 +368,7 @@
     ],
     "imports-myucto": [
       "company_profile",
+      "imports",
       "myucto_import"
     ],
     "imports-money-s3": [

@@ -153,6 +153,8 @@ try {
         $container->get(\MyInvoice\Service\Migration\Abra\AbraImportJobService::class)->run($jobId);
     } elseif ($source === 'premier_import') {
         $container->get(\MyInvoice\Service\Migration\Premier\PremierImportJobService::class)->run($jobId);
+    } elseif ($source === 'myucto_import') {
+        $container->get(\MyInvoice\Service\Migration\Myucto\MyuctoImportJobService::class)->run($jobId);
     } elseif ($source === 'stereo_nx_import') {
         $container->get(\MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService::class)->run($jobId);
     } elseif ($source === 'scan_attach') {

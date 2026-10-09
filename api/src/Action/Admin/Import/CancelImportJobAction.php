@@ -38,6 +38,10 @@ final class CancelImportJobAction
 
         $id = (int) ($args['id'] ?? 0);
         $supplierId = SupplierGuard::currentId($request);
+        $job = $this->jobs->find($id, $supplierId);
+        if (($job['source'] ?? '') === 'myucto_import') {
+            return Json::error($response, 'native_import', 'Nativní obnovu spravujte v průvodci MyÚčto.', 403);
+        }
         $ok = $this->jobs->requestCancel($id, $supplierId);
         if (!$ok) {
             return Json::error($response, 'cannot_cancel',

@@ -97,11 +97,28 @@ final class MyuctoImportWorkflowTest extends TestCase
         $this->workflow->run(4, 1, $token, 'different', null, true, true);
     }
 
+    public function testPreviewFromOldProfileCannotAuthorizeQueuedOrDirectApply(): void
+    {
+        $token = $this->upload();
+        $this->importer->expects(self::once())->method('import')->willReturn(['dry_run' => true]);
+        $this->workflow->run(4, 1, $token, 'synthetic', null, false, false);
+        $this->workflow->uploads()->updateState(4, $token, ['checked_profile' => null]);
+        try {
+            $this->workflow->validateStart(4, 1, $token, 'synthetic', true, true);
+            self::fail('Starší kontrola nesmí povolit nový profil.');
+        } catch (MyuctoImportException $e) {
+            self::assertStringContainsString('Nejprve proveďte', $e->getMessage());
+        }
+        $this->expectExceptionMessage('Nejprve proveďte');
+        $this->workflow->run(4, 1, $token, 'synthetic', null, true, true);
+    }
+
     public function testChangedFileIsRejected(): void
     {
         $token = $this->upload();
+        $this->importer->expects(self::once())->method('import')->willReturn(['dry_run' => true]);
+        $this->workflow->run(4, 1, $token, 'synthetic', null, false, false);
         file_put_contents($this->dir . '/storage/myucto-import/4/' . $token . '/export.zip', 'CHANGED');
-        $this->importer->expects(self::never())->method('import');
         $this->expectExceptionMessage('export se změnil');
         $this->workflow->run(4, 1, $token, 'synthetic', null, false, false);
     }
@@ -113,6 +130,34 @@ final class MyuctoImportWorkflowTest extends TestCase
             try { $this->workflow->show($supplier, $actor, $token); self::fail('Foreign upload was accessible.'); }
             catch (MyuctoImportException $e) { self::assertSame(404, $e->getCode()); }
         }
+    }
+
+    public function testAcceptsLargeZipButStillRequiresPreviewForQueuedApply(): void
+    {
+        $init = $this->workflow->init(4, 1, 'synthetic.zip', 65 * 1024 * 1024);
+        self::assertNotEmpty($init['token']);
+        $token = $this->upload();
+        $this->workflow->validateStart(4, 1, $token, 'synthetic', false, false);
+        $this->expectExceptionMessage('Nejprve proveďte');
+        $this->workflow->validateStart(4, 1, $token, 'synthetic', true, true);
+    }
+
+    public function testFailedPreviewInvalidatesPreviousSuccessfulPreview(): void
+    {
+        $token = $this->upload();
+        $this->importer->expects(self::exactly(2))->method('import')->willReturnOnConsecutiveCalls(
+            ['dry_run' => true],
+            self::throwException(new \RuntimeException('Syntetická chyba kontroly.')),
+        );
+        $this->workflow->run(4, 1, $token, 'synthetic', null, false, false);
+        try {
+            $this->workflow->run(4, 1, $token, 'synthetic', null, false, false);
+            self::fail('Failed preview was accepted.');
+        } catch (MyuctoImportException) {
+            self::assertNull($this->workflow->show(4, 1, $token)['result']);
+        }
+        $this->expectExceptionMessage('Nejprve proveďte');
+        $this->workflow->validateStart(4, 1, $token, 'synthetic', true, true);
     }
 
     public function testIncompleteUploadCannotBeSealed(): void

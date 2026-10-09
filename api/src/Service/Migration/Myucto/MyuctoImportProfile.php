@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Migration\Myucto;
 /** Explicit first import profile: business records, no instance credentials or runtime jobs. */
 final class MyuctoImportProfile
 {
+    public const VERSION = 'classifications-v1';
     public const TABLES = [
         'currencies', 'revenue_categories', 'expense_categories', 'cost_centers',
         'chart_of_accounts', 'vat_classifications', 'accounting_periods', 'clients', 'client_bank_accounts',
@@ -18,6 +19,7 @@ final class MyuctoImportProfile
         'cash_documents', 'cash_document_vat_lines', 'invoice_settlements',
         'offset_agreements', 'offset_agreement_items', 'assets', 'asset_improvements',
         'depreciation_entries', 'small_assets', 'journal_entries', 'journal_entry_lines',
+        'posting_rules', 'de_movement_classification', 'de_movement_classification_history',
     ];
     public const CONFIG_TABLES = ['supplier_vat_status_history'];
     public const GLOBAL_KEYS = ['countries' => ['iso2'], 'vat_rates' => ['code', 'rate_percent', 'country']];
@@ -26,6 +28,7 @@ final class MyuctoImportProfile
         'revenue_categories' => ['code'], 'expense_categories' => ['code'],
         'vat_classifications' => ['code'], 'cost_centers' => ['code'], 'cash_registers' => ['name', 'currency_code'],
         'supplier_bank_accounts' => ['account_number', 'bank_code'],
+        'posting_rules' => ['rule_key', 'priority'],
     ];
     public const OWNERS = [
         'projects' => ['client_id', 'clients'], 'work_reports' => ['project_id', 'projects'],
@@ -51,6 +54,9 @@ final class MyuctoImportProfile
         'depreciation_entries' => ['override_by' => 'users'],
         'accounting_periods' => ['approved_by' => 'users', 'closed_by' => 'users', 'reviewed_by' => 'users'],
         'bank_statements' => ['dedup_scope_supplier_id' => 'supplier'],
+        'de_movement_classification' => ['bank_transaction_id' => 'bank_transactions',
+            'cash_document_id' => 'cash_documents', 'classified_by' => 'users'],
+        'de_movement_classification_history' => ['changed_by' => 'users'],
     ];
     public const PRESERVED_IDS = ['idoklad_id', 'fakturoid_id', 'import_batch_id'];
     public const RESET_COLUMNS = [

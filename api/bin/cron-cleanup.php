@@ -184,6 +184,10 @@ $report['money_s3_batch_uploads'] = \MyInvoice\Service\Migration\MoneyS3\MoneyS3
 $report['pohoda_uploads'] = \MyInvoice\Service\Migration\Pohoda\PohodaUploads::purgeStaleAll();
 // 8c) Nahrané zálohy dat z PREMIER - totéž, celá databáze firmy (všechny roky).
 $report['premier_uploads'] = \MyInvoice\Service\Migration\Premier\PremierUploads::purgeStaleAll();
+// Nativní ZIPy obnovy: stejná týdenní retence, protokoly zůstávají v import_jobs.
+$report['myucto_uploads'] = Bootstrap::buildContainer()
+    ->get(\MyInvoice\Service\Migration\Myucto\MyuctoImportWorkflow::class)
+    ->uploads()->purgeStaleAll();
 $report['abra_flexi_snapshot_tenants'] = (new \MyInvoice\Service\Migration\Abra\AbraSnapshotStore())->pruneAll();
 $report['abra_flexi_cache_pages'] = \MyInvoice\Service\Migration\Abra\AbraPageCache::pruneExpired();
 
