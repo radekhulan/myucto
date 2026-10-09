@@ -14,7 +14,7 @@ use PDO;
 
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
-    public const DERIVATION_VERSION = 'jmhz-work-month.v7';
+    public const DERIVATION_VERSION = 'jmhz-work-month.v9';
 
     /**
      * Souhrn měsíce, který bere odpracovanou dobu ze souhrnu importu docházky
@@ -51,12 +51,34 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     private const HOLIDAY_FIELDS = ['holiday_millihours'];
 
     /** Verze souhrnu, které nesou {@see HOLIDAY_FIELDS}. */
-    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8'];
+    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8', 'jmhz-work-month.v9'];
 
     /** @return list<string> */
     public static function holidayFields(): array
     {
         return self::HOLIDAY_FIELDS;
+    }
+
+    /**
+     * Neodpracované hodiny svátků v jinak pracovní dny uvnitř nepřítomnosti, za
+     * kterou se mzda za svátek krátí (rodičovská, PPM, otcovská, ošetřovné,
+     * neplacené volno, § 115 odst. 3 ZP).
+     *
+     * Pokyny k 10275 svátky do celkového počtu neodpracovaných hodin počítají,
+     * mzda ani náhrada za ně ale nenáleží, takže do 10276 nepatří. Celý měsíc
+     * rodičovské se svátkem tak dává 10268 + 10275 = 10260. Nese je až v9
+     * (z intervalů): přidat klíč do starší verze by změnilo obsahový otisk už
+     * zmrazených souhrnů.
+     */
+    private const UNPAID_HOLIDAY_FIELDS = ['holiday_unpaid_millihours'];
+
+    /** Verze souhrnu, které nesou {@see UNPAID_HOLIDAY_FIELDS}. */
+    public const VERSIONS_WITH_UNPAID_HOLIDAYS = ['jmhz-work-month.v9'];
+
+    /** @return list<string> */
+    public static function unpaidHolidayFields(): array
+    {
+        return self::UNPAID_HOLIDAY_FIELDS;
     }
 
     /**
@@ -74,6 +96,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v6',
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
+        'jmhz-work-month.v9',
     ];
 
     /** Provenience souhrnu potvrzeného hromadným schválením dávky importu. */
@@ -175,6 +198,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v6',
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
+        'jmhz-work-month.v9',
     ];
 
     /**
@@ -195,6 +219,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v6',
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
+        'jmhz-work-month.v9',
     ];
 
     /** @return list<string> */
@@ -226,7 +251,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     /**
      * Verze souhrnu, které nesou {@see WORKED_BREAKDOWN_FIELDS}.
      *
-     * v4, v5 a v7 mají dny vždy vyplněné; v6 a v8 (souhrn z importu) je smí
+     * v4, v5, v7 a v9 mají dny vždy vyplněné; v6 a v8 (souhrn z importu) je smí
      * mít NEUVEDENÉ, protože podklady docházky dny nenesou.
      */
     public const VERSIONS_WITH_WORKED_BREAKDOWN = [
@@ -235,6 +260,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v6',
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
+        'jmhz-work-month.v9',
     ];
 
     /** @return list<string> */
@@ -405,9 +431,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             ),
             default => self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo),
         };
-        $holidayMinutes = !self::requiresShiftCalendar($employment['relation_type'])
+        [$holidayMinutes, $unpaidHolidayMinutes] = !self::requiresShiftCalendar($employment['relation_type'])
             || self::isAgreement($employment['relation_type'])
-                ? 0
+                ? [0, 0]
                 : $this->holidayMinutes($calendars, $evidenceFrom, $evidenceTo, $entries, $absences, $periodStart);
         $employmentIssues = self::employmentIssues($employment);
         $absenceIssues = self::absenceIssues($absences);
@@ -450,6 +476,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             // potvrzení, ne v dialogu (viz HOLIDAY_FIELDS). `null` = svátek
             // nejde vyjádřit v celých tisícinách hodiny a souhrn nejde potvrdit.
             'holiday_millihours' => self::minutesToMillihours($holidayMinutes),
+            // Svátek uvnitř nepřítomnosti, za kterou se mzda krátí: do 10275 ano
+            // (pokyny k 10275 svátky počítají), do 10276 ne (viz UNPAID_HOLIDAY_FIELDS).
+            'holiday_unpaid_millihours' => self::minutesToMillihours($unpaidHolidayMinutes),
             'requires_unworked_hours_followup' => $absences !== [],
             /*
              * Druhy nepřítomnosti, které v měsíci opravdu jsou.
@@ -1105,6 +1134,23 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $unworkedHoursOccurred = true;
             self::assertScaledMaximum($values['unworked_total_millihours'], 99999999, 'unworked_total_hours');
         }
+        // Svátek uvnitř nepřítomnosti bez mzdy jen do 10275 (UNPAID_HOLIDAY_FIELDS).
+        // Nese ho jen verze z intervalů v9; souhrn z importu svátky dodává sám.
+        $unpaidHoliday = 0;
+        if (in_array($version, self::VERSIONS_WITH_UNPAID_HOLIDAYS, true)) {
+            $unpaidHoliday = $preview['holiday_unpaid_millihours'] ?? 0;
+            if (!is_int($unpaidHoliday) || $unpaidHoliday < 0) {
+                throw new \InvalidArgumentException(
+                    'Hodiny svátků v jinak pracovní dny nejde vyjádřit v celých tisícinách hodiny.',
+                );
+            }
+            $values['holiday_unpaid_millihours'] = $unpaidHoliday > 0 ? $unpaidHoliday : null;
+            if ($unpaidHoliday > 0) {
+                $values['unworked_total_millihours'] = ($values['unworked_total_millihours'] ?? 0) + $unpaidHoliday;
+                $unworkedHoursOccurred = true;
+                self::assertScaledMaximum($values['unworked_total_millihours'], 99999999, 'unworked_total_hours');
+            }
+        }
         $note = $input['confirmation_note'] ?? '';
         if (!is_string($note) || mb_strlen(trim($note)) > 500) {
             throw new \InvalidArgumentException(
@@ -1180,6 +1226,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'decimal_policy' => 'exact_user_confirmed_value_without_rounding',
             'validated_controls' => [23, 144, 145, 286],
         ];
+        if (in_array($version, self::VERSIONS_WITH_UNPAID_HOLIDAYS, true)) {
+            $provenance['holidays_unpaid'] = $unpaidHoliday > 0 ? 'work_calendar_added_to_10275' : 'none';
+        }
         if ($importSource) {
             /*
              * Hromadné schválení dávky nepotvrzuje nikdo po jednom poli; hodnoty
@@ -1590,9 +1639,14 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * Dovolená svátek nečerpá (§ 219 odst. 1 ZP) a u placené překážky se mzda
      * za svátek nekrátí, takže svátek v nich do 10275/10276 patří.
      *
+     * Svátek uvnitř nepřítomnosti, kvůli které se mzda za svátek krátí, vrací
+     * zvlášť jako druhou hodnotu: je neodpracovaná hodina (10275), ale bez náhrady
+     * (10276 ne), viz UNPAID_HOLIDAY_FIELDS.
+     *
      * @param list<array<string,mixed>> $calendars
      * @param list<array<string,mixed>> $entries
      * @param list<array<string,mixed>> $absences
+     * @return array{0:int,1:int} svátky s náhradou nebo bez krácení, svátky bez mzdy
      */
     private function holidayMinutes(
         array $calendars,
@@ -1601,9 +1655,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         array $entries,
         array $absences,
         string $periodStart,
-    ): int {
+    ): array {
         if ($from === null || $to === null) {
-            return 0;
+            return [0, 0];
         }
         $publicHolidays = [];
         foreach ($this->fund->month(substr($periodStart, 0, 7), [])['days'] as $day) {
@@ -1621,6 +1675,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $workedDates[$start->format('Y-m-d')] = true;
         }
         $minutes = 0;
+        $unpaid = 0;
         for ($date = $from; $date <= $to; $date = $date->modify('+1 day')) {
             $iso = $date->format('Y-m-d');
             if (isset($workedDates[$iso])) {
@@ -1646,23 +1701,30 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             if (!$isHoliday) {
                 continue;
             }
+            $weekday = $date->format('N');
+            $planned = (int) ($matching[0]['week_pattern'][$weekday]
+                ?? $matching[0]['week_pattern'][(int) $weekday]
+                ?? 0);
             foreach ($absences as $absence) {
                 $type = (string) ($absence['absence_type'] ?? '');
-                if ((in_array($type, ['dpn', 'quarantine'], true)
-                        || PayrollWageReplacementTitle::holidayCutsMonthlyWage($type))
-                    && (string) $absence['date_from'] <= $iso
-                    && (string) $absence['date_to'] >= $iso
-                ) {
+                if ((string) $absence['date_from'] > $iso || (string) $absence['date_to'] < $iso) {
+                    continue;
+                }
+                if (in_array($type, ['dpn', 'quarantine'], true)) {
+                    // Svátek uvnitř nemoci nese hodinový blok nemoci.
+                    continue 2;
+                }
+                if (PayrollWageReplacementTitle::holidayCutsMonthlyWage($type)) {
+                    // Mzda za svátek se neposkytuje: neodpracovaná hodina bez náhrady
+                    // (10275 ano, 10276 ne).
+                    $unpaid += $planned;
                     continue 2;
                 }
             }
-            $weekday = $date->format('N');
-            $minutes += (int) ($matching[0]['week_pattern'][$weekday]
-                ?? $matching[0]['week_pattern'][(int) $weekday]
-                ?? 0);
+            $minutes += $planned;
         }
 
-        return $minutes;
+        return [$minutes, $unpaid];
     }
 
     private static function minutesToMillihours(int $minutes): ?int

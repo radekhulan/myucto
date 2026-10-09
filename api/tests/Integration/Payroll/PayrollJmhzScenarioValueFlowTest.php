@@ -187,9 +187,9 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
      * nepřítomností bez náhrady (10473 = 31) a vyloučenými dny § 18 odst. 7,
      * nic se neodpracovalo a hodiny s náhradou 10276 nejsou.
      *
-     * Úhrn 10275 tu záměrně netestujeme: svátek uvnitř nepřítomnosti, za kterou
-     * se mzda krátí, v něm chybí (176 h místo 184 h, Pokyny MH k 10275),
-     * viz řádek JMHZ-SV-10275-05 a defekt G3-2.
+     * Úhrn 10275 nese i svátek uvnitř rodičovské (Pokyny MH k 10275), takže
+     * 10268 + 10275 = 10260 = 184 h; dřív v něm chyběl (176 h, defekt G3-2,
+     * řádek JMHZ-SV-10275-05).
      */
     public function testParentalLeaveForWholeMonthIsExcusedAbsenceWithoutPaidHours(): void
     {
@@ -208,6 +208,7 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
         );
         self::assertStringNotContainsString('<form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertMatchesRegularExpression('#<form:hodinyNeodpracCelkem>(<form:pocet>)?184\.000<#', $xml);
     }
 
     /**

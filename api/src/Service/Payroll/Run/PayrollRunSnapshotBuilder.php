@@ -2145,6 +2145,16 @@ final class PayrollRunSnapshotBuilder
                         PayrollJmhzWorkMonthSummaryBuilder::holidayFields(),
                     );
                 }
+                if (in_array(
+                    $derivationVersion,
+                    PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_UNPAID_HOLIDAYS,
+                    true,
+                )) {
+                    $conditionalFields = array_merge(
+                        $conditionalFields,
+                        PayrollJmhzWorkMonthSummaryBuilder::unpaidHolidayFields(),
+                    );
+                }
                 foreach ($conditionalFields as $field) {
                     $values[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }

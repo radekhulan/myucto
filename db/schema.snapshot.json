@@ -964,7 +964,9 @@
         "1980_payroll_absence_invalid_termination.sql",
         "1981_client_email_subject_attachment_name.sql",
         "1982_submission_inbox_categories.sql",
-        "1983_payroll_component_meal_allowance_taxable_mapping.sql"
+        "1983_payroll_component_meal_allowance_taxable_mapping.sql",
+        "1984_payroll_takeover_invariant_checks.sql",
+        "1985_payroll_jmhz_unpaid_holidays.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -12479,6 +12481,7 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "evidence_days": "tinyint(3) unsigned NOT NULL",
                 "holiday_millihours": "int(10) unsigned NULL DEFAULT NULL",
+                "holiday_unpaid_millihours": "int(10) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "maternity_millihours": "int(10) unsigned NULL DEFAULT NULL",
                 "overtime_millihours": "int(10) unsigned NULL DEFAULT NULL",
@@ -12523,14 +12526,14 @@
                 "fk_payroll_jmhz_work_month_time_month": "(supplier_id, time_month_id) -> payroll_time_months (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_payroll_jmhz_work_month_absence_evidence": "`derivation_version` not in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null or `derivation_version` in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and (`unworked_hours_occurred` = 1 or `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null) and (`maternity_millihours` is null or `maternity_millihours` <= 99999999) and (`paternity_millihours` is null or `paternity_millihours` <= 99999999) and (`parental_millihours` is null or `parental_millihours` <= 99999999) and (`unpaid_leave_millihours` is null or `unpaid_leave_millihours` <= 99999999) and (`unexcused_millihours` is null or `unexcused_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_absence_evidence": "`derivation_version` not in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null or `derivation_version` in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and (`unworked_hours_occurred` = 1 or `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null) and (`maternity_millihours` is null or `maternity_millihours` <= 99999999) and (`paternity_millihours` is null or `paternity_millihours` <= 99999999) and (`parental_millihours` is null or `parental_millihours` <= 99999999) and (`unpaid_leave_millihours` is null or `unpaid_leave_millihours` <= 99999999) and (`unexcused_millihours` is null or `unexcused_millihours` <= 99999999)",
                 "chk_payroll_jmhz_work_month_agreed_fund": "`agreed_fund_millihours` <= 9999999",
-                "chk_payroll_jmhz_work_month_compensatory_time_off": "`derivation_version` not in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and `compensatory_time_off_millihours` is null or `derivation_version` in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and (`unworked_hours_occurred` = 1 or `compensatory_time_off_millihours` is null) and (`compensatory_time_off_millihours` is null or `compensatory_time_off_millihours` <= 99999999)",
-                "chk_payroll_jmhz_work_month_conditional_confirmation": "`derivation_version` = 'jmhz-work-month-core.v1' and `conditional_blocks_confirmed` is null and `unworked_hours_occurred` is null and `work_obstacles_occurred` is null and `unworked_total_millihours` is null and `unworked_paid_millihours` is null and `dpn_without_employer_compensation_millihours` is null and `dpn_with_employer_compensation_millihours` is null and `vacation_millihours` is null and `care_millihours` is null and `employee_obstacle_paid_millihours` is null and `employer_obstacle_millihours` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and `conditional_blocks_confirmed` = 1 and `unworked_hours_occurred` is not null and `unworked_hours_occurred` in (0,1) and `work_obstacles_occurred` is not null and `work_obstacles_occurred` in (0,1)",
+                "chk_payroll_jmhz_work_month_compensatory_time_off": "`derivation_version` not in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `compensatory_time_off_millihours` is null or `derivation_version` in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and (`unworked_hours_occurred` = 1 or `compensatory_time_off_millihours` is null) and (`compensatory_time_off_millihours` is null or `compensatory_time_off_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_conditional_confirmation": "`derivation_version` = 'jmhz-work-month-core.v1' and `conditional_blocks_confirmed` is null and `unworked_hours_occurred` is null and `work_obstacles_occurred` is null and `unworked_total_millihours` is null and `unworked_paid_millihours` is null and `dpn_without_employer_compensation_millihours` is null and `dpn_with_employer_compensation_millihours` is null and `vacation_millihours` is null and `care_millihours` is null and `employee_obstacle_paid_millihours` is null and `employer_obstacle_millihours` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `conditional_blocks_confirmed` = 1 and `unworked_hours_occurred` is not null and `unworked_hours_occurred` in (0,1) and `work_obstacles_occurred` is not null and `work_obstacles_occurred` in (0,1)",
                 "chk_payroll_jmhz_work_month_conditional_ranges": "(`unworked_total_millihours` is null or `unworked_total_millihours` <= 99999999) and (`unworked_paid_millihours` is null or `unworked_paid_millihours` <= 99999999) and (`dpn_without_employer_compensation_millihours` is null or `dpn_without_employer_compensation_millihours` <= 99999999) and (`dpn_with_employer_compensation_millihours` is null or `dpn_with_employer_compensation_millihours` <= 99999999) and (`vacation_millihours` is null or `vacation_millihours` <= 99999999) and (`care_millihours` is null or `care_millihours` <= 99999999) and (`unworked_paid_millihours` is null or `vacation_millihours` is null or `unworked_paid_millihours` >= `vacation_millihours`) and (`employee_obstacle_paid_millihours` is null or `employee_obstacle_paid_millihours` <= `agreed_fund_millihours`) and (`employer_obstacle_millihours` is null or `employer_obstacle_millihours` <= `agreed_fund_millihours`)",
-                "chk_payroll_jmhz_work_month_control_binding": "`derivation_version` = 'jmhz-work-month-core.v1' and `control_catalog_key` is null and `control_manifest_sha256` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and `control_catalog_key` is not null and char_length(`control_catalog_key`) > 0 and `control_manifest_sha256` is not null and `control_manifest_sha256` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_jmhz_work_month_control_binding": "`derivation_version` = 'jmhz-work-month-core.v1' and `control_catalog_key` is null and `control_manifest_sha256` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `control_catalog_key` is not null and char_length(`control_catalog_key`) > 0 and `control_manifest_sha256` is not null and `control_manifest_sha256` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_jmhz_work_month_evidence_days": "`evidence_days` <= dayofmonth(last_day(`period_start`))",
-                "chk_payroll_jmhz_work_month_holidays": "`derivation_version` not in ('jmhz-work-month.v7','jmhz-work-month.v8') and `holiday_millihours` is null or `derivation_version` in ('jmhz-work-month.v7','jmhz-work-month.v8') and (`unworked_hours_occurred` = 1 or `holiday_millihours` is null) and (`holiday_millihours` is null or `holiday_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_holidays": "`derivation_version` not in ('jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `holiday_millihours` is null or `derivation_version` in ('jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and (`unworked_hours_occurred` = 1 or `holiday_millihours` is null) and (`holiday_millihours` is null or `holiday_millihours` <= 99999999)",
                 "chk_payroll_jmhz_work_month_obstacle_block": "`derivation_version` = 'jmhz-work-month-core.v1' or `work_obstacles_occurred` = 0 and `employee_obstacle_paid_millihours` is null and `employer_obstacle_millihours` is null or `work_obstacles_occurred` = 1 and `unworked_hours_occurred` = 1 and (`employee_obstacle_paid_millihours` is not null or `employer_obstacle_millihours` is not null)",
                 "chk_payroll_jmhz_work_month_period": "dayofmonth(`period_start`) = 1",
                 "chk_payroll_jmhz_work_month_provenance_json": "json_valid(`provenance_json`)",
@@ -12540,10 +12543,11 @@
                 "chk_payroll_jmhz_work_month_spec_hash": "`spec_manifest_sha256` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_jmhz_work_month_standard_fund": "`standard_fund_millihours` <= 9999999",
                 "chk_payroll_jmhz_work_month_summary_hash": "`summary_sha256` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_jmhz_work_month_unpaid_holidays": "`derivation_version` <> 'jmhz-work-month.v9' and `holiday_unpaid_millihours` is null or `derivation_version` = 'jmhz-work-month.v9' and (`unworked_hours_occurred` = 1 or `holiday_unpaid_millihours` is null) and (`holiday_unpaid_millihours` is null or `holiday_unpaid_millihours` <= 99999999)",
                 "chk_payroll_jmhz_work_month_unworked_block": "`derivation_version` = 'jmhz-work-month-core.v1' or `unworked_hours_occurred` = 0 and `unworked_total_millihours` is null and `unworked_paid_millihours` is null and `dpn_without_employer_compensation_millihours` is null and `dpn_with_employer_compensation_millihours` is null and `vacation_millihours` is null and `care_millihours` is null or `unworked_hours_occurred` = 1 and `unworked_total_millihours` is not null and `unworked_total_millihours` > 0",
                 "chk_payroll_jmhz_work_month_weekly_work": "`weekly_work_centihours` <= 9999999",
                 "chk_payroll_jmhz_work_month_worked": "`worked_millihours` <= 99999999",
-                "chk_payroll_jmhz_work_month_worked_breakdown": "`derivation_version` not in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8') and `worked_days` is null and `overtime_millihours` is null or `derivation_version` in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v7') and `worked_days` is not null and `worked_days` <= 31 and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`) or `derivation_version` in ('jmhz-work-month.v6','jmhz-work-month.v8') and (`worked_days` is null or `worked_days` <= 31) and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`)"
+                "chk_payroll_jmhz_work_month_worked_breakdown": "`derivation_version` not in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `worked_days` is null and `overtime_millihours` is null or `derivation_version` in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v7','jmhz-work-month.v9') and `worked_days` is not null and `worked_days` <= 31 and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`) or `derivation_version` in ('jmhz-work-month.v6','jmhz-work-month.v8') and (`worked_days` is null or `worked_days` <= 31) and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`)"
             }
         },
         "payroll_leave_entitlement_snapshots": {
@@ -16897,6 +16901,29 @@
             "checks": {
                 "chk_payroll_surcharge_claim_period": "dayofmonth(`period_start`) = 1",
                 "chk_payroll_surcharge_claim_row_version": "`row_version` > 0"
+            }
+        },
+        "payroll_takeover_invariant_checks": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "checked_at": "datetime NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "result_json": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "source": "varchar(32) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "violation_count": "int(10) unsigned NOT NULL DEFAULT 0"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, source)"
+            },
+            "foreign_keys": {
+                "fk_ptic_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_ptic_result_json": "json_valid(`result_json`)"
             }
         },
         "payroll_takeover_payment_evidence": {

@@ -1488,6 +1488,11 @@ final class JmhzEldpEvidenceBuilder
                 self::carriesHolidays($summaryVersion)
                     ? PayrollJmhzWorkMonthSummaryBuilder::holidayFields()
                     : [],
+                // Svátek uvnitř nepřítomnosti bez mzdy: jen do úhrnu 10275,
+                // do 10276 ne (není v PAID_UNWORKED_FIELDS). Nese ho až v9.
+                in_array($summaryVersion, PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_UNPAID_HOLIDAYS, true)
+                    ? PayrollJmhzWorkMonthSummaryBuilder::unpaidHolidayFields()
+                    : [],
             );
         }
 
@@ -1920,6 +1925,13 @@ final class JmhzEldpEvidenceBuilder
         }
         if (self::carriesHolidays($summaryVersion)) {
             foreach (PayrollJmhzWorkMonthSummaryBuilder::holidayFields() as $field) {
+                $filled[$field] = true;
+            }
+        }
+        // Svátek uvnitř nepřítomnosti bez mzdy dokládá sama ta nepřítomnost
+        // (souhrn ho odvozuje jen uvnitř ní).
+        if ($absences !== [] && in_array($summaryVersion, PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_UNPAID_HOLIDAYS, true)) {
+            foreach (PayrollJmhzWorkMonthSummaryBuilder::unpaidHolidayFields() as $field) {
                 $filled[$field] = true;
             }
         }
