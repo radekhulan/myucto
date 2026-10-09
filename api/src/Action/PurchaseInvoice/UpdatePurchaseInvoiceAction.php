@@ -28,6 +28,7 @@ use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Support\ExchangeRateDate;
@@ -312,6 +313,20 @@ final class UpdatePurchaseInvoiceAction
             // Optimistický zámek (L1): pro klienta UPDATE podmíněný booked_at IS NULL —
             // účetní mohla doklad zaúčtovat mezi guard-checkem a zápisem.
             $requireUnbooked = RequestAuthorization::isClientType($request);
+            // Vědomě potvrzená shoda čísla (issue #140): pořadí se dosadí samostatně,
+            // updateDraft() sloupec nezná a bez potvrzení se nic nemění.
+            if (VendorNumberDuplicates::allowed($body)) {
+                $seq = VendorNumberDuplicates::nextSeq(
+                    $pdo,
+                    $supplierId,
+                    (int) $vendor['id'],
+                    (string) ($body['vendor_invoice_number'] ?? $existing['vendor_invoice_number'] ?? ''),
+                    (string) ($body['issue_date'] ?? $existing['issue_date'] ?? ''),
+                    $id,
+                );
+                $pdo->prepare('UPDATE purchase_invoices SET vendor_number_seq = ? WHERE id = ? AND supplier_id = ?')
+                    ->execute([$seq, $id, $supplierId]);
+            }
             // Viz CreatePurchaseInvoiceAction — kolize na těchhle dvou indexech je 409.
             $updated = DbErrorLogger::expectingDuplicates(
                 ['uq_pi_vendor_invoice', 'uq_pi_supplier_varsymbol'],
@@ -379,7 +394,7 @@ final class UpdatePurchaseInvoiceAction
             }
             // Přesný duplikát PF: stejný dodavatel + číslo dokladu + datum (uq_pi_vendor_invoice) → 409.
             if ($dupMsg = self::vendorInvoiceDuplicateMessage($e, $body['vendor_invoice_number'] ?? null)) {
-                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409);
+                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409, ['can_confirm' => true]);
             }
             throw $e;
         } catch (\Throwable $e) {

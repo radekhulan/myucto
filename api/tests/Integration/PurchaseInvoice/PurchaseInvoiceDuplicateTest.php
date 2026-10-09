@@ -113,6 +113,72 @@ final class PurchaseInvoiceDuplicateTest extends TestCase
             'chybový kód identifikuje duplicitní přijatou fakturu');
     }
 
+    public function testConfirmedDuplicateNumberIsStoredAsNextSequence(): void
+    {
+        $body = [
+            'vendor_id'             => $this->vendorId,
+            'vendor_invoice_number' => 'KAL-2098-777',
+            'document_kind'         => 'invoice',
+            'issue_date'            => '2098-01-01',
+            'tax_date'              => '2098-01-15',
+            'due_date'              => '2098-01-15',
+            'currency_id'           => $this->currencyId,
+            'items'                 => [],
+        ];
+        self::assertSame(201, $this->create($body)->getStatusCode());
+
+        $blocked = $this->create($body);
+        self::assertSame(409, $blocked->getStatusCode(), 'bez potvrzení zůstává duplicita zablokovaná');
+        $blocked->getBody()->rewind();
+        $payload = json_decode((string) $blocked->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertTrue($payload['error']['can_confirm'] ?? false, 'odpověď nabízí vědomé potvrzení');
+
+        $second = $this->create($body + ['allow_duplicate_number' => true]);
+        self::assertSame(201, $second->getStatusCode(), (string) $second->getBody());
+        $third = $this->create($body + ['allow_duplicate_number' => true]);
+        self::assertSame(201, $third->getStatusCode(), (string) $third->getBody());
+
+        $seqs = $this->db->pdo()->query(
+            'SELECT vendor_number_seq FROM purchase_invoices WHERE vendor_id = ' . $this->vendorId
+            . ' ORDER BY vendor_number_seq'
+        )->fetchAll(PDO::FETCH_COLUMN);
+        self::assertSame([0, 1, 2], array_map('intval', $seqs));
+    }
+
+    public function testConfirmedDuplicateOnUpdate(): void
+    {
+        $pdo = $this->db->pdo();
+        $base = [
+            'vendor_id'     => $this->vendorId,
+            'document_kind' => 'invoice',
+            'issue_date'    => '2098-02-01',
+            'tax_date'      => '2098-02-01',
+            'due_date'      => '2098-02-15',
+            'currency_id'   => $this->currencyId,
+            'items'         => [],
+        ];
+        self::assertSame(201, $this->create($base + ['vendor_invoice_number' => 'UPD-A'])->getStatusCode());
+        self::assertSame(201, $this->create($base + ['vendor_invoice_number' => 'UPD-B'])->getStatusCode());
+        $id = (int) $pdo->query("SELECT id FROM purchase_invoices WHERE vendor_id = {$this->vendorId} AND vendor_invoice_number = 'UPD-B'")->fetchColumn();
+
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction::class);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('PUT', '/api/purchase-invoices/' . $id)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+
+        $blocked = $action($request->withParsedBody($base + ['vendor_invoice_number' => 'UPD-A']), new Psr7Response(), ['id' => $id]);
+        self::assertSame(409, $blocked->getStatusCode());
+
+        $ok = $action(
+            $request->withParsedBody($base + ['vendor_invoice_number' => 'UPD-A', 'allow_duplicate_number' => true]),
+            new Psr7Response(),
+            ['id' => $id],
+        );
+        self::assertSame(200, $ok->getStatusCode(), (string) $ok->getBody());
+        self::assertSame(1, (int) $pdo->query('SELECT vendor_number_seq FROM purchase_invoices WHERE id = ' . $id)->fetchColumn());
+    }
+
     public function testSuccessfulSavePromotesCustomerAndFailedDuplicateDoesNot(): void
     {
         $pdo = $this->db->pdo();

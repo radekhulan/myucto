@@ -967,7 +967,8 @@
         "1983_payroll_component_meal_allowance_taxable_mapping.sql",
         "1984_payroll_takeover_invariant_checks.sql",
         "1985_payroll_jmhz_unpaid_holidays.sql",
-        "1986_import_jobs_myucto.sql"
+        "1986_import_jobs_myucto.sql",
+        "1987_purchase_invoice_vendor_number_seq.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -18355,6 +18356,7 @@
                 "vendor_id": "bigint(20) unsigned NOT NULL",
                 "vendor_invoice_number": "varchar(50) NOT NULL",
                 "vendor_is_vat_payer": "tinyint(1) NULL DEFAULT NULL",
+                "vendor_number_seq": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "vendor_snapshot": "longtext NOT NULL COLLATE utf8mb4_bin"
             },
             "indexes": {
@@ -18384,7 +18386,7 @@
                 "idx_pi_vendor": "BTREE (vendor_id, issue_date)",
                 "uq_pi_advance_link": "UNIQUE BTREE (advance_purchase_invoice_id)",
                 "uq_pi_supplier_varsymbol": "UNIQUE BTREE (supplier_id, varsymbol)",
-                "uq_pi_vendor_invoice": "UNIQUE BTREE (supplier_id, vendor_id, vendor_invoice_number, issue_date)",
+                "uq_pi_vendor_invoice": "UNIQUE BTREE (supplier_id, vendor_id, vendor_invoice_number, issue_date, vendor_number_seq)",
                 "uq_purchase_invoices_fakturoid": "UNIQUE BTREE (supplier_id, fakturoid_id)",
                 "uq_purchase_invoices_idoklad": "UNIQUE BTREE (supplier_id, idoklad_id)",
                 "uq_purchase_invoices_supplier_id": "UNIQUE BTREE (supplier_id, id)"

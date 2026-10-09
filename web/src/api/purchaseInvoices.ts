@@ -618,6 +618,8 @@ export interface PurchaseMonthGroup {
 export interface PurchaseInvoicePayload {
   /** Staging originál, který účetní tímto ručním zápisem zpracovává. */
   submission_id?: number
+  /** Vědomě potvrzená shoda čísla dokladu u dodavatele (platby platebního kalendáře). */
+  allow_duplicate_number?: boolean
   vendor_id: number
   vendor_invoice_number: string
   document_kind?: PurchaseDocumentKind

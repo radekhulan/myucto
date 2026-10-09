@@ -1286,8 +1286,9 @@ final class PurchaseInvoiceRepository
              payment_account_number, payment_bank_code, payment_iban, payment_bic,
              payment_variable_symbol, payment_account_source, payment_account_checked_at,
              payment_method, payment_method_source,
-             status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+             status, vat_classification_code, vat_deduction, vat_deduction_percent, tax_deductible, is_fixed_asset, expense_category_id, created_by,
+             vendor_number_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -1334,6 +1335,7 @@ final class PurchaseInvoiceRepository
             !empty($data['is_fixed_asset']) ? 1 : 0,
             $expenseCategoryId,
             $userId,
+            max(0, (int) ($data['vendor_number_seq'] ?? 0)),
         ]);
 
         $newId = (int) $pdo->lastInsertId();

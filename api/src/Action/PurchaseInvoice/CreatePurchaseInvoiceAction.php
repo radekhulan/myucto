@@ -25,6 +25,7 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
+use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Support\AdvanceTaxDocumentText;
@@ -193,6 +194,17 @@ final class CreatePurchaseInvoiceAction
                     409,
                 );
             }
+            if (VendorNumberDuplicates::allowed($body) && !empty($body['issue_date'])) {
+                $body['vendor_number_seq'] = VendorNumberDuplicates::nextSeq(
+                    $pdo,
+                    $supplierId,
+                    (int) $vendor['id'],
+                    (string) ($body['vendor_invoice_number'] ?? ''),
+                    (string) $body['issue_date'],
+                );
+            } else {
+                unset($body['vendor_number_seq']);
+            }
             // Obě kolize níž (interní číslo, doklad dodavatele) končí jako 409 —
             // uživatelská situace, ne chyba serveru. V logu proto nemají svítit
             // jako ERROR; jiný index ani cizí klíč se tím neztiší.
@@ -254,7 +266,7 @@ final class CreatePurchaseInvoiceAction
             }
             // Přesný duplikát PF: stejný dodavatel + číslo dokladu + datum (uq_pi_vendor_invoice) → 409.
             if ($dupMsg = self::vendorInvoiceDuplicateMessage($e, $body['vendor_invoice_number'] ?? null)) {
-                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409);
+                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409, ['can_confirm' => true]);
             }
             throw $e;
         } catch (\Throwable $e) {

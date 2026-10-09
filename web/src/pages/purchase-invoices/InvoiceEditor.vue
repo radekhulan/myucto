@@ -1344,6 +1344,9 @@ async function onReplacePdf() {
   dropzoneVisible.value = true
 }
 
+// Vědomě potvrzená shoda čísla dokladu u dodavatele (např. platby platebního kalendáře).
+let allowDuplicateNumber = false
+
 async function submit() {
   if (blockDemoMutation()) return
   if (submitting.value) return
@@ -1364,6 +1367,7 @@ async function submit() {
   try {
     const payload: PurchaseInvoicePayload = {
       ...(submission.value ? { submission_id: submission.value.id } : {}),
+      ...(allowDuplicateNumber ? { allow_duplicate_number: true } : {}),
       vendor_id: form.value.vendor_id!,
       vendor_invoice_number: form.value.vendor_invoice_number,
       varsymbol: form.value.varsymbol || null,
@@ -1488,6 +1492,17 @@ async function submit() {
     router.push(`/purchase-invoices/${inv.id}`)
   } catch (e: any) {
     const data = e?.response?.data?.error
+    if (data?.code === 'vendor_invoice_duplicate' && data?.can_confirm && !allowDuplicateNumber
+      && window.confirm(t('purchase_invoice.duplicate_number_confirm', { message: apiErrorMessage(e) }))) {
+      allowDuplicateNumber = true
+      submitting.value = false
+      try {
+        await submit()
+      } finally {
+        allowDuplicateNumber = false
+      }
+      return
+    }
     if (data?.fields) {
       fieldErrors.value = data.fields
     }

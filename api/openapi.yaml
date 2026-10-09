@@ -36972,6 +36972,13 @@ components:
       properties:
         vendor_id: { type: integer }
         vendor_invoice_number: { type: string, maxLength: 50 }
+        allow_duplicate_number:
+          type: boolean
+          default: false
+          description: |
+            Vědomé potvrzení, že doklad se stejným dodavatelem, číslem a datem vystavení už existuje
+            (typicky další platba platebního kalendáře). Bez něj vrátí shoda 409
+            `vendor_invoice_duplicate` s `can_confirm: true`.
         varsymbol: { type: [string, "null"], maxLength: 20 }
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document], default: invoice }
         issue_date: { type: string, format: date }

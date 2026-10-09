@@ -18440,6 +18440,7 @@
   },
   "purchase_invoice": {
     "title": "Přijaté faktury",
+    "duplicate_number_confirm": "{message}\n\nPokud jde o další platbu téhož dokladu (například platebního kalendáře), můžete doklad uložit i se stejným číslem. Uložit přesto?",
     "list_status": "Stav",
     "subtitle": "Doklady od dodavatelů - náklady firmy.",
     "currency_payment_section": "Měna a úhrada",

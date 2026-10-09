@@ -211,6 +211,7 @@ Tento postup je pro správce. Dodavatelé vám posílají PDF e-mailem nebo mát
 | Doklad nejde zaúčtovat, přechod na **Zaúčtovaná** je zablokovaný | Chybí DUZP | Doplňte DUZP v editoru a zkuste to znovu |
 | Doklad s volbou **Krácený koeficientem (§76)** nejde zaúčtovat ani zahrnout do přiznání | Není nastavený zálohový koeficient pro daný rok | Požádejte administrátora nebo účetní o nastavení koeficientu, viz [Výkazy DPH](41_Vykazy_DPH.md#41138-kraceny-odpocet-76-koeficient) |
 | Při vytěžení se objeví hláška s číslem existující faktury, nová faktura nevznikla | Faktura od stejného dodavatele se stejným číslem a datem už existuje | Ověřte existující fakturu, nebo doklad ve frontě odmítněte |
+| Při uložení se aplikace ptá, zda doklad uložit i se stejným číslem | Od dodavatele už máte doklad se stejným číslem a datem vystavení | Jde-li o další platbu téhož dokladu, například platebního kalendáře energií, potvrďte uložení. Jinak číslo opravte, ochrana proti omylu tím zůstává |
 | Upozornění **Doklad nese DPH, ale nemá klasifikaci** | Sazba, kterou český číselník nezná (například německých 19 %), nebo dodavatel s neurčenou zemí | Zkontrolujte sazby na řádcích a vyberte klasifikaci DPH ručně |
 | Po uložení varování, že se kurz nepřenačetl | Kurz zadal člověk, přišel z importu, nebo je ČNB nedostupná | Zkontrolujte kurz a případně ho znovu načtěte tlačítkem **Načíst z ČNB** |
 | Upozornění na kombinaci reverse charge a omezeného nároku při zaúčtování | Taková kombinace se automaticky nezaúčtuje | Zaúčtujte doklad ručním zápisem v deníku |
