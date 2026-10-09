@@ -18483,6 +18483,19 @@
   },
   "purchase_invoice": {
     "title": "Přijaté faktury",
+    "payment_calendar": {
+      "action": "Platební kalendář",
+      "title": "Platební kalendář - další platby",
+      "help": "Tento doklad je první platbou kalendáře. Pro každou další platbu vznikne samostatný doklad se stejným dodavatelem a číslem, splatností a DUZP podle data platby a položkami přepočtenými na částku platby. DPH i výdaj se tak uplatní u každé platby zvlášť.",
+      "count": "Počet dalších plateb",
+      "generate": "Předvyplnit měsíčně",
+      "due_date": "Splatnost",
+      "amount": "Částka s DPH",
+      "add": "Přidat platbu",
+      "total": "{count} plateb, celkem {total}",
+      "save": "Založit platby",
+      "created": "Založeno {count} plateb platebního kalendáře."
+    },
     "duplicate_number_confirm": "{message}\n\nPokud jde o další platbu téhož dokladu (například platebního kalendáře), můžete doklad uložit i se stejným číslem. Uložit přesto?",
     "list_status": "Stav",
     "subtitle": "Doklady od dodavatelů - náklady firmy.",

@@ -853,6 +853,10 @@ export const purchaseInvoicesApi = {
   create: (payload: PurchaseInvoicePayload) =>
     api.post<PurchaseInvoice>('/purchase-invoices', payload).then(r => r.data),
 
+  /** Platební kalendář (issue #140): další platby se stejným číslem dokladu podle vzoru {id}. */
+  createPaymentCalendar: (id: number, installments: Array<{ due_date: string; amount: number }>) =>
+    api.post<{ created_ids: number[] }>(`/purchase-invoices/${id}/payment-calendar`, { installments }).then(r => r.data),
+
   /**
    * Deterministický jednosouborový import z editoru nové PF. Nevstupuje do admin
    * dávkového importu ani do AI: podporuje .isdoc, .isdocx a PDF/A-3 s embedded ISDOC.

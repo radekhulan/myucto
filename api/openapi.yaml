@@ -6626,6 +6626,47 @@ paths:
       responses:
         '200': { description: OK }
 
+  /api/v1/purchase-invoices/{id}/payment-calendar:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [Purchase invoices]
+      summary: Založí další platby platebního kalendáře podle vzoru
+      description: |
+        Platební kalendář (§ 31a ZDPH) se eviduje jako řada přijatých dokladů se stejným číslem,
+        jeden na platbu: DPH i výdaj vznikají k jednotlivým platbám. `{id}` je první platba (vzor);
+        nové doklady převezmou hlavičku a položky přepočtené na částku platby, splatnost
+        a DUZP = `due_date`. Nevzniknou jako koncept, pokud vzor koncept není.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [installments]
+              properties:
+                installments:
+                  type: array
+                  maxItems: 60
+                  items:
+                    type: object
+                    required: [due_date, amount]
+                    properties:
+                      due_date: { type: string, format: date }
+                      amount: { type: number, description: Částka platby včetně DPH v měně dokladu }
+      responses:
+        '201':
+          description: Založeno
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created_ids: { type: array, items: { type: integer } }
+        '409': { description: Vzor nejde použít, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Neplatný rozpis plateb, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/purchase-invoices/{id}/credit-note-offset:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

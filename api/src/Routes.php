@@ -757,6 +757,8 @@ final class Routes
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/exchange-rate', SetPurchaseInvoiceExchangeRateAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/transition',     TransitionPurchaseInvoiceStatusAction::class);
+        // Platební kalendář (issue #140): další platby se stejným číslem dokladu podle vzoru.
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/payment-calendar', \MyInvoice\Action\PurchaseInvoice\PurchasePaymentCalendarAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'getPurchase']);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'applyPurchase']);
         $app->delete ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'revertPurchase']);

@@ -18483,6 +18483,19 @@
   },
   "purchase_invoice": {
     "title": "Received invoices",
+    "payment_calendar": {
+      "action": "Payment calendar",
+      "title": "Payment calendar - further payments",
+      "help": "This document is the first payment of the calendar. Every further payment becomes a separate document with the same vendor and number, due date and tax point date of the payment and items recalculated to the payment amount. VAT and the expense are therefore claimed for each payment separately.",
+      "count": "Number of further payments",
+      "generate": "Prefill monthly",
+      "due_date": "Due date",
+      "amount": "Amount incl. VAT",
+      "add": "Add payment",
+      "total": "{count} payments, total {total}",
+      "save": "Create payments",
+      "created": "{count} payment calendar payments created."
+    },
     "duplicate_number_confirm": "{message}\n\nIf this is another payment of the same document (for example a payment calendar), you can save it with the same number. Save anyway?",
     "list_status": "Status",
     "subtitle": "Vendor documents — company expenses.",

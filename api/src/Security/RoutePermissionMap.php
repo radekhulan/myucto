@@ -107,6 +107,7 @@ final class RoutePermissionMap
         ['*', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/transition$#', 'purchase_invoices.transition', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/credit-note-offset$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        ['POST', '#^/api/purchase-invoices/[0-9]+/payment-calendar$#', 'purchase_invoices.create', AccessLevel::WRITE],
         ['DELETE', '#^/api/purchase-invoices/[0-9]+/credit-note-offset$#', 'purchase_invoices.transition', AccessLevel::WRITE],
         // Schvalování manažerem střediska (F6). Odeslání a zrušení kola je změna stavu
         // dokladu; připomínku posílá účetní. Schránka a rozhodnutí stačí na úrovni

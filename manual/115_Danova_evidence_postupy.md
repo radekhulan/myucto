@@ -46,8 +46,10 @@ u každé platby zvlášť, proto každou platbu evidujte jako samostatný přij
 
 1. Zadejte první platbu jako přijatou fakturu: dodavatel, **číslo dokladu** z kalendáře, datum vystavení kalendáře, **splatnost**
    a **DUZP** = den splatnosti platby, částka a sazba DPH podle kalendáře.
-2. Další platby zadejte stejně, se stejným číslem dokladu. Aplikace upozorní, že doklad s tímto číslem už existuje, a zeptá
-   se, zda ho uložit přesto. Potvrďte. Ochrana proti omylu tím zůstává zachovaná.
+2. V detailu první platby klikněte na **Platební kalendář**. Zadejte počet dalších plateb, **Předvyplnit měsíčně** je
+   rozepíše od splatnosti první platby a částky i data upravíte podle kalendáře. **Založit platby** vytvoří pro každou platbu
+   samostatný doklad se stejným dodavatelem a číslem, splatností a DUZP podle data platby a položkami přepočtenými na částku.
+   Platbu jde zadat i ručně se stejným číslem dokladu: aplikace upozorní na shodu a uložení potvrdíte.
 3. Každou platbu spárujte s bankovním pohybem. Zaplatíte-li jindy než ke dni splatnosti, opravte DUZP na den úhrady.
 4. Roční vyúčtování zadejte podle dokladu včetně odečtených záloh, k úhradě zůstane nedoplatek. Přeplatek je doklad se
    zápornou částkou, vrácení spárujte jako příchozí platbu.

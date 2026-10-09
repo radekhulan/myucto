@@ -9,6 +9,7 @@ import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.v
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
+import PaymentCalendarModal from '@/components/purchase/PaymentCalendarModal.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -803,6 +804,8 @@ async function postSettlement(settlementId: number) {
   }
 }
 
+const paymentCalendarOpen = ref(false)
+
 const purchaseActions = computed<ActionItem[]>(() => {
   const inv = invoice.value
   if (!inv) return []
@@ -816,6 +819,12 @@ const purchaseActions = computed<ActionItem[]>(() => {
 
   items.push({ key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
     show: canEdit.value && w && !lockedForMe.value, to: `/purchase-invoices/${inv.id}/edit` })
+
+  // Platební kalendář (issue #140): další platby se stejným číslem dokladu podle tohoto vzoru.
+  items.push({ key: 'payment-calendar', label: t('purchase_invoice.payment_calendar.action'), icon: 'cycle', tier: 'secondary', variant: 'primary',
+    show: ['invoice', 'receipt', 'advance'].includes(inv.document_kind) && inv.status !== 'cancelled'
+      && Number(inv.total_with_vat) > 0 && auth.canWrite('purchase_invoices.create'),
+    disabled: acting.value, run: () => { paymentCalendarOpen.value = true } })
 
   if (canTransition) {
     for (const target of allowedTransitions.value) {
@@ -1161,6 +1170,9 @@ const purchaseActions = computed<ActionItem[]>(() => {
         v-if="invoice.status !== 'draft' && ((invoice.document_kind === 'credit_note' && invoice.parent_purchase_invoice_id) || (invoice.corrected_by?.length ?? 0) > 0)"
         doc-type="purchase_invoice" :doc-id="invoice.id" :is-credit-note="invoice.document_kind === 'credit_note'"
         :currency="invoice.currency" :can-write="auth.canWrite('purchase_invoices.transition')" @changed="load" />
+
+      <PaymentCalendarModal v-if="paymentCalendarOpen" :invoice-id="invoice.id" :due-date="invoice.due_date"
+        :amount="Number(invoice.total_with_vat)" :currency="invoice.currency" @close="paymentCalendarOpen = false" />
 
       <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
       <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"
