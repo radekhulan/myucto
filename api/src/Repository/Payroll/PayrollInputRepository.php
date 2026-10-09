@@ -2246,7 +2246,39 @@ final class PayrollInputRepository
         return PayrollTimeValue::int(
             $stmt->fetchColumn(),
             'annual_basket_total',
+        ) + $this->takenOverBasketTotal($supplierId, $employeeId, $basket, $year);
+    }
+
+    /**
+     * Čerpání koše v převzatých měsících roku (`payroll_migration_reference_totals`): rok
+     * přechodu má část měsíců spočítanou předchozím programem a limit platí za celý rok.
+     * Převzaté měsíce leží před začátkem vedení mezd, takže se s akumulátory vstupů
+     * nepřekrývají. Měsíc vztahu převzatý z víc zdrojů (převod i import hlášení) se počítá
+     * jednou. Zatím jen koš příspěvků na produkty spoření na stáří; jiný koš zdroje nenesou.
+     */
+    private function takenOverBasketTotal(
+        int $supplierId,
+        int $employeeId,
+        PayrollBenefitExemptionBasket $basket,
+        int $year,
+    ): int {
+        if ($basket !== PayrollBenefitExemptionBasket::OldAgeSavings) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(contribution), 0)
+               FROM (SELECT MAX(old_age_savings_contribution_minor) AS contribution
+                       FROM payroll_migration_reference_totals
+                      WHERE supplier_id = ?
+                        AND employee_id = ?
+                        AND period_start >= ?
+                        AND period_start < ?
+                        AND old_age_savings_contribution_minor IS NOT NULL
+                      GROUP BY period_start, COALESCE(employment_id, external_relationship_ref)) taken_over'
         );
+        $stmt->execute([$supplierId, $employeeId, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
+
+        return PayrollTimeValue::int($stmt->fetchColumn(), 'taken_over_basket_total');
     }
 
     /**

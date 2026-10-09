@@ -1169,7 +1169,14 @@ final class PohodaPayrollImporter
         $matched = $this->people->matchedRelations();
         $totals = [];
         $skipped = 0;
+        // Doplňkové údaje mzdy (`MZ2`, vazba `RefAg` = `MZ.ID`): příspěvky zaměstnavatele na
+        // penzijní produkty pro roční koš osvobození ({@see PayrollMigrationTakeoverFacts::fromPohodaMz()}).
+        $extra = [];
+        foreach (PohodaXml::records($file, 'MZ2') as $row) {
+            $extra[PohodaXml::text($row, 'RefAg')] = array_intersect_key($row, ['KcPDP' => true, 'KcDIP' => true]);
+        }
         foreach (PohodaXml::records($file, 'MZ') as $mz) {
+            $mz += $extra[PohodaXml::text($mz, 'ID')] ?? [];
             if ((int) PohodaXml::text($mz, 'Rok') !== $year) {
                 continue;
             }

@@ -69,6 +69,11 @@ final readonly class PayrollMigrationTakeoverFacts
         public ?int $sicknessExcludedDays = null,
         /** Příjem včetně nepojištěné činnosti (JMHZ 10476) v haléřích; `null` = zdroj ho nevydal. */
         public ?int $uninsuredIncomeMinor = null,
+        /**
+         * Příspěvek zaměstnavatele na produkty spoření na stáří (JMHZ 10292 až 10296) v haléřích:
+         * čerpání ročního koše § 6 odst. 9 písm. p) ZDP v převzatém měsíci; `null` = zdroj ho nevydal.
+         */
+        public ?int $oldAgeSavingsContributionMinor = null,
     ) {
         foreach ([
             'relationship_start_date' => $relationshipStartDate,
@@ -105,6 +110,9 @@ final readonly class PayrollMigrationTakeoverFacts
         }
         if ($uninsuredIncomeMinor !== null && $uninsuredIncomeMinor < 0) {
             throw new \InvalidArgumentException('Příjem z nepojištěné činnosti nesmí být záporný.');
+        }
+        if ($oldAgeSavingsContributionMinor !== null && $oldAgeSavingsContributionMinor < 0) {
+            throw new \InvalidArgumentException('Příspěvek na produkty spoření na stáří nesmí být záporný.');
         }
         if ($workedDaysHundredths < 0 || $workedMinutes < 0) {
             throw new \InvalidArgumentException('Odpracovaná doba nesmí být záporná.');
@@ -174,7 +182,25 @@ final readonly class PayrollMigrationTakeoverFacts
             sicknessExcludedDays: $mz === [] || PohodaXml::text($mz, 'NahrDoby') === ''
                 ? null
                 : max(0, min((int) round(PohodaXml::num($mz, 'NahrDoby')), 31)),
+            oldAgeSavingsContributionMinor: self::pamicaOldAgeSavings($mz),
         );
+    }
+
+    /**
+     * Příspěvek zaměstnavatele na penzijní produkty z doplňkových údajů mzdy PAMICA
+     * (`MZ2`, volající je připojí k řádku `MZ`): `KcPDP` penzijní připojištění a doplňkové
+     * penzijní spoření, `KcDIP` dlouhodobý investiční produkt. `null`, když export `MZ2`
+     * nenese (starší verze PAMICA).
+     *
+     * @param array<string,mixed> $mz
+     */
+    private static function pamicaOldAgeSavings(array $mz): ?int
+    {
+        if (!array_key_exists('KcPDP', $mz) && !array_key_exists('KcDIP', $mz)) {
+            return null;
+        }
+
+        return max(0, (int) round((PohodaXml::num($mz, 'KcPDP') + PohodaXml::num($mz, 'KcDIP')) * 100));
     }
 
     /**
@@ -226,6 +252,7 @@ final readonly class PayrollMigrationTakeoverFacts
             'payout_date' => $this->payoutDate,
             'sickness_excluded_days' => $this->sicknessExcludedDays,
             'uninsured_income_minor' => $this->uninsuredIncomeMinor,
+            'old_age_savings_contribution_minor' => $this->oldAgeSavingsContributionMinor,
         ];
     }
 

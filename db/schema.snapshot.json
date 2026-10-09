@@ -972,7 +972,8 @@
         "1988_credit_note_offsets.sql",
         "1989_expense_rules_tax_deductible.sql",
         "1990_tax_evidence_bank_rules.sql",
-        "1991_gopay_tax_evidence_settings.sql"
+        "1991_gopay_tax_evidence_settings.sql",
+        "1992_payroll_takeover_old_age_savings.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -12696,6 +12697,7 @@
                 "insurance_days": "smallint(5) unsigned NOT NULL DEFAULT 0",
                 "net_minor": "bigint(20) NOT NULL DEFAULT 0",
                 "net_payable_minor": "bigint(20) NOT NULL DEFAULT 0",
+                "old_age_savings_contribution_minor": "bigint(20) NULL DEFAULT NULL",
                 "payout_date": "date NULL DEFAULT NULL",
                 "pension_participation": "tinyint(1) NOT NULL DEFAULT 1",
                 "period_start": "date NOT NULL",
@@ -12724,6 +12726,7 @@
                 "fk_pmrt_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
+                "chk_pmrt_old_age_savings": "`old_age_savings_contribution_minor` is null or `old_age_savings_contribution_minor` >= 0",
                 "chk_pmrt_period_first_day": "dayofmonth(`period_start`) = 1",
                 "chk_pmrt_sickness_excluded_days": "`sickness_excluded_days` is null or `sickness_excluded_days` <= 31",
                 "chk_pmrt_takeover_days": "`insurance_days` <= 31 and `excluded_days` <= 31",

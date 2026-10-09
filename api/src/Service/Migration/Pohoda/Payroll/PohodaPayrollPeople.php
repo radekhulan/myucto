@@ -136,9 +136,21 @@ final class PohodaPayrollPeople
         $leaveCards = [];
         /** @var array<string,array{requested?:bool,granted?:bool}> $partTime vztah => žádost a nárok na slevu zaměstnavatele */
         $partTime = [];
-        foreach (PohodaXml::scan($file, [...self::TABLES, 'MZ', 'Dovolena']) as $table => $mz) {
+        /** @var array<string,bool> $pensionerDiscount mzda (`MZ.ID`) => sleva pracujícího důchodce uplatněná (`MZ2`) */
+        $pensionerDiscount = [];
+        /** @var array<string,string> $payslipPerson mzda (`MZ.ID`) => osoba */
+        $payslipPerson = [];
+        foreach (PohodaXml::scan($file, [...self::TABLES, 'MZ', 'MZ2', 'Dovolena']) as $table => $mz) {
             if ($table === 'Dovolena') {
                 self::leaveCard($leaveCards, $mz, $year);
+                continue;
+            }
+            // Doplňkové údaje mzdy (`MZ2`, vazba `RefAg` = `MZ.ID`): sleva pracujícího důchodce
+            // (§ 7d zák. č. 589/1992 Sb.) tak, jak ji PAMICA v měsíci uplatnila.
+            if ($table === 'MZ2') {
+                if (array_key_exists('SocPojSlevaPracDuch', $mz)) {
+                    $pensionerDiscount[PohodaXml::text($mz, 'RefAg')] = self::bool(PohodaXml::text($mz, 'SocPojSlevaPracDuch'));
+                }
                 continue;
             }
             if ($table !== 'MZ') {
@@ -175,6 +187,7 @@ final class PohodaPayrollPeople
                 'weekly' => PohodaXml::num($mz, 'TUvazek'),
             ];
             $person = PohodaXml::text($mz, 'RefZAM');
+            $payslipPerson[PohodaXml::text($mz, 'ID')] = $person;
             // Den, kdy PAMICA mzdu opravdu vyplatila. `Datum` je den výplaty (v exportu vždy
             // 10. následujícího měsíce), `KcVyplat` odděluje mzdy, ze kterých se platilo.
             $paidOn = self::realDate(PohodaXml::date($mz, 'Datum'));
@@ -211,6 +224,17 @@ final class PohodaPayrollPeople
             if (self::bool(PohodaXml::text($mz, 'NeDopZdr'))) {
                 $healthMinimumExempt[$person][$month] = true;
             }
+        }
+        /** @var array<string,true> $discountKnown osoby, jejichž mzdy roku nesou příznak slevy důchodce v `MZ2` */
+        $discountKnown = [];
+        foreach ($pensionerDiscount as $payslipId => $claimed) {
+            $person = $payslipPerson[$payslipId] ?? null;
+            $of = $payslipOf[$payslipId] ?? null;
+            if ($person === null || $of === null || !isset($personMonths[$person][$of['month']])) {
+                continue;
+            }
+            $discountKnown[$person] = true;
+            $personMonths[$person][$of['month']]['pensioner_discount'] = $personMonths[$person][$of['month']]['pensioner_discount'] || $claimed;
         }
         $relationCount = [];
         foreach ($byId['ZAMpomer'] ?? [] as $relation) {
@@ -430,10 +454,12 @@ final class PohodaPayrollPeople
                     static fn (int $month): string => sprintf('%04d-%02d', $year, $month),
                     self::sortedKeys($healthMinimumExempt[$personId] ?? []),
                 ),
-                // Sleva pracujícího důchodce: bez podaného hlášení ji převod zná jen u osoby, která
-                // důchod nemá (neuplatňuje se). Důchodci ji doplní hlášení, jinak zůstane k ověření.
+                // Sleva pracujícího důchodce: po měsících z `MZ2` (příznak, se kterým PAMICA mzdu
+                // počítala). Starší export bez `MZ2` ji zná jen u osoby, která důchod nemá
+                // (neuplatňuje se); důchodci ji pak doplní hlášení, jinak zůstane k ověření.
                 'pensioner' => self::pensioner($person, $relation),
-                'pensioner_discounts' => self::pensioner($person, $relation) ? [] : self::declarations($months, $year, 'pensioner_discount', 'verified', 'not_claimed'),
+                'pensioner_discounts' => self::pensioner($person, $relation) && !isset($discountKnown[$personId])
+                    ? [] : self::declarations($months, $year, 'pensioner_discount', 'verified', 'not_claimed'),
                 'birth_date' => self::realDate(PohodaXml::date($person, 'DatNar')),
                 'part_time_discount' => self::partTimeDiscount($byId['SocPojSleva'] ?? [], (string) $relationId, $partTime[$relationId] ?? []),
                 'first_signed' => self::bool(PohodaXml::text($periods[array_key_first($periods)][0], 'Prohlas'))

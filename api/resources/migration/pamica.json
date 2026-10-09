@@ -1046,7 +1046,7 @@
                 },
                 "ID": {
                     "status": "mapped",
-                    "target": "PohodaPayrollConverter, PohodaPayrollDeductions, PohodaPayrollPeople, PohodaPayrollRelations, PohodaPayrollSickness"
+                    "target": "PohodaPayrollConverter, PohodaPayrollDeductions, PohodaPayrollImporter, PohodaPayrollPeople, PohodaPayrollRelations, PohodaPayrollSickness"
                 },
                 "JeDPCnadLimit": {
                     "status": "ignored"
@@ -1601,9 +1601,171 @@
         },
         "MZ2": {
             "rows_seen": 4222,
-            "status": "ignored",
-            "reason": "Doplňkové údaje mzdy (benefity DIP/PDP, práce na dálku, sleva pracujícího důchodce, riziko). Převzatý měsíc je nese v úhrnech MZ a v podaném hlášení JMHZ; slevu důchodce převod bere z podaného hlášení.",
-            "review": "Příspěvky zaměstnavatele na DIP/PDP/životní pojištění (KcDIP, KcPDP, KcZamBenefit*) a sleva pracujícího důchodce (SocPojSlevaPracDuch) mají vliv na nastavení dalších měsíců; převod je z MZ2 nebere."
+            "status": "mapped",
+            "target": "doplňkové údaje mzdy: sleva pracujícího důchodce po měsících (SocPojSlevaPracDuch, PohodaPayrollPeople) a příspěvky zaměstnavatele na penzijní produkty KcPDP + KcDIP do převzatého měsíce (old_age_savings_contribution_minor, roční koš § 6 odst. 9 písm. p ZDP)",
+            "readers": [
+                "PohodaPayrollImporter",
+                "PohodaPayrollPeople"
+            ],
+            "ignored_columns_reason": "Ostatní doplňkové údaje (práce na dálku, riziko, ovocnáři, cizí měna, zahraniční daň) převzatý měsíc nese v úhrnech MZ a v podaném hlášení JMHZ.",
+            "columns": {
+                "ClenHZS": {
+                    "status": "ignored"
+                },
+                "CmCastH": {
+                    "status": "ignored"
+                },
+                "CmCastU": {
+                    "status": "ignored"
+                },
+                "CmCelkem": {
+                    "status": "ignored"
+                },
+                "CmKurs": {
+                    "status": "ignored"
+                },
+                "FunkPozit": {
+                    "status": "ignored"
+                },
+                "HodPracDalka": {
+                    "status": "ignored"
+                },
+                "HodPracDalkaSum": {
+                    "status": "ignored"
+                },
+                "ID": {
+                    "status": "mapped",
+                    "target": "PohodaPayrollImporter, PohodaPayrollPeople"
+                },
+                "KcDIP": {
+                    "status": "mapped",
+                    "target": "PohodaPayrollImporter"
+                },
+                "KcDanJinyStat": {
+                    "status": "ignored"
+                },
+                "KcDanJinyStatZaklad": {
+                    "status": "ignored"
+                },
+                "KcPDP": {
+                    "status": "mapped",
+                    "target": "PohodaPayrollImporter"
+                },
+                "KcPracDalka": {
+                    "status": "ignored"
+                },
+                "KcPracDalkaNad": {
+                    "status": "ignored"
+                },
+                "KcPracDalkaNadSum": {
+                    "status": "ignored"
+                },
+                "KcPracDalkaSum": {
+                    "status": "ignored"
+                },
+                "KcPripojPov": {
+                    "status": "ignored"
+                },
+                "KcSlevaOvocnar": {
+                    "status": "ignored"
+                },
+                "KcSocLRiziko": {
+                    "status": "ignored"
+                },
+                "KcSocLRizikoSum": {
+                    "status": "ignored"
+                },
+                "KcSocPojSlevaPracDuch": {
+                    "status": "ignored"
+                },
+                "KcSocZakBezny": {
+                    "status": "ignored"
+                },
+                "KcSocZakRiziko": {
+                    "status": "ignored"
+                },
+                "KcSocZakSum_SlevaPracDuch": {
+                    "status": "ignored"
+                },
+                "KcSporStari": {
+                    "status": "ignored"
+                },
+                "KcSumSlevaOvocnar": {
+                    "status": "ignored"
+                },
+                "KcSumZakSlevaOvocnar": {
+                    "status": "ignored"
+                },
+                "KcZamBenefit": {
+                    "status": "ignored",
+                    "review": "Význam (příspěvek na životní pojištění?) nejde ověřit, v reálných exportech je nulový; převod ho do koše nepočítá."
+                },
+                "KcZamBenefitKorekce": {
+                    "status": "ignored"
+                },
+                "KcZamBenefitKorekceSum": {
+                    "status": "ignored"
+                },
+                "KcZamBenefitNadSum": {
+                    "status": "ignored"
+                },
+                "KcZamBenefitSum": {
+                    "status": "ignored"
+                },
+                "KcZdrBenefit": {
+                    "status": "ignored"
+                },
+                "KcZdrBenefitKorekce": {
+                    "status": "ignored"
+                },
+                "KcZdrBenefitKorekceSum": {
+                    "status": "ignored"
+                },
+                "KcZdrBenefitNadSum": {
+                    "status": "ignored"
+                },
+                "KcZdrBenefitSum": {
+                    "status": "ignored"
+                },
+                "MzdaOdch": {
+                    "status": "ignored"
+                },
+                "NezahrnovatDoMH": {
+                    "status": "ignored"
+                },
+                "RefAg": {
+                    "status": "mapped",
+                    "target": "PohodaPayrollImporter, PohodaPayrollPeople"
+                },
+                "RelPracMist": {
+                    "status": "ignored"
+                },
+                "Riziko": {
+                    "status": "ignored"
+                },
+                "Riziko3": {
+                    "status": "ignored"
+                },
+                "RizikoOdprac": {
+                    "status": "ignored"
+                },
+                "RizikoSmeny": {
+                    "status": "ignored"
+                },
+                "SlevaOvocnar": {
+                    "status": "ignored"
+                },
+                "SlevaOvocnarZadost": {
+                    "status": "ignored"
+                },
+                "SocPojSlevaPracDuch": {
+                    "status": "mapped",
+                    "target": "PohodaPayrollPeople"
+                },
+                "SocPojSlevaPracDuchZadost": {
+                    "status": "ignored"
+                }
+            }
         },
         "MZdanKomp": {
             "rows_seen": 125,
