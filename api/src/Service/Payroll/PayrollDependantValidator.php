@@ -183,8 +183,8 @@ final class PayrollDependantValidator
         return [
             'relation' => $relation,
             'full_name' => $this->text($input, 'full_name', 191),
-            'given_name' => $this->nullableText($input, 'given_name', 100),
-            'family_name' => $this->nullableText($input, 'family_name', 100),
+            'given_name' => $this->nullableName($input, 'given_name'),
+            'family_name' => $this->nullableName($input, 'family_name'),
             'birth_date' => $birthDate,
             'birth_number_present' => $present,
             'birth_number' => $birthNumber,
@@ -346,16 +346,8 @@ final class PayrollDependantValidator
 
         return [
             'other_household_caregiver_status' => $status,
-            'other_caregiver_given_name' => $this->text(
-                $input,
-                'other_caregiver_given_name',
-                100,
-            ),
-            'other_caregiver_family_name' => $this->text(
-                $input,
-                'other_caregiver_family_name',
-                100,
-            ),
+            'other_caregiver_given_name' => $this->name($input, 'other_caregiver_given_name'),
+            'other_caregiver_family_name' => $this->name($input, 'other_caregiver_family_name'),
             'other_caregiver_birth_date' => $this->date(
                 $input,
                 'other_caregiver_birth_date',
@@ -420,6 +412,31 @@ final class PayrollDependantValidator
         }
 
         return $this->text($input, $key, $maximum);
+    }
+
+    /**
+     * Jméno, které jde do měsíčního hlášení (10431, 10432, 10435, 10436): vzor
+     * `simpleA_ZX_SP_Type` z XSD JMHZ, viz {@see PayrollSubmissionPersonName}.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function name(array $input, string $key): string
+    {
+        $value = $this->text($input, $key, 100);
+        PayrollSubmissionPersonName::assertAllowed($value, self::label($key));
+
+        return $value;
+    }
+
+    /** @param array<string,mixed> $input */
+    private function nullableName(array $input, string $key): ?string
+    {
+        $value = $input[$key] ?? null;
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return null;
+        }
+
+        return $this->name($input, $key);
     }
 
     /** @param array<string,mixed> $input */

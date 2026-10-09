@@ -77,18 +77,19 @@ final class PayrollPersonCreateValidator
          */
         $firstName = $this->optionalNamePart(
             $input['first_name'] ?? null,
-            'Křestní jméno může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
+            'Křestní jméno',
         );
         $lastName = $this->optionalNamePart(
             $input['last_name'] ?? null,
-            'Příjmení může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
+            'Příjmení',
         );
         // Rodné příjmení vyžaduje registrace u ČSSZ (PREZEC i REGZEC). Formulář
         // ho předvyplňuje příjmením; nepovinné zůstává kvůli API a starším klientům.
         $birthSurname = $this->optionalNamePart(
             $input['birth_surname'] ?? null,
-            'Rodné příjmení může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.',
+            'Rodné příjmení',
         );
+        PayrollSubmissionPersonName::assertPersonNames($firstName, $lastName, $birthSurname);
 
         $birthDate = $this->optionalDate(
             $input['birth_date'] ?? null,
@@ -331,16 +332,17 @@ final class PayrollPersonCreateValidator
 
     /**
      * Část jména tak, jak ji uživatel zadal — jen ořez a mez, žádné dělení
-     * ani skládání. Řídicí znaky odmítá až karta, tady stačí táž délka.
+     * ani skládání. Jméno jde do měsíčního hlášení a registrace ČSSZ, proto
+     * smí mít jen znaky, které jejich XSD připouští ({@see PayrollSubmissionPersonName}).
      */
-    private function optionalNamePart(mixed $value, string $error): ?string
+    private function optionalNamePart(mixed $value, string $label): ?string
     {
         $text = trim($this->string($value));
         if ($text === '') {
             return null;
         }
         if (mb_strlen($text) > self::MAX_NAME_PART) {
-            throw new \InvalidArgumentException($error);
+            throw new \InvalidArgumentException($label . ' může mít nejvýše ' . self::MAX_NAME_PART . ' znaků.');
         }
 
         return $text;

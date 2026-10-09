@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll;
 
 use MyInvoice\Service\Payroll\CzIscoCodebook;
+use MyInvoice\Service\Payroll\Import\Jmhz\JmhzDerivedRegistrations;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
@@ -60,6 +61,52 @@ final class PayrollPersonCreateValidatorTest extends TestCase
         self::assertTrue($result['employment']['terms']['is_primary']);
         // Bez vlastní hodnoty zůstává plný úvazek.
         self::assertSame('40.00', $result['employment']['terms']['weekly_hours']);
+    }
+
+    /**
+     * Jméno, příjmení a rodné příjmení jdou do měsíčního hlášení a registrace
+     * ČSSZ, jejichž XSD připouští jen latinku, pomlčku, čárku, tečku, apostrof
+     * a mezeru. Číslice dřív prošla založením a spadla až na XSD podání.
+     *
+     * @return iterable<string,array{string,string}>
+     */
+    public static function namesRejectedBySubmission(): iterable
+    {
+        yield 'příjmení s číslicí' => ['last_name', 'Osoba2'];
+        yield 'jméno se závorkou' => ['first_name', 'Jan (ml.)'];
+        yield 'rodné příjmení s lomítkem' => ['birth_surname', 'Nová/Stará'];
+    }
+
+    #[DataProvider('namesRejectedBySubmission')]
+    public function testNameOutsideSubmissionPatternIsRejected(string $field, string $value): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nepřipouští');
+        self::validator()->validate([$field => $value] + self::baseInput());
+    }
+
+    public function testNameWithDiacriticsAndApostropheIsAccepted(): void
+    {
+        $result = self::validator()->validate([
+            'first_name' => 'Žofie-Anna',
+            'last_name' => "D'Arcy Šťastná",
+        ] + self::baseInput());
+
+        self::assertSame("D'Arcy Šťastná", $result['last_name']);
+    }
+
+    /**
+     * Osoba z hlášení, které nese jen OIČ, vzniká se zástupným jménem s pořadovým
+     * číslem; účetní ho přepíše. Číslice v zástupném příjmení založení nezastaví.
+     */
+    public function testPlaceholderNameFromJmhzImportIsAccepted(): void
+    {
+        $result = self::validator()->validate([
+            'first_name' => JmhzDerivedRegistrations::PLACEHOLDER_FIRST_NAME,
+            'last_name' => JmhzDerivedRegistrations::PLACEHOLDER_LAST_NAME . ' 2',
+        ] + self::baseInput());
+
+        self::assertSame(JmhzDerivedRegistrations::PLACEHOLDER_LAST_NAME . ' 2', $result['last_name']);
     }
 
     private static function validator(): PayrollPersonCreateValidator

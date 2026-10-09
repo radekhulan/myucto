@@ -275,6 +275,39 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         }
     }
 
+    /**
+     * Jméno platné verze identity jde do měsíčního hlášení a registrace ČSSZ;
+     * XSD připouští jen latinku, pomlčku, čárku, tečku, apostrof a mezeru.
+     * Uzavřený historický řádek se nekontroluje: kvůli řádku, který formulář
+     * ani neukazuje, karta uložení odmítat nesmí.
+     */
+    public function testCurrentIdentityNameOutsideSubmissionPatternIsRejected(): void
+    {
+        foreach (['first_name' => 'Jana2', 'last_name' => 'Testovací (roz.)', 'birth_surname' => 'Pokusná1'] as $field => $value) {
+            try {
+                $this->validator->validate($this->payload(['identity_history' => [[
+                    'full_name' => 'Jana Testovací',
+                    'first_name' => 'Jana',
+                    'last_name' => 'Testovací',
+                    'effective_from' => '2026-01-01',
+                    $field => $value,
+                ]]]));
+                self::fail("{$field} {$value} musí být odmítnuto.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('nepřipouští', $exception->getMessage(), $field);
+            }
+        }
+
+        $closed = $this->validator->validate($this->payload(['identity_history' => [[
+            'full_name' => 'Jana Testovací',
+            'first_name' => 'Jana',
+            'last_name' => 'Testovací2',
+            'effective_from' => '2020-01-01',
+            'effective_to' => '2020-12-31',
+        ]]]));
+        self::assertSame('Testovací2', $closed['identity_history'][0]['last_name']);
+    }
+
     public function testStillRejectsIdentityWithoutDisplayName(): void
     {
         $this->expectInvalid(['identity_history' => [[

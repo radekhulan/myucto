@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Payroll;
 
 use InvalidArgumentException;
 use MyInvoice\Service\Payroll\PayrollDependantValidator;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollDependantValidatorTest extends TestCase
@@ -234,6 +235,48 @@ final class PayrollDependantValidatorTest extends TestCase
         // Hláška smí jmenovat jen POLE Z FORMULÁŘE, ne klíč payloadu.
         $this->expectExceptionMessage('„Odkaz na doklad“');
         $this->validator->validateClaim($input);
+    }
+
+    /**
+     * Jméno vyživované osoby jde do měsíčního hlášení (10435, 10436) a XSD JMHZ
+     * ho vzorem `simpleA_ZX_SP_Type` omezuje na latinku, pomlčku, čárku, tečku,
+     * apostrof a mezeru. Příjmení s číslicí dřív prošlo zápisem a spadlo až na
+     * XSD při přípravě hlášení.
+     *
+     * @return iterable<string,array{string,string}>
+     */
+    public static function namesRejectedBySubmission(): iterable
+    {
+        yield 'příjmení s číslicí' => ['family_name', 'Dítě1'];
+        yield 'jméno se závorkou' => ['given_name', 'Eva (Evička)'];
+        yield 'příjmení v cyrilici' => ['family_name', 'Петров'];
+    }
+
+    #[DataProvider('namesRejectedBySubmission')]
+    public function testDependantNameOutsideSubmissionPatternIsRejected(string $field, string $value): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('nepřipouští');
+        $this->validator->validateDependant($this->dependant([$field => $value]));
+    }
+
+    public function testDependantNameWithDiacriticsHyphenAndApostropheIsAccepted(): void
+    {
+        $result = $this->validator->validateDependant($this->dependant([
+            'given_name' => 'Anna-Marie',
+            'family_name' => "O'Brien Dvořáková",
+        ]));
+
+        self::assertSame("O'Brien Dvořáková", $result['family_name']);
+    }
+
+    public function testOtherCaregiverNameOutsideSubmissionPatternIsRejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('„Příjmení jiné vyživující osoby“');
+        $this->validator->validateClaim($this->claimedByOther([
+            'other_caregiver_family_name' => 'Novák2',
+        ]));
     }
 
     public function testNormalizesClaim(): void

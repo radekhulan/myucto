@@ -368,6 +368,7 @@ final class PayrollPersonProfileValidator
                 ),
             ];
             $this->assertInterval($result[array_key_last($result)], "identity_history.{$index}");
+            $this->assertSubmittableNames($result[array_key_last($result)]);
             /*
              * Účinnost SMÍ být v budoucnu.
              *
@@ -383,6 +384,27 @@ final class PayrollPersonProfileValidator
         }
 
         return $result;
+    }
+
+    /**
+     * Jméno, příjmení a rodné příjmení verze, která platí dnes nebo začne
+     * platit, jdou do měsíčního hlášení a registrací ČSSZ a jejich XSD je omezuje
+     * na znaky {@see PayrollSubmissionPersonName}. Uzavřená historická verze se
+     * nekontroluje: kvůli řádku, který formulář ani neukazuje, se karta uložit
+     * nesmí odmítnout.
+     *
+     * @param IdentityInput $identity
+     */
+    private function assertSubmittableNames(array $identity): void
+    {
+        if ($identity['effective_to'] !== null && $identity['effective_to'] < date('Y-m-d')) {
+            return;
+        }
+        PayrollSubmissionPersonName::assertPersonNames(
+            $identity['first_name'],
+            $identity['last_name'],
+            $identity['birth_surname'],
+        );
     }
 
     /**

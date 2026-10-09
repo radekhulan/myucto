@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\PayrollSubmissionPersonName;
 use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
 
 /**
@@ -19,9 +20,6 @@ use MyInvoice\Service\Payroll\Submission\Sickness\CsszWorkplaceCatalog;
  */
 final readonly class OzuspojXmlValidator
 {
-    /** Doplněk znakové množiny `simpleA_ZX_SP_Type` z baseTypes2.xsd (mezera se hlídá XSD). */
-    private const DISALLOWED_NAME_CHARACTER = "/[^A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\\-,\\.' ]/u";
-
     public function __construct(
         private OzuspojSchemaCatalog $schemas,
     ) {}
@@ -165,20 +163,14 @@ final readonly class OzuspojXmlValidator
      */
     private function assertNameCharacters(string $label, string $value): void
     {
-        if (preg_match_all(self::DISALLOWED_NAME_CHARACTER, $value, $matches) < 1) {
+        $characters = PayrollSubmissionPersonName::disallowedCharacters($value);
+        if ($characters === []) {
             return;
         }
-        $characters = array_values(array_unique($matches[0]));
-        $shown = implode(' ', array_map(
-            static fn (string $character): string => $character === "\t"
-                ? '[tabulátor]'
-                : '„' . $character . '“',
-            $characters,
-        ));
         $this->invalid(
             'ozuspoj_employee_name_characters_invalid',
             'Ve ' . ($label === 'jméno' ? 'jméně' : 'příjmení') . ' zaměstnance jsou znaky, které datová věta OZUSPOJ nepřipouští: '
-                . $shown . '. Opravte ' . $label
+                . PayrollSubmissionPersonName::shown($characters) . '. Opravte ' . $label
                 . ' v Osobách u zaměstnance (povolená je latinka, pomlčka, čárka, tečka, apostrof a mezera) a oznámení připravte znovu.',
         );
     }
