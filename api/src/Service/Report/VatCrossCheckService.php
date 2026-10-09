@@ -480,6 +480,9 @@ final class VatCrossCheckService
 
         // Headline zůstává z REÁLNÉHO buildera (autoritativní „co se skutečně podá"):
         // typ 0 = zboží (ř.20), typ 3 = služby (ř.21). Typ 2 (třístranný) do smíru nepatří.
+        // Sčítá se `summary.rows.amount` v haléřích, ne podaná `pln_hodnota`: SH zaokrouhluje
+        // každý řádek na celé Kč nahoru (předpis EPO, viz SouhrnneHlaseniBuilder::formatAmount),
+        // přiznání až součet. Rozdíl do 1 Kč na řádek SH je tedy zaokrouhlení, ne nesoulad.
         $shResult = $this->shv->build($supplierId, $year, $month, $period);
         $shTotal = 0.0;
         $shTriangular = 0.0;

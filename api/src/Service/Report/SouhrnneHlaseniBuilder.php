@@ -310,6 +310,14 @@ final class SouhrnneHlaseniBuilder
                     : sprintf('%04d-%02d', $year, $month),
                 'rows_count'          => $totalRows,
                 'total_amount'        => round($totalAmount, 2),
+                // Součet řádků PŘED zaokrouhlením (v haléřích) = to, co sčítá DPHDP3 ř. 20+21+31.
+                // Rozdíl proti total_amount je jen zaokrouhlení po řádcích (viz formatAmount),
+                // UI ho vysvětluje, aby nevypadal jako chyba. Následné hlášení nese jen opravné
+                // řádky, takže tam srovnání s přiznáním nedává smysl.
+                'total_amount_exact'  => $isFollowUp ? null : round(array_sum(array_map(
+                    static fn (array $r): float => (float) $r['amount'],
+                    $rows,
+                )), 2),
                 'rows'                => $rows,
                 'submission_deadline' => $deadline,
                 'variant'             => $variant,
@@ -635,12 +643,17 @@ final class SouhrnneHlaseniBuilder
     /**
      * Hodnota plnění v celých korunách — zaokrouhlení na plnou částku, tedy OD NULY.
      *
-     * Kladná hodnota nahoru (dosavadní chování, drží ho i test). Záporná hodnota ale
-     * `ceil()` zaokrouhloval SMĚREM K NULE, takže dobropis do JČS podhodnotil — správně
-     * musí jít dolů, aby se opravovaná částka nezmenšila. Že se u kladných řádků
-     * zaokrouhluje nahoru a ne matematicky, je převzatý předpoklad: souhrnné hlášení se
-     * tím systematicky rozchází s ř. 20+21 přiznání (haléře, matematické zaokrouhlení)
-     * a čím víc protistran, tím větší rozdíl — stojí za ověření proti pokynům k SH.
+     * Nahoru to předepisuje sama struktura EPO: popis atributu `pln_hodnota` v DPHSHV
+     * (api/xsd/dphshv.xsd, shodně s živým https://adisspr.mfcr.cz/adis/jepo/schema/dphshv_epo2.xsd)
+     * říká „Celková hodnota plnění se zaokrouhlí na celé koruny nahoru. Celková hodnota
+     * plnění musí být vždy celé číslo." a stejně to stálo v pokynech k tiskopisu SH
+     * (25 5525, oddíl 5 „Celková hodnota plnění v Kč"). Zaokrouhluje se každý řádek
+     * (stát × DIČ × kód plnění), kdežto přiznání (DPHDP3 ř. 20, 21, 31) sčítá haléře
+     * a zaokrouhluje až součet. Součet SH proto může přiznání převýšit až o 1 Kč na řádek
+     * a není to chyba; VatCrossCheckService kvůli tomu porovnává nezaokrouhlené řádky.
+     *
+     * Záporná hodnota (dobropis do JČS převyšuje dodávky) jde dolů, aby se opravovaná
+     * částka nezmenšila — `ceil()` by ji zaokrouhlil směrem k nule.
      */
     private function formatAmount(float $amount): string
     {

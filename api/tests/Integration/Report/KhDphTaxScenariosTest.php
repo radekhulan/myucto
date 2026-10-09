@@ -2110,6 +2110,36 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * Issue #141 — SH zaokrouhluje každý řádek na celé Kč nahoru (popis `pln_hodnota`
+     * v DPHSHV), přiznání až součet. Tři odběratelé po 100,20 Kč: SH 3 × 101 = 303,
+     * DPHDP3 ř.21 = 301. Rozdíl 2 Kč je zaokrouhlení po řádcích; summary ho musí umět
+     * vysvětlit nezaokrouhleným součtem, který odpovídá přiznání.
+     */
+    public function testShPerRowRoundUpExplainsDifferenceToVatReturn(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        foreach (['SK1410000001', 'SK1410000002', 'SK1410000003'] as $i => $dic) {
+            $customer = $this->client('EU SH řádek ' . ($i + 1), $this->skId, $dic, customer: true);
+            $this->sale('SH141-' . ($i + 1), $customer, '22', false, $d(10 + $i), $d(10 + $i), [[100.20, 0, 0]]);
+        }
+
+        $result = $this->shv->build($this->supplierId, self::YEAR, self::MONTH);
+        $sh = (new \SimpleXMLElement($result['xml']))->DPHSHV;
+        $this->assertCount(3, $sh->VetaR);
+        foreach ($sh->VetaR as $veta) {
+            $this->assertSame('101', (string) $veta['pln_hodnota'], 'každý řádek SH na celé Kč nahoru');
+        }
+        $this->assertEqualsWithDelta(303, $result['summary']['total_amount'], 0.001);
+        $this->assertEqualsWithDelta(300.60, $result['summary']['total_amount_exact'], 0.001,
+            'nezaokrouhlený součet řádků SH = základ, který sčítá přiznání');
+
+        $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+        $this->assertSame('301', (string) $dp->Veta2['pln_sluzby'], 'ř.21 zaokrouhluje až součet');
+        $this->assertSame((int) round($result['summary']['total_amount_exact']), (int) (string) $dp->Veta2['pln_sluzby'],
+            'po zaokrouhlení součtu sedí SH na ř.21 přiznání');
+    }
+
+    /**
      * Audit KH/DPH 2026-07 (S3) — pořízení zboží z JČS (kód 23, RC) se SNÍŽENOU 12% sazbou
      * (knihy/potraviny) patří na ř.4 (p_zb5) + mirror ř.44 (nar_zdp5), NE na ř.3/ř.43 (21%).
      * KH oddíl A.2 bucketuje přímo dle sazby (dan2) — s remapem řádků sedí přiznání i KH.

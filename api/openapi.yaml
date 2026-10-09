@@ -6975,7 +6975,7 @@ paths:
         - { in: query, name: year,  required: true, schema: { type: integer } }
         - { in: query, name: month, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "Summary s řádky (country, vat_id, sh_type, amount, count)" }
+        '200': { description: "Summary s řádky (country, vat_id, sh_type, amount, count), total_amount (součet řádků zaokrouhlených na celé Kč nahoru, jak se podávají) a total_amount_exact (součet před zaokrouhlením, odpovídá přiznání; u následného hlášení null)" }
 
   /api/v1/reports/dphshv:
     get:

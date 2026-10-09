@@ -311,6 +311,24 @@ final class VatCrossCheckTest extends TestCase
         self::assertContains($s1, $ids, 'Úplný drill-down uvede i doklad s DIČ (rozdíl z jiné příčiny než chybějící DIČ).');
     }
 
+    // Issue #141: SH zaokrouhluje každý řádek nahoru, přiznání až součet → není to nesoulad.
+    public function testShPerRowRoundUpIsNotMismatch(): void
+    {
+        $skId = (int) ($this->db->pdo()->query("SELECT id FROM countries WHERE iso2 = 'SK' AND is_eu = 1 LIMIT 1")->fetchColumn() ?: 0);
+        if ($skId === 0) {
+            self::markTestSkipped('SK není v countries jako EU.');
+        }
+        foreach (['SK1410000011', 'SK1410000012', 'SK1410000013', 'SK1410000014', 'SK1410000015'] as $i => $dic) {
+            $cust = $this->client('Odběratel SH141 ' . $i, $dic, $skId);
+            $this->sale('FV-2048-R' . $i, $cust, '22', true, 1000.10, 0.0, 0.0);
+        }
+
+        $findings = $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+
+        self::assertNull($this->findingByCheck($findings, 'dphdp3_vs_sh'),
+            'SH 5 × 1001 Kč vs ř.21 5000,50 Kč je jen zaokrouhlení po řádcích, ne nesoulad.');
+    }
+
     // ── F-0b: drill-down kontroly 343 + klasifikace § 73 (E1-QUICKWINS §3–§4) ──
 
     // T1: timing vpřed (vzor PF 255) — předpis k DUZP v M, odpočet dle § 73 v M+1.
