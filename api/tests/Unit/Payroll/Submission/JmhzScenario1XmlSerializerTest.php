@@ -3203,6 +3203,70 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    /**
+     * Daňové údaje souhrnu za zaměstnavatele jsou úhrny přes všechny osoby
+     * podání: sražené zálohy po slevách (10034) a vyplacené měsíční bonusy
+     * (10035). Čtyři osoby, dvě se zálohou a dvě s bonusem.
+     */
+    public function testEmployerTaxSummaryAddsUpEveryPerson(): void
+    {
+        $payload = $this->payload();
+        $withChild = $this->payloadWithChildCredit();
+        $people = [
+            12 => [$payload['people'][0], 20_000, 0],
+            13 => [$withChild['people'][0], 0, 120_000],
+            14 => [$withChild['people'][0], 0, 30_000],
+        ];
+        $guids = [101 => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E10'];
+        foreach ($people as $employeeId => [$person, $afterCredits, $bonus]) {
+            $employmentId = $employeeId + 90;
+            $advance = &$person['person_summary']['statutory']['income_tax']['advance_tax'];
+            if ($afterCredits !== 0) {
+                $advance['tax_after_credits_minor_units'] = $afterCredits;
+            }
+            $advance['tax_bonus_minor_units'] = $bonus;
+            unset($advance);
+            $person['employee_id'] = $employeeId;
+            $employment = &$person['employments'][0];
+            $employment['employment_id'] = $employmentId;
+            $employment['identity']['person_external_identifier'] = ['value' => '10000000' . $employeeId];
+            $employment['identity']['jmhz_employment_external_identifier'] = ['value' => '20000000000000000000' . $employeeId];
+            $employment['insurance']['relationship_id'] = "employment:{$employmentId}";
+            $employment['insurance']['participation']['relationship_id'] = "employment:{$employmentId}";
+            unset($employment);
+            $person['person_summary']['statutory']['net_pay']['relationships'] = [['relationship_id' => "employment:{$employmentId}"]];
+            $payload['people'][] = $person;
+            $payload['ordinary_evidence'][] = [
+                'scope' => ['employee_id' => $employeeId, 'employment_id' => $employmentId],
+                'attribute_values' => ['10116' => false, '10546' => false],
+            ];
+            $payload['source_versions']['ordinary_evidence'][] = [
+                'employment_id' => $employmentId,
+                'id' => 600 + $employeeId,
+                'source_manifest_sha256' => str_repeat('4', 64),
+                'snapshot_fingerprint' => str_repeat('5', 64),
+            ];
+            $guids[$employmentId] = '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E' . $employeeId;
+        }
+
+        $xml = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            JmhzSubmissionEnvelope::create(
+                '0195e2c4-1a2b-7c3d-8e4f-5a6b7c8d9e0f',
+                $guids,
+                '2026-08-05T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+        )['xml'];
+        $xml = preg_replace('/>\s+</', '><', $xml) ?? '';
+
+        self::assertStringContainsString(
+            '<so:danUdajeMesic><so:danZalohaPoSleve>350</so:danZalohaPoSleve><so:danBonus>1500</so:danBonus></so:danUdajeMesic>',
+            $xml,
+        );
+    }
+
     /** @return array<string,mixed> */
     private function positionDocument(string $body, string $kind): array
     {

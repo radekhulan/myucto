@@ -470,6 +470,65 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
     }
 
     /**
+     * Zdravotničtí záchranáři a členové HZS podniku (§ 5a odst. 1 písm. b)
+     * ZPSZ) mají vlastní dvojici úhrnu vyměřovacích základů (10025)
+     * a pojistného zaměstnavatele (10026); u zaměstnavatele bez nich se
+     * dvojice neuvádí.
+     */
+    public function testRescueWorkersAreReportedInTheirOwnBlock(): void
+    {
+        $source = $this->source();
+        $relationship = &$source['statutory_result']['people'][0]['relationships'][0];
+        $relationship['result_snapshot']['employer_rate_category'] = 'rescue_and_company_fire_service';
+        $relationship['result_snapshot_hash'] = $this->hash($relationship['result_snapshot']);
+        unset($relationship);
+
+        $root = &$source['statutory_result']['result_snapshot'];
+        $root['employer_categories'] = [
+            [
+                'category' => 'ordinary',
+                'paragraph5a_letter' => 'a',
+                'assessment_base_minor_units' => 1_000_000,
+                'contribution_minor_units' => 248_000,
+            ],
+            [
+                'category' => 'rescue_and_company_fire_service',
+                'paragraph5a_letter' => 'b',
+                'assessment_base_minor_units' => 700_000,
+                'contribution_minor_units' => 208_600,
+            ],
+        ];
+        $root['employer_contribution_before_discount_minor_units'] = 456_600;
+        $root['employer_contribution_minor_units'] = 406_600;
+        $rootHash = $this->hash($root);
+        unset($root);
+        $source['statutory_result']['result_snapshot_hash'] = $rootHash;
+
+        $liability = $source['social_liabilities'][0]['source_snapshot'];
+        $liability['statutory_result_hash'] = $rootHash;
+        $liability['employer_contribution_minor'] = 406_600;
+        $liability['target_amount_minor'] = 520_800;
+        $liability['delta_signed_minor'] = 520_800;
+        $source['social_liabilities'][0]['source_snapshot'] = $liability;
+        $source['social_liabilities'][0]['source_snapshot_json'] =
+            CanonicalJson::encode($liability);
+        $source['social_liabilities'][0]['source_snapshot_hash'] = $this->hash($liability);
+        $source['social_liabilities'][0]['amount_minor'] = 520_800;
+
+        $preview = $this->builder->build(41, $source);
+
+        self::assertSame([
+            'zakladZamestnavateleA' => 10_000,
+            'pojistneZamestnavateleA' => 2_480,
+            'zakladZamestnavateleB' => 7_000,
+            'pojistneZamestnavateleB' => 2_086,
+            'pojistneZamestnavateleCelkem' => 4_566,
+            'pojistneZamestnance' => 1_207,
+            'pojistneCelkem' => 5_773,
+        ], $preview->pvpoj['pojistne']);
+    }
+
+    /**
      * Pojistná část a formulář zaměstnance musí číst slevu zaměstnavatele
      * TÝMŽ pravidlem.
      *
