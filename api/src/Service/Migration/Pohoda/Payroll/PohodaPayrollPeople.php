@@ -300,7 +300,7 @@ final class PohodaPayrollPeople
             // a v porovnání s PAMICA sedí, takže do seznamu k ručnímu doplnění nepatří. Zůstanou
             // jen ostatní plnění, hlavně zdanitelná část stravování.
             $component = PohodaPayrollCatalog::component($code, $name, true);
-            if ($component['meaning'] !== 'component' || in_array($component['kind'], ['premium', 'bonus'], true)) {
+            if (!in_array($component['meaning'], ['component', 'meal_allowance'], true) || in_array($component['kind'], ['premium', 'bonus'], true)) {
                 continue;
             }
             $label = trim($code . ' ' . $name);

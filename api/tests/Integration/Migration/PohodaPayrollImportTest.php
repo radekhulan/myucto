@@ -432,6 +432,40 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * Stravenkový paušál (Z21) a Sick days (V18) převod dřív tiše zahodil: paušál chyběl
+     * ve výplatě i v osvobozených příjmech hlášení, za Sick days neproplatil náhradu
+     * a souhrn měsíce měl díru v hodinách.
+     */
+    public function testMealAllowanceAndSickDaysReachTheCountedMonth(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = $this->writeSicknessPayroll(true);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $codes = array_column(array_merge(...array_column($protocol->toArray()['steps'], 'messages')), 'code');
+        self::assertNotContains('components_without_jmhz', $codes, $this->explain($protocol));
+        $employment = $this->employment($supplierId, '5001');
+
+        $input = "SELECT COALESCE(SUM(i.amount_minor), 0) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+                   WHERE i.supplier_id = ? AND i.employment_id = ? AND c.code = ? AND i.status <> 'cancelled' AND i.period_start = '2026-03-01'";
+        self::assertSame(247_800, $this->scalar($input, [$supplierId, $employment['id'], 'PRISPEVEK_STRAVOVANI_PREVZATY']), $this->explain($protocol));
+        $component = $this->db->pdo()->prepare('SELECT tax_treatment, social_treatment, exemption_basis FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $component->execute([$supplierId, 'PRISPEVEK_STRAVOVANI_PREVZATY']);
+        self::assertSame(['tax_treatment' => 'exempt', 'social_treatment' => 'excluded', 'exemption_basis' => 'statutory_exempt'], $component->fetch(\PDO::FETCH_ASSOC));
+
+        // Sick days 7,5 h × průměr 200 Kč jako placené volno.
+        self::assertSame(150_000, $this->scalar($input, [$supplierId, $employment['id'], 'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC']), $this->explain($protocol));
+        $summary = $this->db->pdo()->prepare(
+            'SELECT values_json FROM payroll_time_month_import_summaries
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?'
+        );
+        $summary->execute([$supplierId, $employment['id'], '2026-03-01']);
+        $values = json_decode((string) $summary->fetchColumn(), true) ?: [];
+        self::assertSame(7_500, $values['obstacle_employee_hours'] ?? null, json_encode($values));
+    }
+
+    /**
      * Převod PAMICA po letech: nepřítomnosti dalšího roku se zapíšou i u vztahu, který už
      * nepřítomnost z dřívějšího roku má. Dřív se takový vztah přeskočil celý. Neschopnost
      * přes konec roku navazuje na okno náhrady mzdy a opakovaný převod nic nezdvojí.
@@ -506,7 +540,7 @@ final class PohodaPayrollImportTest extends TestCase
      * Jedna fiktivní osoba s měsíční mzdou a nemocí, kterou PAMICA nese s datem od a do.
      * Syntetická data, žádné reálné doklady ani osoby.
      */
-    private function writeSicknessPayroll(): string
+    private function writeSicknessPayroll(bool $mealAndSickDays = false): string
     {
         $dir = $this->tmp . '/12345678_2026';
         if (!is_dir($dir)) {
@@ -528,12 +562,20 @@ final class PohodaPayrollImportTest extends TestCase
             'PSC' => '60200', 'Stat' => 'CZ']);
         $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'Cislo' => '1', 'JeDPP' => 0, 'DatNast' => '2024-01-01', 'TUvazek' => 40]);
         $row('MZ', ['ID' => 30, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => 3, 'HodFond' => 176, 'DnyFond2' => 22,
-            'TUvazek' => 40, 'HodOdpra' => 136, 'RefPoj' => 1, 'KcHrubaM' => 35000, 'KcCistaM' => 27000, 'Prohlas' => 1,
+            'TUvazek' => 40, 'HodOdpra' => $mealAndSickDays ? 128.5 : 136, 'RefPoj' => 1, 'KcHrubaM' => 35000, 'KcCistaM' => 27000, 'Prohlas' => 1,
             'JeSocPP' => 1, 'KcSoc' => 2485, 'KcZaklM' => 35000, 'DnyPrac' => 22, 'DnyOdpra' => 17, 'KcPrum' => 200,
             'Datum' => '2026-04-10', 'KcVyplat' => 27000]);
         $row('MZslozky', ['ID' => 1, 'RefAg' => 30, 'RefSlozka' => 1, 'KcMzda' => 35000, 'Hodnota1' => 35000]);
         $row('MZneprit', ['ID' => 1, 'RefAg' => 30, 'RefSlozka' => 1, 'HodPrac' => 40, 'KcNahr' => 6000,
             'DatZac' => '2026-03-05', 'DatKon' => '2026-03-13']);
+        if ($mealAndSickDays) {
+            // 20 směn × 123,90 Kč pod limitem za směnu; Sick days jeden den 7,5 h za průměr.
+            $row('sMZslozky', ['ID' => 2, 'Cislo' => 'Z21', 'Nazev' => 'Stravenkový paušál']);
+            $row('sMZneprit', ['ID' => 2, 'Cislo' => 'V18', 'Nazev' => 'Sick days']);
+            $row('MZslozky', ['ID' => 2, 'RefAg' => 30, 'RefSlozka' => 2, 'KcMzda' => 2478, 'Hodnota1' => 123.9, 'Hodnota3' => 20]);
+            $row('MZneprit', ['ID' => 2, 'RefAg' => 30, 'RefSlozka' => 2, 'HodPrac' => 7.5, 'KcNahr' => 1500,
+                'DatZac' => '2026-03-20', 'DatKon' => '2026-03-20']);
+        }
 
         $file = $dir . '/91_mzdy.xml';
         file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"

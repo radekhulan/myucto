@@ -25,7 +25,9 @@ use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceRules;
+use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentSourceRule;
 
 /**
  * Převod mezd z datového souboru POHODA Mzdy / PAMICA (`91_mzdy.xml`) do mezd firmy.
@@ -418,7 +420,14 @@ final class PohodaPayrollImporter
             // (přesčas, doplatky), převod nehádá a předá účetní se seznamem kódů a počty vstupů.
             $unclassified = [];
             foreach ($profile['components'] as $component) {
-                if (PayrollComponentJmhzMappingDefaults::targetFor($component['code'], $component['kind'], 'one_off', 'included') === null) {
+                // Složku výchozího číselníku zakládá číselník se svou klasifikací; druh
+                // v profilu je jen náhradní. Osvobozený benefit zařazení do rozpadu nepotřebuje.
+                $default = PayrollComponentDefaults::classification($component['code'])
+                    ?? ['component_kind' => $component['kind'], 'frequency_kind' => 'one_off', 'tax_treatment' => 'included'];
+                if (JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', $default['tax_treatment'], $default['component_kind'])) {
+                    continue;
+                }
+                if (PayrollComponentJmhzMappingDefaults::targetFor($component['code'], $default['component_kind'], $default['frequency_kind'], $default['tax_treatment']) === null) {
                     $unclassified[$component['code']] = 0;
                 }
             }
@@ -952,8 +961,9 @@ final class PohodaPayrollImporter
                     // mzdy ({@see \MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmploymentWriter::recurringWage()}),
                     // takže vztah bez něj je ten, kterému PAMICA za svátek platila náhradu (`V02`).
                     holidayWithoutMonthlyWage: true,
-                    // `V03` mimo lékaře je v PAMICA „Placené volno" ({@see PohodaPayrollCatalog::absence()}):
-                    // placená překážka, za kterou PAMICA platí průměr (`KcPlacV`).
+                    // `V03` mimo lékaře je v PAMICA „Placené volno" a `V18` „Sick days"
+                    // ({@see PohodaPayrollCatalog::absence()}): placené volno, za které PAMICA
+                    // platí průměr (`KcPlacV`, u Sick days sazba `Hodnota9`, výchozí 100 %).
                     paidEmployeeObstacle: true,
                 );
             } catch (\InvalidArgumentException|\DomainException $e) {

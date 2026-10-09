@@ -209,6 +209,26 @@ final class PayrollComponentDefaults
                 // a {@see PayrollExemptionBasis::NotSubjectToTax}) a do 10286
                 // se nezapočítává.
                 ['PRISPEVEK_STRAVOVANI', 'Příspěvek na stravování', 'benefit_meal', 'monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'included', 'meal_per_shift', 'periodic_benefit_limit'],
+                // Příspěvek na stravování převzatý z jiného mzdového programu (PAMICA
+                // Z21 „Stravenkový paušál"), rozdělený už ZDROJEM na osvobozenou část
+                // a nadlimitní část. Limit za směnu tam spočítal program, který směny
+                // evidoval; MyÚčto je u měsíce převzatého souhrnem nemá
+                // ({@see PayrollMealShiftEvidenceService} by z prázdné docházky
+                // spočítal nula nároků a zdanil celý příspěvek). Proto vlastní
+                // jednorázová složka bez koše: osvobozená část je tu už doložená
+                // rozpadem zdroje, stejně jako CESTOVNI_NAHRADA_LIMIT nese rozpad
+                // vyúčtování cesty. Podklad `statutory_exempt` = § 6 odst. 9 ZDP,
+                // nic se nedopočítává. Ruční vstup ji nezaloží
+                // ({@see \MyInvoice\Repository\Payroll\PayrollInputRepository}),
+                // jinak by obešla limit za směnu.
+                // JMHZ: do 10286 i 10289 jako PRISPEVEK_STRAVOVANI, bez kolonky v rozpadu.
+                ['PRISPEVEK_STRAVOVANI_PREVZATY', 'Příspěvek na stravování - osvobozená část', 'benefit_meal', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'included', null, 'statutory_exempt'],
+                // Peněžitý příspěvek na stravování nad limit § 6 odst. 9 písm. b) ZDP
+                // (a příspěvek poskytnutý bez osvobození, PAMICA Z21a): běžný zdanitelný
+                // příjem a vyměřovací základ obou pojistných. Na rozdíl od
+                // STRAVOVANI_ZDANITELNE se vyplácí, proto `monetary`. Průměrný výdělek
+                // ani tady nezahrnuje, stejně jako osvobozenou část.
+                ['PRISPEVEK_STRAVOVANI_ZDANITELNY', 'Příspěvek na stravování - zdanitelná část', 'benefit_meal', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // § 6 odst. 9 písm. i) ZDP — hodnota přechodného ubytování do
                 // 3 500 Kč měsíčně. Osvobozeno je jen NEPENĚŽNÍ plnění, jen mimo
                 // pracovní cestu a jen tehdy, není-li obec přechodného ubytování
@@ -290,6 +310,27 @@ final class PayrollComponentDefaults
         }
 
         return array_keys($codes);
+    }
+
+    /**
+     * Druh, četnost a daňové zacházení výchozí složky podle poslední verze, nebo
+     * `null`, když kód do výchozího číselníku nepatří. Pro volající, kteří složku
+     * jen pojmenují (profil importu) a zakládá ji číselník sám.
+     *
+     * @return array{component_kind:string, frequency_kind:string, tax_treatment:string}|null
+     */
+    public static function classification(string $code): ?array
+    {
+        $found = null;
+        foreach (self::VERSIONS as $version) {
+            foreach ($version['rows'] as $row) {
+                if ($row[0] === $code) {
+                    $found = ['component_kind' => $row[2], 'frequency_kind' => $row[4], 'tax_treatment' => $row[5]];
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**

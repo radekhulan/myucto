@@ -162,6 +162,7 @@ filtru, ne jen se zobrazenou stránkou.
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
 | Složku náhrady za dovolenou nebo nemoc nejde zadat ručně | Vzniká ze schválené absence | Schvalte absenci v [Absence a dovolená](76_Absence_a_dovolena.md). |
+| Převzatý příspěvek na stravování nejde zadat ručně | Osvobozenou část spočítal předchozí program ze svých směn | Zadejte příspěvek na složku `PRISPEVEK_STRAVOVANI`. |
 | Příplatek za přesčas, svátek, noc nebo víkend nejde zadat | Vzniká ze schválené docházky | Schvalte měsíc docházky, nebo přesčas zadejte hodinami v rychlém vstupu. |
 | Vstup z předpisu, docházky, absence nebo cesty nejde upravit | Opravuje se u svého zdroje | Upravte zdroj a vstup se přepočte. |
 | Schválený benefitní vstup nejde upravit | Čerpání je zapsané v koši | Proveďte storno (opačný zápis) a zadejte správnou částku. |
@@ -214,6 +215,16 @@ za dovolenou (10338). Běh ji přijme, zůstane-li úhrn vztahu v měsíci nezá
 jiná záporná částka nebo částka za jiný měsíc patří do opravy původního běhu.
 Tuto složku zakládá i převod z PAMICA (složky J07 a J10) a sekce skončení vztahu
 na kartě zaměstnance.
+
+**Stravenkový paušál převzatý z jiného programu** (PAMICA Z21) má dvě složky.
+Část do limitu za směnu (§ 6 odst. 9 písm. b) zákona o daních z příjmů) jde na
+`PRISPEVEK_STRAVOVANI_PREVZATY`: nedaní se, není vyměřovacím základem pojistného
+a v hlášení je v úhrnu příjmů (10286) i mezi osvobozenými příjmy (10289). Limit
+spočítal předchozí program podle směn, které evidoval, proto složku zakládá jen
+převod a ručně ji zadat nejde. Část nad limit a paušál bez osvobození (Z21a) jde
+na `PRISPEVEK_STRAVOVANI_ZDANITELNY`, běžný zdanitelný příjem. Vlastní příspěvek
+pro další měsíce zadávejte na `PRISPEVEK_STRAVOVANI`, u kterého aplikace
+osvobozenou část spočítá ze směn v docházce.
 
 ### 91.12.3 Koncept, schválení a filtry
 

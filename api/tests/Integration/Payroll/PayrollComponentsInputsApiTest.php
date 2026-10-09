@@ -290,6 +290,10 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'PRISPEVEK_PENZE_ZIVOTNI',
             'PRISPEVEK_RIZIKOVE_SPORENI',
             'PRISPEVEK_STRAVOVANI',
+            // Stravenkový paušál převzatý z jiného programu: osvobozená část podle
+            // rozpadu zdroje a zdanitelná část (nad limit, bez osvobození).
+            'PRISPEVEK_STRAVOVANI_PREVZATY',
+            'PRISPEVEK_STRAVOVANI_ZDANITELNY',
             'PROVIZE',
             'REKREACE_VOLNY_CAS',
             'SOUKROME_VOZIDLO',
@@ -330,6 +334,28 @@ final class PayrollComponentsInputsApiTest extends TestCase
                 (string) $response->getBody(),
             );
         }
+    }
+
+    /**
+     * Osvobozenou část převzatého příspěvku na stravování doložil rozpad zdrojového
+     * programu za jeho směny. Ruční částka by obešla limit za směnu § 6 odst. 9
+     * písm. b) ZDP, který u vlastních vstupů hlídá složka PRISPEVEK_STRAVOVANI.
+     */
+    public function testTakenOverMealAllowanceCannotBeEnteredByHand(): void
+    {
+        $response = $this->inputs->create(
+            $this->request('POST', '/api/payroll/inputs')->withParsedBody(
+                $this->inputPayload(
+                    $this->defaultComponentId('PRISPEVEK_STRAVOVANI_PREVZATY'),
+                    250_000,
+                    'manual-meal-allowance',
+                ),
+            ),
+            new Response(),
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString('vzniká jen převodem mezd', (string) $response->getBody());
     }
 
     private function defaultComponentId(string $code): int

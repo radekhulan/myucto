@@ -87,6 +87,9 @@ final class PayrollComponentJmhzMappingDefaults
          * docházky každý měsíc a bez zařazení nejde zmrazit měsíční hlášení.
          */
         'STRAVOVANI_ZDANITELNE' => '10328',
+        // Peněžitý příspěvek na stravování nad limit: totéž zdanitelné plnění, jen
+        // vyplacené v penězích, takže stejné zařazení.
+        'PRISPEVEK_STRAVOVANI_ZDANITELNY' => '10328',
         // Náhrady mzdy zúčtované; náhrada při DPN má vlastní detailní uzel.
         'NAHRADA_MZDY' => '10337',
         'NAHRADA_MZDY_DOVOLENA' => '10338',

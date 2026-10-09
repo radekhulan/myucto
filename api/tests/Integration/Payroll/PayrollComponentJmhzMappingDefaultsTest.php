@@ -134,6 +134,8 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             // Nepeněžní stravování je součástí hrubé mzdy i obou vyměřovacích
             // základů, detailní uzel pro ně katalog nemá, proto sběrný součet.
             'STRAVOVANI_ZDANITELNE' => '10328',
+            // Peněžitý příspěvek na stravování nad limit: totéž plnění v penězích.
+            'PRISPEVEK_STRAVOVANI_ZDANITELNY' => '10328',
             'NAHRADA_MZDY' => '10337',
             'NAHRADA_MZDY_DOVOLENA' => '10338',
             'NAHRADA_MZDY_DOVOLENA_VYROVNANI' => '10338',

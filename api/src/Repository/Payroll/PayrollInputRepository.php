@@ -2399,6 +2399,14 @@ final class PayrollInputRepository
     private const ABSENCE_ONLY_CODES = ['NAHRADA_MZDY_DPN', 'NAHRADA_MZDY_DOVOLENA'];
 
     /**
+     * Složky, jejichž osvobození doložil rozpad zdrojového programu, a které proto
+     * smí založit jen import (`import`) nebo jeho oprava (`correction`). Ruční
+     * částka by obešla limit za směnu § 6 odst. 9 písm. b) ZDP, který u vlastních
+     * vstupů hlídá {@see PayrollMealShiftEvidenceService} na složce PRISPEVEK_STRAVOVANI.
+     */
+    private const IMPORT_ONLY_CODES = ['PRISPEVEK_STRAVOVANI_PREVZATY'];
+
+    /**
      * Kontrola referencí mzdového vstupu.
      *
      * Kromě příslušnosti k firmě hlídá i stav vztahu: na `archived` ani `no_show`
@@ -2446,6 +2454,14 @@ final class PayrollInputRepository
         ) {
             throw new \InvalidArgumentException(
                 'Náhradu mzdy při DPN ani za dovolenou nelze zadat ručně; vzniká ze schválené absence.'
+            );
+        }
+        if (in_array((string) $row['code'], self::IMPORT_ONLY_CODES, true)
+            && !in_array((string) ($data['source_kind'] ?? ''), ['import', 'correction'], true)
+        ) {
+            throw new \InvalidArgumentException(
+                'Převzatý příspěvek na stravování vzniká jen převodem mezd. Vlastní příspěvek zadejte '
+                . 'na složku Příspěvek na stravování, osvobození se pak spočítá ze směn.'
             );
         }
     }

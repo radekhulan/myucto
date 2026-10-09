@@ -34,6 +34,15 @@ final class PohodaPayrollCatalog
      */
     public const TAXABLE_MEAL = 'STRAVOVANI_ZDANITELNE';
 
+    /**
+     * Stravenkový paušál (Z21) do limitu za směnu, složka výchozího číselníku
+     * (osvobozeno § 6 odst. 9 písm. b) ZDP, bez pojistného, JMHZ 10286 a 10289).
+     */
+    public const MEAL_ALLOWANCE_EXEMPT = 'PRISPEVEK_STRAVOVANI_PREVZATY';
+
+    /** Stravenkový paušál nad limit (Z21 `Hodnota4`) a paušál bez osvobození (Z21a). */
+    public const MEAL_ALLOWANCE_TAXABLE = 'PRISPEVEK_STRAVOVANI_ZDANITELNY';
+
     /** Odměna za kontejnery, tatáž složka jako ve vzoru GIRITON (druh `bonus`, JMHZ 10331). */
     public const CONTAINER_BONUS = 'ODMENA_KONTEJNERY';
 
@@ -62,6 +71,9 @@ final class PohodaPayrollCatalog
 
     /** Sloupec sešitu, do kterého se sčítá srážka za stravování (složka i srážka). */
     private const MEAL_HEADER = 'Obědy - srážka ze mzdy (Kč)';
+
+    private const MEAL_ALLOWANCE_EXEMPT_HEADER = 'Příspěvek na stravování - osvobozená část (Kč)';
+    private const MEAL_ALLOWANCE_TAXABLE_HEADER = 'Příspěvek na stravování - zdanitelná část (Kč)';
 
     /** Sloupec sešitu pro ostatní dobrovolné srážky; jeden na měsíc, hodnoty se sčítají. */
     private const OTHER_DEDUCTION_HEADER = 'Srážka ze mzdy (Kč)';
@@ -150,7 +162,33 @@ final class PohodaPayrollCatalog
         if ($number === 'J03' && str_contains($normalized, 'obed')) {
             return ['meaning' => 'meal', 'kind' => null, 'code' => null, 'header' => self::MEAL_HEADER];
         }
+        // Stravenkový paušál: osvobozenou část a nadlimitní část (`Hodnota4`) rozdělí
+        // sešit ({@see self::mealAllowanceSplit()}). Druh v profilu jen pro případ, že
+        // by složka výchozího číselníku ve firmě chyběla; zakládá ji číselník sám.
+        if ($number === 'Z21') {
+            return ['meaning' => 'meal_allowance', 'kind' => 'other', 'code' => self::MEAL_ALLOWANCE_EXEMPT, 'header' => self::MEAL_ALLOWANCE_EXEMPT_HEADER];
+        }
+        if ($number === 'Z21A') {
+            return ['meaning' => 'component', 'kind' => 'other', 'code' => self::MEAL_ALLOWANCE_TAXABLE, 'header' => self::MEAL_ALLOWANCE_TAXABLE_HEADER];
+        }
         return $ignore;
+    }
+
+    /**
+     * Stravenkový paušál z položky mzdy: osvobozená část a nadlimitní část. PAMICA
+     * vede v `Hodnota4` („z toho nad limit") část paušálu nad limitem za odpracované
+     * směny (`Hodnota3`); jen ona počet směn s nárokem zná.
+     *
+     * @return array{exempt:array{header:string,code:string,amount:float}, taxable:array{header:string,code:string,amount:float}}
+     */
+    public static function mealAllowanceSplit(float $amount, float $overLimit): array
+    {
+        $taxable = $amount > 0 ? min($amount, max(0.0, $overLimit)) : 0.0;
+
+        return [
+            'exempt' => ['header' => self::MEAL_ALLOWANCE_EXEMPT_HEADER, 'code' => self::MEAL_ALLOWANCE_EXEMPT, 'amount' => $amount - $taxable],
+            'taxable' => ['header' => self::MEAL_ALLOWANCE_TAXABLE_HEADER, 'code' => self::MEAL_ALLOWANCE_TAXABLE, 'amount' => $taxable],
+        ];
     }
 
     /** @return array{meaning:string,header:string} */
@@ -164,6 +202,10 @@ final class PohodaPayrollCatalog
             $number === 'V02' => ['meaning' => 'holiday_hours', 'header' => 'Svátek (h)'],
             $number === 'V03' && str_contains($normalized, 'lekar') => ['meaning' => 'doctor_hours', 'header' => 'Lékař (h)'],
             $number === 'V03' => ['meaning' => 'obstacle_employee_hours', 'header' => 'Placené volno (h)'],
+            // „Sick days": placené volno sjednané nad rámec zákona. PAMICA platí náhradu
+            // z průměru se sazbou `Hodnota9` (výchozí 100 %), tedy stejně jako za V03;
+            // stejný sloupec, aby se hodiny sečetly a převod za ně dopočítal náhradu.
+            str_starts_with($number, 'V18') => ['meaning' => 'obstacle_employee_hours', 'header' => 'Placené volno (h)'],
             $number === 'V04' => ['meaning' => 'unpaid_leave_hours', 'header' => 'Neplacené volno (h)'],
             $number === 'V05' => ['meaning' => 'unexcused_hours', 'header' => 'Neomluvená absence (h)'],
             str_starts_with($number, 'V06') => ['meaning' => 'obstacle_employer_hours', 'header' => 'Překážka na straně zaměstnavatele (h)'],

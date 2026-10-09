@@ -62,7 +62,7 @@ final class PohodaPayrollConverter
 
     /** Sloupce položek mezd, které čte skládání sešitu. */
     private const ITEM_COLUMNS = [
-        'MZslozky' => ['RefAg', 'RefSlozka', 'KcMzda', 'PocHodin', 'Hodnota1'],
+        'MZslozky' => ['RefAg', 'RefSlozka', 'KcMzda', 'PocHodin', 'Hodnota1', 'Hodnota4'],
         'MZneprit' => ['RefAg', 'RefSlozka', 'HodPrac', 'KcNahr', 'DatZac', 'DatKon'],
         'MZsrazky' => ['RefAg', 'RefSlozka', 'KcSrazeno'],
         'MZdoch' => ['RefAg', 'Hodin1', 'Hodin2', 'Hodin3', 'Hodin4', 'Hodin5', 'Hodin6', 'Hodin7', 'Hodin8', 'Hodin9', 'Hodin10',
@@ -268,6 +268,15 @@ final class PohodaPayrollConverter
                     $column($class['header'], 'component', 'amount', $class['kind'], $class['code']);
                     $add($class['header'], $amount);
                     $totals['components_minor'] += self::minor($amount);
+                } elseif ($class['meaning'] === 'meal_allowance') {
+                    foreach (PohodaPayrollCatalog::mealAllowanceSplit($amount, PohodaXml::num($item, 'Hodnota4')) as $part) {
+                        if (round($part['amount'], 2) == 0.0) {
+                            continue;
+                        }
+                        $column($part['header'], 'component', 'amount', $class['kind'], $part['code']);
+                        $add($part['header'], $part['amount']);
+                        $totals['components_minor'] += self::minor($part['amount']);
+                    }
                 }
                 $hours = PohodaPayrollCatalog::workHours($number);
                 if ($hours !== null) {
