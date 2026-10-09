@@ -1304,6 +1304,10 @@ async function loadContentCorrectionCandidates(submissionId: number) {
     )
     correctableComponents.value = result.forms
     correctionBlocked.value = result.blocked_forms ?? []
+    // Předvybrané jsou jen formuláře, které se proti přijatému podání změnily.
+    selectedCorrectionGuids.value = result.forms
+      .filter(component => component.changed === true)
+      .map(component => component.employment_external_identifier)
     correctionCandidatesLoaded.value = true
   } catch (exception: unknown) {
     correctingId.value = null
@@ -2200,6 +2204,19 @@ onMounted(loadVariableSymbols)
                       </span>
                       <span class="rounded-full bg-info-100 px-2 py-0.5 text-xs font-medium text-info-700">
                         {{ t(`payroll.submissions.transport.correction.action_kind.${component.action}`) }}
+                      </span>
+                      <span
+                        v-if="component.changed === true"
+                        :data-test="`transport-correct-changed-${component.employment_external_identifier}`"
+                        class="rounded-full bg-warning-100 px-2 py-0.5 text-xs font-medium text-warning-700"
+                      >
+                        {{ t('payroll.submissions.transport.correction.changed') }}
+                      </span>
+                      <span
+                        v-else-if="component.changed === false"
+                        class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
+                      >
+                        {{ t('payroll.submissions.transport.correction.unchanged') }}
                       </span>
                     </span>
                     <span class="mt-0.5 block text-xs text-neutral-600">

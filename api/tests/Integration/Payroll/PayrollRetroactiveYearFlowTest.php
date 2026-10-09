@@ -164,13 +164,10 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         $corrections = $this->container->get(JmhzContentCorrectionSubmissionService::class);
         self::assertInstanceOf(JmhzContentCorrectionSubmissionService::class, $corrections);
         $candidates = $corrections->candidates($this->supplierId, 'test', $this->submissions['2026-03'], (int) $preparation['body']['id']);
-        // Kandidáti nabízí všechny přijaté formuláře; který se změnil, vybírá
-        // účetní (G7-D3 v OVERENE-DEFEKTY.json: seznam rozdíl neoznačuje).
-        $changed = array_values(array_filter(
-            $candidates['forms'],
-            static fn (array $f): bool => $f['action'] === 'correct_values' && $f['employee_name'] === 'Syntetická Stálá',
-        ));
-        self::assertCount(1, $changed, CanonicalJson::encode($candidates));
+        // G7-D3: kandidáti označí, který přijatý formulář se proti podání změnil.
+        $flags = array_column($candidates['forms'], 'changed', 'employee_name');
+        self::assertSame(['Syntetická Stálá' => true, 'Syntetický Souběžný' => false], $flags, CanonicalJson::encode($candidates));
+        $changed = array_values(array_filter($candidates['forms'], static fn (array $f): bool => $f['changed'] === true));
         $frozen = $corrections->freeze(
             $this->supplierId,
             'test',

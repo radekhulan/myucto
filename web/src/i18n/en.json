@@ -7700,6 +7700,8 @@
           "protocol_errors": "The last displayed protocol identified {count} employments with a specific error.",
           "select_errors": "Select those flagged by the protocol",
           "flagged_by_protocol": "Protocol error",
+          "changed": "Changed since submission",
+          "unchanged": "Unchanged",
           "no_results": "No employment matches this search.",
           "employee_unknown": "Employee name unavailable",
           "technical_identity": "ČSSZ: employment {employment} · person {person}",

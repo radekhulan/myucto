@@ -138,6 +138,7 @@ final readonly class JmhzContentCorrectionSubmissionService
             $environment,
             $regularSubmissionId,
         );
+        $changed = $this->changedAcceptedForms($supplierId, $environment, $resolution, $identity, $current, $set);
         $rows = [];
         foreach ($current as $externalId => $row) {
             $externalId = (string) $externalId;
@@ -151,6 +152,9 @@ final readonly class JmhzContentCorrectionSubmissionService
                 'action' => $state->state === 'accepted'
                     ? 'correct_values'
                     : 'complete_form',
+                // true/false jen u přijatého formuláře, který šlo porovnat;
+                // null = neporovnáno (formulář není přijatý, nebo porovnání selhalo).
+                'changed' => $state->state === 'accepted' ? ($changed[$externalId] ?? null) : null,
             ];
         }
 
@@ -596,6 +600,115 @@ final readonly class JmhzContentCorrectionSubmissionService
         }
 
         return $byEmployment;
+    }
+
+    /**
+     * Které přijaté formuláře se proti přijatému podání skutečně změnily.
+     *
+     * Aktuální příprava se nanečisto sestaví jako oprava všech přijatých
+     * formulářů (s jejich původními GUID) a tělo každého formuláře bez
+     * hlavičky se porovná s tělem téhož formuláře ve zmrazeném podání, které
+     * ho naposledy přijalo. Bez toho by po opravě jediné osoby účetní dostala
+     * k výběru celou firmu. Porovnání je pomůcka výběru: když se nepovede,
+     * vrací prázdné pole a formuláře zůstanou neoznačené.
+     *
+     * @param array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}> $current
+     * @return array<string,bool> identifikátor vztahu → změněno
+     */
+    private function changedAcceptedForms(
+        int $supplierId,
+        string $environment,
+        JmhzScenario1Resolution $resolution,
+        JmhzFrozenSubmissionIdentity $identity,
+        array $current,
+        JmhzEffectiveFormSet $set,
+    ): array {
+        $forms = [];
+        $formGuids = [];
+        $accepted = [];
+        foreach ($current as $externalId => $row) {
+            $externalId = (string) $externalId;
+            $state = $set->forEmployment($externalId);
+            if ($state->state !== 'accepted' || $state->formGuid === null || $state->sourceSubmissionId === null) {
+                continue;
+            }
+            $forms[] = JmhzContentCorrectionForm::amendAccepted($row['employment_id'], $state->formGuid, true, true);
+            $formGuids[$row['employment_id']] = $state->formGuid;
+            $accepted[$externalId] = $state;
+        }
+        if ($forms === []) {
+            return [];
+        }
+        try {
+            $result = $this->validator->dryRunCorrectionPackages(
+                $resolution,
+                JmhzSubmissionEnvelope::createForExistingSubmission(
+                    $identity->submissionGuid,
+                    $formGuids,
+                    $this->filledAt(),
+                    self::PRODUCT_NAME,
+                    EpoEnvelope::appVersion() ?? '0',
+                ),
+                JmhzContentCorrectionPlan::create($forms),
+            );
+            $now = [];
+            foreach ($result['packages'] as $package) {
+                $now += self::formBodiesByGuid((string) $package['xml']);
+            }
+            $sources = [];
+            $changed = [];
+            foreach ($accepted as $externalId => $state) {
+                $sources[$state->sourceSubmissionId] ??= self::formBodiesByGuid(
+                    $this->frozen->bytes($supplierId, $environment, $state->sourceSubmissionId),
+                );
+                $guid = strtoupper((string) $state->formGuid);
+                $before = $sources[$state->sourceSubmissionId][$guid] ?? null;
+                $after = $now[$guid] ?? null;
+                if ($before === null || $after === null) {
+                    continue;
+                }
+                $changed[$externalId] = $before !== $after;
+            }
+
+            return $changed;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Těla formulářů osob (vše kromě hlavičky s GUID a typem) podle GUID formuláře.
+     *
+     * @return array<string,string>
+     */
+    private static function formBodiesByGuid(string $xml): array
+    {
+        $dom = new \DOMDocument();
+        if (!$dom->loadXML($xml, LIBXML_NONET)) {
+            return [];
+        }
+        $bodies = [];
+        foreach ($dom->getElementsByTagNameNS('*', 'formularOsoby') as $form) {
+            $guid = null;
+            $body = '';
+            foreach ($form->childNodes as $child) {
+                if (!$child instanceof \DOMElement) {
+                    continue;
+                }
+                if ($child->localName === 'hlavicka') {
+                    foreach ($child->getElementsByTagNameNS('*', 'idFormulare') as $id) {
+                        $guid = strtoupper(trim($id->textContent));
+                    }
+                    continue;
+                }
+                $body .= (string) $child->C14N();
+            }
+            if ($guid !== null) {
+                $bodies[$guid] = (string) preg_replace('/>\s+</', '><', $body);
+            }
+        }
+
+        return $bodies;
     }
 
     /**

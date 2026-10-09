@@ -7397,6 +7397,8 @@ export interface PayrollJmhzContentCorrectionForm {
    */
   protocol_error_count: number
   action: 'correct_values' | 'complete_form'
+  /** Přijatý formulář se proti podání změnil; null = neporovnáno. */
+  changed?: boolean | null
 }
 
 export interface PayrollJmhzContentCorrectionPreparation {

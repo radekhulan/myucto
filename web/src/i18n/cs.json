@@ -7700,6 +7700,8 @@
           "protocol_errors": "Poslední zobrazený protokol označil {count} pracovních vztahů konkrétní chybou.",
           "select_errors": "Vybrat označené protokolem",
           "flagged_by_protocol": "Chyba v protokolu",
+          "changed": "Změněno proti podání",
+          "unchanged": "Beze změny",
           "no_results": "Tomuto hledání neodpovídá žádný pracovní vztah.",
           "employee_unknown": "Zaměstnanec bez dostupného jména",
           "technical_identity": "ČSSZ: pracovní vztah {employment} · osoba {person}",
