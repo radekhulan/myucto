@@ -3021,8 +3021,10 @@ final class JmhzScenario1ControlEvaluator
                         ? null
                         : 'Atribut 10320 musí být uveden v lednovém až březnovém podání.';
                 }
+                // all() místo has(): přítomnost se musí započítat jako přečtený
+                // údaj, jinak perForm() součást přeskočí a nález se ztratí.
                 foreach ($annualIds as $attributeId) {
-                    if ($form->has($attributeId)) {
+                    if ($form->all($attributeId) !== []) {
                         return "Atribut {$attributeId} smí být uveden jen v lednovém až březnovém podání.";
                     }
                 }
@@ -3049,7 +3051,7 @@ final class JmhzScenario1ControlEvaluator
                         : 'Atribut 10319 musí být uveden v lednovém a únorovém podání.';
                 }
 
-                return $form->has('10319')
+                return $form->all('10319') !== []
                     ? 'Atribut 10319 smí být uveden jen v lednovém a únorovém podání.'
                     : null;
             },
@@ -3824,7 +3826,9 @@ final class JmhzScenario1ControlEvaluator
         return $this->perForm(
             $projection,
             static function (JmhzAttributeScope $form) use ($amountId, $flagId): ?string {
-                if (!$form->has($amountId)) {
+                // all() místo has(): bez započteného čtení by součást s částkou
+                // a chybějícím příznakem perForm() přeskočil.
+                if ($form->all($amountId) === []) {
                     return null;
                 }
                 if ($form->boolean($flagId) === true) {
