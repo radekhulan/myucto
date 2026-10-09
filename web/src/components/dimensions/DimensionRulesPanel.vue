@@ -12,6 +12,7 @@ import {
 } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import { useToast } from '@/composables/useToast'
+import { useSupplierStore } from '@/stores/supplier'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 
 /**
@@ -23,6 +24,8 @@ const props = defineProps<{ canWrite: boolean }>()
 const { t } = useI18n()
 const toast = useToast()
 const dims = useDimensions()
+// Daňová evidence: pravidla se uplatní na pohyby peněžního deníku (výdaj = 5, příjem = 6).
+const isTaxEvidence = computed(() => useSupplierStore().currentSupplier?.accounting_mode === 'tax_evidence')
 
 const ENFORCEMENTS: DimensionRuleEnforcement[] = ['error', 'warning', 'none']
 
@@ -189,6 +192,7 @@ function percent(ratio: number): string {
         <div>
           <h2 class="text-lg font-semibold">{{ t('dimensions.rules.title') }}</h2>
           <p class="text-xs text-neutral-500 max-w-3xl">{{ t('dimensions.rules.hint') }}</p>
+          <p v-if="isTaxEvidence" class="text-xs text-primary-800 max-w-3xl mt-1" data-test="rules-tax-evidence">{{ t('dimensions.rules.tax_evidence_hint') }}</p>
         </div>
         <button v-if="props.canWrite" type="button" :disabled="busy || activeTypes.length === 0" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="rule-new" @click="openForm()">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
@@ -312,12 +316,13 @@ function percent(ratio: number): string {
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-1">{{ t('dimensions.rules.audit_rows', { count: audit.rows.length }) }}</h3>
           <table class="w-full text-sm">
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="r in audit.rows" :key="`${r.line_id}-${r.type_id}`">
+              <tr v-for="(r, i) in audit.rows" :key="`${r.line_id}-${r.type_id}-${i}`">
                 <td class="py-1 pr-3 whitespace-nowrap">{{ formatDate(r.entry_date) }}</td>
                 <td class="py-1 pr-3">
-                  <RouterLink :to="{ path: '/accounting/journal', query: { entry_id: r.entry_id } }" class="text-primary-600 hover:underline">
+                  <RouterLink v-if="r.entry_id" :to="{ path: '/accounting/journal', query: { entry_id: r.entry_id } }" class="text-primary-600 hover:underline">
                     {{ r.document_no || `#${r.entry_id}` }}
                   </RouterLink>
+                  <span v-else>{{ r.document_no || `#${r.source_id}` }}</span>
                 </td>
                 <td class="py-1 pr-3"><span class="font-mono">{{ r.account_code }}</span> <span class="text-neutral-500">{{ r.account_name }}</span></td>
                 <td class="py-1 pr-3">{{ r.type_name }}</td>

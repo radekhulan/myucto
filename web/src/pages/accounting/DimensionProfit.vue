@@ -11,6 +11,7 @@ import {
 } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import { useToast } from '@/composables/useToast'
+import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -32,10 +33,16 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const dims = useDimensions()
+// Daňová evidence: výsledovka z peněžního deníku (příjmy a výdaje), peněžní tok
+// po dimenzi a výkazy z deníku tu nejsou.
+const isTaxEvidence = computed(() => useSupplierStore().currentSupplier?.accounting_mode === 'tax_evidence')
+function revenueLabel() { return isTaxEvidence.value ? t('dimensions.profit_income') : t('dimensions.profit_revenue') }
+function costLabel() { return isTaxEvidence.value ? t('dimensions.profit_expense') : t('dimensions.profit_cost') }
+function metricLabel(metric: 'revenue' | 'cost' | 'result') { return metric === 'revenue' ? revenueLabel() : metric === 'cost' ? costLabel() : t('dimensions.profit_result') }
 
 type Tab = 'profit' | 'cash_flow'
 const year = new Date().getFullYear()
-const tab = ref<Tab>(route.query.tab === 'cash_flow' ? 'cash_flow' : 'profit')
+const tab = ref<Tab>(route.query.tab === 'cash_flow' && useSupplierStore().currentSupplier?.accounting_mode !== 'tax_evidence' ? 'cash_flow' : 'profit')
 const from = ref(String(route.query.from || `${year}-01-01`))
 const to = ref(String(route.query.to || `${year}-12-31`))
 const groupScope = ref(route.query.scope === 'group')
@@ -99,11 +106,12 @@ function otherReportQuery(valueId: number | null, descendants = true) { return {
   to: to.value,
   ...(valueId ? { dimension_value_id: String(valueId), dimension_descendants: descendants ? '1' : '0' } : {}),
 } }
-const otherReports = [
+const doubleEntryReports = [
   { name: 'accounting-balance-sheet', labelKey: 'accounting.balance_sheet.title' },
   { name: 'accounting-trial-balance', labelKey: 'accounting.trial_balance.title' },
   { name: 'accounting-general-ledger', labelKey: 'accounting.general_ledger.title' },
 ]
+const otherReports = computed(() => isTaxEvidence.value ? [] : doubleEntryReports)
 
 function profitParams(): DimensionProfitParams | null {
   if (!profitForm.typeId) return null
@@ -291,7 +299,7 @@ function money(v: number) {
                 @click="switchTab('profit')">
           {{ t('dimensions.tab_profit') }}
         </button>
-        <button type="button" role="tab" :aria-selected="tab === 'cash_flow'" data-test="tab-cash-flow"
+        <button v-if="!isTaxEvidence" type="button" role="tab" :aria-selected="tab === 'cash_flow'" data-test="tab-cash-flow"
                 class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
                 :class="tab === 'cash_flow' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
                 @click="switchTab('cash_flow')">
@@ -354,13 +362,16 @@ function money(v: number) {
           {{ t('dimensions.profit_companies', { count: profitReport.supplier_ids.length }) }}
           <span v-if="profitReport.hidden_companies > 0" class="text-warning-700">{{ t('dimensions.profit_hidden', { count: profitReport.hidden_companies }) }}</span>
         </p>
+        <p v-if="profitReport.basis === 'cash_journal'" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="profit-cash-journal">
+          {{ t('dimensions.profit_cash_journal_note') }}
+        </p>
         <p v-if="profitReport.restricted" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="profit-restricted">
           {{ t('dimensions.profit_restricted_note') }}
         </p>
 
         <div v-if="hasActivity(profitReport.totals)" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4" data-test="profit-summary">
           <div v-for="metric in (['revenue', 'cost', 'result'] as const)" :key="metric" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
-            <p class="text-xs text-neutral-500">{{ t(`dimensions.profit_${metric}`) }}</p>
+            <p class="text-xs text-neutral-500">{{ metricLabel(metric) }}</p>
             <p class="mt-1 text-xl font-semibold tabular-nums" :class="metric === 'result' ? (profitReport.totals.result < 0 ? 'text-danger-600' : profitReport.totals.result > 0 ? 'text-success-700' : '') : ''">
               {{ money(profitReport.totals[metric]) }}
             </p>
@@ -382,7 +393,7 @@ function money(v: number) {
           </div>
         </div>
 
-        <DimensionProfitMatrix v-if="profitReport.matrix" :matrix="profitReport.matrix" />
+        <DimensionProfitMatrix v-if="profitReport.matrix" :matrix="profitReport.matrix" :cash-journal="profitReport.basis === 'cash_journal'" />
 
         <div v-if="!profitReport.matrix && visibleRows.length === 0 && !hasActivity(profitReport.unassigned)" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6 text-sm text-neutral-500" data-test="profit-no-activity">{{ t('dimensions.profit_no_activity') }}</div>
         <div v-else-if="!profitReport.matrix" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
@@ -390,10 +401,10 @@ function money(v: number) {
             <thead class="bg-neutral-50 text-neutral-600">
               <tr>
                 <th class="px-4 py-3 text-left font-medium">{{ selectedType?.name }}</th>
-                <th class="px-4 py-3 text-left font-medium whitespace-nowrap">{{ t('dimensions.other_reports_short') }}</th>
+                <th v-if="otherReports.length" class="px-4 py-3 text-left font-medium whitespace-nowrap">{{ t('dimensions.other_reports_short') }}</th>
                 <th v-if="showResponsible" class="px-4 py-3 text-left font-medium whitespace-nowrap">{{ t('dimensions.profit_responsible') }}</th>
-                <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ t('dimensions.profit_revenue') }}</th>
-                <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ t('dimensions.profit_cost') }}</th>
+                <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ revenueLabel() }}</th>
+                <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ costLabel() }}</th>
                 <th class="px-4 py-3 text-right font-medium whitespace-nowrap">{{ t('dimensions.profit_result') }}</th>
               </tr>
             </thead>
@@ -410,7 +421,7 @@ function money(v: number) {
                     <span v-if="row.name !== row.code" class="truncate">{{ row.name }}</span>
                   </div>
                 </td>
-                <td class="px-4 py-2">
+                <td v-if="otherReports.length" class="px-4 py-2">
                   <div class="flex flex-wrap gap-x-3 gap-y-1">
                     <RouterLink v-for="other in otherReports" :key="other.name" :to="{ name: other.name, query: otherReportQuery(row.value_id) }"
                                 class="text-primary-700 hover:underline cursor-pointer whitespace-nowrap" :data-test="`profit-row-report-${row.value_id}`">
@@ -425,7 +436,7 @@ function money(v: number) {
               </tr>
               <tr v-if="!profitReport.restricted && hasActivity(profitReport.unassigned)" class="text-neutral-500 italic">
                 <td class="px-4 py-2">{{ t('dimensions.profit_unassigned') }}</td>
-                <td class="px-4 py-2" />
+                <td v-if="otherReports.length" class="px-4 py-2" />
                 <td v-if="showResponsible" class="px-4 py-2" />
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.unassigned.revenue) }}</td>
                 <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.unassigned.cost) }}</td>
@@ -435,7 +446,7 @@ function money(v: number) {
             <tfoot class="bg-neutral-50 font-semibold">
               <tr>
                 <td class="px-4 py-3">{{ t('dimensions.profit_total') }}</td>
-                <td class="px-4 py-3" />
+                <td v-if="otherReports.length" class="px-4 py-3" />
                 <td v-if="showResponsible" class="px-4 py-3" />
                 <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.totals.revenue) }}</td>
                 <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap">{{ money(profitReport.totals.cost) }}</td>
@@ -450,8 +461,8 @@ function money(v: number) {
             <thead class="bg-neutral-50 text-neutral-600">
               <tr>
                 <th class="px-4 py-3 text-left font-medium">{{ t('dimensions.analytics_company') }}</th>
-                <th class="px-4 py-3 text-right font-medium">{{ t('dimensions.profit_revenue') }}</th>
-                <th class="px-4 py-3 text-right font-medium">{{ t('dimensions.profit_cost') }}</th>
+                <th class="px-4 py-3 text-right font-medium">{{ revenueLabel() }}</th>
+                <th class="px-4 py-3 text-right font-medium">{{ costLabel() }}</th>
                 <th class="px-4 py-3 text-right font-medium">{{ t('dimensions.profit_result') }}</th>
               </tr>
             </thead>
@@ -483,7 +494,7 @@ function money(v: number) {
         <p class="mb-3 text-xs text-neutral-500 max-w-3xl">{{ t('dimensions.cf_method_note') }}</p>
         <DimensionCashFlowPanel :report="cashFlowReport" />
       </template>
-      <div class="mt-5 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
+      <div v-if="otherReports.length" class="mt-5 bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <h2 class="font-semibold">{{ t('dimensions.other_reports') }}</h2>
         <p class="text-xs text-neutral-500 mt-1 mb-3">{{ t('dimensions.other_reports_hint') }}</p>
         <div class="flex flex-wrap gap-2" data-test="profit-other-reports">

@@ -241,7 +241,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/balance-sheet',    name: 'accounting-balance-sheet',    component: () => import('@/pages/accounting/BalanceSheet.vue'),    meta: { requiresDoubleEntry: true } },
       { path: 'accounting/income-statement', name: 'accounting-income-statement', component: () => import('@/pages/accounting/IncomeStatement.vue'), meta: { requiresDoubleEntry: true } },
       { path: 'accounting/income-statement-by-function', name: 'accounting-income-statement-by-function', component: () => import('@/pages/accounting/IncomeStatementByFunction.vue'), meta: { requiresDoubleEntry: true } },
-      { path: 'accounting/dimension-profit', name: 'accounting-dimension-profit', component: () => import('@/pages/accounting/DimensionProfit.vue'), meta: { requiresDoubleEntry: true } },
+      { path: 'accounting/dimension-profit', name: 'accounting-dimension-profit', component: () => import('@/pages/accounting/DimensionProfit.vue'), meta: { requiresAccountingMode: true } },
       // Výjimky mapování účtů do výkazů pro konkrétní firmu (splatnost, spřízněné osoby, analytiky).
       { path: 'accounting/statement-mapping', name: 'accounting-statement-mapping', component: () => import('@/pages/accounting/StatementMapping.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/saldo',            name: 'accounting-saldo',            component: () => import('@/pages/accounting/Saldokonto.vue'),      meta: { requiresDoubleEntry: true } },
@@ -350,7 +350,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'group-stats', name: 'group-stats', component: () => import('@/pages/GroupStats.vue'), meta: { permission: 'dashboard.portfolio' } },
       { path: 'stats',                  name: 'stats',           component: () => import('@/pages/Stats.vue') },
       { path: 'purchase-stats',         name: 'purchase-stats',  component: () => import('@/pages/PurchaseStats.vue') },
-      { path: 'dimension-stats',         name: 'dimension-stats', component: () => import('@/pages/DimensionStats.vue'), meta: { requiresDoubleEntry: true } },
+      { path: 'dimension-stats',         name: 'dimension-stats', component: () => import('@/pages/DimensionStats.vue'), meta: { requiresAccountingMode: true } },
       // Sjednocená stránka „Bankovní účty" (Finance): výpisy + měny/účty + stavy + avíza.
       // Pravidla účtování (bank posting rules) se přesunula pod Šablony (záložka „Pravidla
       // účtování"), vedle Pravidel nákladů — jednotné místo pro všechna pravidla/šablony.

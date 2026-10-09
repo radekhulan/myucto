@@ -33,6 +33,12 @@ final class DimensionRuleService
     /** Zdroje zápisu, na které se pravidla vztahují (doklady a ruční zápis). */
     public const RULE_SOURCES = ['invoice', 'purchase_invoice', 'cash', 'bank', 'manual'];
 
+    /** Třída, se kterou se maska pravidla porovnává u příjmu daňové evidence. */
+    public const CASH_INCOME_CODE = '6';
+
+    /** Třída, se kterou se maska pravidla porovnává u výdaje daňové evidence. */
+    public const CASH_EXPENSE_CODE = '5';
+
     private const MAX_LISTED = 5;
 
     public function __construct(private readonly Connection $db) {}
@@ -154,6 +160,36 @@ final class DimensionRuleService
         } catch (PostingException $e) {
             throw new DimensionException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
+    }
+
+    /**
+     * Pravidlo pro pohyb peněžního deníku daňové evidence. Pohyb nemá účet, maska se
+     * proto porovnává s třídou, do které by stejný pohyb patřil v podvojném účetnictví:
+     * příjem {@see CASH_INCOME_CODE}, výdaj {@see CASH_EXPENSE_CODE}. Pravidlo `5, 6`
+     * tak platí v obou režimech; maska na konkrétní účet (`518`) v daňové evidenci nic
+     * nezachytí. Vozidlo podle platební karty se dohledá stejně jako při zaúčtování
+     * (bankovní pohyb, přijatá faktura).
+     *
+     * @param list<array<string,mixed>> $rules {@see usableRules()} firmy
+     * @return array{value_id:?int, enforcement:?string} výchozí hodnota, jinak nejpřísnější vynucení
+     */
+    public function cashMovementRule(array $rules, int $supplierId, string $sourceType, ?int $sourceId, string $code, string $date, int $typeId): array
+    {
+        $rules = array_values(array_filter($rules, static fn (array $r): bool => $r['dimension_type_id'] === $typeId));
+        if ($rules === []) {
+            return ['value_id' => null, 'enforcement' => null];
+        }
+        $postingSource = match ($sourceType) {
+            'invoice_payment' => 'invoice',
+            default => $sourceType,
+        };
+        $card = fn (int $type): ?int => $this->cardVehicleValue($supplierId, $postingSource, $sourceId, $type);
+        $result = DimensionRuleEngine::apply($rules, [['account_code' => $code]], $date, $card);
+        $valueId = $result['lines'][0]['dimensions'][$typeId] ?? null;
+        if ($valueId !== null) {
+            return ['value_id' => (int) $valueId, 'enforcement' => null];
+        }
+        return ['value_id' => null, 'enforcement' => $result['violations'][0]['enforcement'] ?? null];
     }
 
     /**

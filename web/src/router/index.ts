@@ -229,6 +229,8 @@ const commercialOnlyRouteNames = new Set([
   'gopay',
   // Majetek je dostupný i v daňové evidenci (requiresAccountingMode), licence platí stejně.
   'accounting-assets', 'accounting-asset-new', 'accounting-asset-detail', 'accounting-asset-edit',
+  // Dimenze: v daňové evidenci z peněžního deníku (requiresAccountingMode), licence platí stejně.
+  'accounting-dimension-profit', 'dimension-stats',
   'automation-cockpit',
   'accounting-setup-assistant',
   'portfolio-overview',

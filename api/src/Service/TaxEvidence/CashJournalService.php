@@ -375,6 +375,32 @@ final class CashJournalService
         return $monthly;
     }
 
+    /**
+     * Pohyby deníku v rozsahu jednoho kalendářního roku s rozpadem do kbelíků, bez
+     * dotahování kurzů a bez totálů. Podklad pro analytiku po dimenzích v daňové
+     * evidenci ({@see CashJournalDimensionService}); kbelíky jsou tytéž jako v deníku.
+     *
+     * @return list<array{row:array<string,mixed>, alloc:array<string,float>}>
+     */
+    public function classifiedMovements(int $supplierId, string $from, string $to): array
+    {
+        $year = (int) substr($from, 0, 4);
+        $isVatPayer = $this->isVatPayerAt($supplierId, $to);
+        $taxConstants = $this->constants->forYear($year);
+        $out = [];
+        foreach ($this->repo->movements($supplierId, $from, $to, $isVatPayer) as $row) {
+            $classified = $this->classify(
+                $row,
+                $this->isVatPayerAt($supplierId, (string) $row['movement_date']),
+                $taxConstants,
+                $supplierId,
+                $year,
+            );
+            $out[] = ['row' => $row, 'alloc' => $classified['alloc']];
+        }
+        return $out;
+    }
+
     // ── klasifikátor §5 ──────────────────────────────────────────────────────
 
     /**

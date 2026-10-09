@@ -407,7 +407,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/crm',             label: t('nav.crm'),            icon: ICONS.crm },
         { to: '/stats',           label: t('nav.stats'),          icon: ICONS.stats },
         { to: '/purchase-stats',  label: t('nav.purchase_stats'), icon: ICONS.purchase },
-        ...(dimensionsEnabled && isDoubleEntry ? [{ to: '/dimension-stats', label: t('nav.dimensions'), icon: ICONS.tag, permission: 'accounting' as PermissionKey }] : []),
+        ...(dimensionsEnabled && (isDoubleEntry || isTaxEvidence) ? [{ to: '/dimension-stats', label: t('nav.dimensions'), icon: ICONS.tag, permission: 'accounting' as PermissionKey }] : []),
         ...(auth.hasCommercialFeatures && supplierStore.hasMultiple && auth.canRead('dashboard.portfolio') ? [{ to: '/group-stats', label: t('nav.group_stats'), icon: ICONS.stock_warehouses, permission: 'dashboard.portfolio' as PermissionKey }] : []),
       ],
     },
@@ -646,6 +646,8 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/tax-evidence/cash-journal',         label: t('nav.de_cash_journal'),         icon: ICONS.tax_book },
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
         { to: '/tax-evidence/tax-estimate',         label: t('nav.de_tax_estimate'),         icon: ICONS.tax_income },
+        // Výsledovka po dimenzi stojí v daňové evidenci na peněžním deníku.
+        ...(dimensionsEnabled ? [{ to: '/accounting/dimension-profit', label: t('nav.accounting_dimension_profit'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
         { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/tax-evidence/expense-rules', label: t('accounting.expense_rules.title'), icon: ICONS.codebooks, permission: 'accounting' },
         { to: '/tax-evidence/bank-rules', label: t('nav.tax_evidence_bank_rules'), icon: ICONS.bank, permission: 'tax_evidence' as PermissionKey },

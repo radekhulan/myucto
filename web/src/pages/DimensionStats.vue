@@ -264,6 +264,9 @@ watch(() => supplier.currentSupplierId, async () => {
       <EmptyState v-else-if="types.length === 0" boxed icon="tag" :title="t('dimensions.types_empty')" to="/company/dimensions" :cta="t('dimensions.title')" />
       <template v-else-if="report">
         <p v-if="report.hidden_companies" class="mb-3 text-xs text-warning-700">{{ t('dimensions.profit_hidden', { count: report.hidden_companies }) }}</p>
+        <p v-if="report.basis === 'cash_journal'" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="dimension-stats-cash-journal">
+          {{ t('dimensions.profit_cash_journal_note') }}
+        </p>
         <div v-if="selectedComparison" class="flex flex-wrap items-center gap-3 mb-4 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2 text-sm" data-test="dimension-stats-selected">
           <span>{{ t('dimensions.analytics_selected') }}: <strong>{{ selectedLabel }}</strong></span>
           <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="trendValue = 'total'">

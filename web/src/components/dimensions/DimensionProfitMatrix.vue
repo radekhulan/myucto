@@ -11,6 +11,8 @@ import { formatMoney } from '@/composables/useFormat'
  */
 const props = defineProps<{
   matrix: DimensionProfitMatrix
+  /** Daňová evidence: řádky jsou příjmy a výdaje peněžního deníku, ne účty. */
+  cashJournal?: boolean
 }>()
 
 const { t } = useI18n()
@@ -23,8 +25,8 @@ const sections = computed(() => {
   const revenue = visibleRows.value.filter(r => r.account_type === 'revenue')
   const expense = visibleRows.value.filter(r => r.account_type !== 'revenue')
   return [
-    { key: 'revenue', label: t('dimensions.profit_revenue'), rows: revenue },
-    { key: 'expense', label: t('dimensions.profit_cost'), rows: expense },
+    { key: 'revenue', label: props.cashJournal ? t('dimensions.profit_income') : t('dimensions.profit_revenue'), rows: revenue },
+    { key: 'expense', label: props.cashJournal ? t('dimensions.profit_expense') : t('dimensions.profit_cost'), rows: expense },
   ].filter(s => s.rows.length > 0)
 })
 

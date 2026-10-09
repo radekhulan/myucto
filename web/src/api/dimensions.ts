@@ -334,6 +334,8 @@ export interface DimensionProfitReport {
   from: string
   to: string
   supplier_ids: number[]
+  /** `cash_journal` = firma v daňové evidenci, sestava z peněžního deníku (příjmy a výdaje). */
+  basis?: 'journal' | 'cash_journal'
   hidden_companies: number
   value_id?: number | null
   responsible_user_id?: number | null
@@ -371,6 +373,7 @@ export interface DimensionAnalyticsReport {
   type: DimensionType
   year: number
   supplier_ids: number[]
+  basis?: 'journal' | 'cash_journal'
   rows: DimensionProfitRow[]
   unassigned: DimensionAnalyticsAmounts
   totals: DimensionAnalyticsAmounts

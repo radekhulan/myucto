@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Service\TaxEvidence\CashJournalDimensionService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionSplitAllocation;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
@@ -41,6 +43,8 @@ final class DimensionProfitService
     public function __construct(
         private readonly Connection $db,
         private readonly DimensionRepository $dimensions,
+        private readonly AccountingModeRepository $modes,
+        private readonly CashJournalDimensionService $cashJournal,
     ) {}
 
     /**
@@ -154,6 +158,7 @@ final class DimensionProfitService
             'from' => $from,
             'to' => $to,
             'supplier_ids' => $supplierIds,
+            'basis' => $this->basis($supplierId, (int) substr($from, 0, 4)),
             'value_id' => $rootValueId > 0 ? $rootValueId : null,
             'responsible_user_id' => $responsible > 0 ? $responsible : null,
             'restricted' => $restricted,
@@ -260,6 +265,7 @@ final class DimensionProfitService
             'type' => $report['type'],
             'year' => $year,
             'supplier_ids' => $ids,
+            'basis' => $this->basis($supplierId, $year),
             'rows' => $report['rows'],
             'unassigned' => self::analyticsMoney($valueTotals[''] ?? []),
             'totals' => self::analyticsMoney($yearTotals),
@@ -382,6 +388,43 @@ final class DimensionProfitService
      * @return list<array{value_key:string, code:string, name:string, account_type:string, revenue:int, cost:int}>
      */
     private function sums(int $supplierId, int $typeId, string $from, string $to, bool $monthly = false): array
+    {
+        // Rok v daňové evidenci nemá deník; sestava stojí na peněžním deníku
+        // ({@see CashJournalDimensionService}). Podvojné roky jdou beze změny z deníku.
+        $out = [];
+        $journalFrom = null;
+        for ($year = (int) substr($from, 0, 4); $year <= (int) substr($to, 0, 4); $year++) {
+            $start = max($from, sprintf('%04d-01-01', $year));
+            $end = min($to, sprintf('%04d-12-31', $year));
+            if ($this->modes->forYear($supplierId, $year) === 'tax_evidence') {
+                if ($journalFrom !== null) {
+                    array_push($out, ...$this->journalSums($supplierId, $typeId, $journalFrom, sprintf('%04d-12-31', $year - 1), $monthly));
+                    $journalFrom = null;
+                }
+                array_push($out, ...$this->cashJournal->sums($supplierId, $typeId, $start, $end, $monthly));
+            } else {
+                $journalFrom ??= $start;
+            }
+        }
+        if ($journalFrom !== null) {
+            array_push($out, ...$this->journalSums($supplierId, $typeId, $journalFrom, $to, $monthly));
+        }
+        return $out;
+    }
+
+    /**
+     * Zda firma vede v roce daňovou evidenci — sestava pak ukazuje příjmy a výdaje
+     * peněžního deníku místo výnosů a nákladů.
+     */
+    public function basis(int $supplierId, int $year): string
+    {
+        return $this->modes->forYear($supplierId, $year) === 'tax_evidence' ? 'cash_journal' : 'journal';
+    }
+
+    /**
+     * @return list<array{value_key:string, code:string, name:string, account_type:string, revenue:int, cost:int}>
+     */
+    private function journalSums(int $supplierId, int $typeId, string $from, string $to, bool $monthly = false): array
     {
         $monthSelect = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m') AS month_key, " : '';
         $monthGroup = $monthly ? "DATE_FORMAT(e.entry_date, '%Y-%m'), " : '';

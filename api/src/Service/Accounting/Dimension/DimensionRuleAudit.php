@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Dimension;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Service\TaxEvidence\CashJournalDimensionService;
 use PDO;
 
 /**
@@ -25,13 +27,29 @@ final class DimensionRuleAudit
 {
     private const EXEMPT_SOURCES = ['closing', 'opening'];
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly AccountingModeRepository $modes,
+        private readonly CashJournalDimensionService $cashJournal,
+    ) {}
+
+    /**
+     * Firma v daňové evidenci (podle roku začátku období) deník nemá; kontrola i pokrytí
+     * jdou nad pohyby peněžního deníku ({@see CashJournalDimensionService}).
+     */
+    private function isTaxEvidence(int $supplierId, string $dateFrom): bool
+    {
+        return $this->modes->forYear($supplierId, (int) substr($dateFrom, 0, 4)) === 'tax_evidence';
+    }
 
     /**
      * @return array{rows:list<array<string,mixed>>, summary:list<array<string,mixed>>, total:int, truncated:bool}
      */
     public function violations(int $supplierId, string $dateFrom, string $dateTo, int $limit = 200): array
     {
+        if ($this->isTaxEvidence($supplierId, $dateFrom)) {
+            return $this->cashJournal->violations($supplierId, $dateFrom, $dateTo, $limit);
+        }
         $rules = array_values(array_filter(
             (new DimensionRuleService($this->db))->usableRules($supplierId),
             static fn (array $r): bool => $r['enforcement'] !== 'none',
@@ -145,6 +163,9 @@ final class DimensionRuleAudit
      */
     public function coverage(int $supplierId, string $dateFrom, string $dateTo): array
     {
+        if ($this->isTaxEvidence($supplierId, $dateFrom)) {
+            return $this->cashJournal->coverage($supplierId, $dateFrom, $dateTo);
+        }
         $types = (new DimensionRepository($this->db))->listTypes($supplierId, false);
         [$baseSql, $baseParams] = $this->baseSql($supplierId, $dateFrom, $dateTo);
         $out = [];
