@@ -91,6 +91,86 @@ final class PohodaPayrollOlderYearImportTest extends TestCase
         ], $this->componentVersions($supplierId, Payroll::BONUS_CODE), $this->explain($older));
     }
 
+    public function testOlderYearAfterNewerAddsRelationsOfExistingPeople(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = Payroll::write($this->tmp);
+
+        $this->import($supplierId, $file, 2026);
+        $older = $this->import($supplierId, $file, 2025);
+
+        $this->assertRelations($supplierId, $older);
+        self::assertSame([], self::messages($older, 'person_failed'), $this->explain($older));
+        self::assertSame([], self::messages($older, 'person_not_found'), $this->explain($older));
+
+        // Mzdy DPP z roku 2025 patří DPP, ne pracovnímu poměru téže osoby.
+        $dpp = $this->employment($supplierId, Payroll::ALENA_DPP);
+        $hpp = $this->employment($supplierId, Payroll::ALENA_HPP);
+        self::assertSame(400000, $this->scalar(
+            "SELECT COALESCE(SUM(i.amount_minor), 0) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+              WHERE i.supplier_id = ? AND i.employment_id = ? AND c.code = ? AND i.period_start = '2025-01-01' AND i.status <> 'cancelled'",
+            [$supplierId, $dpp['id'], Payroll::HOURLY_CODE],
+        ), $this->explain($older));
+        self::assertSame(0, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_inputs i JOIN payroll_component_definitions c ON c.id = i.component_id
+              WHERE i.supplier_id = ? AND i.employment_id = ? AND c.code = ?",
+            [$supplierId, $hpp['id'], Payroll::HOURLY_CODE],
+        ), $this->explain($older));
+    }
+
+    public function testNewerYearAfterOlderDoesNotDuplicateRelations(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = Payroll::write($this->tmp);
+
+        $older = $this->import($supplierId, $file, 2025);
+        $this->assertRelations($supplierId, $older, false);
+        $newer = $this->import($supplierId, $file, 2026);
+        $this->assertRelations($supplierId, $newer);
+        self::assertSame([], self::messages($newer, 'person_failed'), $this->explain($newer));
+        // Únorový doplatek po skončení vztahu ukončeného převodem 2025: varování místo druhé osoby.
+        self::assertCount(1, self::messages($newer, 'payslip_outside_employment'), $this->explain($newer));
+    }
+
+    public function testRepeatedOlderYearChangesNothing(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = Payroll::write($this->tmp);
+
+        $this->import($supplierId, $file, 2026);
+        $this->import($supplierId, $file, 2025);
+        $inputs = $this->rows('payroll_inputs', $supplierId);
+        $again = $this->import($supplierId, $file, 2025);
+
+        $this->assertRelations($supplierId, $again);
+        self::assertSame(2, self::stepCounts($again, PohodaPayrollImporter::STEP_MONTHS)['existing'] ?? 0, $this->explain($again));
+        self::assertSame($inputs, $this->rows('payroll_inputs', $supplierId));
+    }
+
+    /** Dvě osoby, čtyři vztahy s druhem a daty ze zdroje a převzaté úhrny všech mezd na vztahu. */
+    private function assertRelations(int $supplierId, ImportProtocol $protocol, bool $year2026 = true): void
+    {
+        $open = $year2026 ? [[Payroll::ALENA_OPEN, 'dpp', Payroll::ALENA_OPEN_START, null, 'active', 'Alena Vzorová']] : [];
+        self::assertSame(2, $this->rows('payroll_employees', $supplierId), $this->explain($protocol));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT e.code, e.relation_type, e.start_date, e.end_date, e.status, p.full_name
+               FROM payroll_employments e JOIN payroll_employees p ON p.id = e.employee_id AND p.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? ORDER BY e.code'
+        );
+        $stmt->execute([$supplierId]);
+        self::assertSame([
+            [Payroll::ALENA_HPP, 'employment', '2024-01-01', null, 'active', 'Alena Vzorová'],
+            [Payroll::ALENA_DPP, 'dpp', Payroll::ALENA_DPP_START, Payroll::ALENA_DPP_END, 'ended', 'Alena Vzorová'],
+            ...$open,
+            [Payroll::BOHUMIL_HPP, 'employment', '2025-01-01', Payroll::BOHUMIL_END, 'ended', 'Bohumil Ukázkový'],
+            [Payroll::BOHUMIL_DPP, 'dpp', '2025-01-01', Payroll::BOHUMIL_END, 'ended', 'Bohumil Ukázkový'],
+        ], array_map(static fn (array $r): array => array_values($r), $stmt->fetchAll(\PDO::FETCH_ASSOC)), $this->explain($protocol));
+        self::assertSame(0, $this->scalar(
+            'SELECT COUNT(*) FROM payroll_migration_reference_totals WHERE supplier_id = ? AND employment_id IS NULL',
+            [$supplierId],
+        ), $this->explain($protocol));
+    }
+
     private function import(int $supplierId, string $file, int $year): ImportProtocol
     {
         $protocol = $this->importer->run($supplierId, $this->userId, $file, $year, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);

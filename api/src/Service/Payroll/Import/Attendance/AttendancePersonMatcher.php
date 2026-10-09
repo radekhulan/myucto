@@ -136,7 +136,7 @@ final class AttendancePersonMatcher
                 );
                 $candidates = $this->employmentsOf($employeeIds, $byEmployee);
                 if ($candidates !== []) {
-                    return $this->resolved('birth_number', self::narrow($candidates, $relationTypes));
+                    return $this->resolved('birth_number', self::narrow($candidates, $relationTypes, $personalNumber));
                 }
                 if ($employeeIds !== []) {
                     $warnings[] = "Osoba s tímto rodným číslem je v evidenci, ale nemá pracovní vztah platný v období {$period}.";
@@ -153,13 +153,13 @@ final class AttendancePersonMatcher
                     === mb_strtolower($personalNumber, 'UTF-8'),
             ));
             if ($candidates !== []) {
-                return $this->resolved('employment_code', self::narrow($candidates, $relationTypes));
+                return $this->resolved('employment_code', self::narrow($candidates, $relationTypes, $personalNumber));
             }
         }
 
         $candidates = $this->employmentsOf(array_keys($nameIndex[$nameKey] ?? []), $byEmployee);
         if ($candidates !== []) {
-            return $this->resolved('name', self::narrow($candidates, $relationTypes));
+            return $this->resolved('name', self::narrow($candidates, $relationTypes, $personalNumber));
         }
 
         return $this->result('not_found', null, []);
@@ -226,9 +226,23 @@ final class AttendancePersonMatcher
      * @param list<string> $relationTypes
      * @return list<array<string,mixed>>
      */
-    private static function narrow(array $candidates, array $relationTypes): array
+    private static function narrow(array $candidates, array $relationTypes, string $personalNumber = ''): array
     {
-        if (count($candidates) < 2 || $relationTypes === []) {
+        if (count($candidates) < 2) {
+            return $candidates;
+        }
+        // Osobní číslo z podkladů, které je přesně kódem jednoho z vztahů osoby, rozhodne
+        // dřív než druh poměru (souběh dvou pracovních poměrů téže osoby).
+        if ($personalNumber !== '') {
+            $byCode = array_values(array_filter(
+                $candidates,
+                static fn (array $employment): bool => mb_strtolower($employment['code'], 'UTF-8') === mb_strtolower($personalNumber, 'UTF-8'),
+            ));
+            if (count($byCode) === 1) {
+                return $byCode;
+            }
+        }
+        if ($relationTypes === []) {
             return $candidates;
         }
         $narrowed = array_values(array_filter(

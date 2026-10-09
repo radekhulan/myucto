@@ -14,7 +14,8 @@ namespace MyInvoice\Tests\Fixtures\Pohoda;
  *    roku 2026 o DPP neví a převod roku 2025 ji musí založit jako DALŠÍ vztah téže osoby.
  *  - Bohumil (2002): v roce 2026 už není, v roce 2025 má pracovní poměr i DPP (`2002-2`),
  *    obojí skončené 30. 6. 2025. Osoba se při převodu 2025 zakládá celá znovu a druhý vztah
- *    nesmí narazit na „stejné rodné číslo už evidujete".
+ *    nesmí narazit na „stejné rodné číslo už evidujete". V únoru 2026, po skončení, mu PAMICA
+ *    zúčtovala doplatek: ani ten nesmí založit druhou osobu.
  *  - Alena má navíc DPP od února 2026 bez výplaty, která trvá (`2001-3`): patří do roku 2026.
  *    Bohumilova dohoda z roku 2019 bez mzdy v převáděných letech se nezakládá.
  *
@@ -94,6 +95,11 @@ final class SyntheticPohodaPayrollTwoYears
                 }
             }
         }
+
+        // Doplatek Bohumilovi v únoru 2026, po skončení vztahu (PAMICA ho zúčtovala k vztahu).
+        $row('MZ', ['ID' => ++$id, 'RefZAM' => 2, 'RefPomer' => 3, 'Rok' => 2026, 'RelMes' => 2, 'HodFond' => 0, 'HodOdpra' => 0,
+            'RefPoj' => 1, 'KcHrubaM' => 2000, 'KcCistaM' => 1600, 'Prohlas' => 1, 'JeSocPP' => 1, 'Datum' => '2026-03-10', 'KcVyplat' => 1600]);
+        $row('MZslozky', ['ID' => ++$item, 'RefAg' => $id, 'RefSlozka' => 2, 'KcMzda' => 2000]);
 
         $file = $dir . '/91_mzdy.xml';
         file_put_contents($file, '<?xml version="1.0" encoding="UTF-8"?>' . "\n"

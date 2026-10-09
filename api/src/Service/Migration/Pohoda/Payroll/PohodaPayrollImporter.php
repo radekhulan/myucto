@@ -80,6 +80,7 @@ final class PohodaPayrollImporter
         private readonly PayrollTakeoverRepeatedMonth $repeatedMonth,
         private readonly PayrollTakeoverSicknessCompensation $sicknessCompensation,
         private readonly PohodaPayrollRegistrations $registrations,
+        private readonly PohodaPayrollRelations $relations,
     ) {}
 
     /**
@@ -442,6 +443,15 @@ final class PohodaPayrollImporter
             $protocol->finish(self::STEP_PROFILE);
 
             $protocol->begin(self::STEP_MONTHS);
+            // Osoby a vztahy roku dřív než měsíce: druhý vztah téže osoby jde k ní, ne jako
+            // nová osoba, a řádek měsíce pak najde svůj vztah podle osobního čísla.
+            $ensured = $this->relations->ensure($supplierId, $userOrNull, PohodaPayrollRelations::read($file, $year, $converter->exportedOn),
+                $protocol, self::STEP_MONTHS, self::MESSAGE_LIMIT);
+            foreach ($ensured as $name => $count) {
+                if ($count > 0) {
+                    $protocol->count(self::STEP_MONTHS, $name, $count);
+                }
+            }
             $done = $this->map->all($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH);
             /** @var array<string,int> $compensationBatches měsíc, který počítá MyÚčto => dávka docházky */
             $compensationBatches = [];
@@ -536,7 +546,25 @@ final class PohodaPayrollImporter
                 try {
                     $preview = $this->attendance->preview($supplierId, $period, [$workbook], null, $profileId);
                     $created = 0;
-                    foreach (array_chunk(self::personsToCreate($preview['persons'], $month), self::PERSON_CHUNK) as $chunk) {
+                    // Řádek vztahu, který ve firmě je, ale v měsíci už neplatí (doplatek zúčtovaný
+                    // po skončení), osobu nezakládá: byla by to druhá osoba téhož rodného čísla.
+                    $toCreate = [];
+                    foreach (self::personsToCreate($preview['persons'], $month) as $person) {
+                        if ($person['personal_number'] !== null && $this->employmentExists($supplierId, $person['personal_number'])) {
+                            $protocol->count(self::STEP_MONTHS, 'payslips_outside_employment');
+                            if ($messages++ < self::MESSAGE_LIMIT) {
+                                $protocol->warn(self::STEP_MONTHS, 'payslip_outside_employment', sprintf(
+                                    '%s: osobní číslo %s má mzdu zúčtovanou mimo trvání vztahu (typicky doplatek po skončení). '
+                                    . 'Mzdové vstupy za tento měsíc se k vztahu nezapsaly; převzaté úhrny měsíce u vztahu jsou. '
+                                    . 'Pokud je doplatek potřeba v MyÚčtu, zadejte ho ručně.',
+                                    $period, $person['personal_number'],
+                                ), ['period' => $period, 'personal_number' => $person['personal_number']]);
+                            }
+                            continue;
+                        }
+                        $toCreate[] = $person;
+                    }
+                    foreach (array_chunk($toCreate, self::PERSON_CHUNK) as $chunk) {
                         $result = $this->attendance->persons($supplierId, $period, $chunk, $userOrNull, null, 'pohoda-import', [$workbook], null, $profileId);
                         foreach ($result['results'] as $item) {
                             if ($item['status'] === 'created') {
@@ -814,6 +842,14 @@ final class PohodaPayrollImporter
             ];
         }
         return $create;
+    }
+
+    private function employmentExists(int $supplierId, string $code): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_employments WHERE supplier_id = ? AND code = ? LIMIT 1');
+        $stmt->execute([$supplierId, $code]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     private static function money(int $minor): string

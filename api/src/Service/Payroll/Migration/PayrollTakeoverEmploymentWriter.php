@@ -46,7 +46,83 @@ final class PayrollTakeoverEmploymentWriter
         private readonly PayrollRecurringComponentRepository $recurring,
         private readonly PayrollRecurringComponentValidator $recurringValidator,
         private readonly PayrollComponentRepository $components,
+        private readonly PayrollPersonCreateValidator $personValidator,
     ) {}
+
+    /**
+     * Další pracovní vztah osoby, která už ve firmě je (souběh nebo opakovaný nástup ve
+     * zdroji). Vztah dostane osobní číslo ze zdroje, pokud je volné a platné; jinak číslo
+     * přidělí aplikace. Hlavním je jen tehdy, když osoba žádný trvající hlavní vztah nemá.
+     *
+     * Stejná cesta jako karta osoby (validátor zakládání, repozitář vztahů); vztah vzniká
+     * jako plánovaný, aktivuje ho {@see self::activateTakenOver()}.
+     */
+    public function addEmployment(
+        int $supplierId,
+        int $employeeId,
+        string $fullName,
+        string $code,
+        string $relationType,
+        string $start,
+        ?int $monthlyGross,
+        ?string $weeklyHours,
+        ?int $userId,
+    ): int {
+        $validated = $this->personValidator->validate([
+            'full_name' => $fullName,
+            'relation_type' => $relationType,
+            'planned_start_on' => $start,
+            'monthly_gross' => $monthlyGross,
+            'weekly_hours' => $weeklyHours,
+            'employment_code' => $this->employmentCodeAvailable($supplierId, $code) ? $code : null,
+        ]);
+        $employment = $validated['employment'];
+        $employment['terms']['is_primary'] = !$this->hasActivePrimary($supplierId, $employeeId);
+        $employment['code'] = $validated['employment_code'] ?? '';
+        $created = $this->employments->create($supplierId, $employeeId, $employment, $userId, null, null);
+
+        return (int) $created['id'];
+    }
+
+    /**
+     * Plánovaný vztah, který ve zdroji už běžel (nástup nejpozději dnes), se aktivuje
+     * k nástupu ze zdroje.
+     *
+     * @return array<string,int>
+     */
+    public function activateTakenOver(int $supplierId, int $employmentId, string $start, string $today, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        $row = $this->employmentById($supplierId, $employmentId);
+        if ($row === null || $row['status'] !== 'planned' || $start > $today) {
+            return [];
+        }
+        $this->employments->transition($supplierId, $employmentId, 'active', (int) $row['row_version'], $start,
+            $policy->note('vztah vedený od ' . PayrollTakeoverFormat::czechDate($start) . '.'), $userId, null, null);
+
+        return ['activated' => 1];
+    }
+
+    /** Osobní číslo jde dát vztahu: má platný tvar a ve firmě ho nemá jiný vztah. */
+    public function employmentCodeAvailable(int $supplierId, string $code): bool
+    {
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,63}$/', $code) !== 1) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_employments WHERE supplier_id = ? AND code = ?');
+        $stmt->execute([$supplierId, $code]);
+
+        return $stmt->fetchColumn() === false;
+    }
+
+    private function hasActivePrimary(int $supplierId, int $employeeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_employments WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1 AND status IN ('planned', 'active', 'suspended')"
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
 
     /** Důvod verze podmínek, kterou zapisuje převod ze sjednané mzdy zdroje. */
     public static function wageNote(PayrollTakeoverPolicy $policy): string

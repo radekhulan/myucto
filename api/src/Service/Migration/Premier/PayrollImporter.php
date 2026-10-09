@@ -28,7 +28,6 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
-use MyInvoice\Service\Payroll\PayrollPersonCreateValidator;
 use PDO;
 
 /**
@@ -88,7 +87,6 @@ final class PayrollImporter
         private readonly Connection $db,
         private readonly PremierImportRepository $map,
         private readonly PayrollPersonCreateService $personCreate,
-        private readonly PayrollPersonCreateValidator $personValidator,
         private readonly PayrollEmploymentRepository $employments,
         private readonly PayrollEmploymentValidator $employmentValidator,
         private readonly PayrollTakeoverPersonWriter $people,
@@ -801,7 +799,7 @@ final class PayrollImporter
             'planned_start_on' => $relation['start'],
             'monthly_gross' => self::firstWage($relation, $ctx->endsOn()),
             'weekly_hours' => self::weeklyHours($relation, $ctx->endsOn()),
-            'employment_code' => $this->codeAvailable($ctx->supplierId, $number) ? $number : null,
+            'employment_code' => $this->employmentWriter->employmentCodeAvailable($ctx->supplierId, $number) ? $number : null,
         ];
         $attempts = [$input];
         if ($input['birth_number'] !== null) {
@@ -845,19 +843,17 @@ final class PayrollImporter
     private function addEmployment(PremierContext $ctx, int $employeeId, array $relation): int
     {
         $number = (string) $relation['personal_number'];
-        $validated = $this->personValidator->validate([
-            'full_name' => (string) ($relation['full_name'] ?: 'Zaměstnanec ' . $number),
-            'relation_type' => $relation['relation_type'],
-            'planned_start_on' => $relation['start'],
-            'monthly_gross' => self::firstWage($relation, $ctx->endsOn()),
-            'weekly_hours' => self::weeklyHours($relation, $ctx->endsOn()),
-            'employment_code' => $this->codeAvailable($ctx->supplierId, $number) ? $number : null,
-        ]);
-        $employment = $validated['employment'];
-        $employment['terms']['is_primary'] = !$this->hasPrimary($ctx->supplierId, $employeeId);
-        $employment['code'] = $validated['employment_code'] ?? '';
-        $created = $this->employments->create($ctx->supplierId, $employeeId, $employment, $ctx->userOrNull(), null, null);
-        return (int) $created['id'];
+        return $this->employmentWriter->addEmployment(
+            $ctx->supplierId,
+            $employeeId,
+            (string) ($relation['full_name'] ?: 'Zaměstnanec ' . $number),
+            $number,
+            (string) $relation['relation_type'],
+            (string) $relation['start'],
+            self::firstWage($relation, $ctx->endsOn()),
+            self::weeklyHours($relation, $ctx->endsOn()),
+            $ctx->userOrNull(),
+        );
     }
 
     /** @param array<string,mixed> $relation */
@@ -1153,25 +1149,6 @@ final class PayrollImporter
         $stmt->execute([$supplierId, $employeeId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $row;
-    }
-
-    private function codeAvailable(int $supplierId, string $code): bool
-    {
-        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,63}$/', $code) !== 1) {
-            return false;
-        }
-        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM payroll_employments WHERE supplier_id = ? AND code = ?');
-        $stmt->execute([$supplierId, $code]);
-        return $stmt->fetchColumn() === false;
-    }
-
-    private function hasPrimary(int $supplierId, int $employeeId): bool
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM payroll_employments WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1 AND status IN ('planned', 'active', 'suspended')"
-        );
-        $stmt->execute([$supplierId, $employeeId]);
-        return $stmt->fetchColumn() !== false;
     }
 
     private function activityCode(int $supplierId, int $employmentId): ?string
