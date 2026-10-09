@@ -194,7 +194,12 @@ ze kterého se krátí. Například v červenci 2026 (svátek 6. 7.) se odpracov
 176 hodin, ale mzda se krátí poměrem k fondu 184 hodin. Stejný fond platí pro
 dosaženou mzdu za přesčas a hlásí se v měsíčním hlášení. Výjimkou je svátek
 v době nemoci: za ten náleží náhrada podle § 192 odst. 1, takže se ze
-základní mzdy odečte, aby nebyl zaplacen dvakrát.
+základní mzdy odečte, aby nebyl zaplacen dvakrát. Svátek uvnitř celodenní
+nepřítomnosti, za kterou mzda ani náhrada od zaměstnavatele nepřísluší
+(mateřská, rodičovská, otcovská, ošetřovné, nemoc od 15. dne, neplacené
+volno, neomluvená absence), se ze základní mzdy odečte také: zaměstnanec ten
+den nepracoval kvůli nepřítomnosti, ne kvůli svátku. Ve svátek v době dovolené
+nebo placené překážky se mzda nekrátí.
 
 Když si aplikace jistá není, žádnou částku nenabídne a vyžádá ruční zadání:
 chybí pracovní kalendář, o absenci v měsíci se ještě nerozhodlo, nemoc nemá

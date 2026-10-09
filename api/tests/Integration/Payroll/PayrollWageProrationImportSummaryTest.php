@@ -376,12 +376,38 @@ final class PayrollWageProrationImportSummaryTest extends TestCase
     }
 
     /**
-     * Totéž na směnové cestě: 16 h neplaceného volna v červenci 2026 dává
-     * 40 000 x 10 080/11 040 = 36 521,73 → 36 522 Kč (z fondu bez svátku
-     * 36 364 Kč). Neplacené volno přes svátek (6. 7.) svátek nezahrnuje —
-     * ten zůstává zaplacený měsíční mzdou.
+     * Totéž na směnové cestě s placenou překážkou: 16 h překážky na straně
+     * zaměstnavatele v červenci 2026 dává 40 000 x 10 080/11 040 = 36 521,73
+     * → 36 522 Kč (z fondu bez svátku 36 364 Kč). Překážka přes svátek (6. 7.)
+     * svátek nezahrnuje: mzda se za něj nekrátí (§ 115 odst. 3 ZP).
      */
     public function testShiftMonthWithHolidayProratesAgainstFundIncludingHoliday(): void
+    {
+        $this->datedAbsence('employer_obstacle', '2026-07-06', '2026-07-08');
+        $this->publishedShift('2026-07-07');
+        $this->publishedShift('2026-07-08');
+
+        $result = $this->proration->forMonth(
+            $this->supplierId,
+            $this->employmentId,
+            '2026-07',
+            self::GROSS_MINOR,
+        );
+
+        self::assertTrue($result['supported'], (string) $result['reason']);
+        self::assertSame(11_040, $result['fund_minutes']);
+        self::assertSame(['paid_obstacle' => 960], $result['replaced_minutes_by_title']);
+        self::assertSame(3_652_200, $result['amount_minor']);
+    }
+
+    /**
+     * Neplacené volno 6. až 8. 7. 2026 přes svátek 6. 7.: zaměstnanec ten den
+     * nepracoval kvůli volnu, ne kvůli svátku, takže ochrana § 115 odst. 3 ZP
+     * se na něj nevztahuje a krátí se i obvyklých osm hodin svátku. Směna na
+     * svátek publikovaná není — svátek se měří rozvrhem. 40 000 x
+     * (11 040 - 1 440)/11 040 = 34 782,60 → 34 783 Kč.
+     */
+    public function testUnpaidLeaveOverHolidayCutsTheHolidayOnTheShiftPath(): void
     {
         $this->datedAbsence('unpaid_leave', '2026-07-06', '2026-07-08');
         $this->publishedShift('2026-07-07');
@@ -395,9 +421,64 @@ final class PayrollWageProrationImportSummaryTest extends TestCase
         );
 
         self::assertTrue($result['supported'], (string) $result['reason']);
-        self::assertSame(11_040, $result['fund_minutes']);
-        self::assertSame(['unpaid' => 960], $result['replaced_minutes_by_title']);
-        self::assertSame(3_652_200, $result['amount_minor']);
+        self::assertSame(['unpaid' => 1_440], $result['replaced_minutes_by_title']);
+        self::assertSame(3_478_300, $result['amount_minor']);
+    }
+
+    /**
+     * Rodičovská dovolená celý leden 2026 v měsíci ze souhrnu importu (bez
+     * směn, měří se kalendářem). Leden má 22 pracovních dnů a 1. 1. je svátek:
+     * mzdový fond 10 560 minut. Za rodičovskou mzda ani náhrada nepřísluší
+     * a za svátek se mzda krátí také, takže základní mzda je nula. Dříve tu
+     * zůstalo 40 000 x 480/10 560 → 1 819 Kč za svátek (PAMICA 0).
+     */
+    public function testParentalLeaveForWholeMonthLeavesNoWageForTheHoliday(): void
+    {
+        $this->importSummaryMonth(['fund_hours' => 176_000, 'worked_hours' => 0], '2026-01-01');
+        $this->datedAbsence('parental', '2026-01-01', '2026-01-31');
+
+        $result = $this->proration->forImportSummary(
+            $this->supplierId,
+            $this->employmentId,
+            '2026-01',
+            self::GROSS_MINOR,
+        );
+
+        self::assertTrue($result['supported'], (string) $result['reason']);
+        self::assertSame(10_560, $result['fund_minutes']);
+        self::assertSame(['state_benefit' => 10_560], $result['replaced_minutes_by_title']);
+        self::assertSame(0, $result['amount_minor']);
+    }
+
+    /**
+     * Nemoc za oknem § 192 ZP přes svátek na směnové cestě. DPN od 20. 6. do
+     * 10. 7. 2026: okno náhrady končí 3. 7. (tři směny v červenci, 1 440
+     * minut náhrady), za oknem jsou směny 7. až 10. 7. a svátek 6. 7. bez
+     * směny. Dávku za něj platí stát, mzda se za svátek krátí: 2 400 minut.
+     * 40 000 x (11 040 - 3 840)/11 040 = 26 086,95 → 26 087 Kč. Kalendářní
+     * cesta svátek za oknem krátila vždy, směnová ho nechávala ve mzdě.
+     */
+    public function testHolidayBeyondSicknessWindowIsCutOnTheShiftPath(): void
+    {
+        $absenceId = $this->datedAbsence('dpn', '2026-06-20', '2026-07-10');
+        $this->sicknessEvent($absenceId);
+        foreach (['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-07', '2026-07-08', '2026-07-09', '2026-07-10'] as $date) {
+            $this->publishedShift($date);
+        }
+
+        $result = $this->proration->forMonth(
+            $this->supplierId,
+            $this->employmentId,
+            '2026-07',
+            self::GROSS_MINOR,
+        );
+
+        self::assertTrue($result['supported'], (string) $result['reason']);
+        self::assertSame(
+            ['sickness_compensation' => 1_440, 'state_benefit' => 2_400],
+            $result['replaced_minutes_by_title'],
+        );
+        self::assertSame(2_608_700, $result['amount_minor']);
     }
 
     /**

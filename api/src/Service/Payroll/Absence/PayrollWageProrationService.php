@@ -354,18 +354,22 @@ final class PayrollWageProrationService
                     return self::datedNothing('sickness_calculation_missing');
                 }
                 $firstDayFullyWorked = $event['first_day_fully_worked'];
+                $bounds = $this->absences->absenceBounds($row, $firstDayFullyWorked);
                 if (!$event['eligible']) {
                     // DPN bez nároku na nemocenské (§ 15a zák. č. 187/2006 Sb.): náhradu
                     // mzdy nikdo neplatí ani dávku, takže celá doba je krácení bez
-                    // náhrady a svátek v ní zůstává ve mzdě jako u jiné neplacené doby.
+                    // náhrady — svátek včetně, nepracoval kvůli nemoci (§ 115 odst. 3 ZP).
                     $unpaid = [
                         ...$this->windowSegments($row, $firstDayFullyWorked, AbsenceHolidayTreatment::Ignore, $fromCalendar),
                         ...$this->beyondWindowSegments($row, $firstDayFullyWorked, $fromCalendar),
                     ];
+                    $cut = $this->holidayMinutesCut($row, $bounds['from'], $bounds['to'], $periodStart, $periodEnd, $holidays);
                     $byTitle[PayrollWageReplacementTitle::Unpaid->value]
                         = ($byTitle[PayrollWageReplacementTitle::Unpaid->value] ?? 0)
                         + self::minutesInMonth($unpaid, $periodStart, $periodEnd)
-                        - self::minutesOnDates($unpaid, $periodStart, $periodEnd, $holidays);
+                        - self::minutesOnDates($unpaid, $periodStart, $periodEnd, $holidays)
+                        + $cut;
+                    $holidayMinutes += $cut;
                     continue;
                 }
                 $window = $this->windowSegments(
@@ -378,13 +382,24 @@ final class PayrollWageProrationService
                 $byTitle[PayrollWageReplacementTitle::SicknessCompensation->value]
                     = ($byTitle[PayrollWageReplacementTitle::SicknessCompensation->value] ?? 0)
                     + $inWindow;
+                // Za oknem § 192 platí dávku stát a mzda za svátek se krátí jako za
+                // jiné dny nemoci. Svátek se proto měří rozvrhem na obou cestách:
+                // směnová cesta ho bez publikované směny nevidí, kalendářní ano.
+                $beyond = $this->beyondWindowSegments($row, $firstDayFullyWorked, $fromCalendar);
+                $cut = $this->holidayMinutesCut(
+                    $row,
+                    max($bounds['window_to']->modify('+1 day'), $bounds['from']),
+                    $bounds['to'],
+                    $periodStart,
+                    $periodEnd,
+                    $holidays,
+                );
                 $byTitle[PayrollWageReplacementTitle::StateBenefit->value]
                     = ($byTitle[PayrollWageReplacementTitle::StateBenefit->value] ?? 0)
-                    + self::minutesInMonth(
-                        $this->beyondWindowSegments($row, $firstDayFullyWorked, $fromCalendar),
-                        $periodStart,
-                        $periodEnd,
-                    );
+                    + self::minutesInMonth($beyond, $periodStart, $periodEnd)
+                    - self::minutesOnDates($beyond, $periodStart, $periodEnd, $holidays)
+                    + $cut;
+                $holidayMinutes += $cut;
                 // Svátek v okně § 192 se proplácí náhradou, takže tatáž doba
                 // nesmí zůstat i v základní mzdě. Fond ji ale nezná — svátku
                 // ukládá nula plánovaných minut — a bez tohohle dopočtu by
@@ -403,15 +418,24 @@ final class PayrollWageProrationService
                 PayrollWageReplacementTitle::holidayTreatment($type),
                 $fromCalendar,
             );
-            // Ze základní mzdy vypadne svátek JEN tehdy, když ho nějaký titul
-            // opravdu zaplatí — a to umí pouze náhrada při DPN (§ 192 odst. 1).
-            // U dovolené se svátek nečerpá (§ 219 odst. 1) a u ostatních absencí
-            // za něj nikdo nic neposkytuje, takže mzda za něj zůstává nekrácená
-            // (§ 115 odst. 3). Publikovaná směna na svátek by jinak srazila mzdu
-            // za dobu, kterou nic nenahrazuje.
+            // Svátek se měří vždy rozvrhem, ne směnou na svátek publikovanou:
+            // ta se odečte a podle druhu nepřítomnosti se za svátek krátí
+            // jeho obvyklá doba. Mzda se za svátek nekrátí jen tomu, kdo
+            // nepracoval kvůli svátku (§ 115 odst. 3 ZP) — u dovolené
+            // (§ 219 odst. 1) a placené překážky. Kdo byl nepřítomen z důvodu
+            // bez mzdy i bez náhrady od zaměstnavatele (rodičovská, PPM,
+            // ošetřovné, neplacené volno…), tomu se za svátek krátí
+            // ({@see PayrollWageReplacementTitle::holidayCutsMonthlyWage()}).
+            $cut = 0;
+            if (PayrollWageReplacementTitle::holidayCutsMonthlyWage($type)) {
+                $bounds = $this->absences->absenceBounds($row, false);
+                $cut = $this->holidayMinutesCut($row, $bounds['from'], $bounds['to'], $periodStart, $periodEnd, $holidays);
+            }
             $byTitle[$title->value] = ($byTitle[$title->value] ?? 0)
                 + self::minutesInMonth($segments, $periodStart, $periodEnd)
-                - self::minutesOnDates($segments, $periodStart, $periodEnd, $holidays);
+                - self::minutesOnDates($segments, $periodStart, $periodEnd, $holidays)
+                + $cut;
+            $holidayMinutes += $cut;
         }
 
         return ['by_title' => $byTitle, 'holiday_minutes' => $holidayMinutes, 'reason' => null];
@@ -589,6 +613,52 @@ final class PayrollWageProrationService
             $this->schedule->plannedMinutes($supplierId, $employmentId, array_keys($holidays)),
             $remainingByDate,
         );
+    }
+
+    /**
+     * Minuty svátků uvnitř nepřítomnosti, za které se měsíční mzda krátí.
+     *
+     * Svátek se oceňuje obvyklou dobou podle rozvrhu kalendáře — tou, kterou
+     * mzdový fond svátku přičítá ({@see PayrollMonthlyFundService::wageFundMinutes()}).
+     * Svátek mimo obvyklý pracovní den nemá minut a nekrátí nic. Den, kdy
+     * nepřítomnost začíná nebo končí jen částí, se nebere: nepřítomen celý
+     * den nebyl.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $holidays datum => cokoliv
+     */
+    private function holidayMinutesCut(
+        array $row,
+        \DateTimeImmutable $from,
+        \DateTimeImmutable $to,
+        string $periodStart,
+        string $periodEnd,
+        array $holidays,
+    ): int {
+        $first = max($from->format('Y-m-d'), $periodStart);
+        $last = min($to->format('Y-m-d'), $periodEnd);
+        $dates = [];
+        foreach (array_keys($holidays) as $date) {
+            $date = (string) $date;
+            if ($date < $first || $date > $last) {
+                continue;
+            }
+            if (($date === (string) $row['date_from'] && ($row['partial_first_minutes'] ?? null) !== null)
+                || ($date === (string) $row['date_to'] && ($row['partial_last_minutes'] ?? null) !== null)
+            ) {
+                continue;
+            }
+            $dates[] = $date;
+        }
+        if ($dates === []) {
+            return 0;
+        }
+
+        return array_sum($this->schedule->plannedMinutes(
+            PayrollTimeValue::int($row['supplier_id'] ?? null, 'supplier_id'),
+            PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id'),
+            $dates,
+        ));
     }
 
     /** @param array<string,mixed> $row */

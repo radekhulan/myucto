@@ -46,6 +46,12 @@ use InvalidArgumentException;
  * v základní mzdě. Volající předává fond, ve kterém je, takže nahrazené minuty
  * fond běžně nepřesáhnou; přesah se přesto nezáporně ořízne.
  *
+ * Stejně tak svátek uvnitř nepřítomnosti, za kterou mzda ani náhrada od
+ * zaměstnavatele nepřísluší (rodičovská, PPM, neplacené volno…): zaměstnanec
+ * ten den nepracoval kvůli nepřítomnosti, ne kvůli svátku, takže ochrana
+ * § 115 odst. 3 ZP se na něj nevztahuje
+ * ({@see \MyInvoice\Service\Payroll\Absence\PayrollWageReplacementTitle::holidayCutsMonthlyWage()}).
+ *
  * ── Zaokrouhlení ────────────────────────────────────────────────────────────
  *
  * Jednou, až na konci, na celé koruny nahoru (§ 142 odst. 2 ZP). Mezikroky se

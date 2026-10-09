@@ -64,6 +64,37 @@ enum PayrollWageReplacementTitle: string
     }
 
     /**
+     * Krátí se měsíční mzda za svátek, který leží uvnitř celodenní nepřítomnosti
+     * tohoto druhu?
+     *
+     * § 115 odst. 3 ZP chrání jen zaměstnance, který nepracoval PROTO, že svátek
+     * připadl na jeho obvyklý pracovní den. Kdo byl ten den nepřítomen z jiného
+     * důvodu, za který mu mzda ani náhrada od zaměstnavatele nepřísluší (dávka
+     * nemocenského pojištění, rodičovská, pracovní volno bez náhrady mzdy,
+     * neomluvená absence), nepracoval kvůli té nepřítomnosti a mzda se mu za
+     * svátek krátí stejně jako za ostatní dny.
+     *
+     * Dovolená svátek nečerpá (§ 219 odst. 1 ZP), placená překážka za svátek
+     * náhradu nedává, ale mzda se nekrátí, a náhradní volno za přesčas
+     * (§ 114 odst. 1 ZP) ani doba po neplatném rozvázání (§ 69 ZP) se ve
+     * svátek nečerpají — u nich svátek v mzdě zůstává. Nemoc se dělí oknem
+     * § 192 ZP a řeší ji volající: v okně svátek platí náhrada, za oknem a bez
+     * nároku na nemocenské se krátí jako tady.
+     *
+     * Jediné místo pro krácení mzdy i pro svátek v hodinách měsíčního hlášení
+     * (10275/10276), aby mzda a hlášení stály na témž výkladu.
+     */
+    public static function holidayCutsMonthlyWage(string $absenceType): bool
+    {
+        return match ($absenceType) {
+            'ocr', 'long_term_care', 'ppm', 'paternity', 'parental',
+            'unpaid_leave', 'unexcused', 'other',
+            'public_function', 'employee_obstacle_unpaid' => true,
+            default => false,
+        };
+    }
+
+    /**
      * Zacházení se svátkem uvnitř absence. Musí být DOSLOVA to, které při
      * schválení absence rozhodlo o penězích — jinak by se krátilo za jiné
      * hodiny, než za které se náhrada vyplatila.

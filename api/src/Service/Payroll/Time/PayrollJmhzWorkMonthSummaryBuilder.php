@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Time;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Absence\PayrollWageReplacementTitle;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioRequirementSourceCatalog;
@@ -1552,9 +1553,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * kalendáře. Svátek je státní svátek podle {@see CzechHolidayCalendar}
      * nebo den kalendáře výslovně označený jako svátek; den kalendáře
      * označený jinak svátkem není. Den se vynechá, když na něj připadá
-     * odpracovaná doba nebo nepřítomnost jiná než dovolená — dovolená
-     * svátek nečerpá (§ 219 odst. 1 ZP), nemoc ho nese ve svém bloku
-     * a nepřítomnost bez příjmu náhradu za svátek nedává.
+     * odpracovaná doba, nemoc (nese ho ve svém bloku) nebo nepřítomnost, kvůli
+     * které se mzda za svátek krátí (§ 115 odst. 3 ZP, týž výklad jako krácení
+     * mzdy: {@see PayrollWageReplacementTitle::holidayCutsMonthlyWage()}).
+     * Dovolená svátek nečerpá (§ 219 odst. 1 ZP) a u placené překážky se mzda
+     * za svátek nekrátí, takže svátek v nich do 10275/10276 patří.
      *
      * @param list<array<string,mixed>> $calendars
      * @param list<array<string,mixed>> $entries
@@ -1613,7 +1616,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 continue;
             }
             foreach ($absences as $absence) {
-                if (($absence['absence_type'] ?? null) !== 'vacation'
+                $type = (string) ($absence['absence_type'] ?? '');
+                if ((in_array($type, ['dpn', 'quarantine'], true)
+                        || PayrollWageReplacementTitle::holidayCutsMonthlyWage($type))
                     && (string) $absence['date_from'] <= $iso
                     && (string) $absence['date_to'] >= $iso
                 ) {
