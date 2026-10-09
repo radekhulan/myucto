@@ -147,7 +147,7 @@ Podrobnosti v [§ 114.11.10](#1141110-pravidla-dimenzi-podle-uctu).
 
 **Přehled s grafy:**
 
-1. Otevřete `Grafy → Dimenze` (jen firmy v podvojném účetnictví se zapnutými dimenzemi).
+1. Otevřete `Grafy → Dimenze` (firmy se zapnutými dimenzemi v podvojném účetnictví i v daňové evidenci).
 2. Zvolte rok, typ dimenze a případně firmu.
 3. Kliknutím na hodnotu vyfiltrujete karty, měsíční vývoj a spodní tabulku.
 
@@ -583,6 +583,14 @@ typu dimenze. Účet, který historie členila téměř vždy (aspoň 90 % z des
 a více řádků), nabídne tlačítko **Vytvořit pravidlo**. Hodí se po převodu
 z jiného systému.
 
+#### Pravidla v daňové evidenci
+
+Firma v daňové evidenci účty nemá. Pravidlo se uplatní na pohyby peněžního deníku
+a maska se porovná s třídou: výdaj jako **5**, příjem jako **6**. Výchozí hodnota
+pravidla doplní pohyb, který hodnotu nemá ani z dokladu, a kontrola pravidel ukáže
+pohyby s daňovým příjmem nebo výdajem, kterým povinná dimenze chybí. Podrobnosti
+jsou v [kapitole Daňová evidence](74_Danova_evidence.md#74919-dimenze-v-danove-evidenci).
+
 ### 114.11.11 Rozpad mezi více hodnot
 
 Náklad, který patří víc střediskům nebo projektům, se dá rozdělit tlačítkem
@@ -710,6 +718,10 @@ když hodnotu nesou obě strany zápisů. Úhrada faktury projektu v bance bez
 projektu nechá pohledávku projektu v rozvaze otevřenou.
 
 #### Výkazy po dimenzi
+
+V daňové evidenci se statistika i výsledovka po dimenzi počítají z peněžního
+deníku: výnosy jsou daňové příjmy a náklady daňové výdaje, hodnotu nese doklad
+pohybu. Postup je v [kapitole Daňová evidence](74_Danova_evidence.md#74919-dimenze-v-danove-evidenci).
 
 V menu **Grafy → Dimenze** je roční statistika za zvolený typ dimenze. Ukazuje
 zaúčtované výnosy, náklady, zisk nebo ztrátu, ziskovou marži, podíl částek

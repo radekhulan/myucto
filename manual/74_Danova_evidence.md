@@ -214,6 +214,7 @@ Hlavní tabulka řadí všechny pohyby chronologicky a pro každý zobrazuje bě
 | Zdroj *(skrytý)* | Odkud pohyb pochází: pokladna, banka nebo virtuální noha z úhrady faktury |
 | Základ *(skrytý)* | Daňový základ pohybu (bez složky DPH) |
 | DPH *(skrytý)* | Složka DPH pohybu |
+| Poznámky a přílohy | Tlačítko otevře poznámky a přílohy pohybu (viz [§ 74.9.18](#74918-poznamky-a-prilohy-k-pohybum)), u řádku je vidět první poznámka a počet poznámek a příloh |
 
 ### 74.9.5 Daňová klasifikace pohybů
 
@@ -554,6 +555,44 @@ uzávěrku, dokud ji v modulu GoPay nespárujete. Poplatky GoPay neevidujte znov
 by se dvakrát.
 
 Vyúčtování, jehož pohyby nebo výplata leží v roce s dokončenou roční uzávěrkou, nejde načíst, zpracovat znovu ani smazat.
+
+### 74.9.18 Poznámky a přílohy k pohybům
+
+Ke každému pohybu peněžního deníku si můžete zapsat poznámku a připojit přílohu, například vysvětlení výdaje pro kontrolu
+nebo sken účtenky. V tabulce pohybů klikněte v sloupci **Poznámky a přílohy** na tlačítko s ikonou dokumentu.
+
+- **Poznámka** patří k pohybu deníku. Poznámek může být víc, připnutá je vždy nahoře a ukazuje se přímo v řádku deníku.
+  Poznámku jde upravit nebo smazat. Pohyb ani jeho zařazení se poznámkou nemění, proto ji jde psát i v roce s dokončenou
+  uzávěrkou.
+- **Příloha** patří k dokladu pohybu: k pokladnímu dokladu, bankovnímu pohybu, ručně zaplacené přijaté faktuře nebo
+  k ruční úhradě vydané faktury. Soubor nahrajete přímo v dialogu, nebo připojíte dokument, který už je v sekci Dokumenty.
+  Tentýž dokument pak vidíte i u dokladu (např. na detailu pokladního dokladu nebo u bankovního pohybu).
+- Pohyb vyúčtování GoPay přílohu nemá, doklady k vyúčtování najdete v modulu GoPay.
+
+Psát poznámky a připojovat přílohy může uživatel s právem zápisu do daňové evidence, nahrávat soubory jen ten, kdo smí
+nahrávat dokumenty.
+
+### 74.9.19 Dimenze v daňové evidenci
+
+Dimenze (střediska, zakázky, vozidla, viz [kapitola Dimenze](114_Dimenze.md)) fungují i v daňové evidenci. Sestavy
+`Grafy → Dimenze` a `Daňová evidence → Výsledovka po dimenzi` se počítají z peněžního deníku:
+
+- **Příjmy** jsou daňové příjmy, **výdaje** daňové výdaje deníku, u plátce DPH bez DPH. Nedaňové pohyby, převody,
+  soukromé vklady a výběry ani odpisy majetku do sestavy nevstupují. Součet sestavy proto odpovídá řádku
+  **Příjmy − výdaje** v souhrnu peněžního deníku za stejné období.
+- **Hodnotu dimenze nese doklad pohybu.** Přednost má dimenze na pokladním dokladu nebo bankovním pohybu, pak dimenze
+  uhrazené faktury (včetně výchozí hodnoty zakázky a klienta) nebo ostatní položky. Bankovní pohyb, který hradí víc faktur,
+  se rozdělí podle částek úhrad. Když hlavička faktury dimenzi nemá, použijí se dimenze položek podle jejich částky.
+- **Pravidla dimenzí** doplní hodnotu pohybu, který ji z dokladu nemá. Pohyb nemá účet, maska pravidla se proto porovnává
+  s třídou: výdaj jako **5**, příjem jako **6**. Pravidlo `5, 6` platí v obou režimech, maska na konkrétní účet (např.
+  `518`) v daňové evidenci nic nezachytí. Kontrola pravidel ukáže pohyby, kterým povinná dimenze chybí.
+- Rozpad po účtech ukazuje dva řádky: příjmy (6) a výdaje (5). Peněžní tok po dimenzi a odkazy na rozvahu, předvahu
+  a hlavní knihu jsou jen v podvojném účetnictví.
+
+Příklad: faktura 10 000 Kč se zakázkou A je uhrazena v hotovosti, přijatá faktura 4 000 Kč je rozdělena napůl mezi zakázky
+A a B a bankou zaplacená faktura 3 000 Kč dimenzi nemá. Výsledovka po dimenzi ukáže u zakázky A příjem 10 000 Kč a výdaj
+2 000 Kč, u zakázky B výdaj 2 000 Kč a bez hodnoty výdaj 3 000 Kč. Pravidlo `5` s výchozí hodnotou B přesune těch 3 000 Kč
+k zakázce B.
 
 ## 74.10 Související kapitoly
 
