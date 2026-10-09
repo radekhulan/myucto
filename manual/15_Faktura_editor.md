@@ -841,10 +841,12 @@ Pokud zjistíte, že vystavená faktura je špatně:
 > částku, takže výsledný zápis je čitelný (kladné částky na správné straně), ne matoucí záporná
 > čísla. Funguje stejně v CZK i v cizí měně.
 
-**Zápočet dobropisu s fakturou.** Vystavený dobropis k faktuře, která ještě není zaplacená, se s
-ní automaticky započte: faktuře klesne **Zbývá uhradit** o částku dobropisu a dobropis je
-vyrovnaný. Odběratel pak platí jen rozdíl a jeho platbu aplikace spáruje s bankou podle zbytku.
-V platbách faktury se zápočet ukáže se zdrojem **Zápočet dobropisu**.
+**Zápočet dobropisu s fakturou.** V daňové evidenci se vystavený dobropis k faktuře, která ještě
+není zaplacená, s ní automaticky započte: faktuře klesne **Zbývá uhradit** o částku dobropisu a
+dobropis je vyrovnaný. Odběratel pak platí jen rozdíl a jeho platbu aplikace spáruje s bankou
+podle zbytku. V platbách faktury se zápočet ukáže se zdrojem **Zápočet dobropisu**. V podvojném
+účetnictví se dobropis automaticky nezapočítává, dobropis i faktura zůstávají na saldokontu
+každý sám za sebe. Započíst je jde tlačítkem **Započíst s fakturou**.
 
 - Zápočet vzniká jen v plné výši dobropisu a jen tehdy, když ho zbytek faktury pokryje. Dobropis k
   už zaplacené faktuře zůstává k vrácení peněz jako dosud.

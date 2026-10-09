@@ -49,6 +49,16 @@ final class CreditNoteOffsetTest extends CashJournalTestCase
         self::assertSame(0, $this->countRows($res, 'invoice_payment'), 'zápočet dobropisu není řádek peněžního deníku');
     }
 
+    public function testIssuedCreditNoteIsOffsetAutomaticallyInTaxEvidence(): void
+    {
+        [$invoiceId, $creditNoteId] = $this->issuedPair(10000.0, -2000.0);
+
+        $result = $this->offsets->autoApplyForInvoice($this->supplierId, $creditNoteId, $this->userId);
+
+        self::assertNotNull($result['offset_id'], (string) $result['reason']);
+        self::assertEqualsWithDelta(8000.0, $this->issuedRemaining($invoiceId), 0.001);
+    }
+
     public function testIssuedOffsetRevertRestoresInvoiceAndCreditNote(): void
     {
         [$invoiceId, $creditNoteId] = $this->issuedPair(10000.0, -2000.0);

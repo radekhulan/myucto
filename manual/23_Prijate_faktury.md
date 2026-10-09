@@ -718,9 +718,10 @@ dohledatelnou návaznost v obou detailech a správné promítnutí vráceného d
 původní fakturu může opravovat více částečných dobropisů. Pokud vazbu nevyplníte, automatika ji nesmí odhadnout podle samotné
 podobné částky.
 
-**Zápočet dobropisu s fakturou.** Přijatý dobropis s vyplněnou opravovanou fakturou se při přijetí s fakturou automaticky
-započte, pokud faktura ještě není celá zaplacená: faktuře klesne **Zbývá uhradit** o částku dobropisu, dobropis je vyrovnaný
-a dodavateli platíte jen rozdíl, který se spáruje s bankou. Pokryje-li dobropis celou fakturu, je zaplacená i faktura.
+**Zápočet dobropisu s fakturou.** V daňové evidenci se přijatý dobropis s vyplněnou opravovanou fakturou při přijetí
+s fakturou automaticky započte, pokud faktura ještě není celá zaplacená: faktuře klesne **Zbývá uhradit** o částku
+dobropisu, dobropis je vyrovnaný a dodavateli platíte jen rozdíl, který se spáruje s bankou. Pokryje-li dobropis celou
+fakturu, je zaplacená i faktura. V podvojném účetnictví se dobropis automaticky nezapočítává, jen tlačítkem.
 Zápočet se dělá jen v plné výši dobropisu. V detailu dobropisu ho zrušíte tlačítkem **Zrušit zápočet**, starší dobropis
 započtete tlačítkem **Započíst s fakturou**. Do [peněžního deníku](74_Danova_evidence.md) zápočet nevstupuje, výdajem je
 až skutečně zaplacený zbytek. DPH se nemění.

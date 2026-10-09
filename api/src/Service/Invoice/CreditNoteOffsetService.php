@@ -95,6 +95,36 @@ final class CreditNoteOffsetService
     }
 
     /**
+     * Automatický zápočet při vystavení dobropisu. Jen v daňové evidenci: v podvojném
+     * účetnictví dobropis i faktura visí na saldokontu 311 každý sám za sebe a výchozí
+     * chování zůstává beze změny. Ruční „Započíst s fakturou" ({@see applyForInvoice()})
+     * jde ve všech režimech.
+     *
+     * @return array{offset_id: ?int, reason: ?string}
+     */
+    public function autoApplyForInvoice(int $supplierId, int $creditNoteId, ?int $userId): array
+    {
+        if (!$this->isTaxEvidence($supplierId)) {
+            return ['offset_id' => null, 'reason' => 'auto_offset_tax_evidence_only'];
+        }
+        return $this->applyForInvoice($supplierId, $creditNoteId, $userId);
+    }
+
+    /**
+     * Automatický zápočet při přijetí dobropisu, jen v daňové evidenci
+     * (viz {@see autoApplyForInvoice()}).
+     *
+     * @return array{offset_id: ?int, reason: ?string}
+     */
+    public function autoApplyForPurchase(int $supplierId, int $creditNoteId, ?int $userId): array
+    {
+        if (!$this->isTaxEvidence($supplierId)) {
+            return ['offset_id' => null, 'reason' => 'auto_offset_tax_evidence_only'];
+        }
+        return $this->applyForPurchase($supplierId, $creditNoteId, $userId);
+    }
+
+    /**
      * Započte vystavený dobropis proti faktuře. Vrací ID zápočtu, nebo null s důvodem,
      * když zápočet nejde (nevadí — dobropis pak zůstává k vrácení penězi).
      *
@@ -424,6 +454,13 @@ final class CreditNoteOffsetService
             $this->pdf->invalidate($id, 'invalidate_payment_change');
             $this->stats->recomputeForInvoiceId($id);
         }
+    }
+
+    private function isTaxEvidence(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        return $stmt->fetchColumn() === 'tax_evidence';
     }
 
     private static function docType(string $docType): string

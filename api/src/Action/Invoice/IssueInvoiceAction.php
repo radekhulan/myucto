@@ -522,10 +522,11 @@ final class IssueInvoiceAction
         // Dobropis navázaný na nezaplacenou fakturu se s ní hned započte — faktuře klesne
         // „Zbývá uhradit" a odběratel platí rozdíl (issue #140). Až za hotovostním
         // vyrovnáním: dobropis vrácený z pokladny už zápočet nepotřebuje. Měkce, dobropis
-        // je vystavený a nezapočtený se dá vyřídit z detailu.
+        // je vystavený a nezapočtený se dá vyřídit z detailu. Automaticky jen v daňové
+        // evidenci, v podvojném účetnictví jen ruční akcí.
         if (($invoice['invoice_type'] ?? '') === 'credit_note') {
             try {
-                $this->creditNoteOffsets->applyForInvoice(
+                $this->creditNoteOffsets->autoApplyForInvoice(
                     $supplierId,
                     $id,
                     isset($user['id']) ? (int) $user['id'] : null,

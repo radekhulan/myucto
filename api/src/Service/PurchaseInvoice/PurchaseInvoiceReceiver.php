@@ -109,9 +109,10 @@ final class PurchaseInvoiceReceiver
 
         // Dobropis navázaný na nezaplacenou fakturu se s ní započte (issue #140). Až za
         // pokladnou: dobropis vrácený hotově už zápočet nepotřebuje. Pro jiné druhy
-        // dokladu i opakované přijetí (un-cancel se zápočtem) je to no-op.
+        // dokladu i opakované přijetí (un-cancel se zápočtem) je to no-op. Automaticky jen
+        // v daňové evidenci, v podvojném účetnictví jen ruční akcí.
         try {
-            $this->creditNoteOffsets->applyForPurchase($supplierId, $id, $userId);
+            $this->creditNoteOffsets->autoApplyForPurchase($supplierId, $id, $userId);
         } catch (\Throwable $e) {
             $this->logger->log('purchase_invoice.credit_note_offset_failed', $userId,
                 'purchase_invoice', $id, ['error' => $e->getMessage()], $ip, $userAgent);
