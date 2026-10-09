@@ -58,6 +58,14 @@ final class PayrollRegistrationDeltaVariantRule
                 $result[] = $key;
             }
         }
+        // Serializér slévá `facts.highest_education_code` do `fact/@highedu`
+        // stejně jako samostatný klíč, takže SPEC ho nesmí nést ani tudy.
+        if ($variant === PayrollRegistrationBusinessMatrix::VARIANT_SPEC
+            && is_array($delta['facts'] ?? null)
+            && array_key_exists('highest_education_code', $delta['facts'])
+        ) {
+            $result[] = 'facts.highest_education_code';
+        }
         $allowed = self::EMPLOYMENT_ALLOWED[$variant] ?? null;
         if ($allowed !== null && is_array($delta['employment'] ?? null)) {
             foreach (array_keys($delta['employment']) as $field) {

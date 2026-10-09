@@ -96,6 +96,26 @@ final class PayrollRegistrationXmlSerializer
                     ? $eventData['relationship_detail_code']
                     : null,
             );
+            $forbidden = PayrollRegistrationEventVariantRule::forbiddenParts(
+                $payload->interaction->actionCode,
+                (string) $eventData['activity_code'],
+                is_string($eventData['relationship_detail_code'] ?? null)
+                    ? $eventData['relationship_detail_code']
+                    : null,
+                $eventData,
+            );
+            if ($forbidden !== []) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_regzec_variant_part_forbidden',
+                    PayrollRegistrationFieldVocabulary::action(
+                        'REGZEC25',
+                        $payload->interaction->actionCode,
+                    ) . ' nese údaje, které ČSSZ u tohoto druhu činnosti '
+                        . 'zamítne (' . implode(', ', $forbidden) . '). '
+                        . 'Otevřete oznámení znovu a připravte podání ještě '
+                        . 'jednou.',
+                );
+            }
         }
 
         return match ($payload->interaction->documentType) {
