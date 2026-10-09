@@ -138,8 +138,8 @@ final class TaxAdvanceScheduleService
         $effectiveMonth = $this->insuranceAdvanceEffectiveMonth($sourceReturnId);
         $previousSocial = $this->previousMonthlyAmount($supplierId, 'social', $periodYear - 1);
         $previousHealth = $this->previousMonthlyAmount($supplierId, 'health', $periodYear - 1);
-        $socialMinimum = ceil((float) ($summary['social']['min_base'] ?? 0) / 12 * (float) ($summary['rates']['social'] ?? 0.292));
-        $healthMinimum = ceil((float) ($summary['health']['min_base'] ?? 0) / 12 * (float) ($summary['rates']['health'] ?? 0.135));
+        $socialMinimum = TaxFormAmount::ceilKc((float) ($summary['social']['min_base'] ?? 0) / 12 * (float) ($summary['rates']['social'] ?? 0.292));
+        $healthMinimum = TaxFormAmount::ceilKc((float) ($summary['health']['min_base'] ?? 0) / 12 * (float) ($summary['rates']['health'] ?? 0.135));
 
         $socialRows = $this->buildMonthlyRows($periodYear, $socialMonthly, $ids['social_vs'], 'social', $effectiveMonth, $previousSocial, $socialMinimum);
         $healthRows = $this->buildMonthlyRows($periodYear, $healthMonthly, $ids['health_vs'], 'health', $effectiveMonth, $previousHealth, $healthMinimum);

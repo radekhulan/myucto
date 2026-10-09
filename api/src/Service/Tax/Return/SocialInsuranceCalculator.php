@@ -117,6 +117,6 @@ final class SocialInsuranceCalculator
 
     private function ceilKc(float $v): float
     {
-        return ceil($v);
+        return TaxFormAmount::ceilKc($v);
     }
 }

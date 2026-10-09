@@ -63,6 +63,22 @@ final class InsuranceCalculatorTest extends TestCase
         self::assertSame(5005.0, $r['monthly_advance']);     // ceil(17 139 × 0,292)
     }
 
+    /**
+     * Vyměřovací základ i pojistné se zaokrouhlují nahoru ze SOUČINU, který ve float nese
+     * šum: 400 000 × 0,55 = 220000.00000000003 a 1 800 × 0,135 = 243.00000000000003.
+     * Holé ceil() z toho dělalo VZ 220 001 a pojistné o korunu vyšší (ČSSZ XML i PDF).
+     */
+    public function testRoundingUpIgnoresFloatNoise(): void
+    {
+        $social = $this->social->compute(400000, false, 0, false, null, $this->c);
+        self::assertSame(220000.0, $social['assessment_base']);
+        self::assertSame(64240.0, $social['insurance']);
+
+        $health = $this->health->compute(3600, true, 0, $this->c);
+        self::assertSame(1800.0, $health['assessment_base']);
+        self::assertSame(243.0, $health['insurance']);
+    }
+
     public function testSocialAssessmentBaseIsCappedAtFortyEightAverageWages(): void
     {
         foreach ([2025 => 2234736.0, 2026 => 2350416.0] as $year => $maximum) {

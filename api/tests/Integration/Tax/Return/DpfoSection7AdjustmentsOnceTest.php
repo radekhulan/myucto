@@ -146,12 +146,13 @@ final class DpfoSection7AdjustmentsOnceTest extends CashJournalTestCase
         $c = TaxConstants::forYear(2025);
         // Hlavní činnost celý rok: VZ ČSSZ 55 %, VZ ZP 50 % dílčího základu, nejméně minimum roku 2025.
         self::assertEqualsWithDelta(
-            max(ceil($expectedBase * (float) $c['social_assessment_pct']), ceil((float) $c['social_min_base_main'])),
+            // 397 000 × 0,55 = 218 350 přesně; holé ceil() float součinu by dalo 218 351.
+            max(ceil(round($expectedBase * (float) $c['social_assessment_pct'], 6)), ceil((float) $c['social_min_base_main'])),
             $summary['social']['assessment_base'],
             0.001,
         );
         self::assertEqualsWithDelta(
-            max(ceil($expectedBase * (float) $c['health_assessment_pct']), ceil((float) $c['health_min_base'])),
+            max(ceil(round($expectedBase * (float) $c['health_assessment_pct'], 6)), ceil((float) $c['health_min_base'])),
             $summary['health']['assessment_base'],
             0.001,
         );

@@ -27,4 +27,26 @@ final class TaxFormAmount
 
         return $rounded == 0.0 ? 0.0 : $rounded;
     }
+
+    /**
+     * Zaokrouhlení na celé koruny NAHORU (pojistné a vyměřovací základy OSVČ, daň § 16,
+     * zálohy). Součin částky a sazby nese ve float chybu řádu 1e-11: 400 000 × 0,55 dá
+     * 220000.00000000003 a holé `ceil()` z něj udělá vyměřovací základ 220 001. Proto se
+     * před `ceil()` vrátí na 6 desetinných míst; součin celých korun a sazby se třemi
+     * desetinnými místy se tím nezmění, odstraní se jen šum.
+     */
+    public static function ceilKc(float $amount): float
+    {
+        return ceil(round($amount, 6));
+    }
+
+    /** Nahoru na celé násobky $step (zálohy na daň zaokrouhlené na stokoruny). */
+    public static function ceilTo(float $amount, int $step): float
+    {
+        if ($step <= 0) {
+            return self::ceilKc($amount);
+        }
+
+        return ceil(round($amount / $step, 6)) * $step;
+    }
 }

@@ -104,6 +104,16 @@ final class CsszPrehledXmlBuilderXsdTest extends TestCase
         self::assertStringContainsString('<poj>652543</poj>', $xml);
     }
 
+    /** 400 000 × 0,55 je ve float 220000.00000000003; VZ ani pojistné nesmí vyskočit o korunu. */
+    public function testAssessmentBaseRoundingIgnoresFloatNoise(): void
+    {
+        $summary = $this->sampleSummary();
+        $summary['tax_base_7'] = 400000.0;
+        $xml = (new CsszPrehledXmlBuilder())->build($this->sampleSupplier(), 2025, $summary, [])['xml'];
+        self::assertStringContainsString('<uvz>220000</uvz>', $xml);
+        self::assertStringContainsString('<poj>64240</poj>', $xml);
+    }
+
     public function testSecondaryActivityUsesVColumn(): void
     {
         $xml = $this->buildXml(true)['xml'];

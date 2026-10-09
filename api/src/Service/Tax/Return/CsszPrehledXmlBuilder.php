@@ -289,16 +289,16 @@ final class CsszPrehledXmlBuilder
         $advances = (int) round((float) ($social['advances_paid'] ?? 0));
 
         if ($participates) {
-            $vvz = (int) ceil($pri * $pct);                        // vypočtený VZ (před minimem)
-            $mvz = (int) ceil((float) ($social['min_base'] ?? 0)); // minimální VZ
-            $maxBase = isset($social['max_base']) ? (int) ceil((float) $social['max_base']) : PHP_INT_MAX;
+            $vvz = (int) TaxFormAmount::ceilKc($pri * $pct);                        // vypočtený VZ (před minimem)
+            $mvz = (int) TaxFormAmount::ceilKc((float) ($social['min_base'] ?? 0)); // minimální VZ
+            $maxBase = isset($social['max_base']) ? (int) TaxFormAmount::ceilKc((float) $social['max_base']) : PHP_INT_MAX;
             $uvz = min(max($vvz, $mvz), $maxBase);                  // určený VZ včetně stropu
         } else {
             $vvz = 0;
             $mvz = 0;
             $uvz = 0;
         }
-        $poj = (int) ceil($uvz * $rate); // pojistné = ceil(VZ × sazba)
+        $poj = (int) TaxFormAmount::ceilKc($uvz * $rate); // pojistné = ceil(VZ × sazba)
 
         return [
             'pri' => $pri,

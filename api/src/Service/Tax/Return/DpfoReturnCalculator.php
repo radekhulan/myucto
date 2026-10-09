@@ -193,7 +193,7 @@ final class DpfoReturnCalculator
 
         // ── Základ zaokrouhlený ↓ 100 Kč + daň 15/23 % ───────────────────────
         $roundedBase = $this->floorTo($baseAfter15, (int) ($c['rounding_base_fo'] ?? 100));
-        $tax16 = ceil(DpfoCalculator::progressiveTax((float) $roundedBase, $c));
+        $tax16 = TaxFormAmount::ceilKc(DpfoCalculator::progressiveTax((float) $roundedBase, $c));
 
         // ── Slevy §35ba ──────────────────────────────────────────────────────
         $creditTaxpayer = TaxFormAmount::kc((float) ($c['credit_taxpayer'] ?? 30840));
@@ -255,7 +255,7 @@ final class DpfoReturnCalculator
         $separateTax = 0.0;
         if ($separateBase > 0.0) {
             $roundedSeparateBase = $this->floorTo($separateBase, (int) ($c['rounding_base_fo'] ?? 100));
-            $separateTax = ceil($roundedSeparateBase * $separateRate);
+            $separateTax = TaxFormAmount::ceilKc($roundedSeparateBase * $separateRate);
             $warnings[] = 'Samostatný základ daně podle § 16a: '
                 . number_format($roundedSeparateBase, 0, ',', ' ') . ' Kč, daň '
                 . number_format($separateTax, 0, ',', ' ') . ' Kč (sazba '
@@ -292,7 +292,7 @@ final class DpfoReturnCalculator
             : (float) ($c['advance_quarterly_rate'] ?? 0.25);
         $advanceAmount = $advanceRegime === 'none'
             ? 0.0
-            : ceil($lastKnownTax * $advanceRate * $advanceFactor / 100) * 100;
+            : TaxFormAmount::ceilTo($lastKnownTax * $advanceRate * $advanceFactor, 100);
 
         $lines = [
             $this->line('31', 'Příjmy ze závislé činnosti (§6)', $s6Income, 'ruční vstup (potvrzení zaměstnavatele)'),

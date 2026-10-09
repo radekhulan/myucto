@@ -875,7 +875,7 @@ final class DppoReturnCalculator
         if ($step <= 0) {
             return round($value, 2);
         }
-        return ceil($value / $step) * $step;
+        return TaxFormAmount::ceilTo($value, $step);
     }
 
     private function pct(float $rate): string
