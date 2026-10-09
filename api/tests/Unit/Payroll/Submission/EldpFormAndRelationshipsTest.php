@@ -136,6 +136,27 @@ final class EldpFormAndRelationshipsTest extends TestCase
         (new EldpXmlValidator())->validate($statement, (new EldpXmlSerializer())->serialize($statement));
     }
 
+    /**
+     * Jednatel s odměnou nad rozhodnou částkou je pojištěncem (§ 5 odst. 1 písm. a)
+     * bodu 2 zák. č. 155/1995 Sb.) a měsíční hlášení ho vede s kódem S++. Evidenční
+     * list za něj dřív nevznikl (`eldp_relationship_kind_unsupported`), ačkoli
+     * měsíční hlášení stejného vztahu dobu pojištění neslo. Vada G4-1.
+     */
+    public function testBoardMemberWithParticipationBuildsAnSPlusPlusSection(): void
+    {
+        $revisions = [];
+        for ($month = 1; $month <= 12; ++$month) {
+            $revisions[] = $this->revision(2025, $month, baseMinor: 3_000_000, relationType: 'statutory_body', activityCode: 'S', detailCode: '1');
+        }
+
+        $sections = $this->build($revisions)->sections();
+
+        self::assertCount(1, $sections);
+        self::assertSame('S++', $sections[0]['code']);
+        self::assertSame(365, $sections[0]['insurance_days']);
+        self::assertSame(360_000, $sections[0]['assessment_base_czk']);
+    }
+
     /** DPP, která se v roce ani jednou neúčastnila, evidenční list nemá. */
     public function testAgreementToPerformWorkWithoutAnyParticipationHasNoStatement(): void
     {
@@ -474,7 +495,10 @@ final class EldpFormAndRelationshipsTest extends TestCase
             ]],
         ];
         $inputJson = CanonicalJson::encode($input);
-        $socialKind = $relationType === 'employment' ? 'employment' : $relationType;
+        $socialKind = match ($relationType) {
+            'statutory_body' => 'corporate_body',
+            default => $relationType,
+        };
         $result = [
             'schema_version' => 'payroll-run-result.v2',
             'source_snapshot_hash' => hash('sha256', $inputJson),

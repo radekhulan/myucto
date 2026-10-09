@@ -1807,6 +1807,9 @@ final class EldpAnnualStatementBuilder
      * Druh sociálního vztahu, pod kterým výsledek výpočtu vede pracovní vztah.
      * Zaměstnání malého rozsahu je pro sociální pojištění pracovní poměr
      * (stejně jako v {@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceBuilder}).
+     * Člen statutárního orgánu a společník s.r.o. jsou pojištěnci § 5 odst. 1
+     * písm. a) bodu 2 zák. č. 155/1995 Sb.; měsíční hlášení je vede s kódem S++
+     * a evidenční list za ně musí jít sestavit stejně.
      */
     private static function socialKind(mixed $relation): ?string
     {
@@ -1814,6 +1817,7 @@ final class EldpAnnualStatementBuilder
             'employment', 'small_scale_employment' => 'employment',
             'dpc' => 'dpc',
             'dpp' => 'dpp',
+            'partner_dependent', 'statutory_body' => 'corporate_body',
             default => null,
         };
     }
