@@ -1007,6 +1007,16 @@ final class PayrollRunStatutoryInputAssembler
         }
         $worked = $this->nonNegativeInt($values['worked_millihours'] ?? null);
         $paidUnworked = $this->nonNegativeInt($values['unworked_paid_millihours'] ?? null);
+        // Bez neodpracovaných hodin (IN07 nenastala) souhrn 10275–10280 neuvádí,
+        // takže prázdné hodiny s náhradou jsou potvrzená nula, ne chybějící údaj.
+        // Typicky měsíc bez svátku a bez nepřítomnosti: dřív zastavil slevu.
+        $interactions = $this->object($summary['interactions'] ?? null);
+        if ($paidUnworked === null
+            && ($values['unworked_paid_millihours'] ?? null) === null
+            && ($interactions['IN07'] ?? null) === false
+        ) {
+            $paidUnworked = 0;
+        }
         if ($worked === null || $paidUnworked === null) {
             return null;
         }

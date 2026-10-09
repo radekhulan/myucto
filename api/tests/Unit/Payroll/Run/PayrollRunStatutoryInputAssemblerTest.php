@@ -687,6 +687,33 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         );
     }
 
+    /**
+     * Měsíc bez svátku a bez nepřítomnosti (únor) má IN07 nenastalou a hodiny
+     * s náhradou prázdné. Pro § 7a je to potvrzená nula, ne chybějící údaj; dřív
+     * běh slevu zastavil hláškou „chybí skutečně odpracované hodiny", přestože
+     * schválený pracovní měsíc existoval. Prázdno při IN07 nastalé nebo bez
+     * interakce v souhrnu zůstává chybějícím údajem.
+     */
+    public function testMonthWithoutUnworkedHoursCountsWorkedHoursOnly(): void
+    {
+        $assessable = function (?bool $in07): ?int {
+            $snapshot = $this->acceptedIntentSnapshot('not_applicable');
+            $month = $this->workMonth(150_000, 0);
+            $month['jmhz_work_summary']['values']['unworked_paid_millihours'] = null;
+            if ($in07 !== null) {
+                $month['jmhz_work_summary']['interactions'] = ['IN07' => $in07, 'IN08' => false];
+            }
+            $snapshot['people'][0]['employments'][0]['time_month'] = $month;
+
+            return (new PayrollRunStatutoryInputAssembler())->assemble($snapshot)
+                ->socialInsurance?->people[0]->relationships[0]->partTimeDiscountAssessableMillihours;
+        };
+
+        self::assertSame(150_000, $assessable(false));
+        self::assertNull($assessable(true));
+        self::assertNull($assessable(null));
+    }
+
     /** @return array<string,mixed> */
     private function workMonth(int $workedMillihours, int $paidUnworkedMillihours): array
     {
