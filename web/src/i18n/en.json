@@ -11747,6 +11747,7 @@
         "jmhz_preparation_not_found": "The JMHZ preparation was not found.",
         "jmhz_preparation_not_ready": "The sources for the JMHZ monthly report are incomplete; open the JMHZ check and complete the highlighted groups of data.",
         "jmhz_preparation_source_not_current": "The JMHZ preparation no longer matches the current approved payroll revision; prepare the report again.",
+        "jmhz_preparation_too_large": "The JMHZ preparation is larger than the database accepts in a single statement (max_allowed_packet); raise the limit in the MariaDB configuration and prepare the report again.",
         "jmhz_preparation_version_unsupported": "The version of the saved JMHZ preparation is not supported.",
         "jmhz_primary_employment_unresolved": "The primary employment relationship is not determined. An employee with concurrent relationships must have exactly one relationship marked as the main one; the others are secondary.",
         "jmhz_projection_form_unbound": "The person's form in the XML submission has no parent submission component.",

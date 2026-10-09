@@ -432,6 +432,7 @@ final class JmhzBlockerCatalog
         'jmhz_preparation_not_found' => 'support',
         'jmhz_preparation_not_ready' => 'support',
         'jmhz_preparation_source_not_current' => 'retry',
+        'jmhz_preparation_too_large' => 'support',
         'jmhz_preparation_version_unsupported' => 'support',
         'jmhz_primary_employment_unresolved' => ['employment_terms', 'is_primary'],
         'jmhz_projection_form_unbound' => 'support',

@@ -181,6 +181,43 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         self::assertStringNotContainsString('snapshot_ciphertext', CanonicalJson::encode($first));
     }
 
+    /**
+     * Snímek přípravy se šifruje zkomprimovaný: snímek firmy s tisíci zaměstnanci
+     * by jinak jedním INSERTem překročil výchozí `max_allowed_packet` (16 MB).
+     * Otisk a ověřené načtení pracují dál s nekomprimovaným kanonickým JSON.
+     */
+    public function testPreparationSnapshotIsStoredCompressedAndStillVerifies(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-compressed',
+            null,
+        );
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_jmhz_preparation_snapshots WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $created['id']]);
+        $stored = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($stored);
+        $packed = $this->encryption->decryptFor(
+            (string) $stored['snapshot_ciphertext'],
+            JmhzPreparationSnapshotService::encryptionContext(
+                $this->supplierId,
+                'test',
+                $this->revisionId,
+                (string) $stored['snapshot_fingerprint'],
+                (string) $stored['source_manifest_sha256'],
+                (string) $stored['readiness_sha256'],
+            ),
+        );
+        self::assertStringStartsWith("\x1f\x8b", $packed, 'Snímek se má šifrovat zkomprimovaný (gzip).');
+
+        $verified = $this->service->loadVerified($this->supplierId, 'test', (int) $created['id']);
+        self::assertSame($this->revisionId, $verified->sourceRevisionId);
+    }
+
     public function testVerifiedLoaderReturnsTypedPayloadWithoutExposingCiphertext(): void
     {
         $created = $this->service->freeze(

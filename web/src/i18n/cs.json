@@ -11747,6 +11747,7 @@
         "jmhz_preparation_not_found": "Příprava JMHZ nebyla nalezena.",
         "jmhz_preparation_not_ready": "Zdroje měsíčního hlášení JMHZ nejsou úplné; otevřete test JMHZ a doplňte zvýrazněné skupiny údajů.",
         "jmhz_preparation_source_not_current": "Příprava JMHZ už neodpovídá aktuální schválené revizi mzdy; připravte hlášení znovu.",
+        "jmhz_preparation_too_large": "Příprava JMHZ je větší, než databáze přijme jedním příkazem (max_allowed_packet); zvyšte limit v konfiguraci MariaDB a přípravu zopakujte.",
         "jmhz_preparation_version_unsupported": "Verze uložené přípravy JMHZ není podporovaná.",
         "jmhz_primary_employment_unresolved": "Není určen primární pracovněprávní vztah. Zaměstnanec se souběžnými vztahy musí mít právě jeden vztah označený jako hlavní, ostatní jsou vedlejší.",
         "jmhz_projection_form_unbound": "Formulář osoby v XML podání nemá nadřazenou součást podání.",

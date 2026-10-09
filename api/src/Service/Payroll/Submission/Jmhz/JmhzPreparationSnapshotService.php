@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSnapshotCompression;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 
@@ -312,8 +313,10 @@ final readonly class JmhzPreparationSnapshotService
                 );
                 return $this->result($existing, false);
             }
+            // Zkomprimovaný: snímek velké firmy by jinak jedním INSERTem překročil
+            // max_allowed_packet databáze ({@see PayrollSnapshotCompression}).
             $ciphertext = $this->encryption->encryptFor(
-                $snapshotJson,
+                PayrollSnapshotCompression::pack($snapshotJson),
                 $this->encryptionContext(
                     $supplierId,
                     $environment,
@@ -324,7 +327,7 @@ final readonly class JmhzPreparationSnapshotService
                 ),
             );
             $readiness = $snapshot->readiness();
-            $id = $this->repository->insert([
+            $id = $this->insertOrExplainPacketLimit($ciphertext, [
                 'supplier_id' => $supplierId,
                 'environment' => $environment,
                 'run_id' => $scope['run_id'],
@@ -358,6 +361,53 @@ final readonly class JmhzPreparationSnapshotService
             $this->verifyStored($stored);
             return $this->result($stored, true);
         });
+    }
+
+    /**
+     * Uložení snímku; když ho databáze odmítne pro velikost (`max_allowed_packet`),
+     * srozumitelná chyba s doporučenou hodnotou místo pádu na neočekávané chybě.
+     * Snímek je už zkomprimovaný, takže na limit narazí jen opravdu velká firma
+     * nebo databáze s limitem pod výchozími 16 MB.
+     *
+     * @param array<string,mixed> $record
+     */
+    private function insertOrExplainPacketLimit(string $ciphertext, array $record): int
+    {
+        try {
+            return $this->repository->insert($record);
+        } catch (\PDOException $e) {
+            if (!self::isPacketLimit($e)) {
+                throw $e;
+            }
+            $megabyte = 1024 * 1024;
+            $recommended = (int) (ceil((strlen($ciphertext) + 4 * $megabyte) / (16 * $megabyte)) * 16);
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_preparation_too_large',
+                sprintf(
+                    'Příprava měsíčního hlášení má po kompresi a zašifrování %s MB a databáze ji jedním příkazem'
+                    . ' nepřijme (limit max_allowed_packet). Zvyšte max_allowed_packet v konfiguraci MariaDB'
+                    . ' alespoň na %d MB (aktuální hodnotu ukazuje Diagnostika) a přípravu zopakujte.',
+                    number_format(strlen($ciphertext) / $megabyte, 1, ',', ' '),
+                    $recommended,
+                ),
+                $e,
+            );
+        }
+    }
+
+    /** Chyby MariaDB, kterými končí příliš velký příkaz (po ER_NET_PACKET_TOO_LARGE spojení padá). */
+    private const PACKET_LIMIT_ERRORS = [
+        'ER_NET_PACKET_TOO_LARGE' => 1153,
+        'CR_SERVER_GONE_ERROR' => 2006,
+        'CR_SERVER_LOST' => 2013,
+    ];
+
+    public static function isPacketLimit(\PDOException $e): bool
+    {
+        $driverCode = (int) ($e->errorInfo[1] ?? 0);
+
+        return in_array($driverCode, self::PACKET_LIMIT_ERRORS, true)
+            || str_contains($e->getMessage(), 'max_allowed_packet');
     }
 
     /**
@@ -794,7 +844,7 @@ final readonly class JmhzPreparationSnapshotService
                 'Manifest pripravy JMHZ neodpovida archivnim metadatum.',
             );
         }
-        $plaintext = $this->encryption->decryptFor(
+        $plaintext = PayrollSnapshotCompression::unpack($this->encryption->decryptFor(
             (string) $stored['snapshot_ciphertext'],
             $this->encryptionContext(
                 (int) $stored['supplier_id'],
@@ -804,7 +854,7 @@ final readonly class JmhzPreparationSnapshotService
                 (string) $stored['source_manifest_sha256'],
                 (string) $stored['readiness_sha256'],
             ),
-        );
+        ));
         $fingerprint = $this->sensitiveData->keyedFingerprint(
             $plaintext,
             'jmhz-preparation-snapshot',
