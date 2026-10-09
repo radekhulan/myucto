@@ -279,7 +279,7 @@ final class CreditNoteOffsetService
             'reason' => $reason, 'invoice_id' => 0, 'amount' => 0.0, 'offset_on' => '', 'credit_note_number' => '',
         ];
         $stmt = $pdo->prepare(
-            'SELECT invoice_type, status, amount_to_pay, parent_invoice_id, currency_id, issue_date, varsymbol
+            'SELECT invoice_type, status, amount_to_pay, parent_invoice_id, currency_id, exchange_rate, issue_date, varsymbol
                FROM invoices WHERE id = ? AND supplier_id = ?' . ($lock ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$creditNoteId, $supplierId]);
@@ -302,7 +302,7 @@ final class CreditNoteOffsetService
         }
 
         $stmt = $pdo->prepare(
-            'SELECT invoice_type, status, amount_to_pay, paid_total, currency_id
+            'SELECT invoice_type, status, amount_to_pay, paid_total, currency_id, exchange_rate
                FROM invoices WHERE id = ? AND supplier_id = ?' . ($lock ? ' FOR UPDATE' : '')
         );
         $stmt->execute([(int) $cn['parent_invoice_id'], $supplierId]);
@@ -315,6 +315,9 @@ final class CreditNoteOffsetService
         }
         if ((int) $inv['currency_id'] !== (int) $cn['currency_id']) {
             return $none('currency_mismatch');
+        }
+        if ($this->exchangeRateMismatch($pdo, $supplierId, (int) $cn['currency_id'], $cn['exchange_rate'], $inv['exchange_rate'])) {
+            return $none('exchange_rate_mismatch');
         }
         $remaining = round((float) $inv['amount_to_pay'] - (float) $inv['paid_total'], 2);
         if ($remaining < $amount - self::TOLERANCE) {
@@ -340,7 +343,7 @@ final class CreditNoteOffsetService
             'reason' => $reason, 'invoice_id' => 0, 'amount' => 0.0, 'offset_on' => '', 'credit_note_number' => '',
         ];
         $stmt = $pdo->prepare(
-            'SELECT document_kind, status, amount_to_pay, parent_purchase_invoice_id, currency_id, issue_date,
+            'SELECT document_kind, status, amount_to_pay, parent_purchase_invoice_id, currency_id, exchange_rate, issue_date,
                     vendor_invoice_number
                FROM purchase_invoices WHERE id = ? AND supplier_id = ?' . ($lock ? ' FOR UPDATE' : '')
         );
@@ -369,7 +372,7 @@ final class CreditNoteOffsetService
 
         $parentId = (int) $cn['parent_purchase_invoice_id'];
         $stmt = $pdo->prepare(
-            'SELECT document_kind, status, currency_id
+            'SELECT document_kind, status, currency_id, exchange_rate
                FROM purchase_invoices WHERE id = ? AND supplier_id = ?' . ($lock ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$parentId, $supplierId]);
@@ -382,6 +385,9 @@ final class CreditNoteOffsetService
         }
         if ((int) $inv['currency_id'] !== (int) $cn['currency_id']) {
             return $none('currency_mismatch');
+        }
+        if ($this->exchangeRateMismatch($pdo, $supplierId, (int) $cn['currency_id'], $cn['exchange_rate'], $inv['exchange_rate'])) {
+            return $none('exchange_rate_mismatch');
         }
         if ($this->purchaseRemaining($pdo, $parentId) < $amount - self::TOLERANCE) {
             return $none('parent_remaining_too_low');
@@ -454,6 +460,31 @@ final class CreditNoteOffsetService
             $this->pdf->invalidate($id, 'invalidate_payment_change');
             $this->stats->recomputeForInvoiceId($id);
         }
+    }
+
+    /**
+     * Cizoměnový dobropis s jiným kurzem než faktura se v podvojném účetnictví nezapočítává.
+     *
+     * Zápočet nemá vlastní účetní zápis, jen vyrovná doklady v saldokontu. Faktura i dobropis
+     * jsou na 311/321 v kurzu svého dne (§ 24 odst. 6 ZoÚ), takže po zápočtu a úhradě zbytku
+     * zůstane na saldokontu kurzový zbytek a kontrola uzávěrky (zaplacené doklady
+     * s otevřeným saldem) ho hlásí. Vyrovnat by ho musel kurzový rozdíl 563/663 ke dni
+     * zápočtu (§ 60 vyhl. 500/2002 Sb., ČÚS 006). Vlastní zápis zápočtu tu ale není a nový
+     * druh zápisu by měnil podvojné účetnictví, které má zůstat beze změny. Takový dobropis
+     * se proto v PÚ vrací penězi nebo vyrovná zápočtem proti účtu, který kurzový rozdíl
+     * zaúčtuje. V daňové evidenci saldokonto není a kurz nehraje roli.
+     */
+    private function exchangeRateMismatch(PDO $pdo, int $supplierId, int $currencyId, mixed $creditNoteRate, mixed $invoiceRate): bool
+    {
+        if ($this->isTaxEvidence($supplierId)) {
+            return false;
+        }
+        $stmt = $pdo->prepare('SELECT code FROM currencies WHERE id = ?');
+        $stmt->execute([$currencyId]);
+        if (strtoupper((string) $stmt->fetchColumn()) === 'CZK') {
+            return false;
+        }
+        return abs((float) $creditNoteRate - (float) $invoiceRate) > 0.0000005;
     }
 
     private function isTaxEvidence(int $supplierId): bool

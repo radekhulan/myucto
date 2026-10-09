@@ -59,6 +59,19 @@ final class CreditNoteOffsetTest extends CashJournalTestCase
         self::assertEqualsWithDelta(8000.0, $this->issuedRemaining($invoiceId), 0.001);
     }
 
+    public function testForeignCurrencyOffsetWithDifferentRateIsAllowedInTaxEvidence(): void
+    {
+        [$invoiceId, $creditNoteId] = $this->issuedPair(1000.0, -200.0);
+        $eur = $this->currencyRow($this->supplierId, 'EUR', null, null);
+        $this->db->pdo()->prepare('UPDATE invoices SET currency_id = ?, exchange_rate = 25 WHERE id = ?')->execute([$eur, $invoiceId]);
+        $this->db->pdo()->prepare('UPDATE invoices SET currency_id = ?, exchange_rate = 24 WHERE id = ?')->execute([$eur, $creditNoteId]);
+
+        $result = $this->offsets->applyForInvoice($this->supplierId, $creditNoteId, $this->userId);
+
+        self::assertNotNull($result['offset_id'], (string) $result['reason']);
+        self::assertEqualsWithDelta(800.0, $this->issuedRemaining($invoiceId), 0.001);
+    }
+
     public function testIssuedOffsetRevertRestoresInvoiceAndCreditNote(): void
     {
         [$invoiceId, $creditNoteId] = $this->issuedPair(10000.0, -2000.0);

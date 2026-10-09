@@ -850,9 +850,14 @@ každý sám za sebe. Započíst je jde tlačítkem **Započíst s fakturou**.
 
 - Zápočet vzniká jen v plné výši dobropisu a jen tehdy, když ho zbytek faktury pokryje. Dobropis k
   už zaplacené faktuře zůstává k vrácení peněz jako dosud.
-- V detailu dobropisu je odkaz na fakturu a tlačítko **Zrušit zápočet** pro případ, že odběratel
-  přesto zaplatil celou fakturu. Dobropis vystavený dřív se dá započíst tlačítkem **Započíst s
-  fakturou**.
+- V detailu dobropisu je odkaz na fakturu a tlačítko **Zrušit zápočet**. Když odběratel přesto
+  zaplatí celou původní částku, spárování té platby zápočet zruší samo a dobropis se vrací k
+  vrácení peněz. Dobropis vystavený dřív se dá započíst tlačítkem **Započíst s fakturou**.
+- V podvojném účetnictví nejde započíst cizoměnový dobropis s jiným kurzem, než má faktura. Po
+  zápočtu by na saldokontu zůstal kurzový rozdíl, který zápočet nezaúčtuje. Takový dobropis
+  vraťte penězi, nebo ho vyrovnejte zápočtem proti účtu.
+- Zápočet ani zápočet proti účtu se při párování banky nenabízí k navázání na pohyb. Pohyb se
+  páruje se zbytkem, který odběratel skutečně platí.
 - Zápočet není platba: v [peněžním deníku](74_Danova_evidence.md) se neobjeví, příjmem je až
   skutečně přijatý zbytek. DPH se nemění, dobropis je v evidenci DPH sám za sebe.
 

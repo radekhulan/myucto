@@ -238,7 +238,105 @@ final class CreditNoteOffsetDoubleEntryTest extends BankPostingTestCase
         self::assertSame('issued', $this->invoiceStatus($creditNoteId));
     }
 
+    /**
+     * Cizoměnový dobropis s jiným kurzem než faktura: po zápočtu a úhradě zbytku by na 311
+     * zůstal kurzový zbytek (200 EUR × rozdíl kurzů) a kontrola zaplacených dokladů
+     * s otevřeným saldem by ho hlásila. Zápočet se proto v PÚ nenabízí.
+     */
+    public function testForeignCurrencyOffsetWithDifferentRateIsRefusedAndClosingCheckStaysClean(): void
+    {
+        [$invoiceId, $creditNoteId] = $this->foreignPair('2099881201', 25.000, 24.000);
+
+        $state = $this->offsets->forDocument($this->supplierId, 'invoice', $creditNoteId);
+        $result = $this->offsets->applyForInvoice($this->supplierId, $creditNoteId, $this->userId);
+
+        // Odběratel zaplatí rozdíl 800 EUR, 311 se odúčtuje kurzem předpisu faktury.
+        $tx = $this->transaction($this->statement(), 800.00, ['currency' => 'EUR']);
+        $this->payments()->recordPayment($invoiceId, 800.00, self::YEAR . '-06-15', ['source' => 'bank', 'bank_transaction_id' => $tx]);
+        $this->postEntry('bank', $tx, '221', '311', 20000.00);
+
+        $open = array_filter(
+            $this->container->get(\MyInvoice\Repository\ClosingRepository::class)->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-12-31'),
+            static fn (array $r): bool => (int) $r['id'] === $invoiceId,
+        );
+        self::assertSame([], array_values($open), 'zaplacená faktura nesmí mít na 311 kurzový zbytek');
+        self::assertFalse($state['can_offset']);
+        self::assertSame('exchange_rate_mismatch', $state['reason']);
+        self::assertNull($result['offset_id']);
+    }
+
+    public function testForeignCurrencyOffsetWithSameRateStaysAvailable(): void
+    {
+        [$invoiceId, $creditNoteId] = $this->foreignPair('2099881202', 25.000, 25.000);
+
+        $result = $this->offsets->applyForInvoice($this->supplierId, $creditNoteId, $this->userId);
+
+        self::assertNotNull($result['offset_id'], (string) $result['reason']);
+        self::assertEqualsWithDelta(800.00, $this->remaining($invoiceId), 0.001);
+    }
+
+    public function testForeignCurrencyPurchaseOffsetWithDifferentRateIsRefused(): void
+    {
+        $eur = $this->currencyRow($this->supplierId, 'EUR');
+        $vendor = $this->client('Dodavatel EUR');
+        $invoiceId = $this->purchaseInvoice('PF-2099-CNO-EUR', $vendor, 1000.00);
+        $creditNoteId = $this->purchaseInvoice('PF-2099-CNO-EUR-D', $vendor, -200.00, 'credit_note');
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET currency_id = ?, exchange_rate = ? WHERE id = ?')
+            ->execute([$eur, 25.0, $invoiceId]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET currency_id = ?, exchange_rate = ?, parent_purchase_invoice_id = ? WHERE id = ?')
+            ->execute([$eur, 24.0, $invoiceId, $creditNoteId]);
+
+        $result = $this->offsets->applyForPurchase($this->supplierId, $creditNoteId, $this->userId);
+
+        self::assertNull($result['offset_id']);
+        self::assertSame('exchange_rate_mismatch', $result['reason']);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /**
+     * EUR faktura 1000 a dobropis −200 s předpisy v kurzu svého dne.
+     *
+     * @return array{0:int, 1:int} [faktura, dobropis]
+     */
+    private function foreignPair(string $varsymbol, float $invoiceRate, float $creditNoteRate): array
+    {
+        $eur = $this->currencyRow($this->supplierId, 'EUR');
+        $client = $this->client('Odběratel ' . $varsymbol);
+        $invoiceId = $this->saleInvoice($varsymbol, $client, 1000.00);
+        $creditNoteId = $this->saleInvoice($varsymbol . '9', $client, -200.00, 'credit_note');
+        $this->db->pdo()->prepare('UPDATE invoices SET currency_id = ?, exchange_rate = ? WHERE id = ?')
+            ->execute([$eur, $invoiceRate, $invoiceId]);
+        $this->db->pdo()->prepare('UPDATE invoices SET currency_id = ?, exchange_rate = ?, parent_invoice_id = ? WHERE id = ?')
+            ->execute([$eur, $creditNoteRate, $invoiceId, $creditNoteId]);
+        $this->postPredpis('invoice', $invoiceId, '311', '602', round(1000 * $invoiceRate, 2));
+        $this->postPredpis('invoice', $creditNoteId, '602', '311', round(200 * $creditNoteRate, 2));
+        return [$invoiceId, $creditNoteId];
+    }
+
+    private function postEntry(string $sourceType, int $sourceId, string $debit, string $credit, float $amount): int
+    {
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        $debitCode = isset($map[$debit]) ? $debit : (string) array_key_first(array_filter(
+            $map,
+            static fn ($v, $k): bool => str_starts_with((string) $k, $debit),
+            ARRAY_FILTER_USE_BOTH,
+        ));
+        return $this->journal->insert([
+            'supplier_id' => $this->supplierId,
+            'period_id'   => $this->periodId,
+            'entry_date'  => self::YEAR . '-06-15',
+            'document_no' => 'TEST-' . $sourceType . '-' . $sourceId,
+            'description' => 'Úhrada',
+            'source_type' => $sourceType,
+            'source_id'   => $sourceId,
+            'posted_at'   => date('Y-m-d H:i:s'),
+            'posted_by'   => $this->userId,
+        ], [
+            ['account_id' => $map[$debitCode]['id'], 'side' => 'debit', 'amount' => $amount],
+            ['account_id' => $map[$credit]['id'], 'side' => 'credit', 'amount' => $amount],
+        ]);
+    }
 
     /**
      * Faktura a dobropis s předpisy, ručně započtené. Zbývá uhradit = total − credit.

@@ -37372,7 +37372,8 @@ components:
         reason:
           type: [string, "null"]
           enum: [not_credit_note, no_parent, credit_note_not_open, credit_note_not_negative, already_offset,
-                 parent_not_invoice, parent_not_open, currency_mismatch, parent_remaining_too_low, null]
+                 parent_not_invoice, parent_not_open, currency_mismatch, exchange_rate_mismatch,
+                 parent_remaining_too_low, null]
 
     PurchaseInvoicePayload:
       type: object
