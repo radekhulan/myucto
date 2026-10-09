@@ -45,7 +45,7 @@ export interface InvoicePayment {
   variable_symbol: string | null
   bank_reference: string | null
   note: string | null
-  source: 'manual' | 'mark_paid' | 'bank' | 'legacy'
+  source: 'manual' | 'mark_paid' | 'bank' | 'legacy' | 'cash' | 'settlement' | 'credit_note'
   bank_transaction_id: number | null
   bank_statement_id?: number | null
   bank_counterparty_name?: string | null

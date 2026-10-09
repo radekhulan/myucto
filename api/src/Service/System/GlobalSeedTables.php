@@ -326,6 +326,7 @@ final class GlobalSeedTables
         'catalog_job_items', 'catalog_job_lanes', 'catalog_jobs',
         'client_bank_accounts', 'client_email_contacts', 'client_revenue_cache',
         'clients',
+        'credit_note_offsets',
         'crm_action_item_dismissals', 'crm_monthly_summary',
         'cron_dispatch_claims', 'cron_heartbeat', 'cron_runs',
         'de_movement_classification', 'de_movement_classification_history',

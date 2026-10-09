@@ -673,6 +673,10 @@ final class Routes
         $app->post   ('/api/invoices/{id:[0-9]+}/issue',     IssueInvoiceAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/mark-paid', MarkPaidAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/unmark-paid', UnmarkPaidAction::class);
+        // Zápočet dobropisu proti opravované faktuře (issue #140).
+        $app->get    ('/api/invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'getInvoice']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'applyInvoice']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'revertInvoice']);
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/invoices/{id:[0-9]+}/project',   SetInvoiceProjectAction::class);
         // Období časového rozlišení výnosu (384) — smí i u zaúčtovaného dokladu, čte ho až uzávěrka.
@@ -753,6 +757,9 @@ final class Routes
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/exchange-rate', SetPurchaseInvoiceExchangeRateAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/transition',     TransitionPurchaseInvoiceStatusAction::class);
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'getPurchase']);
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'applyPurchase']);
+        $app->delete ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'revertPurchase']);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/document-kind',   SetPurchaseInvoiceDocumentKindAction::class);
         // Zakázka (issue #29) — smí i u zaúčtovaného dokladu, je to analytická dimenze.
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/project',         SetPurchaseInvoiceProjectAction::class);

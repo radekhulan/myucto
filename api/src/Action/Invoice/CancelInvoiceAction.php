@@ -59,6 +59,7 @@ final class CancelInvoiceAction
         private readonly InvoiceAssetSaleService $assetSale,
         private readonly CashSettlementService $cashSettlement,
         private readonly TaxConstantsRepository $taxConstants,
+        private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -186,6 +187,10 @@ final class CancelInvoiceAction
             // ve stejné transakci. Ručně pořízených pokladních dokladů (auto_settlement = 0)
             // se to nedotýká; ty ať uživatel vyřídí v modulu Pokladna vědomě.
             $this->cashSettlement->detach($supplierId, 'invoice', (int) $invoice['id']);
+
+            // Zápočet dobropisu (issue #140) padá se stornem kterékoli strany: stornovaný
+            // dobropis nic nesnižuje a stornovaná faktura nemá co započíst.
+            $this->creditNoteOffsets->revertForDocument($supplierId, 'invoice', (int) $invoice['id']);
 
             // 1. Vytvoř cancellation záznam (interní, bez varsymbolu)
             $stmt = $pdo->prepare(

@@ -423,6 +423,12 @@ final class MyuctoImporter
             $target = MyuctoImportProfile::DOCUMENT_TYPES[$row['doc_type']] ?? throw new RuntimeException('Nepodporovaný typ vypořádávaného dokladu.');
             $out['doc_id'] = $map[$target][MyuctoExportReader::id($row['doc_id'])] ?? throw new RuntimeException('Chybí vypořádávaný doklad.');
         }
+        if ($table === 'credit_note_offsets') {
+            $target = MyuctoImportProfile::DOCUMENT_TYPES[$row['doc_type']] ?? throw new RuntimeException('Nepodporovaný typ zápočtu dobropisu.');
+            foreach (['invoice_id', 'credit_note_id'] as $column) {
+                $out[$column] = $map[$target][MyuctoExportReader::id($row[$column])] ?? throw new RuntimeException('Chybí doklad zápočtu dobropisu.');
+            }
+        }
         if ($table === 'invoices' && ($row['supplier_snapshot'] ?? null) !== null) {
             $snapshot = json_decode((string) $row['supplier_snapshot'], true, 64, JSON_THROW_ON_ERROR);
             if (!is_array($snapshot) || array_is_list($snapshot)) {

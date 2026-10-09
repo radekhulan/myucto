@@ -67,6 +67,7 @@ final class IssueInvoiceAction
         private readonly CashSettlementService $cashSettlement,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly ClientRepository $clients,
+        private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -517,6 +518,24 @@ final class IssueInvoiceAction
             $ip,
             $request->getHeaderLine('User-Agent'),
         );
+
+        // Dobropis navázaný na nezaplacenou fakturu se s ní hned započte — faktuře klesne
+        // „Zbývá uhradit" a odběratel platí rozdíl (issue #140). Až za hotovostním
+        // vyrovnáním: dobropis vrácený z pokladny už zápočet nepotřebuje. Měkce, dobropis
+        // je vystavený a nezapočtený se dá vyřídit z detailu.
+        if (($invoice['invoice_type'] ?? '') === 'credit_note') {
+            try {
+                $this->creditNoteOffsets->applyForInvoice(
+                    $supplierId,
+                    $id,
+                    isset($user['id']) ? (int) $user['id'] : null,
+                );
+            } catch (\Throwable $e) {
+                $this->logger->log('invoice.credit_note_offset_failed', $user['id'] ?? null, 'invoice', $id, [
+                    'error' => $e->getMessage(),
+                ], $ip, $request->getHeaderLine('User-Agent'));
+            }
+        }
 
         $issued = $this->repo->find($id);
         if ($settlement['status'] !== CashSettlementService::NOOP) {

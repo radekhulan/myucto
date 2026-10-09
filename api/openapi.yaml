@@ -2721,6 +2721,34 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/invoices/{id}/credit-note-offset:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [InvoiceOps]
+      summary: Zápočty dobropisu, kterých se doklad účastní
+      description: |
+        Dobropis navázaný na nezaplacenou fakturu se při vystavení s fakturou sám započte:
+        faktuře klesne „Zbývá uhradit" (platba se zdrojem `credit_note`) a dobropis je
+        `paid`. Vrací zápočty dokladu jako dobropisu i jako faktury; u dobropisu bez zápočtu
+        `can_offset` a důvod, proč nejde (`reason`).
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CreditNoteOffsetState' } } } }
+    post:
+      tags: [InvoiceOps]
+      summary: Započte dobropis s opravovanou fakturou
+      description: Jen v plné výši dobropisu a jen když ho zbytek faktury pokryje. `{id}` je dobropis.
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CreditNoteOffsetState' } } } }
+        '409': { description: 'Zápočet nejde (`credit_note_offset_<reason>`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [InvoiceOps]
+      summary: Zruší zápočty dobropisu, kterých se doklad účastní
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CreditNoteOffsetState' } } } }
+        '404': { description: Doklad nemá zápočet dobropisu, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/invoices/{id}/penalty/preview:
     get:
       tags: [InvoiceOps]
@@ -6597,6 +6625,31 @@ paths:
                 source: { type: string, enum: [cnb, manual, idoklad, fakturoid], default: manual }
       responses:
         '200': { description: OK }
+
+  /api/v1/purchase-invoices/{id}/credit-note-offset:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Purchase invoices]
+      summary: Zápočty přijatého dobropisu, kterých se doklad účastní
+      description: |
+        Přijatý dobropis navázaný na nezaplacenou fakturu se při přijetí s fakturou sám
+        započte. Zápočet snižuje zbytek k úhradě faktury; pokryje-li ji celou, je faktura `paid`.
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CreditNoteOffsetState' } } } }
+    post:
+      tags: [Purchase invoices]
+      summary: Započte přijatý dobropis s opravovanou fakturou
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CreditNoteOffsetState' } } } }
+        '409': { description: 'Zápočet nejde (`credit_note_offset_<reason>`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [Purchase invoices]
+      summary: Zruší zápočty dobropisu, kterých se doklad účastní
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CreditNoteOffsetState' } } } }
+        '404': { description: Doklad nemá zápočet dobropisu, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/purchase-invoices/{id}/transition:
     post:
@@ -35913,8 +35966,8 @@ components:
         note: { type: [string, "null"] }
         source:
           type: string
-          enum: [manual, mark_paid, bank, legacy]
-          description: "manual = ruční záznam, mark_paid = zkratka „označit zaplaceno“, bank = bankovní párování (GPC i e-mailové avízo), legacy = backfill z dob před evidencí plateb"
+          enum: [manual, mark_paid, bank, legacy, cash, settlement, credit_note]
+          description: "manual = ruční záznam, mark_paid = zkratka „označit zaplaceno“, bank = bankovní párování (GPC i e-mailové avízo), legacy = backfill z dob před evidencí plateb, cash = pokladní doklad, settlement = zápočet proti účtu, credit_note = zápočet navázaného dobropisu (není peněžní tok)"
         bank_transaction_id: { type: [integer, "null"], format: int64, description: "Vazba na bankovní transakci (taková platba se maže přes unmatch ve výpisu)" }
         bank_statement_id: { type: [integer, "null"], format: int64 }
         tax_document_invoice_id: { type: [integer, "null"], format: int64, description: "Daňový doklad k přijaté platbě vystavený k této platbě (jen u záloh)" }
@@ -36965,6 +37018,30 @@ components:
         account_code: { type: string, maxLength: 10 }
         vat_classification_code: { type: [string, "null"] }
         order_index: { type: integer }
+
+    CreditNoteOffsetState:
+      type: object
+      required: [offsets, can_offset, reason]
+      properties:
+        offsets:
+          type: array
+          items:
+            type: object
+            required: [id, doc_type, invoice_id, credit_note_id, amount, offset_on]
+            properties:
+              id: { type: integer }
+              doc_type: { type: string, enum: [invoice, purchase_invoice] }
+              invoice_id: { type: integer, description: Opravovaná faktura }
+              credit_note_id: { type: integer }
+              amount: { type: number, description: Započtená částka v měně dokladu }
+              offset_on: { type: string, format: date }
+              invoice_number: { type: [string, "null"] }
+              credit_note_number: { type: [string, "null"] }
+        can_offset: { type: boolean }
+        reason:
+          type: [string, "null"]
+          enum: [not_credit_note, no_parent, credit_note_not_open, credit_note_not_negative, already_offset,
+                 parent_not_invoice, parent_not_open, currency_mismatch, parent_remaining_too_low, null]
 
     PurchaseInvoicePayload:
       type: object

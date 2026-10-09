@@ -213,7 +213,7 @@ final class InvoicePaymentService
                 self::trimOrNull($opts['variable_symbol'] ?? null, 20),
                 self::trimOrNull($opts['bank_reference'] ?? null, 120),
                 self::trimOrNull($opts['note'] ?? null, 255),
-                in_array($opts['source'] ?? '', ['manual', 'mark_paid', 'bank', 'cash', 'settlement'], true) ? $opts['source'] : 'manual',
+                in_array($opts['source'] ?? '', ['manual', 'mark_paid', 'bank', 'cash', 'settlement', 'credit_note'], true) ? $opts['source'] : 'manual',
                 isset($opts['bank_transaction_id']) && (int) $opts['bank_transaction_id'] > 0
                     ? (int) $opts['bank_transaction_id'] : null,
                 isset($opts['created_by']) && (int) $opts['created_by'] > 0 ? (int) $opts['created_by'] : null,
@@ -434,6 +434,7 @@ final class InvoicePaymentService
         }
         try {
             $this->goPayPending->releaseForPayment($paymentId);
+            self::releaseCreditNotes($pdo, 'p.id = ?', [$paymentId]);
             $pdo->prepare('DELETE FROM invoice_payments WHERE id = ?')->execute([$paymentId]);
             $transition = $this->recomputeLocked($pdo, (int) $payment['invoice_id']);
             if ($ownsTransaction) {
@@ -467,6 +468,7 @@ final class InvoicePaymentService
         }
         try {
             $this->goPayPending->releaseForInvoice($invoiceId);
+            self::releaseCreditNotes($pdo, 'p.invoice_id = ?', [$invoiceId]);
             $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ?');
             $del->execute([$invoiceId]);
             $count = $del->rowCount();
@@ -658,6 +660,25 @@ final class InvoicePaymentService
         if (!$this->db->pdo()->inTransaction()) {
             $this->stats->recomputeForInvoiceId($invoiceId);
         }
+    }
+
+    /**
+     * Mazaná platba ze zápočtu dobropisu ({@see CreditNoteOffsetService}) vrací dobropis
+     * do vystaveného stavu; řádek zápočtu po ní zmizí kaskádou (migrace 1988). Platí pro
+     * každou cestu mazání, ať se zápočet ruší z dobropisu, z faktury nebo „Zrušit úhradu".
+     *
+     * @param list<int> $params
+     */
+    private static function releaseCreditNotes(PDO $pdo, string $paymentWhere, array $params): void
+    {
+        $pdo->prepare(
+            "UPDATE invoices cn
+               JOIN credit_note_offsets o ON o.credit_note_id = cn.id AND o.doc_type = 'invoice'
+                                         AND o.supplier_id = cn.supplier_id
+               JOIN invoice_payments p ON p.id = o.invoice_payment_id AND p.supplier_id = cn.supplier_id
+                SET cn.status = IF(cn.sent_at IS NOT NULL, 'sent', 'issued'), cn.paid_at = NULL
+              WHERE {$paymentWhere} AND cn.status = 'paid'"
+        )->execute($params);
     }
 
     /** @return array<string,mixed> */

@@ -30,6 +30,7 @@ final class PurchaseInvoiceReceiver
         private readonly SmallAssetService $smallAssets,
         private readonly CashSettlementService $cashSettlement,
         private readonly CardPaymentAutomation $cardAutomation,
+        private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
     ) {}
 
     /**
@@ -94,6 +95,18 @@ final class PurchaseInvoiceReceiver
 
         // Hotovostní vyrovnání (migrace 1327): koncept ještě není závazek, volbu
         // „uhradit hotově z pokladny" uplatní až přijetí.
-        return $this->cashSettlement->maybeSettle($supplierId, 'purchase_invoice', $id, $userId, $ip, $userAgent);
+        $settlement = $this->cashSettlement->maybeSettle($supplierId, 'purchase_invoice', $id, $userId, $ip, $userAgent);
+
+        // Dobropis navázaný na nezaplacenou fakturu se s ní započte (issue #140). Až za
+        // pokladnou: dobropis vrácený hotově už zápočet nepotřebuje. Pro jiné druhy
+        // dokladu i opakované přijetí (un-cancel se zápočtem) je to no-op.
+        try {
+            $this->creditNoteOffsets->applyForPurchase($supplierId, $id, $userId);
+        } catch (\Throwable $e) {
+            $this->logger->log('purchase_invoice.credit_note_offset_failed', $userId,
+                'purchase_invoice', $id, ['error' => $e->getMessage()], $ip, $userAgent);
+        }
+
+        return $settlement;
     }
 }

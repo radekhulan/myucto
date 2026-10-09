@@ -46,7 +46,8 @@ final class StatementMatcherPurchasePaymentTest extends TestCase
                 purchase_invoice_id INTEGER, amount REAL, match_type TEXT, match_confidence INTEGER, matched_by_user_id INTEGER);
             CREATE TABLE offset_agreement_items (supplier_id INTEGER, agreement_id INTEGER, doc_type TEXT, doc_id INTEGER, amount REAL);
             CREATE TABLE offset_agreements (id INTEGER, status TEXT);
-            CREATE TABLE invoice_settlements (id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, status TEXT, amount REAL);");
+            CREATE TABLE invoice_settlements (id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, status TEXT, amount REAL);
+            CREATE TABLE credit_note_offsets (id INTEGER, supplier_id INTEGER, doc_type TEXT, invoice_id INTEGER, credit_note_id INTEGER, amount REAL, offset_on TEXT);");
         $this->matcher = new StatementMatcher(
             $this->createStub(Connection::class),
             $this->createStub(FinalFromProformaCreator::class),

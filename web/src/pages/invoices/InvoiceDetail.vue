@@ -44,6 +44,7 @@ import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import RefundPaymentDialog from '@/components/invoices/RefundPaymentDialog.vue'
+import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
 
 const { t, te, locale } = useI18n()
 const toast = useToast()
@@ -1400,6 +1401,14 @@ const isOpenRefund = computed(() => {
     && Number(inv.amount_to_pay ?? 0) < 0
 })
 const refundDialogOpen = ref(false)
+// Zápočet dobropisu (issue #140): dobropis s opravovanou fakturou, nebo faktura,
+// které už dobropis snížil „Zbývá uhradit". Jinde se nic nenačítá.
+const hasCreditNoteOffsetContext = computed(() => {
+  const inv = invoice.value
+  if (!inv) return false
+  if (inv.invoice_type === 'credit_note') return !!inv.parent_invoice_id
+  return inv.invoice_type === 'invoice' && payments.value.some(p => p.source === 'credit_note')
+})
 
 async function markRefunded() {
   if (!invoice.value) return
@@ -2190,6 +2199,10 @@ const invoiceActions = computed<ActionItem[]>(() => {
           {{ t('invoice.advance_link.pair_final') }}
         </button>
       </div>
+      <!-- Zápočet dobropisu s opravovanou fakturou (issue #140) -->
+      <CreditNoteOffsetNotice v-if="!isDraft && hasCreditNoteOffsetContext"
+        doc-type="invoice" :doc-id="invoice.id" :is-credit-note="invoice.invoice_type === 'credit_note'"
+        :currency="invoice.currency" :can-write="auth.canWrite('invoices.mark_paid')" @changed="load" />
       <!-- Rodič storna/dobropisu (původní faktura) → prostý odkaz -->
       <RouterLink v-if="invoice.parent_invoice && !linkedProforma"
         :to="`/invoices/${invoice.parent_invoice.id}`"

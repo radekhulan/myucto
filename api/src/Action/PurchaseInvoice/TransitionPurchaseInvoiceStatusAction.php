@@ -72,6 +72,7 @@ final class TransitionPurchaseInvoiceStatusAction
         private readonly \MyInvoice\Service\Accounting\Card\CardPaymentAutomation $cardAutomation,
         private readonly PurchaseInvoiceReceiver $receiver,
         private readonly PurchaseInvoiceApprovalService $approvals,
+        private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -205,6 +206,12 @@ final class TransitionPurchaseInvoiceStatusAction
         $bookedBy = $target === 'booked' && !empty($user['id']) ? (int) $user['id'] : null;
         $requireUnbooked = RequestAuthorization::isClientType($request);
 
+        // Dobropis vyrovnaný zápočtem (issue #140): „Zrušit úhradu" zruší zápočet a stav
+        // vrátí ten sám. Háčky přijetí se pak nespouští, jinak by zápočet hned vznikl znovu.
+        $offsetReverted = $currentStatus === 'paid' && $target === 'received'
+            && (string) ($existing['document_kind'] ?? '') === 'credit_note'
+            && $this->creditNoteOffsets->revertForDocument($supplierId, 'purchase_invoice', $id) > 0;
+
         if ($target === 'cancelled') {
             // A3 (audit H5): storno PF (přechod na cancelled) musí stornovat i aktivní
             // zápis v deníku — jinak deník drží náklad + 321 stornované PF, kterou DPH
@@ -221,6 +228,8 @@ final class TransitionPurchaseInvoiceStatusAction
                 // ve stejné transakci. Ruční pokladní doklady (auto_settlement = 0) se
                 // nedotýká; ty ať uživatel vyřídí v modulu Pokladna vědomě.
                 $this->cashSettlement->detach($supplierId, 'purchase_invoice', $id);
+                // Zápočet dobropisu (issue #140) padá se stornem kterékoli strany.
+                $this->creditNoteOffsets->revertForDocument($supplierId, 'purchase_invoice', $id);
                 $this->journalSync->onCancel($supplierId, 'purchase_invoice', $id, [
                     'user_id'    => $user['id'] ?? null,
                     'posted_by'  => $user['id'] ?? null,
@@ -269,7 +278,7 @@ final class TransitionPurchaseInvoiceStatusAction
                 }
                 throw $e;
             }
-        } elseif (!$this->repo->setStatus($id, $target, $supplierId, $paidDate, $bookedBy, $requireUnbooked)) {
+        } elseif (!$offsetReverted && !$this->repo->setStatus($id, $target, $supplierId, $paidDate, $bookedBy, $requireUnbooked)) {
             return Json::error(
                 $response,
                 'document_locked',
@@ -301,7 +310,7 @@ final class TransitionPurchaseInvoiceStatusAction
         // idempotentní.
         $userId = isset($user['id']) ? (int) $user['id'] : null;
         $settlement = null;
-        if ($target === 'received') {
+        if ($target === 'received' && !$offsetReverted) {
             $settlement = $this->receiver->afterReceived($supplierId, $id, $userId, $ip, $request->getHeaderLine('User-Agent'));
         } else {
             // Platba kartou: zaúčtovaný / uhrazený doklad se spáruje s pohybem karty

@@ -310,10 +310,15 @@ final class CashJournalRepository
                 AND " . sprintf($datePredicate, 'ip.paid_on');
 
         // ── Noha C2 — virtuální výdaje (ručně zaplacené PF bez fyz. vazby) ────
+        // Zápočet dobropisu (1988) není peněžní tok: dobropis vyrovnaný zápočtem se
+        // nezapisuje vůbec a faktura jen svým zbytkem, který se skutečně zaplatil.
+        $cnOffsets = "COALESCE((SELECT SUM(cno.amount) FROM credit_note_offsets cno
+                                 WHERE cno.supplier_id = pi.supplier_id AND cno.doc_type = 'purchase_invoice'
+                                   AND cno.invoice_id = pi.id), 0)";
         $legs[] =
             "SELECT 'purchase_invoice' AS source_type, pi.id AS source_id, pi.paid_at AS movement_date,
                     'out' AS direction,
-                    ROUND(COALESCE(pi.amount_to_pay, pi.total_with_vat) * {$this->piRateSql()}, 2) AS amount,
+                    ROUND((COALESCE(pi.amount_to_pay, pi.total_with_vat) - {$cnOffsets}) * {$this->piRateSql()}, 2) AS amount,
                     COALESCE(pi.vendor_invoice_number, '') AS doc_no, COALESCE(pv.company_name, '') AS partner,
                     '' AS description,
                     NULL AS cash_purpose, NULL AS cash_vat_base, NULL AS cash_vat_amount,
@@ -333,6 +338,9 @@ final class CashJournalRepository
                 AND NOT EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.purchase_invoice_id = pi.id)
                 AND NOT EXISTS (SELECT 1 FROM cash_documents cd2
                                  WHERE cd2.purchase_invoice_id = pi.id AND cd2.status = 'posted')
+                AND NOT EXISTS (SELECT 1 FROM credit_note_offsets cno2
+                                 WHERE cno2.doc_type = 'purchase_invoice' AND cno2.credit_note_id = pi.id)
+                AND NOT ({$cnOffsets} > 0 AND ABS(COALESCE(pi.amount_to_pay, pi.total_with_vat) - {$cnOffsets}) <= 0.005)
                 AND " . sprintf($datePredicate, 'pi.paid_at');
 
         return $legs === [] ? null : implode("\nUNION ALL\n", $legs);

@@ -841,6 +841,19 @@ Pokud zjistíte, že vystavená faktura je špatně:
 > částku, takže výsledný zápis je čitelný (kladné částky na správné straně), ne matoucí záporná
 > čísla. Funguje stejně v CZK i v cizí měně.
 
+**Zápočet dobropisu s fakturou.** Vystavený dobropis k faktuře, která ještě není zaplacená, se s
+ní automaticky započte: faktuře klesne **Zbývá uhradit** o částku dobropisu a dobropis je
+vyrovnaný. Odběratel pak platí jen rozdíl a jeho platbu aplikace spáruje s bankou podle zbytku.
+V platbách faktury se zápočet ukáže se zdrojem **Zápočet dobropisu**.
+
+- Zápočet vzniká jen v plné výši dobropisu a jen tehdy, když ho zbytek faktury pokryje. Dobropis k
+  už zaplacené faktuře zůstává k vrácení peněz jako dosud.
+- V detailu dobropisu je odkaz na fakturu a tlačítko **Zrušit zápočet** pro případ, že odběratel
+  přesto zaplatil celou fakturu. Dobropis vystavený dřív se dá započíst tlačítkem **Započíst s
+  fakturou**.
+- Zápočet není platba: v [peněžním deníku](74_Danova_evidence.md) se neobjeví, příjmem je až
+  skutečně přijatý zbytek. DPH se nemění, dobropis je v evidenci DPH sám za sebe.
+
 ### 15.9.10 Výkaz materiálu
 
 Vedle výkazu víceprací lze ke stejné faktuře vést i **výkaz materiálu**, samostatný rozpis

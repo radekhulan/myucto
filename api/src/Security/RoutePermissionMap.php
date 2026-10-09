@@ -75,8 +75,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/invoices/[0-9]+/issue(-final)?$#', 'invoices.issue', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/(send|send-test)$#', 'invoices.send', AccessLevel::WRITE],
         ['POST', '#^/api/invoices(/[0-9]+)?/(reminder|reminder-test)$#', 'invoices.reminder', AccessLevel::WRITE],
-        ['POST', '#^/api/invoices/[0-9]+/(mark-paid|unmark-paid|payments)(/|$)#', 'invoices.mark_paid', AccessLevel::WRITE],
-        ['DELETE', '#^/api/invoices/[0-9]+/payments(/|$)#', 'invoices.mark_paid', AccessLevel::WRITE],
+        ['POST', '#^/api/invoices/[0-9]+/(mark-paid|unmark-paid|payments|credit-note-offset)(/|$)#', 'invoices.mark_paid', AccessLevel::WRITE],
+        ['DELETE', '#^/api/invoices/[0-9]+/(payments|credit-note-offset)(/|$)#', 'invoices.mark_paid', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/(cancel|uncancel)$#', 'invoices.cancel', AccessLevel::WRITE],
         // Obnova snapshotů stran u vystaveného dokladu — sdílí oprávnění s editací
         // faktury; navíc je v akci tvrdý admin-only check (superadmin).
@@ -106,6 +106,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/transition$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        ['POST', '#^/api/purchase-invoices/[0-9]+/credit-note-offset$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        ['DELETE', '#^/api/purchase-invoices/[0-9]+/credit-note-offset$#', 'purchase_invoices.transition', AccessLevel::WRITE],
         // Schvalování manažerem střediska (F6). Odeslání a zrušení kola je změna stavu
         // dokladu; připomínku posílá účetní. Schránka a rozhodnutí stačí na úrovni
         // ČTENÍ, aby šlo oprávnění přidělit i roli jen pro čtení — rozhodnout jde jen

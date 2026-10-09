@@ -8,6 +8,7 @@ import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.v
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
+import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -1154,6 +1155,12 @@ const purchaseActions = computed<ActionItem[]>(() => {
         class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-800">
         ⚠ {{ t('purchase_invoice.warning.eu_acquisition_tax_date_mismatch') }}
       </div>
+
+      <!-- ═══ Zápočet dobropisu s opravovanou fakturou (issue #140) ═══ -->
+      <CreditNoteOffsetNotice
+        v-if="invoice.status !== 'draft' && ((invoice.document_kind === 'credit_note' && invoice.parent_purchase_invoice_id) || (invoice.corrected_by?.length ?? 0) > 0)"
+        doc-type="purchase_invoice" :doc-id="invoice.id" :is-credit-note="invoice.document_kind === 'credit_note'"
+        :currency="invoice.currency" :can-write="auth.canWrite('purchase_invoices.transition')" @changed="load" />
 
       <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
       <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"

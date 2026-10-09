@@ -26,6 +26,7 @@ final class BankPaymentOrderPayableTest extends TestCase
         $pdo->exec('CREATE TABLE offset_agreements (id INTEGER, status TEXT)');
         $pdo->exec('CREATE TABLE offset_agreement_items (agreement_id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, amount NUMERIC)');
         $pdo->exec('CREATE TABLE invoice_settlements (id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, status TEXT, amount NUMERIC)');
+        $pdo->exec('CREATE TABLE credit_note_offsets (id INTEGER, supplier_id INTEGER, doc_type TEXT, invoice_id INTEGER, credit_note_id INTEGER, amount NUMERIC, offset_on TEXT)');
         $pdo->exec("INSERT INTO currencies VALUES (11, 1, 'CZK')");
         $pdo->exec("INSERT INTO purchase_invoices VALUES (101, 1, 11, 'received', 'invoice', 'bank_transfer', 100, 0, NULL)");
         $pdo->exec('INSERT INTO payment_order_items VALUES (501, 101, 100, NULL)');
@@ -68,6 +69,7 @@ final class BankPaymentOrderPayableTest extends TestCase
         $pdo->exec('CREATE TABLE offset_agreements (id INTEGER, status TEXT)');
         $pdo->exec('CREATE TABLE offset_agreement_items (agreement_id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, amount NUMERIC)');
         $pdo->exec('CREATE TABLE invoice_settlements (id INTEGER, supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, status TEXT, amount NUMERIC)');
+        $pdo->exec('CREATE TABLE credit_note_offsets (id INTEGER, supplier_id INTEGER, doc_type TEXT, invoice_id INTEGER, credit_note_id INTEGER, amount NUMERIC, offset_on TEXT)');
         $pdo->exec("INSERT INTO currencies VALUES (11, 1, 'CZK')");
         $pdo->exec("INSERT INTO invoices VALUES (301, 1, 11, 'invoice', 'issued', 'bank_transfer', -608, NULL)");
         $pdo->exec('INSERT INTO payment_order_items VALUES (601, NULL, 608, 301)');

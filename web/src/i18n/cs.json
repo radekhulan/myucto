@@ -18459,6 +18459,17 @@
     "title": "Certifikáty a elektronické podpisy",
     "subtitle": "Certifikáty, podpisové profily a mapování PDF výstupů."
   },
+  "credit_note_offset": {
+    "credit_note_offset": "Dobropis je započtený ({amount}, {date}) s fakturou",
+    "invoice_offset": "Zbývá uhradit sníženo o {amount} ({date}) dobropisem",
+    "can_apply_hint": "Dobropis zatím není započtený s opravovanou fakturou. Po zápočtu se faktuře sníží Zbývá uhradit a protistrana platí jen rozdíl.",
+    "apply": "Započíst s fakturou",
+    "revert": "Zrušit zápočet",
+    "revert_confirm": "Zrušit zápočet dobropisu? Faktura se vrátí na původní částku k úhradě a dobropis zůstane k vrácení penězi.",
+    "applied": "Dobropis je započtený s fakturou.",
+    "reverted": "Zápočet dobropisu je zrušený.",
+    "failed": "Zápočet dobropisu se nepodařil."
+  },
   "purchase_invoice": {
     "title": "Přijaté faktury",
     "duplicate_number_confirm": "{message}\n\nPokud jde o další platbu téhož dokladu (například platebního kalendáře), můžete doklad uložit i se stejným číslem. Uložit přesto?",
@@ -20845,7 +20856,10 @@
         "manual": "Ručně",
         "mark_paid": "Označeno zaplaceno",
         "bank": "Banka",
-        "legacy": "Historická"
+        "legacy": "Historická",
+        "cash": "Pokladna",
+        "settlement": "Zápočet",
+        "credit_note": "Zápočet dobropisu"
       },
       "vs": "VS platby",
       "reference": "Reference",

@@ -968,7 +968,8 @@
         "1984_payroll_takeover_invariant_checks.sql",
         "1985_payroll_jmhz_unpaid_holidays.sql",
         "1986_import_jobs_myucto.sql",
-        "1987_purchase_invoice_vendor_number_seq.sql"
+        "1987_purchase_invoice_vendor_number_seq.sql",
+        "1988_credit_note_offsets.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3745,6 +3746,36 @@
             },
             "checks": []
         },
+        "credit_note_offsets": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount": "decimal(15,2) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "int(11) NULL DEFAULT NULL",
+                "credit_note_id": "bigint(20) unsigned NOT NULL",
+                "doc_type": "enum('invoice','purchase_invoice') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "invoice_id": "bigint(20) unsigned NOT NULL",
+                "invoice_payment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "offset_on": "date NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_cno_payment": "BTREE (invoice_payment_id)",
+                "idx_cno_invoice": "BTREE (supplier_id, doc_type, invoice_id)",
+                "uq_cno_credit_note": "UNIQUE BTREE (doc_type, credit_note_id)"
+            },
+            "foreign_keys": {
+                "fk_cno_payment": "(invoice_payment_id) -> invoice_payments (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_cno_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_cno_amount": "`amount` > 0"
+            }
+        },
         "crm_action_item_dismissals": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -5980,7 +6011,7 @@
                 "invoice_id": "bigint(20) unsigned NOT NULL",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "paid_on": "date NOT NULL",
-                "source": "enum('manual','mark_paid','bank','legacy','cash','settlement') NOT NULL DEFAULT 'manual'",
+                "source": "enum('manual','mark_paid','bank','legacy','cash','settlement','credit_note') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_document_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "variable_symbol": "varchar(20) NULL DEFAULT NULL"

@@ -18,7 +18,10 @@ use MyInvoice\Service\Bank\FxPaymentSettlement;
  *   - **vzájemný zápočet** — `offset_agreement_items` u dohody ve stavu `confirmed`
  *     ({@see \MyInvoice\Service\Accounting\OffsetService}, dvojice FV ↔ PF),
  *   - **zápočet proti účtu** — `invoice_settlements` ve stavu `confirmed`
- *     ({@see \MyInvoice\Service\Accounting\InvoiceSettlementService}, 321 MD / zvolený účet D).
+ *     ({@see \MyInvoice\Service\Accounting\InvoiceSettlementService}, 321 MD / zvolený účet D),
+ *   - **zápočet dobropisu** — `credit_note_offsets` na opravované faktuře
+ *     ({@see \MyInvoice\Service\Invoice\CreditNoteOffsetService}, bez účetního zápisu:
+ *     dobropis sám už 321 snížil).
  *
  * Všechno se sčítá v MĚNĚ DOKLADU, stejně jako `amount_to_pay`, proti kterému se zbytek
  * počítá. Zápočty se v ní evidují přímo. Banka a pokladna ne: `payment_matches.amount`
@@ -71,7 +74,10 @@ final class PurchaseSettledExpr
                          AND oi.doc_id = %1$sid AND oa.id <> %4$d), 0)
            + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
                        WHERE s.supplier_id = %1$ssupplier_id AND s.doc_type = %3$s
-                         AND s.doc_id = %1$sid AND s.status = %2$s AND s.id <> %5$d), 0)',
+                         AND s.doc_id = %1$sid AND s.status = %2$s AND s.id <> %5$d), 0)
+           + COALESCE((SELECT SUM(cno.amount) FROM credit_note_offsets cno
+                       WHERE cno.supplier_id = %1$ssupplier_id AND cno.doc_type = %3$s
+                         AND cno.invoice_id = %1$sid), 0)',
             $a,
             "'confirmed'",
             "'purchase_invoice'",
@@ -180,8 +186,9 @@ final class PurchaseSettledExpr
      * Zápočet bez účetního zápisu (daňová evidence, ještě nedoúčtovaný) protizápis nemá,
      * takže o něm rozhoduje jen jeho stav.
      *
-     * Obsahuje ČTYŘI placeholdery v pořadí: agreement_date, storno dohody, settled_on,
-     * storno zápočtu — všechny jsou `asOf`.
+     * Obsahuje PĚT placeholderů v pořadí: agreement_date, storno dohody, settled_on,
+     * storno zápočtu, datum zápočtu dobropisu — všechny jsou `asOf`. Zápočet dobropisu
+     * nemá storno: zrušený zápočet řádek smaže a dobropis zůstane otevřený sám za sebe.
      *
      * @param string $alias alias tabulky `purchase_invoices` v okolním dotazu
      */
@@ -206,7 +213,10 @@ final class PurchaseSettledExpr
                          AND oi.doc_id = %1$sid AND oa.agreement_date <= ? AND %3$s), 0)
            + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
                        WHERE s.supplier_id = %1$ssupplier_id AND s.doc_type = %2$s
-                         AND s.doc_id = %1$sid AND s.settled_on <= ? AND %4$s), 0)',
+                         AND s.doc_id = %1$sid AND s.settled_on <= ? AND %4$s), 0)
+           + COALESCE((SELECT SUM(cno.amount) FROM credit_note_offsets cno
+                       WHERE cno.supplier_id = %1$ssupplier_id AND cno.doc_type = %2$s
+                         AND cno.invoice_id = %1$sid AND cno.offset_on <= ?), 0)',
             $a,
             "'purchase_invoice'",
             $liveAsOf('oa'),
