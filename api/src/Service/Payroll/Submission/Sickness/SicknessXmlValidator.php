@@ -577,6 +577,7 @@ final readonly class SicknessXmlValidator
                     'Počet odpracovaných hodin nesmí být vyšší než pracovní doba.',
                 );
             }
+            $this->shiftLength($workTime);
         } elseif ($hours !== null || $workTime !== null) {
             $this->invalid(
                 'nempri_hours_without_worked',
@@ -789,6 +790,7 @@ final readonly class SicknessXmlValidator
                 'Podklady musí nést pracovní dobu i počet odpracovaných hodin posledního dne.',
             );
         }
+        $this->shiftLength($shift);
         if ($worked > $shift) {
             $this->invalid(
                 'nempri_last_day_hours_exceed',
@@ -1039,6 +1041,20 @@ final readonly class SicknessXmlValidator
         }
 
         return null;
+    }
+
+    /**
+     * Délka směny (pracovniDoba, pracovniDobaPoslDenPD): DV NEMPRI25 0,01 až
+     * 24 hodin. XSD (StDoublePracDoba) pustí i nulu, ČSSZ ji ale odmítne.
+     */
+    private function shiftLength(?float $hours): void
+    {
+        if ($hours !== null && ($hours < 0.01 || $hours > self::MAX_DAY_HOURS)) {
+            $this->invalid(
+                'nempri_shift_length_invalid',
+                'Délka směny musí být 0,01 až 24 hodin.',
+            );
+        }
     }
 
     /** VENDOR: název programu 0 až 64 znaků, verze 0 až 16 (DV NEMPRI25, HZUPN20). */

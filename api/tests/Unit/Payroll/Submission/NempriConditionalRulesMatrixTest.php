@@ -68,6 +68,23 @@ final class NempriConditionalRulesMatrixTest extends TestCase
         }
         yield 'ose bez čísla rozhodnutí' => ['ose', [], ['decisionNumber' => null], 'nempri_decision_number_missing'];
         yield 'dlo nárok jiné osoby bez § 57' => ['dlo', ['otherMaternityClaim' => true, 'otherPersonS57' => null], [], 'nempri_other_claim_details_missing'];
+        foreach (['ppm', 'vpm', 'opp'] as $kind) {
+            yield "{$kind} převedení bez data" => [$kind, [], ['transferredOtherWork' => true, 'transferredOn' => null], 'nempri_transfer_date_mismatch'];
+            yield "{$kind} směna 0 hodin" => [$kind, [], ['workedOnDecisiveDay' => true, 'hoursWorked' => '0', 'dailyWorkingHours' => '0'], 'nempri_shift_length_invalid'];
+        }
+        foreach (['nem', 'ose', 'dlo'] as $kind) {
+            yield "{$kind} směna 0 hodin" => [$kind, [], ['workedOnDecisiveDay' => true, 'hoursWorked' => '0', 'dailyWorkingHours' => '0'], 'nempri_shift_length_invalid'];
+            yield "{$kind} směna 0,001 hodiny" => [$kind, [], ['workedOnDecisiveDay' => true, 'hoursWorked' => '0', 'dailyWorkingHours' => '0.001'], 'nempri_shift_length_invalid'];
+        }
+        yield 'opp směna posledního dne 0 hodin' => ['opp', ['shiftHoursLastDay' => '0', 'hoursWorkedLastDay' => '0'], [], 'nempri_shift_length_invalid'];
+        yield 'dlo směna posledního dne 0 hodin' => ['dlo', ['actionStart' => false, 'actionEnd' => true, 'shiftHoursLastDay' => '0', 'hoursWorkedLastDay' => '0'], [], 'nempri_shift_length_invalid'];
+        yield 'opp dítě bez RČ i data narození' => ['opp', ['person' => new NempriPerson('Dítě', 'Testovací', null, null)], [], 'nempri_person_identifier_missing'];
+        yield 'opp dítě s RČ mimo modulo 11' => ['opp', ['person' => new NempriPerson('Dítě', 'Testovací', '1501010008', null)], [], 'nempri_person_birth_number_invalid'];
+        yield 'opp práce ve dnech od po do' => ['opp', ['workDays' => [['from' => '2026-09-16', 'to' => '2026-09-15']]], [], 'nempri_period_invalid'];
+        yield 'ppm dítě bez RČ i data narození' => ['ppm', ['person' => new NempriPerson('Dítě', 'Testovací', null, null)], [], 'nempri_person_identifier_missing'];
+        yield 'ppm dítě s RČ mimo modulo 11' => ['ppm', ['person' => new NempriPerson('Dítě', 'Testovací', '1501010008', null)], [], 'nempri_person_birth_number_invalid'];
+        yield 'ppm pořadí dítěte 11' => ['ppm', ['childOrder' => 11], [], 'nempri_child_order_invalid'];
+        yield 'vpm nástup na PPM bez narození dítěte' => ['vpm', [], ['startsMaternity' => true, 'childBirthDate' => null], 'nempri_child_birth_missing'];
         yield 'nem název programu nad 64 znaků' => ['nem', [], ['productName' => str_repeat('a', 65)], 'nempri_vendor_invalid'];
         yield 'nem verze programu nad 16 znaků' => ['nem', [], ['productVersion' => str_repeat('1', 17)], 'nempri_vendor_invalid'];
     }
@@ -144,11 +161,29 @@ final class NempriConditionalRulesMatrixTest extends TestCase
         $benefit = match ($kind) {
             'nem' => SicknessBenefitKind::Nem,
             'ose' => SicknessBenefitKind::Ose,
+            'ppm' => SicknessBenefitKind::Ppm,
+            'vpm' => SicknessBenefitKind::Vpm,
+            'opp' => SicknessBenefitKind::Opp,
             default => SicknessBenefitKind::Dlo,
         };
         $application = match ($kind) {
-            'nem' => null,
+            'nem', 'vpm' => null,
             'ose' => self::care($applicationOverrides),
+            'ppm' => new NempriBenefitApplication(...[...[
+                'fromDate' => '2026-09-01',
+                'person' => new NempriPerson('Dítě', 'Testovací', null, '2026-08-20'),
+                'maternityCareReason' => 'DOH',
+                'childOrder' => 1,
+            ], ...$applicationOverrides]),
+            'opp' => new NempriBenefitApplication(...[...[
+                'fromDate' => '2026-09-14',
+                'person' => new NempriPerson('Dítě', 'Testovací', null, '2026-09-10'),
+                'paternityReason' => 'OTC',
+                'plannedShifts' => false,
+                'shiftHoursLastDay' => '8',
+                'hoursWorkedLastDay' => '4',
+                'returnedOn' => '2026-09-18',
+            ], ...$applicationOverrides]),
             default => self::dlo($applicationOverrides),
         };
         $starts = !$benefit->hasActions() || ($application?->actionStart ?? true);
@@ -159,6 +194,8 @@ final class NempriConditionalRulesMatrixTest extends TestCase
             'decisionNumber' => match ($benefit) {
                 SicknessBenefitKind::Nem => 'A1234567',
                 SicknessBenefitKind::Ose => '1234567N',
+                SicknessBenefitKind::Ppm => null,
+                SicknessBenefitKind::Vpm, SicknessBenefitKind::Opp => null,
                 default => '1234567L',
             },
             'foreignCase' => false,
