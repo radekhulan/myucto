@@ -390,6 +390,56 @@ final readonly class PayrollSicknessCaseRepository
     }
 
     /**
+     * Schválené absence druhu, ze kterého plyne dávka, ke kterým případ
+     * nevznikl — typicky proto, že firmě při schválení chyběl kód OSSZ.
+     * Absence, kterou kryje existující případ (navazující část řetězu),
+     * ani DPN schválená bez nároku sem nepatří.
+     *
+     * @param list<string> $absenceTypes
+     * @return list<array<string,mixed>>
+     */
+    public function approvedAbsencesWithoutCase(
+        int $supplierId,
+        string $environment,
+        array $absenceTypes,
+        string $endingFrom,
+    ): array {
+        if ($absenceTypes === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($absenceTypes), '?'));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT absence.*
+               FROM payroll_absences absence
+              WHERE absence.supplier_id = ?
+                AND absence.status = 'approved'
+                AND absence.absence_type IN ({$placeholders})
+                AND absence.date_to >= ?
+                AND NOT EXISTS (
+                    SELECT 1 FROM payroll_sickness_cases sickness_case
+                     WHERE sickness_case.supplier_id = absence.supplier_id
+                       AND sickness_case.environment = ?
+                       AND (sickness_case.absence_id = absence.id
+                            OR (sickness_case.employment_id = absence.employment_id
+                                AND sickness_case.cancelled = 0
+                                AND sickness_case.incapacity_from <= absence.date_to
+                                AND (sickness_case.incapacity_to IS NULL
+                                     OR sickness_case.incapacity_to >= absence.date_from)))
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM payroll_sickness_events sickness_event
+                     WHERE sickness_event.supplier_id = absence.supplier_id
+                       AND sickness_event.absence_id = absence.id
+                       AND sickness_event.insurance_eligibility_confirmed = 0
+                )
+              ORDER BY absence.employment_id, absence.date_from, absence.id"
+        );
+        $statement->execute([$supplierId, ...$absenceTypes, $endingFrom, $environment]);
+
+        return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Případ, který vznikl z dané absence.
      *
      * @return array<string,mixed>|null

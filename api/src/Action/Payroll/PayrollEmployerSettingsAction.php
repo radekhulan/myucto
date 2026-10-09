@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollOfficeVariableSymbolInvalidException;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -30,6 +31,7 @@ final class PayrollEmployerSettingsAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmployerLegacyIdentifierCarryOver $legacyIdentifiers,
+        private readonly SicknessCaseFromAbsenceService $sicknessCases,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -102,6 +104,9 @@ final class PayrollEmployerSettingsAction
         if ($this->legacyIdentifiers->settle($supplierId, $this->userId($request))['carried'] !== []) {
             $settings = $this->settings->get($supplierId);
         }
+        // Případy dávek přeskočené při schválení absence kvůli chybějícímu
+        // kódu OSSZ vzniknou hned, jak kód přibude (§ 97 lhůta běží dál).
+        $this->sicknessCases->settleApprovedWithoutCase($supplierId, $this->userId($request));
 
         $this->logger->log(
             'payroll.employer_settings.updated',

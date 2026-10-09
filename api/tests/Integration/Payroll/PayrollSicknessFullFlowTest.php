@@ -631,6 +631,72 @@ final class PayrollSicknessFullFlowTest extends TestCase
     }
 
     /**
+     * Schválená DPN nad 14 dnů ve firmě bez kódu OSSZ případ přeskočí. Po
+     * doplnění kódu ho aplikace musí založit při otevření přehledu případů;
+     * dřív se k přeskočené absenci už nikdy nevrátila a lhůta NEMPRI zmizela.
+     */
+    public function testSkippedCaseIsCreatedAfterOsszCodeIsFilled(): void
+    {
+        $person = $this->sicknessPerson(17, 'Iva Bezkódová');
+        $average = $this->createApprovedAverage($person['employment_id'], 2);
+        $this->publishShifts($person['employment_id'], self::workdays('2026-06'));
+        $setCode = $this->db->pdo()->prepare(
+            'UPDATE payroll_employer_settings SET social_security_office_code = ? WHERE supplier_id = ?',
+        );
+        $setCode->execute([null, $this->supplierId]);
+        $dpn = ['first_day_fully_worked' => false, 'insurance_eligibility_confirmed' => true, 'conflicting_benefit_excluded' => true];
+
+        $approved = $this->approveAbsence($person['employment_id'], 'dpn', '2026-06-08', '2026-06-26', (int) $average['id'], $dpn);
+        self::assertSame('skipped', $approved['sickness_case']['outcome'], json_encode($approved['sickness_case']) ?: '');
+        self::assertSame('sickness_ossz_code_missing', $approved['sickness_case']['reason_code']);
+
+        $listed = $this->service(PayrollSicknessCaseAction::class)->list(
+            $this->request('GET', '/api/payroll/submissions/sickness-cases'),
+            new Response(),
+        );
+        self::assertSame(200, $listed->getStatusCode(), (string) $listed->getBody());
+        self::assertSame([], $this->caseIdsFor($this->json($listed)['items'], $person['employment_id']));
+
+        $setCode->execute(['115', $this->supplierId]);
+        $listed = $this->service(PayrollSicknessCaseAction::class)->list(
+            $this->request('GET', '/api/payroll/submissions/sickness-cases'),
+            new Response(),
+        );
+        self::assertSame(200, $listed->getStatusCode(), (string) $listed->getBody());
+        $caseIds = $this->caseIdsFor($this->json($listed)['items'], $person['employment_id']);
+        self::assertCount(1, $caseIds);
+
+        $case = $this->service(SicknessCaseService::class)->requireCase($this->supplierId, self::ENVIRONMENT, $caseIds[0]);
+        self::assertSame('2026-06-08', $case['incapacity_from']);
+        self::assertSame('2026-06-26', $case['incapacity_to']);
+        self::assertSame(115, (int) $case['ossz_code']);
+        self::assertSame((int) $approved['absence']['id'], (int) $case['absence_id']);
+
+        // Opakované otevření případ nezdvojí.
+        $again = $this->service(PayrollSicknessCaseAction::class)->list(
+            $this->request('GET', '/api/payroll/submissions/sickness-cases'),
+            new Response(),
+        );
+        self::assertSame($caseIds, $this->caseIdsFor($this->json($again)['items'], $person['employment_id']));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items
+     * @return list<int>
+     */
+    private function caseIdsFor(array $items, int $employmentId): array
+    {
+        $ids = [];
+        foreach ($items as $item) {
+            if ((int) ($item['employment_id'] ?? 0) === $employmentId && empty($item['cancelled'])) {
+                $ids[] = (int) $item['id'];
+            }
+        }
+
+        return $ids;
+    }
+
+    /**
      * DPN-05: převzatá neschopnost s 10 dny okna u předchozího plátce. Den
      * vzniku je 1. 6., ne první den v MyÚčtu, a lhůta NEMPRI běží od 15. 6.
      */

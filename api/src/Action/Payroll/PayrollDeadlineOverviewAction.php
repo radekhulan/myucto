@@ -10,6 +10,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -25,6 +26,7 @@ final class PayrollDeadlineOverviewAction
     public function __construct(
         private readonly PayrollDeadlineOverviewService $service,
         private readonly PayrollModuleAccess $access,
+        private readonly SicknessCaseFromAbsenceService $sicknessCases,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -59,6 +61,16 @@ final class PayrollDeadlineOverviewAction
         $query = $request->getQueryParams();
         $environment = $query['environment'] ?? 'production';
         $horizon = $query['horizon_days'] ?? null;
+        // Lhůta NEMPRI absence schválené bez případu (chyběl kód OSSZ) se
+        // v přehledu objeví, jakmile případ jde založit.
+        if ($environment === SicknessCaseFromAbsenceService::ENVIRONMENT
+            && RequestAuthorization::allows($request, 'payroll.submissions', AccessLevel::WRITE)
+        ) {
+            $this->sicknessCases->settleApprovedWithoutCase(
+                $this->currentSupplierId($request),
+                $this->userId($request),
+            );
+        }
         try {
             $result = $this->service->overview(
                 $this->currentSupplierId($request),

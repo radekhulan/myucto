@@ -12,6 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
@@ -48,6 +49,7 @@ final class PayrollSicknessCaseAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionGate $productionGate,
         private readonly PayrollSubmissionTransportAttemptRepository $attempts,
+        private readonly SicknessCaseFromAbsenceService $fromAbsences,
     ) {}
 
     /**
@@ -69,6 +71,12 @@ final class PayrollSicknessCaseAction
         return $this->run($response, function () use ($request): array {
             $supplierId = $this->currentSupplierId($request);
             $environment = $this->environment($request);
+            // Absence schválené bez případu (chyběl kód OSSZ) se nabídnou znovu.
+            if ($environment === SicknessCaseFromAbsenceService::ENVIRONMENT
+                && RequestAuthorization::allows($request, 'payroll.submissions', AccessLevel::WRITE)
+            ) {
+                $this->fromAbsences->settleApprovedWithoutCase($supplierId, $this->userId($request));
+            }
 
             return [
                 'items' => $this->cases->list(

@@ -172,6 +172,44 @@ final readonly class SicknessCaseFromAbsenceService
     }
 
     /**
+     * Doplní případy ke schváleným absencím, u kterých při schválení nevznikly.
+     *
+     * Schválení absence případ přeskočí, když se podání nedá založit (firmě
+     * chybí kód OSSZ). Lhůta § 97 ale běží dál, takže po doplnění kódu (a při
+     * otevření přehledu případů) se přeskočené absence projdou znovu stejnou
+     * cestou jako při schválení. Bere se jen rok zpět a nic před prvním
+     * měsícem vedení mezd v MyÚčtu — dřívější události vyřídil předchozí
+     * program a starší než rok by z MyÚčta už nikdo nepodával.
+     *
+     * @return list<array{outcome:string,case_id:?int,benefit_kind:?string,nempri_due_on:?string,reason_code:?string,message:?string}>
+     */
+    public function settleApprovedWithoutCase(int $supplierId, ?int $userId): array
+    {
+        if ($userId === null || $userId <= 0) {
+            return [];
+        }
+        $endingFrom = (new \DateTimeImmutable('today'))->modify('-1 year')->format('Y-m-d');
+        $startDay = $this->startDay($supplierId);
+        if ($startDay !== null && $startDay > $endingFrom) {
+            $endingFrom = $startDay;
+        }
+        $results = [];
+        foreach ($this->cases->approvedAbsencesWithoutCase(
+            $supplierId,
+            self::ENVIRONMENT,
+            array_keys(self::KIND_BY_ABSENCE),
+            $endingFrom,
+        ) as $absence) {
+            $result = $this->onApproved($supplierId, $absence, $userId);
+            if ($result !== null) {
+                $results[] = $result;
+            }
+        }
+
+        return $results;
+    }
+
+    /**
      * Rozběhnutá událost převzatá z předchozího mzdového programu.
      *
      * Převod zapisuje nepřítomnosti přímo repozitářem, mimo schválení
