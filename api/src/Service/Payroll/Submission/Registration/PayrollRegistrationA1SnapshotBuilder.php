@@ -420,15 +420,15 @@ final class PayrollRegistrationA1SnapshotBuilder
             'contract_start_on' => $this->optionalDate($input, 'contract_start_on'),
             'small_scale' => $this->optionalBool($input, 'small_scale'),
             'employment_status_code' => $this->employmentStatus($input),
-            'work_mode_code' => $this->optionalText($input, 'work_mode_code', 2),
+            'work_mode_code' => $this->coded('work_mode_code', $this->optionalText($input, 'work_mode_code', 2), PayrollRegistrationCodebooks::WORK_MODE, 'Pracovní režim'),
             'continuous_operation' => $this->optionalBool($input, 'continuous_operation'),
-            'prevailing_workplace_code' => $this->optionalText($input, 'prevailing_workplace_code', 2),
+            'prevailing_workplace_code' => $this->coded('prevailing_workplace_code', $this->optionalText($input, 'prevailing_workplace_code', 2), PayrollRegistrationCodebooks::WORK_PLACE, 'Průběh práce'),
             'expected_workplaces' => $this->optionalText($input, 'expected_workplaces', 500),
             'contract_workplace' => $this->optionalText($input, 'contract_workplace', 255),
             'workplace_city' => $this->optionalText($input, 'workplace_city', 255),
             'workplace_municipality_code' => $this->optionalText($input, 'workplace_municipality_code', 12),
             'profession_code' => $this->optionalText($input, 'profession_code', 12),
-            'required_education_code' => $this->optionalText($input, 'required_education_code', 4),
+            'required_education_code' => $this->coded('required_education_code', $this->optionalText($input, 'required_education_code', 4), PayrollRegistrationCodebooks::EDUCATION, 'KKOV'),
             'position_name' => $this->optionalText($input, 'position_name', 255),
             'leadership' => $this->optionalBool($input, 'leadership'),
         ];
@@ -894,7 +894,7 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function taxResidency(array $input): array
     {
         $country = $this->country($input, 'country_code');
-        $identifierType = $this->optionalText($input, 'identifier_type', 1);
+        $identifierType = $this->coded('identifier_type', $this->optionalText($input, 'identifier_type', 1), PayrollRegistrationCodebooks::TAX_IDENTIFIER_TYPE, 'Typ daňové identifikace');
         $identifier = $this->optionalText($input, 'identifier', 20);
         if ($country === 'CZ') {
             // EDV 1.4.0.6, ID 10061 a 10062: u rezidence v ČR je daňová
@@ -950,7 +950,7 @@ final class PayrollRegistrationA1SnapshotBuilder
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function pension(array $input): array
     {
-        $type = $this->optionalText($input, 'type_code', 3);
+        $type = $this->coded('type_code', $this->optionalText($input, 'type_code', 3), PayrollRegistrationCodebooks::PENSION_TYPE, 'C_DUCH');
         $from = $this->optionalDate($input, 'received_from');
         if (($type === null) !== ($from === null)) {
             $this->missing('type_and_received_from');
@@ -979,7 +979,7 @@ final class PayrollRegistrationA1SnapshotBuilder
                 continue;
             }
             $item = [
-                'type_code' => $this->text($restriction, 'type_code', 3),
+                'type_code' => (string) $this->coded('type_code', $this->text($restriction, 'type_code', 3), PayrollRegistrationCodebooks::HEALTH_RESTRICTION, 'Zdravotní omezení'),
                 'from' => $this->date($restriction, 'from'),
                 'to' => $this->optionalDate($restriction, 'to'),
             ];
@@ -1004,7 +1004,7 @@ final class PayrollRegistrationA1SnapshotBuilder
 
         return [
             'highest_education_code' => $variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
-                ? $this->text($input, 'highest_education_code', 4)
+                ? (string) $this->coded('highest_education_code', $this->text($input, 'highest_education_code', 4), PayrollRegistrationCodebooks::EDUCATION, 'KKOV')
                 : null,
             'disability_card' => $this->bool($input, 'disability_card'),
             'health_restrictions' => $normalized,
@@ -1015,7 +1015,7 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function foreignLegislation(array $input): array
     {
         $applies = $this->bool($input, 'applies');
-        $country = $this->optionalText($input, 'country_code', 2);
+        $country = $this->coded('country_code', $this->optionalText($input, 'country_code', 2), PayrollRegistrationCodebooks::COUNTRY, 'C_STAT');
         if ($applies && $country === null) {
             $this->missing('country_code');
         }
@@ -1037,7 +1037,7 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function proofIdentity(array $input, bool $issuerRequired = true): array
     {
         return [
-            'type_code' => $this->text($input, 'type_code', 3),
+            'type_code' => (string) $this->coded('type_code', $this->text($input, 'type_code', 3), PayrollRegistrationCodebooks::PROOF_TYPE, 'Typ dokladu'),
             'number' => $this->text($input, 'number', 64),
             'foreign_issuer' => $issuerRequired
                 ? $this->text($input, 'foreign_issuer', 100)
@@ -1050,12 +1050,12 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function foreignWorker(array $input): array
     {
         $freeAccess = $this->bool($input, 'free_access');
-        $reason = $this->optionalText($input, 'free_access_reason_code', 4);
-        $permitType = $this->optionalText($input, 'permit_type_code', 4);
+        $reason = $this->coded('free_access_reason_code', $this->optionalText($input, 'free_access_reason_code', 4), PayrollRegistrationCodebooks::FREE_ACCESS_REASON, 'Důvod pro volný přístup na trh práce');
+        $permitType = $this->coded('permit_type_code', $this->optionalText($input, 'permit_type_code', 4), PayrollRegistrationCodebooks::PERMIT_TYPE, 'Druh pracovního oprávnění');
         $permitId = $this->optionalText($input, 'permit_identifier', 64);
         $permitFrom = $this->optionalDate($input, 'permit_from');
         $permitTo = $this->optionalDate($input, 'permit_to');
-        $issuingOffice = $this->optionalText($input, 'issuing_labour_office_code', 8);
+        $issuingOffice = $this->coded('issuing_labour_office_code', $this->optionalText($input, 'issuing_labour_office_code', 8), PayrollRegistrationCodebooks::LABOUR_OFFICE, 'Krajské pobočky ÚP ČR');
         if ($freeAccess && $reason === null) {
             $this->missing('free_access_reason_code');
         }
@@ -1287,7 +1287,28 @@ final class PayrollRegistrationA1SnapshotBuilder
             return '';
         }
 
-        return $value;
+        return (string) $this->coded($key, $value, PayrollRegistrationCodebooks::COUNTRY, 'C_STAT');
+    }
+
+    /**
+     * Kód z číselníku EDV 1.4.0.6; prázdná hodnota projde (povinnost hlídá
+     * volající), kód mimo číselník je vada pole a vrátí se `null`.
+     *
+     * @param list<string> $codebook
+     */
+    private function coded(string $field, ?string $value, array $codebook, string $name): ?string
+    {
+        if ($value === null || $value === '' || PayrollRegistrationCodebooks::contains($codebook, $value)) {
+            return $value;
+        }
+        $this->malformed(
+            $field,
+            'není v číselníku ' . $name . ' (EDV REGZEC), teď je „' . $value . '". Vyberte kód z nabídky.',
+            'codebook',
+            ['value' => $value, 'codebook' => $name],
+        );
+
+        return null;
     }
 
     /** Konec období (`$to`) musí být pozdější než jeho začátek. */

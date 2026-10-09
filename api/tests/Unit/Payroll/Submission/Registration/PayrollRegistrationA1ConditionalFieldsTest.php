@@ -143,7 +143,7 @@ final class PayrollRegistrationA1ConditionalFieldsTest extends TestCase
             ),
         );
 
-        $source['foreign_worker']['issuing_labour_office_code'] = 'CZ010';
+        $source['foreign_worker']['issuing_labour_office_code'] = 'HMP';
         self::assertSame(
             [],
             $builder->problems($source, self::foreignIdentity(), self::scope()),

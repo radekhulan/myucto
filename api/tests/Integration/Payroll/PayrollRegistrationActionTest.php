@@ -1536,7 +1536,7 @@ final class PayrollRegistrationActionTest extends TestCase
             $this->json($rejected)['error']['code'],
         );
 
-        $request['changes']['tax_residency']['identifier_type'] = 'T';
+        $request['changes']['tax_residency']['identifier_type'] = 'D';
         $request['changes']['tax_residency']['identifier'] = 'SYN-TIN-7';
         $request['changes']['tax_residency']['residence_address'] = [
             'street' => 'Main',
@@ -4626,7 +4626,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringContainsString('neposílá', $this->json($czech)['error']['message']);
 
         $residency['country_code'] = 'DE';
-        $residency['identifier_type'] = 'T';
+        $residency['identifier_type'] = 'D';
         $residency['identifier'] = 'SYN-TIN-1';
         $mismatch = $this->approveA3(['tax_residency' => $residency], 'synthetic-rdr-mismatch');
         self::assertSame(422, $mismatch->getStatusCode(), (string) $mismatch->getBody());
@@ -5153,7 +5153,7 @@ final class PayrollRegistrationActionTest extends TestCase
         ];
         $payload['tax_residency'] = [
             'country_code' => 'UA',
-            'identifier_type' => 'T',
+            'identifier_type' => 'D',
             'identifier' => 'SYN-TIN-9',
             'residence_address' => [
                 'street' => 'Holovna',
