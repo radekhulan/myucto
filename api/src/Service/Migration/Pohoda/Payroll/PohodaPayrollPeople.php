@@ -877,7 +877,7 @@ final class PohodaPayrollPeople
      *
      * @param array<string,array<string,mixed>> $rows `SocPojSleva` podle ID
      * @param array{requested?:bool,granted?:bool} $flags
-     * @return array{reason:?string,source_reason:string,from:?string,requested:bool,granted:bool}|null
+     * @return array{reason:?string,source_reason:string,from:?string,source_id:string,requested:bool,granted:bool}|null
      */
     private static function partTimeDiscount(array $rows, string $relationId, array $flags): ?array
     {
@@ -889,14 +889,15 @@ final class PohodaPayrollPeople
             $from = self::realDate(PohodaXml::date($row, 'DatumOd'));
             if ($found === null || (string) $from >= (string) $found['from']) {
                 $code = trim(PohodaXml::text($row, 'RelDuvod'));
-                $found = ['reason' => self::PART_TIME_DISCOUNT_REASONS[$code] ?? null, 'source_reason' => $code, 'from' => $from];
+                $found = ['reason' => self::PART_TIME_DISCOUNT_REASONS[$code] ?? null, 'source_reason' => $code, 'from' => $from,
+                    'source_id' => PohodaXml::text($row, 'ID')];
             }
         }
         if ($found === null && ($flags['requested'] ?? false) === false && ($flags['granted'] ?? false) === false) {
             return null;
         }
 
-        return ($found ?? ['reason' => null, 'source_reason' => '', 'from' => null])
+        return ($found ?? ['reason' => null, 'source_reason' => '', 'from' => null, 'source_id' => ''])
             + ['requested' => $flags['requested'] ?? false, 'granted' => $flags['granted'] ?? false];
     }
 

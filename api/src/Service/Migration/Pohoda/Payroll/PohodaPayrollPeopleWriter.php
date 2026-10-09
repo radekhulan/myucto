@@ -531,11 +531,12 @@ final class PohodaPayrollPeopleWriter
                 . "z PAMICA převod nepřevzal - {$doubt}. Ověřte důvod podle § 7a odst. 1 a zadejte ho v podmínkách vztahu.", $number);
             return;
         }
-        $from = is_string($discount['from'] ?? null) ? PayrollTakeoverFormat::czechDate($discount['from']) : '?';
         $letter = SocialPartTimeDiscountReason::from((string) $reason)->paragraph7aLetter();
+        // Doklad nároku je kanonický odkaz na záznam zdroje (výpočet pojistného ho jako
+        // odkaz ověřuje a text s mezerami by výpočet vztahu shodil), ne volný text.
         $this->part($protocol, $step, $number, 'Sleva zaměstnavatele na pojistném', fn (): array => $this->employments->partTimeDiscountReason(
             $supplierId, $employmentId, (string) $reason,
-            self::NOTE . "důvod slevy zaměstnavatele § 7a odst. 1 písm. {$letter}) od {$from}; nárok přiznaný v PAMICA.",
+            'pamica:socpojsleva:' . ((string) ($discount['source_id'] ?? '') !== '' ? $discount['source_id'] : 'mz'),
             $userId, $policy,
         ));
         $intent = $this->db->pdo()->prepare(

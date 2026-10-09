@@ -151,14 +151,17 @@ final class PohodaPayrollOlderYearImportTest extends TestCase
             [$supplierId, $alena['employee_id']],
         ), 'Žádost o slevu zaměstnavatele není sleva pracujícího důchodce. ' . $this->explain($protocol));
         $reason = $this->db->pdo()->prepare(
-            'SELECT social_part_time_discount_reason FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?
-              ORDER BY effective_from DESC, id DESC LIMIT 1'
+            'SELECT social_part_time_discount_reason, social_part_time_discount_evidence FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ? ORDER BY effective_from DESC, id DESC LIMIT 1'
         );
         $reason->execute([$supplierId, $alena['id']]);
-        self::assertSame(Payroll::ALENA_DISCOUNT_REASON, $reason->fetchColumn(), $this->explain($protocol));
+        $terms = $reason->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(Payroll::ALENA_DISCOUNT_REASON, $terms['social_part_time_discount_reason'] ?? null, $this->explain($protocol));
+        // Doklad je kanonický odkaz: výpočet pojistného ho ověřuje a text s mezerami by výpočet vztahu shodil.
+        self::assertMatchesRegularExpression('/^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/D', (string) $terms['social_part_time_discount_evidence']);
         $bohumil = $this->employment($supplierId, Payroll::BOHUMIL_HPP);
         $reason->execute([$supplierId, $bohumil['id']]);
-        self::assertSame('none', $reason->fetchColumn(), 'Důvod a) u osoby mladší 55 let se nepřebírá.');
+        self::assertSame('none', $reason->fetch(\PDO::FETCH_ASSOC)['social_part_time_discount_reason'] ?? null, 'Důvod a) u osoby mladší 55 let se nepřebírá.');
         self::assertCount(1, self::messages($protocol, 'part_time_discount_doubtful'), $this->explain($protocol));
         // Bez přijatého záměru OZUSPOJ převod upozorní, že běh slevu zastaví k ručnímu posouzení.
         self::assertCount(1, self::messages($protocol, 'part_time_discount_intent_missing'), $this->explain($protocol));
