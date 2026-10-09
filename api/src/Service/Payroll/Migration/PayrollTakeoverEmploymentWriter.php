@@ -489,7 +489,7 @@ final class PayrollTakeoverEmploymentWriter
                 'rate_basis_points' => null,
                 'valid_from' => $from,
                 'valid_to' => $to,
-                'allocation_rule' => 'calendar_days',
+                'allocation_rule' => $item['allocation'] ?? 'calendar_days',
                 'maximum_amount_minor' => null,
                 'note' => $policy->note(mb_substr('opakovaná složka „' . $item['name'] . '" z karty vztahu.', 0, 200)),
                 'is_active' => true,

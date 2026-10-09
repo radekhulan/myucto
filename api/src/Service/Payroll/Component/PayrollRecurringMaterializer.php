@@ -26,9 +26,11 @@ use MyInvoice\Service\Payroll\PayrollRunClosedException;
  * aritmetika by znamenala dvě různá čísla pro tutéž mzdu podle toho, kterou
  * cestou vstup vznikl.
  *
- * Krátí se jen složka druhu `base_wage`. Pevný měsíční benefit nebo příspěvek
- * se za nepřítomnost nekrátí — nepřísluší za odpracovanou dobu, takže poměr by
- * na něj neseděl.
+ * Krátí se složka druhu `base_wage` a předpis s rozpočítáním „odpracované
+ * hodiny" (`hours`): ten je sjednaný jako měsíční částka za odpracovanou dobu
+ * (typicky osobní ohodnocení), takže se krátí TÝMŽ poměrem jako základní mzda.
+ * Pevný měsíční benefit nebo příspěvek se za nepřítomnost nekrátí — nepřísluší
+ * za odpracovanou dobu, takže poměr by na něj neseděl.
  *
  * Fail-closed: bez doloženého časového podkladu (chybí kalendář, měsíc má
  * rozporná data) se částka NEODHADUJE a předpis jde k ručnímu posouzení.
@@ -81,7 +83,7 @@ final class PayrollRecurringMaterializer
                     $manualReview[] = $this->blocked($row, 'Mzdová složka není aktivní.');
                     continue;
                 }
-                $calculation = $this->calculator->calculate($row, $periodStart);
+                $calculation = $this->calculate($row, $periodStart);
                 if ($calculation['status'] === 'supported') {
                     $calculation = $this->prorateForAbsences(
                         $supplierId,
@@ -148,6 +150,37 @@ final class PayrollRecurringMaterializer
     }
 
     /**
+     * Částka předpisu před krácením. Předpis „odpracované hodiny" (`hours`) se sám
+     * kalkulátorem nespočítá (bez časového podkladu by částku vymyslel); tady ho
+     * časový podklad čeká v {@see prorateForAbsences()}, takže se nejdřív vymezí
+     * kalendářními dny platnosti a trvání vztahu a pak se krátí jako základní mzda.
+     *
+     * @param array<string,mixed> $row
+     * @return array{status:string,amount_minor:?int,trace:array<string,mixed>,blocker:?string}
+     */
+    private function calculate(array $row, string $periodStart): array
+    {
+        if (!self::byWorkedTime($row)) {
+            return $this->calculator->calculate($row, $periodStart);
+        }
+        $calculation = $this->calculator->calculate(
+            ['allocation_rule' => 'calendar_days'] + $row,
+            $periodStart,
+        );
+        if ($calculation['status'] === 'supported') {
+            $calculation['trace']['allocation_rule'] = 'hours';
+        }
+
+        return $calculation;
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function byWorkedTime(array $row): bool
+    {
+        return ($row['allocation_rule'] ?? null) === 'hours';
+    }
+
+    /**
      * Zkrácení spočítané částky o dobu, kterou v měsíci kryje jiný titul.
      *
      * Vstupem krácení je částka, kterou vrátil kalkulátor, ne sjednaná měsíční
@@ -164,9 +197,9 @@ final class PayrollRecurringMaterializer
         array $row,
         array $calculation,
     ): array {
-        // Krátí se JEN základní mzda. Druh složky, ne kód — kód si firma může
-        // přejmenovat, druh je vlastnost číselníku.
-        if (($row['component_kind'] ?? null) !== 'base_wage') {
+        // Krátí se JEN základní mzda a předpis „odpracované hodiny". Druh složky,
+        // ne kód — kód si firma může přejmenovat, druh je vlastnost číselníku.
+        if (($row['component_kind'] ?? null) !== 'base_wage' && !self::byWorkedTime($row)) {
             return $calculation;
         }
         $amount = $calculation['amount_minor'];

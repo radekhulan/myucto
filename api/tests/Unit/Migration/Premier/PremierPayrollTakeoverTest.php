@@ -158,7 +158,7 @@ final class PremierPayrollTakeoverTest extends TestCase
         $relations = array_column(PremierPayroll::fromBackup(PremierBackup::open($this->tmp))->relations, null, 'key');
 
         self::assertSame(
-            [['code' => 'PREMIER_303', 'name' => 'Osobní ohodnocení', 'kind' => 'bonus', 'amount' => 2000.0, 'from' => '2025-01-01', 'to' => null]],
+            [['code' => 'PREMIER_303', 'name' => 'Osobní ohodnocení', 'kind' => 'bonus', 'amount' => 2000.0, 'from' => '2025-01-01', 'to' => null, 'allocation' => 'hours']],
             PremierPayrollTakeover::record($relations['5'], '2025-12-31')->employment->recurringComponents,
         );
         self::assertSame([], PremierPayrollTakeover::recurringComponents($relations['5'], '2025-12-31', '2025-01'));

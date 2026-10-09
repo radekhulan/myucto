@@ -6070,7 +6070,7 @@
                 },
                 "303": {
                     "status": "mapped",
-                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PREMIER_303 (druh bonus, pravidelná) pro měsíce počítané MyÚčtem; převzaté měsíce ho mají v úhrnech MZDY"
+                    "target": "trvalý příjem z karty MZ_SRAZ: opakovaná složka PREMIER_303 (druh bonus, pravidelná, rozpočítání odpracované hodiny = krácení poměrem odpracované doby jako základní mzda) pro měsíce počítané MyÚčtem; převzaté měsíce ho mají v úhrnech MZDY"
                 },
                 "305": {
                     "status": "ignored",

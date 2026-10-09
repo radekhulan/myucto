@@ -72,9 +72,21 @@ final class PremierPayrollDeductions
     public const RECURRING_INCOME = ['303' => 'bonus'];
 
     /**
+     * Rozpočítání opakované složky podle kódu (výchozí `calendar_days`).
+     *
+     * Osobní ohodnocení (303) PREMIER krátí poměrem odpracovaných hodin k fondu pracovní
+     * doby měsíce: na záloze 2025-2026 vyšlo u 126 ze 128 automaticky spočítaných měsíců
+     * přesně `round(částka karty × odpracované hodiny / fond)` (dovolená, nemoc i překážky
+     * krátí, svátek je mimo fond). MyÚčto to vyjadřuje rozpočítáním „odpracované hodiny"
+     * (`hours`), které krátí stejně jako základní mzdu. Částky zadané v PREMIER ručně
+     * (příznak `DNY.RUCNE`) pravidlo nemají a převod je nenapodobuje.
+     */
+    private const RECURRING_ALLOCATION = ['303' => 'hours'];
+
+    /**
      * Karty `MZ_SRAZ` s trvalým příjmem ({@see self::RECURRING_INCOME}) po vztazích.
      *
-     * @return array<int,list<array{code:string,name:string,kind:string,amount:float,from:?string,to:?string}>>
+     * @return array<int,list<array{code:string,name:string,kind:string,amount:float,from:?string,to:?string,allocation:string}>>
      *         `S_INTER` => karty; `from`/`to` jsou měsíce `YYYY-MM` (`null` = neomezeno)
      */
     public static function recurringIncomes(PremierBackup $backup): array
@@ -99,6 +111,7 @@ final class PremierPayrollDeductions
                 'amount' => round((float) ($row['S_CASTKA'] ?? 0), 2),
                 'from' => self::month($row['S_ROK_OD'] ?? null, $row['S_MES_OD'] ?? null),
                 'to' => self::month($row['S_ROK_DO'] ?? null, $row['S_MES_DO'] ?? null),
+                'allocation' => self::RECURRING_ALLOCATION[$code] ?? 'calendar_days',
             ];
         }
 

@@ -498,6 +498,50 @@ final class PayrollRecurringMaterializerTest extends TestCase
     }
 
     /**
+     * Předpis „odpracované hodiny" (osobní ohodnocení za odpracovanou dobu) se
+     * krátí stejným poměrem jako základní mzda: 1 500 Kč × 128/176 = 1 090,91 Kč,
+     * nahoru na celé koruny 1 091 Kč. Bez krácení by měsíc s dovolenou vyplatil
+     * celou částku.
+     */
+    public function testWorkedHoursAllocationIsProratedLikeBaseWage(): void
+    {
+        $componentId = $this->createComponent('OSOBNI_OHODNOCENI_REK');
+        $this->createWorkCalendar();
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'vacation_hours' => 48_000, 'worked_hours' => 128_000]);
+        $this->createRecurring($componentId, amountMinor: 150_000, allocationRule: 'hours');
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(1, $result['created_count'], (string) json_encode($result['manual_review']));
+        self::assertSame(
+            109_100,
+            PayrollTimeValue::rows($result['created'], 'created')[0]['amount_minor'],
+        );
+    }
+
+    /** Bez kalendáře se ani předpis „odpracované hodiny" neodhaduje. */
+    public function testWorkedHoursAllocationWithoutTimeBasisFailsClosed(): void
+    {
+        $componentId = $this->createComponent('OSOBNI_OHODNOCENI_REK');
+        $this->createImportSummaryMonth(['fund_hours' => 176_000, 'vacation_hours' => 48_000, 'worked_hours' => 128_000]);
+        $this->createRecurring($componentId, amountMinor: 150_000, allocationRule: 'hours');
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            self::PERIOD,
+            $this->userId,
+        );
+
+        self::assertSame(0, $result['created_count']);
+        self::assertSame(1, $result['manual_review_count']);
+        self::assertSame(0, $this->countInputs());
+    }
+
+    /**
      * Bez pracovního kalendáře se fond neví, takže se poměrná část NEODHADUJE.
      * Vrátit plnou sjednanou mzdu by bylo horší než nevrátit nic: číslo vypadá
      * hotově a nikdo ho už nezkontroluje.

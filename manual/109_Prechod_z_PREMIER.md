@@ -368,7 +368,11 @@ Zkontrolujte po převodu:
   nepřevádějí. Z trvalých karet vztahu převod založí jen osobní ohodnocení
   pevnou částkou, a to jako opakovanou složku *Osobní ohodnocení*
   (pravidelná odměna) pro měsíce, které počítá MyÚčto; karta, která na konci
-  převáděného období už skončila, se nepřevezme. Příspěvek na penzijní
+  převáděného období už skončila, se nepřevezme. Předpis má rozpočítání
+  *Odpracované hodiny*: v měsíci s dovolenou, nemocí nebo překážkou se krátí
+  poměrem odpracované doby k fondu pracovní doby stejně jako základní mzda,
+  tak jak ho krátí PREMIER. Částku, kterou jste v PREMIER zadávali ručně,
+  upravte ve vstupu měsíce. Příspěvek na penzijní
   připojištění, stravenkový paušál a příspěvek na praní zadejte v modulu Mzdy.
 - **Doklad a DIČ nerezidenta.** Stát daňové rezidence nerezidenta převod vezme
   z karty nerezidenta; číslo dokladu a DIČ v zemi rezidence doplňte ručně.

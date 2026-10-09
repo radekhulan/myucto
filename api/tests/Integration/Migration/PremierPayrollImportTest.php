@@ -547,8 +547,8 @@ final class PremierPayrollImportTest extends TestCase
         $first = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
         self::assertFalse($first->hasErrors(), $this->explain($first));
         self::assertSame(1, self::stepCounts($first, 'payroll')['recurring_components'] ?? 0, $this->explain($first));
-        self::assertSame([['PREMIER_303', 'bonus', 'regular', '200000', '2025-01-15', null]], $this->fetch('SELECT d.code, d.component_kind, d.frequency_kind,
-                r.amount_minor, r.valid_from, r.valid_to
+        self::assertSame([['PREMIER_303', 'bonus', 'regular', '200000', '2025-01-15', null, 'hours']], $this->fetch('SELECT d.code, d.component_kind, d.frequency_kind,
+                r.amount_minor, r.valid_from, r.valid_to, r.allocation_rule
               FROM payroll_recurring_components r
               JOIN payroll_component_definitions d ON d.supplier_id = r.supplier_id AND d.id = r.component_id
               JOIN payroll_employments e ON e.supplier_id = r.supplier_id AND e.id = r.employment_id
