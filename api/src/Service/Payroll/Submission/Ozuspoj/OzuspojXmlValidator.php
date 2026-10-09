@@ -148,7 +148,10 @@ final readonly class OzuspojXmlValidator
         // Popis datové věty: VENDOR/@productName 0 až 64 znaků,
         // @productVersion 0 až 16, SENDER/@EmailNotifikace 0 až 250 ve tvaru
         // e-mailové adresy. XSD je má jako volný xs:string, takže to neuhlídá.
-        if (mb_strlen($payload->productName) > 64 || mb_strlen($payload->productVersion) > 16) {
+        // Verze je typ A,NN,ZM: písmena, číslice, pomlčka, tečka, podtržítko.
+        if (mb_strlen($payload->productName) > 64
+            || preg_match('/^[\p{L}0-9._-]{0,16}$/uD', $payload->productVersion) !== 1
+        ) {
             $this->invalid(
                 'ozuspoj_vendor_invalid',
                 'Název programu smí mít nejvýš 64 znaků a jeho verze 16 znaků.',

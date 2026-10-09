@@ -43,6 +43,8 @@ final class OzuspojNormMatrixTest extends TestCase
         yield 'telefon se zavináčem' => [['contactPhone' => '123@456'], 'ozuspoj_xsd_validation_failed'];
         yield 'notifikační e-mail bez zavináče' => [['notificationEmail' => 'notifikace'], 'ozuspoj_notification_email_invalid'];
         yield 'verze programu nad 16 znaků' => [['productVersion' => str_repeat('1', 17)], 'ozuspoj_vendor_invalid'];
+        yield 'verze programu s mezerou' => [['productVersion' => '1.0 beta'], 'ozuspoj_vendor_invalid'];
+        yield 'verze programu s lomítkem' => [['productVersion' => '1.0/2'], 'ozuspoj_vendor_invalid'];
         yield 'název programu nad 64 znaků' => [['productName' => str_repeat('a', 65)], 'ozuspoj_vendor_invalid'];
     }
 
