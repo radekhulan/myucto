@@ -34,6 +34,7 @@ use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\FixedExchangeRateService;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Ai\AiKillSwitchService;
 use MyInvoice\Service\Ai\AiSuggestionService;
@@ -596,6 +597,7 @@ final class BankPostingService
                 return ['lines' => $this->cardBankLines($supplierId, $tx, $card['code'])];
             }
         }
+        $this->assertAllocationsSettledByBank((int) $tx['id']);
         $isForeign = $this->effectiveCurrency($tx) !== 'CZK';
         if ((float) $tx['amount'] > 0) {
             return $isForeign
@@ -689,6 +691,29 @@ final class BankPostingService
 
         $this->appendRounding($lines, $absAmount - round($allocSum, 2));
         return ['lines' => $lines];
+    }
+
+    /**
+     * Pojistka proti dvojímu odúčtování 311: na pohyb smí být navázaná jen platba, kterou
+     * párování banky navázat smí ({@see InvoicePaymentService::bankReconcilableSql()}).
+     * Platbu ze zápočtu dobropisu, zápočtu proti účtu, vzájemného zápočtu nebo pokladny
+     * už saldokonto vyrovnalo jinou cestou. Bankovní zápis by ji odúčtoval podruhé,
+     * proto pohyb jde ke kontrole.
+     */
+    private function assertAllocationsSettledByBank(int $txId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM invoice_payments p
+              WHERE p.bank_transaction_id = ?
+                AND NOT ' . InvoicePaymentService::bankSettleableSql('p')
+        );
+        $stmt->execute([$txId]);
+        if ((int) $stmt->fetchColumn() > 0) {
+            throw new PostingException(
+                'overpaid_verify',
+                'Pohyb je navázaný na úhradu vyrovnanou zápočtem nebo pokladnou — ověřte, zda nejde o dvojí úhradu.',
+            );
+        }
     }
 
     /**

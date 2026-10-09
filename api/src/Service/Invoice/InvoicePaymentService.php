@@ -35,6 +35,39 @@ final class InvoicePaymentService
     /** Typy dokladů, na které lze evidovat platbu. */
     private const PAYABLE_TYPES = ['invoice', 'proforma'];
 
+    /**
+     * Zdroje plateb, které smí párování banky dodatečně navázat na bankovní pohyb
+     * (rekonciliace zaplacené faktury). Jen evidenční záznam peněz, které reálně přišly
+     * bankou, nebo bankovní platba, která ztratila vazbu po smazání výpisu.
+     *
+     * Ne: `cash` (vyrovnala pokladna), `settlement` (zápočet proti účtu, vlastní zápis
+     * na 311), `credit_note` (zápočet dobropisu, saldo snížil dobropis sám) ani platba
+     * vzájemného zápočtu ({@see \MyInvoice\Service\Accounting\OffsetService}, zdroj
+     * `manual`, poznáme ji podle offset_agreement_items). Bankovní zápis by pohledávku
+     * 311 odúčtoval podruhé.
+     */
+    public const BANK_RECONCILABLE_SOURCES = ['legacy', 'manual', 'mark_paid', 'bank'];
+
+    /**
+     * SQL podmínka „platbu lze navázat na bankovní pohyb". Jediné místo pravidla pro
+     * návrhy párování, sloučenou úhradu i {@see reconcileToBankTransaction()}.
+     */
+    public static function bankReconcilableSql(string $alias): string
+    {
+        return "{$alias}.bank_transaction_id IS NULL AND " . self::bankSettleableSql($alias);
+    }
+
+    /**
+     * SQL podmínka „platbu smí vyrovnat bankovní pohyb" bez ohledu na to, zda už na
+     * nějaký navázaná je (zdroj z {@see BANK_RECONCILABLE_SOURCES}, ne vzájemný zápočet).
+     */
+    public static function bankSettleableSql(string $alias): string
+    {
+        $sources = "'" . implode("','", self::BANK_RECONCILABLE_SOURCES) . "'";
+        return "({$alias}.source IN ({$sources})"
+            . " AND NOT EXISTS (SELECT 1 FROM offset_agreement_items oai_rec WHERE oai_rec.invoice_payment_id = {$alias}.id))";
+    }
+
     public function __construct(
         private readonly Connection $db,
         private readonly InvoicePdfRenderer $pdf,
@@ -345,7 +378,8 @@ final class InvoicePaymentService
      *
      * NEMĚNÍ paid_total ani stav faktury (jen doplní bank_transaction_id k existující
      * platbě) — proto žádné dvojí zdanění/přeplacení. Vyžaduje PRÁVĚ JEDNU dosud
-     * nenavázanou platbu (bank_transaction_id IS NULL); 0 = faktura už je spárovaná
+     * nenavázanou platbu, kterou lze navázat ({@see bankReconcilableSql()}: zápočet ani
+     * pokladna bankou podruhé neodúčtují 311); 0 = faktura už je spárovaná
      * s jinou transakcí, >1 = nejednoznačné (rekonciliaci proveď ručně). Tím je
      * zaručeno, že nikdy neporušíme UNIQUE(bank_transaction_id, invoice_id).
      *
@@ -358,15 +392,15 @@ final class InvoicePaymentService
     {
         $pdo = $this->db->pdo();
         $sel = $pdo->prepare(
-            'SELECT id, amount FROM invoice_payments
-              WHERE invoice_id = ? AND bank_transaction_id IS NULL
-           ORDER BY id'
+            'SELECT p.id, p.amount FROM invoice_payments p
+              WHERE p.invoice_id = ? AND ' . self::bankReconcilableSql('p') . '
+           ORDER BY p.id'
         );
         $sel->execute([$invoiceId]);
         $rows = $sel->fetchAll(PDO::FETCH_ASSOC) ?: [];
         if (count($rows) === 0) {
             throw new \RuntimeException(
-                'Faktura nemá nenavázanou platbu k rekonciliaci (je už spárovaná s jinou transakcí).'
+                'Faktura nemá nenavázanou platbu k rekonciliaci (je už spárovaná s jinou transakcí, nebo uhrazená zápočtem či pokladnou).'
             );
         }
         if (count($rows) > 1) {

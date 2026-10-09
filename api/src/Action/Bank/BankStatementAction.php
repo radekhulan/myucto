@@ -2467,15 +2467,17 @@ final class BankStatementAction
 
         // Pool: vystavené faktury v okně ±window dní. Zahrnuje i ZAPLACENÉ — u nich jde
         // o rekonciliaci (navázat existující platbu na transakci), proto k nim tahám
-        // sumu+počet dosud nenavázaných plateb (bank_transaction_id IS NULL). Částku
+        // sumu+počet dosud nenavázaných plateb, které lze na pohyb navázat (zápočet ani
+        // pokladna ne, viz InvoicePaymentService::bankReconcilableSql). Částku
         // NEfiltrujeme v SQL (efektivní příspěvek se počítá v PHP — kvůli cizí měně + paid).
+        $reconcilableSql = InvoicePaymentService::bankReconcilableSql('ip');
         $sql = "SELECT i.id, i.client_id, i.varsymbol AS ref, i.amount_to_pay, i.paid_total, i.status,
                        i.exchange_rate, i.issue_date, i.due_date, cur.code AS currency,
                        c.company_name AS party,
                        (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
-                         WHERE ip.invoice_id = i.id AND ip.bank_transaction_id IS NULL) AS reconcilable,
+                         WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable,
                        (SELECT COUNT(*) FROM invoice_payments ip
-                         WHERE ip.invoice_id = i.id AND ip.bank_transaction_id IS NULL) AS reconcilable_count
+                         WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable_count
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
              LEFT JOIN clients c ON c.id = i.client_id
@@ -3450,13 +3452,14 @@ final class BankStatementAction
 
         // Načti vybrané faktury (supplier scope). Pořadí dle vstupu.
         $place = implode(',', array_fill(0, count($invoiceIds), '?'));
+        $reconcilableSql = InvoicePaymentService::bankReconcilableSql('ip');
         $stmt = $pdo->prepare(
             "SELECT i.id, i.supplier_id, i.invoice_type, i.status, i.client_id,
                     i.amount_to_pay, i.paid_total, i.exchange_rate, cur.code AS currency,
                     (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
-                      WHERE ip.invoice_id = i.id AND ip.bank_transaction_id IS NULL) AS reconcilable,
+                      WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable,
                     (SELECT COUNT(*) FROM invoice_payments ip
-                      WHERE ip.invoice_id = i.id AND ip.bank_transaction_id IS NULL) AS reconcilable_count
+                      WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable_count
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id IN ($place)"

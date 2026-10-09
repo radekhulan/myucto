@@ -63,7 +63,163 @@ final class CreditNoteOffsetDoubleEntryTest extends BankPostingTestCase
         self::assertEqualsWithDelta(8000.00, $this->remaining($invoiceId), 0.001);
     }
 
+    /**
+     * Dobropis na plnou výši nechá fakturu zaplacenou jedinou platbou se zdrojem
+     * `credit_note`. Sloučená úhrada ji nesmí „rekonciliovat" s bankou: bankovní zápis
+     * by 311 odúčtoval podruhé, saldo už snížil dobropis.
+     */
+    public function testSplitPaymentDoesNotReconcileCreditNoteOffset(): void
+    {
+        [$client, $invoiceId] = $this->fullyOffsetInvoice('FV-2099-CNO-S', 10000.00);
+        $otherId = $this->saleInvoice('FV-2099-CNO-S2', $client, 2000.00);
+        $this->postPredpis('invoice', $otherId, '311', '602', 2000.00);
+        $tx = $this->transaction($this->statement(), 12000.00);
+
+        $res = $this->callAction(
+            $this->container->get(\MyInvoice\Action\Bank\BankStatementAction::class),
+            'manualMatch',
+            'POST',
+            'admin',
+            ['invoice_ids' => [$invoiceId, $otherId]],
+            ['id' => (string) $tx],
+        );
+
+        self::assertSame(409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('cannot_reconcile', $res['body']['error']['code'] ?? null);
+        self::assertSame(0, (int) $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id = ?', [$tx]));
+        self::assertEqualsWithDelta(0.0, $this->bank311Credit($tx), 0.001, '311 se bankou neodúčtuje podruhé');
+        self::assertEqualsWithDelta(2000.00, $this->receivable311([$invoiceId, $otherId]), 0.001,
+            'saldo 311: faktura vyrovnaná dobropisem, druhá otevřená');
+    }
+
+    public function testSplitSuggestionsDoNotOfferCreditNoteOffsetForReconciliation(): void
+    {
+        [$client, $invoiceId] = $this->fullyOffsetInvoice('FV-2099-CNO-N', 10000.00);
+        $otherId = $this->saleInvoice('FV-2099-CNO-N2', $client, 2000.00);
+        $tx = $this->transaction($this->statement(), 12000.00);
+
+        $res = $this->callAction(
+            $this->container->get(\MyInvoice\Action\Bank\BankStatementAction::class),
+            'splitSuggestions',
+            'GET',
+            'admin',
+            [],
+            ['id' => (string) $tx],
+        );
+
+        self::assertSame(200, $res['status']);
+        foreach ($res['body']['suggestions'] ?? [] as $s) {
+            $ids = array_map(static fn (array $i): int => (int) $i['id'], $s['invoices'] ?? []);
+            self::assertNotContains($invoiceId, $ids, 'faktura vyrovnaná dobropisem se k rekonciliaci nenabízí');
+        }
+        self::assertNotSame(0, $otherId);
+    }
+
+    public function testReconcileToBankTransactionSkipsOffsetAndSettlementPayments(): void
+    {
+        [, $invoiceId] = $this->fullyOffsetInvoice('FV-2099-CNO-R', 5000.00);
+        $tx = $this->transaction($this->statement(), 5000.00);
+
+        $thrown = null;
+        try {
+            $this->container->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class)
+                ->reconcileToBankTransaction($invoiceId, $tx);
+        } catch (\RuntimeException $e) {
+            $thrown = $e;
+        }
+        self::assertNotNull($thrown, 'Platba ze zápočtu dobropisu se na bankovní pohyb navázat nesmí.');
+        self::assertSame(0, (int) $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id = ?', [$tx]));
+
+        $client = $this->client('Odběratel zápočtu proti účtu');
+        $settled = $this->saleInvoice('FV-2099-CNO-R2', $client, 3000.00, 'invoice', 'paid');
+        $this->db->pdo()->prepare(
+            "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source)
+             VALUES (?, ?, ?, 3000, 'CZK', 'settlement')"
+        )->execute([$this->supplierId, $settled, self::YEAR . '-06-12']);
+        $tx2 = $this->transaction($this->statement(), 3000.00);
+        $this->expectException(\RuntimeException::class);
+        $this->container->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class)
+            ->reconcileToBankTransaction($settled, $tx2);
+    }
+
+    /**
+     * Pojistka v zaúčtování: kdyby platba ze zápočtu dobropisu přesto visela na pohybu
+     * (data z doby před opravou), bankovní zápis 221/311 nevznikne a pohyb jde ke kontrole.
+     */
+    public function testBankPostingRefusesPaymentSettledByCreditNote(): void
+    {
+        [, $invoiceId] = $this->fullyOffsetInvoice('FV-2099-CNO-P', 10000.00);
+        $tx = $this->transaction($this->statement(), 10000.00, ['match_status' => 'manual', 'matched_invoice_id' => $invoiceId]);
+        $this->db->pdo()->prepare(
+            "UPDATE invoice_payments SET bank_transaction_id = ? WHERE invoice_id = ? AND source = 'credit_note'"
+        )->execute([$tx, $invoiceId]);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertNotSame('posted', $res['action']);
+        self::assertSame('overpaid_verify', $res['reason']);
+        self::assertEqualsWithDelta(0.0, $this->bank311Credit($tx), 0.001);
+    }
+
     // ── fixtures ─────────────────────────────────────────────────────────────
+
+    /**
+     * Faktura s předpisem 311/602 a dobropis na plnou výši s předpisem 602/311,
+     * ručně započtené. Faktura je zaplacená jedinou platbou `credit_note`.
+     *
+     * @return array{0:int, 1:int} [klient, faktura]
+     */
+    private function fullyOffsetInvoice(string $varsymbol, float $total): array
+    {
+        $client = $this->client('Odběratel ' . $varsymbol);
+        $invoiceId = $this->saleInvoice($varsymbol, $client, $total);
+        $creditNoteId = $this->saleInvoice($varsymbol . '-D', $client, -$total, 'credit_note');
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')
+            ->execute([$invoiceId, $creditNoteId]);
+        $this->postPredpis('invoice', $invoiceId, '311', '602', $total);
+        $this->postPredpis('invoice', $creditNoteId, '602', '311', $total);
+
+        $result = $this->offsets->applyForInvoice($this->supplierId, $creditNoteId, $this->userId);
+        self::assertNotNull($result['offset_id'], (string) $result['reason']);
+        self::assertSame('paid', $this->invoiceStatus($invoiceId));
+        return [$client, $invoiceId];
+    }
+
+    private function bank311Credit(int $txId): float
+    {
+        return (float) $this->scalar(
+            "SELECT COALESCE(SUM(l.amount), 0)
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE e.supplier_id = ? AND e.source_type = 'bank' AND e.source_id = ?
+                AND e.reversed_by IS NULL AND l.side = 'credit' AND a.account_code LIKE '311%'",
+            [$this->supplierId, $txId],
+        );
+    }
+
+    /**
+     * Zůstatek 311 ze všech zápisů daných faktur, jejich dobropisů a bankovních pohybů,
+     * které je hradí.
+     *
+     * @param list<int> $invoiceIds
+     */
+    private function receivable311(array $invoiceIds): float
+    {
+        $place = implode(',', array_fill(0, count($invoiceIds), '?'));
+        return (float) $this->scalar(
+            "SELECT COALESCE(SUM(CASE l.side WHEN 'debit' THEN l.amount ELSE -l.amount END), 0)
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE e.supplier_id = ? AND e.reversed_by IS NULL AND a.account_code LIKE '311%'
+                AND ((e.source_type = 'invoice' AND e.source_id IN (
+                         SELECT id FROM invoices WHERE id IN ($place) OR parent_invoice_id IN ($place)))
+                  OR (e.source_type = 'bank' AND e.source_id IN (
+                         SELECT bank_transaction_id FROM invoice_payments WHERE invoice_id IN ($place))))",
+            [$this->supplierId, ...$invoiceIds, ...$invoiceIds, ...$invoiceIds],
+        );
+    }
 
     /** @return array{0:int, 1:int} */
     private function issuedPair(string $varsymbol, float $invoiceTotal, float $creditNoteTotal): array
