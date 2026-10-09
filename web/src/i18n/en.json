@@ -30292,6 +30292,7 @@
       "part_time_discount_differs": "employer discount reasons differing from the card",
       "part_time_discount_not_granted": "employer discount requests without entitlement",
       "part_time_discount_doubtful": "employer discounts to verify",
+      "part_time_discount_intent_missing": "employer discounts without an accepted OZUSPOJ intent",
       "pensioner_discount_doubtful": "working pensioner discounts to verify",
       "annual_requests_requested": "annual tax settlement requests taken over",
       "annual_requests_not_requested": "employees taken over without an annual settlement request",

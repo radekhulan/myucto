@@ -30292,6 +30292,7 @@
       "part_time_discount_differs": "důvodů slevy zaměstnavatele odlišných od karty",
       "part_time_discount_not_granted": "žádostí o slevu zaměstnavatele bez nároku",
       "part_time_discount_doubtful": "slev zaměstnavatele k ověření",
+      "part_time_discount_intent_missing": "slev zaměstnavatele bez přijatého záměru OZUSPOJ",
       "pensioner_discount_doubtful": "slev pracujícího důchodce k ověření",
       "annual_requests_requested": "žádostí o roční zúčtování převzatých",
       "annual_requests_not_requested": "převzatých prohlášení bez žádosti o roční zúčtování",

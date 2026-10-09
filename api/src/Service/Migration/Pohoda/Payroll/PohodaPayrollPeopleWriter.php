@@ -538,6 +538,17 @@ final class PohodaPayrollPeopleWriter
             self::NOTE . "důvod slevy zaměstnavatele § 7a odst. 1 písm. {$letter}) od {$from}; nárok přiznaný v PAMICA.",
             $userId, $policy,
         ));
+        $intent = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_discount_intents WHERE supplier_id = ? AND environment = 'production' AND employment_id = ? AND status IN ('accepted', 'ended') LIMIT 1"
+        );
+        $intent->execute([$supplierId, $employmentId]);
+        if ($intent->fetchColumn() === false) {
+            $protocol->count($step, 'part_time_discount_intent_missing');
+            $this->warn($protocol, $step, 'part_time_discount_intent_missing', "Osobní číslo {$number}: PAMICA uplatňovala slevu zaměstnavatele "
+                . "na pojistném (§ 7a odst. 1 písm. {$letter}), převod zapsal její důvod. Nárok ale zakládá až přijatý záměr OZUSPOJ, "
+                . 'jehož obsah export PAMICA nenese (jen doručenku v datové schránce). Převezměte přijaté oznámení v Mzdy → Importy; '
+                . 'do té doby mzdový běh vztah zastaví k ručnímu posouzení slevy.', $number);
+        }
     }
 
     /** Důvod slevy, který věk osoby vylučuje (písm. a) od 55 let, písm. g) do 21 let). */

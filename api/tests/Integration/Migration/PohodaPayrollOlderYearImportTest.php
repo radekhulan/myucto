@@ -160,6 +160,8 @@ final class PohodaPayrollOlderYearImportTest extends TestCase
         $reason->execute([$supplierId, $bohumil['id']]);
         self::assertSame('none', $reason->fetchColumn(), 'Důvod a) u osoby mladší 55 let se nepřebírá.');
         self::assertCount(1, self::messages($protocol, 'part_time_discount_doubtful'), $this->explain($protocol));
+        // Bez přijatého záměru OZUSPOJ převod upozorní, že běh slevu zastaví k ručnímu posouzení.
+        self::assertCount(1, self::messages($protocol, 'part_time_discount_intent_missing'), $this->explain($protocol));
     }
 
     public function testRepeatedOlderYearChangesNothing(): void
