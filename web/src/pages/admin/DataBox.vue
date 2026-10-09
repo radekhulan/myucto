@@ -13,7 +13,8 @@
  *    (§ 17 odst. 3 zák. 300/2008 Sb.) a rozjede lhůty, takže se zapíná
  *    vědomě, s vysvětlením, a ne přepínačem bez kontextu.
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { isAxiosError } from 'axios'
 import {
@@ -30,6 +31,9 @@ import {
   type GatewayStart,
   type IsdsGatewayCapability,
   type IsdsMobileCredentialProfile,
+  type InboxBrowseResult,
+  type InboxCategory,
+  type InboxClassification,
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
@@ -53,6 +57,24 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PeriodFilterBar from '@/components/ui/PeriodFilterBar.vue'
 import { pickDefaultYear } from '@/utils/periodDefaultYear'
 import DateInput from '@/components/ui/DateInput.vue'
+import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
+import Modal from '@/components/ui/Modal.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import InboxCategoryManager from '@/components/submission/InboxCategoryManager.vue'
+import InboxCategoryNav from '@/components/submission/InboxCategoryNav.vue'
+import { inboxCategoryLabel, inboxCategoryTone } from '@/utils/databoxInboxCategories'
+import {
+  INBOX_QUERY_KEYS,
+  activeInboxFilterCount,
+  defaultSortOrder,
+  emptyInboxFilters,
+  inboxFiltersToApiParams,
+  inboxFiltersToQuery,
+  parseInboxFilters,
+  toggleInboxSort,
+  type InboxFilters,
+  type InboxSort,
+} from '@/utils/databoxInboxFilters'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -111,8 +133,24 @@ const outboxPage = computed(() => Math.floor(outboxOffset.value / outboxPageSize
 const outboxYear = ref<number | null>(null)
 const outboxMonth = ref<number | null>(null)
 const outboxYears = ref<number[]>([])
-const inboxYear = ref<number | null>(null)
-const inboxMonth = ref<number | null>(null)
+/*
+ * Filtry příchozích zpráv žijí v URL (`?tab=inbox&category=3&read=unread`),
+ * aby šel výběr poslat odkazem a přežil obnovení stránky. Odkaz s filtry má
+ * přednost před předvolbou roku — „Vše" z odkazu se nepřepíše letoškem.
+ */
+const route = useRoute()
+const router = useRouter()
+const inboxFromUrl = route.query.tab === 'inbox'
+const inboxFilters = ref<InboxFilters>(inboxFromUrl ? parseInboxFilters(route.query) : emptyInboxFilters())
+const inboxSearchDraft = ref(inboxFilters.value.q)
+const inboxYear = computed<number | null>({
+  get: () => inboxFilters.value.year,
+  set: value => { inboxFilters.value.year = value },
+})
+const inboxMonth = computed<number | null>({
+  get: () => inboxFilters.value.month,
+  set: value => { inboxFilters.value.month = value },
+})
 const inboxYears = ref<number[]>([])
 
 /**
@@ -135,7 +173,7 @@ function ensureDefaultYears(): boolean {
     changed = true
   }
   const inboxDefault = pickDefaultYear(inboxYears.value)
-  if (inboxYear.value === null && inboxDefault !== null) {
+  if (!inboxFromUrl && inboxYear.value === null && inboxDefault !== null) {
     inboxYear.value = inboxDefault
     changed = true
   }
@@ -151,18 +189,212 @@ async function applyOutboxPeriod(next: { year?: number | null; month?: number | 
 }
 
 async function applyInboxPeriod(next: { year?: number | null; month?: number | null }) {
-  if (next.year !== undefined) inboxYear.value = next.year
-  if (next.month !== undefined) inboxMonth.value = next.month
-  inboxOffset.value = 0
-  await loadAll()
+  await applyInboxFilters({
+    ...(next.year !== undefined ? { year: next.year } : {}),
+    ...(next.month !== undefined ? { month: next.month } : {}),
+  })
 }
 const inbox = ref<InboxMessage[]>([])
 const inboxVisibility = ref<'active' | 'hidden'>('active')
 // Schránka roste každý měsíc a mazat se z ní nesmí, takže se listuje.
 const inboxPageSize = 25
 const inboxTotal = ref(0)
-const inboxOffset = ref(0)
-const inboxPage = computed(() => Math.floor(inboxOffset.value / inboxPageSize) + 1)
+const inboxPage = computed(() => inboxFilters.value.page)
+const inboxCategories = ref<InboxCategory[]>([])
+const inboxFacets = ref<NonNullable<InboxBrowseResult['facets']> | null>(null)
+const inboxSenders = ref<NonNullable<InboxBrowseResult['senders']>>([])
+const inboxLoading = ref(false)
+const categoryManagerOpen = ref(false)
+const readBusyId = ref<number | null>(null)
+const assignTarget = ref<InboxMessage | null>(null)
+const assignCategoryId = ref<number | ''>('')
+const assignToSender = ref(false)
+const assignBusy = ref(false)
+/** Kategorie umí jen server s migrací 1982 — starší vrací holý seznam. */
+const inboxSupportsCategories = computed(() => inboxFacets.value !== null)
+const inboxCategoriesById = computed(() => new Map(inboxCategories.value.map(category => [category.id, category])))
+const inboxActiveFilterCount = computed(() => activeInboxFilterCount(inboxFilters.value))
+const inboxSort = computed(() => ({ key: inboxFilters.value.sort, dir: inboxFilters.value.order }))
+const inboxClassificationOptions: InboxClassification[] = [
+  'delivery_receipt', 'cssz_protocol', 'health_insurer_response', 'tax_office_response', 'unclassified',
+]
+
+function inboxBrowseParams() {
+  return inboxFiltersToApiParams(inboxFilters.value, inboxPageSize, inboxVisibility.value)
+}
+
+function applyInboxResult(result: InboxBrowseResult) {
+  inbox.value = result.items
+  inboxTotal.value = result.total ?? result.items.length
+  inboxYears.value = result.years ?? []
+  pollState.value = result.state
+  inboxCategories.value = result.categories ?? []
+  inboxFacets.value = result.facets ?? null
+  inboxSenders.value = result.senders ?? []
+}
+
+/** Filtry do URL — ostatní parametry stránky (např. `outbox`) zůstávají. */
+function syncInboxQuery() {
+  const rest = Object.fromEntries(
+    Object.entries(route.query).filter(([key]) => !(INBOX_QUERY_KEYS as readonly string[]).includes(key)),
+  )
+  void router.replace({ query: { ...rest, tab: 'inbox', ...inboxFiltersToQuery(inboxFilters.value) } })
+}
+
+async function reloadInbox() {
+  inboxLoading.value = true
+  try {
+    applyInboxResult(await dataBoxApi.browseInbox(environment.value, inboxBrowseParams()))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    inboxLoading.value = false
+  }
+}
+
+/*
+ * Odchod na jinou záložku odstraní filtry zpráv z URL — jinak by obnovení
+ * stránky vrátilo uživatele zpátky do příchozích zpráv. Návrat je zapíše znovu.
+ */
+watch(tab, next => {
+  if (next === 'inbox') {
+    if (route.query.tab !== 'inbox') syncInboxQuery()
+    return
+  }
+  if (route.query.tab !== 'inbox') return
+  const rest = Object.fromEntries(
+    Object.entries(route.query).filter(([key]) => key !== 'tab' && !(INBOX_QUERY_KEYS as readonly string[]).includes(key)),
+  )
+  void router.replace({ query: rest })
+})
+
+/** Každá změna filtru vrací na první stránku — jiný výběr má jiný počet stránek. */
+async function applyInboxFilters(next: Partial<InboxFilters>) {
+  inboxFilters.value = { ...inboxFilters.value, page: 1, ...next }
+  syncInboxQuery()
+  await reloadInbox()
+}
+
+async function submitInboxSearch() {
+  if (inboxSearchDraft.value.trim() === inboxFilters.value.q.trim()) return
+  await applyInboxFilters({ q: inboxSearchDraft.value.trim() })
+}
+
+async function clearInboxFilter(key: string) {
+  const reset: Partial<InboxFilters> = {}
+  if (key === 'q') { reset.q = ''; inboxSearchDraft.value = '' }
+  if (key === 'sender') reset.sender = null
+  if (key === 'type') reset.type = null
+  if (key === 'direction') reset.direction = null
+  if (key === 'read') reset.read = null
+  if (key === 'attachments') reset.attachments = false
+  await applyInboxFilters(reset)
+}
+
+async function clearAllInboxFilters() {
+  inboxSearchDraft.value = ''
+  await applyInboxFilters({ q: '', sender: null, type: null, direction: null, read: null, attachments: false })
+}
+
+async function toggleInboxSortColumn(key: string) {
+  await applyInboxFilters(toggleInboxSort(inboxFilters.value, key as InboxSort))
+}
+
+function eventValue(event: Event): string {
+  return (event.target as HTMLInputElement | HTMLSelectElement).value
+}
+
+async function onInboxSortSelect(event: Event) {
+  const sort = eventValue(event) as InboxSort
+  await applyInboxFilters({ sort, order: defaultSortOrder(sort) })
+}
+
+async function onInboxSelect(key: 'sender' | 'type' | 'direction' | 'read', event: Event) {
+  const value = eventValue(event)
+  await applyInboxFilters({ [key]: value === '' ? null : value } as Partial<InboxFilters>)
+}
+
+const inboxFilterChips = computed<FilterChip[]>(() => {
+  const f = inboxFilters.value
+  const chips: FilterChip[] = []
+  if (f.q.trim() !== '') chips.push({ key: 'q', label: t('databox.inboxBrowse.search'), value: f.q })
+  if (f.sender !== null) {
+    const sender = inboxSenders.value.find(row => row.box_id === f.sender)
+    chips.push({ key: 'sender', label: t('databox.inboxBrowse.filters.sender'), value: sender?.name ?? f.sender })
+  }
+  if (f.type !== null) chips.push({ key: 'type', label: t('databox.inboxBrowse.filters.type'), value: t(`databox.classification.${f.type}`) })
+  if (f.direction !== null) {
+    chips.push({ key: 'direction', label: t('databox.inboxBrowse.filters.direction'), value: t(`databox.inboxBrowse.filters.${f.direction}`) })
+  }
+  if (f.read !== null) {
+    chips.push({
+      key: 'read',
+      label: t('databox.inboxBrowse.filters.read'),
+      value: f.read === 'unread' ? t('databox.inboxBrowse.filters.unread') : t('databox.inboxBrowse.filters.readOnly'),
+    })
+  }
+  if (f.attachments) chips.push({ key: 'attachments', value: t('databox.inboxBrowse.filters.attachments') })
+  return chips
+})
+
+function inboxMessageCategory(message: InboxMessage): InboxCategory | null {
+  if (message.category_id === null || message.category_id === undefined) return null
+  return inboxCategoriesById.value.get(message.category_id)
+    ?? {
+      id: message.category_id,
+      code: message.category_code ?? null,
+      name: message.category_name ?? null,
+      sort_order: 0,
+      is_system: (message.category_code ?? null) !== null,
+    }
+}
+
+function isInboxUnread(message: InboxMessage): boolean {
+  return inboxSupportsCategories.value && !message.read_at
+}
+
+async function setInboxRead(message: InboxMessage, read: boolean) {
+  readBusyId.value = message.id
+  try {
+    const item = await dataBoxApi.markInboxRead(message.id, read)
+    inbox.value = inbox.value.map(row => (row.id === item.id ? { ...row, read_at: item.read_at, read_by: item.read_by } : row))
+    await reloadInbox()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    readBusyId.value = null
+  }
+}
+
+/** Otevření zprávy ji označí jako přečtenou; navigaci to nesmí zdržet ani zastavit. */
+function openInboxMessage(message: InboxMessage) {
+  if (inboxSupportsCategories.value && !message.read_at) {
+    void dataBoxApi.markInboxRead(message.id, true).catch(() => undefined)
+  }
+}
+
+function startAssign(message: InboxMessage) {
+  assignTarget.value = message
+  assignCategoryId.value = message.category_id ?? ''
+  assignToSender.value = false
+}
+
+async function saveAssign() {
+  const target = assignTarget.value
+  if (!target || assignCategoryId.value === '') return
+  assignBusy.value = true
+  try {
+    const applyToSender = assignToSender.value && !!target.sender_box_id
+    await dataBoxApi.assignInboxCategory(target.id, assignCategoryId.value, applyToSender)
+    toast.success(t(applyToSender ? 'databox.inboxBrowse.assign.savedWithRule' : 'databox.inboxBrowse.assign.saved'))
+    assignTarget.value = null
+    await reloadInbox()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    assignBusy.value = false
+  }
+}
 const pollState = ref<InboxPollState | null>(null)
 const inboxStorageItems = ref<DataBoxInboxStorageSetting[]>([])
 const inboxArchiveFolders = ref<DataBoxArchiveFolder[]>([])
@@ -406,15 +638,7 @@ async function loadAll() {
         outboxYear.value,
         outboxMonth.value,
       ),
-      dataBoxApi.inbox(
-        environment.value,
-        undefined,
-        inboxVisibility.value,
-        inboxPageSize,
-        inboxOffset.value,
-        inboxYear.value,
-        inboxMonth.value,
-      ),
+      dataBoxApi.browseInbox(environment.value, inboxBrowseParams()),
       // Nespárovaná doručenka nesmí zmizet z očí — načítá se vždycky, ne až
       // na vyžádání.
       dataBoxApi.unmatchedReceipts(environment.value).catch(() => [] as InboxMessage[]),
@@ -439,10 +663,7 @@ async function loadAll() {
     outbox.value = out.items
     outboxTotal.value = out.total
     outboxYears.value = out.years ?? []
-    inbox.value = inb.items
-    inboxTotal.value = inb.total ?? inb.items.length
-    inboxYears.value = inb.years ?? []
-    pollState.value = inb.state
+    applyInboxResult(inb)
     unmatchedReceipts.value = unmatched
     savedMobileCredential.value = mobileProfile
     inboxStorageItems.value = storage.items
@@ -532,8 +753,7 @@ async function setInboxVisibility(visibility: 'active' | 'hidden') {
   if (inboxVisibility.value === visibility) return
   inboxVisibility.value = visibility
   // Jiný pohled má vlastní počet zpráv; zůstat na páté stránce by ukázalo prázdno.
-  inboxOffset.value = 0
-  await loadAll()
+  await applyInboxFilters({})
 }
 
 async function goToOutboxPage(nextPage: number) {
@@ -544,10 +764,11 @@ async function goToOutboxPage(nextPage: number) {
 }
 
 async function goToInboxPage(nextPage: number) {
-  const offset = Math.max(0, (nextPage - 1) * inboxPageSize)
-  if (offset === inboxOffset.value) return
-  inboxOffset.value = offset
-  await loadAll()
+  const page = Math.max(1, nextPage)
+  if (page === inboxFilters.value.page) return
+  inboxFilters.value = { ...inboxFilters.value, page }
+  syncInboxQuery()
+  await reloadInbox()
 }
 
 async function hideInboxMessage(message: InboxMessage) {
@@ -1644,7 +1865,7 @@ async function handleGatewayReturn(): Promise<boolean> {
 
 onMounted(async () => {
   const params = new URLSearchParams(window.location.search)
-  const requestedTab = params.get('tab')
+  const requestedTab = params.get('tab') ?? (inboxFromUrl ? 'inbox' : null)
   if (requestedTab && ['access', 'outbox', 'inbox', 'notices', 'recipients'].includes(requestedTab)) {
     tab.value = requestedTab as Tab
   }
@@ -2751,40 +2972,6 @@ onUnmounted(clearReceiptsTimer)
 
     <!-- ─────────────── Příchozí ─────────────── -->
     <section v-else-if="tab === 'inbox'" class="space-y-4">
-      <PeriodFilterBar
-        :year="inboxYear"
-        :month="inboxMonth"
-        :years="inboxYears"
-        :total="inboxTotal"
-        @update:year="applyInboxPeriod({ year: $event })"
-        @update:month="applyInboxPeriod({ month: $event })"
-      />
-      <div class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-        <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.archive.title') }}</h2>
-        <details class="text-sm" data-test="databox-explain">
-          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
-          <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.archive.description') }}</p>
-        </details>
-        <div class="mt-4 flex flex-wrap items-end gap-3">
-          <label class="min-w-[16rem] flex-1">
-            <span class="mb-1 block text-sm font-medium">{{ t('databox.inbox.archive.folder') }}</span>
-            <select v-model="selectedInboxArchiveFolderId" class="form-select w-full" data-test="inbox-archive-folder">
-              <option value="">{{ t('databox.inbox.archive.root') }}</option>
-              <option v-for="folder in inboxArchiveFolderOptions" :key="folder.id" :value="folder.id">
-                {{ folder.label }}
-              </option>
-            </select>
-          </label>
-          <button type="button" :class="btnOutline('primary')" :disabled="saving" data-test="inbox-archive-save" @click="saveInboxArchiveFolder">
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
-            </svg>
-            {{ t('databox.inbox.archive.save') }}
-          </button>
-        </div>
-        <p class="mt-2 text-xs text-neutral-500">{{ t('databox.inbox.archive.pathHint') }}</p>
-      </div>
-
       <!-- Prázdno vs. porucha musí být rozlišitelné na první pohled -->
       <div
         v-if="pollState && pollState.consecutive_failures > 0"
@@ -2797,57 +2984,6 @@ onUnmounted(clearReceiptsTimer)
       </div>
       <div v-else-if="pollState?.last_ok_at" class="text-sm text-neutral-500">
         {{ t('databox.inbox.lastOkAt', { at: formatUtcDateTime(pollState.last_ok_at) }) }}
-      </div>
-
-      <div class="flex flex-wrap gap-2">
-        <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="refreshDelivery">
-          {{ t('databox.delivery.refresh') }}
-        </button>
-      </div>
-      <details class="text-sm" data-test="databox-explain">
-        <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
-        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.delivery.explain') }}</p>
-      </details>
-      <p class="text-sm text-neutral-500">
-        {{ t('databox.inbox.manualOnly') }}
-      </p>
-
-      <div class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.privacy.title') }}</h2>
-            <details class="text-sm" data-test="databox-explain">
-              <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
-              <p class="mt-1 max-w-4xl text-sm text-neutral-500">{{ t('databox.inbox.privacy.description') }}</p>
-            </details>
-          </div>
-          <div class="flex flex-wrap gap-2" data-test="inbox-visibility">
-            <button
-              type="button"
-              :class="inboxVisibility === 'active' ? btnFilled('primary') : btnOutline('neutral')"
-              :disabled="loading"
-              data-test="inbox-visibility-active"
-              @click="setInboxVisibility('active')"
-            >
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" />
-              </svg>
-              {{ t('databox.inbox.privacy.active') }}
-            </button>
-            <button
-              type="button"
-              :class="inboxVisibility === 'hidden' ? btnFilled('primary') : btnOutline('neutral')"
-              :disabled="loading"
-              data-test="inbox-visibility-hidden"
-              @click="setInboxVisibility('hidden')"
-            >
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
-              </svg>
-              {{ t('databox.inbox.privacy.hiddenList') }}
-            </button>
-          </div>
-        </div>
       </div>
 
       <div class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
@@ -2961,306 +3097,704 @@ onUnmounted(clearReceiptsTimer)
         </div>
       </div>
 
-      <EmptyState v-if="!loading && inbox.length === 0" icon="inbox" :title="t('databox.inbox.empty')" />
+      <!--
+        Přehled zpráv: kategorie vlevo (na mobilu řada odznaků nad seznamem),
+        filtry, hledání a řazení nad seznamem. Stav filtrů je v URL.
+      -->
+      <div class="grid gap-4 lg:grid-cols-[15rem_minmax(0,1fr)]" data-test="inbox-browser">
+        <aside v-if="inboxSupportsCategories" class="min-w-0">
+          <InboxCategoryNav
+            :categories="inboxCategories"
+            :counts="inboxFacets?.categories ?? []"
+            :selected="inboxFilters.category"
+            :can-manage="true"
+            @select="applyInboxFilters({ category: $event })"
+            @manage="categoryManagerOpen = true"
+          />
+        </aside>
 
-      <div v-if="inbox.length" class="space-y-3 md:hidden" data-test="inbox-mobile-list">
-        <article
-          v-for="m in inbox"
-          :key="m.id"
-          class="rounded-lg border border-neutral-200 bg-surface p-4"
-          data-test="inbox-mobile-card"
-        >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <h3 class="break-words font-medium">{{ m.subject ?? '—' }}</h3>
-              <p class="mt-1 break-words text-sm text-neutral-500">
-                {{ m.sender_name ?? m.sender_box_id ?? '—' }}
-              </p>
-            </div>
-            <span
-              class="shrink-0 rounded-full px-2 py-0.5 text-xs"
-              :class="m.classification === 'unclassified'
-                ? 'bg-neutral-100 text-neutral-600'
-                : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'"
+        <div class="min-w-0 space-y-3" :class="inboxSupportsCategories ? '' : 'lg:col-span-2'">
+          <PeriodFilterBar
+            :year="inboxYear"
+            :month="inboxMonth"
+            :years="inboxYears"
+            :total="inboxTotal"
+            @update:year="applyInboxPeriod({ year: $event })"
+            @update:month="applyInboxPeriod({ month: $event })"
+          />
+
+          <FilterBar
+            :active-count="inboxActiveFilterCount"
+            :chips="inboxFilterChips"
+            @clear="clearInboxFilter"
+            @clear-all="clearAllInboxFilters"
+          >
+            <template #primary>
+              <form class="relative min-w-56 flex-1" role="search" @submit.prevent="submitInboxSearch">
+                <svg
+                  class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" />
+                </svg>
+                <input
+                  v-model="inboxSearchDraft"
+                  type="search"
+                  maxlength="200"
+                  :placeholder="t('databox.inboxBrowse.searchPlaceholder')"
+                  :aria-label="t('databox.inboxBrowse.search')"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface pl-9 pr-3 text-sm"
+                  data-test="inbox-search"
+                  @search="submitInboxSearch"
+                  @blur="submitInboxSearch"
+                />
+              </form>
+            </template>
+
+            <template v-if="inboxSupportsCategories">
+              <select
+                :value="inboxFilters.sender ?? ''"
+                class="h-9 max-w-[16rem] rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+                :aria-label="t('databox.inboxBrowse.filters.sender')"
+                data-test="inbox-filter-sender"
+                @change="onInboxSelect('sender', $event)"
+              >
+                <option value="">{{ t('databox.inboxBrowse.filters.anySender') }}</option>
+                <option v-for="sender in inboxSenders" :key="sender.box_id" :value="sender.box_id">
+                  {{ sender.name ?? sender.box_id }} ({{ sender.count }})
+                </option>
+              </select>
+              <select
+                :value="inboxFilters.type ?? ''"
+                class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+                :aria-label="t('databox.inboxBrowse.filters.type')"
+                data-test="inbox-filter-type"
+                @change="onInboxSelect('type', $event)"
+              >
+                <option value="">{{ t('databox.inboxBrowse.filters.anyType') }}</option>
+                <option v-for="type in inboxClassificationOptions" :key="type" :value="type">
+                  {{ t(`databox.classification.${type}`) }} ({{ inboxFacets?.classifications[type] ?? 0 }})
+                </option>
+              </select>
+              <select
+                :value="inboxFilters.direction ?? ''"
+                class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+                :aria-label="t('databox.inboxBrowse.filters.direction')"
+                data-test="inbox-filter-direction"
+                @change="onInboxSelect('direction', $event)"
+              >
+                <option value="">{{ t('databox.inboxBrowse.filters.anyDirection') }}</option>
+                <option value="received">{{ t('databox.inboxBrowse.filters.received') }} ({{ inboxFacets?.directions.received ?? 0 }})</option>
+                <option value="sent">{{ t('databox.inboxBrowse.filters.sent') }} ({{ inboxFacets?.directions.sent ?? 0 }})</option>
+              </select>
+              <select
+                :value="inboxFilters.read ?? ''"
+                class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+                :aria-label="t('databox.inboxBrowse.filters.read')"
+                data-test="inbox-filter-read"
+                @change="onInboxSelect('read', $event)"
+              >
+                <option value="">{{ t('databox.inboxBrowse.filters.anyRead') }}</option>
+                <option value="unread">{{ t('databox.inboxBrowse.filters.unread') }} ({{ inboxFacets?.unread ?? 0 }})</option>
+                <option value="read">{{ t('databox.inboxBrowse.filters.readOnly') }}</option>
+              </select>
+              <label class="inline-flex h-9 items-center gap-2 whitespace-nowrap text-sm">
+                <input
+                  type="checkbox"
+                  :checked="inboxFilters.attachments"
+                  data-test="inbox-filter-attachments"
+                  @change="applyInboxFilters({ attachments: ($event.target as HTMLInputElement).checked })"
+                />
+                {{ t('databox.inboxBrowse.filters.attachments') }}
+              </label>
+              <label class="inline-flex items-center gap-2 whitespace-nowrap text-sm md:hidden">
+                <span class="text-neutral-500">{{ t('databox.inboxBrowse.filters.sort') }}</span>
+                <select
+                  :value="inboxFilters.sort"
+                  class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+                  data-test="inbox-sort"
+                  @change="onInboxSortSelect"
+                >
+                  <option v-for="key in (['delivered', 'sender', 'subject', 'category'] as InboxSort[])" :key="key" :value="key">
+                    {{ t(`databox.inboxBrowse.sort.${key}`) }}
+                  </option>
+                </select>
+                <button
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :title="t(`databox.inboxBrowse.order.${inboxFilters.order}`)"
+                  @click="toggleInboxSortColumn(inboxFilters.sort)"
+                >
+                  {{ inboxFilters.order === 'asc' ? '▲' : '▼' }}
+                </button>
+              </label>
+            </template>
+
+            <template #actions>
+              <div class="flex flex-wrap gap-2" data-test="inbox-visibility">
+                <button
+                  type="button"
+                  :class="[inboxVisibility === 'active' ? btnFilled('primary') : btnOutline('neutral'), 'whitespace-nowrap']"
+                  :disabled="loading"
+                  data-test="inbox-visibility-active"
+                  @click="setInboxVisibility('active')"
+                >
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" />
+                  </svg>
+                  {{ t('databox.inbox.privacy.active') }}
+                </button>
+                <button
+                  type="button"
+                  :class="[inboxVisibility === 'hidden' ? btnFilled('primary') : btnOutline('neutral'), 'whitespace-nowrap']"
+                  :disabled="loading"
+                  data-test="inbox-visibility-hidden"
+                  @click="setInboxVisibility('hidden')"
+                >
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                  </svg>
+                  {{ t('databox.inbox.privacy.hiddenList') }}
+                </button>
+              </div>
+            </template>
+          </FilterBar>
+
+          <EmptyState
+            v-if="!loading && !inboxLoading && inbox.length === 0"
+            icon="inbox"
+            :title="inboxFilterChips.length > 0 || inboxFilters.category !== null
+              ? t('databox.inboxBrowse.noResults')
+              : t('databox.inbox.empty')"
+          />
+
+          <div v-if="inbox.length" class="space-y-3 md:hidden" data-test="inbox-mobile-list">
+            <article
+              v-for="m in inbox"
+              :key="m.id"
+              class="rounded-lg border bg-surface p-4"
+              :class="isInboxUnread(m) ? 'border-primary-300 dark:border-primary-700' : 'border-neutral-200'"
+              data-test="inbox-mobile-card"
             >
-              {{ t(`databox.classification.${m.classification}`) }}
-            </span>
-          </div>
-
-          <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.deliveredAt') }}</dt>
-              <dd class="mt-1 break-words">{{ m.delivered_at ?? '—' }}</dd>
-            </div>
-            <div>
-              <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.messageId') }}</dt>
-              <dd class="mt-1 break-all font-mono text-xs" data-test="inbox-mobile-message-id">{{ m.external_message_id }}</dd>
-            </div>
-            <div>
-              <dt class="text-xs uppercase text-neutral-400">{{ t('databox.delivery.column') }}</dt>
-              <dd v-if="m.classification === 'delivery_receipt'" class="mt-1 text-xs text-neutral-500">
-                {{ t('databox.delivery.notApplicable') }}
-              </dd>
-              <dd v-else class="mt-1">
-                <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
-                  {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
-                </span>
-                <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600">
-                  {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h3 class="break-words" :class="isInboxUnread(m) ? 'font-semibold' : 'font-medium'">
+                    <span
+                      v-if="isInboxUnread(m)"
+                      class="mr-1 inline-block h-2 w-2 rounded-full bg-primary-600 align-middle"
+                      :title="t('databox.inboxBrowse.unread')"
+                    />
+                    {{ m.subject ?? '—' }}
+                  </h3>
+                  <p class="mt-1 break-words text-sm text-neutral-500">
+                    {{ m.sender_name ?? m.sender_box_id ?? '—' }}
+                  </p>
                 </div>
-                <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500">
-                  {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
-                </div>
-                <div v-if="m.delivery_note" class="mt-1 break-words text-xs text-neutral-500">
-                  {{ m.delivery_note }}
-                </div>
-              </dd>
-            </div>
-          </dl>
-
-          <div class="mt-4 flex flex-wrap gap-2">
-            <RouterLink
-              v-if="m.document_id"
-              :to="{ name: 'document-detail', params: { id: m.document_id } }"
-              :class="btnOutlineSm('primary')"
-              data-test="inbox-mobile-open-message"
-            >
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" />
-              </svg>
-              {{ t('databox.inbox.openMessage') }}
-            </RouterLink>
-            <span
-              v-else-if="m.local_content_state === 'purged'"
-              class="inline-flex h-7 items-center rounded-full bg-neutral-100 px-2 text-xs text-neutral-600"
-            >
-              {{ t('databox.inbox.privacy.contentPurged') }}
-            </span>
-            <span
-              v-else-if="m.local_content_state === 'purging'"
-              class="inline-flex h-7 items-center rounded-full bg-warning-50 px-2 text-xs text-warning-700 dark:bg-warning-900/30 dark:text-warning-200"
-            >
-              {{ t('databox.inbox.privacy.contentPurging') }}
-            </span>
-            <button type="button" :class="btnOutlineSm('neutral')" @click="startNoticeFromMessage(m)">
-              {{ t('databox.notices.recordFromMessage') }}
-            </button>
-            <button
-              v-if="canReprocess(m)"
-              type="button"
-              :class="btnOutlineSm('neutral')"
-              :disabled="reprocessBusyId === m.id"
-              :title="t('databox.inbox.reprocessHint')"
-              data-test="inbox-reprocess"
-              @click="reprocessInboxMessage(m)"
-            >
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
-              </svg>
-              {{ t(reprocessBusyId === m.id
-                ? 'databox.inbox.reprocessing'
-                : 'databox.inbox.reprocess') }}
-            </button>
-            <button
-              v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"
-              type="button"
-              :class="btnOutlineSm('neutral')"
-              :disabled="privacyBusyId === m.id"
-              data-test="inbox-hide"
-              @click="hideInboxMessage(m)"
-            >
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
-              </svg>
-              {{ t('databox.inbox.privacy.hide') }}
-            </button>
-            <button
-              v-if="canManageInboxPrivacy(m) && inboxVisibility === 'hidden'"
-              type="button"
-              :class="btnOutlineSm('neutral')"
-              :disabled="privacyBusyId === m.id"
-              data-test="inbox-restore"
-              @click="restoreInboxMessage(m)"
-            >
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
-              </svg>
-              {{ t('databox.inbox.privacy.restore') }}
-            </button>
-            <button
-              v-if="canManageInboxPrivacy(m) && m.local_content_state !== 'purged'"
-              type="button"
-              :class="btnOutlineSm('danger')"
-              :disabled="privacyBusyId === m.id"
-              data-test="inbox-purge-content"
-              @click="purgeInboxLocalContent(m)"
-            >
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
-              </svg>
-              {{ t(m.local_content_state === 'purging'
-                ? 'databox.inbox.privacy.purgeRetry'
-                : 'databox.inbox.privacy.purge') }}
-            </button>
-          </div>
-        </article>
-      </div>
-
-      <div class="hidden overflow-x-auto md:block">
-        <table v-if="inbox.length" class="w-full text-sm">
-          <thead>
-            <tr class="text-left text-xs uppercase text-neutral-400">
-              <th class="py-2 pr-3">{{ t('databox.inbox.subject') }}</th>
-              <th class="py-2 pr-3">{{ t('databox.inbox.sender') }}</th>
-              <th class="py-2 pr-3">{{ t('databox.inbox.classification') }}</th>
-              <th class="py-2 pr-3">{{ t('databox.inbox.deliveredAt') }}</th>
-              <th class="py-2 pr-3">{{ t('databox.inbox.messageId') }}</th>
-              <th class="py-2 pr-3">{{ t('databox.delivery.column') }}</th>
-              <th class="py-2 pr-3"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="m in inbox" :key="m.id" class="border-t border-neutral-100 align-top">
-              <td class="py-2 pr-3">{{ m.subject ?? '—' }}</td>
-              <td class="py-2 pr-3">{{ m.sender_name ?? m.sender_box_id ?? '—' }}</td>
-              <td class="py-2 pr-3">
                 <span
-                  class="rounded-full px-2 py-0.5 text-xs"
+                  class="shrink-0 rounded-full px-2 py-0.5 text-xs"
                   :class="m.classification === 'unclassified'
                     ? 'bg-neutral-100 text-neutral-600'
                     : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'"
                 >
                   {{ t(`databox.classification.${m.classification}`) }}
                 </span>
-              </td>
-              <td class="py-2 pr-3">{{ m.delivered_at ?? '—' }}</td>
-              <td class="py-2 pr-3 font-mono text-xs break-all" data-test="inbox-desktop-message-id">{{ m.external_message_id }}</td>
-              <!--
-                Rozhodný den doručení. Odznak nikdy neříká jen „doručeno" —
-                u fikce i u běžící lhůty musí být poznat, čím je to podložené,
-                protože od toho dne běží navazující lhůty.
-              -->
-              <td v-if="m.classification === 'delivery_receipt'" class="py-2 pr-3 text-xs text-neutral-500">
-                <!--
-                  Doručenka popisuje NAŠE odeslané podání, ne zprávu doručovanou
-                  nám. Fikce doručení se na ni nevztahuje, takže tu odznak
-                  „doručení neznáme" nemá co dělat — nebylo by co znát.
-                -->
-                {{ t('databox.delivery.notApplicable') }}
-              </td>
-              <td v-else class="py-2 pr-3">
-                <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
-                  {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
+              </div>
+
+              <div v-if="inboxMessageCategory(m)" class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span
+                  class="rounded-full px-2 py-0.5"
+                  :class="inboxCategoryTone(inboxMessageCategory(m)?.code)"
+                  :title="m.category_source ? t(`databox.inboxBrowse.categorySource.${m.category_source}`) : undefined"
+                  data-test="inbox-category-badge"
+                >{{ inboxCategoryLabel(inboxMessageCategory(m), t) }}</span>
+                <span v-if="m.attachment_count" class="text-neutral-500">{{ t('databox.inboxBrowse.attachments', { count: m.attachment_count }) }}</span>
+                <span v-if="m.sender_ref_number" class="break-all text-neutral-500">{{ t('databox.inboxBrowse.refNumber', { ref: m.sender_ref_number }) }}</span>
+                <span v-if="m.sender_ident" class="break-all text-neutral-500">{{ t('databox.inboxBrowse.fileMark', { mark: m.sender_ident }) }}</span>
+              </div>
+
+              <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.deliveredAt') }}</dt>
+                  <dd class="mt-1 break-words">{{ m.delivered_at ?? '—' }}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.messageId') }}</dt>
+                  <dd class="mt-1 break-all font-mono text-xs" data-test="inbox-mobile-message-id">{{ m.external_message_id }}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase text-neutral-400">{{ t('databox.delivery.column') }}</dt>
+                  <dd v-if="m.classification === 'delivery_receipt'" class="mt-1 text-xs text-neutral-500">
+                    {{ t('databox.delivery.notApplicable') }}
+                  </dd>
+                  <dd v-else class="mt-1">
+                    <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
+                      {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
+                    </span>
+                    <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600">
+                      {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
+                    </div>
+                    <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500">
+                      {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
+                    </div>
+                    <div v-if="m.delivery_note" class="mt-1 break-words text-xs text-neutral-500">
+                      {{ m.delivery_note }}
+                    </div>
+                  </dd>
+                </div>
+              </dl>
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <RouterLink
+                  v-if="m.document_id"
+                  :to="{ name: 'document-detail', params: { id: m.document_id } }"
+                  :class="btnOutlineSm('primary')"
+                  data-test="inbox-mobile-open-message"
+                  @click="openInboxMessage(m)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" />
+                  </svg>
+                  {{ t('databox.inbox.openMessage') }}
+                </RouterLink>
+                <span
+                  v-else-if="m.local_content_state === 'purged'"
+                  class="inline-flex h-7 items-center rounded-full bg-neutral-100 px-2 text-xs text-neutral-600"
+                >
+                  {{ t('databox.inbox.privacy.contentPurged') }}
                 </span>
-                <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600">
-                  {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
-                </div>
-                <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500">
-                  {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
-                </div>
-                <div v-if="m.delivery_note" class="mt-1 max-w-md text-xs text-neutral-500">
-                  {{ m.delivery_note }}
-                </div>
-              </td>
-              <td class="py-2 pr-3">
-                <div class="flex flex-wrap gap-2">
-                  <RouterLink
-                    v-if="m.document_id"
-                    :to="{ name: 'document-detail', params: { id: m.document_id } }"
-                    :class="btnOutlineSm('primary')"
-                  >
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" />
-                    </svg>
-                    {{ t('databox.inbox.openMessage') }}
-                  </RouterLink>
-                  <span
-                    v-else-if="m.local_content_state === 'purged'"
-                    class="inline-flex h-7 items-center rounded-full bg-neutral-100 px-2 text-xs text-neutral-600"
-                  >
-                    {{ t('databox.inbox.privacy.contentPurged') }}
-                  </span>
-                  <span
-                    v-else-if="m.local_content_state === 'purging'"
-                    class="inline-flex h-7 items-center rounded-full bg-warning-50 px-2 text-xs text-warning-700 dark:bg-warning-900/30 dark:text-warning-200"
-                  >
-                    {{ t('databox.inbox.privacy.contentPurging') }}
-                  </span>
-                  <button type="button" :class="btnOutlineSm('neutral')" @click="startNoticeFromMessage(m)">
-                    {{ t('databox.notices.recordFromMessage') }}
-                  </button>
-                  <button
-                    v-if="canReprocess(m)"
-                    type="button"
-                    :class="btnOutlineSm('neutral')"
-                    :disabled="reprocessBusyId === m.id"
-                    :title="t('databox.inbox.reprocessHint')"
-                    data-test="inbox-reprocess"
-                    @click="reprocessInboxMessage(m)"
-                  >
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
-                    </svg>
-                    {{ t(reprocessBusyId === m.id
-                      ? 'databox.inbox.reprocessing'
-                      : 'databox.inbox.reprocess') }}
-                  </button>
-                  <button
-                    v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"
-                    type="button"
-                    :class="btnOutlineSm('neutral')"
-                    :disabled="privacyBusyId === m.id"
-                    data-test="inbox-hide"
-                    @click="hideInboxMessage(m)"
-                  >
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
-                    </svg>
-                    {{ t('databox.inbox.privacy.hide') }}
-                  </button>
-                  <button
-                    v-if="canManageInboxPrivacy(m) && inboxVisibility === 'hidden'"
-                    type="button"
-                    :class="btnOutlineSm('neutral')"
-                    :disabled="privacyBusyId === m.id"
-                    data-test="inbox-restore"
-                    @click="restoreInboxMessage(m)"
-                  >
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
-                    </svg>
-                    {{ t('databox.inbox.privacy.restore') }}
-                  </button>
-                  <button
-                    v-if="canManageInboxPrivacy(m) && m.local_content_state !== 'purged'"
-                    type="button"
-                    :class="btnOutlineSm('danger')"
-                    :disabled="privacyBusyId === m.id"
-                    data-test="inbox-purge-content"
-                    @click="purgeInboxLocalContent(m)"
-                  >
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
-                    </svg>
-                    {{ t(m.local_content_state === 'purging'
-                      ? 'databox.inbox.privacy.purgeRetry'
-                      : 'databox.inbox.privacy.purge') }}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <span
+                  v-else-if="m.local_content_state === 'purging'"
+                  class="inline-flex h-7 items-center rounded-full bg-warning-50 px-2 text-xs text-warning-700 dark:bg-warning-900/30 dark:text-warning-200"
+                >
+                  {{ t('databox.inbox.privacy.contentPurging') }}
+                </span>
+                <button
+                  v-if="inboxSupportsCategories"
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  data-test="inbox-reassign"
+                  @click="startAssign(m)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.tag" />
+                  </svg>
+                  {{ t('databox.inboxBrowse.reassign') }}
+                </button>
+                <button
+                  v-if="inboxSupportsCategories"
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="readBusyId === m.id"
+                  data-test="inbox-toggle-read"
+                  @click="setInboxRead(m, !m.read_at)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="m.read_at ? ICONS.eyeOff : ICONS.eye" />
+                  </svg>
+                  {{ m.read_at ? t('databox.inboxBrowse.markUnread') : t('databox.inboxBrowse.markRead') }}
+                </button>
+                <button type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
+                  </svg>
+                  {{ t('databox.notices.recordFromMessage') }}
+                </button>
+                <button
+                  v-if="canReprocess(m)"
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="reprocessBusyId === m.id"
+                  :title="t('databox.inbox.reprocessHint')"
+                  data-test="inbox-reprocess"
+                  @click="reprocessInboxMessage(m)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+                  </svg>
+                  {{ t(reprocessBusyId === m.id
+                    ? 'databox.inbox.reprocessing'
+                    : 'databox.inbox.reprocess') }}
+                </button>
+                <button
+                  v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="privacyBusyId === m.id"
+                  data-test="inbox-hide"
+                  @click="hideInboxMessage(m)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                  </svg>
+                  {{ t('databox.inbox.privacy.hide') }}
+                </button>
+                <button
+                  v-if="canManageInboxPrivacy(m) && inboxVisibility === 'hidden'"
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="privacyBusyId === m.id"
+                  data-test="inbox-restore"
+                  @click="restoreInboxMessage(m)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+                  </svg>
+                  {{ t('databox.inbox.privacy.restore') }}
+                </button>
+                <button
+                  v-if="canManageInboxPrivacy(m) && m.local_content_state !== 'purged'"
+                  type="button"
+                  :class="btnOutlineSm('danger')"
+                  :disabled="privacyBusyId === m.id"
+                  data-test="inbox-purge-content"
+                  @click="purgeInboxLocalContent(m)"
+                >
+                  <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
+                  </svg>
+                  {{ t(m.local_content_state === 'purging'
+                    ? 'databox.inbox.privacy.purgeRetry'
+                    : 'databox.inbox.privacy.purge') }}
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <div class="hidden overflow-x-auto md:block">
+            <table v-if="inbox.length" class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs uppercase text-neutral-400">
+                  <SortableTh :label="t('databox.inbox.subject')" sort-key="subject" :sort="inboxSort" @toggle="toggleInboxSortColumn" />
+                  <SortableTh :label="t('databox.inbox.sender')" sort-key="sender" :sort="inboxSort" @toggle="toggleInboxSortColumn" />
+                  <SortableTh
+                    v-if="inboxSupportsCategories"
+                    :label="t('databox.inboxBrowse.category')"
+                    sort-key="category"
+                    :sort="inboxSort"
+                    @toggle="toggleInboxSortColumn"
+                  />
+                  <th class="px-3 py-2">{{ t('databox.inbox.classification') }}</th>
+                  <SortableTh :label="t('databox.inbox.deliveredAt')" sort-key="delivered" :sort="inboxSort" @toggle="toggleInboxSortColumn" />
+                  <th class="px-3 py-2">{{ t('databox.delivery.column') }}</th>
+                  <th class="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="m in inbox"
+                  :key="m.id"
+                  class="border-t border-neutral-100 align-top"
+                  :class="isInboxUnread(m) ? 'bg-primary-50/40 dark:bg-primary-900/10' : ''"
+                  data-test="inbox-desktop-row"
+                >
+                  <td class="px-3 py-2">
+                    <div class="break-words" :class="isInboxUnread(m) ? 'font-semibold' : ''">
+                      <span
+                        v-if="isInboxUnread(m)"
+                        class="mr-1 inline-block h-2 w-2 rounded-full bg-primary-600 align-middle"
+                        :title="t('databox.inboxBrowse.unread')"
+                      />
+                      {{ m.subject ?? '—' }}
+                    </div>
+                    <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-neutral-500">
+                      <span class="break-all font-mono" data-test="inbox-desktop-message-id">{{ m.external_message_id }}</span>
+                      <span v-if="m.attachment_count">{{ t('databox.inboxBrowse.attachments', { count: m.attachment_count }) }}</span>
+                      <span v-if="m.sender_ref_number" class="break-all">{{ t('databox.inboxBrowse.refNumber', { ref: m.sender_ref_number }) }}</span>
+                      <span v-if="m.recipient_ref_number" class="break-all">{{ t('databox.inboxBrowse.recipientRefNumber', { ref: m.recipient_ref_number }) }}</span>
+                      <span v-if="m.sender_ident" class="break-all">{{ t('databox.inboxBrowse.fileMark', { mark: m.sender_ident }) }}</span>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2">
+                    <button
+                      v-if="inboxSupportsCategories && m.sender_box_id"
+                      type="button"
+                      class="cursor-pointer text-left hover:text-primary-700 hover:underline"
+                      @click="applyInboxFilters({ sender: m.sender_box_id })"
+                    >{{ m.sender_name ?? m.sender_box_id }}</button>
+                    <span v-else>{{ m.sender_name ?? m.sender_box_id ?? '—' }}</span>
+                  </td>
+                  <td v-if="inboxSupportsCategories" class="px-3 py-2">
+                    <span
+                      v-if="inboxMessageCategory(m)"
+                      class="whitespace-nowrap rounded-full px-2 py-0.5 text-xs"
+                      :class="inboxCategoryTone(inboxMessageCategory(m)?.code)"
+                      :title="m.category_source ? t(`databox.inboxBrowse.categorySource.${m.category_source}`) : undefined"
+                      data-test="inbox-category-badge"
+                    >{{ inboxCategoryLabel(inboxMessageCategory(m), t) }}</span>
+                  </td>
+                  <td class="px-3 py-2">
+                    <span
+                      class="rounded-full px-2 py-0.5 text-xs"
+                      :class="m.classification === 'unclassified'
+                        ? 'bg-neutral-100 text-neutral-600'
+                        : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'"
+                    >
+                      {{ t(`databox.classification.${m.classification}`) }}
+                    </span>
+                  </td>
+                  <td class="whitespace-nowrap px-3 py-2">{{ m.delivered_at ?? '—' }}</td>
+                  <!--
+                    Rozhodný den doručení. Odznak nikdy neříká jen „doručeno" —
+                    u fikce i u běžící lhůty musí být poznat, čím je to podložené,
+                    protože od toho dne běží navazující lhůty.
+                  -->
+                  <td v-if="m.classification === 'delivery_receipt'" class="px-3 py-2 text-xs text-neutral-500">
+                    <!--
+                      Doručenka popisuje NAŠE odeslané podání, ne zprávu doručovanou
+                      nám. Fikce doručení se na ni nevztahuje, takže tu odznak
+                      „doručení neznáme" nemá co dělat — nebylo by co znát.
+                    -->
+                    {{ t('databox.delivery.notApplicable') }}
+                  </td>
+                  <td v-else class="px-3 py-2">
+                    <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
+                      {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
+                    </span>
+                    <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600">
+                      {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
+                    </div>
+                    <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500">
+                      {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
+                    </div>
+                    <div v-if="m.delivery_note" class="mt-1 max-w-md text-xs text-neutral-500">
+                      {{ m.delivery_note }}
+                    </div>
+                  </td>
+                  <td class="px-3 py-2">
+                    <div class="flex flex-wrap gap-2">
+                      <RouterLink
+                        v-if="m.document_id"
+                        :to="{ name: 'document-detail', params: { id: m.document_id } }"
+                        :class="btnOutlineSm('primary')"
+                        data-test="inbox-desktop-open-message"
+                        @click="openInboxMessage(m)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" />
+                        </svg>
+                        {{ t('databox.inbox.openMessage') }}
+                      </RouterLink>
+                      <span
+                        v-else-if="m.local_content_state === 'purged'"
+                        class="inline-flex h-7 items-center rounded-full bg-neutral-100 px-2 text-xs text-neutral-600"
+                      >
+                        {{ t('databox.inbox.privacy.contentPurged') }}
+                      </span>
+                      <span
+                        v-else-if="m.local_content_state === 'purging'"
+                        class="inline-flex h-7 items-center rounded-full bg-warning-50 px-2 text-xs text-warning-700 dark:bg-warning-900/30 dark:text-warning-200"
+                      >
+                        {{ t('databox.inbox.privacy.contentPurging') }}
+                      </span>
+                      <button
+                        v-if="inboxSupportsCategories"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        data-test="inbox-reassign"
+                        @click="startAssign(m)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.tag" />
+                        </svg>
+                        {{ t('databox.inboxBrowse.reassign') }}
+                      </button>
+                      <button
+                        v-if="inboxSupportsCategories"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="readBusyId === m.id"
+                        data-test="inbox-toggle-read"
+                        @click="setInboxRead(m, !m.read_at)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="m.read_at ? ICONS.eyeOff : ICONS.eye" />
+                        </svg>
+                        {{ m.read_at ? t('databox.inboxBrowse.markUnread') : t('databox.inboxBrowse.markRead') }}
+                      </button>
+                      <button type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
+                        </svg>
+                        {{ t('databox.notices.recordFromMessage') }}
+                      </button>
+                      <button
+                        v-if="canReprocess(m)"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="reprocessBusyId === m.id"
+                        :title="t('databox.inbox.reprocessHint')"
+                        data-test="inbox-reprocess"
+                        @click="reprocessInboxMessage(m)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+                        </svg>
+                        {{ t(reprocessBusyId === m.id
+                          ? 'databox.inbox.reprocessing'
+                          : 'databox.inbox.reprocess') }}
+                      </button>
+                      <button
+                        v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="privacyBusyId === m.id"
+                        data-test="inbox-hide"
+                        @click="hideInboxMessage(m)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+                        </svg>
+                        {{ t('databox.inbox.privacy.hide') }}
+                      </button>
+                      <button
+                        v-if="canManageInboxPrivacy(m) && inboxVisibility === 'hidden'"
+                        type="button"
+                        :class="btnOutlineSm('neutral')"
+                        :disabled="privacyBusyId === m.id"
+                        data-test="inbox-restore"
+                        @click="restoreInboxMessage(m)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+                        </svg>
+                        {{ t('databox.inbox.privacy.restore') }}
+                      </button>
+                      <button
+                        v-if="canManageInboxPrivacy(m) && m.local_content_state !== 'purged'"
+                        type="button"
+                        :class="btnOutlineSm('danger')"
+                        :disabled="privacyBusyId === m.id"
+                        data-test="inbox-purge-content"
+                        @click="purgeInboxLocalContent(m)"
+                      >
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
+                        </svg>
+                        {{ t(m.local_content_state === 'purging'
+                          ? 'databox.inbox.privacy.purgeRetry'
+                          : 'databox.inbox.privacy.purge') }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <PaginationBar
+            v-if="inboxTotal > inboxPageSize"
+            data-test="inbox-pagination"
+            :page="inboxPage"
+            :per-page="inboxPageSize"
+            :total="inboxTotal"
+            @update:page="goToInboxPage"
+          />
+        </div>
       </div>
 
-      <PaginationBar
-        v-if="inboxTotal > inboxPageSize"
-        data-test="inbox-pagination"
-        :page="inboxPage"
-        :per-page="inboxPageSize"
-        :total="inboxTotal"
-        @update:page="goToInboxPage"
+      <div class="flex flex-wrap gap-2">
+        <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="refreshDelivery">
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" />
+          </svg>
+          {{ t('databox.delivery.refresh') }}
+        </button>
+      </div>
+      <details class="text-sm" data-test="databox-explain">
+        <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+        <p class="mt-1 text-sm text-neutral-500">{{ t('databox.delivery.explain') }}</p>
+      </details>
+      <p class="text-sm text-neutral-500">
+        {{ t('databox.inbox.manualOnly') }}
+      </p>
+
+      <div class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+        <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.privacy.title') }}</h2>
+        <details class="text-sm" data-test="databox-explain">
+          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+          <p class="mt-1 max-w-4xl text-sm text-neutral-500">{{ t('databox.inbox.privacy.description') }}</p>
+        </details>
+      </div>
+
+      <div class="min-w-0 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+        <h2 class="font-medium text-neutral-900">{{ t('databox.inbox.archive.title') }}</h2>
+        <details class="text-sm" data-test="databox-explain">
+          <summary class="cursor-pointer select-none text-xs font-medium text-neutral-500">{{ t('databox.explain_toggle') }}</summary>
+          <p class="mt-1 text-sm text-neutral-500">{{ t('databox.inbox.archive.description') }}</p>
+        </details>
+        <div class="mt-4 flex flex-wrap items-end gap-3">
+          <label class="min-w-[16rem] flex-1">
+            <span class="mb-1 block text-sm font-medium">{{ t('databox.inbox.archive.folder') }}</span>
+            <select v-model="selectedInboxArchiveFolderId" class="form-select w-full" data-test="inbox-archive-folder">
+              <option value="">{{ t('databox.inbox.archive.root') }}</option>
+              <option v-for="folder in inboxArchiveFolderOptions" :key="folder.id" :value="folder.id">
+                {{ folder.label }}
+              </option>
+            </select>
+          </label>
+          <button type="button" :class="btnOutline('primary')" :disabled="saving" data-test="inbox-archive-save" @click="saveInboxArchiveFolder">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+            </svg>
+            {{ t('databox.inbox.archive.save') }}
+          </button>
+        </div>
+        <p class="mt-2 text-xs text-neutral-500">{{ t('databox.inbox.archive.pathHint') }}</p>
+      </div>
+
+      <InboxCategoryManager
+        v-if="categoryManagerOpen"
+        :senders="inboxSenders"
+        @close="categoryManagerOpen = false"
+        @changed="reloadInbox"
       />
+
+      <Modal
+        v-if="assignTarget"
+        :title="t('databox.inboxBrowse.assign.title')"
+        width-class="max-w-lg"
+        @close="assignTarget = null"
+      >
+        <div class="space-y-4" data-test="inbox-assign-modal">
+          <p class="break-words text-sm text-neutral-600">
+            {{ t('databox.inboxBrowse.assign.message', { subject: assignTarget.subject ?? '—' }) }}
+          </p>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium">{{ t('databox.inboxBrowse.assign.category') }}</span>
+            <select v-model="assignCategoryId" class="form-select w-full" data-test="inbox-assign-category">
+              <option v-for="category in inboxCategories" :key="category.id" :value="category.id">
+                {{ inboxCategoryLabel(category, t) }}
+              </option>
+            </select>
+          </label>
+          <label v-if="assignTarget.sender_box_id" class="flex items-start gap-2 text-sm">
+            <input v-model="assignToSender" type="checkbox" class="mt-0.5" data-test="inbox-assign-sender" />
+            <span>{{ t('databox.inboxBrowse.assign.applyToSender', { sender: assignTarget.sender_name ?? assignTarget.sender_box_id }) }}</span>
+          </label>
+        </div>
+        <template #footer>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="assignTarget = null">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" />
+              </svg>
+              {{ t('databox.inboxBrowse.assign.cancel') }}
+            </button>
+            <button
+              type="button"
+              :class="[btnFilled('primary'), 'whitespace-nowrap']"
+              :disabled="assignBusy || assignCategoryId === ''"
+              data-test="inbox-assign-save"
+              @click="saveAssign"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.tag" />
+              </svg>
+              {{ t('databox.inboxBrowse.assign.save') }}
+            </button>
+          </div>
+        </template>
+      </Modal>
     </section>
 
     <!-- ─────────────── Výzvy k odstranění vad (§ 74 DŘ) ─────────────── -->

@@ -33,7 +33,7 @@ vi.mock('@/api/dataBox', () => ({
     credentials: m.credentials,
     recipients: m.recipients,
     outbox: m.outbox,
-    inbox: m.inbox,
+    browseInbox: m.inbox,
     mobileKeyProfile: m.mobileKeyProfile,
     unmatchedReceipts: m.unmatchedReceipts,
     receiptCandidates: m.receiptCandidates,
@@ -42,6 +42,11 @@ vi.mock('@/api/dataBox', () => ({
   },
 }))
 
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatUtcDateTime: (value: string) => value }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))

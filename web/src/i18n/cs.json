@@ -28755,6 +28755,120 @@
         "isds_download": "stáhla aplikace z ISDS"
       }
     },
+    "inboxBrowse": {
+      "searchPlaceholder": "Hledat ve věci, odesílateli, č. j., spisové značce a přílohách",
+      "search": "Hledat ve zprávách",
+      "allMessages": "Všechny zprávy",
+      "categoriesTitle": "Kategorie",
+      "manageCategories": "Kategorie a pravidla",
+      "unreadBadge": "{count} nepřečtených",
+      "noResults": "Zvoleným filtrům neodpovídá žádná zpráva.",
+      "filters": {
+        "sender": "Odesílatel",
+        "anySender": "Všichni odesílatelé",
+        "type": "Typ zprávy",
+        "anyType": "Všechny typy",
+        "direction": "Směr",
+        "anyDirection": "Přijaté i odeslané",
+        "received": "Přijaté",
+        "sent": "Odeslané a doručenky",
+        "read": "Přečtení",
+        "anyRead": "Přečtené i nepřečtené",
+        "unread": "Nepřečtené",
+        "readOnly": "Přečtené",
+        "attachments": "Jen s přílohou",
+        "sort": "Řadit podle",
+        "category": "Kategorie"
+      },
+      "sort": {
+        "delivered": "data doručení",
+        "sender": "odesílatele",
+        "subject": "věci",
+        "category": "kategorie"
+      },
+      "order": {
+        "asc": "Vzestupně",
+        "desc": "Sestupně"
+      },
+      "category": "Kategorie",
+      "categorySource": {
+        "auto": "Zařazeno automaticky",
+        "rule": "Zařazeno podle vašeho pravidla",
+        "manual": "Přeřazeno ručně"
+      },
+      "attachments": "Přílohy: {count}",
+      "refNumber": "Č. j. {ref}",
+      "recipientRefNumber": "Naše č. j. {ref}",
+      "fileMark": "Sp. zn. {mark}",
+      "unread": "Nepřečteno",
+      "markRead": "Přečteno",
+      "markUnread": "Nepřečteno",
+      "reassign": "Přeřadit",
+      "system": {
+        "tax_office": "Finanční a celní správa",
+        "social_security": "Sociální zabezpečení",
+        "health_insurance": "Zdravotní pojišťovny",
+        "courts_enforcement": "Soudy a exekutoři",
+        "public_authority": "Ostatní úřady",
+        "business_partners": "Obchodní partneři",
+        "isds_system": "Systém datových schránek",
+        "own_submissions": "Vlastní podání a doručenky",
+        "other": "Ostatní"
+      },
+      "assign": {
+        "title": "Přeřadit zprávu",
+        "message": "Zpráva: {subject}",
+        "category": "Kategorie",
+        "applyToSender": "Zařazovat sem i další zprávy od odesílatele {sender}",
+        "save": "Přeřadit",
+        "cancel": "Zrušit",
+        "saved": "Zpráva je přeřazená.",
+        "savedWithRule": "Zpráva je přeřazená a pravidlo pro odesílatele uložené."
+      },
+      "manager": {
+        "title": "Kategorie a pravidla",
+        "intro": "Aplikace řadí zprávy podle odesílatele a typu zprávy. U nového odesílatele založí pravidlo sama. Pravidlo můžete přesměrovat do jiné kategorie nebo přidat vlastní podle schránky, jména odesílatele nebo věci. Ručně přeřazené zprávy pravidla nemění.",
+        "categories": "Kategorie",
+        "systemCategory": "systémová",
+        "customCategory": "vlastní",
+        "categoryName": "Název kategorie",
+        "resetName": "Vrátit výchozí název",
+        "newCategoryPlaceholder": "Název nové kategorie",
+        "addCategory": "Přidat kategorii",
+        "deleteCategory": "Smazat kategorii",
+        "deleteCategoryConfirm": "Smazat kategorii „{name}“? Její zprávy se zařadí znovu automaticky a její pravidla se smažou.",
+        "rules": "Pravidla",
+        "noRules": "Zatím žádná pravidla.",
+        "ruleField": {
+          "sender_box": "Schránka odesílatele",
+          "sender_name": "Jméno odesílatele obsahuje",
+          "subject": "Věc obsahuje"
+        },
+        "origin": {
+          "auto": "automatické",
+          "user": "vaše"
+        },
+        "patternPlaceholder": {
+          "sender_box": "ID schránky (7 znaků)",
+          "sender_name": "Část jména odesílatele",
+          "subject": "Část věci zprávy"
+        },
+        "pattern": "Hledaný text",
+        "targetCategory": "Do kategorie",
+        "addRule": "Přidat pravidlo",
+        "deleteRule": "Smazat pravidlo",
+        "deleteRuleConfirm": "Smazat pravidlo? Zprávy, které podle něj patřily do kategorie, se zařadí znovu automaticky.",
+        "unsaved": "Neuloženo",
+        "closeUnsavedConfirm": "Máte neuložené změny. Zavřít bez uložení?",
+        "save": "Uložit změny",
+        "discard": "Zahodit",
+        "close": "Zavřít",
+        "saved": "Změny jsou uložené a zprávy přeřazené.",
+        "created": "Kategorie je založená.",
+        "ruleCreated": "Pravidlo je uložené a zprávy přeřazené.",
+        "deleted": "Smazáno."
+      }
+    },
     "inbox": {
       "archive": {
         "title": "Ukládání stažených zpráv",

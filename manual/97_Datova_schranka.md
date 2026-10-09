@@ -166,7 +166,39 @@ Příchozí zprávy se nenačítají automaticky ani na pozadí. Postupujte takt
 6. Zkontrolujte výsledek a nově uložené zprávy.
 
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Staženo nových zpráv** s počtem a zprávy jsou v seznamu (sloupce
-**Předmět**, **Odesílatel**, **Zařazení**, **Doručeno**). Zprávu otevřete tlačítkem **Otevřít zprávu a přílohy**.
+**Předmět**, **Odesílatel**, **Kategorie**, **Zařazení**, **Doručeno**). Zprávu otevřete tlačítkem **Otevřít zprávu
+a přílohy**. Otevřená zpráva se označí jako přečtená.
+
+**Kategorie, hledání a filtry příchozích zpráv:**
+
+Každou zprávu MyÚčto zařadí do kategorie podle odesílatele a typu zprávy: **Finanční a celní správa**, **Sociální
+zabezpečení**, **Zdravotní pojišťovny**, **Soudy a exekutoři**, **Ostatní úřady**, **Obchodní partneři**, **Systém
+datových schránek**, **Vlastní podání a doručenky** a **Ostatní**. Rozhoduje ID schránky odesílatele z číselníku
+příjemců, typ schránky (orgán veřejné moci, exekutor, firma), název odesílatele a rozpoznaný typ zprávy (protokol
+ČSSZ, odpověď pojišťovny). U nového odesílatele aplikace založí pravidlo pro jeho schránku, takže jeho další zprávy
+skončí ve stejné kategorii. Zprávy stažené dřív se zařadí samy při prvním otevření seznamu.
+
+1. Na záložce **Příchozí zprávy** vyberte vlevo kategorii (na telefonu nad seznamem). U každé kategorie je počet
+   zpráv a počet nepřečtených. Prázdné kategorie se v přehledu neukazují.
+2. Do pole **Hledat ve zprávách** napište část věci, jména odesílatele, čísla jednacího, spisové značky nebo názvu
+   přílohy a potvrďte klávesou Enter. Na velikosti písmen ani diakritice nezáleží; více slov musí najít všechna.
+3. Pod tlačítkem **Filtry** zúžíte seznam podle odesílatele, typu zprávy, směru (**Přijaté**, **Odeslané a
+   doručenky**), přečtení a příloh. Rychlý filtr **měsíc a rok** zůstává nad seznamem.
+4. Řazení změníte kliknutím na záhlaví sloupce **Předmět**, **Odesílatel**, **Kategorie** nebo **Doručeno** (druhé
+   kliknutí obrátí směr). Na telefonu je řazení v nabídce **Řadit podle**.
+5. Zprávu do jiné kategorie přesunete tlačítkem **Přeřadit**. Když zaškrtnete **Zařazovat sem i další zprávy od
+   odesílatele**, vznikne pravidlo a přeřadí se i ostatní zprávy téhož odesílatele.
+6. Tlačítkem **Kategorie a pravidla** otevřete správu: systémové kategorie přejmenujete (prázdný název vrátí výchozí),
+   vlastní kategorie založíte nebo smažete a u pravidel změníte cílovou kategorii nebo přidáte nové pravidlo podle
+   schránky odesílatele, části jména odesílatele nebo části věci. Přejmenování a přesměrování pravidel uložíte
+   tlačítkem **Uložit změny**.
+
+Zvolené filtry jsou součástí adresy stránky, takže výběr (například nepřečtené zprávy od finanční správy za březen)
+můžete uložit do záložek nebo poslat kolegovi. Stav přečtení je společný pro celou firmu.
+
+> [!NOTE]
+> Ručně přeřazenou zprávu pravidla nepřesunou. Pravidlo podle věci má přednost před pravidlem podle schránky a to
+> před pravidlem podle jména odesílatele. Smazáním vlastní kategorie se její zprávy zařadí znovu automaticky.
 
 Server při jednom načtení projde dostupné stránky až do bezpečného limitu a duplicitní zprávy znovu neuloží. Pokud se
 nepodaří stáhnout nebo uložit všechny zprávy, MyÚčto zobrazí neúplný výsledek jako chybu. Načtení zopakujte až po

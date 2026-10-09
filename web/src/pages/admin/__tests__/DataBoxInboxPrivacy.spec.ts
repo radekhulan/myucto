@@ -21,7 +21,7 @@ vi.mock('@/api/dataBox', () => ({
     credentials: m.credentials,
     recipients: m.recipients,
     outbox: m.outbox,
-    inbox: m.inbox,
+    browseInbox: m.inbox,
     mobileKeyProfile: m.mobileKeyProfile,
     unmatchedReceipts: m.unmatchedReceipts,
     inboxStorage: m.inboxStorage,
@@ -29,6 +29,11 @@ vi.mock('@/api/dataBox', () => ({
     restoreInboxMessage: m.restoreInboxMessage,
     purgeInboxLocalContent: m.purgeInboxLocalContent,
   },
+}))
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn() }),
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatUtcDateTime: (value: string) => value }))
@@ -140,7 +145,7 @@ describe('DataBox — soukromí příchozích zpráv', () => {
 
     // Přepnutí pohledu vrací listování na první stránku: skrytých zpráv je
     // jiný počet a zůstat na páté stránce by ukázalo prázdno.
-    expect(m.inbox).toHaveBeenCalledWith('production', undefined, 'hidden', 25, 0, null, null)
+    expect(m.inbox).toHaveBeenCalledWith('production', expect.objectContaining({ visibility: 'hidden', limit: 25, offset: 0 }))
     expect(m.purgeInboxLocalContent).toHaveBeenCalledWith(51, 4)
     expect(m.toastSuccess).toHaveBeenCalledWith('databox.inbox.privacy.purged')
   })

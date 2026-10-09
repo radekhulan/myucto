@@ -259,6 +259,91 @@ export interface InboxMessage {
   sender_is_public_authority?: boolean | null
   delivery_resolved_at?: string | null
   delivery_note?: string | null
+  /** Kategorie zprávy (migrace 1982); starší instalace pole nevrací. */
+  category_id?: number | null
+  category_source?: 'auto' | 'rule' | 'manual' | null
+  category_code?: InboxCategoryCode | null
+  category_name?: string | null
+  direction?: 'received' | 'sent' | null
+  read_at?: string | null
+  read_by?: number | null
+  attachment_count?: number
+  sender_ref_number?: string | null
+  recipient_ref_number?: string | null
+  recipient_ident?: string | null
+}
+
+export type InboxCategoryCode =
+  | 'tax_office'
+  | 'social_security'
+  | 'health_insurance'
+  | 'courts_enforcement'
+  | 'public_authority'
+  | 'business_partners'
+  | 'isds_system'
+  | 'own_submissions'
+  | 'other'
+
+export interface InboxCategory {
+  id: number
+  /** Systémová kategorie; `null` = vlastní kategorie uživatele. */
+  code: InboxCategoryCode | null
+  /** Vlastní název; `null` = výchozí překlad podle `code`. */
+  name: string | null
+  sort_order: number
+  is_system: boolean
+}
+
+export type InboxRuleField = 'sender_box' | 'sender_name' | 'subject'
+
+export interface InboxCategoryRule {
+  id: number
+  category_id: number
+  match_field: InboxRuleField
+  pattern: string
+  origin: 'auto' | 'user'
+  created_by: number | null
+  created_at: string
+}
+
+export interface InboxCategoryOverview {
+  categories: InboxCategory[]
+  rules: InboxCategoryRule[]
+}
+
+export interface InboxBrowseParams {
+  visibility?: 'active' | 'hidden' | 'all'
+  q?: string
+  category?: number
+  sender?: string
+  classification?: InboxClassification
+  direction?: 'received' | 'sent'
+  read?: 'read' | 'unread'
+  attachments?: '1'
+  sort?: 'delivered' | 'sender' | 'subject' | 'category'
+  order?: 'asc' | 'desc'
+  year?: number
+  month?: number
+  limit?: number
+  offset?: number
+}
+
+export interface InboxBrowseResult {
+  items: InboxMessage[]
+  total: number
+  years?: number[]
+  limit: number
+  offset: number
+  state: InboxPollState | null
+  /** Bez migrace 1982 server kategorie ani počty nevrací. */
+  categories?: InboxCategory[]
+  facets?: {
+    categories: Array<{ category_id: number | null; count: number; unread: number }>
+    directions: { received: number; sent: number }
+    classifications: Partial<Record<InboxClassification, number>>
+    unread: number
+  }
+  senders?: Array<{ box_id: string; name: string | null; count: number }>
 }
 
 /**
@@ -849,6 +934,52 @@ export const dataBoxApi = {
         month: month ?? undefined,
       },
     }).then(r => r.data),
+
+  /**
+   * Příchozí zprávy s kategoriemi, filtry, hledáním a řazením. Starší server
+   * nové parametry ignoruje a vrátí jen `items`/`total` bez počtů.
+   */
+  browseInbox: (environment: string, params: InboxBrowseParams) =>
+    api.get<InboxBrowseResult>('/submissions/inbox', {
+      params: { environment, ...params },
+    }).then(r => r.data),
+
+  inboxCategories: () =>
+    api.get<InboxCategoryOverview>('/submissions/inbox/categories').then(r => r.data),
+
+  createInboxCategory: (name: string) =>
+    api.post<InboxCategoryOverview>('/submissions/inbox/categories', { name }).then(r => r.data),
+
+  /** `name: null` vrátí systémové kategorii výchozí název. */
+  renameInboxCategory: (id: number, name: string | null) =>
+    api.put<InboxCategoryOverview>(`/submissions/inbox/categories/${id}`, { name }).then(r => r.data),
+
+  deleteInboxCategory: (id: number) =>
+    api.delete<InboxCategoryOverview>(`/submissions/inbox/categories/${id}`).then(r => r.data),
+
+  createInboxRule: (categoryId: number, matchField: InboxRuleField, pattern: string) =>
+    api.post<InboxCategoryOverview>('/submissions/inbox/category-rules', {
+      category_id: categoryId,
+      match_field: matchField,
+      pattern,
+    }).then(r => r.data),
+
+  updateInboxRule: (id: number, categoryId: number) =>
+    api.put<InboxCategoryOverview>(`/submissions/inbox/category-rules/${id}`, { category_id: categoryId })
+      .then(r => r.data),
+
+  deleteInboxRule: (id: number) =>
+    api.delete<InboxCategoryOverview>(`/submissions/inbox/category-rules/${id}`).then(r => r.data),
+
+  /** Ruční přeřazení; `applyToSender` založí pravidlo pro schránku odesílatele. */
+  assignInboxCategory: (id: number, categoryId: number, applyToSender: boolean) =>
+    api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/category`, {
+      category_id: categoryId,
+      apply_to_sender: applyToSender,
+    }).then(r => r.data.item),
+
+  markInboxRead: (id: number, read: boolean) =>
+    api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/read`, { read }).then(r => r.data.item),
 
   /**
    * Zpracovat uloženou zprávu znovu. Nesahá na síť — pracuje s originálem,

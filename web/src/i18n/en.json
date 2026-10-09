@@ -28755,6 +28755,120 @@
         "isds_download": "downloaded by the app from ISDS"
       }
     },
+    "inboxBrowse": {
+      "searchPlaceholder": "Search subject, sender, reference numbers, file marks and attachments",
+      "search": "Search messages",
+      "allMessages": "All messages",
+      "categoriesTitle": "Categories",
+      "manageCategories": "Categories and rules",
+      "unreadBadge": "{count} unread",
+      "noResults": "No message matches the selected filters.",
+      "filters": {
+        "sender": "Sender",
+        "anySender": "All senders",
+        "type": "Message type",
+        "anyType": "All types",
+        "direction": "Direction",
+        "anyDirection": "Received and sent",
+        "received": "Received",
+        "sent": "Sent and delivery receipts",
+        "read": "Read status",
+        "anyRead": "Read and unread",
+        "unread": "Unread",
+        "readOnly": "Read",
+        "attachments": "With attachment only",
+        "sort": "Sort by",
+        "category": "Category"
+      },
+      "sort": {
+        "delivered": "delivery date",
+        "sender": "sender",
+        "subject": "subject",
+        "category": "category"
+      },
+      "order": {
+        "asc": "Ascending",
+        "desc": "Descending"
+      },
+      "category": "Category",
+      "categorySource": {
+        "auto": "Categorized automatically",
+        "rule": "Categorized by your rule",
+        "manual": "Moved manually"
+      },
+      "attachments": "Attachments: {count}",
+      "refNumber": "Ref. no. {ref}",
+      "recipientRefNumber": "Our ref. no. {ref}",
+      "fileMark": "File mark {mark}",
+      "unread": "Unread",
+      "markRead": "Read",
+      "markUnread": "Unread",
+      "reassign": "Move",
+      "system": {
+        "tax_office": "Tax and customs administration",
+        "social_security": "Social security",
+        "health_insurance": "Health insurers",
+        "courts_enforcement": "Courts and bailiffs",
+        "public_authority": "Other authorities",
+        "business_partners": "Business partners",
+        "isds_system": "Data box system",
+        "own_submissions": "Own submissions and receipts",
+        "other": "Other"
+      },
+      "assign": {
+        "title": "Move message",
+        "message": "Message: {subject}",
+        "category": "Category",
+        "applyToSender": "Also file further messages from {sender} here",
+        "save": "Move",
+        "cancel": "Cancel",
+        "saved": "The message has been moved.",
+        "savedWithRule": "The message has been moved and the sender rule saved."
+      },
+      "manager": {
+        "title": "Categories and rules",
+        "intro": "The app files messages by sender and message type. For a new sender it creates a rule on its own. You can redirect a rule to another category or add your own by data box, sender name or subject. Messages moved manually are not affected by rules.",
+        "categories": "Categories",
+        "systemCategory": "system",
+        "customCategory": "custom",
+        "categoryName": "Category name",
+        "resetName": "Restore default name",
+        "newCategoryPlaceholder": "New category name",
+        "addCategory": "Add category",
+        "deleteCategory": "Delete category",
+        "deleteCategoryConfirm": "Delete category “{name}”? Its messages will be filed again automatically and its rules deleted.",
+        "rules": "Rules",
+        "noRules": "No rules yet.",
+        "ruleField": {
+          "sender_box": "Sender data box",
+          "sender_name": "Sender name contains",
+          "subject": "Subject contains"
+        },
+        "origin": {
+          "auto": "automatic",
+          "user": "yours"
+        },
+        "patternPlaceholder": {
+          "sender_box": "Data box ID (7 characters)",
+          "sender_name": "Part of the sender name",
+          "subject": "Part of the subject"
+        },
+        "pattern": "Text to match",
+        "targetCategory": "To category",
+        "addRule": "Add rule",
+        "deleteRule": "Delete rule",
+        "deleteRuleConfirm": "Delete the rule? Messages it filed into the category will be filed again automatically.",
+        "unsaved": "Unsaved",
+        "closeUnsavedConfirm": "You have unsaved changes. Close without saving?",
+        "save": "Save changes",
+        "discard": "Discard",
+        "close": "Close",
+        "saved": "Changes saved and messages refiled.",
+        "created": "Category created.",
+        "ruleCreated": "Rule saved and messages refiled.",
+        "deleted": "Deleted."
+      }
+    },
     "inbox": {
       "archive": {
         "title": "Downloaded message storage",

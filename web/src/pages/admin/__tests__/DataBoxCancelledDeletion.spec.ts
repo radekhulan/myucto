@@ -30,13 +30,18 @@ vi.mock('@/api/dataBox', () => ({
     credentials: m.credentials,
     recipients: m.recipients,
     outbox: m.outbox,
-    inbox: m.inbox,
+    browseInbox: m.inbox,
     mobileKeyProfile: m.mobileKeyProfile,
     unmatchedReceipts: m.unmatchedReceipts,
     remove: m.remove,
   },
 }))
 
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn() }),
+}))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' },
     t: (key: string, params?: Record<string, unknown>) =>
