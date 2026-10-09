@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
@@ -56,7 +57,62 @@ final class PohodaPayrollJmhzWriter
         private readonly JmhzExternalSubmissionStore $history,
         private readonly PayrollTakeoverEmploymentWriter $employments,
         private readonly PayrollTakeoverPersonWriter $people,
+        private readonly PayrollAnnualSettlementRepository $annualSettlements,
     ) {}
+
+    /**
+     * Žádost o roční zúčtování daní za předchozí rok tak, jak ji PAMICA vykázala v podaném
+     * hlášení (10319, lednové a únorové hlášení roku převodu). Bez ní se hlášení za leden
+     * a únor nesestaví (`jmhz_annual_request_source_missing`) a zúčtování za převzatý rok
+     * nemá z čeho vyjít. Zapisuje se jen tam, kde žádost v evidenci chybí; ostatní odpovědi
+     * žádosti (předchozí zaměstnavatelé, doklady) zůstanou nevyplněné k doplnění účetní.
+     * Den žádosti hlášení nenese, za doklad se bere den podání hlášení, které ji vykázalo.
+     *
+     * @param array<string,mixed> $context {@see self::read()}
+     * @param array<string,array{employee_id:int,employment_id:int}> $matched
+     */
+    private function annualRequests(int $supplierId, ?int $userId, array $context, array $matched, int $year, ImportProtocol $protocol, string $step): void
+    {
+        /** @var array<int,array{requested:bool,on:string,period:string}> $byEmployee */
+        $byEmployee = [];
+        foreach ($context['reports'] as $report) {
+            if ($report['sent'] !== true || $report['type'] === 'S' || $report['year'] !== $year) {
+                continue;
+            }
+            foreach ($report['forms'] as $form) {
+                $pair = $matched[$form['relation_key']] ?? null;
+                $value = strtoupper(trim((string) self::attribute($form['attributes'], 10319)));
+                if ($pair === null || !in_array($value, ['A', 'N', 'TRUE', 'FALSE', '1', '0'], true)) {
+                    continue;
+                }
+                // Platí první podání, které žádost vykázalo: hlášení jsou seřazená podle
+                // období a odeslání, a nejdřívější den podání je doklad, že žádost už byla.
+                $byEmployee[(int) $pair['employee_id']] ??= [
+                    'requested' => in_array($value, ['A', 'TRUE', '1'], true),
+                    'on' => substr((string) ($report['submitted_at'] ?? $report['filled_at']), 0, 10),
+                    'period' => (string) $report['period'],
+                ];
+            }
+        }
+        foreach ($byEmployee as $employeeId => $request) {
+            if ($this->annualSettlements->findRequest($supplierId, $employeeId, $year - 1) !== null) {
+                $protocol->count($step, 'annual_requests_existing');
+                continue;
+            }
+            $this->annualSettlements->saveRequest($supplierId, $employeeId, $year - 1, [
+                'request_status' => $request['requested'] ? 'requested' : 'not_requested',
+                'requested_on' => $request['requested'] ? $request['on'] : null,
+                'request_evidence_reference' => $request['requested'] ? 'pamica:jmhz-10319:' . $request['period'] : null,
+                'prior_employers' => 'unknown', 'prior_documents_received_on' => null,
+                'filing_obligation' => 'unknown', 'filing_obligation_reason' => null,
+                'annual_claims' => 'unknown', 'annual_claims_note' => null,
+                'other_household_caregiver_status' => 'unknown', 'other_household_caregivers' => [],
+                'note' => 'Převzato z PAMICA: ' . ($request['requested'] ? 'žádost o roční zúčtování' : 'bez žádosti o roční zúčtování')
+                    . ' za rok ' . ($year - 1) . ' podle podaného hlášení za ' . $request['period'] . '.',
+            ], null, $userId);
+            $protocol->count($step, $request['requested'] ? 'annual_requests_requested' : 'annual_requests_not_requested');
+        }
+    }
 
     public static function policy(): PayrollTakeoverPolicy
     {
@@ -135,6 +191,7 @@ final class PohodaPayrollJmhzWriter
         $this->messages = 0;
         $this->storeHistory($supplierId, $userId, $context, $matched, $protocol, $step);
         $this->warnUnsent($context['reports'], $protocol, $step);
+        $this->annualRequests($supplierId, $userId, $context, $matched, $year, $protocol, $step);
 
         $policy = self::policy();
         $state = new PayrollTakeoverRunState();

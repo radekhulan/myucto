@@ -571,6 +571,32 @@ final class PohodaPayrollImportTest extends TestCase
         self::assertSame(['2026-01' => 3750, '2026-02' => 3750], $weekly, json_encode($weekly) . $this->explain($protocol));
     }
 
+    /**
+     * Žádost o roční zúčtování za předchozí rok nese podané hlášení (10319). Bez ní hlášení
+     * za leden a únor nejde sestavit a zúčtování nemá z čeho vyjít; dřív ji účetní zadávala
+     * ručně. Opakovaný převod žádost nepřepíše.
+     */
+    public function testAnnualSettlementRequestFromSubmittedReport(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::writeWithReports($this->tmp);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $request = $this->db->pdo()->prepare(
+            'SELECT request_status, requested_on, request_evidence_reference FROM payroll_annual_settlement_requests
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?'
+        );
+        $request->execute([$supplierId, $this->employment($supplierId, '1001')['employee_id'], SyntheticPohodaPayroll::YEAR - 1]);
+        self::assertSame(['request_status' => 'requested', 'requested_on' => '2026-02-15', 'request_evidence_reference' => 'pamica:jmhz-10319:2026-01'],
+            $request->fetch(\PDO::FETCH_ASSOC), $this->explain($protocol));
+        $request->execute([$supplierId, $this->employment($supplierId, '1002')['employee_id'], SyntheticPohodaPayroll::YEAR - 1]);
+        self::assertSame('not_requested', $request->fetch(\PDO::FETCH_ASSOC)['request_status'] ?? null);
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertSame(2, self::stepCounts($again, PohodaPayrollImporter::STEP_JMHZ)['annual_requests_existing'] ?? 0, $this->explain($again));
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->payrollSupplier();

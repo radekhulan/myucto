@@ -204,6 +204,8 @@ final class SyntheticPohodaPayroll
             [10354, '1.3.2025'], [10477, '43000'], [10370, '3053'], [10481, '10664'], [10490, 'N'], [10546, 'N'],
             [10240, '1'], [10241, '1.1.2026'], [10242, '31.1.2026'], [10356, '31'], [10245, '43000'], [10357, '0'],
             [10535, '43000'],
+            // Žádost o roční zúčtování za předchozí rok (Jana požádala, Petr ne).
+            [10319, 'A'],
         ];
         $petr = static fn (string $type): array => [
             [1, 'bezPriznaku'], [10012, $g['petr']], [10016, $type], [10495, 'A'],
@@ -211,7 +213,7 @@ final class SyntheticPohodaPayroll
             [10056, '20.11.1985'], [10223, '1.1.2026'], [10239, 'P'],
             [10229, 'Ostrava'], [10230, '554821'], [10231, 'CZ'], [10232, 'N'], [10247, 'N'], [10251, 'N'],
             [10286, '5000'], [10307, '5000'], [10309, '750'], [10419, 'N'], [10344, '5000'],
-            [10328, '5000'], [10345, self::PETR_REPORT_AVERAGE], [10535, '5000'],
+            [10328, '5000'], [10345, self::PETR_REPORT_AVERAGE], [10535, '5000'], [10319, 'N'],
         ];
         $item = static fn (int $id, int $mh, int $relation, int $person, array $attributes): string => '<MHitems>'
             . "<ID>{$id}</ID><RefAg>{$mh}</RefAg><RefZAM>{$person}</RefZAM><RefPomer>{$relation}</RefPomer><RelTyp>1</RelTyp>"
