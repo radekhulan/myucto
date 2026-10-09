@@ -48,12 +48,15 @@
 param(
     [string]$Config,
     [string]$Databaze,
-    [int[]]$Rok,
+    [string[]]$Rok,
     [string]$Ico,
     [string]$Vystup
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Z .cmd přes -File přijde "2025,2026" jako jeden řetězec ([int[]] z něj dělal 20252026).
+$Rok = @($Rok | ForEach-Object { "$_" -split '[,;\s]+' } | Where-Object { $_ -ne '' } | ForEach-Object { [int]$_ })
 
 if ($env:OS -ne 'Windows_NT') {
     Write-Host 'Skript běží jen na Windows.' -ForegroundColor Red

@@ -62,7 +62,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Uzivatel,
     [string]$Heslo,
     [string]$Ico,
-    [int[]]$Rok,
+    [string[]]$Rok,
     [string]$PohodaExe,
     [string]$Vystup,
     [int]$TimeoutMinut = 60,
@@ -72,6 +72,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Z .cmd přes -File přijde "2025,2026" jako jeden řetězec ([int[]] z něj dělal 20252026).
+$Rok = @($Rok | ForEach-Object { "$_" -split '[,;\s]+' } | Where-Object { $_ -ne '' } | ForEach-Object { [int]$_ })
 
 if ($env:OS -ne 'Windows_NT') {
     Write-Host 'Skript běží jen na Windows, na stejném počítači, kde je nainstalovaná POHODA.' -ForegroundColor Red
