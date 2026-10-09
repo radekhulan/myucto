@@ -11442,7 +11442,7 @@
         "eldp_takeover_assessment_base_not_whole_czk": "Vyměřovací základ převzatého měsíce není celé číslo korun v rozsahu, který evidenční list umí zapsat.",
         "eldp_takeover_employment_dates_ambiguous": "Převzaté měsíce pracovního vztahu uvádějí různá data nástupu nebo skončení. Sjednoťte údaje v Kontrole převodu mezd.",
         "eldp_takeover_employment_dates_inconsistent": "Převzatý měsíc eviduje jiné trvání pracovního vztahu než schválené mzdové revize. Opravte údaje v Kontrole převodu mezd.",
-        "eldp_takeover_employment_end_unknown": "Pracovní vztah není v žádné schválené mzdové revizi roku a převzaté měsíce neuvádějí datum jeho skončení. Doplňte ho v Kontrole převodu mezd.",
+        "eldp_takeover_employment_end_unknown": "Pracovní vztah není v žádné schválené mzdové revizi roku a převzaté měsíce neuvádějí datum jeho skončení ani trvání po 31. 12. nedokládá měsíc následujícího období. Doplňte ho v Kontrole převodu mezd.",
         "eldp_takeover_employment_unresolved": "Pracovní vztah není v žádné schválené mzdové revizi roku a převzaté měsíce nemají jednoznačnou osobu ani platné datum nástupu. Doplňte údaje v Kontrole převodu mezd.",
         "eldp_takeover_post_termination_income_unsupported": "Převzatý měsíc nese vyměřovací základ až po skončení pracovního vztahu. Dodatečně zúčtovaný příjem z převzatých dat aplikace do evidenčního listu nezapíše; podejte ho mimo aplikaci, nebo údaj opravte v Kontrole převodu mezd.",
         "eldp_takeover_excluded_days_breakdown_missing": "Převzatý měsíc má vyloučené dny, ale chybí jejich rozpad podle druhů. Zaevidujte odpovídající nepřítomnosti a proveďte převod znovu.",

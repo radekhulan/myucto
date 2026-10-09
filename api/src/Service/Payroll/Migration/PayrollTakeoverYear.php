@@ -83,7 +83,30 @@ final readonly class PayrollTakeoverYear
          * @var array<int,list<array<string,mixed>>>
          */
         public array $absences = [],
+        /**
+         * Doklad, že pracovní vztah po konci roku trvá (`employment_id` =>
+         * první takový měsíc následujícího období a jeho zdroj). Plní ho jen
+         * {@see PayrollTakeoverReader::forEmployment()}; evidenční list z něj
+         * dovozuje trvání vztahu do 31. 12., když převzaté měsíce skončení neuvádějí.
+         *
+         * @var array<int,array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string}>
+         */
+        public array $continuations = [],
     ) {}
+
+    /**
+     * Doložené trvání vztahu po 31. 12. roku, nebo `null`.
+     *
+     * @return array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string}|null
+     */
+    public function continuationAfterYearEnd(int $employmentId): ?array
+    {
+        $evidence = $this->continuations[$employmentId] ?? null;
+
+        return $evidence !== null && $evidence['period'] > sprintf('%04d-12', $this->year)
+            ? $evidence
+            : null;
+    }
 
     /**
      * Nepřítomnosti vztahu, které zasahují do intervalu `[$from, $to]`.

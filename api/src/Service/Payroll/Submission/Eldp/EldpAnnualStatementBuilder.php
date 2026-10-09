@@ -50,7 +50,10 @@ use Psr\Clock\ClockInterface;
  * proti ní jen kontrolují. Vztah, který skončil v převzatém období (nebo celý
  * rok vedl jiný program), ale žádná revize roku nezná; jeho trvání se pak
  * převezme z převzatých měsíců, jen je-li doložené: jednoznačné datum nástupu
- * i skončení ({@see self::employmentFromTakeover()}). Payload to přizná klíčem
+ * i skončení ({@see self::employmentFromTakeover()}). Prázdné skončení se
+ * bere jako „vztah trvá" jen tehdy, když trvání po 31. 12. dokládá převzatý
+ * nebo schválený měsíc následujícího období; doklad zapíše payload do
+ * `employment_continuation_evidence`. Payload to přizná klíčem
  * `employment_dates_source`. Revize za měsíce mimo trvání vztahu (firma počítá
  * dál po jeho skončení) list neblokují ({@see self::resolveEmployment()}).
  *
@@ -288,13 +291,20 @@ final class EldpAnnualStatementBuilder
             && substr((string) $authorityRequestReceivedOn, 0, 4) === sprintf('%04d', $year);
 
         $employmentFromTakeover = false;
+        $continuationEvidence = [];
+        $usedContinuation = null;
         $employment = $this->resolveEmployment(
             $months,
             $employmentId,
             $blockers,
             $takeoverRows,
             $employmentFromTakeover,
+            $takeover?->continuationAfterYearEnd($employmentId),
+            $usedContinuation,
         );
+        if ($usedContinuation !== null) {
+            $continuationEvidence[$employmentId] = $usedContinuation;
+        }
         $employeeEmployments = self::employeeEmployments($allMonths, $employment['employee_id']);
         $this->assertNotContinuationOfEarlierEmployment(
             $employeeEmployments,
@@ -349,13 +359,19 @@ final class EldpAnnualStatementBuilder
                 : [];
             $continuedMonths = $allMonths;
             $continuedFromTakeover = false;
+            $usedContinuation = null;
             $continuedEmployment = $this->resolveEmployment(
                 $continuedMonths,
                 $continuedId,
                 $blockers,
                 $continuedRows,
                 $continuedFromTakeover,
+                $continuedTakeover?->continuationAfterYearEnd($continuedId),
+                $usedContinuation,
             );
+            if ($usedContinuation !== null) {
+                $continuationEvidence[$continuedId] = $usedContinuation;
+            }
             $part = $this->employmentLines(
                 $continuedId,
                 $year,
@@ -616,6 +632,14 @@ final class EldpAnnualStatementBuilder
         if ($employmentFromTakeover) {
             $payload['employment_dates_source'] = 'takeover';
         }
+        if ($continuationEvidence !== []) {
+            ksort($continuationEvidence);
+            $payload['employment_continuation_evidence'] = array_map(
+                static fn (int $id, array $evidence): array => ['employment_id' => $id, ...$evidence],
+                array_keys($continuationEvidence),
+                array_values($continuationEvidence),
+            );
+        }
         if ($continued !== []) {
             $payload['scope']['continued_employment_ids'] = $continued;
         }
@@ -680,7 +704,14 @@ final class EldpAnnualStatementBuilder
         }
         ksort($months, SORT_STRING);
         $fromTakeover = false;
-        $employment = $this->resolveEmployment($months, $employmentId, $blockers, $takeoverRows, $fromTakeover);
+        $employment = $this->resolveEmployment(
+            $months,
+            $employmentId,
+            $blockers,
+            $takeoverRows,
+            $fromTakeover,
+            $takeover?->continuationAfterYearEnd($employmentId),
+        );
         $assembled = $this->employmentLines(
             $employmentId,
             $year,
@@ -1057,6 +1088,9 @@ final class EldpAnnualStatementBuilder
      * @param array<string,array<string,mixed>> $months
      * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
      * @param list<PayrollTakeoverMonth> $takeoverRows převzaté měsíce vztahu
+     * @param array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string}|null $continuation
+     *        doložené trvání vztahu po konci roku
+     * @param array{period:string,source:string}|null $usedContinuation doklad, o který se trvání opřelo
      * @return array{employee_id:int,start:string,end:?string}
      */
     private function resolveEmployment(
@@ -1065,6 +1099,8 @@ final class EldpAnnualStatementBuilder
         array &$blockers,
         array $takeoverRows,
         bool &$fromTakeover,
+        ?array $continuation = null,
+        ?array &$usedContinuation = null,
     ): array {
         $resolved = null;
         $inAnyRevision = false;
@@ -1120,6 +1156,8 @@ final class EldpAnnualStatementBuilder
                 $takeoverRows,
                 $employmentId,
                 $takeoverBlockers,
+                $continuation,
+                $usedContinuation,
             );
             if ($resolved === null) {
                 throw EldpValidationException::blocked($takeoverBlockers);
@@ -1181,14 +1219,21 @@ final class EldpAnnualStatementBuilder
      * aspoň u jednoho řádku. Jinak blokátor s adresou, kde údaj doplnit,
      * nikdy odhad (ani z živé karty vztahu, ta není zmrazená).
      *
+     * Výjimkou je vztah bez skončení, jehož trvání po konci roku dokládá
+     * měsíc následujícího období ({@see PayrollTakeoverYear::continuationAfterYearEnd()}).
+     *
      * @param list<PayrollTakeoverMonth> $rows
      * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
+     * @param array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string}|null $continuation
+     * @param array{period:string,source:string}|null $usedContinuation
      * @return array{employee_id:int,start:string,end:?string}|null
      */
     private function employmentFromTakeover(
         array $rows,
         int $employmentId,
         array &$blockers,
+        ?array $continuation = null,
+        ?array &$usedContinuation = null,
     ): ?array {
         $where = ' Doplňte údaj u převzatého měsíce v Mzdy → Kontrola převodu mezd a import opakujte.';
         $employeeIds = [];
@@ -1269,11 +1314,43 @@ final class EldpAnnualStatementBuilder
             return null;
         }
         if ($ends === []) {
+            /*
+             * Vztah, který převzaté měsíce roku nechávají bez skončení a který
+             * doložitelně běží i po 31. 12. (převzatý nebo schválený měsíc
+             * následujícího období), za rok trval celý: list se podává jako
+             * roční (§ 38 odst. 3 zákona č. 582/1991 Sb. ve znění do
+             * 31. 12. 2025). Doklad musí patřit témuž nástupu a nesmí sám
+             * skončení do konce roku uvádět.
+             */
+            $yearEnd = max(array_map(
+                static fn (PayrollTakeoverMonth $row): string => substr($row->period, 0, 4),
+                $rows,
+            )) . '-12-31';
+            if ($continuation !== null
+                && $continuation['period'] > substr($yearEnd, 0, 7)
+                && ($continuation['relationship_start_date'] === null
+                    || $continuation['relationship_start_date'] === $starts[0])
+                && ($continuation['relationship_end_date'] === null
+                    || $continuation['relationship_end_date'] > $yearEnd)
+            ) {
+                $usedContinuation = [
+                    'period' => $continuation['period'],
+                    'source' => $continuation['source'],
+                ];
+
+                return [
+                    'employee_id' => (int) array_key_first($employeeIds),
+                    'start' => $starts[0],
+                    'end' => $continuation['relationship_end_date'],
+                ];
+            }
             $blockers[] = [
                 'code' => 'eldp_takeover_employment_end_unknown',
                 'message' => 'Pracovní vztah není v žádné schválené mzdové revizi roku a převzaté měsíce '
                     . 'neuvádějí datum jeho skončení. Prázdné datum může znamenat, že vztah trvá, '
-                    . 'i že ho původní program nevydal, takže trvání listu nejde doložit.' . $where,
+                    . 'i že ho původní program nevydal, a trvání vztahu po 31. 12. nedokládá ani '
+                    . 'převzatý či schválený měsíc následujícího období, takže trvání listu nejde doložit.'
+                    . $where,
                 'detail' => $detail,
             ];
 

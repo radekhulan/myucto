@@ -157,6 +157,86 @@ final class PayrollMigrationReconciliationRepository
     }
 
     /**
+     * První doložený měsíc trvání pracovního vztahu po konci roku.
+     *
+     * Prázdné skončení vztahu u převzatých měsíců znamená „trvá" i „původní
+     * program ho nevydal". Doklad, že vztah 31. 12. neskončil, je měsíc
+     * následujícího období, ve kterém vztah prokazatelně běží:
+     *
+     *  - převzatý měsíc téhož vztahu se skončením po konci roku, nebo bez
+     *    skončení, ale s odpracovanou dobou či dobou pojištění (samotný
+     *    dodatečně zúčtovaný příjem po skončení trvání nedokládá),
+     *  - vztah ve schválené mzdové revizi, jejíž zmrazený vztah nekončí
+     *    do konce roku (revize po skončení nese vztah jen s datem skončení).
+     *
+     * Vrací se nejdřívější z obou; datum nástupu z dokladu si ověří ten, kdo
+     * trvání skládá.
+     *
+     * @return array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string}|null
+     */
+    public function employmentContinuationAfterYear(int $supplierId, int $employmentId, int $year): ?array
+    {
+        $nextYear = sprintf('%04d-01-01', $year + 1);
+        $yearEnd = sprintf('%04d-12-31', $year);
+        $takeover = $this->db->pdo()->prepare(
+            'SELECT DATE_FORMAT(period_start, "%Y-%m") AS period,
+                    relationship_start_date, relationship_end_date
+               FROM payroll_migration_reference_totals
+              WHERE supplier_id = ? AND employment_id = ? AND period_start >= ?
+                AND (relationship_end_date > ?
+                     OR (relationship_end_date IS NULL
+                         AND (insurance_days > 0 OR worked_days_hundredths > 0 OR worked_minutes > 0)))
+              ORDER BY period_start
+              LIMIT 1',
+        );
+        $takeover->execute([$supplierId, $employmentId, $nextYear, $yearEnd]);
+        $takeoverRow = $takeover->fetch(PDO::FETCH_ASSOC);
+
+        $calculated = $this->db->pdo()->prepare(
+            'SELECT DATE_FORMAT(employment.period_start, "%Y-%m") AS period,
+                    COALESCE(JSON_VALUE(employment.input_json, "$.employment.actual_start_date"),
+                             JSON_VALUE(employment.input_json, "$.employment.start_date")) AS relationship_start_date,
+                    JSON_VALUE(employment.input_json, "$.employment.end_date") AS relationship_end_date
+               FROM payroll_run_employments employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = employment.supplier_id
+                AND revision.id = employment.revision_id
+                AND revision.status = "approved"
+              WHERE employment.supplier_id = ? AND employment.employment_id = ?
+                AND employment.period_start >= ?
+                AND (JSON_VALUE(employment.input_json, "$.employment.end_date") IS NULL
+                     OR JSON_VALUE(employment.input_json, "$.employment.end_date") > ?)
+              ORDER BY employment.period_start
+              LIMIT 1',
+        );
+        $calculated->execute([$supplierId, $employmentId, $nextYear, $yearEnd]);
+        $calculatedRow = $calculated->fetch(PDO::FETCH_ASSOC);
+
+        $candidates = [];
+        if (is_array($takeoverRow)) {
+            $candidates[] = ['source' => 'takeover', ...$takeoverRow];
+        }
+        if (is_array($calculatedRow)) {
+            $candidates[] = ['source' => 'calculated', ...$calculatedRow];
+        }
+        $first = null;
+        foreach ($candidates as $candidate) {
+            if ($first === null || (string) $candidate['period'] < $first['period']) {
+                $first = [
+                    'period' => (string) $candidate['period'],
+                    'source' => $candidate['source'],
+                    'relationship_start_date' => $candidate['relationship_start_date'] === null
+                        ? null : (string) $candidate['relationship_start_date'],
+                    'relationship_end_date' => $candidate['relationship_end_date'] === null
+                        ? null : (string) $candidate['relationship_end_date'],
+                ];
+            }
+        }
+
+        return $first;
+    }
+
+    /**
      * Schválené nepřítomnosti pracovního vztahu, které zasahují do roku, ve
      * tvaru zmrazeného vstupu mzdového běhu (jen klíče, které čte odvození
      * vyloučených dob evidenčního listu).

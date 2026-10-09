@@ -2853,9 +2853,13 @@ datum, které původní program později opravil: převzatý měsíc nese trván
 vztahu, jak ho program znal při jeho zpracování, a pozdější měsíc
 s opraveným datem skončení platí (dny dřívějšího měsíce se podle opravy
 přepočtou). Prázdné datum skončení může znamenat, že vztah trvá, i že ho
-původní program nevydal, proto takový list zůstane zablokovaný, dokud datum
-v převzatých mzdách (`Mzdy → Importy`, záložka **Převzaté mzdy**)
-nedoplníte. Stejně zablokovaný zůstane převzatý měsíc, který nese vyměřovací
+původní program nevydal. Vztah bez data skončení se proto bere jako trvající
+do 31. 12. jen tehdy, když to dokládá měsíc následujícího období: převzatý
+měsíc téhož vztahu s odpracovanou dobou nebo dobou pojištění (případně se
+skončením až po 31. 12.), nebo schválený mzdový běh, ve kterém vztah do konce
+roku neskončil. List je pak roční za celý rok. Bez takového dokladu zůstane
+list zablokovaný, dokud datum v převzatých mzdách (`Mzdy → Importy`, záložka
+**Převzaté mzdy**) nedoplníte. Stejně zablokovaný zůstane převzatý měsíc, který nese vyměřovací
 základ až po skončení vztahu: dodatečně zúčtovaný příjem (řádek „P+“)
 z převzatých dat aplikace nedoloží a list s ním podejte mimo aplikaci.
 

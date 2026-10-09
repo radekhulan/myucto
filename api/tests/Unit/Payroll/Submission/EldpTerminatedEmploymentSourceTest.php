@@ -338,14 +338,122 @@ final class EldpTerminatedEmploymentSourceTest extends TestCase
     }
 
     /**
+     * Rok vedl celý původní program a skončení vztahu nevydal. Vztah ale
+     * doložitelně běží i v lednu následujícího roku, takže za rok trval celý:
+     * roční list 1. 1.–31. 12. (§ 38 odst. 3 zákona č. 582/1991 Sb. ve znění
+     * do 31. 12. 2025). Dřív blokoval `eldp_takeover_employment_end_unknown`.
+     */
+    public function testContinuingTakeoverEmploymentWithNextYearEvidenceIsAnnualStatement(): void
+    {
+        foreach (['takeover', 'calculated'] as $source) {
+            $statement = $this->build(
+                2025,
+                [],
+                $this->continuingYear(2025, [
+                    'period' => '2026-01',
+                    'source' => $source,
+                    'relationship_start_date' => '2024-01-01',
+                    'relationship_end_date' => null,
+                ]),
+            );
+
+            $sections = $statement->sections();
+            self::assertCount(1, $sections);
+            self::assertSame('1++', $sections[0]['code']);
+            self::assertSame('2025-01-01', $sections[0]['valid_from']);
+            self::assertSame('2025-12-31', $sections[0]['valid_to']);
+            self::assertSame(365, $sections[0]['insurance_days']);
+            self::assertSame(120_000, $sections[0]['assessment_base_czk']);
+            self::assertSame('01', $statement->payload['form']['eldp_type']);
+            self::assertSame('takeover', $statement->payload['employment_dates_source']);
+            self::assertSame(
+                [['employment_id' => self::EMPLOYMENT_ID, 'period' => '2026-01', 'source' => $source]],
+                $statement->payload['employment_continuation_evidence'],
+            );
+            $xml = (new EldpXmlSerializer())->serialize($statement);
+            (new EldpXmlValidator())->validate($statement, $xml);
+        }
+    }
+
+    /** Totéž trvání skládá potvrzení o době pojištění (§ 42), týž sestavovač. */
+    public function testContinuingTakeoverEmploymentFeedsInsuranceCertificate(): void
+    {
+        $periods = (new EldpAnnualStatementBuilder())->insurancePeriods(
+            self::SUPPLIER_ID,
+            self::EMPLOYMENT_ID,
+            2025,
+            [],
+            [
+                'pension_age_reached_on' => null,
+                'early_pension_from' => null,
+                'full_pension_paid_from' => null,
+                'foreign_insurance' => false,
+            ],
+            $this->continuingYear(2025, [
+                'period' => '2026-03',
+                'source' => 'takeover',
+                'relationship_start_date' => null,
+                'relationship_end_date' => '2026-06-30',
+            ]),
+        );
+
+        self::assertSame('2025-01-01', $periods['periods'][0]['from']);
+        self::assertSame('2025-12-31', $periods['periods'][0]['to']);
+        self::assertSame(365, $periods['insurance_days']);
+    }
+
+    /**
+     * Doklad o trvání, který neodpovídá vztahu (jiný nástup, skončení do
+     * 31. 12., nebo leží ve vykazovaném roce), trvání nedoloží: blokace zůstává.
+     */
+    public function testContinuationEvidenceThatDoesNotProveDurationStaysBlocked(): void
+    {
+        $cases = [
+            'jiný nástup' => ['period' => '2026-01', 'source' => 'takeover', 'relationship_start_date' => '2025-06-01', 'relationship_end_date' => null],
+            'skončení do konce roku' => ['period' => '2026-01', 'source' => 'calculated', 'relationship_start_date' => '2024-01-01', 'relationship_end_date' => '2025-12-31'],
+            'měsíc téhož roku' => ['period' => '2025-12', 'source' => 'takeover', 'relationship_start_date' => '2024-01-01', 'relationship_end_date' => null],
+        ];
+        foreach ($cases as $case => $evidence) {
+            try {
+                $this->build(2025, [], $this->continuingYear(2025, $evidence));
+                self::fail("Doklad „{$case}\" nesmí trvání doložit.");
+            } catch (EldpValidationException $exception) {
+                $blocker = $this->blocker($exception, 'eldp_takeover_employment_end_unknown');
+                self::assertStringContainsString('31. 12.', $blocker['message'], $case);
+            }
+        }
+    }
+
+    /**
+     * Převzaté měsíce 1–12 roku bez data skončení, nástup 1. 1. 2024,
+     * plná doba pojištění a 10 000 Kč měsíčně.
+     *
+     * @param array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string} $evidence
+     */
+    private function continuingYear(int $year, array $evidence): PayrollTakeoverYear
+    {
+        $months = [];
+        for ($month = 1; $month <= 12; ++$month) {
+            $months[] = $this->takeoverMonth($year, $month, [
+                'relationship_start_date' => '2024-01-01',
+                'insurance_days' => (int) (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->format('t'),
+            ]);
+        }
+
+        return $this->takeoverYear($year, sprintf('%04d-01', $year + 1), $months, [], [self::EMPLOYMENT_ID => $evidence]);
+    }
+
+    /**
      * @param list<PayrollTakeoverMonth> $months
      * @param list<string> $calculated
+     * @param array<int,array{period:string,source:string,relationship_start_date:?string,relationship_end_date:?string}> $continuations
      */
     private function takeoverYear(
         int $year,
         ?string $startPeriod,
         array $months,
         array $calculated,
+        array $continuations = [],
     ): PayrollTakeoverYear {
         return new PayrollTakeoverYear(
             self::SUPPLIER_ID,
@@ -355,6 +463,7 @@ final class EldpTerminatedEmploymentSourceTest extends TestCase
             $calculated,
             self::EMPLOYEE_ID,
             self::EMPLOYMENT_ID,
+            continuations: $continuations,
         );
     }
 
