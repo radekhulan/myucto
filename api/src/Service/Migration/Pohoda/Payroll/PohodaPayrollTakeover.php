@@ -213,6 +213,7 @@ final class PohodaPayrollTakeover
             oic: is_string($record['oic']) ? $record['oic'] : null,
             idPpv: is_string($record['id_ppv']) ? $record['id_ppv'] : null,
             checklistNotes: self::evidenceNotes($record),
+            hourlyWageFrom: is_string($record['hourly_wage_from'] ?? null) ? $record['hourly_wage_from'] : null,
         );
     }
 

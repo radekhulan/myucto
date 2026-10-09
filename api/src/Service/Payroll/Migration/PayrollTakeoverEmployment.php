@@ -44,6 +44,8 @@ final readonly class PayrollTakeoverEmployment
      * @param array{type_code:string,number:string,foreign_issuer:?string,country_code:?string}|null $proofIdentity
      *        doklad totožnosti cizince do profilu registrace A1 vztahu
      *        ({@see PayrollTakeoverEmploymentWriter::proofIdentity()})
+     * @param ?string $hourlyWageFrom první den měsíce, od kterého zdroj vede hodinovou nebo úkolovou
+     *        mzdu, když jí v převáděném roce předchází měsíční mzda (změna formy odměňování v roce)
      */
     public function __construct(
         public string $personalNumber,
@@ -68,5 +70,6 @@ final readonly class PayrollTakeoverEmployment
         public array $followUps = [],
         public array $recurringComponents = [],
         public ?array $proofIdentity = null,
+        public ?string $hourlyWageFrom = null,
     ) {}
 }

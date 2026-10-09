@@ -412,7 +412,7 @@ final class PohodaPayrollPeopleWriter
 
     /**
      * Týdenní úvazek vztahů v měsíci, který převod právě zapsal, podle mzdy PAMICA za ten
-     * měsíc (`MZ.TUvazek`), ne podle karty vztahu, která nese jen dnešní úvazek
+     * měsíc (`MZ.TUvazek`, stanovená doba z `MZ.DUvazek`), ne podle karty vztahu, která nese jen dnešní úvazek
      * ({@see PayrollTakeoverEmploymentWriter::monthWeeklyHours()}). Volá se po každém měsíci
      * před schválením převzatého měsíce, protože schválený pracovní měsíc si úvazek zmrazí.
      *
@@ -433,8 +433,10 @@ final class PohodaPayrollPeopleWriter
             }
             $employmentId = (int) $employment['id'];
             $first = array_key_first($weekly) === $period;
+            $stated = $record['stated_weekly_hours_by_month'][$period] ?? null;
             $this->part($protocol, $step, $number, 'Týdenní úvazek ze mzdy', fn (): array => $this->employments->monthWeeklyHours(
                 $supplierId, $employmentId, $period, (float) $weekly[$period], $first, $userId, $policy,
+                is_numeric($stated) ? (float) $stated : null,
             ));
         }
     }

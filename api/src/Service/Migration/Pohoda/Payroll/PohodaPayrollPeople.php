@@ -185,6 +185,9 @@ final class PohodaPayrollPeople
                 'worked_days' => PohodaXml::num($mz, 'DnyOdpra'),
                 // Týdenní úvazek, se kterým PAMICA měsíc počítala; karta vztahu nese jen dnešní.
                 'weekly' => PohodaXml::num($mz, 'TUvazek'),
+                // Stanovená denní doba zaměstnavatele v měsíci (`DUvazek`, pětidenní týden);
+                // z ní a týdenního úvazku vychází podíl úvazku toho měsíce.
+                'stated_daily' => PohodaXml::num($mz, 'DUvazek'),
             ];
             $person = PohodaXml::text($mz, 'RefZAM');
             $payslipPerson[PohodaXml::text($mz, 'ID')] = $person;
@@ -318,6 +321,9 @@ final class PohodaPayrollPeople
             $code = strtoupper(trim(PohodaXml::text($catalog, 'Cislo')));
             if (in_array($code, self::HOURLY_WAGE_CODES, true)) {
                 $hourlyWage[$payslip['relation']] = true;
+                if (isset($relationMonths[$payslip['relation']][$payslip['month']])) {
+                    $relationMonths[$payslip['relation']][$payslip['month']]['hourly'] = true;
+                }
                 continue;
             }
             if (in_array($code, self::WAGE_CODES, true)) {
@@ -411,8 +417,11 @@ final class PohodaPayrollPeople
                 'children_without_credit' => $childrenWithoutCredit[$personId] ?? 0,
                 'monthly_wages' => self::monthlyWages($relationMonths[$relationId] ?? [], $year, $start, $end),
                 'hourly_wage' => $hourlyWage[$relationId] ?? false,
+                'hourly_wage_from' => self::hourlyWageFrom($relationMonths[$relationId] ?? [], $year),
                 // Týdenní úvazek po měsících mezd (`MZ.TUvazek`); u dohody o provedení práce žádný.
                 'weekly_hours_by_month' => self::bool(PohodaXml::text($relation, 'JeDPP')) ? [] : self::weeklyByMonth($relationMonths[$relationId] ?? [], $year),
+                // Stanovená týdenní doba po měsících mezd (`MZ.DUvazek` × 5).
+                'stated_weekly_hours_by_month' => self::bool(PohodaXml::text($relation, 'JeDPP')) ? [] : self::statedWeeklyByMonth($relationMonths[$relationId] ?? [], $year),
                 // Plnění, která se u vztahu opakují skoro každý měsíc (zdanitelná část
                 // stravování a podobně). Převod je nezakládá jako pravidelnou složku, protože
                 // částka se měsíc od měsíce mění; protokol je vypíše účetní.
@@ -501,6 +510,50 @@ final class PohodaPayrollPeople
         }
 
         return $out;
+    }
+
+    /**
+     * Stanovená týdenní doba zaměstnavatele (§ 79 ZP), se kterou PAMICA měsíc počítala:
+     * `DUvazek` je stanovená denní doba, `TUvazek` sjednaný týdenní úvazek. Karta vztahu
+     * nese jen dnešní hodnoty, změna režimu během roku (37,5 h na 40 h) se pozná jen ze mzdy.
+     *
+     * @param array<int,array<string,mixed>> $months měsíc => údaje mzdy vztahu
+     * @return array<string,float> `YYYY-MM` => stanovená týdenní doba v hodinách
+     */
+    private static function statedWeeklyByMonth(array $months, int $year): array
+    {
+        ksort($months);
+        $out = [];
+        foreach ($months as $month => $data) {
+            $stated = round((float) ($data['stated_daily'] ?? 0) * 5, 2);
+            if ($stated > 0 && $stated + 0.001 >= (float) ($data['weekly'] ?? 0)) {
+                $out[sprintf('%04d-%02d', $year, $month)] = $stated;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * První měsíc s hodinovou nebo úkolovou mzdou, když mu v roce předchází měsíc s měsíční
+     * mzdou (změna formy odměňování). Vztah hodinový od prvního převáděného měsíce vrací null.
+     *
+     * @param array<int,array<string,mixed>> $months měsíc => údaje mzdy vztahu
+     */
+    private static function hourlyWageFrom(array $months, int $year): ?string
+    {
+        ksort($months);
+        $monthly = false;
+        foreach ($months as $month => $data) {
+            if (($data['hourly'] ?? false) === true) {
+                return $monthly ? sprintf('%04d-%02d-01', $year, $month) : null;
+            }
+            if ((float) ($data['rate'] ?? 0) > 0) {
+                $monthly = true;
+            }
+        }
+
+        return null;
     }
 
     /**

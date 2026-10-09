@@ -243,12 +243,17 @@ final class PayrollTakeoverEmploymentWriter
      * pravdy pro ten měsíc: verze platná k jeho začátku se opraví na místě (první převáděný
      * měsíc první verze, jako u sjednané mzdy), jinak vznikne nová verze od začátku měsíce.
      * Úvazek se přepočte poměrem, takže stanovená týdenní doba zaměstnavatele (§ 79 ZP)
-     * zůstává, jak ji verze nesla. Verzi, po které už následuje další, převod nepřepisuje.
+     * zůstává, jak ji verze nesla. Zná-li zdroj stanovenou dobu toho měsíce
+     * (`$statedWeeklyHours`), úvazek se spočítá z ní: změna režimu během roku (37,5 h
+     * na 40 h při stejném sjednaném úvazku) je jinak neviditelná a měsíc před změnou by
+     * dostal stanovenou dobu a fond z dnešní karty. Verzi, po které už následuje další,
+     * převod nepřepisuje.
      *
      * @param bool $firstMonth první převáděný měsíc vztahu v tomto převodu
+     * @param ?float $statedWeeklyHours stanovená týdenní doba zaměstnavatele v měsíci podle zdroje
      * @return array<string,int>
      */
-    public function monthWeeklyHours(int $supplierId, int $employmentId, string $period, float $weeklyHours, bool $firstMonth, ?int $userId, PayrollTakeoverPolicy $policy): array
+    public function monthWeeklyHours(int $supplierId, int $employmentId, string $period, float $weeklyHours, bool $firstMonth, ?int $userId, PayrollTakeoverPolicy $policy, ?float $statedWeeklyHours = null): array
     {
         if ($weeklyHours <= 0) {
             return [];
@@ -262,7 +267,13 @@ final class PayrollTakeoverEmploymentWriter
         $at = $this->termsAt($supplierId, $employmentId, $from);
         $desired = (int) round($weeklyHours * 100);
         $currentWeekly = $at['weekly_hours'] === null ? null : (int) round((float) $at['weekly_hours'] * 100);
-        if ($currentWeekly === $desired) {
+        $stated = $statedWeeklyHours === null ? 0 : (int) round($statedWeeklyHours * 100);
+        $desiredWorkload = $stated >= $desired && $stated > 0
+            ? max(1, min(10_000, (int) round(10_000 * $desired / $stated)))
+            : null;
+        if ($currentWeekly === $desired
+            && ($desiredWorkload === null || (int) ($at['workload_basis_points'] ?? 0) === $desiredWorkload)
+        ) {
             return [];
         }
         $current = $this->employments->currentTerms($supplierId, $employmentId)
@@ -274,9 +285,9 @@ final class PayrollTakeoverEmploymentWriter
         $weekly = sprintf('%.2f', $desired / 100);
         $changes = [
             'weekly_hours' => $weekly,
-            'workload_basis_points' => $currentWeekly !== null && $currentWeekly > 0 && $workload > 0
+            'workload_basis_points' => $desiredWorkload ?? ($currentWeekly !== null && $currentWeekly > 0 && $workload > 0
                 ? max(1, min(10_000, (int) round($workload * $desired / $currentWeekly)))
-                : PayrollPersonCreateValidator::workloadBasisPoints($weekly),
+                : PayrollPersonCreateValidator::workloadBasisPoints($weekly)),
         ];
         $body = RegistrationImportWriter::termsBody($current, 'Týdenní pracovní doba ze mzdy ' . $policy->label . ' za ' . $period . '.');
         foreach ($changes as $field => $value) {
@@ -362,12 +373,20 @@ final class PayrollTakeoverEmploymentWriter
          * ve zdroji (PAMICA `KcZaklM`) nese v sobě, ne vedle nich: ověřeno na spočítaném
          * běhu za 6/2026, kde všech 116 takových vztahů vyšlo výš (o 4,32 mil. Kč), tedy
          * dvojí započtení. Základní mzdu u nich zadá účetní, protokol je spočítá.
+         *
+         * Výjimkou je vztah, který v roce přešel z měsíční mzdy na hodinovou nebo úkolovou
+         * (`hourlyWageFrom`): měsíce před změnou měsíční mzdu mají a předpis dostanou, jen
+         * skončí den před první hodinovou mzdou.
          */
-        if ($employment->hourlyWage) {
+        $hourlyFrom = $employment->hourlyWage ? $employment->hourlyWageFrom : null;
+        if ($hourlyFrom !== null) {
+            $wages = array_values(array_filter($wages, static fn (array $wage): bool => $wage['from'] < $hourlyFrom));
+        }
+        if ($employment->hourlyWage && ($hourlyFrom === null || $wages === [])) {
             $state->hourlyWageRelations++;
             return ['recurring_wage_hourly' => 1];
         }
-        $counts = [];
+        $counts = $hourlyFrom !== null ? ['recurring_wage_until_hourly' => 1] : [];
         $component = $this->monthlyWageComponent($supplierId);
         if ($component === null) {
             throw new \DomainException('firma nemá v číselníku složku základní měsíční mzdy (MZDA_MESICNI).');
@@ -382,7 +401,8 @@ final class PayrollTakeoverEmploymentWriter
         $upper = null;
         // Skončení ze zdroje platí i tehdy, když ho vztah ve firmě ještě nemá (zapíše ho
         // tentýž převod až po mzdě); jinak by předpis běžel za konec vztahu.
-        foreach ([$row['end_date'] ?? null, $employment->end, $component['valid_to'] ?? null] as $limit) {
+        $beforeHourly = $hourlyFrom === null ? null : (new \DateTimeImmutable($hourlyFrom))->modify('-1 day')->format('Y-m-d');
+        foreach ([$row['end_date'] ?? null, $employment->end, $component['valid_to'] ?? null, $beforeHourly] as $limit) {
             if (is_string($limit) && ($upper === null || $limit < $upper)) {
                 $upper = $limit;
             }
