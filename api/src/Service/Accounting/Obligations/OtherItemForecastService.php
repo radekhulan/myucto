@@ -11,10 +11,17 @@ final class OtherItemForecastService
 {
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<array{side:string,currency:string,due_on:string,remaining:float,status:string}> */
+    /**
+     * Otevřené části ostatních pohledávek a závazků splatné v rozsahu; položka se splátkovým
+     * kalendářem vrací řádek za každou neuhrazenou splátku.
+     *
+     * @return list<array{side:string,currency:string,due_on:string,remaining:float,status:string,
+     *     id:int,document_no:string,title:string,partner_name:string,issued_on:string}>
+     */
     public function dueBetween(int $supplierId, string $from, string $to, ?string $currency = null): array
     {
-        $sql = 'SELECT oi.side, oi.currency, oi.due_on, oi.status,
+        $sql = 'SELECT oi.id, oi.document_no, oi.title, oi.partner_name, oi.issued_on,
+                       oi.side, oi.currency, oi.due_on, oi.status,
                        GREATEST(oi.amount - COALESCE(SUM(a.amount), 0), 0) AS remaining
                   FROM other_items oi
              LEFT JOIN other_item_allocations a ON a.other_item_id = oi.id AND a.supplier_id = oi.supplier_id
@@ -35,9 +42,10 @@ final class OtherItemForecastService
             'side' => (string) $r['side'], 'currency' => (string) $r['currency'],
             'due_on' => (string) $r['due_on'], 'remaining' => (float) $r['remaining'],
             'status' => (string) $r['status'],
-        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+        ] + self::identity($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
         $planned = 'WITH planned AS (
-            SELECT oi.id, oi.side, oi.currency, oi.status, i.due_on, i.amount,
+            SELECT oi.id, oi.document_no, oi.title, oi.partner_name, oi.issued_on,
+                   oi.side, oi.currency, oi.status, i.due_on, i.amount,
                    SUM(i.amount) OVER (PARTITION BY oi.id ORDER BY i.position) cumulative,
                    COALESCE(a.paid_amount, 0) paid_amount
               FROM other_item_installments i
@@ -53,7 +61,7 @@ final class OtherItemForecastService
             $planned .= ' AND oi.currency = ?';
             $planParams[] = $currency;
         }
-        $planned .= ') SELECT side, currency, status, due_on,
+        $planned .= ') SELECT id, document_no, title, partner_name, issued_on, side, currency, status, due_on,
                    GREATEST(LEAST(amount, cumulative - paid_amount), 0) remaining
               FROM planned WHERE due_on BETWEEN ? AND ? ORDER BY due_on, id';
         array_push($planParams, $from, $to);
@@ -65,10 +73,25 @@ final class OtherItemForecastService
                 'side' => (string) $row['side'], 'currency' => (string) $row['currency'],
                 'due_on' => (string) $row['due_on'], 'remaining' => (float) $row['remaining'],
                 'status' => (string) $row['status'],
-            ];
+            ] + self::identity($row);
         }
         usort($rows, static fn (array $a, array $b): int => $a['due_on'] <=> $b['due_on']);
         return $rows;
+    }
+
+    /**
+     * @param array<string,mixed> $r
+     * @return array{id:int,document_no:string,title:string,partner_name:string,issued_on:string}
+     */
+    private static function identity(array $r): array
+    {
+        return [
+            'id' => (int) $r['id'],
+            'document_no' => (string) ($r['document_no'] ?? ''),
+            'title' => (string) ($r['title'] ?? ''),
+            'partner_name' => (string) ($r['partner_name'] ?? ''),
+            'issued_on' => (string) ($r['issued_on'] ?? ''),
+        ];
     }
 
     /** @return list<array<string,float|string>> */

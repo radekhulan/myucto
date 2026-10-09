@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { documentCompletenessApi, type DocumentCompletenessResult, type Direction } from '@/api/documentCompleteness'
+import { documentCompletenessApi, type DocumentCompletenessResult, type Direction, type OverdueDocumentItem } from '@/api/documentCompleteness'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -56,6 +56,16 @@ onMounted(load)
 
 function bucketLabel(bucket: string): string {
   return t(`documentCompleteness.bucket.${bucket}`)
+}
+
+const overdueNote = computed(() => data.value?.accounting_mode === 'tax_evidence'
+  ? t('documentCompleteness.overdue_note_tax_evidence')
+  : t('documentCompleteness.overdue_note'))
+
+function docRoute(item: OverdueDocumentItem) {
+  const name = item.doc_type === 'purchase_invoice' ? 'purchase-invoice-detail'
+    : item.doc_type === 'other_item' ? 'other-item-detail' : 'invoice-detail'
+  return { name, params: { id: item.doc_id } }
 }
 </script>
 
@@ -149,7 +159,7 @@ function bucketLabel(bucket: string): string {
     <!-- Sekce 2: doklady bez úhrady po splatnosti -->
     <section v-if="data">
       <h2 class="text-lg font-medium mb-1">{{ t('documentCompleteness.overdue_title') }}</h2>
-      <p class="text-xs text-neutral-400 mb-3">{{ t('documentCompleteness.overdue_note') }}</p>
+      <p class="text-xs text-neutral-400 mb-3">{{ overdueNote }}</p>
 
       <p
         v-if="data.documents_overdue_unpaid.summary.truncated"
@@ -172,7 +182,7 @@ function bucketLabel(bucket: string): string {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="item in docsVisible" :key="item.doc_type + item.doc_id" class="hover:bg-neutral-50">
+            <tr v-for="item in docsVisible" :key="item.doc_type + item.doc_id + item.due_date" class="hover:bg-neutral-50">
               <td class="px-3 py-2 whitespace-nowrap">
                 <span class="text-xs text-neutral-400">{{ t(`documentCompleteness.doc_type.${item.doc_type}`) }}</span>
                 <div>{{ item.doc_no }}</div>
@@ -182,7 +192,7 @@ function bucketLabel(bucket: string): string {
               <td class="px-3 py-2 text-right text-danger-600 whitespace-nowrap">{{ item.days_overdue }}</td>
               <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(item.remaining_czk, 'CZK') }}</td>
               <td class="px-3 py-2 text-right">
-                <RouterLink :to="{ name: item.doc_type === 'purchase_invoice' ? 'purchase-invoice-detail' : 'invoice-detail', params: { id: item.doc_id } }"
+                <RouterLink :to="docRoute(item)"
                   class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
                   {{ t('documentCompleteness.open_doc') }} →
                 </RouterLink>

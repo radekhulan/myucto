@@ -47,7 +47,8 @@ describe('workspace route factory', () => {
     expect(byName.get('purchase-invoice-edit')?.meta).toMatchObject({ requiresSupplier: true })
     expect(byName.get('accounting-journal')?.meta).toMatchObject({ requiresDoubleEntry: true })
     // Majetek a daňové odpisy vede i daňová evidence (§ 7b ZDP).
-    for (const name of ['accounting-assets', 'accounting-asset-new', 'accounting-asset-detail', 'accounting-asset-edit']) {
+    // Úplnost dokladů (§ 7b odst. 1 ZDP) také.
+    for (const name of ['accounting-assets', 'accounting-asset-new', 'accounting-asset-detail', 'accounting-asset-edit', 'accounting-document-completeness']) {
       expect(byName.get(name)?.meta).toMatchObject({ requiresAccountingMode: true })
       expect(byName.get(name)?.meta?.requiresDoubleEntry).toBeUndefined()
     }

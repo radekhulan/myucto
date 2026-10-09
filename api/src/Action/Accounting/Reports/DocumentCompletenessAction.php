@@ -13,8 +13,8 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Featura E (REAL_data_followup_UX.md) — kontrola úplnosti dokladů proti bance.
- * Čistě čtecí endpoint (žádná mutace):
+ * Featura E (REAL_data_followup_UX.md) — kontrola úplnosti dokladů proti bance, v podvojném
+ * účetnictví i v daňové evidenci. Čistě čtecí endpoint (žádná mutace):
  *   GET /api/accounting/reports/document-completeness?days=30&direction=all
  */
 final class DocumentCompletenessAction
@@ -30,7 +30,9 @@ final class DocumentCompletenessAction
     public function get(Request $request, Response $response): Response
     {
         $supplierId = $this->currentSupplierId($request);
-        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        // § 7b odst. 1 ZDP: i daňová evidence musí příjmy a výdaje doložit; služba v ní
+        // nahradí deník a saldokonto knihou pohledávek a závazků.
+        if (!$this->requireAccountingMode($this->db, $supplierId, $response, $err)) return $err;
 
         $q = $request->getQueryParams();
         $days = (int) ($q['days'] ?? 30);

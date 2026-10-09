@@ -107,6 +107,8 @@ final class DocumentCompletenessServiceTest extends BankPostingTestCase
         $limited = new DocumentCompletenessService(
             $this->db,
             $this->container->get(SaldoRepository::class),
+            $this->container->get(\MyInvoice\Service\Crm\CrmAggregationService::class),
+            $this->container->get(\MyInvoice\Service\Accounting\Obligations\OtherItemForecastService::class),
             1,
         );
         $result = $limited->build(

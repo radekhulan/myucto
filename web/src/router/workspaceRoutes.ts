@@ -246,7 +246,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/statement-mapping', name: 'accounting-statement-mapping', component: () => import('@/pages/accounting/StatementMapping.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/saldo',            name: 'accounting-saldo',            component: () => import('@/pages/accounting/Saldokonto.vue'),      meta: { requiresDoubleEntry: true } },
       // Featura E (REAL_data_followup_UX.md) — kontrola úplnosti dokladů proti bance (§24/1) + doklady po splatnosti.
-      { path: 'accounting/document-completeness', name: 'accounting-document-completeness', component: () => import('@/pages/accounting/DocumentCompleteness.vue'), meta: { requiresDoubleEntry: true } },
+      { path: 'accounting/document-completeness', name: 'accounting-document-completeness', component: () => import('@/pages/accounting/DocumentCompleteness.vue'), meta: { requiresAccountingMode: true } },
       // Inventarizace rozvahových účtů (§29–30 ZoÚ, T2) — soupis KZ účtů tříd 0–4 k rozvahovému dni.
       { path: 'accounting/balance-inventory', name: 'accounting-balance-inventory', component: () => import('@/pages/accounting/BalanceInventory.vue'), meta: { requiresDoubleEntry: true } },
       // § 18 odst. 2 ZoÚ — přehled o peněžních tocích a o změnách vlastního kapitálu.

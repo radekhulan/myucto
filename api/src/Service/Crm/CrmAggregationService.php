@@ -840,6 +840,80 @@ final class CrmAggregationService
     }
 
     /**
+     * Jednotlivé vydané faktury po splatnosti, které nejsou uhrazené — tytéž predikáty jako
+     * {@see agingReceivables()}, jen po dokladech (kontrola úplnosti dokladů v daňové evidenci).
+     *
+     * @return list<array{doc_id:int,doc_no:string,partner_name:string,issue_date:string,due_date:string,
+     *     currency:string,remaining:float,remaining_czk:float}>
+     */
+    public function overdueReceivableItems(int $supplierId, string $today): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.id, COALESCE(i.varsymbol, '') AS doc_no, COALESCE(cl.company_name, '') AS partner_name,
+                    i.issue_date, i.due_date, COALESCE(c.code, 'CZK') AS currency,
+                    COALESCE(i.amount_to_pay, 0) - COALESCE(i.paid_total, 0) AS remaining,
+                    CASE WHEN COALESCE(c.code, 'CZK') = 'CZK' THEN 1 ELSE COALESCE(i.exchange_rate, 1) END AS rate
+               FROM invoices i
+          LEFT JOIN currencies c ON c.id = i.currency_id
+          LEFT JOIN clients cl ON cl.id = i.client_id
+              WHERE i.supplier_id = ?
+                AND i.status IN ('issued', 'sent', 'reminded')
+                AND " . $this->receivableDocTypeSql() . "
+                AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)
+                AND i.due_date < ?
+           ORDER BY i.due_date, i.id"
+        );
+        $stmt->execute([$supplierId, $today]);
+
+        return array_map(static fn (array $r): array => [
+            'doc_id' => (int) $r['id'],
+            'doc_no' => (string) $r['doc_no'],
+            'partner_name' => (string) $r['partner_name'],
+            'issue_date' => (string) $r['issue_date'],
+            'due_date' => (string) $r['due_date'],
+            'currency' => (string) $r['currency'],
+            'remaining' => round((float) $r['remaining'], 2),
+            'remaining_czk' => round((float) $r['remaining'] * (float) $r['rate'], 2),
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Jednotlivé přijaté faktury po splatnosti bez úhrady — predikáty {@see agingPayables()}.
+     *
+     * @return list<array{doc_id:int,doc_no:string,partner_name:string,issue_date:string,due_date:string,
+     *     currency:string,remaining:float,remaining_czk:float}>
+     */
+    public function overduePayableItems(int $supplierId, string $today): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pi.id, COALESCE(pi.vendor_invoice_number, '') AS doc_no, COALESCE(v.company_name, '') AS partner_name,
+                    pi.issue_date, pi.due_date, COALESCE(c.code, 'CZK') AS currency,
+                    GREATEST(" . PayablePredicate::remainingExpression('pi') . ", 0) AS remaining,
+                    CASE WHEN COALESCE(c.code, 'CZK') = 'CZK' THEN 1 ELSE COALESCE(pi.exchange_rate, 1) END AS rate
+               FROM purchase_invoices pi
+          LEFT JOIN currencies c ON c.id = pi.currency_id
+          LEFT JOIN clients v ON v.id = pi.vendor_id
+              WHERE pi.supplier_id = ?
+                AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
+                . PayablePredicate::excludeFullySettled() . "
+                AND pi.due_date < ?
+           ORDER BY pi.due_date, pi.id"
+        );
+        $stmt->execute([$supplierId, $today]);
+
+        return array_map(static fn (array $r): array => [
+            'doc_id' => (int) $r['id'],
+            'doc_no' => (string) $r['doc_no'],
+            'partner_name' => (string) $r['partner_name'],
+            'issue_date' => (string) $r['issue_date'],
+            'due_date' => (string) $r['due_date'],
+            'currency' => (string) $r['currency'],
+            'remaining' => round((float) $r['remaining'], 2),
+            'remaining_czk' => round((float) $r['remaining'] * (float) $r['rate'], 2),
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /**
      * DSO (Days Sales Outstanding) za posledních N měsíců.
      * Vrátí průměrný počet dní mezi issue_date a paid_at u zaplacených faktur.
      *

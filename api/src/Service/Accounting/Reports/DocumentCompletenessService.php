@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\SaldoRepository;
+use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
+use MyInvoice\Service\Crm\CrmAggregationService;
 use PDO;
 
 /**
@@ -50,10 +52,18 @@ final class DocumentCompletenessService
     public function __construct(
         private readonly Connection $db,
         private readonly SaldoRepository $saldo,
+        private readonly CrmAggregationService $crm,
+        private readonly OtherItemForecastService $otherItems,
         private readonly int $maxOpenItems = self::MAX_OPEN_ITEMS,
     ) {}
 
     /**
+     * Daňová evidence (§ 7b ZDP) nemá deník ani saldokonto: pohyb „má doklad", když je
+     * spárovaný s fakturou, přiřazený k ostatní položce, k záloze na daň či pojistné nebo
+     * ke mzdě, případně ručně zařazený jako soukromý pohyb či převod. Doklady po splatnosti
+     * se berou z téže knihy pohledávek a závazků jako sestava daňové evidence (faktury +
+     * ostatní položky včetně splátek), ne z účtů 311/321.
+     *
      * @param string $direction 'outgoing'|'incoming'|'all'
      * @return array<string,mixed>
      */
@@ -62,26 +72,41 @@ final class DocumentCompletenessService
         $now = $now ?? new \DateTimeImmutable('today');
         $today = $now->format('Y-m-d');
         $cutoff = $now->modify('-' . max(0, $thresholdDays) . ' day')->format('Y-m-d');
+        $taxEvidence = $this->isTaxEvidence($supplierId);
 
         return [
             'generated_at'   => $now->format(\DateTimeInterface::ATOM),
             'threshold_days' => max(0, $thresholdDays),
             'direction'      => $direction,
-            'bank_without_document'    => $this->bankWithoutDocument($supplierId, $cutoff, $direction, $today),
-            'documents_overdue_unpaid' => $this->documentsOverdueUnpaid($supplierId, $today),
+            'accounting_mode' => $taxEvidence ? 'tax_evidence' : 'double_entry',
+            'bank_without_document'    => $this->bankWithoutDocument($supplierId, $cutoff, $direction, $today, $taxEvidence),
+            'documents_overdue_unpaid' => $taxEvidence
+                ? $this->documentsOverdueUnpaidTaxEvidence($supplierId, $today)
+                : $this->documentsOverdueUnpaid($supplierId, $today),
         ];
     }
 
     /**
      * @return array{items:list<array<string,mixed>>, summary:array<string,mixed>}
      */
-    private function bankWithoutDocument(int $supplierId, string $cutoff, string $direction, string $today): array
+    private function bankWithoutDocument(int $supplierId, string $cutoff, string $direction, string $today, bool $taxEvidence = false): array
     {
         $directionSql = match ($direction) {
             'outgoing' => ' AND bt.amount < 0',
             'incoming' => ' AND bt.amount > 0',
             default    => '',
         };
+        // Daňová evidence: vazby, které v podvojném účetnictví nahrazuje bankovní zápis v deníku.
+        $taxEvidenceSql = $taxEvidence
+            ? " AND NOT EXISTS (SELECT 1 FROM other_item_allocations oia
+                                 WHERE oia.supplier_id = {$supplierId} AND oia.bank_transaction_id = bt.id AND oia.reversed_on IS NULL)
+                AND NOT EXISTS (SELECT 1 FROM tax_advance_schedules tas
+                                 WHERE tas.supplier_id = {$supplierId} AND tas.matched_transaction_id = bt.id)
+                AND NOT EXISTS (SELECT 1 FROM payroll_payment_matches ppm WHERE ppm.bank_transaction_id = bt.id)
+                AND NOT EXISTS (SELECT 1 FROM de_movement_classification dmc
+                                 WHERE dmc.supplier_id = {$supplierId} AND dmc.source_type = 'bank'
+                                   AND dmc.bank_transaction_id = bt.id AND dmc.tax_bucket IN ('private', 'transfer'))"
+            : '';
 
         $sql =
             "SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount,
@@ -105,7 +130,7 @@ final class DocumentCompletenessService
                     SELECT 1 FROM journal_entries je
                      WHERE je.supplier_id = ? AND je.source_type = 'bank'
                        AND je.source_id = bt.id AND je.reversed_by IS NULL
-                )
+                ){$taxEvidenceSql}
               ORDER BY bt.posted_at ASC, bt.id ASC";
         $stmt = $this->db->pdo()->prepare($sql);
         // SEC-01: pořadí je dr.supplier_id, cutoff, resolver (2×), ip, pm, je.
@@ -247,6 +272,81 @@ final class DocumentCompletenessService
                 'truncated'   => $truncated,
             ],
         ];
+    }
+
+    /**
+     * Doklady po splatnosti bez úhrady v daňové evidenci: vydané a přijaté faktury
+     * (predikáty knihy pohledávek a závazků {@see CrmAggregationService::agingReceivables()})
+     * a potvrzené ostatní položky, u splátkového kalendáře po splátkách.
+     *
+     * @return array{items:list<array<string,mixed>>, summary:array<string,mixed>}
+     */
+    private function documentsOverdueUnpaidTaxEvidence(int $supplierId, string $today): array
+    {
+        $todayDt = new \DateTimeImmutable($today);
+        $items = [];
+        $sources = [
+            'invoice' => $this->crm->overdueReceivableItems($supplierId, $today),
+            'purchase_invoice' => $this->crm->overduePayableItems($supplierId, $today),
+        ];
+        foreach ($sources as $type => $rows) {
+            foreach ($rows as $row) {
+                $items[] = [
+                    'doc_type' => $type,
+                    'doc_id' => $row['doc_id'],
+                    'doc_no' => $row['doc_no'],
+                    'account_code' => '',
+                    'partner_name' => $row['partner_name'],
+                    'issue_date' => $row['issue_date'],
+                    'due_date' => $row['due_date'],
+                    'days_overdue' => (int) (new \DateTimeImmutable($row['due_date']))->diff($todayDt)->days,
+                    'currency_code' => $row['currency'],
+                    'remaining_czk' => $row['remaining_czk'],
+                ];
+            }
+        }
+        $yesterday = $todayDt->modify('-1 day')->format('Y-m-d');
+        foreach ($this->otherItems->dueBetween($supplierId, '1000-01-01', $yesterday) as $row) {
+            if (!in_array($row['status'], ['confirmed', 'posted'], true)) {
+                continue;
+            }
+            $items[] = [
+                'doc_type' => 'other_item',
+                'doc_id' => $row['id'],
+                'doc_no' => $row['document_no'] !== '' ? $row['document_no'] : $row['title'],
+                'account_code' => '',
+                'partner_name' => $row['partner_name'],
+                'issue_date' => $row['issued_on'],
+                'due_date' => $row['due_on'],
+                'days_overdue' => (int) (new \DateTimeImmutable($row['due_on']))->diff($todayDt)->days,
+                'currency_code' => $row['currency'],
+                'remaining_czk' => round((float) $row['remaining'], 2),
+            ];
+        }
+
+        usort($items, static fn (array $a, array $b): int => [$a['due_date'], $a['doc_type'], $a['doc_id']]
+            <=> [$b['due_date'], $b['doc_type'], $b['doc_id']]);
+        $truncated = count($items) > $this->maxOpenItems;
+        if ($truncated) {
+            $items = array_slice($items, 0, $this->maxOpenItems);
+        }
+        $totalCzk = 0.0;
+        foreach ($items as $item) {
+            $totalCzk = round($totalCzk + (float) $item['remaining_czk'], 2);
+        }
+
+        return [
+            'items' => $items,
+            'summary' => ['total_count' => count($items), 'total_czk' => $totalCzk, 'truncated' => $truncated],
+        ];
+    }
+
+    private function isTaxEvidence(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+
+        return $stmt->fetchColumn() === 'tax_evidence';
     }
 
     private function bucketFor(int $days): string

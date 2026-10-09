@@ -644,6 +644,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/tax-evidence/cash-journal',         label: t('nav.de_cash_journal'),         icon: ICONS.tax_book },
         { to: '/tax-evidence/receivables-payables', label: t('nav.de_receivables_payables'), icon: ICONS.crm },
         { to: '/tax-evidence/tax-estimate',         label: t('nav.de_tax_estimate'),         icon: ICONS.tax_income },
+        { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/other-items', label: t('nav.other_items'), icon: ICONS.coin, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
         // Přechodový můstek § 7b → § 24 — jen u firem na DE (chystaný/probíhající přechod);
         // firmě, co už podvojné vede, se v menu neukazuje (stránka zůstává na URL).

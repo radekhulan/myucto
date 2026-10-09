@@ -24,7 +24,7 @@ Sestava je pouze čtecí. Nic automaticky nepáruje, nezaúčtuje ani nemění s
 
 ## 61.2 Než začnete
 
-1. **Podvojné účetnictví a právo číst účetnictví.** Sestava je dostupná jen firmě v podvojném účetnictví a uživateli s právem číst účetnictví.
+1. **Účetní režim a právo číst účetnictví.** Sestava je dostupná firmě v podvojném účetnictví i v daňové evidenci (tam v menu `Daňová evidence → Úplnost dokladů`) a uživateli s právem číst účetnictví. Rozdíly v daňové evidenci popisuje [§ 61.7.5](#6175-danova-evidence).
 2. **Naimportované bankovní výpisy.** Kontrola pracuje jen se skutečnými pohyby z výpisu. Provizorní avíza se nepočítají. Výpisy nahrajte v `Peníze → Banka`.
 3. **Zaúčtované úhrady a párování.** Čím víc plateb máte spárovaných, tím kratší seznam uvidíte.
 
@@ -175,6 +175,20 @@ nezaúčtované vydané a přijaté doklady a banku bez návrhu bez ohledu na st
 Prázdný výsledek neprokazuje, že v účetnictví nechybí doklad, který do systému
 vůbec nevstoupil. Je to technická kontrola úplnosti vazeb nad dostupnými daty,
 nikoli úplná inventura účetních případů.
+
+### 61.7.5 Daňová evidence
+
+Daňová evidence musí příjmy a výdaje doložit stejně (§ 7b odst. 1 ZDP), jen nemá
+deník ani saldokonto. Kontrola proto bere vazby jinak:
+
+- **Bankovní pohyb má doklad**, když je spárovaný s vydanou nebo přijatou fakturou,
+  přiřazený k ostatní pohledávce nebo závazku, spárovaný se zálohou na daň či
+  pojistné nebo se mzdou, případně ručně zařazený v peněžním deníku jako
+  **Soukromé** nebo **Převod**. Ostatní ruční zařazení doklad nenahrazuje.
+- **Doklady po splatnosti** jsou neuhrazené vydané a přijaté faktury a potvrzené
+  ostatní pohledávky a závazky, u splátkového kalendáře po jednotlivých splátkách.
+  Zdroj je stejný jako v přehledu `Daňová evidence → Pohledávky a závazky`.
+  Sloupec účtu zůstává prázdný a cizoměnové doklady se přepočítají kurzem dokladu.
 
 ### 61.7.4 Úplnost číselných řad vydaných dokladů (pravidla)
 

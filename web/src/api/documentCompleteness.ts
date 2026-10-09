@@ -24,7 +24,7 @@ export interface BankWithoutDocumentItem {
 }
 
 export interface OverdueDocumentItem {
-  doc_type: 'invoice' | 'purchase_invoice'
+  doc_type: 'invoice' | 'purchase_invoice' | 'other_item'
   doc_id: number
   doc_no: string
   account_code: string
@@ -46,6 +46,8 @@ export interface DocumentCompletenessResult {
   generated_at: string
   threshold_days: number
   direction: Direction
+  /** Daňová evidence nemá saldokonto: doklady po splatnosti jsou z knihy pohledávek a závazků. */
+  accounting_mode?: 'double_entry' | 'tax_evidence'
   bank_without_document: {
     items: BankWithoutDocumentItem[]
     summary: { total_count: number; total_czk: number; by_bucket: BucketSummary[] }

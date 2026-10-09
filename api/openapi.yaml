@@ -12128,6 +12128,12 @@ paths:
         saldokontní účet (311, 321). Při překročení je
         `documents_overdue_unpaid.summary.truncated = true` a seznam i jeho
         součet platí jen za načtenou (nejstarší) část.
+
+        Dostupné i v daňové evidenci (`accounting_mode = tax_evidence` v odpovědi):
+        pohyb má doklad i přes přiřazení k ostatní položce, záloze na daň či
+        pojistné, mzdě nebo ruční zařazení jako soukromý pohyb či převod; doklady
+        po splatnosti jsou faktury a ostatní položky (`doc_type = other_item`,
+        po splátkách) z knihy pohledávek a závazků, `account_code` je prázdný.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: days, schema: { type: integer, minimum: 0, maximum: 3650, default: 30 } }
