@@ -341,6 +341,8 @@ jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
 | adresa trvalého pobytu a kontaktní adresa, e-mail, telefon | osobní karta |
 | příznak daňového nerezidenta | daňová rezidence (česká rezidence) |
 | příslušnost k cizím právním předpisům | příslušnost k sociálnímu pojištění (český režim bez A1) |
+| příznak *Nedoplácet ZP do minima* u zpracovaných mezd | výjimka z minimálního vyměřovacího základu zdravotního pojištění za dotčené měsíce (důvod doplní účetní) |
+| týdenní úvazek u zpracovaných mezd | týdenní pracovní doba a úvazek vztahu po měsících |
 | žádost o slevu pracujícího důchodce u zpracovaných mezd | sleva pracujícího důchodce po měsících (uplatněná, nebo neuplatňuje se) |
 | děti s daňovým zvýhodněním (1., 2. a 3. dítě) | vyživované osoby s nárokem daného pořadí, od měsíce podepsaného prohlášení |
 | prohlášení poplatníka u zpracovaných mezd | prohlášení poplatníka po měsících |
@@ -349,6 +351,19 @@ jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
 | datum skončení pracovního poměru | skončení vztahu k tomuto dni |
 | odeslané registrace a odhlášky ČSSZ, oznámení pojišťovnám, ELDP | splněné položky Zákonných termínů |
 | úhrny mezd za měsíce před začátkem vedení mezd v MyÚčtu | počáteční stavy kumulací |
+
+Zdravotní pojištění, daňová rezidence a příslušnost k sociálnímu pojištění
+začínají nejstarším vztahem osoby, i když osoba má v PAMICA víc vztahů
+(souběh nebo opakovaný nástup).
+
+Týdenní úvazek bere převod ze zpracované mzdy každého měsíce, ne z karty
+vztahu, která nese jen dnešní úvazek. Změnil-li se úvazek během převáděného
+období, vznikne od měsíce změny nová verze podmínek vztahu.
+
+Výjimku z minima zdravotního pojištění PAMICA vede bez důvodu, převod ji proto
+zapíše jako *neověřenou* a protokol vypíše osobní čísla. Důvod (například
+státní pojištěnec nebo držitel průkazu ZTP/P) doplňte v zákonné evidenci
+osoby; dokud chybí, mzdový běh za tyto měsíce nepůjde spočítat.
 
 OIČ a ID PPV se převezmou jen tehdy, když v kroku *Náhled a volby* potvrdíte,
 že čísla v PAMICA pocházejí z protokolů ČSSZ. OIČ s chybnou kontrolní číslicí

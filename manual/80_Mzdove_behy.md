@@ -215,6 +215,7 @@ hlášením najdete v [Přechodu mezd v průběhu roku](113_Prechod_mezd_v_prube
 |---|---|---|
 | „…: pracovní vztah nemá v období žádnou schválenou mzdovou složku.“ | Vztah je v běhu, ale nemá schválený vstup | Doplňte a schvalte složku v měsíčních vstupech. Trvá-li vztah a příjem v měsíci opravdu nevznikl, zadejte u základní složky 0 Kč; za vztah se podá nulové hlášení JMHZ. Potom **Obnovit podklady**. |
 | Blokace kvůli vstupu v konceptu | Vstup zůstal neschválený | U blokace klikněte na **Schválit vše**, nebo v `Mzdy → Mzdové složky a vstupy` na **Schválit N odpovídajících filtru**. |
+| „…: v období je nerozhodnutá nepřítomnost“ | Nepřítomnost v měsíci čeká na schválení nebo u ní běží oprava; platí pro měsíční i hodinovou mzdu | Nepřítomnost schvalte nebo zamítněte (opravu dokončete) v `Mzdy → Absence a dovolená`, potom **Obnovit podklady**. |
 | Schválení odmítnuto s výzvou k obnovení | Od zmrazení snímku přibyly nebo se změnily schválené podklady | Klikněte na **Obnovit podklady** a přepočítejte ([§ 80.6](#806-krok-za-krokem-obnoveni-podkladu-rozpracovaneho-behu)). |
 | Přepočet nevzal opravený údaj | **Přepočítat** počítá ze zmrazeného snímku | **Obnovit podklady**, u schváleného běhu **Vyžádat opravu**. |
 | Datum výplaty se neuloží | Je později než poslední den následujícího měsíce (§ 141 odst. 1 zákoníku práce) | Zadejte skutečné datum výplaty v zákonné lhůtě. |
