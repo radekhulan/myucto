@@ -25134,6 +25134,17 @@
       "gaps_found": "Gaps found: {count}"
     },
     "kh_evidence": {
+      "aggregate_row": "Aggregated line",
+      "back_to_submissions": "Back to the filing archive",
+      "submitted_title": "Document list from the filed control statement",
+      "submitted_subtitle": "Documents from the filed control statement compared with current data.",
+      "source_submitted": "Source: filed control statement (filed {date}, type: {variant}). The Current columns show today's state of the document.",
+      "has_differences": "Current data differ from the filed statement. Consider whether a follow-up control statement is needed.",
+      "no_differences": "Current data match the filed statement.",
+      "aggregate_note": "Sections A.5 and B.3 are aggregated in the statement and are compared as one aggregated line.",
+      "current_base": "Current base",
+      "current_vat": "Current VAT",
+      "open_submitted": "Section document list",
       "title": "Control statement document list",
       "filter_label": "Control statement section",
       "filter_none": "VAT ledger (all documents)",

@@ -69,7 +69,8 @@ daňovou povinnost** nebo **Nadměrný odpočet**.
 
 > [!WARNING]
 > Důkazem podání je až potvrzení z portálu, nikoli PDF z Knihy DPH. Kniha
-> navíc neporovnává data s XML, které bylo skutečně odesláno. Změnil-li se
+> ukazuje aktuální data; s XML, které bylo skutečně odesláno, porovnává
+> doklady jen soupis podle podaného KH ([§ 42.5](#425-krok-za-krokem-soupis-dokladu-oddilu-kh-pro-kontrolu-financniho-uradu)). Změnil-li se
 > doklad po stažení podkladů, použijte ve DPH přiznání frontu změn po podání
 > a znovu posuďte, zda je nutné opravné nebo dodatečné podání.
 
@@ -140,7 +141,32 @@ o haléře, soupis rozdíl uvede.
 
 > [!WARNING]
 > Soupis z Knihy DPH ukazuje **aktuální data**. Pokud se doklady po podání
-> kontrolního hlášení změnily, nemusí odpovídat tomu, co jste podali.
+> kontrolního hlášení změnily, nemusí odpovídat tomu, co jste podali. Pro
+> správce daně proto sestavte soupis podle podaného hlášení (níže).
+
+**Soupis podle podaného KH a dohledání rozdílů:**
+
+1. Otevřete `Daně → EPO podání a archív` a vyberte podané kontrolní hlášení za
+   dané období (stav **Podáno** nebo **Přijato**).
+2. V liště akcí klikněte na **Soupis dokladů oddílu**.
+3. Zvolte oddíl, například **A.4**. Doklady a částky se čtou přímo z podaného
+   XML, jméno protistrany a interní číslo se doplní z evidence.
+4. Sloupec **Stav** porovnává každý doklad s aktuálními daty:
+   - **Shoda** - doklad je v aktuálních datech se stejnými částkami,
+   - **Rozdíl částky** - doklad se po podání změnil, sloupce **Aktuálně
+     základ** a **Aktuálně DPH** ukazují dnešní stav,
+   - **Jen v podaném KH** - doklad v aktuálních datech v tomto oddílu není
+     (byl smazán, stornován, přesunut do jiného období nebo oddílu),
+   - **Jen v aktuálních datech** - doklad přibyl po podání.
+5. Oddíly A.5 a B.3 jsou v KH souhrnné, porovnávají se proto jedním řádkem
+   souhrnné věty. Jednotlivé doklady souhrnu najdete v Knize DPH (postup výše).
+6. Klikněte na **Stáhnout PDF** nebo **Stáhnout XLSX**. Hlavička exportu
+   uvádí „podle podaného KH" s datem podání a typem hlášení (řádné, opravné,
+   následné).
+
+**Jak poznáte, že je hotovo:** Všechny doklady mají stav **Shoda**, nebo
+víte, proč se liší. Pokud se údaje podaného hlášení změnily, posuďte podání
+následného kontrolního hlášení (`Daně → Kontrolní hlášení`).
 
 ## 42.6 Když něco nejde
 

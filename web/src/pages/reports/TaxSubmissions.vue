@@ -1374,6 +1374,16 @@ const submissionActions = computed<ActionItem[]>(() => {
       href: epoSubmissionsApi.xmlUrl(s.id),
     },
     {
+      // Soupis dokladů oddílu podle podaného KH a rozdíly proti aktuálním datům (issue #142).
+      key: 'kh_evidence',
+      label: t('reports.kh_evidence.open_submitted'),
+      icon: 'table',
+      tier: 'secondary',
+      variant: 'neutral',
+      show: s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
+      to: { name: 'reports-submissions-kh-evidence', params: { id: s.id } },
+    },
+    {
       key: 'refresh_status',
       label: t('reports.submissions.refresh_epo_status'),
       icon: 'cycle',

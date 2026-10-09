@@ -38,6 +38,11 @@
     <tr><td class="meta-label">Filtr:</td><td>{{ filter_label }}</td></tr>
     <tr><td class="meta-label">Zdroj:</td><td>{{ source_label }}</td></tr>
     <tr><td class="meta-label">Sestaveno:</td><td>{{ generated_at|cz_datetime }}</td></tr>
+    {% if comparison is defined and comparison and status_counts is defined %}
+        <tr><td class="meta-label">Porovnání:</td><td>
+            {% for key, n in status_counts %}{{ status_labels[key] }}: {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </td></tr>
+    {% endif %}
 </table>
 
 {% for key, section in sections %}
@@ -60,6 +65,10 @@
                 <th class="num col-num">DPH<br>sníž. sazba</th>
                 <th class="num col-num">Základ<br>celkem</th>
                 <th class="num col-num">DPH<br>celkem</th>
+                {% if comparison is defined and comparison %}
+                    <th class="num col-num">Aktuálně<br>základ</th>
+                    <th class="num col-num">Aktuálně<br>DPH</th>
+                {% endif %}
             </tr>
         </thead>
         <tbody>
@@ -68,7 +77,7 @@
                 {% if comparison is defined and comparison %}
                     <td class="col-status {{ row.status == 'match' ? '' : (row.status == 'amount_diff' ? 'status-diff' : 'status-missing') }}">{{ status_labels[row.status] ?? row.status }}</td>
                 {% endif %}
-                <td class="col-doc">{{ row.doc_number }}{% if row.is_correction %} (oprava){% endif %}</td>
+                <td class="col-doc">{{ row.is_aggregate ? 'Souhrnná věta' : row.doc_number }}{% if row.is_correction %} (oprava){% endif %}</td>
                 <td class="col-int">{{ row.internal_number }}</td>
                 <td class="col-partner">{{ row.counterparty_name|slice(0, 40) }}</td>
                 <td class="col-dic">{{ row.counterparty_dic }}</td>
@@ -79,6 +88,10 @@
                 <td class="num col-num">{{ row.vat12|cz_money }}</td>
                 <td class="num col-num">{{ row.base_total|cz_money }}</td>
                 <td class="num col-num">{{ row.vat_total|cz_money }}</td>
+                {% if comparison is defined and comparison %}
+                    <td class="num col-num">{{ row.current ? row.current.base_total|cz_money : '' }}</td>
+                    <td class="num col-num">{{ row.current ? row.current.vat_total|cz_money : '' }}</td>
+                {% endif %}
             </tr>
         {% endfor %}
         </tbody>
@@ -91,6 +104,10 @@
                 <td class="num">{{ section.totals.vat12|cz_money }}</td>
                 <td class="num">{{ section.totals.base_total|cz_money }}</td>
                 <td class="num">{{ section.totals.vat_total|cz_money }}</td>
+                {% if comparison is defined and comparison %}
+                    <td class="num">{{ section.current_totals.base_total|cz_money }}</td>
+                    <td class="num">{{ section.current_totals.vat_total|cz_money }}</td>
+                {% endif %}
             </tr>
         </tfoot>
     </table>

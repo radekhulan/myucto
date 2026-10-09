@@ -41,6 +41,8 @@ final class KhEvidenceSoupisTest extends TestCase
     /** @var int[] */
     private array $purchaseIds = [];
     private ?array $origVatFlags = null;
+    /** @var int[] */
+    private array $submissionIds = [];
 
     protected function setUp(): void
     {
@@ -86,6 +88,9 @@ final class KhEvidenceSoupisTest extends TestCase
                     $this->origVatFlags['dic'] ?? null,
                     $this->supplierId,
                 ]);
+        }
+        foreach ($this->submissionIds as $id) {
+            $pdo->prepare('DELETE FROM tax_submissions WHERE id = ?')->execute([$id]);
         }
         foreach ($this->invoiceIds as $id) {
             $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id = ?')->execute([$id]);
@@ -190,6 +195,49 @@ final class KhEvidenceSoupisTest extends TestCase
         } finally {
             @unlink($tmp);
         }
+    }
+
+    public function testSubmittedStatementComparisonFindsChangedMissingAndNewDocuments(): void
+    {
+        $this->seedPeriod();
+        $built = $this->kh->build($this->supplierId, self::YEAR, self::MONTH);
+        $repo = new \MyInvoice\Repository\TaxSubmissionRepository($this->db);
+        $id = $repo->archive($this->supplierId, 'dphkh1', self::YEAR, self::MONTH, null, $built['xml'], $built['summary'], 'passed', [], $this->userId);
+        $this->submissionIds[] = $id;
+
+        // Nepodaný snapshot soupis „podle podaného KH" nedává.
+        try {
+            $this->evidence->submitted($this->supplierId, $id, 'all');
+            $this->fail('Nepodaný snapshot musí být odmítnut.');
+        } catch (\DomainException) {
+        }
+        $repo->markSubmitted($id, $this->supplierId, sprintf('%04d-%02d-20 10:00:00', self::YEAR, self::MONTH + 1), null, $this->userId);
+
+        // Po podání: změna částky jednoho dokladu A.4, nový doklad A.4.
+        $pdo = $this->db->pdo();
+        $changedId = (int) $pdo->query("SELECT id FROM invoices WHERE varsymbol = '2098110002' AND supplier_id = {$this->supplierId}")->fetchColumn();
+        $pdo->prepare('UPDATE invoice_items SET total_without_vat = 15100.11, unit_price_without_vat = 15100.11, total_vat = 3171.02, total_with_vat = 18271.13 WHERE invoice_id = ?')->execute([$changedId]);
+        $pdo->prepare('UPDATE invoices SET total_without_vat = 15100.11, total_vat = 3171.02, total_with_vat = 18271.13 WHERE id = ?')->execute([$changedId]);
+        $cust = $this->clientIds[0];
+        $this->sale('2098110006', $cust, sprintf('%04d-%02d-15', self::YEAR, self::MONTH), [[30000.00, 6300.00]]);
+
+        $report = $this->evidence->submitted($this->supplierId, $id, 'A.4');
+        $this->assertSame('submitted', $report['source']);
+        $this->assertSame('řádné', $report['submission']['variant_label']);
+        $status = [];
+        foreach ($report['sections']['A.4']['rows'] as $row) {
+            $status[$row['doc_number']] = $row['status'];
+        }
+        $this->assertSame('match', $status['2098110001'] ?? null);
+        $this->assertSame('amount_diff', $status['2098110002'] ?? null);
+        $this->assertSame('only_current', $status['2098110006'] ?? null);
+        // Součet „podle podaného" = součet vět A.4 v podaném XML.
+        $this->assertSame(4700048, $this->cents($report['sections']['A.4']['totals']['base21']));
+
+        $pdf = (new \MyInvoice\Service\Pdf\KhEvidencePdfRenderer())->render($report);
+        $this->assertStringStartsWith('%PDF', $pdf);
+        $xlsx = (new KhEvidenceXlsxExporter())->export($report, 'podane.xlsx');
+        $this->assertNotSame('', $xlsx['bytes']);
     }
 
     private function seedPeriod(): void

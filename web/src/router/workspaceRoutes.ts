@@ -490,6 +490,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // pod mzdami: ze mzdy ani jedna povinnost nevzniká (viz komponenta).
       { path: 'reports/foreign-income', name: 'reports-foreign-income', component: () => import('@/pages/reports/ForeignIncomeNotices.vue') },
       { path: 'reports/submissions',    name: 'reports-submissions', component: () => import('@/pages/reports/TaxSubmissions.vue') },
+      { path: 'reports/submissions/:id(\\d+)/kh-evidence', name: 'reports-submissions-kh-evidence', component: () => import('@/pages/reports/KhSubmissionEvidence.vue') },
       { path: 'reports/monthly-export', name: 'reports-monthly-export', component: () => import('@/pages/reports/MonthlyExportReport.vue') },
       { path: 'reports/oss',            name: 'reports-oss', component: () => import('@/pages/reports/OssReport.vue'), meta: { requiresOss: true } },
       { path: 'tax',                    name: 'tax-optimizer',      component: () => import('@/pages/tax/TaxOptimizer.vue') },

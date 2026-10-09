@@ -112,6 +112,12 @@ Rekonciliace odpovídá na otázku: „Shoduje se dnešní výpočet MyÚčta s 
 2. Zvolte období a prohlédněte rozdíly mezi archivovaným podáním a dnešním náhledem.
 3. Rozhodněte, zda je třeba opravné podání. Rozhodnutí zůstává na účetní.
 
+**Kontrolní hlášení (po dokladech):**
+
+1. U podaného kontrolního hlášení klikněte v liště akcí na **Soupis dokladů oddílu**.
+2. Zvolte oddíl a projděte sloupec **Stav**: shoda, rozdíl částky, doklad jen v podaném KH, nebo jen v aktuálních datech.
+3. Soupis stáhněte do PDF nebo XLSX, třeba jako podklad pro správce daně. Podrobný postup je v kapitole [Kniha DPH](42_Kniha_DPH.md#425-krok-za-krokem-soupis-dokladu-oddilu-kh-pro-kontrolu-financniho-uradu).
+
 **Jak poznáte, že je hotovo:** Každý rozdíl je vysvětlený. Neshodu nikdy neodstraňujte mechanickým dorovnávacím zápisem bez účetního případu.
 
 ## 49.7 Když něco nejde

@@ -77,6 +77,58 @@ final class KhEvidenceAction
     }
 
     /**
+     * GET /api/reports/submissions/{id}/kh-evidence?section=A.4 — soupis podle PODANÉHO KH
+     * porovnaný po dokladech s aktuálními daty.
+     */
+    public function submittedPreview(Request $request, Response $response, array $args): Response
+    {
+        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        $report = $this->submittedReport($request, $response, (int) $args['id']);
+        return $report instanceof Response ? $report : Json::ok($response, $report);
+    }
+
+    /** GET /api/reports/submissions/{id}/kh-evidence/export?section=A.4&format=pdf|xlsx */
+    public function submittedDownload(Request $request, Response $response, array $args): Response
+    {
+        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        $format = (string) ($request->getQueryParams()['format'] ?? 'pdf');
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            return Json::error($response, 'validation_failed', 'Neplatný formát (pdf, xlsx).', 400);
+        }
+        $report = $this->submittedReport($request, $response, (int) $args['id']);
+        if ($report instanceof Response) {
+            return $report;
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $this->logger->log('report.kh_evidence_downloaded', (int) ($user['id'] ?? 0), null, null, [
+            'period' => $report['period']['label'], 'section' => $report['section'], 'format' => $format,
+            'submission_id' => (int) $args['id'],
+        ], $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
+
+        return self::file($response, $this->pdf, $this->xlsx, $report, self::filename($report, 'podane'), $format);
+    }
+
+    /** @return array<string,mixed>|Response */
+    private function submittedReport(Request $request, Response $response, int $id): array|Response
+    {
+        $section = KhEvidenceService::normalizeSection(isset($request->getQueryParams()['section']) ? (string) $request->getQueryParams()['section'] : null);
+        if ($section === null || $section === 'none') {
+            return Json::error($response, 'validation_failed', 'Neplatný oddíl kontrolního hlášení.', 400);
+        }
+        try {
+            return $this->service->submitted(SupplierGuard::currentId($request), $id, $section);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'kh_evidence_unavailable', $e->getMessage(), 422);
+        } catch (\Throwable $e) {
+            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * @param array<string,mixed> $report
      */
     public static function file(Response $response, KhEvidencePdfRenderer $pdf, KhEvidenceXlsxExporter $xlsx, array $report, string $base, string $format): Response

@@ -210,6 +210,7 @@ export interface KhEvidenceRow {
   base_total: number
   vat_total: number
   is_correction: boolean
+  is_aggregate?: boolean
   status?: KhEvidenceStatus
   current?: Partial<KhEvidenceRow> | null
 }
@@ -828,6 +829,19 @@ export const reportsApi = {
     const params = new URLSearchParams({ year: String(year), month: String(month), period, section, format })
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/reports/kh-evidence?${params.toString()}`
+  },
+
+  // Soupis podle PODANÉHO KH porovnaný s aktuálními daty (issue #142)
+  khEvidenceSubmitted: (submissionId: number, section: KhEvidenceSection) =>
+    api.get<KhEvidenceReport>(`/reports/submissions/${submissionId}/kh-evidence`, {
+      params: { section },
+    }).then(r => r.data),
+
+  khEvidenceSubmittedDownloadUrl: (submissionId: number, section: KhEvidenceSection, format: 'pdf' | 'xlsx') => {
+    const sid = localStorage.getItem('myinvoice.current_supplier_id')
+    const params = new URLSearchParams({ section, format })
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    return `/api/reports/submissions/${submissionId}/kh-evidence/export?${params.toString()}`
   },
 
   ossPreview: (year: number, quarter: number) =>

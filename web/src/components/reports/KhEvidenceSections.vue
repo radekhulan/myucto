@@ -41,6 +41,10 @@ function statusClass(s: KhEvidenceStatus | undefined): string {
   }
 }
 
+function docLabel(row: KhEvidenceRow): string {
+  return row.is_aggregate ? t('reports.kh_evidence.aggregate_row') : row.doc_number
+}
+
 function rowKey(row: KhEvidenceRow, idx: number): string {
   return `${row.source}:${row.doc_number}:${idx}`
 }
@@ -81,6 +85,10 @@ function rowKey(row: KhEvidenceRow, idx: number): string {
                 <th class="px-2 py-2 text-right font-medium whitespace-nowrap">{{ t('reports.kh_evidence.col.vat12') }}</th>
                 <th class="px-2 py-2 text-right font-medium whitespace-nowrap">{{ t('reports.kh_evidence.col.base_total') }}</th>
                 <th class="px-2 py-2 text-right font-medium whitespace-nowrap">{{ t('reports.kh_evidence.col.vat_total') }}</th>
+                <template v-if="comparison">
+                  <th class="px-2 py-2 text-right font-medium whitespace-nowrap">{{ t('reports.kh_evidence.current_base') }}</th>
+                  <th class="px-2 py-2 text-right font-medium whitespace-nowrap">{{ t('reports.kh_evidence.current_vat') }}</th>
+                </template>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -91,7 +99,7 @@ function rowKey(row: KhEvidenceRow, idx: number): string {
                   </span>
                 </td>
                 <td class="px-2 py-1.5 whitespace-nowrap font-mono">
-                  {{ row.doc_number }}
+                  {{ docLabel(row) }}
                   <span v-if="row.is_correction" class="text-[10px] text-warning-700">({{ t('reports.kh_evidence.correction') }})</span>
                 </td>
                 <td class="px-2 py-1.5 whitespace-nowrap font-mono text-neutral-500">{{ row.internal_number }}</td>
@@ -104,6 +112,10 @@ function rowKey(row: KhEvidenceRow, idx: number): string {
                 <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ fmtMoney(row.vat12) }}</td>
                 <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ fmtMoney(row.base_total) }}</td>
                 <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap">{{ fmtMoney(row.vat_total) }}</td>
+                <template v-if="comparison">
+                  <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap" :class="row.status === 'amount_diff' ? 'text-warning-700 font-semibold' : ''">{{ fmtMoney(row.current?.base_total) }}</td>
+                  <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap" :class="row.status === 'amount_diff' ? 'text-warning-700 font-semibold' : ''">{{ fmtMoney(row.current?.vat_total) }}</td>
+                </template>
               </tr>
             </tbody>
             <tfoot class="bg-neutral-50 font-semibold">
@@ -115,6 +127,10 @@ function rowKey(row: KhEvidenceRow, idx: number): string {
                 <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(report.sections[key].totals.vat12) }}</td>
                 <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(report.sections[key].totals.base_total) }}</td>
                 <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(report.sections[key].totals.vat_total) }}</td>
+                <template v-if="comparison">
+                  <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(report.sections[key].current_totals?.base_total) }}</td>
+                  <td class="px-2 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(report.sections[key].current_totals?.vat_total) }}</td>
+                </template>
               </tr>
             </tfoot>
           </table>
@@ -124,7 +140,7 @@ function rowKey(row: KhEvidenceRow, idx: number): string {
         <div class="md:hidden divide-y divide-neutral-100">
           <div v-for="(row, idx) in report.sections[key].rows" :key="rowKey(row, idx)" class="px-4 py-3 text-sm space-y-1">
             <div class="flex items-center justify-between gap-2">
-              <span class="font-mono font-medium">{{ row.doc_number }}</span>
+              <span class="font-mono font-medium">{{ docLabel(row) }}</span>
               <span v-if="comparison" class="text-[10px] font-bold px-1.5 py-px rounded" :class="statusClass(row.status)">
                 {{ t(`reports.kh_evidence.status.${row.status}`) }}
               </span>
@@ -162,7 +178,7 @@ function rowKey(row: KhEvidenceRow, idx: number): string {
       <div class="font-semibold text-warning-700 mb-1">{{ t('reports.kh_evidence.excluded_title') }}</div>
       <ul class="list-disc pl-5 text-warning-700 space-y-0.5">
         <li v-for="(row, idx) in report.excluded" :key="idx">
-          {{ row.section }}: <span class="font-mono">{{ row.doc_number }}</span> {{ row.counterparty_name }} -
+          {{ row.section }}: <span class="font-mono">{{ docLabel(row) }}</span> {{ row.counterparty_name }} -
           {{ t(`reports.kh_evidence.excluded_reason.${row.reason}`) }}
         </li>
       </ul>

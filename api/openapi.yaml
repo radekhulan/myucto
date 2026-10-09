@@ -7271,6 +7271,46 @@ paths:
           content:
             application/xml: {}
 
+  /api/v1/reports/submissions/{id}/kh-evidence:
+    get:
+      tags: [Reports]
+      summary: Soupis dokladů podle podaného kontrolního hlášení s porovnáním proti aktuálním datům
+      description: |
+        Jen pro podání formuláře `dphkh1` ve stavu `submitted` nebo `accepted` (jinak 422).
+        Řádky se čtou z podaného XML a porovnávají po dokladech s aktuálním soupisem téhož období:
+        `match`, `amount_diff`, `only_submitted`, `only_current`. Oddíly A.5 a B.3 jsou v KH souhrnné
+        a porovnávají se jedním řádkem souhrnné věty. `totals` = podle podaného KH, `current_totals` =
+        aktuální částky porovnaných dokladů.
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: section, schema: { type: string, enum: [all, A.1, A.2, A.4, A.5, B.1, B.2, B.3], default: all } }
+      responses:
+        '200': { description: Soupis s porovnáním, content: { application/json: { schema: { $ref: '#/components/schemas/KhEvidenceReport' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Podání není podané kontrolní hlášení }
+
+  /api/v1/reports/submissions/{id}/kh-evidence/export:
+    get:
+      tags: [Reports]
+      summary: Export soupisu podle podaného KH do PDF nebo XLSX
+      description: Hlavička nese firmu, období, filtr, zdroj „podle podaného KH" s datem a typem podání a okamžik sestavení.
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: section, schema: { type: string, enum: [all, A.1, A.2, A.4, A.5, B.1, B.2, B.3], default: all } }
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+      responses:
+        '200':
+          description: Soubor sestavy
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Podání není podané kontrolní hlášení }
+
   /api/v1/reports/submissions/{id}/epo-handoff:
     parameters:
       - { in: path, name: id, required: true, schema: { type: integer } }
@@ -33290,6 +33330,11 @@ components:
         vat_total: { type: number }
         is_correction: { type: boolean, description: Oprava nedobytné pohledávky (zdph_44 = P) }
         status: { type: string, enum: [match, only_submitted, only_current, amount_diff], description: Jen u porovnání s podaným KH }
+        is_aggregate: { type: boolean, description: Souhrnná věta A.5/B.3 }
+        current:
+          type: [object, 'null']
+          description: Jen u porovnání - aktuální částky téhož dokladu
+          additionalProperties: { type: [number, 'null'] }
 
     KhEvidenceTotals:
       type: object
@@ -33336,6 +33381,11 @@ components:
             properties:
               rows: { type: array, items: { $ref: '#/components/schemas/KhEvidenceRow' } }
               totals: { $ref: '#/components/schemas/KhEvidenceTotals' }
+              current_totals: { $ref: '#/components/schemas/KhEvidenceTotals' }
+        status_counts:
+          type: object
+          description: Jen u porovnání s podaným KH - počty řádků podle stavu
+          additionalProperties: { type: integer }
         excluded:
           type: array
           description: Doklady vyřazené z KH (chybí DIČ, rozdílný režim plnění)

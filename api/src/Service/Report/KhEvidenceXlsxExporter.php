@@ -58,6 +58,7 @@ final class KhEvidenceXlsxExporter
             'Základ zákl. sazba', 'DPH zákl. sazba', 'Základ sníž. sazba', 'DPH sníž. sazba', 'Základ celkem', 'DPH celkem'];
         if ($comparison) {
             array_unshift($headers, 'Stav');
+            array_push($headers, 'Aktuálně základ celkem', 'Aktuálně DPH celkem');
         }
         $offset = $comparison ? 1 : 0;
         $cols = count($headers);
@@ -80,7 +81,11 @@ final class KhEvidenceXlsxExporter
                 if ($comparison) {
                     $sheet->setCellValueExplicit([1, $r], self::STATUS_LABELS[$row['status'] ?? ''] ?? (string) ($row['status'] ?? ''), DataType::TYPE_STRING);
                 }
-                $sheet->setCellValueExplicit([1 + $offset, $r], (string) $row['doc_number'] . (!empty($row['is_correction']) ? ' (oprava)' : ''), DataType::TYPE_STRING);
+                $doc = !empty($row['is_aggregate']) ? 'Souhrnná věta' : (string) $row['doc_number'];
+                $sheet->setCellValueExplicit([1 + $offset, $r], $doc . (!empty($row['is_correction']) ? ' (oprava)' : ''), DataType::TYPE_STRING);
+                if ($comparison && is_array($row['current'] ?? null)) {
+                    $this->currentMoney($sheet, $firstMoney + 6, $r, $row['current']);
+                }
                 $sheet->setCellValueExplicit([2 + $offset, $r], (string) ($row['internal_number'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit([3 + $offset, $r], (string) ($row['counterparty_name'] ?? ''), DataType::TYPE_STRING);
                 $sheet->setCellValueExplicit([4 + $offset, $r], (string) ($row['counterparty_dic'] ?? ''), DataType::TYPE_STRING);
@@ -90,6 +95,9 @@ final class KhEvidenceXlsxExporter
             }
             $sheet->setCellValueExplicit([1, $r], 'Celkem ' . (int) $section['totals']['count'] . ' dokladů', DataType::TYPE_STRING);
             $this->money($sheet, $firstMoney, $r, $section['totals']);
+            if ($comparison && is_array($section['current_totals'] ?? null)) {
+                $this->currentMoney($sheet, $firstMoney + 6, $r, $section['current_totals']);
+            }
             $sheet->getStyle("A{$r}:{$last}{$r}")->getFont()->setBold(true);
             $sheet->getStyle("A{$head}:{$last}{$r}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
             $r++;
@@ -138,6 +146,15 @@ final class KhEvidenceXlsxExporter
                 continue;
             }
             $sheet->setCellValue([$col + $i, $row], (float) $values[$k]);
+            $sheet->getStyle([$col + $i, $row])->getNumberFormat()->setFormatCode(self::MONEY);
+        }
+    }
+
+    /** @param array<string,mixed> $values */
+    private function currentMoney(Worksheet $sheet, int $col, int $row, array $values): void
+    {
+        foreach (['base_total', 'vat_total'] as $i => $k) {
+            $sheet->setCellValue([$col + $i, $row], (float) ($values[$k] ?? 0));
             $sheet->getStyle([$col + $i, $row])->getNumberFormat()->setFormatCode(self::MONEY);
         }
     }

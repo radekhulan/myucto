@@ -3189,6 +3189,8 @@ final class Routes
         // Evidence pro KH (issue #142) — soupis dokladů oddílu KH, PDF/XLSX export.
         $app->get    ('/api/reports/kh-evidence/preview', [\MyInvoice\Action\Report\KhEvidenceAction::class, 'preview']);
         $app->get    ('/api/reports/kh-evidence',         [\MyInvoice\Action\Report\KhEvidenceAction::class, 'download']);
+        $app->get    ('/api/reports/submissions/{id:[0-9]+}/kh-evidence',        [\MyInvoice\Action\Report\KhEvidenceAction::class, 'submittedPreview']);
+        $app->get    ('/api/reports/submissions/{id:[0-9]+}/kh-evidence/export', [\MyInvoice\Action\Report\KhEvidenceAction::class, 'submittedDownload']);
         // OSS (One Stop Shop) — kvartální dashboard; zařazení řádků se odvozuje automaticky.
         $app->get    ('/api/reports/oss/preview',      [OssReportAction::class, 'preview']);
         // Práh 10 000 EUR (§ 8 odst. 3 ZDPH) — bez guardu oss_disabled, protože ho

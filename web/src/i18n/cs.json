@@ -25134,6 +25134,17 @@
       "gaps_found": "Nalezené mezery: {count}"
     },
     "kh_evidence": {
+      "aggregate_row": "Souhrnná věta",
+      "back_to_submissions": "Zpět do Archivu podání",
+      "submitted_title": "Soupis dokladů podle podaného KH",
+      "submitted_subtitle": "Doklady z podaného kontrolního hlášení porovnané s aktuálními daty.",
+      "source_submitted": "Zdroj: podané kontrolní hlášení (podáno {date}, typ: {variant}). Sloupce Aktuálně ukazují dnešní stav dokladu.",
+      "has_differences": "Aktuální data se od podaného hlášení liší. Posuďte, zda je potřeba podat následné kontrolní hlášení.",
+      "no_differences": "Aktuální data odpovídají podanému hlášení.",
+      "aggregate_note": "Oddíly A.5 a B.3 jsou v KH souhrnné, porovnávají se jedním řádkem souhrnné věty.",
+      "current_base": "Aktuálně základ",
+      "current_vat": "Aktuálně DPH",
+      "open_submitted": "Soupis dokladů oddílu",
       "title": "Soupis dokladů kontrolního hlášení",
       "filter_label": "Oddíl KH",
       "filter_none": "Kniha DPH (všechny doklady)",
