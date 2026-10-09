@@ -253,7 +253,7 @@ Pokud měsíční GPC obsahuje platby již načtené z API, připojí se k exist
 
 #### 29.13.1.1 Filtry, řazení a export nespárovaných
 
-V záložce **Všechny pohyby** lze kombinovat hledání, rok, vlastní účet, stav spárování a stav zaúčtování. Částku lze zadat i jako `1 234,50`; hledá se přesná částka bez ohledu na znaménko. Po návratu z deníku se filtry a řazení obnoví, pro každou firmu zvlášť. U zaúčtovaných pohybů se zobrazuje i protiúčet.
+V záložce **Všechny pohyby** lze kombinovat hledání, rok, vlastní účet a stav spárování, v podvojném účetnictví také stav zaúčtování. Částku lze zadat i jako `1 234,50`; hledá se přesná částka bez ohledu na znaménko. Po návratu z deníku se filtry a řazení obnoví, pro každou firmu zvlášť. U zaúčtovaných pohybů se zobrazuje i protiúčet.
 
 Při posouvání tabulky zůstávají filtry a názvy sloupců viditelné. Další pohyby se načítají automaticky při přiblížení ke konci seznamu. Na počítači tlačítko **Další** nezabírá místo pod výpisem; na dotykovém zařízení je dostupné i ruční načtení.
 
@@ -293,9 +293,9 @@ Měsíční výpis API skládá pohyby z jednotlivých stažení. Jejich **zdroj
 
 ### 29.13.3 Všechny pohyby
 
-Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a roky. Na rozdíl od fronty **K zaúčtování** ukazuje i již spárované a zaúčtované pohyby. U každého řádku vidíte náš zdrojový účet, účet protistrany, výpis, párování a stav zaúčtování. Filtr **Stav** nabízí stejné stavy párování jako detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu; vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají. Filtr **Ignorováno** ukáže i dříve ignorované položky.
+Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a roky. Má ji každá firma bez ohledu na způsob vedení účetnictví, stačí nahrané výpisy. Ukazuje i již spárované a ignorované pohyby. U každého řádku vidíte náš zdrojový účet, účet protistrany, výpis a párování. Firma s podvojným účetnictvím navíc vidí stav zaúčtování a protiúčet a na rozdíl od fronty **K zaúčtování** i zaúčtované pohyby. Filtr **Stav** nabízí stejné stavy párování jako detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu; vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají. Filtr **Ignorováno** ukáže i dříve ignorované položky.
 
-Akce jsou stejné jako v detailu konkrétního výpisu: otevření nebo zrušení párování, rozdělené párování, vytvoření dokladu, přiložení podkladu, vyžádání dokladu, ignorování i ruční zaúčtování. Po provedené akci se aktualizuje tentýž řádek; není nutné dohledávat původní výpis. Filtry podle našeho účtu, data, částky, protistrany, párování a zaúčtování lze kombinovat.
+Akce jsou stejné jako v detailu konkrétního výpisu: otevření nebo zrušení párování, rozdělené párování, vytvoření dokladu, přiložení podkladu, vyžádání dokladu, ignorování a v podvojném účetnictví i ruční zaúčtování. Po provedené akci se aktualizuje tentýž řádek; není nutné dohledávat původní výpis. Filtry podle našeho účtu, data, částky, protistrany, párování a v podvojném účetnictví i zaúčtování lze kombinovat.
 
 ### 29.13.4 Výpis s nezpracovanými pohyby
 
@@ -411,9 +411,9 @@ Příchozí platba spárovaná s přijatou fakturou (vrácený dobropis, vrácen
 
 ### 29.13.13 Automatické zaúčtování spárovaných plateb (jen podvojné účetnictví)
 
-Firmám vedoucím **podvojné účetnictví** MyÚčto po každém spárování nebo importu rovnou nabídne (a u opakovaných plateb i samo vytvoří) zápis do [Účetního deníku](52_Ucetni_denik.md). Daňová evidence žádný deník nemá: u ní se tato sekce, záložky ani tlačítka vůbec nezobrazují a bankovní modul funguje jen jako párování plateb popsané výše.
+Firmám vedoucím **podvojné účetnictví** MyÚčto po každém spárování nebo importu rovnou nabídne (a u opakovaných plateb i samo vytvoří) zápis do [Účetního deníku](52_Ucetni_denik.md). Daňová evidence žádný deník nemá: u ní se tato sekce, účetní záložky ani tlačítka vůbec nezobrazují a bankovní modul funguje jen jako párování plateb popsané výše.
 
-Automatika žije na stránce `Peníze → Bankovní účty`, kde firmě s podvojným účetnictvím přibudou vedle **Bankovních výpisů** záložky **Všechny pohyby**, **K zaúčtování** a **Kontace účtů**. Pravidla účtování se spravují v `Nástroje → Šablony účtování`, záložka **Pravidla účtování**.
+Automatika žije na stránce `Peníze → Bankovní účty`, kde firmě s podvojným účetnictvím přibudou vedle **Bankovních výpisů** a **Všech pohybů** záložky **K zaúčtování** a **Kontace účtů**. Pravidla účtování se spravují v `Nástroje → Šablony účtování`, záložka **Pravidla účtování**.
 
 - **K zaúčtování** je fronta návrhů čekajících na schválení, s odznáčkem počtu čekajících položek přímo na záložce. Výchozí podzáložka **Nezaúčtované pohyby** obsahuje všechny skutečné pohyby bez aktivního zápisu, tedy i ty, pro které automatika žádný návrh kontace nevytvořila. Historie návrhů je v samostatné podzáložce **Historie návrhů** a nabízí **Zaúčtováno automaticky**, **Potřebuje mě**, **Schválené** a **Odmítnuté**.
 - **Pravidla účtování** jsou naučená pravidla pro opakované platby bez dokladu (odvody, poplatky, úroky).

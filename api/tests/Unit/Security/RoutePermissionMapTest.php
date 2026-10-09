@@ -61,6 +61,8 @@ final class RoutePermissionMapTest extends TestCase
             ['PATCH', '/api/accounting/bank-accounts/7', 'accounting', AccessLevel::WRITE],
             ['GET', '/api/accounting/bank-posting-unposted', 'bank.rules', AccessLevel::READ],
             ['GET', '/api/accounting/bank-posting-unposted/count', 'bank.rules', AccessLevel::READ],
+            // #136: přehled všech pohybů patří k výpisům, ne k účetnictví.
+            ['GET', '/api/bank-transactions', 'bank', AccessLevel::READ],
             // §DM — pravidla klasifikace výdaje spadají pod fallback `accounting`; role
             // „client" ho nemá, takže na ně (včetně GETů bez self-checku v Action) nedosáhne.
             ['GET', '/api/accounting/expense-rules', 'accounting', AccessLevel::READ],

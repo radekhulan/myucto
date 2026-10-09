@@ -28,6 +28,7 @@ final class FreeTierApiBoundaryTest extends TestCase
         yield 'klienti'           => ['/api/clients'];
         yield 'dokumenty'         => ['/api/documents'];
         yield 'bankovní výpisy'   => ['/api/bank-statements'];
+        yield 'všechny pohyby'    => ['/api/bank-transactions'];
         yield 'pokladna'          => ['/api/accounting/cash-documents'];
         yield 'pokladní doklad'   => ['/api/accounting/cash-documents/12'];
         yield 'pokladny'          => ['/api/accounting/cash-registers'];

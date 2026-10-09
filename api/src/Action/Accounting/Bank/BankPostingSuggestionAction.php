@@ -13,6 +13,7 @@ use MyInvoice\Repository\BankPostingSuggestionRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\Learning\RulePromotionService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Bank\BankMovementListService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -38,6 +39,7 @@ final class BankPostingSuggestionAction
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly BankMovementListService $movements,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -71,72 +73,10 @@ final class BankPostingSuggestionAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
         $q = $request->getQueryParams();
-        $page = max(1, (int) ($q['page'] ?? 1));
-        $perPage = max(1, min(self::MAX_PER_PAGE, (int) ($q['per_page'] ?? 50)));
-        // scope=all → záložka „Všechny pohyby" (i zaúčtované, napříč účty); jinak fronta k zaúčtování.
+        // Fronta k zaúčtování. scope=all zůstává kvůli zpětné kompatibilitě; záložka
+        // „Všechny pohyby" čte GET /api/bank-transactions, který není vázaný na režim účetnictví.
         $scope = ($q['scope'] ?? '') === 'all' ? 'all' : 'unposted';
-        $matchStatus = in_array($q['status'] ?? null, ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'], true)
-            ? (string) $q['status'] : null;
-        $result = $this->suggestions->paginateUnposted(
-            $supplierId,
-            $perPage,
-            ($page - 1) * $perPage,
-            [
-                'scope' => $scope,
-                'status' => $matchStatus,
-                'posting_status' => $q['posting_status'] ?? null,
-                'year' => isset($q['year']) && (int) $q['year'] > 0 ? (int) $q['year'] : null,
-                'q' => isset($q['q']) ? mb_substr(trim((string) $q['q']), 0, 100) : null,
-                'account' => isset($q['account']) && $q['account'] !== '' ? (string) $q['account'] : null,
-                'sort' => isset($q['sort']) && is_string($q['sort']) ? $q['sort'] : null,
-                'direction' => isset($q['direction']) && is_string($q['direction']) ? $q['direction'] : null,
-            ],
-        );
-        // Stav zaúčtování počítáme STEJNOU logikou jako detail výpisu (posted i suggested,
-        // ne jen pending suggestion) — viz BankPostingService::transactionPostingInfo().
-        $postingByTx = $this->service->transactionPostingInfo($supplierId, array_column($result['items'], 'id'));
-        // Dimenze pohybu jako štítky v řádku, stejně jako v detailu výpisu.
-        $dimensionsByTx = (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
-            ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', array_map('intval', array_column($result['items'], 'id')));
-        $items = array_map(static function (array $item) use ($postingByTx, $dimensionsByTx): array {
-            $item['posting'] = $postingByTx[$item['id']] ?? null;
-            if ($dimensionsByTx !== null) {
-                $item['dimensions'] = (object) ($dimensionsByTx[(int) $item['id']] ?? []);
-            }
-            return $item;
-        }, $result['items']);
-        return Json::ok($response, [
-            'items' => $this->withCzkAmounts($supplierId, $items),
-            'total' => $result['total'],
-            'page' => $page,
-            'per_page' => $perPage,
-            'scope' => $scope,
-            'years' => $this->suggestions->transactionYears($supplierId),
-            'accounts' => $this->suggestions->transactionAccounts($supplierId),
-        ]);
-    }
-
-    /**
-     * Doplní korunový ekvivalent a kurz. Počítá se tady, ne v SQL repository: kurz musí být
-     * TENTÝŽ, jakým se pohyb nakonec zaúčtuje, a to umí jen BankPostingService (pevný kurz
-     * firmy dle §24/7 → teprve pak ČNB). JOIN na `exchange_rates` by pevný kurz tiše minul a
-     * UI by uživateli předvyplnilo jinou částku, než jakou by zápis dostal.
-     *
-     * @param list<array<string,mixed>> $items
-     * @return list<array<string,mixed>>
-     */
-    private function withCzkAmounts(int $supplierId, array $items): array
-    {
-        return array_map(function (array $item) use ($supplierId): array {
-            $rate = $this->service->czkRateFor(
-                $supplierId,
-                isset($item['currency']) ? (string) $item['currency'] : null,
-                (string) $item['posted_at'],
-            );
-            $item['fx_rate'] = $rate;
-            $item['amount_czk'] = $rate === null ? null : round((float) $item['amount'] * $rate, 2);
-            return $item;
-        }, $items);
+        return Json::ok($response, $this->movements->list($supplierId, $q, $scope));
     }
 
     public function unpostedCount(Request $request, Response $response): Response

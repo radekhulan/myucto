@@ -25,12 +25,14 @@ const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore
 // Pravidla účtování (dřívější tab „rules") žijí pod Šablony (/templates?section=posting) —
 // z tabu K zaúčtování je na ně jen odkaz, ať se neztratí flow „založ pravidlo za chodu".
 type Tab = 'statements' | 'all_movements' | 'posting' | 'analytics' | 'accounts' | 'balances' | 'email'
-// „Všechny pohyby" = samostatný top-level tab hned za Výpisy (ne pod K zaúčtování).
+// „Všechny pohyby" = samostatný top-level tab hned za Výpisy (ne pod K zaúčtování). Je to
+// přehled výpisů, ne účetnictví, proto ho má každá firma; účetní sloupce si řeší sám (#136).
 // „Kontace účtů" = metadata vlastních účtů pro analytiku 221.xxx (audit UI mezer 2026-07).
-const ACCOUNTING_TABS: Tab[] = ['all_movements', 'posting', 'analytics']
+const ACCOUNTING_TABS: Tab[] = ['posting', 'analytics']
 const ADMIN_TABS: Tab[] = ['email']
 const visibleTabs = computed<Tab[]>(() => [
   'statements',
+  'all_movements',
   ...(isDoubleEntry.value ? ACCOUNTING_TABS : []),
   ...(canReadBankSettings.value ? ['accounts'] as Tab[] : []),
   'balances',

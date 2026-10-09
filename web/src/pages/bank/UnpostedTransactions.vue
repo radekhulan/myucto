@@ -6,6 +6,7 @@ import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { useBankFilterMemory } from '@/composables/useBankFilterMemory'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { downloadApiFile } from '@/utils/downloadFile'
@@ -28,6 +29,7 @@ const props = withDefaults(defineProps<{ scope?: 'unposted' | 'all' }>(), { scop
 const emit = defineEmits<{ 'counts-changed': [] }>()
 const { t } = useI18n()
 const supplierStore = useSupplierStore()
+const auth = useAuthStore()
 const toast = useToast()
 const listBox = ref<HTMLElement | null>(null)
 const loadMoreTarget = ref<HTMLElement | null>(null)
@@ -61,10 +63,16 @@ function accountLabel(a: BankAccountOption): string {
 // stejná komponenta i logika jako detail výpisu (BankTransactionRow.vue, #52).
 // reload = changed() (přepočítá i county v záložkách bank sekce).
 const bankActions = useBankTransactionActions({ reload: () => changed(), refresh: () => changed(true) })
-const colspan = computed(() => props.scope === 'all' ? 9 : 8)
+// „Všechny pohyby" vidí každá firma s výpisy; stav zaúčtování, kontace a akce zaúčtování
+// jen podvojné účetnictví s komerčními funkcemi (stejná podmínka jako detail výpisu).
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const colspan = computed(() => 7 + (props.scope === 'all' ? 1 : 0) + (isDoubleEntry.value ? 1 : 0))
 // Řazení podle sloupce — seznam je stránkovaný na serveru, řadí se tam (výchozí = nejnovější nahoře).
-const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting'])
-const sortKeys = computed(() => txSort.keys.filter(k => k !== 'account' || props.scope === 'all'))
+const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting', 'status'])
+const sortKeys = computed(() => txSort.keys.filter(k =>
+  (k !== 'account' || props.scope === 'all')
+  && (k !== 'posting' || isDoubleEntry.value)
+  && (k !== 'status' || !isDoubleEntry.value)))
 useBankFilterMemory(() => `${supplierStore.currentSupplierId}:movements:${props.scope}`, () => ({
   search: search.value, year: year.value, account: accountFilter.value, status: statusFilter.value,
   posting: postingFilter.value, sort: txSort.selectValue.value,
@@ -126,15 +134,18 @@ async function load(silent = false, append = false) {
     const params = {
       page: append ? page.value + 1 : page.value,
       per_page: perPage.value,
-      scope: props.scope,
       ...(props.scope === 'all' && statusFilter.value ? { status: statusFilter.value } : {}),
       ...(year.value ? { year: year.value } : {}),
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(accountFilter.value ? { account: accountFilter.value } : {}),
-      ...(props.scope === 'all' && postingFilter.value ? { posting_status: postingFilter.value } : {}),
+      ...(props.scope === 'all' && isDoubleEntry.value && postingFilter.value ? { posting_status: postingFilter.value } : {}),
       ...txSort.params.value,
     }
-    const result = await bankPostingApi.listUnposted(params)
+    // „Všechny pohyby" čtou bankovní endpoint (každý režim), fronta k zaúčtování účetní.
+    const fetchPage = (p: typeof params) => props.scope === 'all'
+      ? bankPostingApi.listMovements(p)
+      : bankPostingApi.listUnposted({ ...p, scope: 'unposted' })
+    const result = await fetchPage(params)
     if (generation !== loadGeneration) return
     if (append && result.items.length === 0) {
       total.value = result.total
@@ -150,7 +161,7 @@ async function load(silent = false, append = false) {
       return
     }
     const preceding = !append && page.value > 1
-      ? await Promise.all(Array.from({ length: page.value - 1 }, (_, index) => bankPostingApi.listUnposted({ ...params, page: index + 1 }))) : []
+      ? await Promise.all(Array.from({ length: page.value - 1 }, (_, index) => fetchPage({ ...params, page: index + 1 }))) : []
     if (generation !== loadGeneration) return
     items.value = append ? [...items.value, ...result.items] : [...preceding.flatMap(part => part.items), ...result.items]
     if (append) { internalPageChange = true; page.value = params.page }
@@ -171,7 +182,7 @@ async function changed(silent = false) {
 
 // Změna filtru vždy zpět na první stranu — jinak by uživatel skončil na prázdné stránce.
 let searchTimer: ReturnType<typeof setTimeout> | undefined
-watch([search, year, accountFilter, statusFilter, postingFilter, () => props.scope, () => supplierStore.currentSupplierId, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
+watch([search, year, accountFilter, statusFilter, postingFilter, isDoubleEntry, () => props.scope, () => supplierStore.currentSupplierId, txSort.sort], () => { loadGeneration++ }, { flush: 'sync' })
 watch(page, () => { if (!internalPageChange) loadGeneration++ }, { flush: 'sync' })
 function resetAndLoad() {
   if (page.value !== 1) { page.value = 1; return } // watch(page) načte sám
@@ -185,6 +196,7 @@ watch(year, resetAndLoad)
 watch(accountFilter, resetAndLoad)
 watch(statusFilter, resetAndLoad)
 watch(postingFilter, resetAndLoad)
+watch(isDoubleEntry, resetAndLoad)
 watch(() => supplierStore.currentSupplierId, () => { items.value = []; resetAndLoad() })
 watch(txSort.sort, resetAndLoad)
 watch(() => props.scope, () => {
@@ -208,7 +220,7 @@ watch(page, () => {
 <template>
   <div>
     <p class="text-sm text-neutral-500 mb-3">
-      {{ scope === 'all' ? t('bank.posting.all_hint') : t('bank.posting.unposted_hint') }}
+      {{ scope !== 'all' ? t('bank.posting.unposted_hint') : isDoubleEntry ? t('bank.posting.all_hint') : t('bank.posting.all_hint_evidence') }}
     </p>
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
@@ -228,7 +240,7 @@ watch(page, () => {
         <option value="">{{ t('bank.filter_all') }}</option>
         <option v-for="status in STATUS_OPTIONS" :key="status" :value="status">{{ statusLabel(status) }}</option>
       </select>
-      <select v-if="scope === 'all'" v-model="postingFilter" :aria-label="t('bank.filter_posting')"
+      <select v-if="scope === 'all' && isDoubleEntry" v-model="postingFilter" :aria-label="t('bank.filter_posting')"
         class="h-9 px-2 border border-neutral-300 rounded-md text-sm max-w-full">
         <option value="">{{ t('bank.filter_posting_all') }}</option>
         <option value="unposted">{{ t('bank.filter_posting_unposted') }}</option>
@@ -240,8 +252,9 @@ watch(page, () => {
     </div>
 
     <div v-if="loading && !items.length" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
-    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter || (scope === 'all' && (statusFilter || postingFilter)))" boxed variant="filtered"
+    <EmptyState v-else-if="items.length === 0 && (search || year || accountFilter || (scope === 'all' && (statusFilter || (isDoubleEntry && postingFilter))))" boxed variant="filtered"
       :title="t('bank.posting.no_match')" />
+    <EmptyState v-else-if="items.length === 0 && scope === 'all'" boxed :title="t('bank.posting.all_empty')" />
     <EmptyState v-else-if="items.length === 0" boxed icon="checkCircle" accent="success" :title="t('bank.posting.unposted_empty')" />
     <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
       <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
@@ -254,15 +267,16 @@ watch(page, () => {
               <SortableTh :label="t('bank.vs_ks')" sort-key="variable_symbol" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <SortableTh :label="t('bank.counterparty')" sort-key="counterparty" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <SortableTh :label="t('bank.invoice')" sort-key="invoice" :sort="txSort.sort.value" @toggle="txSort.toggle" />
-              <SortableTh :label="t('bank.posting_state')" sort-key="posting" :sort="txSort.sort.value" @toggle="txSort.toggle" />
-              <th class="px-3 py-2">{{ t('bank.counter_account') }}</th>
+              <SortableTh v-if="isDoubleEntry" :label="t('bank.posting_state')" sort-key="posting" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <SortableTh v-else :label="t('invoice.status_label')" sort-key="status" :sort="txSort.sort.value" @toggle="txSort.toggle" />
+              <th v-if="isDoubleEntry" class="px-3 py-2">{{ t('bank.counter_account') }}</th>
               <th class="px-3 py-2 w-32"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <BankTransactionRow v-for="tx in items" :key="tx.id"
-              layout="desktop" :tx="tx" :is-double-entry="true"
-              fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="true"
+              layout="desktop" :tx="tx" :is-double-entry="isDoubleEntry"
+              fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="isDoubleEntry"
               :colspan="colspan" :actions="bankActions"
               @changed="changed" />
           </tbody>
@@ -271,8 +285,8 @@ watch(page, () => {
 
       <div class="md:hidden divide-y divide-neutral-100">
         <BankTransactionRow v-for="tx in items" :key="`m-${tx.id}`"
-          layout="mobile" :tx="tx" :is-double-entry="true"
-          fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="true"
+          layout="mobile" :tx="tx" :is-double-entry="isDoubleEntry"
+          fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="isDoubleEntry"
           :actions="bankActions"
           @changed="changed" />
       </div>

@@ -22166,6 +22166,8 @@
       "unposted_empty": "All bank transactions are posted.",
       "tab_all": "All transactions",
       "all_hint": "All bank transactions across every account and year, posted and unposted alike.",
+      "all_hint_evidence": "All bank transactions across every account and year, matched and unmatched alike.",
+      "all_empty": "No bank transactions have been imported yet.",
       "col_account": "Our account",
       "search_placeholder": "Search counterparty, VS, account number, description or amount…",
       "all_years": "All years",

@@ -11,7 +11,8 @@ Stránka `Peníze → Bankovní účty` má tyto záložky:
 | Záložka | K čemu slouží |
 |---|---|
 | **Bankovní výpisy** | Import výpisů a párování plateb (viz [Banka](29_Banka.md)). |
-| **Všechny pohyby**, **K zaúčtování**, **Kontace účtů** | Účetní automatika. Vidí je jen firma s podvojným účetnictvím (viz [§ 30.11.2](#30112-kontace-uctu-analytika-221-jen-podvojne-ucetnictvi) a [Banka](29_Banka.md)). |
+| **Všechny pohyby** | Přehled všech transakcí napříč výpisy, účty a roky s filtry a párováním. Vidí ji každá firma (viz [Banka § 29.13.3](29_Banka.md#29133-vsechny-pohyby)). |
+| **K zaúčtování**, **Kontace účtů** | Účetní automatika. Vidí je jen firma s podvojným účetnictvím (viz [§ 30.11.2](#30112-kontace-uctu-analytika-221-jen-podvojne-ucetnictvi) a [Banka](29_Banka.md)). |
 | **Měny a účty** | Seznam bankovních účtů a přímé napojení na banku. Vidí ji ten, kdo smí číst nastavení bankovních účtů. |
 | **Stavy na účtech** | Aktuální zůstatky a jejich vývoj. |
 | **Bankovní avíza a PDF z e-mailu** | Nastavení IMAP, mapování avíz, parsery. Vidí ji administrátor. |

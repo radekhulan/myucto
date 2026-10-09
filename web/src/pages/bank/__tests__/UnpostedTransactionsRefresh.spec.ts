@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   refresh: null as null | (() => Promise<void>),
 }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ hasCommercialFeatures: true }) }))
 vi.mock('@/api/bankPosting', () => ({ bankPostingApi: { listUnposted: mocks.list } }))
 vi.mock('@/api/bank', () => ({ bankApi: { matchSuggestions: mocks.suggestions } }))
 vi.mock('vue-i18n', async importOriginal => ({

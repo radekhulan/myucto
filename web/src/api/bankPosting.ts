@@ -94,6 +94,18 @@ export type UnpostedBankTransaction = BankTransaction & {
   account_label: string | null
 }
 
+export type BankMovementListParams = {
+  page?: number; per_page?: number; year?: number; q?: string; scope?: 'unposted' | 'all'; account?: string
+  status?: 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
+  posting_status?: 'unposted' | 'posted'
+  sort?: BankTransactionSortKey; direction?: 'asc' | 'desc'
+}
+
+export interface BankMovementListResult {
+  items: UnpostedBankTransaction[]; total: number; page: number; per_page: number
+  scope: 'unposted' | 'all'; years: number[]; accounts: BankAccountOption[]
+}
+
 export interface RuleHistory {
   events: Array<{ id: number; event_type: string; reason: string | null; created_by_name: string | null; created_at: string }>
   corrections: Array<{ id: number; event_type: string; suggested: string | null; final: string | null; amount: number | null; created_by_name: string | null; created_at: string }>
@@ -196,17 +208,13 @@ export const bankPostingApi = {
   suggestionsCount: () =>
     api.get<{ pending: number }>('/accounting/bank-posting-suggestions/count')
       .then(r => r.data.pending),
-  // scope='all' → záložka „Všechny pohyby" (i zaúčtované, napříč účty a roky).
-  listUnposted: (params: {
-    page?: number; per_page?: number; year?: number; q?: string; scope?: 'unposted' | 'all'; account?: string
-    status?: 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
-    posting_status?: 'unposted' | 'posted'
-    sort?: BankTransactionSortKey; direction?: 'asc' | 'desc'
-  } = {}) =>
-    api.get<{
-      items: UnpostedBankTransaction[]; total: number; page: number; per_page: number
-      scope: 'unposted' | 'all'; years: number[]; accounts: BankAccountOption[]
-    }>('/accounting/bank-posting-unposted', { params }).then(r => r.data),
+  // Fronta „K zaúčtování" — jen podvojné účetnictví.
+  listUnposted: (params: BankMovementListParams = {}) =>
+    api.get<BankMovementListResult>('/accounting/bank-posting-unposted', { params }).then(r => r.data),
+  // Záložka „Všechny pohyby" (i zaúčtované, napříč účty a roky) — každá firma s výpisy,
+  // bez ohledu na režim účetnictví. Stav zaúčtování server vyplní jen v podvojném účetnictví.
+  listMovements: (params: Omit<BankMovementListParams, 'scope'> = {}) =>
+    api.get<BankMovementListResult>('/bank-transactions', { params }).then(r => r.data),
   unpostedCount: () =>
     api.get<{ unposted: number }>('/accounting/bank-posting-unposted/count')
       .then(r => r.data.unposted),

@@ -22166,6 +22166,8 @@
       "unposted_empty": "Všechny bankovní pohyby jsou zaúčtované.",
       "tab_all": "Všechny pohyby",
       "all_hint": "Všechny bankovní pohyby na všech účtech, zaúčtované i nezaúčtované, napříč roky.",
+      "all_hint_evidence": "Všechny bankovní pohyby na všech účtech napříč roky, spárované i nespárované.",
+      "all_empty": "Zatím nejsou nahrané žádné bankovní pohyby.",
       "col_account": "Náš účet",
       "search_placeholder": "Hledat protistranu, VS, číslo účtu, popis nebo částku…",
       "all_years": "Všechny roky",

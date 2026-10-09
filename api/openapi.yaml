@@ -20285,6 +20285,37 @@ paths:
         '200': { description: OK }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/bank-transactions:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Bank]
+      summary: Seznam všech bankovních pohybů napříč účty a roky
+      description: |
+        Pohyby ze všech bankovních výpisů aktuální firmy, včetně spárovaných
+        a ignorovaných. Dostupné každé firmě s výpisy bez ohledu na režim
+        účetnictví; vyžaduje čtení banky. Stav zaúčtování (`posting.status`,
+        protiúčty, `period_closed`) vyplňuje jen firma v podvojném účetnictví,
+        jinak `posting` nese nejvýš mzdové párování. Filtr a řazení podle
+        zaúčtování se mimo podvojné účetnictví ignorují.
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { in: query, name: year, schema: { type: integer }, description: Kalendářní rok pohybu. }
+        - { in: query, name: account, schema: { type: string }, description: Náš účet (číslo účtu bez ohledu na formát). }
+        - { in: query, name: q, schema: { type: string, maxLength: 100 }, description: 'Protistrana, popis, číslo účtu protistrany, VS nebo přesná částka.' }
+        - { in: query, name: status, schema: { type: string, enum: [unmatched, auto_exact, auto_partial, manual, ignored] }, description: Stav párování s doklady. }
+        - { in: query, name: posting_status, schema: { type: string, enum: [unposted, posted] }, description: Jen podvojné účetnictví. }
+        - { in: query, name: sort, schema: { type: string, enum: [posted_at, amount, account, variable_symbol, counterparty, invoice, status, posting] } }
+        - { in: query, name: direction, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankMovementPage' }
+        '400': { description: 'Není zvolena firma.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/bank-transactions/payment-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -35230,8 +35261,41 @@ components:
             transfer: { $ref: '#/components/schemas/BankTransferPostingInfo' }
         dimensions:
           type: object
-          description: "Dimenze pohybu (Firma → Dimenze) jako mapa id typu → id hodnoty. Jen v detailu výpisu a jen u firmy se zapnutými dimenzemi."
+          description: "Dimenze pohybu (Firma → Dimenze) jako mapa id typu → id hodnoty. Jen v detailu výpisu a v seznamu pohybů a jen u firmy se zapnutými dimenzemi."
           additionalProperties: { type: integer, format: int64 }
+
+    BankMovementPage:
+      type: object
+      description: Stránka seznamu bankovních pohybů (`GET /bank-transactions`).
+      required: [items, total, page, per_page, scope, years, accounts]
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/BankTransaction'
+              - type: object
+                properties:
+                  account_number: { type: string, description: Náš účet z výpisu. }
+                  bank_code: { type: [string, "null"] }
+                  account_label: { type: [string, "null"], description: Název našeho účtu z nastavení firmy. }
+                  period_closed: { type: boolean, description: "Pohyb leží v uzavřeném nebo zamčeném účetním období. Mimo podvojné účetnictví vždy false." }
+                  fx_rate: { type: [number, "null"], description: Kurz do CZK ke dni pohybu. }
+                  amount_czk: { type: [number, "null"] }
+        total: { type: integer }
+        page: { type: integer, minimum: 1 }
+        per_page: { type: integer, minimum: 1, maximum: 100 }
+        scope: { type: string, enum: [all] }
+        years: { type: array, items: { type: integer }, description: Roky, ve kterých má firma pohyby. }
+        accounts:
+          type: array
+          description: Naše účty s výpisy pro filtr.
+          items:
+            type: object
+            properties:
+              account_number: { type: string }
+              bank_code: { type: [string, "null"] }
+              label: { type: [string, "null"] }
 
     SupplierUpdate:
       type: object

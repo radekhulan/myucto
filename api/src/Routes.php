@@ -3595,6 +3595,7 @@ final class Routes
         $app->get  ('/api/bank-statements/{id:[0-9]+}/match-suggestions', [BankStatementAction::class, 'matchSuggestions']);
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/accept', [BankStatementAction::class, 'acceptMatchSuggestion']);
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/reject', [BankStatementAction::class, 'rejectMatchSuggestion']);
+        $app->get  ('/api/bank-transactions',                \MyInvoice\Action\Bank\BankTransactionListAction::class);
         $app->get  ('/api/bank-transactions/{id:[0-9]+}/match-candidates', [BankStatementAction::class, 'matchCandidates']);
         $app->get  ('/api/bank-transactions/payment-candidates', [\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class, 'list']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/match-document', [\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class, 'match']);
