@@ -58,6 +58,60 @@ final class PayrollAbsenceValidatorTest extends TestCase
         ]);
     }
 
+    /**
+     * Převzatá nepřítomnost z roku před prvním rulesetem je historická evidence: zapíše
+     * se bez sazby náhrady (náhradu nese převzatá mzda), ručně zadaná dál selže.
+     */
+    public function testTakenOverAbsenceBeforeRulesetsIsHistoricalEvidenceWithoutRate(): void
+    {
+        $dpn = $this->validator()->absence([
+            'employment_id' => 1,
+            'absence_type' => 'dpn',
+            'date_from' => '2023-12-20',
+            'date_to' => '2024-01-10',
+        ], takeover: true);
+        $vacation = $this->validator()->absence([
+            'employment_id' => 1,
+            'absence_type' => 'vacation',
+            'date_from' => '2024-03-04',
+            'date_to' => '2024-03-08',
+        ], takeover: true);
+
+        self::assertSame('dpn', $dpn['compensation_policy']);
+        self::assertNull($dpn['compensation_rate_basis_points']);
+        self::assertSame('2023-12-20', $dpn['date_from']);
+        self::assertSame('average_100', $vacation['compensation_policy']);
+        self::assertTrue($this->validator()->predatesRulesets('2025-12-31'));
+        self::assertFalse($this->validator()->predatesRulesets('2026-01-01'));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('není účinný mzdový ruleset domény compensation_averages');
+        $this->validator()->absence([
+            'employment_id' => 1,
+            'absence_type' => 'dpn',
+            'date_from' => '2023-12-20',
+            'date_to' => '2024-01-10',
+        ]);
+    }
+
+    /** Převzatá nepřítomnost přes začátek rulesetů nebo v roce po nich zůstává fail-closed. */
+    public function testTakenOverAbsenceReachingCoveredOrLaterYearStillFailsClosed(): void
+    {
+        foreach ([['2025-12-20', '2026-01-10'], ['2027-02-01', '2027-02-05']] as [$from, $to]) {
+            try {
+                $this->validator()->absence([
+                    'employment_id' => 1,
+                    'absence_type' => 'dpn',
+                    'date_from' => $from,
+                    'date_to' => $to,
+                ], takeover: true);
+                self::fail("Převzatá nepřítomnost {$from} - {$to} neměla projít bez rulesetu.");
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('není účinný mzdový ruleset', $e->getMessage());
+            }
+        }
+    }
+
     public function testDpnCompensationRateComesFromRulesetNotFromLiteral(): void
     {
         $data = $this->validator()->absence([

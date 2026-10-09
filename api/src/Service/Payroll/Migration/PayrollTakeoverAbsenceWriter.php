@@ -148,9 +148,16 @@ final class PayrollTakeoverAbsenceWriter
             // Schvaluje se vše, co schválení pustí: druhy bez náhrady z průměru rovnou,
             // ostatní tehdy, když čtvrtletí už má schválený průměr. Nerozhodnutá
             // nepřítomnost jinak blokuje schválení pracovního měsíce.
+            // Historická nepřítomnost z doby před prvním rulesetem náhrad se schvaluje
+            // i bez průměru: průměr chrání výpočet náhrady, který za takové období
+            // nevznikne nikdy (běh ho bez rulesetu nespočítá, náhradu nese převzatá
+            // mzda), a průměr pro takový rok ani založit nejde. Neschválenou by ELDP
+            // při skládání vyloučených dob převzatého měsíce nevidělo.
             $quarter = (int) ceil(((int) substr((string) $absence['from'], 5, 2)) / 3);
-            $hasAverage = $this->averages->findApproved($supplierId, $employmentId, (int) substr((string) $absence['from'], 0, 4), $quarter) !== null;
-            if (!in_array($absence['type'], PayrollAbsenceValidator::TYPES_REQUIRING_AVERAGE, true) || $hasAverage) {
+            $historical = $this->absenceValidator->predatesRulesets((string) $absence['to']);
+            $hasAverage = !$historical
+                && $this->averages->findApproved($supplierId, $employmentId, (int) substr((string) $absence['from'], 0, 4), $quarter) !== null;
+            if ($historical || !in_array($absence['type'], PayrollAbsenceValidator::TYPES_REQUIRING_AVERAGE, true) || $hasAverage) {
                 try {
                     $this->absences->decide($supplierId, (int) $created['id'], (int) $created['row_version'], 'approved', $userId);
                     $approved++;
@@ -267,7 +274,7 @@ final class PayrollTakeoverAbsenceWriter
             (string) $previous['date_from'],
             PayrollAbsenceRepository::carriedWindowDays($previous),
             $from,
-            AbsenceRuleset::forDate($this->rulesets, (string) $previous['date_from'])->sicknessWindowCalendarDays(),
+            AbsenceRuleset::forSicknessWindow($this->rulesets, (string) $previous['date_from'])->sicknessWindowCalendarDays(),
         );
     }
 

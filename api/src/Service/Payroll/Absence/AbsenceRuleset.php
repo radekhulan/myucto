@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 /**
  * Jediná čtecí cesta k zákonným číslům absencí, průměrů a dovolené.
@@ -27,6 +28,22 @@ final class AbsenceRuleset
         return new self(
             $rulesets->forDate(PayrollRulesetDomain::CompensationAverages, $date),
         );
+    }
+
+    /**
+     * Ruleset pro okno náhrady § 192 ZP neschopnosti, která vznikla `$onset`.
+     *
+     * Den vzniku před prvním rulesetem má typicky neschopnost převzatá z předchozího
+     * programu jako historická evidence (ručně ji před prvním rulesetem zapsat nejde),
+     * která trvá do období s rulesetem. Okno ovlivní jen tu pozdější část a ta se
+     * počítá podle prvního rulesetu; délka okna (14 dnů) se od roku 2014 nezměnila.
+     * Na den PO posledním rulesetu se fallback nevztahuje, ten dál selže.
+     */
+    public static function forSicknessWindow(PayrollRulesetProvider $rulesets, string $onset): self
+    {
+        $first = PayrollRulesetYearCoverage::firstCoveredDate($rulesets, PayrollRulesetDomain::CompensationAverages);
+
+        return self::forDate($rulesets, $first !== null && $onset < $first ? $first : $onset);
     }
 
     public static function forYear(PayrollRulesetProvider $rulesets, int $year): self

@@ -83,8 +83,20 @@ final class PayrollAbsenceValidator
         if ($to < $from) {
             throw new \InvalidArgumentException('Konec absence nesmí předcházet začátku.');
         }
-        PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $from);
-        PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $to);
+        /*
+         * Převzatá nepřítomnost z doby PŘED prvním rulesetem náhrad je historická
+         * evidence, ne vstup výpočtu: náhradu za ni nese převzatá mzda a mzdový běh
+         * takové období nikdy nespočítá (bez rulesetu selže). Potřebuje ji ELDP,
+         * které z ní skládá rozpad vyloučených dob § 16 odst. 4 převzatého měsíce.
+         * Proto se u ní pokrytí nekontroluje a sazba náhrady se nedosazuje.
+         * Ručně zadaná nepřítomnost, převzatá přes začátek rulesetů nebo v roce PO
+         * posledním rulesetu zůstávají fail-closed.
+         */
+        $historical = $takeover && $this->predatesRulesets($to);
+        if (!$historical) {
+            PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $from);
+            PayrollRulesetYearCoverage::assertDate($this->rulesets, self::DOMAIN, $to);
+        }
         [$expectedChildbirth, $childbirth] = $this->childbirthDates($type, $from, $body);
         $timezone = trim((string) ($body['timezone_name'] ?? 'Europe/Prague'));
         try {
@@ -195,6 +207,7 @@ final class PayrollAbsenceValidator
             // 10 000 bp u ostatních politik je definice „average_100", ne sazba.
             'compensation_rate_basis_points' => match (true) {
                 $policy === 'none' => null,
+                $policy === 'dpn' && $historical => null,
                 $policy === 'dpn' => AbsenceRuleset::forDate($this->rulesets, $from)
                     ->compensationRateBasisPoints(),
                 $obstacleRate !== null => $obstacleRate,
@@ -204,6 +217,16 @@ final class PayrollAbsenceValidator
             'compensation_rate_reason' => $obstacleRateReason,
             'average_snapshot_id' => $averageId,
         ];
+    }
+
+    /**
+     * Končí převzatá nepřítomnost před prvním dnem rulesetu náhrad, tedy v době,
+     * kterou mzdový běh nikdy nepočítá? Pak je historickou evidencí
+     * ({@see self::absence()}) a převod ji schvaluje bez průměru.
+     */
+    public function predatesRulesets(string $date): bool
+    {
+        return PayrollRulesetYearCoverage::predatesCoverage($this->rulesets, self::DOMAIN, $date);
     }
 
     /**

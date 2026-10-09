@@ -192,6 +192,113 @@ final class PayrollTakeoverSicknessCaseTest extends TestCase
         self::assertArrayHasKey('HZUPN', $this->watched((int) $cases[0]['id']));
     }
 
+    /**
+     * T-3: nepřítomnosti převzaté z roku, pro který MyÚčto nemá ruleset náhrad
+     * (`compensation_averages` začíná rokem 2025), se dřív nezapsaly vůbec
+     * (`absences_rejected`) a ELDP pak u převzatého měsíce s vyloučenými dny nemělo
+     * z čeho složit rozpad § 16 odst. 4. Zapíšou se jako historická evidence:
+     * schválené, bez sazby náhrady a bez průměru. Převod běží po letech, takže
+     * neschopnost přes konec roku přijde ve dvou částech a druhá na první naváže.
+     */
+    public function testTakenOverAbsencesBeforeRulesetsAreRecordedAsHistory(): void
+    {
+        $person = $this->createEmployment($this->officeId, 'Hana Historická', 24, 'hpp', 'employment', 40, 10_000);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = "2020-01-01", actual_start_date = "2020-01-01" WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $writer = $this->writer(PayrollTakeoverAbsenceWriter::class);
+        $policy = new PayrollTakeoverPolicy('pamica', 'PAMICA');
+        $year = static fn (array $absences, string $start): PayrollTakeoverEmployment => new PayrollTakeoverEmployment(
+            personalNumber: 'FLOW-24',
+            relationKey: 'FLOW-24',
+            absences: $absences,
+            transferStart: $start,
+        );
+
+        $counts2023 = $writer->absences($this->supplierId, $person['employment_id'], $year([
+            ['type' => 'dpn', 'from' => '2023-12-20', 'to' => '2023-12-31', 'childbirth' => null],
+        ], '2023-01'), $this->actors[0], $policy, new PayrollTakeoverRunState());
+        $counts2024 = $writer->absences($this->supplierId, $person['employment_id'], $year([
+            ['type' => 'dpn', 'from' => '2024-01-01', 'to' => '2024-01-10', 'childbirth' => null],
+            ['type' => 'vacation', 'from' => '2024-03-04', 'to' => '2024-03-08', 'childbirth' => null],
+            ['type' => 'ocr', 'from' => '2024-05-13', 'to' => '2024-05-17', 'childbirth' => null],
+        ], '2024-01'), $this->actors[0], $policy, new PayrollTakeoverRunState());
+
+        $explain = json_encode([$counts2023, $counts2024]) ?: '';
+        self::assertArrayNotHasKey('absences_rejected', $counts2023, $explain);
+        self::assertArrayNotHasKey('absences_rejected', $counts2024, $explain);
+        self::assertSame(1, $counts2023['absences_approved'] ?? 0, $explain);
+        self::assertSame(3, $counts2024['absences_approved'] ?? 0, $explain);
+        $rows = $this->absencesOf($person['employment_id']);
+        self::assertSame([
+            ['dpn', '2023-12-20', '2023-12-31', 'approved', null, 0],
+            ['dpn', '2024-01-01', '2024-01-10', 'approved', null, 12],
+            ['vacation', '2024-03-04', '2024-03-08', 'approved', 10_000, 0],
+            ['ocr', '2024-05-13', '2024-05-17', 'approved', null, 0],
+        ], $rows);
+        self::assertSame([], $this->casesOf($person['employment_id']), 'Událost skončená před vedením mezd případ nezakládá.');
+
+        $again = $writer->absences($this->supplierId, $person['employment_id'], $year([
+            ['type' => 'dpn', 'from' => '2024-01-01', 'to' => '2024-01-10', 'childbirth' => null],
+        ], '2024-01'), $this->actors[0], $policy, new PayrollTakeoverRunState());
+        self::assertSame(['absences_existing' => 1], $again);
+    }
+
+    /**
+     * Neschopnost převzatá z roku bez rulesetu, která pokračuje do prvního roku
+     * s rulesetem a do vedení mezd v MyÚčtu: navazující část nese dny okna § 192 ZP
+     * vyčerpané historickou částí a případ dávky začíná skutečným dnem vzniku.
+     */
+    public function testTakenOverSicknessFromYearBeforeRulesetsContinuesIntoPayroll(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state SET start_period = "2025-01-01" WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+        $person = $this->createEmployment($this->officeId, 'Ivo Navazující', 25, 'hpp', 'employment', 40, 10_000);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET start_date = "2020-01-01", actual_start_date = "2020-01-01" WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $person['employment_id']]);
+        $writer = $this->writer(PayrollTakeoverAbsenceWriter::class);
+        $policy = new PayrollTakeoverPolicy('pamica', 'PAMICA');
+
+        foreach ([['2024-12-27', '2024-12-31', '2024-01'], ['2025-01-01', '2025-01-31', '2025-01']] as [$from, $to, $start]) {
+            $counts = $writer->absences($this->supplierId, $person['employment_id'], new PayrollTakeoverEmployment(
+                personalNumber: 'FLOW-25',
+                relationKey: 'FLOW-25',
+                absences: [['type' => 'dpn', 'from' => $from, 'to' => $to, 'childbirth' => null]],
+                transferStart: $start,
+            ), $this->actors[0], $policy, new PayrollTakeoverRunState());
+            self::assertArrayNotHasKey('absences_rejected', $counts, json_encode($counts) ?: '');
+        }
+
+        $rows = $this->absencesOf($person['employment_id']);
+        self::assertSame(['dpn', '2024-12-27', '2024-12-31', 'approved', null, 0], $rows[0]);
+        self::assertSame('2025-01-01', $rows[1][1]);
+        self::assertSame(5, $rows[1][5], 'Navazující část nese pět dnů okna vyčerpaných v roce 2024.');
+        $cases = $this->casesOf($person['employment_id']);
+        self::assertCount(1, $cases);
+        self::assertSame('2024-12-27', $cases[0]['incapacity_from']);
+    }
+
+    /** @return list<array{0:string,1:string,2:string,3:string,4:?int,5:int}> */
+    private function absencesOf(int $employmentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT absence_type, date_from, date_to, status, compensation_rate_basis_points, sickness_window_carried_days
+               FROM payroll_absences WHERE supplier_id = ? AND employment_id = ? ORDER BY date_from',
+        );
+        $stmt->execute([$this->supplierId, $employmentId]);
+
+        return array_map(static fn (array $row): array => [
+            (string) $row['absence_type'],
+            (string) $row['date_from'],
+            (string) $row['date_to'],
+            (string) $row['status'],
+            $row['compensation_rate_basis_points'] === null ? null : (int) $row['compensation_rate_basis_points'],
+            (int) $row['sickness_window_carried_days'],
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
     /** @return list<array<string,mixed>> */
     private function casesOf(int $employmentId): array
     {

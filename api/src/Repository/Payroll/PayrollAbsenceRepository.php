@@ -828,7 +828,9 @@ final class PayrollAbsenceRepository
             $windowFrom->format('Y-m-d'),
             self::carriedWindowDays($startRow),
             (string) $absence['date_from'],
-            AbsenceRuleset::forDate($this->rulesets, (string) $startRow['date_from'])->sicknessWindowCalendarDays(),
+            // Začátek řetězu smí ležet před prvním rulesetem, je-li to převzatá
+            // historická nepřítomnost ({@see AbsenceRuleset::forSicknessWindow()}).
+            AbsenceRuleset::forSicknessWindow($this->rulesets, (string) $startRow['date_from'])->sicknessWindowCalendarDays(),
         );
 
         return [

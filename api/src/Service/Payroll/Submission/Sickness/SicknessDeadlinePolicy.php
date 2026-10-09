@@ -131,7 +131,9 @@ final class SicknessDeadlinePolicy
         );
         $duration = (int) $from->diff($to)->format('%r%a') + 1 + max(0, $carriedCalendarDays);
 
-        return $duration > AbsenceRuleset::forDate($this->rulesets, $incapacityFrom)
+        // Den vzniku před prvním rulesetem má neschopnost převzatá jako historická
+        // evidence, která trvá do vedení mezd v MyÚčtu ({@see AbsenceRuleset::forSicknessWindow()}).
+        return $duration > AbsenceRuleset::forSicknessWindow($this->rulesets, $incapacityFrom)
             ->sicknessWindowCalendarDays();
     }
 
@@ -198,7 +200,11 @@ final class SicknessDeadlinePolicy
             );
         }
 
-        $absence = AbsenceRuleset::forDate($this->rulesets, $incapacityFrom);
+        // U nemocenského rozhoduje jen okno § 192 ZP; den vzniku před prvním
+        // rulesetem nese převzatá neschopnost, viz {@see self::nempriRequired()}.
+        $absence = $kind === SicknessBenefitKind::Nem
+            ? AbsenceRuleset::forSicknessWindow($this->rulesets, $incapacityFrom)
+            : AbsenceRuleset::forDate($this->rulesets, $incapacityFrom);
 
         [$earliest, $reference] = match ($kind) {
             // § 97 odst. 2 věta druhá: neprodleně PO UPLYNUTÍ prvních 14 dnů,

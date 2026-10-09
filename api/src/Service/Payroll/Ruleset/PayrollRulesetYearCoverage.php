@@ -56,6 +56,33 @@ final class PayrollRulesetYearCoverage
     }
 
     /**
+     * Leží datum před prvním dnem, od kterého má doména účinný ruleset?
+     *
+     * Odpověď „ano" znamená období, které mzdový modul nikdy nespočítá (běh bez
+     * rulesetu selže), a ne období, kde ruleset teprve chybí: rok PO posledním
+     * rulesetu sem nepatří. Doména bez jediného rulesetu vrací `false`, aby se
+     * z prázdného registru nestala historie.
+     */
+    public static function predatesCoverage(
+        PayrollRulesetProvider $rulesets,
+        PayrollRulesetDomain $domain,
+        string $date,
+    ): bool {
+        self::assertDateFormat($date);
+        $first = self::firstCoveredDate($rulesets, $domain);
+
+        return $first !== null && $date < $first;
+    }
+
+    /** První den, od kterého má doména účinný ruleset; `null` bez jediného rulesetu. */
+    public static function firstCoveredDate(
+        PayrollRulesetProvider $rulesets,
+        PayrollRulesetDomain $domain,
+    ): ?string {
+        return self::intervals($rulesets, $domain)[0]['from'] ?? null;
+    }
+
+    /**
      * Rok je pokrytý jen tehdy, když na něj účinné rulesety navazují bez díry
      * od 1. 1. do 31. 12. Částečné pokrytí by znamenalo, že část roku spadne do
      * prázdna až při konkrétním výpočtu — což je přesně ta tichá chyba, kterou
