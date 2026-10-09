@@ -1283,8 +1283,62 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
         $employments->transition($this->supplierId, $employmentId, $target, $version, $effectiveOn, null, $this->actors[0], null, null);
     }
 
+    /**
+     * Občan SR narozený po roce 1992 s rodným číslem i EČP, nástup 1. 4. zadaný
+     * v říjnu: přihláška A1 nese v client/@bno EČP (pokyny REGZEC, 10057).
+     */
+    public function testSlovakCitizenBornAfter1992RegistersWithEcp(): void
+    {
+        $registration = $this->container->get(PayrollRegistrationAction::class);
+        self::assertInstanceOf(PayrollRegistrationAction::class, $registration);
+        $people = $this->container->get(PayrollPersonCreateService::class);
+        self::assertInstanceOf(PayrollPersonCreateService::class, $people);
+        $birthNumber = self::syntheticBirthNumber('1995-06-10', 'male', 51);
+        $created = $people->create($this->supplierId, [
+            'full_name' => 'Syntetický Slovák',
+            'first_name' => 'Syntetický',
+            'last_name' => 'Slovák',
+            'birth_date' => '1995-06-10',
+            'birth_number' => $birthNumber,
+            'relation_type' => 'employment',
+            'planned_start_on' => '2026-04-01',
+            'office_id' => $this->officeId,
+            'health_insurer_code' => '111',
+        ], $this->actors[0], null, null);
+        $employeeId = (int) $created['id'];
+        $employmentId = (int) $this->scalar('SELECT id FROM payroll_employments WHERE supplier_id = ? AND employee_id = ?', [$this->supplierId, $employeeId]);
+        $this->completeRegistrationCard($employeeId, $employmentId, 'SK', '1995-06-10', 'male', 'Slovák');
+        $this->insertPersonIdentifier($employeeId, 'ecp', '9506101234');
+        $profile = self::a1Profile('2026-04-01');
+        $profile['proof_identity'] = ['type_code' => 'P', 'number' => 'SYN-54321', 'foreign_issuer' => 'Syntetický úřad', 'country_code' => 'SK'];
+        $profile['foreign_worker'] = [
+            'free_access' => true,
+            'free_access_reason_code' => '1',
+            'permit_type_code' => null,
+            'issuing_labour_office_code' => null,
+            'permit_identifier' => null,
+            'permit_from' => null,
+            'permit_to' => null,
+        ];
+        $profile['employment']['expected_workplaces'] = 'Praha';
+        $profile['employment']['required_education_code'] = 'T';
+        $this->saveA1Profile($registration, $employmentId, $profile);
+        $a1 = $this->prepareRegistration($registration, $employmentId, ['registration_mode' => 'full']);
+        $xml = $this->artifactXml((int) $a1['submission_id']);
+        self::assertMatchesRegularExpression('/<client [^>]*bno="9506101234"/', $xml);
+        self::assertStringNotContainsString('bno="' . $birthNumber . '"', $xml);
+        self::assertStringContainsString(' fro="2026-04-01"', $xml);
+    }
+
     /** Karta osoby pro registraci: identita, trvalá adresa, pojišťovna a místo výkonu. */
-    private function completeRegistrationCard(int $employeeId, int $employmentId): void
+    private function completeRegistrationCard(
+        int $employeeId,
+        int $employmentId,
+        string $citizenship = 'CZ',
+        string $birthDate = '1994-04-15',
+        string $sex = 'female',
+        string $birthSurname = 'Zpětná',
+    ): void
     {
         $identities = $this->container->get(PayrollRegistrationIdentityService::class);
         self::assertInstanceOf(PayrollRegistrationIdentityService::class, $identities);
@@ -1297,17 +1351,17 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
             [$this->supplierId, $identityId],
         );
         $this->db->pdo()->prepare(
-            'UPDATE payroll_person_identity_history SET birth_surname = "Zpětná", effective_from = "2026-01-01"
+            'UPDATE payroll_person_identity_history SET birth_surname = ?, effective_from = "2026-01-01"
               WHERE supplier_id = ? AND id = ?',
-        )->execute([$this->supplierId, $identityId]);
+        )->execute([$birthSurname, $this->supplierId, $identityId]);
         $identities->saveIdentityFacts($this->supplierId, $employeeId, $identityId, $rowVersion, [
             'title_prefix' => null,
             'title_suffix' => null,
-            'birth_date' => '1994-04-15',
+            'birth_date' => $birthDate,
             'birth_place' => 'Testov',
-            'birth_country_code' => 'CZ',
-            'citizenship_country_code' => 'CZ',
-            'sex' => 'female',
+            'birth_country_code' => $citizenship,
+            'citizenship_country_code' => $citizenship,
+            'sex' => $sex,
         ]);
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_person_addresses
