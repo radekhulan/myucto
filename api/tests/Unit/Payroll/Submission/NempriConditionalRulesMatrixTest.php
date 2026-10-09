@@ -52,6 +52,8 @@ final class NempriConditionalRulesMatrixTest extends TestCase
         yield 'dlo rozvrh směn od po do' => ['dlo', ['actionStart' => false, 'actionEnd' => true, 'shiftSchedule' => [['from' => '2026-09-11', 'to' => '2026-09-07']]], [], 'nempri_period_invalid'];
         yield 'dlo bez akce' => ['dlo', ['actionStart' => false, 'actionContinuation' => false, 'actionEnd' => false], [], 'nempri_care_action_missing'];
         yield 'dlo bez čísla rozhodnutí' => ['dlo', [], ['decisionNumber' => null], 'nempri_decision_number_missing'];
+        yield 'nem název programu nad 64 znaků' => ['nem', [], ['productName' => str_repeat('a', 65)], 'nempri_vendor_invalid'];
+        yield 'nem verze programu nad 16 znaků' => ['nem', [], ['productVersion' => str_repeat('1', 17)], 'nempri_vendor_invalid'];
     }
 
     /**
@@ -146,7 +148,7 @@ final class NempriConditionalRulesMatrixTest extends TestCase
             'foreignCase' => false,
             'insuredFirstName' => 'Jan',
             'insuredLastName' => 'Testovací',
-            'insuredBirthNumber' => '8001010008',
+            'insuredBirthNumber' => '8001010006',
             'insuredPhone' => null,
             'insuredEmail' => null,
             'employerVariableSymbol' => '1234567890',

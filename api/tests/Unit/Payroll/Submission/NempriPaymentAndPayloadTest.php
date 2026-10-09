@@ -129,7 +129,7 @@ final class NempriPaymentAndPayloadTest extends TestCase
             ],
             [
                 'identity' => ['first_name' => 'Jan', 'last_name' => 'Testovací'],
-                'identifiers' => ['birth_number' => '8001010008', 'ecp' => null],
+                'identifiers' => ['birth_number' => '8001010006', 'ecp' => null],
             ],
             '1.0',
             'MyUcto',

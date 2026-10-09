@@ -530,7 +530,7 @@ final class NempriBenefitApplicationXmlTest extends TestCase
             'foreignCase' => false,
             'insuredFirstName' => 'Jan',
             'insuredLastName' => 'Testovací',
-            'insuredBirthNumber' => '8001010008',
+            'insuredBirthNumber' => '8001010006',
             'insuredPhone' => null,
             'insuredEmail' => null,
             'employerVariableSymbol' => '1234567890',

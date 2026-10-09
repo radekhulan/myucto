@@ -1332,7 +1332,7 @@ final class NempriMatrixAndValidationTest extends TestCase
             'foreignCase' => false,
             'insuredFirstName' => 'Jan',
             'insuredLastName' => 'Testovací',
-            'insuredBirthNumber' => '8001010008',
+            'insuredBirthNumber' => '8001010006',
             'insuredPhone' => null,
             'insuredEmail' => null,
             'employerVariableSymbol' => '1234567890',
@@ -1386,7 +1386,7 @@ final class NempriMatrixAndValidationTest extends TestCase
             'insuredFirstName' => 'Jan',
             'insuredLastName' => 'Testovací',
             'insuredTitle' => null,
-            'insuredBirthNumber' => '8001010008',
+            'insuredBirthNumber' => '8001010006',
             'insuredBirthDate' => '1980-01-01',
             'employerName' => 'Testovací zaměstnavatel s.r.o.',
             'employerIdentificationNumber' => '12345678',
@@ -1446,7 +1446,7 @@ final class NempriMatrixAndValidationTest extends TestCase
     {
         return [
             'identity' => ['first_name' => 'Jan', 'last_name' => 'Testovací', 'birth_date' => '1980-01-01'],
-            'identifiers' => ['birth_number' => '8001010008', 'ecp' => null],
+            'identifiers' => ['birth_number' => '8001010006', 'ecp' => null],
         ];
     }
 }

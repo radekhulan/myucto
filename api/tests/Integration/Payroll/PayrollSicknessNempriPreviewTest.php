@@ -661,7 +661,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
 
         self::assertStringContainsString('<prijmeni>Přejmenovaný</prijmeni>', $xml);
         self::assertStringNotContainsString('<prijmeni>Testovací</prijmeni>', $xml);
-        self::assertStringContainsString('<rodneCislo>8001010008</rodneCislo>', $xml);
+        self::assertStringContainsString('<rodneCislo>8001010006</rodneCislo>', $xml);
     }
 
     /**
@@ -957,7 +957,7 @@ final class PayrollSicknessNempriPreviewTest extends TestCase
                 SET value_ciphertext = ?, value_hash = ?, value_masked = ?
               WHERE supplier_id = ? AND id = ?',
             [$this->supplierId, $employeeId, random_bytes(32)],
-            '8001010008',
+            '8001010006',
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
         );
         if ($withAccount) {

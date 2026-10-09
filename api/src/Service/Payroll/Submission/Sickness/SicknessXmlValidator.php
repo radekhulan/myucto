@@ -61,6 +61,7 @@ final readonly class SicknessXmlValidator
                 . 'NEMPRI ho vyžaduje vždy — bez něj ČSSZ případ nespáruje.',
             );
         }
+        $this->vendor('nempri_vendor_invalid', $payload->productName, $payload->productVersion);
         foreach ([
             'nempri_insured_first_name_missing' => $payload->insuredFirstName,
             'nempri_insured_last_name_missing' => $payload->insuredLastName,
@@ -207,6 +208,15 @@ final readonly class SicknessXmlValidator
                 'Rodné číslo nebo evidenční číslo pojištěnce musí mít 9 nebo 10 číslic.',
             );
         }
+        // DV HZUPN20, kontrola 2: rodné číslo musí být platné (modulo 11, datum).
+        $birthNumberProblem = self::birthNumberProblem($payload->insuredBirthNumber);
+        if ($birthNumberProblem !== null) {
+            $this->invalid(
+                'hzupn_birth_number_invalid',
+                'Rodné číslo pojištěnce není platné: ' . $birthNumberProblem,
+            );
+        }
+        $this->vendor('hzupn_vendor_invalid', $payload->productName, $payload->productVersion);
         if ($payload->correction && $payload->confirmationNumber === null) {
             $this->invalid(
                 'hzupn_correction_without_confirmation_number',
@@ -976,18 +986,13 @@ final readonly class SicknessXmlValidator
         }
         // DV NEMPRI25, LK 4: rodné číslo musí projít modulo 11 a nést platné
         // datum. EČP (den zvýšený o 40) se tu neověřuje, prvek ho připouští.
-        if ($person->birthNumber !== null
-            && (int) substr($person->birthNumber, 4, 2) <= 40
-        ) {
-            try {
-                CzechBirthNumber::normalize($person->birthNumber);
-            } catch (\InvalidArgumentException $exception) {
-                $this->invalid(
-                    'nempri_person_birth_number_invalid',
-                    'Rodné číslo dítěte nebo ošetřované osoby není platné: '
-                        . $exception->getMessage(),
-                );
-            }
+        $birthNumberProblem = self::birthNumberProblem($person->birthNumber);
+        if ($birthNumberProblem !== null) {
+            $this->invalid(
+                'nempri_person_birth_number_invalid',
+                'Rodné číslo dítěte nebo ošetřované osoby není platné: '
+                    . $birthNumberProblem,
+            );
         }
         if ($person->birthNumber === null && $person->birthDate === null) {
             $this->invalid(
@@ -999,6 +1004,39 @@ final readonly class SicknessXmlValidator
         if ($person->birthDate !== null) {
             $this->exactDate($person->birthDate, 'nempri_date_invalid');
             $this->notInFuture($person->birthDate);
+        }
+    }
+
+    /**
+     * Proč rodné číslo neprojde kontrolou validity (modulo 11 a datum), nebo
+     * `null`. EČP (den zvýšený o 40) se neověřuje a hodnota, která nemá 9 až
+     * 10 číslic, už má vlastní hlášku.
+     */
+    private static function birthNumberProblem(?string $value): ?string
+    {
+        if ($value === null
+            || preg_match('/^\d{9,10}$/D', $value) !== 1
+            || (int) substr($value, 4, 2) > 40
+        ) {
+            return null;
+        }
+        try {
+            CzechBirthNumber::normalize($value);
+        } catch (\InvalidArgumentException $exception) {
+            return $exception->getMessage();
+        }
+
+        return null;
+    }
+
+    /** VENDOR: název programu 0 až 64 znaků, verze 0 až 16 (DV NEMPRI25, HZUPN20). */
+    private function vendor(string $code, string $productName, string $productVersion): void
+    {
+        if (mb_strlen($productName) > 64 || mb_strlen($productVersion) > 16) {
+            $this->invalid(
+                $code,
+                'Název programu smí mít nejvýš 64 znaků a jeho verze 16 znaků.',
+            );
         }
     }
 
