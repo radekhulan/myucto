@@ -3472,6 +3472,16 @@ final class Routes
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/hide', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'hide']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/restore', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'restore']);
         $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);
+        // Kategorie zpráv, pravidla zařazení, ruční přeřazení a stav přečtení.
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/category', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'assign']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/read', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markRead']);
+        $app->get    ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'overview']);
+        $app->post   ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'createCategory']);
+        $app->put    ('/api/submissions/inbox/categories/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'updateCategory']);
+        $app->delete ('/api/submissions/inbox/categories/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'deleteCategory']);
+        $app->post   ('/api/submissions/inbox/category-rules', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'createRule']);
+        $app->put    ('/api/submissions/inbox/category-rules/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'updateRule']);
+        $app->delete ('/api/submissions/inbox/category-rules/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'deleteRule']);
         // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
         // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4
         // zák. 300/2008 Sb.) se mění pouhým během času.

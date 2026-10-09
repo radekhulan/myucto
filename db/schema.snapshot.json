@@ -962,7 +962,8 @@
         "1978_payroll_health_and_discount_exceptions_2026.sql",
         "1979_payroll_pension_requests.sql",
         "1980_payroll_absence_invalid_termination.sql",
-        "1981_client_email_subject_attachment_name.sql"
+        "1981_client_email_subject_attachment_name.sql",
+        "1982_submission_inbox_categories.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -21059,12 +21060,65 @@
                 "chk_submission_defect_notices_version": "`row_version` > 0"
             }
         },
+        "submission_inbox_categories": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "code": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "name": "varchar(100) NULL DEFAULT NULL",
+                "sort_order": "smallint(5) unsigned NOT NULL DEFAULT 100",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_submission_inbox_category_order": "BTREE (supplier_id, sort_order)",
+                "uq_submission_inbox_category_code": "UNIQUE BTREE (supplier_id, code)"
+            },
+            "foreign_keys": {
+                "fk_submission_inbox_category_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_submission_inbox_category_named": "`code` is not null or `name` is not null"
+            }
+        },
+        "submission_inbox_category_rules": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "category_id": "int(10) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "match_field": "enum('sender_box','sender_name','subject') NOT NULL",
+                "origin": "enum('auto','user') NOT NULL DEFAULT 'user'",
+                "pattern": "varchar(190) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_submission_inbox_category_rule_category": "BTREE (category_id)",
+                "uq_submission_inbox_category_rule": "UNIQUE BTREE (supplier_id, match_field, pattern)"
+            },
+            "foreign_keys": {
+                "fk_submission_inbox_category_rule_category": "(category_id) -> submission_inbox_categories (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_submission_inbox_category_rule_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "submission_inbox_messages": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "accepted_at": "datetime NULL DEFAULT NULL",
+                "category_id": "int(10) unsigned NULL DEFAULT NULL",
+                "category_source": "enum('auto','rule','manual') NULL DEFAULT NULL",
                 "channel": "enum('isds') NOT NULL",
                 "classification": "enum('delivery_receipt','cssz_protocol','health_insurer_response','tax_office_response','unclassified') NOT NULL DEFAULT 'unclassified'",
                 "delivered_at": "datetime NULL DEFAULT NULL",
@@ -21072,6 +21126,7 @@
                 "delivery_basis": "enum('login','fiction','login_or_fiction','pending','unknown') NOT NULL DEFAULT 'unknown'",
                 "delivery_note": "varchar(300) NULL DEFAULT NULL",
                 "delivery_resolved_at": "datetime NULL DEFAULT NULL",
+                "direction": "enum('received','sent') NULL DEFAULT NULL",
                 "document_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "environment": "enum('production','test') NOT NULL",
                 "external_message_id": "varchar(64) NOT NULL COLLATE ascii_bin",
@@ -21090,6 +21145,8 @@
                 "matched_outbox_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "processed_at": "datetime NULL DEFAULT NULL",
                 "raw_sha256": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "read_at": "datetime NULL DEFAULT NULL",
+                "read_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "sender_box_id": "char(7) NULL DEFAULT NULL COLLATE ascii_bin",
                 "sender_ident": "varchar(64) NULL DEFAULT NULL",
                 "sender_is_public_authority": "tinyint(1) NULL DEFAULT NULL",
@@ -21100,21 +21157,28 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_submission_inbox_category": "BTREE (category_id)",
                 "fk_submission_inbox_document": "BTREE (document_id)",
                 "fk_submission_inbox_hidden_by": "BTREE (hidden_by)",
                 "fk_submission_inbox_purged_by": "BTREE (local_content_purged_by)",
+                "fk_submission_inbox_read_by": "BTREE (read_by)",
+                "idx_submission_inbox_category": "BTREE (supplier_id, environment, category_id)",
                 "idx_submission_inbox_classification": "BTREE (supplier_id, classification, fetched_at)",
                 "idx_submission_inbox_delivery": "BTREE (supplier_id, environment, delivery_basis, fiction_due_on)",
+                "idx_submission_inbox_list": "BTREE (supplier_id, environment, delivered_at)",
                 "idx_submission_inbox_match": "BTREE (matched_outbox_id)",
+                "idx_submission_inbox_sender": "BTREE (supplier_id, environment, sender_box_id)",
                 "idx_submission_inbox_visibility": "BTREE (supplier_id, environment, hidden_at, fetched_at)",
                 "uq_submission_inbox_message": "UNIQUE BTREE (supplier_id, channel, environment, external_message_id)",
                 "uq_submission_inbox_supplier_id": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
+                "fk_submission_inbox_category": "(category_id) -> submission_inbox_categories (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_submission_inbox_document": "(document_id) -> documents (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_submission_inbox_hidden_by": "(hidden_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_submission_inbox_outbox": "(matched_outbox_id) -> submission_outbox (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_submission_inbox_purged_by": "(local_content_purged_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_submission_inbox_read_by": "(read_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_submission_inbox_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {

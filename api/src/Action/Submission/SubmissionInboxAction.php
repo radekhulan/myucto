@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Submission;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Repository\Submission\SubmissionInboxListQuery;
 use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
@@ -55,6 +56,24 @@ final class SubmissionInboxAction
         $supplierId = SupplierGuard::currentId($request);
         $params = $request->getQueryParams();
         $environment = (string) ($params['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        if ($this->inbox->supportsBrowse()) {
+            try {
+                $query = SubmissionInboxListQuery::fromQuery($params);
+            } catch (\InvalidArgumentException $e) {
+                return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+            }
+            $page = $this->inbox->browse($supplierId, $environment, $query);
+
+            return Json::ok($response, [
+                ...$page,
+                'limit' => $query->limit,
+                'offset' => $query->offset,
+                'state' => $this->inbox->pollState($supplierId, 'isds', $environment),
+            ]);
+        }
         $classification = isset($params['classification']) && $params['classification'] !== ''
             ? (string) $params['classification']
             : null;

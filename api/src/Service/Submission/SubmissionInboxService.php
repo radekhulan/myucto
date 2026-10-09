@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Submission;
 
 use MyInvoice\Repository\Submission\SubmissionChannelCredentialRepository;
+use MyInvoice\Repository\Submission\SubmissionInboxListQuery;
 use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -15,6 +16,7 @@ use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\Channel\SubmissionInboxChannel;
+use MyInvoice\Support\PeriodFilter;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -65,6 +67,7 @@ final readonly class SubmissionInboxService
         private ActivityLogger $activity,
         private LoggerInterface $logger,
         private ?SubmissionInboxMessageProcessor $messageProcessor = null,
+        private ?SubmissionInboxCategoryService $categories = null,
     ) {}
 
     /**
@@ -436,6 +439,7 @@ final readonly class SubmissionInboxService
         int $limit = SubmissionInboxRepository::LIST_DEFAULT_LIMIT,
         int $offset = 0,
         string $visibility = 'active',
+        ?PeriodFilter $period = null,
     ): array {
         return $this->inbox->listRecentPage(
             $supplierId,
@@ -444,7 +448,41 @@ final readonly class SubmissionInboxService
             $limit,
             $offset,
             $visibility,
+            $period,
         );
+    }
+
+    /** Umí databáze kategorie, filtry a hledání v seznamu (migrace 1982)? */
+    public function supportsBrowse(): bool
+    {
+        return $this->categories !== null
+            && $this->categories->isAvailable()
+            && $this->inbox->supportsCategories();
+    }
+
+    /**
+     * Seznam s kategoriemi, filtry a hledáním. Zprávy bez kategorie se před
+     * výpisem dorovnají ({@see SubmissionInboxCategoryService::ensureCategorized()}),
+     * takže počty u kategorií nikdy nevynechají nezařazené zprávy.
+     *
+     * @return array<string,mixed>
+     */
+    public function browse(int $supplierId, string $environment, SubmissionInboxListQuery $query): array
+    {
+        if ($this->categories === null || !$this->supportsBrowse()) {
+            throw new \DomainException('Kategorie příchozích zpráv nejsou k dispozici (chybí migrace 1982).');
+        }
+        $this->categories->ensureCategorized($supplierId);
+
+        return [
+            ...$this->inbox->browse($supplierId, $environment, $query),
+            'categories' => $this->categories->listCategories($supplierId),
+        ];
+    }
+
+    public function markRead(int $supplierId, int $messageId, bool $read, ?int $userId): bool
+    {
+        return $this->inbox->markRead($supplierId, $messageId, $read, $userId);
     }
 
     /** @return array<string,mixed>|null */
@@ -621,6 +659,7 @@ final readonly class SubmissionInboxService
         // při čtení, měnil by se podle toho, kdy se kdo podívá — a od něj běží
         // lhůty, takže musí být uložený a dohledatelný.
         $this->resolveDelivery($message);
+        $this->categorize($context->supplierId);
 
         $this->applyDeliveryReceipt($context, $verdict, $header);
 
@@ -722,6 +761,25 @@ final readonly class SubmissionInboxService
             $this->logger->warning('Delivery resolution failed for inbox message', [
                 'supplier_id' => $message['supplier_id'] ?? null,
                 'message_id' => $message['id'] ?? null,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Zařazení do kategorie hned po uložení. Selhání nesmí položit stažení:
+     * zpráva bez kategorie se dorovná při dalším načtení seznamu.
+     */
+    private function categorize(int $supplierId): void
+    {
+        if ($this->categories === null) {
+            return;
+        }
+        try {
+            $this->categories->ensureCategorized($supplierId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Inbox message categorization failed', [
+                'supplier_id' => $supplierId,
                 'error' => $e->getMessage(),
             ]);
         }

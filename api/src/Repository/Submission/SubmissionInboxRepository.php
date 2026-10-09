@@ -258,6 +258,290 @@ final class SubmissionInboxRepository
         )));
     }
 
+    /** Umí databáze kategorie, směr a přečtení zpráv (migrace 1982)? */
+    public function supportsCategories(): bool
+    {
+        return $this->isAvailable()
+            && $this->db->hasColumn(self::TABLE, 'category_id')
+            && $this->db->hasTable('submission_inbox_categories');
+    }
+
+    /**
+     * Obálka zprávy z DMS. Jeden řádek na kontejner; MIN(id) jen pojistí, že
+     * případný duplicitní zápis metadat nezdvojí řádky seznamu.
+     */
+    private const ENVELOPE_JOIN = ' LEFT JOIN document_dms_messages dm ON dm.id = (
+            SELECT MIN(envelope.id) FROM document_dms_messages envelope
+             WHERE envelope.document_id = m.document_id
+        )';
+
+    private const CATEGORY_JOIN = ' LEFT JOIN submission_inbox_categories c
+            ON c.id = m.category_id AND c.supplier_id = m.supplier_id';
+
+    private const ATTACHMENTS_EXISTS = 'EXISTS (
+            SELECT 1 FROM documents attachment
+             WHERE attachment.parent_document_id = m.document_id
+               AND attachment.supplier_id = m.supplier_id
+               AND attachment.deleted_at IS NULL
+        )';
+
+    /**
+     * Seznam s filtry, hledáním, řazením a počty po kategoriích.
+     *
+     * Počty (`facets`) se počítají se všemi filtry KROMĚ toho, který počítají:
+     * u kategorií bez filtru kategorie, u směru bez filtru směru. Jinak by
+     * zvolená kategorie ukázala u všech ostatních nulu a nešlo by z ní poznat,
+     * kam přepnout.
+     *
+     * @return array{
+     *   items:list<array<string,mixed>>, total:int, years:list<int>,
+     *   facets:array{
+     *     categories:list<array{category_id:?int,count:int,unread:int}>,
+     *     directions:array{received:int,sent:int},
+     *     classifications:array<string,int>,
+     *     unread:int
+     *   },
+     *   senders:list<array{box_id:string,name:?string,count:int}>
+     * }
+     */
+    public function browse(int $supplierId, string $environment, SubmissionInboxListQuery $query): array
+    {
+        $this->assertAvailable();
+        if (!$this->supportsCategories()) {
+            throw new \DomainException('Kategorie příchozích zpráv nejsou v databázi k dispozici (chybí migrace 1982).');
+        }
+        $from = ' FROM ' . self::TABLE . ' m' . self::CATEGORY_JOIN . self::ENVELOPE_JOIN;
+
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, null);
+        $countStmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from . $where);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $direction = $query->order === 'asc' ? 'ASC' : 'DESC';
+        $dateOrder = 'COALESCE(m.delivered_at, m.fetched_at)';
+        $orderBy = match ($query->sort) {
+            'sender' => 'COALESCE(m.sender_name, m.sender_box_id) ' . $direction . ', ' . $dateOrder . ' DESC',
+            'subject' => 'm.subject ' . $direction . ', ' . $dateOrder . ' DESC',
+            'category' => 'c.sort_order ' . $direction . ', c.id ' . $direction . ', ' . $dateOrder . ' DESC',
+            default => $dateOrder . ' ' . $direction,
+        };
+        $orderBy .= ', m.id ' . $direction;
+
+        $columns = implode(', ', array_map(
+            static fn (string $column): string => 'm.' . trim($column),
+            explode(',', $this->columns()),
+        ));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . $columns . ',
+                    m.category_id, m.category_source, m.direction, m.read_at, m.read_by,
+                    c.code AS category_code, c.name AS category_name,
+                    dm.sender_ref_number, dm.recipient_ref_number, dm.recipient_ident,
+                    (SELECT COUNT(*) FROM documents attachment
+                      WHERE attachment.parent_document_id = m.document_id
+                        AND attachment.supplier_id = m.supplier_id
+                        AND attachment.deleted_at IS NULL) AS attachment_count'
+            . $from . $where
+            . ' ORDER BY ' . $orderBy
+            . ' LIMIT ' . $query->limit . ' OFFSET ' . $query->offset,
+        );
+        $stmt->execute($params);
+
+        return [
+            'items' => array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])),
+            'total' => $total,
+            'years' => $this->availableYears($supplierId, $environment),
+            'facets' => $this->browseFacets($supplierId, $environment, $query, $from),
+            'senders' => $this->browseSenders($supplierId, $environment, $query),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   categories:list<array{category_id:?int,count:int,unread:int}>,
+     *   directions:array{received:int,sent:int},
+     *   classifications:array<string,int>,
+     *   unread:int
+     * }
+     */
+    private function browseFacets(int $supplierId, string $environment, SubmissionInboxListQuery $query, string $from): array
+    {
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, 'category');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT m.category_id, COUNT(*) AS cnt, SUM(m.read_at IS NULL) AS unread'
+            . $from . $where . ' GROUP BY m.category_id'
+        );
+        $stmt->execute($params);
+        $categories = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $categories[] = [
+                'category_id' => $row['category_id'] !== null ? (int) $row['category_id'] : null,
+                'count' => (int) $row['cnt'],
+                'unread' => (int) $row['unread'],
+            ];
+        }
+
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, 'direction');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT m.direction, COUNT(*) AS cnt' . $from . $where . ' GROUP BY m.direction'
+        );
+        $stmt->execute($params);
+        $directions = ['received' => 0, 'sent' => 0];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $key = $row['direction'] === 'sent' ? 'sent' : 'received';
+            $directions[$key] += (int) $row['cnt'];
+        }
+
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, 'classification');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT m.classification, COUNT(*) AS cnt' . $from . $where . ' GROUP BY m.classification'
+        );
+        $stmt->execute($params);
+        $classifications = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $classifications[(string) $row['classification']] = (int) $row['cnt'];
+        }
+
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, 'read');
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*)' . $from . $where . ' AND m.read_at IS NULL');
+        $stmt->execute($params);
+
+        return [
+            'categories' => $categories,
+            'directions' => $directions,
+            'classifications' => $classifications,
+            'unread' => (int) $stmt->fetchColumn(),
+        ];
+    }
+
+    /**
+     * Odesílatelé pro nabídku filtru — v rámci pohledu (aktivní/skryté)
+     * a prostředí, bez ostatních filtrů, ať nabídka nemizí pod rukama.
+     *
+     * @return list<array{box_id:string,name:?string,count:int}>
+     */
+    private function browseSenders(int $supplierId, string $environment, SubmissionInboxListQuery $query): array
+    {
+        $where = ' WHERE m.supplier_id = ? AND m.environment = ? AND m.sender_box_id IS NOT NULL';
+        $params = [$supplierId, $environment];
+        if ($this->supportsPrivacyLifecycle() && $query->visibility !== 'all') {
+            $where .= $query->visibility === 'hidden' ? ' AND m.hidden_at IS NOT NULL' : ' AND m.hidden_at IS NULL';
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT m.sender_box_id, MAX(m.sender_name) AS sender_name, COUNT(*) AS cnt
+               FROM ' . self::TABLE . ' m' . $where . '
+              GROUP BY m.sender_box_id
+              ORDER BY cnt DESC, sender_name
+              LIMIT 300'
+        );
+        $stmt->execute($params);
+        $senders = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $senders[] = [
+                'box_id' => (string) $row['sender_box_id'],
+                'name' => $row['sender_name'] !== null ? (string) $row['sender_name'] : null,
+                'count' => (int) $row['cnt'],
+            ];
+        }
+        return $senders;
+    }
+
+    /**
+     * @param 'category'|'direction'|'classification'|'read'|null $except filtr, který se nepoužije (pro počty)
+     * @return array{0:string,1:list<mixed>}
+     */
+    private function browseWhere(
+        int $supplierId,
+        string $environment,
+        SubmissionInboxListQuery $query,
+        ?string $except,
+    ): array {
+        $where = ' WHERE m.supplier_id = ? AND m.environment = ?';
+        $params = [$supplierId, $environment];
+        if ($this->supportsPrivacyLifecycle() && $query->visibility !== 'all') {
+            $where .= $query->visibility === 'hidden' ? ' AND m.hidden_at IS NOT NULL' : ' AND m.hidden_at IS NULL';
+        }
+        if ($query->classification !== null && $except !== 'classification') {
+            $where .= ' AND m.classification = ?';
+            $params[] = $query->classification;
+        }
+        if ($query->categoryId !== null && $except !== 'category') {
+            $where .= ' AND m.category_id = ?';
+            $params[] = $query->categoryId;
+        }
+        if ($query->senderBoxId !== null) {
+            $where .= ' AND m.sender_box_id = ?';
+            $params[] = $query->senderBoxId;
+        }
+        if ($query->direction !== null && $except !== 'direction') {
+            $where .= $query->direction === 'sent'
+                ? ' AND m.direction = \'sent\''
+                : ' AND (m.direction = \'received\' OR m.direction IS NULL)';
+        }
+        if ($query->read !== null && $except !== 'read') {
+            $where .= $query->read ? ' AND m.read_at IS NOT NULL' : ' AND m.read_at IS NULL';
+        }
+        if ($query->hasAttachments !== null) {
+            $where .= ($query->hasAttachments ? ' AND ' : ' AND NOT ') . self::ATTACHMENTS_EXISTS;
+        }
+        $filter = ($query->period ?? PeriodFilter::none())->sqlFor('COALESCE(m.delivered_at, m.fetched_at)');
+        $where .= $filter['sql'];
+        $params = [...$params, ...$filter['params']];
+
+        // Každé slovo musí najít aspoň jedno pole. Porovnání nese collation
+        // sloupců (utf8mb4_unicode_ci), takže nezáleží na velikosti písmen
+        // ani na diakritice.
+        foreach (self::searchTokens($query->search) as $token) {
+            $like = '%' . addcslashes($token, '%_\\') . '%';
+            // ID schránky a zprávy jsou ASCII sloupce; hledaný text s diakritikou
+            // by se do nich nepřevedl a dotaz by spadl na míchání collation.
+            $where .= ' AND (m.subject LIKE ? OR m.sender_name LIKE ?
+                OR CONVERT(m.sender_box_id USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?
+                OR m.sender_ident LIKE ?
+                OR CONVERT(m.external_message_id USING utf8mb4) COLLATE utf8mb4_unicode_ci LIKE ?
+                OR dm.sender_ref_number LIKE ? OR dm.recipient_ref_number LIKE ?
+                OR dm.recipient_ident LIKE ?
+                OR EXISTS (
+                    SELECT 1 FROM documents attachment
+                     WHERE attachment.parent_document_id = m.document_id
+                       AND attachment.supplier_id = m.supplier_id
+                       AND attachment.deleted_at IS NULL
+                       AND attachment.original_name LIKE ?
+                ))';
+            array_push($params, ...array_fill(0, 9, $like));
+        }
+
+        return [$where, $params];
+    }
+
+    /** @return list<string> */
+    private static function searchTokens(?string $search): array
+    {
+        if ($search === null) {
+            return [];
+        }
+        $tokens = preg_split('/\s+/u', trim($search)) ?: [];
+
+        return array_values(array_slice(array_filter($tokens, static fn (string $t): bool => $t !== ''), 0, 8));
+    }
+
+    /** Přečteno / nepřečteno — sdílený stav firmy, kdo a kdy zprávu otevřel. */
+    public function markRead(int $supplierId, int $id, bool $read, ?int $userId): bool
+    {
+        $this->assertAvailable();
+        if (!$this->supportsCategories()) {
+            throw new \DomainException('Stav přečtení není v databázi k dispozici (chybí migrace 1982).');
+        }
+        $stmt = $this->db->pdo()->prepare(
+            $read
+                ? 'UPDATE ' . self::TABLE . ' SET read_at = COALESCE(read_at, UTC_TIMESTAMP()), read_by = COALESCE(read_by, ?)
+                    WHERE supplier_id = ? AND id = ?'
+                : 'UPDATE ' . self::TABLE . ' SET read_at = NULL, read_by = NULL WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute($read ? [$userId, $supplierId, $id] : [$supplierId, $id]);
+
+        return $stmt->rowCount() > 0 || $this->findById($supplierId, $id) !== null;
+    }
+
     /** @return array<string,mixed>|null */
     public function findById(int $supplierId, int $id): ?array
     {
@@ -748,7 +1032,7 @@ final class SubmissionInboxRepository
                 $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
             }
         }
-        foreach (['hidden_by', 'local_content_purged_by', 'lifecycle_row_version'] as $key) {
+        foreach (['hidden_by', 'local_content_purged_by', 'lifecycle_row_version', 'category_id', 'read_by', 'attachment_count'] as $key) {
             if (array_key_exists($key, $row)) {
                 $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
             }

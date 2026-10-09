@@ -167,6 +167,9 @@ final class Bootstrap
                 \DI\autowire()->constructorParameter(
                     'messageProcessor',
                     \DI\get(\MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class),
+                )->constructorParameter(
+                    'categories',
+                    \DI\get(\MyInvoice\Service\Submission\SubmissionInboxCategoryService::class),
                 ),
             \MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalNotifier::class =>
                 \DI\get(\MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalMailer::class),
