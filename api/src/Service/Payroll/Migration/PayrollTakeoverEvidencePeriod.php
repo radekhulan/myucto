@@ -12,6 +12,7 @@ namespace MyInvoice\Service\Payroll\Migration;
  * poplatníka (`signed` / `not-signed`), sleva pracujícího důchodce, zdravotní pojištění
  * (stav = kód pojišťovny) i příslušnost k sociálnímu pojištění (`czech` / `foreign`).
  * Odkaz na zdroj a poznámku skládá čtečka zdroje: jen ona ví, z čeho údaj pochází.
+ * `country` nese stát daňové rezidence nerezidenta, pokud ho zdroj vede.
  */
 final readonly class PayrollTakeoverEvidencePeriod
 {
@@ -21,5 +22,6 @@ final readonly class PayrollTakeoverEvidencePeriod
         public ?string $to = null,
         public ?string $reference = null,
         public string $note = '',
+        public ?string $country = null,
     ) {}
 }

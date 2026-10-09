@@ -589,6 +589,29 @@ final class PohodaPayrollImportTest extends TestCase
      * běží. Převod je nepřevezme ani jako měsíc, ani jako srovnávací úhrny, a začátek
      * vedení mezd nové firmy nastaví na únor — měsíc, který MyÚčto musí spočítat.
      */
+    /**
+     * Nerezident se státem rezidence v `ResCisSTOBC` dostane rezidenci převodem; bez státu
+     * zůstává k ručnímu doplnění (dřív se ručně doplňoval vždy).
+     */
+    public function testNonResidentWithResidenceCountryIsTakenOver(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::write($this->tmp);
+        file_put_contents($file, str_replace(
+            '<StatPris>SK</StatPris><Nerezident>0</Nerezident>',
+            '<StatPris>SK</StatPris><Nerezident>1</Nerezident><ResCisSTOBC>SK</ResCisSTOBC>',
+            (string) file_get_contents($file),
+        ));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $petr = $this->employment($supplierId, '1002');
+        self::assertSame(1, $this->scalar(
+            "SELECT COUNT(*) FROM payroll_person_tax_residences WHERE supplier_id = ? AND employee_id = ? AND residence = 'non-resident' AND country_code = 'SK'",
+            [$supplierId, $petr['employee_id']],
+        ), $this->explain($protocol));
+    }
+
     public function testMonthStillRunningOnExportDayIsNotTakenOver(): void
     {
         $supplierId = $this->createIsolatedSupplier($this->db->pdo(), $this->sourceSupplierId);

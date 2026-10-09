@@ -393,6 +393,7 @@ final class PohodaPayrollPeople
                     '1', '-1', 'true' => 'non-resident',
                     default => null,
                 },
+                'tax_residence_country' => self::country(PohodaXml::text($person, 'ResCisSTOBC')),
                 'declarations' => self::declarations($months, $year),
                 'pensioner_discounts' => self::declarations($months, $year, 'pensioner_discount', 'verified', 'not_claimed'),
                 'first_signed' => self::bool(PohodaXml::text($periods[array_key_first($periods)][0], 'Prohlas'))

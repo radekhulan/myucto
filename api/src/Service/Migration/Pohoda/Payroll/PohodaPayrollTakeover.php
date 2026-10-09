@@ -58,7 +58,8 @@ final class PohodaPayrollTakeover
         $residence = match ($record['tax_residence']) {
             'czech-resident' => new PayrollTakeoverEvidencePeriod('czech-resident', $from, null, 'pamica:zam:rezident',
                 self::NOTE . 'zaměstnanec není v PAMICA veden jako daňový nerezident.'),
-            'non-resident' => new PayrollTakeoverEvidencePeriod('non-resident', $from),
+            'non-resident' => new PayrollTakeoverEvidencePeriod('non-resident', $from, null, 'pamica:zam:nerezident',
+                self::NOTE . 'zaměstnanec je v PAMICA veden jako daňový nerezident.', $record['tax_residence_country'] ?? null),
             default => null,
         };
         $declarations = [];

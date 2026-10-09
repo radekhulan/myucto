@@ -199,6 +199,16 @@ final class PayrollTakeoverPersonWriter
                     'evidence_note' => $residence->note,
                 ]];
                 $counts['tax_residence'] = 1;
+            } elseif ($residence->status === 'non-resident' && $residence->country !== null && $residence->country !== 'CZ') {
+                $sections['tax_residences'] = [[
+                    'residence' => 'non-resident',
+                    'country_code' => $residence->country,
+                    'evidence_reference' => $residence->reference,
+                    'effective_from' => $residence->from,
+                    'effective_to' => null,
+                    'evidence_note' => $residence->note,
+                ]];
+                $counts['tax_residence'] = 1;
             } elseif ($residence->status === 'non-resident') {
                 $manual('tax_residence');
             }
