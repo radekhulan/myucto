@@ -367,6 +367,125 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
     }
 
     /**
+     * Exekuce zadaná zpětně: povinná (40 000 Kč, prohlášení) má od ledna
+     * nepřednostní exekuci. Běh srazí třetinu zbytku nad nezabavitelnou
+     * částkou (§ 279 o. s. ř.) a JMHZ nese 10116 = ano.
+     */
+    public function testEnforcementWithholdsAboveProtectedAmount(): void
+    {
+        $this->hire('povinna', 'Syntetická Povinná', '1986-10-10', 'female', 'hpp', 40, true, annual: 'requested',
+            gross: static fn (string $p): int => 40_000);
+        $person = $this->people['povinna']['person'];
+        $this->enforcementCase($person['employee_id']);
+
+        $failures = [...$this->quarterAverages(1), ...$this->processMonth('2026-01')];
+        self::assertSame([], $failures, implode("\n", $failures));
+        $january = $this->netPay((int) $this->approvedRuns['2026-01']['id'], $person['employee_id']);
+        // Čistá 40 000 − 2 840 − 1 800 − 3 430 = 31 930 Kč.
+        self::assertSame(31_930_00, $january['net_before_deductions_minor_units']);
+        $enforcement = $this->enforcementResult((int) $this->approvedRuns['2026-01']['id'], $person['employee_id']);
+        $protected = (int) $enforcement['protected_amount_minor_units'];
+        self::assertGreaterThan(0, $protected, CanonicalJson::encode($enforcement));
+        // § 279 odst. 2 o. s. ř.: zbytek zaokrouhlený dolů na korunu dělitelnou
+        // třemi, nepřednostní pohledávka bere třetinu; nad limitem nic není.
+        // Paušál plátce 50 Kč (§ 301 odst. 2) se platí ze sražené částky.
+        $remainder = intdiv(31_930_00 - $protected, 300) * 300;
+        self::assertSame(0, (int) $enforcement['fully_attachable_excess_minor_units']);
+        self::assertSame(intdiv($remainder, 3), (int) $enforcement['total_withheld_minor_units'], CanonicalJson::encode($enforcement));
+        self::assertSame(
+            (int) $enforcement['total_withheld_minor_units'] - (int) $enforcement['employer_flat_fee_minor_units'],
+            array_sum(array_column($enforcement['allocations'], 'total_minor_units')),
+        );
+        self::assertSame($january['net_payable_minor_units'] - (int) $enforcement['total_withheld_minor_units'], (int) $enforcement['employee_payment_minor_units']);
+        $form = self::forms($this->xmls['2026-01'])[$this->people['povinna']['ppv']];
+        self::assertStringContainsString('<form:srazkyZeMzdyEvidovany>true</form:srazkyZeMzdyEvidovany>', $form, 'JMHZ 10116');
+
+        // Únor: táž srážka, v hlášení žádost o roční zúčtování 2025 (10319).
+        $failures = $this->processMonth('2026-02');
+        self::assertSame([], $failures, implode("\n", $failures));
+        $february = $this->enforcementResult((int) $this->approvedRuns['2026-02']['id'], $person['employee_id']);
+        self::assertSame($enforcement['total_withheld_minor_units'], $february['total_withheld_minor_units']);
+        self::assertSame($enforcement['employee_payment_minor_units'], $february['employee_payment_minor_units']);
+        $form = (string) preg_replace('/>\s+</', '><', self::forms($this->xmls['2026-02'])[$this->people['povinna']['ppv']]);
+        self::assertStringContainsString('<form:srazkyZeMzdyEvidovany>true</form:srazkyZeMzdyEvidovany>', $form);
+        self::assertStringContainsString('<form:rocniZuctovaniZadost>true</form:rocniZuctovaniZadost>', $form);
+    }
+
+    /** Nepřednostní exekuce od 1. 1. 2026, doručená 15. 1. */
+    private function enforcementCase(int $employeeId): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status, effective_from, evidence_complete, recipient_verified)
+             VALUES (?, ?, ?, "enforcement", "remit", "2026-01-01", 1, 1)',
+        )->execute([$this->supplierId, $employeeId, 'g7-case-' . $employeeId]);
+        $caseId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, enforcement_order_key, legal_basis, category, outstanding_minor_units,
+                 priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified, order_or_notice_delivered,
+                 priority_classification_verified, due_monetary_claim_verified, is_active)
+             VALUES (?, ?, ?, ?, "statutory", "non_priority", 50000000, "2026-01-05", "2026-01-05", "2025-12-01", 1, 1, 1, 1, 1)',
+        )->execute([$this->supplierId, $caseId, 'g7-claim-' . $caseId, 'g7-order-' . $caseId]);
+        foreach ([['executor', 'Syntetický exekutorský úřad', '999 EX 7/26'], ['beneficiary', 'Syntetický věřitel', null]] as [$role, $name, $reference]) {
+            $hash = hash('sha256', "g7-enforcement:{$this->supplierId}:{$caseId}:{$role}");
+            $pdo->prepare(
+                'INSERT INTO documents (supplier_id, title, original_name, filename, sha256, mime_type, size_bytes, doc_type, source, uploaded_by, scope)
+                 VALUES (?, ?, "decision.pdf", ?, ?, "application/pdf", 1, "pdf", "manual", ?, "company")',
+            )->execute([$this->supplierId, "Syntetické rozhodnutí {$role}", "{$hash}.pdf", $hash, $this->actors[0]]);
+            $documentId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_enforcement_case_parties
+                    (supplier_id, case_id, party_role, revision_no, effective_from, party_name, party_reference,
+                     source_document_id, source_document_sha256, created_by)
+                 VALUES (?, ?, ?, 1, "2026-01-01", ?, ?, ?, ?, ?)',
+            )->execute([$this->supplierId, $caseId, $role, $name, $reference, $documentId, $hash, $this->actors[0]]);
+        }
+    }
+
+    /** @return array<string,int> */
+    private function netPay(int $runId, int $employeeId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT person.result_snapshot_json
+               FROM payroll_statutory_person_results person
+               JOIN payroll_statutory_results result
+                 ON result.supplier_id = person.supplier_id AND result.id = person.statutory_result_id
+               JOIN payroll_run_revisions revision ON revision.supplier_id = result.supplier_id AND revision.id = result.revision_id
+               JOIN payroll_runs run ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+                AND run.current_revision_no = revision.revision_no
+              WHERE run.supplier_id = ? AND run.id = ? AND result.calculation_kind = "net_pay"',
+        );
+        $stmt->execute([$this->supplierId, $runId]);
+        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $json) {
+            $row = json_decode((string) $json, true);
+            if (is_array($row) && in_array("employee:{$employeeId}", [$row['person_reference'] ?? null, $row['person_id'] ?? null], true)) {
+                return array_map('intval', array_filter($row, 'is_numeric'));
+            }
+        }
+        self::fail("Běh {$runId} nemá čistou mzdu osoby {$employeeId}.");
+    }
+
+    /** @return array<string,mixed> */
+    private function enforcementResult(int $runId, int $employeeId): array
+    {
+        $snapshot = json_decode((string) $this->scalar(
+            'SELECT revision.result_snapshot_json FROM payroll_run_revisions revision
+               JOIN payroll_runs run ON run.supplier_id = revision.supplier_id AND run.id = revision.run_id
+                AND run.current_revision_no = revision.revision_no
+              WHERE run.supplier_id = ? AND run.id = ?',
+            [$this->supplierId, $runId],
+        ), true, flags: JSON_THROW_ON_ERROR);
+        foreach ($snapshot['people'] ?? [] as $row) {
+            if ((int) ($row['employee_id'] ?? 0) === $employeeId) {
+                return $row['enforcement']['result'];
+            }
+        }
+        self::fail("Běh {$runId} nemá exekuci osoby {$employeeId}.");
+    }
+
+    /**
      * G7-D2: mateřská přes očekávaný den porodu bez skutečného dne porodu.
      * Příprava JMHZ musí říct konkrétně „doplňte den porodu", ne obecné
      * „nepřítomnost nelze bezpečně odvodit, zpracujte individuálně".
@@ -729,7 +848,7 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
                 continue;
             }
             $net = $result['cash_income'] - $result['employee_social'] - $result['employee_health'] - $result['advance_tax']
-                - $result['withholding_tax'] + $result['tax_bonus'] - $result['deducted'];
+                - $result['withholding_tax'] + $result['tax_bonus'] + $result['annual_settlement'] - $result['deducted'];
             if ($net !== $result['net_payable']) {
                 $failures[] = "{$prefix}: k výplatě {$result['net_payable']} ≠ hrubá − srážky {$net}";
             }
@@ -851,7 +970,7 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
             $row = json_decode((string) $json, true);
             if (is_array($row) && in_array("employee:{$employeeId}", [$row['person_reference'] ?? null, $row['person_id'] ?? null], true)) {
                 $out = [];
-                foreach (['cash_income', 'employee_social', 'employee_health', 'advance_tax', 'withholding_tax', 'tax_bonus', 'deducted', 'net_payable'] as $field) {
+                foreach (['cash_income', 'employee_social', 'employee_health', 'advance_tax', 'withholding_tax', 'tax_bonus', 'annual_settlement', 'deducted', 'net_payable'] as $field) {
                     $out[$field] = (int) ($row["{$field}_minor_units"] ?? 0);
                 }
 
