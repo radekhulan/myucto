@@ -398,6 +398,126 @@ final class JmhzScenario1ControlViolationTest extends TestCase
         $this->assertFails(150, $agreements('0', '1'));
     }
 
+    /** Kontroly 236, 211, 303, 255, 332 a 307: struktura součástí. */
+    public function testFormStructureControls(): void
+    {
+        $minimal = JmhzXmlSample::minimal();
+
+        $this->assertPasses(236, $minimal);
+        $this->assertFails(236, str_replace('<typFormulare>R</typFormulare>', '<typFormulare>O</typFormulare>', $minimal));
+
+        $twoForms = JmhzXmlSample::twoForms();
+        $cancelSecond = (string) preg_replace(
+            '~<typFormulare>R</typFormulare>(?!.*<typFormulare>)~s',
+            '<typFormulare>S</typFormulare>',
+            $twoForms,
+        );
+        $this->assertPasses(211, $cancelSecond);
+        $this->assertFails(211, str_replace('<typFormulare>R</typFormulare>', '<typFormulare>S</typFormulare>', $minimal));
+
+        $this->assertPasses(303, $minimal);
+        $this->assertFails(303, str_replace('</form:bezPriznaku>', '</form:bezPriznaku><form:vezen></form:vezen>', $minimal));
+        $this->assertFails(303, (string) preg_replace('~<form:bezPriznaku>.*</form:bezPriznaku>~s', '', $minimal));
+        // Stornující součást nese jen hlavičku; tělo formuláře mít nesmí.
+        $this->assertPasses(303, JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001')
+                . '<formularOsoby><hlavicka><idFormulare>0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E11</idFormulare>'
+                . '<typFormulare>S</typFormulare></hlavicka></formularOsoby>',
+            formCount: 4,
+        ));
+
+        // Dva vztahy téže osoby: jeden primární stačí, žádný nestačí.
+        $samePerson = str_replace('1000000012', '1000000001', $twoForms);
+        $this->assertPasses(255, $samePerson);
+        $this->assertFails(255, str_replace('<primarniPpv>true</primarniPpv>', '<primarniPpv>false</primarniPpv>', $samePerson));
+        $this->assertFails(255, $twoForms);
+
+        $this->assertPasses(332, $minimal);
+        $this->assertFails(332, str_replace('<primarniPpv>true</primarniPpv>', '', $minimal));
+
+        $noCode = static fn (string $detail): string => JmhzXmlSample::document(JmhzXmlSample::form(
+            '1000000001',
+            '2000000000000000000001',
+            eldp: "<form:eldp><form:pocetDnu>0</form:pocetDnu>{$detail}</form:eldp>",
+        ));
+        $this->assertPasses(307, $minimal);
+        $this->assertFails(307, $noCode('<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>'));
+    }
+
+    /** Kontroly 159, 162, 113, 112, 124, 310 a 60: podmíněně povinné údaje. */
+    public function testConditionallyRequiredAndForbiddenAttributes(): void
+    {
+        $minimal = JmhzXmlSample::minimal();
+
+        $apz = static fn (string $instrument): string => str_replace(
+            '<form:uplatnujiPrispevekApz>false</form:uplatnujiPrispevekApz>',
+            "<form:uplatnujiPrispevekApz>true</form:uplatnujiPrispevekApz>{$instrument}",
+            JmhzXmlSample::minimal(),
+        );
+        $this->assertFails(159, $apz(''));
+        $this->assertPasses(159, $apz('<form:nastrojApzKod>1</form:nastrojApzKod>'));
+
+        $this->assertPasses(162, $minimal);
+        $this->assertFails(162, str_replace(
+            '<pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>',
+            '',
+            $minimal,
+        ));
+        $this->assertFails(162, str_replace(
+            '<pvpoj:zakladZamestnavateleA>1000</pvpoj:zakladZamestnavateleA>',
+            '<pvpoj:zakladZamestnavateleA>-1</pvpoj:zakladZamestnavateleA>',
+            $minimal,
+        ));
+
+        $caregiver = static fn (string $birth): string => str_replace(
+            '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+            '<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>'
+                . '<form:prohlaseniPoplatnikaDane><form:zvyhodneniDetiMesic><form:jineOsoby><form:jinaOsoba>'
+                . "<form:jmeno>Eva</form:jmeno><form:prijmeni>Nová</form:prijmeni>{$birth}"
+                . '</form:jinaOsoba></form:jineOsoby></form:zvyhodneniDetiMesic></form:prohlaseniPoplatnikaDane>',
+            JmhzXmlSample::minimal(),
+        );
+        $this->assertFails(113, $caregiver(''));
+        $this->assertPasses(113, $caregiver('<form:datumNarozeni>1990-01-01</form:datumNarozeni>'));
+
+        $result = static fn (string $performed, string $content): string => JmhzXmlSample::document(
+            str_replace(
+                '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+                "<form:rocniUhrny><form:rocniZuctovaniProvedeno>{$performed}</form:rocniZuctovaniProvedeno>"
+                    . "<form:vysledekRocnihoZuctovani>{$content}</form:vysledekRocnihoZuctovani></form:rocniUhrny>"
+                    . '<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>',
+                JmhzXmlSample::form('1000000001', '2000000000000000000001'),
+            ),
+            month: '2',
+        );
+        $child = static fn (string $order): string => '<form:uplatnenoZvyhodneniNaDeti>true</form:uplatnenoZvyhodneniNaDeti>'
+            . '<form:zvyhodneniNaDeti><form:vyzivovaneDeti><form:vyzivovaneDite><form:dite>'
+            . '<form:jmeno>Jan</form:jmeno><form:prijmeni>Novák</form:prijmeni>'
+            . '<form:datumNarozeni>2015-04-11</form:datumNarozeni></form:dite>'
+            . $order . '</form:vyzivovaneDite></form:vyzivovaneDeti></form:zvyhodneniNaDeti>';
+        $this->assertPasses(112, $result('true', $child('<form:poradi>1</form:poradi>')));
+        $this->assertFails(112, $result('true', $child('')));
+
+        $spouse = static fn (string $months): string => '<form:uplatnenaSlevaNaPartnera>true</form:uplatnenaSlevaNaPartnera>'
+            . '<form:slevaNaPartnera><form:partner><form:partnerUdaje>'
+            . '<form:jmeno>Eva</form:jmeno><form:prijmeni>Nováková</form:prijmeni>'
+            . '<form:datumNarozeni>1990-01-01</form:datumNarozeni></form:partnerUdaje>'
+            . "<form:prukazZtpp>false</form:prukazZtpp>{$months}</form:partner></form:slevaNaPartnera>";
+        $this->assertPasses(124, $result('true', $spouse('<form:slevaPocetMesicu>12</form:slevaPocetMesicu>')));
+        $this->assertFails(124, $result('true', $spouse('')));
+
+        $this->assertPasses(310, $result('false', ''));
+        $this->assertFails(310, $result('false', '<form:preplatekRok>100</form:preplatekRok>'));
+
+        $legalFact = static fn (string $date): string => str_replace(
+            '<so:souhrn>',
+            "<so:souhrn><so:specifickaSkutecnost><so:datum>{$date}</so:datum></so:specifickaSkutecnost>",
+            JmhzXmlSample::minimal(),
+        );
+        $this->assertPasses(60, $legalFact('2026-08-04'));
+        $this->assertFails(60, $legalFact('2026-08-05'));
+    }
+
     private static function withHours(string $breakdown): string
     {
         return str_replace(

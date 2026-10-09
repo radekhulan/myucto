@@ -2547,6 +2547,13 @@ final class JmhzScenario1ControlEvaluator
     private function formHasExactlyOneBody(JmhzAttributeProjection $projection): array
     {
         return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            // Typ formuláře se čte nejen kvůli podmínce katalogu („pokud 10016
+            // = R nebo O"), ale i proto, že typy formuláře nejsou atributy:
+            // bez přečteného údaje by perForm() součást přeskočil a kontrola
+            // by nikdy nic nezamítla. Stornující součást nese jen hlavičku.
+            if ($form->value('10016') === 'S') {
+                return null;
+            }
             $bodies = $form->bodies();
             if (count($bodies) === 1) {
                 return null;
