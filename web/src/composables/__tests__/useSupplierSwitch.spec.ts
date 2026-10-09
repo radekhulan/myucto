@@ -41,4 +41,12 @@ describe('supplierSwitchDestination', () => {
     expect(supplierSwitchDestination('/invoices/42')).toBe('/invoices')
     expect(supplierSwitchDestination('/bank')).toBeNull()
   })
+
+  it('z detailu libovolného dokladu přejde o úroveň výš, ať ho odkaz nepřepne zpátky', () => {
+    expect(supplierSwitchDestination('/purchase-invoices/674')).toBe('/purchase-invoices')
+    expect(supplierSwitchDestination('/purchase-invoices/674/edit')).toBe('/purchase-invoices')
+    expect(supplierSwitchDestination('/stock/documents/12')).toBe('/stock/documents')
+    expect(supplierSwitchDestination('/accounting/journal', '?entry_id=5')).toBe('/accounting/journal')
+    expect(supplierSwitchDestination('/accounting/journal', '?year=2026')).toBeNull()
+  })
 })

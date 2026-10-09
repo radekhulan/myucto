@@ -32,10 +32,18 @@ export function matchSwitchableSuppliers(
     .slice(0, limit)
 }
 
-export function supplierSwitchDestination(path: string): string | null {
+/**
+ * Kam po přepnutí firmy. Záznam z detailu v jiné firmě neexistuje a odkaz na něj by
+ * firmu přepnul zpátky (`router/supplierDeepLink.ts`), proto se z každé cesty
+ * s číselným ID jde o úroveň výš na přehled; u deníku se zahodí odkaz na zápis.
+ */
+export function supplierSwitchDestination(path: string, search = ''): string | null {
   if (path === '/portfolio') return '/'
-  const detailMatch = path.match(/^\/(invoices|clients|projects|bank)\/\d+/)
-  return detailMatch ? '/' + detailMatch[1] : null
+  const segments = path.split('/')
+  const idIndex = segments.findIndex((segment, index) => index > 0 && /^\d+$/.test(segment))
+  if (idIndex > 0) return segments.slice(0, idIndex).join('/') || '/'
+  if (/(?:^\?|&)entry_id=/.test(search)) return path
+  return null
 }
 
 /**
@@ -71,7 +79,7 @@ export function useSupplierSwitch() {
       return
     }
 
-    const target = destination ?? supplierSwitchDestination(window.location.pathname)
+    const target = destination ?? supplierSwitchDestination(window.location.pathname, window.location.search)
     if (target) {
       window.location.href = target
     } else {
