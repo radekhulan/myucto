@@ -8484,6 +8484,8 @@
         "preparedOn": "Datum vyhotovení",
         "corrects": "Opravuje evidenční list č. {id}",
         "code": "Kód",
+        "smallScale": "MR",
+        "smallScaleTitle": "Malý rozsah: A = zaměstnání malého rozsahu, N = jiná činnost včetně DPP",
         "period": "Od – do",
         "days": "Dnů",
         "base": "Vyměřovací základ",

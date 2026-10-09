@@ -1505,6 +1505,8 @@ final class EldpAnnualStatementBuilder
             'result_snapshot_hash' => $month['result_snapshot_hash'],
             'insurance_from' => $insuranceFrom,
             'insurance_to' => $insuranceTo,
+            // ELDP12 údaj 21 (42, 63) „MR": A jen u zaměstnání malého rozsahu.
+            'small_scale' => $relation === 'small_scale_employment',
         ];
         /*
          * DPČ, DPP a zaměstnání malého rozsahu se důchodového pojištění účastní
@@ -2971,8 +2973,10 @@ final class EldpAnnualStatementBuilder
             if ($newEmployment && self::beforeParticipationArose($line)) {
                 continue;
             }
+            $smallScale = ($line['small_scale'] ?? false) === true;
             $continues = $current !== null
                 && $current['code'] === $line['code']
+                && ($current['small_scale'] ?? false) === $smallScale
                 && (new \DateTimeImmutable($current['valid_to']))
                     ->modify('+1 day')->format('Y-m-d') === $line['insurance_from']
                 && (!$newEmployment || self::continuesInOneRow($previous, $line));
@@ -2997,6 +3001,15 @@ final class EldpAnnualStatementBuilder
                     'excluded_days_provenance' => [],
                     'months_without_insurance' => [],
                 ];
+                /*
+                 * ELDP12 údaj 21 (42, 63) „MR": A = zaměstnání malého rozsahu
+                 * (§ 7 zákona č. 187/2006 Sb.), N = jinak, i u DPP. Klíč jen
+                 * u řádku zaměstnání malého rozsahu, chybějící znamená N:
+                 * otisk ostatních listů zůstává stejný.
+                 */
+                if ($smallScale) {
+                    $current['small_scale'] = true;
+                }
             }
             /** @var array<string,mixed> $current */
             $current['valid_to'] = $line['insurance_to'];

@@ -91,6 +91,8 @@ final class EldpStatementCopyService
         return array_map(
             static fn (array $section): array => [
                 'code' => (string) $section['code'],
+                // Údaj MR: A u zaměstnání malého rozsahu, jinak N (i DPP).
+                'small_scale' => ($section['small_scale'] ?? false) === true ? 'A' : 'N',
                 'valid_from' => is_string($section['valid_from'] ?? null) ? $section['valid_from'] : null,
                 'valid_to' => is_string($section['valid_to'] ?? null) ? $section['valid_to'] : null,
                 'insurance_days' => (int) $section['insurance_days'],

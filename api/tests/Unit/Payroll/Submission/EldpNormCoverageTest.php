@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatement;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatementBuilder;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementCopyService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlValidator;
@@ -306,6 +307,25 @@ final class EldpNormCoverageTest extends TestCase
         self::assertSame('2025-01-04', $statement->payload['form']['employed_from']);
         $xml = (new EldpXmlSerializer())->serialize($statement);
         (new EldpXmlValidator())->validate($statement, $xml);
+    }
+
+    /**
+     * ELDP12 údaj 21 (42, 63) „MR": povinný u každého řádku, A = zaměstnání
+     * malého rozsahu (§ 7 zákona č. 187/2006 Sb.), N = jinak, i u DPP podle
+     * § 7a. Řádek nese příznak a stejnopis ho vypíše.
+     */
+    public function testSmallScaleFlagIsAOnlyForSmallScaleEmployment(): void
+    {
+        $smallScale = $this->build($this->months(2025, 1, 3, end: '2025-03-31', relation: 'small_scale_employment'));
+        $employment = $this->build($this->months(2025, 1, 3, end: '2025-03-31'));
+        $agreement = $this->build([$this->revision(2025, 1, end: '2025-01-31', baseMinor: 1_200_000, relation: 'dpp')]);
+
+        self::assertTrue($smallScale->sections()[0]['small_scale'] ?? false);
+        self::assertSame('A', EldpStatementCopyService::sections($smallScale->payload)[0]['small_scale']);
+        self::assertArrayNotHasKey('small_scale', $employment->sections()[0]);
+        self::assertSame('N', EldpStatementCopyService::sections($employment->payload)[0]['small_scale']);
+        self::assertSame('T++', $agreement->sections()[0]['code']);
+        self::assertSame('N', EldpStatementCopyService::sections($agreement->payload)[0]['small_scale']);
     }
 
     /** Vznikne-li účast už v měsíci nástupu, „Od" je den nástupu. */

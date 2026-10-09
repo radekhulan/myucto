@@ -52,7 +52,7 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
 <table class="grid">
   <thead>
     <tr>
-      <th>Kód</th><th>Od</th><th>Do</th><th class="num">Dny</th><th>Měsíce bez pojištění (X)</th>
+      <th>Kód</th><th>MR</th><th>Od</th><th>Do</th><th class="num">Dny</th><th>Měsíce bez pojištění (X)</th>
       <th class="num">Vyloučené doby</th><th class="num">Odečtené doby</th><th class="num">Vyměřovací základ (Kč)</th>
     </tr>
   </thead>
@@ -60,6 +60,7 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
   {% for section in sections %}
     <tr>
       <td>{{ section.code }}</td>
+      <td>{{ section.small_scale }}</td>
       <td>{{ section.valid_from is not null ? section.valid_from|cz_date : '' }}</td>
       <td>{{ section.valid_to is not null ? section.valid_to|cz_date : '' }}</td>
       <td class="num">{{ section.insurance_days }}</td>
@@ -70,7 +71,7 @@ body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #
     </tr>
   {% endfor %}
     <tr>
-      <td colspan="3"><strong>Celkem</strong></td>
+      <td colspan="4"><strong>Celkem</strong></td>
       <td class="num"><strong>{{ totals.insurance_days }}</strong></td>
       <td></td>
       <td class="num"><strong>{{ totals.excluded_days_total }}</strong></td>

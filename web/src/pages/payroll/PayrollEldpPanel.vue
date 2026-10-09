@@ -302,6 +302,7 @@ interface EldpFormSection {
   assessment_base_czk: number
   months_without_insurance: number[]
   whole_year_without_insurance?: boolean
+  small_scale?: boolean
 }
 
 const formSheet = computed<EldpFormSheet | null>(() => {
@@ -1002,6 +1003,7 @@ watch(requestedByAuthority, value => {
             <thead class="text-neutral-500">
               <tr>
                 <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.code') }}</th>
+                <th class="py-1 pr-3 font-medium" :title="t('payroll.eldp.formSheet.smallScaleTitle')">{{ t('payroll.eldp.formSheet.smallScale') }}</th>
                 <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.period') }}</th>
                 <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.days') }}</th>
                 <th class="py-1 pr-3 font-medium">{{ t('payroll.eldp.formSheet.base') }}</th>
@@ -1016,6 +1018,7 @@ watch(requestedByAuthority, value => {
                 data-test="eldp-form-section"
               >
                 <td class="py-1 pr-3 font-medium">{{ section.code }}</td>
+                <td class="py-1 pr-3" data-test="eldp-form-small-scale">{{ section.small_scale === true ? 'A' : 'N' }}</td>
                 <td class="py-1 pr-3">{{ sectionPeriod(section) }}</td>
                 <td class="py-1 pr-3">{{ section.insurance_days }}</td>
                 <td class="py-1 pr-3">{{ section.assessment_base_czk }}</td>

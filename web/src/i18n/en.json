@@ -8484,6 +8484,8 @@
         "preparedOn": "Date of preparation",
         "corrects": "Corrects record sheet no. {id}",
         "code": "Code",
+        "smallScale": "MR",
+        "smallScaleTitle": "Small-scale: A = small-scale employment, N = any other activity including an agreement to perform work (DPP)",
         "period": "From – to",
         "days": "Days",
         "base": "Assessment base",

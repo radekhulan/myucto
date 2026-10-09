@@ -526,7 +526,8 @@ describe('PayrollEldpPanel', () => {
     expect(wrapper.get('[data-test="eldp-form-type"]').text()).toContain('payroll.eldp.formSheet.types.02')
     const rows = wrapper.findAll('[data-test="eldp-form-section"]')
     expect(rows).toHaveLength(2)
-    expect(rows[0]!.findAll('td')[4]!.text()).toBe('6')
+    expect(rows[0]!.findAll('td')[5]!.text()).toBe('6')
+    expect(rows[0]!.get('[data-test="eldp-form-small-scale"]').text()).toBe('N')
     expect(rows[1]!.text()).toContain('payroll.eldp.formSheet.postTermination')
 
     // Stejnopis pro zaměstnance se tiskne ze zmrazeného listu téhož rozsahu.
