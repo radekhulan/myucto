@@ -73,6 +73,44 @@ final class PayrollRegistrationA1DraftBuilderTest extends TestCase
     }
 
     /**
+     * REGZEC25-fact.highedu-07: občanu ČR s DPČ nebo DPP návrh rovnou dosadí
+     * vzdělání „Z" (nerelevantní) a nehlásí ho jako chybějící.
+     */
+    public function testSuggestsEducationNotRelevantForCzechCitizenWithAgreement(): void
+    {
+        foreach (['dpc' => 'A', 'dpp' => 'T'] as $relationType => $activity) {
+            $sources = self::sources();
+            $sources['employment']['relation_type'] = $relationType;
+            $sources['terms']['activity_code'] = $activity;
+            $sources['terms']['relationship_detail_code'] = null;
+            $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+                $sources,
+                self::identity(),
+                null,
+                null,
+                '2026-08-14',
+                0,
+                null,
+            );
+
+            self::assertSame('Z', $draft['suggested']['facts']['highest_education_code'], $activity);
+            self::assertNotContains('facts.highest_education_code', self::missingFields($draft));
+            self::assertArrayHasKey('facts.highest_education_code', $draft['sources']);
+        }
+
+        $employment = (new PayrollRegistrationA1DraftBuilder())->build(
+            self::sources(),
+            self::identity(),
+            null,
+            null,
+            '2026-08-14',
+            0,
+            null,
+        );
+        self::assertNull($employment['suggested']['facts']['highest_education_code']);
+    }
+
+    /**
      * Postavení v zaměstnání se navrhne z druhu vztahu a doby určité jako
      * čtyřmístný kód NKPZ — dvoumístný kód ČSSZ nepřijímá.
      */

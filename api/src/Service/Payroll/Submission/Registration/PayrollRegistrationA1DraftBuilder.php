@@ -149,7 +149,10 @@ final class PayrollRegistrationA1DraftBuilder
 
         $facts = $variant === PayrollRegistrationBusinessMatrix::VARIANT_10
             ? null
-            : $this->facts($variant);
+            : $this->facts(
+                $variant,
+                PayrollRegistrationEducationRule::mustBeNotRelevant($citizenship, $activityCode),
+            );
 
         $pension = $variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
             ? $this->pension()
@@ -673,9 +676,19 @@ final class PayrollRegistrationA1DraftBuilder
     }
 
     /** @return array<string,mixed> */
-    private function facts(?string $variant): array
+    private function facts(?string $variant, bool $educationNotRelevant): array
     {
-        if ($variant === PayrollRegistrationBusinessMatrix::VARIANT_OST) {
+        $education = null;
+        if ($variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
+            && $educationNotRelevant
+        ) {
+            $education = PayrollRegistrationEducationRule::NOT_RELEVANT;
+            $this->source(
+                'facts.highest_education_code',
+                'U občana ČR s dohodou se vzdělání nesleduje, uvádí se „Z" '
+                . '(nerelevantní) podle Zásad REGZEC, atribut 10091.',
+            );
+        } elseif ($variant === PayrollRegistrationBusinessMatrix::VARIANT_OST) {
             $this->miss(
                 'facts.highest_education_code',
                 'Aplikace nevede nejvyšší dosažené vzdělání. Vyberte je ručně '
@@ -689,7 +702,7 @@ final class PayrollRegistrationA1DraftBuilder
         );
 
         return [
-            'highest_education_code' => null,
+            'highest_education_code' => $education,
             'disability_card' => false,
             'health_restrictions' => [],
         ];

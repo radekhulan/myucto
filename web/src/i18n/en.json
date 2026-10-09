@@ -6825,6 +6825,7 @@
             "orientation_number_cz": "{field} may have at most {max} characters for a Czech address, it is now “{value}”.",
             "residence_country_mismatch": "{field} must match the tax residency country (“{tax}”), it is now “{value}”.",
             "small_scale_dpp": "{field} must not be switched on for activity “{activity}” (agreement to complete a job), small-scale employment is not used for agreements.",
+            "education_not_relevant": "{field} is not tracked for a Czech citizen working under an agreement (activity “{activity}”), it must be “Z” (not relevant), it is now “{value}”.",
             "underage": "The employee is younger than {min_age} on the start date and ČSSZ rejects such a filing on entry. Check the date of birth and the start date.",
             "attachment_extension": "Attachment {name} has an unsupported extension. ČSSZ accepts only .doc, .docx, .rtf, .xls, .xlsx, .pdf, .jpg and .txt.",
             "attachment_duplicate_name": "Attachment {name} has the same name as another attachment. Attachment names must be unique.",

@@ -199,6 +199,26 @@ final class PayrollRegistrationA1SnapshotBuilder
                 'facts',
                 fn (): array => $this->facts($factsInput, $variant),
             );
+            $education = $facts['highest_education_code'] ?? null;
+            if ($education !== null
+                && $education !== PayrollRegistrationEducationRule::NOT_RELEVANT
+                && PayrollRegistrationEducationRule::mustBeNotRelevant(
+                    $citizenship,
+                    $employment['activity_code'],
+                )
+            ) {
+                $this->malformed(
+                    'facts.highest_education_code',
+                    'se u občana ČR s dohodou (druh činnosti „'
+                        . $employment['activity_code'] . '") nesleduje, musí'
+                        . ' být „Z" (nerelevantní), teď je „' . $education . '".',
+                    'education_not_relevant',
+                    [
+                        'activity' => (string) $employment['activity_code'],
+                        'value' => (string) $education,
+                    ],
+                );
+            }
         }
         $pension = null;
         $foreignLegislation = null;

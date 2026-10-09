@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission\Registration;
 
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationA1SnapshotBuilder;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEducationRule;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityRequirements;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshot;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
@@ -40,6 +41,69 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             );
             self::assertSame($snapshot->toArray(), $snapshot->toArray());
         }
+    }
+
+    /**
+     * REGZEC25-fact.highedu-07 (Zásady REGZEC 1.4.6, ID 10091): občan ČR
+     * s DPČ (A až J) nebo DPP (T až ZC) má vzdělání „Z" (nerelevantní).
+     * U pracovního poměru a u cizince s dohodou se vzdělání uvádí.
+     */
+    public function testCzechCitizenWithAgreementMustHaveEducationNotRelevant(): void
+    {
+        $builder = new PayrollRegistrationA1SnapshotBuilder();
+        foreach (['A', 'J', 'T', 'ZC'] as $activity) {
+            $source = self::source($activity, null);
+            $source['facts']['highest_education_code'] = 'T';
+            $problem = self::educationProblem($builder->problems(
+                $source,
+                self::identity(),
+                self::scope(),
+            ));
+            self::assertNotNull($problem, $activity);
+            self::assertSame('registration_regzec_a1_field_value_invalid', $problem['code']);
+            self::assertSame('education_not_relevant', $problem['message_key']);
+            self::assertSame(['activity' => $activity, 'value' => 'T'], $problem['params']);
+
+            $source['facts']['highest_education_code'] = 'Z';
+            self::assertNull(self::educationProblem($builder->problems(
+                $source,
+                self::identity(),
+                self::scope(),
+            )), $activity);
+        }
+
+        $employment = self::source('1', '1');
+        $employment['facts']['highest_education_code'] = 'T';
+        self::assertNull(self::educationProblem($builder->problems(
+            $employment,
+            self::identity(),
+            self::scope(),
+        )));
+
+        $foreigner = self::source('A', null);
+        $foreigner['facts']['highest_education_code'] = 'T';
+        $identity = self::identity();
+        $identity['citizenship_country_code'] = 'SK';
+        self::assertNull(self::educationProblem($builder->problems(
+            $foreigner,
+            $identity,
+            self::scope(),
+        )));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $problems
+     * @return array<string,mixed>|null
+     */
+    private static function educationProblem(array $problems): ?array
+    {
+        foreach ($problems as $problem) {
+            if (($problem['field'] ?? null) === 'facts.highest_education_code') {
+                return $problem;
+            }
+        }
+
+        return null;
     }
 
     public function testMissingVariantFieldFailsClosed(): void
@@ -655,7 +719,10 @@ final class PayrollRegistrationA1SnapshotBuilderTest extends TestCase
             ],
             'health_insurance_code' => '111',
             'facts' => [
-                'highest_education_code' => 'T',
+                // Fixture je občan ČR: u dohody se vzdělání nesleduje (Z).
+                'highest_education_code' => PayrollRegistrationEducationRule::mustBeNotRelevant('CZ', $activityCode)
+                    ? 'Z'
+                    : 'T',
                 'disability_card' => false,
                 'health_restrictions' => [],
             ],

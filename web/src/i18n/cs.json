@@ -6825,6 +6825,7 @@
             "orientation_number_cz": "{field} smí mít u české adresy nejvýš {max} znaky, teď je „{value}“.",
             "residence_country_mismatch": "{field} musí být shodný se státem daňové rezidence („{tax}“), teď je „{value}“.",
             "small_scale_dpp": "{field} nesmí být u druhu činnosti „{activity}“ (dohoda o provedení práce) zapnuté, zaměstnání malého rozsahu se u dohod nepoužívá.",
+            "education_not_relevant": "{field} se u občana ČR s dohodou (druh činnosti „{activity}“) nesleduje, musí být „Z“ (nerelevantní), teď je „{value}“.",
             "underage": "Zaměstnanci je k datu nástupu méně než {min_age} let, ČSSZ takové podání zamítne na vstupu. Zkontrolujte datum narození a datum nástupu.",
             "attachment_extension": "Příloha {name} nemá podporovanou příponu. ČSSZ přijme jen .doc, .docx, .rtf, .xls, .xlsx, .pdf, .jpg a .txt.",
             "attachment_duplicate_name": "Příloha {name} má stejný název jako jiná příloha. Názvy příloh se nesmí opakovat.",
