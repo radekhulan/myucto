@@ -16,6 +16,9 @@ namespace MyInvoice\Service\Invoice;
  *     float reprezentace koeficientu srazí 31,815 na 31,81 místo 31,82.)
  *  - Reverse charge (přenesená daňová povinnost): nominální sazba (21 %) ZŮSTÁVÁ pro
  *    zobrazení i breakdown, ale daň = 0 (dodavatel ji nevybírá, odvede ji zákazník).
+ *    Řádek smí příznak dokladu přebít klíčem `reverse_charge` (bool): smíšený přijatý
+ *    doklad nese vedle řádku § 92a i tuzemský řádek s daní dodavatele. O tom rozhoduje
+ *    volající přes {@see \MyInvoice\Service\Report\VatLedgerService::isSelfAssessedDocumentLine()}.
  *  - Faktura: SUM jednotlivých položek
  *
  * Režim SHORA ($pricesIncludeVat = true — ceny položek jsou VČETNĚ DPH, typicky
@@ -71,7 +74,7 @@ final class InvoiceMath
 
             $base = TimeBilling::invoiceAmount($item);
             // Dělit až nakonec (base*rate/100), ne base*(rate/100) — viz issue #82.
-            $vat  = $reverseCharge ? 0.0 : round($base * $rate / 100.0, 2);
+            $vat  = self::lineReverseCharge($item, $reverseCharge) ? 0.0 : round($base * $rate / 100.0, 2);
             $with = round($base + $vat, 2);
 
             $perItem[] = ['base' => $base, 'vat' => $vat, 'with' => $with, 'rate' => $rate];
@@ -94,10 +97,14 @@ final class InvoiceMath
             $rate  = (float) $item['vat_rate_snapshot'];
 
             $gross = TimeBilling::invoiceAmount($item);
+            $lineRc = self::lineReverseCharge($item, $reverseCharge);
             // Koeficient rate/(100+rate); u rate=0 i RC vychází daň 0.
-            $vat   = ($reverseCharge || $rate <= 0.0) ? 0.0 : round($gross * $rate / (100.0 + $rate), 2);
+            $vat   = ($lineRc || $rate <= 0.0) ? 0.0 : round($gross * $rate / (100.0 + $rate), 2);
             $base  = round($gross - $vat, 2);
             $lines[$i] = ['gross' => $gross, 'rate' => $rate, 'vat' => $vat, 'base' => $base];
+            if ($lineRc) {
+                continue; // daň 0 → do dorovnání sazby nevstupuje
+            }
 
             $key = number_format($rate, 2, '.', '');
             if (!isset($rateGroups[$key])) {
@@ -114,7 +121,7 @@ final class InvoiceMath
         // 2. průchod — dorovnat zaokrouhlovací reziduum daně per sazba na nejsilnějším
         // řádku, aby SUM(řádkový vat) == daň z celkového gross dané sazby (koeficient).
         foreach ($rateGroups as $g) {
-            if ($reverseCharge || $g['rate'] <= 0.0) {
+            if ($g['rate'] <= 0.0) {
                 continue; // daň 0 → není co dorovnávat
             }
             $grossSum  = round($g['grossSum'], 2);
@@ -138,6 +145,14 @@ final class InvoiceMath
             $perItem[] = ['base' => $l['base'], 'vat' => $l['vat'], 'with' => $l['gross'], 'rate' => $l['rate']];
         }
         return $perItem;
+    }
+
+    /** @param array<string,mixed> $item */
+    private static function lineReverseCharge(array $item, bool $reverseCharge): bool
+    {
+        return array_key_exists('reverse_charge', $item) && $item['reverse_charge'] !== null
+            ? (bool) $item['reverse_charge']
+            : $reverseCharge;
     }
 
     /**

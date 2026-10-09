@@ -42,7 +42,7 @@ use MyInvoice\Service\Accounting\PostingException;
  *   document_kind:?string, status:string, is_draft:bool, tax_date:?string, issue_date:?string,
  *   counterparty_name:string, counterparty_dic:?string, country_iso2:?string,
  *   code:?string, dphdp3_line:?string, dphdp3_line_secondary:?string, kh_section:?string,
- *   is_reverse_charge:bool, classification_reverse_charge:bool, code_estimated:bool, vat_deduction_partial:bool, vat_rate:float, base_czk:float, vat_czk:float,
+ *   is_reverse_charge:bool, classification_reverse_charge:bool, rc_self_assessed_vat:bool, code_estimated:bool, vat_deduction_partial:bool, vat_rate:float, base_czk:float, vat_czk:float,
  *   total_with_vat_czk:float, is_fixed_asset:bool, exchange_rate:float, exchange_rate_missing:bool
  * }
  */
@@ -120,9 +120,19 @@ final class VatLedgerService
      */
     public function classificationMap(int $supplierId): array
     {
+        return self::classificationMapFor($this->db->pdo(), $supplierId);
+    }
+
+    /**
+     * {@see classificationMap()} pro volající bez instance služby (přepočet dokladu).
+     *
+     * @return array<string, array<string,mixed>>
+     */
+    public static function classificationMapFor(\PDO $pdo, int $supplierId): array
+    {
         // ORDER BY supplier_id IS NULL DESC → globální (NULL) řádky první, per-tenant
         // override poslední → v loopu přepíše globální seed (per-tenant override VYHRAJE).
-        $stmt = $this->db->pdo()->prepare(
+        $stmt = $pdo->prepare(
             'SELECT code, label, dphdp3_line, dphdp3_line_secondary, kh_section, vat_rate,
                     is_reverse_charge, kod_pred_pl, kh_regime_code, kh_bad_debt
                FROM vat_classifications
@@ -1198,6 +1208,9 @@ final class VatLedgerService
             'kh_bad_debt'            => $clsf['kh_bad_debt'] ?? null,
             'is_reverse_charge'     => $isRc,
             'classification_reverse_charge' => $codeIsRc,
+            // Daň řádku si dopočítal příjemce (dodavatel ji na doklad nedal). Odliší
+            // tuzemský řádek smíšeného dokladu s daní dodavatele od kódu 40 bez daně (#119).
+            'rc_self_assessed_vat'  => $rcSelfAssess,
             // Kód nebyl na dokladu, jen odhadnut fallbackem pro zahraniční RC (24e/24).
             'code_estimated'        => !empty($r['code_estimated']),
             'vat_deduction_partial' => $isPartialDeduction,
@@ -1230,6 +1243,26 @@ final class VatLedgerService
     {
         return !empty($row['is_reverse_charge'])
             && (!empty($row['classification_reverse_charge']) || ($row['dphdp3_line'] ?? null) === null);
+    }
+
+    /**
+     * Totéž pravidlo pro řádek dokladu před vznikem evidence: nese řádek dokladu
+     * s příznakem přenesení v hlavičce daň dodavatele (tuzemský kód 40/41), nebo se
+     * samovyměřuje a dodavatel daň neúčtuje? Bez příznaku v hlavičce vždy false.
+     *
+     * @param array<string, array<string,mixed>> $classificationMap {@see classificationMapFor()}
+     */
+    public static function isSelfAssessedDocumentLine(bool $headerReverseCharge, ?string $code, array $classificationMap): bool
+    {
+        if (!$headerReverseCharge) {
+            return false;
+        }
+        $clsf = $code !== null && $code !== '' ? ($classificationMap[$code] ?? null) : null;
+        return self::isSelfAssessedRow([
+            'is_reverse_charge'             => true,
+            'classification_reverse_charge' => (bool) ($clsf['is_reverse_charge'] ?? false),
+            'dphdp3_line'                   => $clsf['dphdp3_line'] ?? null,
+        ]);
     }
 
     /** Datum (DATE i DATETIME z PDO) na `YYYY-MM-DD`; prázdno → null. */

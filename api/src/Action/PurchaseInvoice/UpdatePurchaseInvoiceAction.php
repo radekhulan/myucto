@@ -343,12 +343,15 @@ final class UpdatePurchaseInvoiceAction
             }
             // Jen když tělo položky opravdu poslalo — jinak by částečný PUT (samotné DUZP,
             // poznámka) doklad vyprázdnil ({@see DocumentItemsPayload}).
+            // Přenesení bylo v hlavičce už před uložením → tuzemský kód 40/41 na řádku je
+            // vědomá položka smíšeného dokladu, ne pozůstatek z doby před zatržením.
+            $keepDomesticItemCodes = (bool) ($existing['reverse_charge'] ?? false);
             if (DocumentItemsPayload::replaces($body)) {
-                $this->repo->replaceItems($id, (array) $body['items']);
+                $this->repo->replaceItems($id, (array) $body['items'], $keepDomesticItemCodes);
             } else {
                 // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
                 // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).
-                $this->repo->reconcileReverseChargeItemCodes($id);
+                $this->repo->reconcileReverseChargeItemCodes($id, $keepDomesticItemCodes);
             }
             // Volba „uhradit hotově z pokladny" (migrace 1327) — jen když klíč v těle JE,
             // ať částečný PUT (samotné DUZP, poznámka) volbu tiše nesmaže.

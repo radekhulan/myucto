@@ -66,6 +66,25 @@ final class InvoiceMathTest extends TestCase
         self::assertSame(0.00,   $r['vat_breakdown'][1]['vat']);
     }
 
+    /** Smíšený doklad s přenesením: tuzemský řádek (reverse_charge=false) nese daň dodavatele zdola i shora. */
+    public function testLineFlagOverridesDocumentReverseCharge(): void
+    {
+        $items = [
+            ['quantity' => 1, 'unit_price_without_vat' => 50000.00, 'vat_rate_snapshot' => 21, 'reverse_charge' => true],
+            ['quantity' => 1, 'unit_price_without_vat' => 20000.00, 'vat_rate_snapshot' => 21, 'reverse_charge' => false],
+        ];
+        $r = InvoiceMath::compute($items, reverseCharge: true);
+        self::assertSame(0.00, $r['items'][0]['vat']);
+        self::assertSame(4200.00, $r['items'][1]['vat']);
+        self::assertSame(74200.00, $r['totals']['with_vat']);
+
+        $items[1]['unit_price_without_vat'] = 24200.00;
+        $r = InvoiceMath::compute($items, reverseCharge: true, pricesIncludeVat: true);
+        self::assertSame(0.00, $r['items'][0]['vat']);
+        self::assertSame(4200.00, $r['items'][1]['vat']);
+        self::assertSame(20000.00, $r['items'][1]['base']);
+    }
+
     public function testEmptyItemsReturnsZeros(): void
     {
         $r = InvoiceMath::compute([]);

@@ -1936,8 +1936,10 @@ final class PurchaseInvoiceRepository
     /**
      * Přepíše items (smaže staré + insertne nové).
      * Volá se z SetItems action; následuje recompute z PurchaseInvoiceCalculator.
+     *
+     * @param bool $keepDomesticItemCodes viz {@see reconcileReverseChargeItemCodes()}
      */
-    public function replaceItems(int $purchaseInvoiceId, array $items): void
+    public function replaceItems(int $purchaseInvoiceId, array $items, bool $keepDomesticItemCodes = false): void
     {
         $pdo = $this->db->pdo();
         $items = array_map(
@@ -2077,7 +2079,7 @@ final class PurchaseInvoiceRepository
             ]);
         }
 
-        $this->reconcileReverseChargeItemCodes($purchaseInvoiceId);
+        $this->reconcileReverseChargeItemCodes($purchaseInvoiceId, $keepDomesticItemCodes);
 
         // Odrážky hlášení AI extrakce u řádků, které teď druh nákladu mají, zmizí.
         if ($supplierId > 0) {
@@ -2087,6 +2089,9 @@ final class PurchaseInvoiceRepository
 
     /** Tuzemské kódy přijatého plnění — u dokladu s přenesenou povinností nikdy nepatří na řádek. */
     public const DOMESTIC_INPUT_CODES = ['40', '41', '42'];
+
+    /** Kódy odpočtu daně dodavatele, které smíšený doklad s přenesením vědomě nese vedle řádku § 92a. */
+    public const MIXED_DOCUMENT_DOMESTIC_CODES = ['40', '41'];
 
     /**
      * Srovná kódy řádků dokladu s přenesenou povinností (issue #119).
@@ -2100,9 +2105,15 @@ final class PurchaseInvoiceRepository
      * nemá, odvodí se znovu jako u nového řádku. Jiné kódy řádků (23/24/24e/25/5,
      * mimo, osvobozené) zůstávají, jsou to vědomá volba.
      *
+     * `$keepDomesticItemCodes`: doklad měl přenesení v hlavičce už před uložením, takže
+     * kód 40/41 na řádku nepochází z doby před zatržením, ale je to tuzemská položka
+     * smíšeného dokladu s daní dodavatele (§ 92a vedle běžného plnění). Ta zůstává.
+     * Neplátci (identifikované osobě) a u zahraničního dodavatele se přepisuje vždy:
+     * odpočet tuzemské daně dodavatele tam nedává smysl.
+     *
      * @return int počet opravených řádků
      */
-    public function reconcileReverseChargeItemCodes(int $purchaseInvoiceId): int
+    public function reconcileReverseChargeItemCodes(int $purchaseInvoiceId, bool $keepDomesticItemCodes = false): int
     {
         $pdo = $this->db->pdo();
         $metaStmt = $pdo->prepare(
@@ -2120,7 +2131,7 @@ final class PurchaseInvoiceRepository
         }
         $marks = implode(',', array_fill(0, count(self::DOMESTIC_INPUT_CODES), '?'));
         $itemsStmt = $pdo->prepare(
-            "SELECT id, vat_rate_id, description FROM purchase_invoice_items
+            "SELECT id, vat_rate_id, description, vat_classification_code FROM purchase_invoice_items
               WHERE purchase_invoice_id = ? AND vat_classification_code IN ({$marks})"
         );
         $itemsStmt->execute([$purchaseInvoiceId, ...self::DOMESTIC_INPUT_CODES]);
@@ -2152,10 +2163,18 @@ final class PurchaseInvoiceRepository
         if ($supplierId > 0 && $this->db->hasTable('supplier_vat_status_history')) {
             $tenantIsVatPayer = VatStatusService::flagsAt($pdo, $supplierId, $docDate)['is_vat_payer'];
         }
+        // Daň dodavatele na tuzemském řádku nese jen tuzemský dodavatel (§ 92a je tuzemský
+        // režim). Kód 40 u zahraničního dodavatele je pozůstatek omylem zvolené země (#119).
+        $vendorIsDomestic = strtoupper((string) ($meta['iso2'] ?? 'CZ')) === 'CZ';
         $vatRates = $this->vatRateMap();
         $update = $pdo->prepare('UPDATE purchase_invoice_items SET vat_classification_code = ? WHERE id = ?');
         $fixed = 0;
         foreach ($items as $item) {
+            if ($keepDomesticItemCodes && $tenantIsVatPayer && $vendorIsDomestic
+                && in_array((string) $item['vat_classification_code'], self::MIXED_DOCUMENT_DOMESTIC_CODES, true)
+            ) {
+                continue;
+            }
             $code = $headerRcCode ?? self::defaultClassificationCode(
                 $vatRates[(int) $item['vat_rate_id']] ?? 0.0,
                 true,

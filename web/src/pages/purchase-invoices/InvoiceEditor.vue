@@ -999,10 +999,23 @@ function removeItem(idx: number) {
   form.value.items.splice(idx, 1)
 }
 
+// Zrcadlí VatLedgerService::isSelfAssessedDocumentLine(): u smíšeného dokladu s přenesením
+// nese tuzemský řádek (kód 40/41) daň dodavatele, samovyměřuje se jen zbytek.
+function itemSelfAssessed(it: PurchaseInvoiceItem): boolean {
+  if (!form.value.reverse_charge) return false
+  const code = it.vat_classification_code ?? form.value.vat_classification_code
+  const matches = code ? vatClassifications.value.filter(c => c.code === code) : []
+  const vc = matches.find(c => c.supplier_id !== null) ?? matches[0]
+  return !vc || vc.is_reverse_charge || vc.dphdp3_line === null
+}
+function itemVatRate(it: PurchaseInvoiceItem): number {
+  return itemSelfAssessed(it) ? 0 : Number(vatRates.value.find(v => v.id === it.vat_rate_id)?.rate_percent ?? 0)
+}
+
 // Per-item live calc preview (read-only, server přepočte při save)
 function itemTotal(it: PurchaseInvoiceItem) {
   const amt = itemAmount(it)
-  const rate = form.value.reverse_charge ? 0 : (vatRates.value.find(v => v.id === it.vat_rate_id)?.rate_percent || 0)
+  const rate = itemVatRate(it)
   if (isPreciseTimeItem(it)) return timeItemTotals(it, rate, form.value.prices_include_vat)
   // Režim "ceny s DPH": unit_price_without_vat nese cenu S DPH (gross) → DPH shora.
   if (form.value.prices_include_vat) {
@@ -1031,7 +1044,7 @@ function setItemGross(it: PurchaseInvoiceItem, raw: string): void {
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u reverse-charge je sazba 0).
-  const rate = form.value.reverse_charge ? 0 : (vatRates.value.find(v => v.id === it.vat_rate_id)?.rate_percent || 0)
+  const rate = itemVatRate(it)
   const net = gross / (1 + rate / 100)
   it.unit_price_without_vat = isTimeItem(it) ? round6(net / qty) : round2(net / qty)
 }
@@ -1054,7 +1067,7 @@ const computedRecap = computed(() => {
   const map = new Map<number, { rate: number; base: number; vat: number }>()
   for (const it of form.value.items) {
     const t = itemTotal(it)
-    const rate = form.value.reverse_charge ? 0 : (vatRates.value.find(v => v.id === it.vat_rate_id)?.rate_percent ?? 0)
+    const rate = itemVatRate(it)
     const cur = map.get(rate) ?? { rate, base: 0, vat: 0 }
     cur.base = round2(cur.base + t.base)
     cur.vat = round2(cur.vat + t.vat)

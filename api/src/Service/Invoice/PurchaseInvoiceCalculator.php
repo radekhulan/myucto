@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
 
 /**
@@ -16,7 +17,8 @@ use PDO;
  *  - Per item: total_without_vat = round(qty * unit_price, 2)
  *              total_vat         = round(base * rate/100, 2)
  *              total_with_vat    = base + vat
- *  - Reverse charge: rate = 0 pro všechny položky (input VAT self-assessed)
+ *  - Reverse charge: daň 0 u řádků, které se samovyměřují; tuzemský řádek smíšeného
+ *    dokladu (kód 40/41) nese daň dodavatele podle sazby (pravidlo z evidence DPH)
  *  - amount_to_pay je generated STORED column (total_with_vat - advance_paid_amount)
  */
 final class PurchaseInvoiceCalculator
@@ -32,7 +34,8 @@ final class PurchaseInvoiceCalculator
     {
         $pdo = $this->db->pdo();
 
-        $stmt = $pdo->prepare('SELECT reverse_charge, prices_include_vat, vat_overrides FROM purchase_invoices WHERE id = ?');
+        $stmt = $pdo->prepare('SELECT supplier_id, reverse_charge, prices_include_vat, vat_overrides, vat_classification_code
+               FROM purchase_invoices WHERE id = ?');
         $stmt->execute([$purchaseInvoiceId]);
         $header = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($header === false) {
@@ -50,13 +53,24 @@ final class PurchaseInvoiceCalculator
         }
 
         $stmt = $pdo->prepare(
-            'SELECT id, quantity, duration_minutes, unit_price_without_vat, vat_rate_snapshot
+            'SELECT id, quantity, duration_minutes, unit_price_without_vat, vat_rate_snapshot, vat_classification_code
                FROM purchase_invoice_items
               WHERE purchase_invoice_id = ?
               ORDER BY order_index, id'
         );
         $stmt->execute([$purchaseInvoiceId]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Smíšený doklad s přenesením v hlavičce: o tom, zda řádek nese daň dodavatele,
+        // rozhoduje klasifikace řádku stejně jako v evidenci DPH, KH a zaúčtování.
+        if ($reverseCharge && $items !== []) {
+            $map = VatLedgerService::classificationMapFor($pdo, (int) $header['supplier_id']);
+            $headerCode = $header['vat_classification_code'] !== null ? (string) $header['vat_classification_code'] : null;
+            foreach ($items as $i => $item) {
+                $code = $item['vat_classification_code'] !== null ? (string) $item['vat_classification_code'] : $headerCode;
+                $items[$i]['reverse_charge'] = VatLedgerService::isSelfAssessedDocumentLine(true, $code, $map);
+            }
+        }
 
         $computed = InvoiceMath::compute($items, $reverseCharge, $pricesIncludeVat, $vatOverrides);
 

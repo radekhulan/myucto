@@ -89,7 +89,9 @@ final class SetPurchaseInvoiceItemsAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
-        $this->repo->replaceItems($id, $items);
+        // Hlavička se tu nemění: přenesení v ní už bylo, kód 40/41 je vědomá tuzemská
+        // položka smíšeného dokladu ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}).
+        $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
         $this->calc->recompute($id);
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

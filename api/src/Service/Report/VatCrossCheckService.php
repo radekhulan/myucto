@@ -187,6 +187,9 @@ final class VatCrossCheckService
      * ({@see PurchaseInvoiceRepository::reconcileReverseChargeItemCodes()}); tady se
      * vyjmenují doklady uložené dřív.
      *
+     * Řádek s daní dodavatele je tuzemská položka smíšeného dokladu (§ 92a vedle
+     * běžného plnění), odpočet ř. 40/41 je u něj správně a nález nevzniká.
+     *
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
@@ -195,7 +198,8 @@ final class VatCrossCheckService
         $docs = [];
         foreach ($rows as $row) {
             if (($row['source'] ?? '') !== 'purchase' || empty($row['is_reverse_charge'])
-                || !in_array((string) ($row['code'] ?? ''), PurchaseInvoiceRepository::DOMESTIC_INPUT_CODES, true)) {
+                || !in_array((string) ($row['code'] ?? ''), PurchaseInvoiceRepository::DOMESTIC_INPUT_CODES, true)
+                || empty($row['rc_self_assessed_vat'])) {
                 continue;
             }
             $id = (int) $row['invoice_id'];
