@@ -22,6 +22,12 @@ final class PayrollEmploymentJmhzActivityFamily
         return in_array($activityCode, self::CORPORATE_BODY_ACTIVITY_CODES, true);
     }
 
+    /** Druh činnosti „T“ až „ZC“: dohoda o provedení práce (kontroly 245 a 325 ČSSZ). */
+    public static function isAgreementToCompleteJobActivity(mixed $activityCode): bool
+    {
+        return in_array($activityCode, self::DPP_ACTIVITY_CODES, true);
+    }
+
     /**
      * Bližší určení pracovněprávního vztahu (10502) „výkon trestu odnětí
      * svobody nebo zabezpečovací detence". U druhu činnosti 1 až 9 vede na

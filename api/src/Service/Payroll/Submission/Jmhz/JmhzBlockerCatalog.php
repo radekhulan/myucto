@@ -554,6 +554,7 @@ final class JmhzBlockerCatalog
         'jmhz_scenario1_tax_credit_breakdown_unavailable' => 'runs',
         'jmhz_scenario1_whole_czk_required' => 'runs',
         'jmhz_scenario1_withholding_base_missing' => 'runs',
+        'jmhz_scenario1_withholding_above_thresholds' => ['employment_terms', 'activity_code'],
         'jmhz_scenario1_withholding_tax_unsupported' => 'manual',
         'jmhz_scenario2_evidence_gap' => 'manual',
         'jmhz_scenario2_frozen_resolution_invalid' => 'retry',

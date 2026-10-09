@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
+use MyInvoice\Service\Tax\TaxConstants;
 
 final class JmhzScenario1DocumentResolver
 {
@@ -598,6 +600,13 @@ final class JmhzScenario1DocumentResolver
                 static fn (array $left, array $right): int =>
                     (int) ($left['employment_id'] ?? 0)
                     <=> (int) ($right['employment_id'] ?? 0),
+            );
+            $this->inspectWithholdingAgainstThresholds(
+                $normalizedEmployments,
+                $withholdingTaxCzk,
+                $preparation->periodStart,
+                $employeeId,
+                $blockers,
             );
             $normalizedPeople[] = [
                 'employee_id' => $employeeId,
@@ -2674,6 +2683,71 @@ final class JmhzScenario1DocumentResolver
      * @param list<JmhzScenario1Blocker> $blockers
      * @return array{base:?int,tax:?int}|null
      */
+    /**
+     * Kontrola 325 katalogu ČSSZ (zamítavá): bez odměn nerezidentů ve
+     * statutárním orgánu (10416, aplikace je nevykazuje) a s úhrnem 10535
+     * dohod o provedení práce (druh činnosti T až ZC) aspoň na rozhodné
+     * hranici DPP a zároveň úhrnem 10535 ostatních vztahů aspoň na hranici
+     * ZMR nesmí osoba nést srážkovou daň (10307, 10309).
+     *
+     * Z hotového XML se kontrola vyhodnotit nedá, protože druh činnosti
+     * (10239) první profil nevykazuje. Vynucuje se proto tady nad rozhodnutím
+     * selektoru, stejně jako kontrola 42. Hranice jsou z mzdového rulesetu
+     * (TaxConstants), tedy tytéž, podle kterých mzda režim zdanění určila.
+     * Rok bez ověřených konstant kontrolu nevyhodnotí; nevydává ji za splněnou,
+     * jen ji nechá protokolu ČSSZ.
+     *
+     * @param list<array<string,mixed>> $employments
+     * @param array{base:?int,tax:?int}|null $withholding
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function inspectWithholdingAgainstThresholds(
+        array $employments,
+        ?array $withholding,
+        string $periodStart,
+        ?int $employeeId,
+        array &$blockers,
+    ): void {
+        if ($withholding === null) {
+            return;
+        }
+        try {
+            $constants = TaxConstants::forYear((int) substr($periodStart, 0, 4));
+        } catch (\OutOfRangeException) {
+            return;
+        }
+        $dppLimit = $constants['dpp_withholding_limit'] ?? null;
+        $smallScaleLimit = $constants['sickness_participation_threshold'] ?? null;
+        if (!is_numeric($dppLimit) || !is_numeric($smallScaleLimit)) {
+            return;
+        }
+        $agreements = 0;
+        $others = 0;
+        foreach ($employments as $employment) {
+            $base = $employment['taxable_income_czk'] ?? null;
+            $selector = $this->object($employment['selector'] ?? null);
+            $activityCode = $selector['activity_code']
+                ?? $this->object($employment['term'] ?? null)['activity_code']
+                ?? null;
+            if (!is_int($base) || !is_string($activityCode) || $activityCode === '') {
+                return;
+            }
+            if (PayrollEmploymentJmhzActivityFamily::isAgreementToCompleteJobActivity($activityCode)) {
+                $agreements += $base;
+            } else {
+                $others += $base;
+            }
+        }
+        if ($agreements >= (float) $dppLimit && $others >= (float) $smallScaleLimit) {
+            $blockers[] = $this->blocker(
+                'jmhz_scenario1_withholding_above_thresholds',
+                'person',
+                $employeeId,
+                ['10307', '10309', '10535', '10239'],
+            );
+        }
+    }
+
     private function withholdingTaxCzk(
         array $tax,
         ?int $employeeId,

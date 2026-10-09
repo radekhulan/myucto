@@ -1272,6 +1272,68 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     }
 
     /**
+     * Kontrola 325 ČSSZ (zamítavá): DPP v úhrnu na hranici 12 000 Kč a ostatní
+     * vztahy na hranici ZMR 4 500 Kč, pak srážková daň 10307/10309 nesmí být.
+     * Z XML se nedá vyhodnotit (druh činnosti 10239 se nevykazuje), proto ji
+     * vynucuje resolver nad druhem činnosti vztahů. Pod hranicí DPP blok projde.
+     */
+    public function testWithholdingWithBothThresholdsReachedBlocksLikeControl325(): void
+    {
+        foreach ([1_200_000 => true, 1_199_900 => false] as $dppBase => $blocked) {
+            $payload = $this->currentPayload();
+            $person = &$payload['people'][0];
+            $tax = &$person['person_summary']['statutory']['income_tax'];
+            $tax['advance_tax']['taxable_income_minor_units'] = 500_000;
+            $tax['withholding_base_minor_units'] = $dppBase;
+            $tax['withholding_tax_minor_units'] = intdiv($dppBase * 15, 100);
+            $tax['withholding_groups'] = [['group' => 'dpp']];
+            $tax['relationships'] = [
+                [
+                    'relationship_reference' => 'employment:101',
+                    'kind' => 'employment',
+                    'taxable_base_minor_units' => 500_000,
+                    'regime' => 'advance',
+                ],
+                [
+                    'relationship_reference' => 'employment:102',
+                    'kind' => 'dpp',
+                    'taxable_base_minor_units' => $dppBase,
+                    'regime' => 'withholding',
+                    'withholding_group' => 'dpp',
+                ],
+            ];
+            unset($tax);
+            $agreement = $person['employments'][0];
+            $agreement['employment_id'] = 102;
+            $agreement['employment'] = ['is_primary' => false];
+            $agreement['term']['activity_code'] = 'T';
+            $agreement['term']['jmhz_relationship_detail_code'] = null;
+            $agreement['scenario_resolution'] = ['scenario_key' => 'scenario_1', 'activity_code' => 'T'];
+            $agreement['insurance']['relationship_id'] = 'employment:102';
+            $agreement['insurance']['kind'] = 'dpp';
+            $person['employments'][0]['scenario_resolution']['activity_code'] = '1';
+            $person['employments'][] = $agreement;
+            unset($person);
+
+            $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+                $this->withVersionedPayload(
+                    $this->preparation(),
+                    JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+                    $payload,
+                ),
+                $this->pvpoj(),
+            );
+
+            $codes = array_map(static fn ($blocker): string => $blocker->code, $resolution->blockers);
+            if ($blocked) {
+                self::assertContains('jmhz_scenario1_withholding_above_thresholds', $codes, 'DPP 12 000 Kč a HPP 5 000 Kč');
+            } else {
+                self::assertNotContains('jmhz_scenario1_withholding_above_thresholds', $codes, 'DPP 11 999 Kč');
+            }
+        }
+    }
+
+    /**
      * Rozpad srážky po vztazích musí složit základ srážkové daně 10307 (úhrn
      * skupiny zaokrouhlený dolů, § 36 odst. 3 ZDP). Nesedí-li, hlášení se
      * zablokuje, místo aby 10535 tvrdil jiné číslo než souhrn.

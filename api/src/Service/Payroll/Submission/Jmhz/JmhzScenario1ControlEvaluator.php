@@ -121,8 +121,10 @@ final class JmhzScenario1ControlEvaluator
         321 => 'Pozitivní výčet povinných atributů souhrnné vrstvy je v katalogu'
             . ' popsaný odkazem na oblast, ne výčtem; bez doloženého seznamu by'
             . ' šlo o odhad.',
+        // Z XML ne, nad zdrojem ano: resolver ji vynucuje blockerem
+        // `jmhz_scenario1_withholding_above_thresholds`.
         325 => 'Prahy pro zálohovou daň se počítají podle druhu činnosti (10239),'
-            . ' který první profil nevykazuje.',
+            . ' který první profil nevykazuje; podmínka se vynucuje před serializací.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
         333 => 'Oficiální katalog 1.4.2.10 má u kontroly časového omezení slevy'

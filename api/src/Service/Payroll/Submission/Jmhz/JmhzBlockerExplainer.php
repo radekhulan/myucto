@@ -81,6 +81,7 @@ final class JmhzBlockerExplainer
         'jmhz_scenario1_child_identity_incomplete' => 'U vyživovaného dítěte chybí jméno, příjmení nebo platné datum narození.',
         'jmhz_scenario1_child_order_unsupported' => 'Pořadí vyživovaného dítěte je mimo číselník měsíčního hlášení.',
         'jmhz_scenario1_withholding_tax_unsupported' => 'Srážková daň není pro tento profil JMHZ připravená.',
+        'jmhz_scenario1_withholding_above_thresholds' => 'Srážková daň nesmí nastat: dohody o provedení práce i ostatní vztahy jsou na rozhodných hranicích nebo nad nimi (kontrola 325 ČSSZ).',
         /*
          * Souběh účastných vztahů výpočet počítá po vztazích a hlášení ho
          * vykáže. Nález zbývá jen u revize spočítané dřív, jejíž výsledek
