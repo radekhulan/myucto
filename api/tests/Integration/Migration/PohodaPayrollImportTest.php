@@ -539,6 +539,36 @@ final class PohodaPayrollImportTest extends TestCase
         return $file;
     }
 
+    /**
+     * Schválený pracovní měsíc si úvazek zmrazí. Převzatý měsíc se proto schvaluje až po
+     * podmínkách z podaného hlášení téhož měsíce. Jana tu má kratší stanovenou dobu 37,5 h
+     * jako plný úvazek: založení vztahu dosadí úvazek ze 40 h (93,75 %), hlášení dokládá
+     * 100 %. Dřív se měsíc schválil dřív, než převod úvazek opravil, a zůstala v něm
+     * stanovená týdenní doba 40 h.
+     */
+    public function testTakenOverMonthIsApprovedAfterTermsFromReport(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::writeWithReports($this->tmp);
+        $xml = (string) file_get_contents($file);
+        $xml = str_replace(['<TUvazek>40</TUvazek>', '<a id="10261" t="0" f="1">40.00</a>'], ['<TUvazek>37.5</TUvazek>', '<a id="10261" t="0" f="1">37.50</a>'], $xml);
+        file_put_contents($file, $xml);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $jana = $this->employment($supplierId, '1001');
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DATE_FORMAT(period_start, "%Y-%m") AS period, weekly_work_centihours FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ? ORDER BY period_start, time_month_revision_no'
+        );
+        $stmt->execute([$supplierId, $jana['id']]);
+        $weekly = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $weekly[$row['period']] = (int) $row['weekly_work_centihours'];
+        }
+        self::assertSame(['2026-01' => 3750, '2026-02' => 3750], $weekly, json_encode($weekly) . $this->explain($protocol));
+    }
+
     public function testDryRunLeavesNothingBehind(): void
     {
         $supplierId = $this->payrollSupplier();

@@ -584,14 +584,10 @@ final class PohodaPayrollImporter
                     // srážku pro další měsíce zapíše jednou krok srážek.
                     $applied = $this->attendance->apply(
                         $supplierId, $period, [$workbook], null, [], true, true, $userOrNull, null, true, $profileId,
-                        false, true, true, $approveTakenOver, false,
+                        false, true, true, false, false,
                         self::countedByModule($period, $moduleStart),
                     );
                     $skipped = count($applied['skipped'] ?? []);
-                    if ($approveTakenOver) {
-                        $this->reportTimeApproval($period, is_array($applied['time_approval'] ?? null) ? $applied['time_approval'] : null, $protocol);
-                        $this->approveTakenOverInputs($supplierId, $userOrNull, $period, (int) ($applied['inputs']['import_id'] ?? 0), $protocol);
-                    }
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
                     if ($repeated) {
                         $this->repeatedMonth->supersedeInputs($supplierId, $period, $previousBatches,
@@ -605,6 +601,12 @@ final class PohodaPayrollImporter
                     // dostala jen verze poslední a starší měsíce by zůstaly bez pracoviště.
                     $this->people->writeWorkplaces($supplierId, $userOrNull, $records, $protocol, self::STEP_MONTHS);
                     $this->jmhz->monthTerms($supplierId, $userOrNull, $records, $jmhz, $period, $protocol, self::STEP_MONTHS);
+                    // Schválení až po podmínkách z hlášení téhož měsíce: schválený pracovní měsíc
+                    // si úvazek a fond zmrazí, a dřív by u prvního měsíce zůstal úvazek dosazený
+                    // ze 40 h místo podaného (oprava by přišla až po schválení).
+                    if ($approveTakenOver) {
+                        $this->approveTakenOverBatch($supplierId, $userOrNull, $period, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $protocol);
+                    }
                     $protocol->count(self::STEP_MONTHS, 'months');
                     $protocol->count(self::STEP_MONTHS, 'payslips', $month['totals']['rows']);
                     $protocol->count(self::STEP_MONTHS, 'persons_created', $created);
