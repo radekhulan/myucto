@@ -17,6 +17,16 @@ final readonly class PayrollRegistrationXmlValidator
         PayrollRegistrationXmlPayload $payload,
         string $xml,
     ): void {
+        // EDV PREZEC26 a REGZEC25: VENDOR/@productName 0 až 64 znaků,
+        // @productVersion 0 až 16; XSD je má jako volný xs:string.
+        if (mb_strlen((string) $payload->productName) > 64
+            || mb_strlen((string) $payload->productVersion) > 16
+        ) {
+            $this->invalid(
+                'registration_vendor_invalid',
+                'Název programu smí mít nejvýš 64 znaků a jeho verze 16 znaků.',
+            );
+        }
         $this->validateBusinessBoundary($payload);
         $expected = (new PayrollRegistrationXmlSerializer())
             ->serialize($payload);
