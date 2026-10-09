@@ -3,7 +3,8 @@
 > Návod, jak do MyÚčta načíst měsíční vyúčtování GoPay (XML) nebo výpis z obchodního
 > účtu (XLS/XLSX), zaúčtovat platby, vratky, poplatky i výplatu na bankovní účet
 > a ověřit, že se vše spárovalo. Pro účetní a každého, kdo přijímá platby přes GoPay.
-> Funkce je dostupná firmám s podvojným účetnictvím.
+> Funkce je dostupná firmám s podvojným účetnictvím i v daňové evidenci (tam bez účetních
+> zápisů, viz [§ 33.8.7](#3387-gopay-v-danove-evidenci)).
 
 ## 33.1 Kdy to potřebujete
 
@@ -23,9 +24,9 @@
 
 ## 33.2 Než začnete
 
-1. **Podvojné účetnictví.** Stránka `Peníze → GoPay` je v menu jen u firem s podvojným účetnictvím. K použití potřebujete přístup k bance, k importu potřebujete oprávnění k importu a účtování banky.
-2. **Analytické účty.** V účtové osnově musíte mít účty, které vyberete v nastavení (viz [§ 33.2.1](#3321-nastaveni-uctu)). Dva různé účty 221 (peníze u GoPay a cílový bankovní účet), účet pro pohledávky 311, nákladový účet pro poplatky a účet 261.
-3. **Zaúčtované doklady.** Faktury a dobropisy, které mají platby párovat, musí být před importem zaúčtované.
+1. **Podvojné účetnictví nebo daňová evidence.** Stránka `Peníze → GoPay` je v menu u firem s podvojným účetnictvím i s daňovou evidencí. K použití potřebujete přístup k bance, k importu potřebujete oprávnění k importu a účtování banky.
+2. **Analytické účty (jen podvojné účetnictví).** V účtové osnově musíte mít účty, které vyberete v nastavení (viz [§ 33.2.1](#3321-nastaveni-uctu)). Dva různé účty 221 (peníze u GoPay a cílový bankovní účet), účet pro pohledávky 311, nákladový účet pro poplatky a účet 261.
+3. **Zaúčtované doklady (jen podvojné účetnictví).** Faktury a dobropisy, které mají platby párovat, musí být před importem zaúčtované.
 4. **Soubor od GoPay.** Clearing XML za uzavřené období z administrace GoPay, nebo výpis z obchodního účtu v XLS/XLSX. K němu můžete přiložit původní PDF.
 
 ### 33.2.1 Nastavení účtů
@@ -45,6 +46,9 @@ Na stránce `Peníze → GoPay` vyplňte část **Nastavení účtování** a kl
 
 > [!WARNING]
 > **GoPay účet (221)** a **Cílový bankovní účet (221)** musí být dvě různé analytiky. Jinak aplikace nastavení neuloží.
+
+V daňové evidenci se účty nevybírají. Část **Nastavení účtování** obsahuje jen **Účet odesílatele GoPay**, **Kód banky**
+a toleranci data, podle kterých se výplata spáruje s bankovním pohybem.
 
 ## 33.3 Krok za krokem: import vyúčtování
 
@@ -189,9 +193,27 @@ Administrátor může importované vyúčtování smazat ze seznamu. Smazání o
 
 Vyúčtování lze smazat jen tehdy, když všechny jeho účetní zápisy patří do otevřeného a nezamčeného období a nebyly stornované. Po smazání lze stejné XML znovu importovat.
 
+### 33.8.7 GoPay v daňové evidenci
+
+V daňové evidenci se GoPay chová jako v podvojném účetnictví, jen místo účetních zápisů vede pohyby peněžní deník.
+Příjem vzniká dnem platby přes GoPay (úhrada faktury s referencí `GOPAY:`), vratka k dobropisu příjem snižuje, poplatky
+jsou daňový výdaj ke dni srážky ve vyúčtování a výplata na bankovní účet je převod mezi vlastními prostředky. GoPay má
+v deníku vlastní zůstatek, který se sesouhlasí se zůstatkem obchodního účtu GoPay. Podrobnosti a příklad jsou
+v [kapitole Daňová evidence](74_Danova_evidence.md#74917-gopay-v-danove-evidenci).
+
+Rozdíly proti podvojnému účetnictví:
+
+- Doklady se před importem nezaúčtovávají, pohyb se páruje rovnou s fakturou nebo dobropisem. Spárovaný pohyb má stav
+  **Zaúčtováno** bez čísla zápisu.
+- Sekce **Čeká na vyúčtování** se nezobrazuje: platbu, kterou GoPay ještě nevyplatil, ukazuje zůstatek GoPay v peněžním
+  deníku.
+- Spárovaná výplata zařadí bankovní pohyb v peněžním deníku jako **Převod**. Smazání vyúčtování toto zařazení zruší.
+- Vyúčtování v roce s dokončenou roční uzávěrkou daňové evidence nejde načíst, zpracovat znovu ani smazat.
+
 ## 33.9 Související kapitoly
 
 - [Banka](29_Banka.md) - import bankovních výpisů a párování plateb, kam se GoPay převod páruje.
 - [Bankovní účty](30_Bankovni_ucty.md) - účty, ze kterých GoPay posílá výplatu.
 - [Účetní deník](52_Ucetni_denik.md) - zápisy vytvořené z vyúčtování.
 - [Účtová osnova](66_Ucetni_osnova.md) - analytické účty pro nastavení.
+- [Daňová evidence](74_Danova_evidence.md) - GoPay jako peněžní prostředek v peněžním deníku.

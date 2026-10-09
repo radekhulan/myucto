@@ -6,6 +6,7 @@ import {
   taxEvidenceApi,
   type CashJournalReport,
   type CashJournalRow,
+  type CashJournalInstrument,
   type TaxBucketOverride,
 } from '@/api/taxEvidence'
 import { useToast } from '@/composables/useToast'
@@ -59,6 +60,9 @@ function docLink(row: CashJournalRow) {
   if (row.purchase_invoice_id) {
     return { name: 'purchase-invoice-detail', params: { id: row.purchase_invoice_id } }
   }
+  if (row.gopay_clearing_id) {
+    return { name: 'gopay', query: { clearing: String(row.gopay_clearing_id) } }
+  }
   return null
 }
 
@@ -102,8 +106,19 @@ function rowKey(row: CashJournalRow): string {
 // Override (1027) existuje jen pro bank_transaction_id / cash_document_id (XOR
 // constraint migrace) — noha C (invoice_payment/purchase_invoice, virtuální
 // úhrady bez fyzického dokladu) klasifikaci nepodporuje.
+function instrumentLabel(instrument: CashJournalInstrument): string {
+  switch (instrument) {
+    case 'cash': return t('tax_evidence.cash_journal.instrument_cash')
+    case 'bank': return t('tax_evidence.cash_journal.instrument_bank')
+    case 'gopay': return t('tax_evidence.cash_journal.instrument_gopay')
+    default: return t('tax_evidence.cash_journal.instrument_virtual')
+  }
+}
+
+// Výplatu GoPay spárovanou s vyúčtováním deník vždy vede jako převod, ruční zařazení
+// by ji nezměnilo (příjem vznikl už inkasem platby přes GoPay).
 function isClassifiable(row: CashJournalRow): boolean {
-  return row.source_type === 'bank' || row.source_type === 'cash'
+  return (row.source_type === 'bank' || row.source_type === 'cash') && row.gopay_clearing_id === null
 }
 async function onClassify(row: CashJournalRow, value: string, select: HTMLSelectElement) {
   if (!value) return
@@ -288,6 +303,32 @@ onMounted(load)
         <span class="text-sm font-semibold">{{ t('tax_evidence.cash_journal.totals_net') }}</span>
         <span class="font-mono text-lg font-semibold text-primary-700">{{ formatMoney(report.totals.net) }}</span>
       </div>
+    </div>
+
+    <!-- Zůstatky po peněžních prostředcích (pokladna, banka, GoPay, úhrady bez pohybu) -->
+    <div v-if="report && report.balances && report.balances.length > 1" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
+      <div class="text-xs text-neutral-500 uppercase tracking-wide font-medium mb-2">{{ t('tax_evidence.cash_journal.balances_title') }}</div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs text-neutral-500">
+            <tr>
+              <th class="py-1 pr-3 font-medium">{{ t('tax_evidence.cash_journal.balances_instrument') }}</th>
+              <th class="py-1 pr-3 font-medium text-right">{{ t('tax_evidence.cash_journal.opening_balance') }}</th>
+              <th class="py-1 pr-3 font-medium text-right">{{ t('tax_evidence.cash_journal.balances_movement') }}</th>
+              <th class="py-1 font-medium text-right">{{ t('tax_evidence.cash_journal.closing_balance') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="b in report.balances" :key="b.instrument">
+              <td class="py-1.5 pr-3 whitespace-nowrap">{{ instrumentLabel(b.instrument) }}</td>
+              <td class="py-1.5 pr-3 text-right font-mono whitespace-nowrap">{{ formatMoney(b.opening) }}</td>
+              <td class="py-1.5 pr-3 text-right font-mono whitespace-nowrap">{{ formatMoney(b.movement) }}</td>
+              <td class="py-1.5 text-right font-mono font-medium whitespace-nowrap">{{ formatMoney(b.closing) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="report.balances.some(b => b.instrument === 'gopay')" class="mt-2 text-xs text-neutral-500">{{ t('tax_evidence.cash_journal.balances_gopay_hint') }}</p>
     </div>
 
     <!-- Kontrola vůči přiznanému příjmu (R5 variance) -->

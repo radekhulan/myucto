@@ -43,6 +43,10 @@ describe('navigace podle RBAC oprávnění', () => {
     expect(appLayout).toContain("if (path === '/crm') return 'dashboard.portfolio'")
   })
 
+  it('GoPay je v menu podvojného účetnictví i daňové evidence, jen s komerčními funkcemi', () => {
+    expect(appLayout).toContain("...((isDoubleEntry || isTaxEvidence) && auth.hasCommercialFeatures ? [{ to: '/gopay'")
+  })
+
   it('zpřístupní bankovní nastavení podle settings.bank_accounts', () => {
     expect(bankPage).toContain("auth.canRead('settings.bank_accounts')")
     expect(bankPage).toContain("auth.canWrite('settings.bank_accounts')")

@@ -38,6 +38,7 @@ const importing = ref(false)
 const processingId = ref<number | null>(null)
 const deletingId = ref<number | null>(null)
 const configured = ref(false)
+const isTaxEvidence = ref(false)
 const accountOptions = ref<GoPayAccountOption[]>([])
 const clearings = ref<GoPayClearing[]>([])
 const selected = ref<GoPayClearingDetail | null>(null)
@@ -74,7 +75,7 @@ const account311 = computed(() => accountOptions.value.filter(a => a.account_cod
 const account261 = computed(() => accountOptions.value.filter(a => a.account_code.startsWith('261')))
 const expenseAccounts = computed(() => accountOptions.value.filter(a => a.account_type === 'expense'))
 const importDisabledReason = computed(() => {
-  if (!configured.value) return t('gopay.import.configure_first')
+  if (!configured.value) return isTaxEvidence.value ? t('gopay.import.configure_first_tax_evidence') : t('gopay.import.configure_first')
   if (!canImport.value) return t('gopay.import.permission_missing')
   if (!xmlFile.value) return t('gopay.import.choose_file')
   return ''
@@ -101,6 +102,7 @@ async function load() {
       gopayApi.pending(),
     ])
     configured.value = settings.configured
+    isTaxEvidence.value = settings.mode === 'tax_evidence'
     accountOptions.value = settings.account_options
     applySettings(settings.settings)
     clearings.value = items
@@ -150,6 +152,7 @@ async function saveSettings() {
   try {
     const result = await gopayApi.saveSettings({ ...form })
     configured.value = result.configured
+    isTaxEvidence.value = result.mode === 'tax_evidence'
     accountOptions.value = result.account_options
     applySettings(result.settings)
     toast.success(t('gopay.settings.saved'))
@@ -288,7 +291,7 @@ onMounted(load)
   <div class="space-y-6">
     <header>
       <h1 class="text-2xl font-bold text-neutral-900">{{ t('gopay.title') }}</h1>
-      <p class="mt-1 text-sm text-neutral-600">{{ t('gopay.subtitle') }}</p>
+      <p class="mt-1 text-sm text-neutral-600">{{ isTaxEvidence ? t('gopay.subtitle_tax_evidence') : t('gopay.subtitle') }}</p>
     </header>
 
     <div v-if="loading" class="rounded-xl border border-neutral-200 bg-surface p-8 text-center text-neutral-500">
@@ -296,13 +299,18 @@ onMounted(load)
     </div>
 
     <template v-else>
+      <div v-if="isTaxEvidence" class="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-800">
+        {{ t('gopay.tax_evidence_notice') }}
+      </div>
+
       <section class="rounded-xl border border-neutral-200 bg-surface p-5 shadow-sm">
         <div class="mb-4">
           <h2 class="text-lg font-semibold text-neutral-900">{{ t('gopay.settings.title') }}</h2>
-          <p class="mt-1 text-sm text-neutral-600">{{ t('gopay.settings.description') }}</p>
+          <p class="mt-1 text-sm text-neutral-600">{{ isTaxEvidence ? t('gopay.settings.description_tax_evidence') : t('gopay.settings.description') }}</p>
         </div>
 
         <form class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" @submit.prevent="saveSettings">
+          <template v-if="!isTaxEvidence">
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('gopay.settings.gopay_account') }}
             <select v-model="form.gopay_account_id" class="form-select mt-1 w-full" :disabled="!canConfigure" required>
@@ -343,6 +351,7 @@ onMounted(load)
               <option v-for="account in account261" :key="account.id" :value="account.id">{{ accountLabel(account) }}</option>
             </select>
           </label>
+          </template>
 
           <div class="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
             <label class="block text-sm font-medium text-neutral-700">
@@ -389,7 +398,7 @@ onMounted(load)
         <p v-if="importDisabledReason" class="mt-2 text-xs text-warning-700">{{ importDisabledReason }}</p>
       </section>
 
-      <section v-if="configured && pending" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
+      <section v-if="configured && pending && !isTaxEvidence" class="overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm">
         <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 px-5 py-4">
           <div class="min-w-[16rem] flex-1">
             <h2 class="text-lg font-semibold text-neutral-900">{{ t('gopay.pending.title') }}</h2>

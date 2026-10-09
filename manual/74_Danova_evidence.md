@@ -187,6 +187,11 @@ Nad tabulkou pohybů je panel **Souhrn** s běžným zůstatkem a rozpadem do da
 
 Dole je zvýrazněný řádek **Daňový základ (příjem - výdaj)** = daňový příjem minus daňový výdaj.
 
+Vede-li firma víc peněžních prostředků, zobrazí se pod souhrnem panel **Zůstatky peněžních prostředků**. Pro pokladnu,
+bankovní účty, GoPay a úhrady bez pohybu v pokladně nebo bance ukazuje počáteční zůstatek, pohyb v období a konečný
+zůstatek. Jejich součet je počáteční a konečný zůstatek souhrnu. Zůstatek GoPay odpovídá penězům, které GoPay ještě
+nevyplatil na bankovní účet (viz [§ 74.9.17](#74917-gopay-v-danove-evidenci)).
+
 Částky se počítají na haléře. Příklad u plátce s plným nárokem: úhrada přijaté faktury 12 100 Kč, z toho základ 10 000 Kč a DPH
 2 100 Kč, vytvoří daňový výdaj 10 000 Kč a nedaňový výdaj 2 100 Kč. Při 60% poměrném odpočtu je uznatelný výdaj 10 840 Kč a
 nedaňová odpočitatelná DPH 1 260 Kč. Konečné DPFO provede vlastní formulářová zaokrouhlení popsaná v
@@ -516,9 +521,44 @@ pravidlo.
 > nepatří žádný doklad. Do kterého řádku deníku pohyb patří, určuje zařazení. Pro převod mezi vlastními účty proto zvolte
 > **Ignorovat** a zařazení **Převod**.
 
+### 74.9.17 GoPay v daňové evidenci
+
+Modul `Peníze → GoPay` ([kapitola GoPay](33_GoPay.md)) funguje i v daňové evidenci, jen bez účetních zápisů. GoPay je
+v peněžním deníku samostatný peněžní prostředek, podobně jako pokladna nebo bankovní účet:
+
+- **Platba přes GoPay** (kartou nebo převodem přes platební bránu) je daňový příjem ke dni platby. Nese ji úhrada faktury
+  s referencí `GOPAY:<GoPay ID platby>` a v deníku patří prostředku GoPay.
+- **Vratka k dobropisu** z vyúčtování snižuje příjem ke dni vratky, u plátce DPH o základ dobropisu.
+- **Poplatky GoPay** (za zpracování plateb a za vratky) jsou daňový výdaj ke dni srážky ve vyúčtování, dobropis poplatků
+  výdaj snižuje.
+- **Výplata na bankovní účet** je převod mezi vlastními prostředky: v prostředku GoPay výdej, na bankovním účtu příjem,
+  obojí mimo základ daně. Bankovní pohyb spárovaný s vyúčtováním se zařadí jako **Převod** stejnou cestou jako ruční
+  zařazení a znovu jako příjem ho zařadit nejde.
+
+Příklad: zákazník 15. ledna zaplatí fakturu 1 000 Kč přes GoPay, 20. ledna dostane vratku 100 Kč k dobropisu, GoPay
+strhne poplatek za vratku 5 Kč a poplatek za zpracování 20 Kč a 1. února pošle na účet 875 Kč.
+
+<!-- cols: 16 34 18 32 -->
+| Datum | Pohyb | Prostředek | Zařazení |
+|---|---|---|---|
+| 15. 1. | Úhrada faktury 1 000 Kč | GoPay | Daňový příjem 1 000 Kč |
+| 20. 1. | Vratka k dobropisu 100 Kč | GoPay | Daňový příjem -100 Kč |
+| 20. 1. | Poplatek za vratku 5 Kč | GoPay | Daňový výdaj 5 Kč |
+| 1. 2. | Poplatek za zpracování 20 Kč | GoPay | Daňový výdaj 20 Kč |
+| 1. 2. | Výplata 875 Kč | GoPay | Převod |
+| 1. 2. | Příchozí platba 875 Kč | Banka | Převod |
+
+Daňový příjem je 900 Kč, daňový výdaj 25 Kč a zůstatek GoPay po výplatě 0 Kč. Do vyúčtování ukazuje zůstatek GoPay
+peníze, které GoPay drží. Platba z vyúčtování, ke které aplikace nenašla úhradu faktury, je v deníku nezařazená a blokuje
+uzávěrku, dokud ji v modulu GoPay nespárujete. Poplatky GoPay neevidujte znovu jako uhrazenou přijatou fakturu, započetly
+by se dvakrát.
+
+Vyúčtování, jehož pohyby nebo výplata leží v roce s dokončenou roční uzávěrkou, nejde načíst, zpracovat znovu ani smazat.
+
 ## 74.10 Související kapitoly
 
 - [Pokladna](32_Pokladna.md) - pokladní doklady, které se promítají do peněžního deníku.
+- [GoPay](33_GoPay.md) - import vyúčtování platební brány, poplatky a výplaty v peněžním deníku.
 - [Přijaté faktury](23_Prijate_faktury.md) - příznaky uznatelnosti a DPH.
 - [Platební příkazy](26_Platebni_prikazy.md) - hromadná úhrada přijatých faktur.
 - [Daň z příjmů](43_Dan_z_prijmu.md) - přiznání DPFO z totálů peněžního deníku.

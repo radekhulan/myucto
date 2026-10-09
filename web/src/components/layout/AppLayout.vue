@@ -489,7 +489,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payment-cards',  label: t('payment_cards.nav'),  icon: ICONS.coin, permission: 'settings.bank_accounts' as PermissionKey },
         { to: '/credit-cards',   label: t('nav.credit_cards'),   icon: ICONS.payment_orders, permission: 'bank' as PermissionKey },
         ...((isDoubleEntry || isTaxEvidence) ? [{ to: '/accounting/cash', label: t('nav.accounting_cash'), icon: ICONS.cash, newTo: '/accounting/cash/new' }] : []),
-        ...(isDoubleEntry && auth.hasCommercialFeatures ? [{ to: '/gopay', label: t('nav.gopay'), icon: ICONS.payment_orders, permission: 'bank' as PermissionKey }] : []),
+        ...((isDoubleEntry || isTaxEvidence) && auth.hasCommercialFeatures ? [{ to: '/gopay', label: t('nav.gopay'), icon: ICONS.payment_orders, permission: 'bank' as PermissionKey }] : []),
       ],
     },
     {

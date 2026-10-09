@@ -33,6 +33,8 @@ export interface GoPaySettings {
 
 export interface GoPaySettingsResponse {
   configured: boolean
+  /** Daňová evidence GoPay neúčtuje do účtů: nastavuje se jen výplatní účet. */
+  mode: 'double_entry' | 'tax_evidence'
   settings: GoPaySettings
   account_options: GoPayAccountOption[]
 }

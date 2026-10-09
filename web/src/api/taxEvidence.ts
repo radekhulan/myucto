@@ -34,6 +34,19 @@ export interface CashJournalRow {
   blocking: boolean
   /** Cizoměnový pohyb bez kurzu ke dni úhrady — není oceněn (income/expense = 0). */
   fx_rate_missing: boolean
+  /** Peněžní prostředek pohybu: pokladna, banka, GoPay, nebo úhrada bez fyzického pohybu. */
+  instrument: CashJournalInstrument
+  /** Bankovní výplata nebo pohyb vyúčtování GoPay — zařazení určuje vyúčtování. */
+  gopay_clearing_id: number | null
+}
+
+export type CashJournalInstrument = 'cash' | 'bank' | 'gopay' | 'virtual'
+
+export interface CashJournalBalance {
+  instrument: CashJournalInstrument
+  opening: number
+  movement: number
+  closing: number
 }
 
 export interface CashJournalTotals {
@@ -82,6 +95,7 @@ export interface CashJournalReport {
   is_vat_payer: boolean
   opening_balance: number
   closing_balance: number
+  balances: CashJournalBalance[]
   rows: CashJournalRow[]
   totals: CashJournalTotals
   checks: CashJournalChecks

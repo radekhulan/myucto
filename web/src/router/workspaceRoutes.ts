@@ -363,7 +363,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
           ? { path: '/templates', query: { section: 'posting' } }
           : true,
       },
-      { path: 'gopay', name: 'gopay', component: () => import('@/pages/accounting/GoPay.vue'), meta: { requiresDoubleEntry: true } },
+      { path: 'gopay', name: 'gopay', component: () => import('@/pages/accounting/GoPay.vue'), meta: { requiresAccountingMode: true } },
       { path: 'bank/:id(\\d+)',         name: 'bank-detail',     component: () => import('@/pages/bank/StatementDetail.vue') },
       // Admin (M6)
       { path: 'admin/activity-log',     name: 'activity-log',   component: () => import('@/pages/admin/ActivityLog.vue'), meta: {  } },
