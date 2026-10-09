@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionForm;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionPlan;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPackageSplitter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
@@ -2741,10 +2742,21 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertSame(['2000000000000000000001'], $read($xpath, 'identifikace/idPpv'), $body);
         self::assertSame([], $read($xpath, 'identifikace/prijmeni'), $body);
         self::assertSame(1, $xpath->query(self::formQuery($body, 'souhrnDataZec'))->length, $body);
-        self::assertSame(
-            'true',
-            $xpath->query('/j:jmhz/j:formulareOsob/j:formularOsoby/j:hlavicka/j:primarniPpv')->item(0)?->textContent,
-        );
+        foreach ([
+            'idFormulare' => '0195E2C4-1A2B-7C3D-8E4F-5A6B7C8D9E10',
+            'typFormulare' => 'R',
+            'primarniPpv' => 'true',
+        ] as $element => $value) {
+            self::assertSame(
+                [$value],
+                array_map(
+                    static fn (\DOMNode $node): string => $node->textContent,
+                    iterator_to_array($xpath->query('/j:jmhz/j:formulareOsob/j:formularOsoby/j:hlavicka/j:' . $element)),
+                ),
+                "{$body}: hlavicka/{$element}",
+            );
+        }
+        self::assertSame(['1000'], $read($xpath, 'prijem/dan/zakladDane'), $body);
 
         $named = $document;
         $named['people'][0]['employments'][0]['identity']['person_external_identifier'] = null;
@@ -3071,6 +3083,160 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             $base . 'zdravPojZamestnavatel/zdravotniPojisteni' => $withEmployerHealth ? '1800' : null,
             $base . 'zdravPojZamestnanec/zdravotniPojisteni' => $withEmployeeHealth ? '900' : null,
         ];
+    }
+
+    /** @return iterable<string, array{string, string}> */
+    public static function positionFormBodies(): iterable
+    {
+        foreach (['bezPriznaku', 'cinnostKS'] as $body) {
+            foreach (['ico', 'foreign'] as $kind) {
+                yield "{$body}-{$kind}" => [$body, $kind];
+            }
+        }
+    }
+
+    /**
+     * Vykonávaná pozice na formuláři bez příznaku i činnosti K–S: místo výkonu
+     * práce (obec, kód obce, stát), mzdový příspěvek APZ s nástrojem (10233
+     * jen při 10232 = ANO, interakce IN05) a dočasné přidělení s uživatelem
+     * identifikovaným IČO, nebo zahraniční osobou (stát, identifikace, název).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('positionFormBodies')]
+    public function testPositionCarriesWorkplaceApzAndTemporaryAssignment(string $body, string $kind): void
+    {
+        $document = $this->positionDocument($body, $kind);
+        $read = function (array $document, string $path) use ($body): array {
+            return array_map(
+                static fn (\DOMNode $node): string => $node->textContent,
+                iterator_to_array($this->summaryMatrixXpath($document)->query(self::formQuery($body, $path))),
+            );
+        };
+        $position = 'vykonavanaPozice/';
+        $user = $position . 'docasnePrideleni/uzivatel/';
+        foreach ([
+            $position . 'mistoVykonuPrace/obec' => ['Brno'],
+            $position . 'mistoVykonuPrace/kodObce' => ['582786'],
+            $position . 'mistoVykonuPrace/kodStatu' => ['CZ'],
+            $position . 'uplatnujiPrispevekApz' => ['true'],
+            $position . 'nastrojApzKod' => ['2'],
+            $position . 'docasnePrideleniEvidovano' => ['true'],
+            $user . 'ico' => $kind === 'ico' ? ['00000019'] : [],
+            $user . 'zahranicniOsoba/kodStatu' => $kind === 'foreign' ? ['DE'] : [],
+            $user . 'zahranicniOsoba/identifikace' => $kind === 'foreign' ? ['12345678'] : [],
+            $user . 'zahranicniOsoba/nazev' => $kind === 'foreign' ? ['Muster GmbH'] : [],
+        ] as $path => $expected) {
+            self::assertSame($expected, $read($document, $path), "{$body}: {$path}");
+        }
+
+        $document['people'][0]['employments'][0]['term']['jmhz_apz_contribution_status'] = 'no';
+        self::assertSame(['false'], $read($document, $position . 'uplatnujiPrispevekApz'), $body);
+        self::assertSame([], $read($document, $position . 'nastrojApzKod'), $body);
+    }
+
+    /** @return iterable<string, array{int, string, string, string}> */
+    public static function codebookControlCases(): iterable
+    {
+        yield 'stát pracoviště' => [153, 'assignment-ico', '<form:kodStatu>CZ</form:kodStatu>', '<form:kodStatu>QQ</form:kodStatu>'];
+        yield 'nástroj APZ' => [154, 'assignment-ico', '<form:nastrojApzKod>2</form:nastrojApzKod>', '<form:nastrojApzKod>9</form:nastrojApzKod>'];
+        yield 'stát zahraničního uživatele' => [302, 'assignment-foreign', '<form:kodStatu>DE</form:kodStatu>', '<form:kodStatu>QQ</form:kodStatu>'];
+        yield 'kategorizace rizika' => [156, 'risk', '<form:kategorizaceRizika>1</form:kategorizaceRizika>', '<form:kategorizaceRizika>5</form:kategorizaceRizika>'];
+        yield 'typ odloženého příjmu' => [331, 'deferred', '<form:typ>1</form:typ>', '<form:typ>9</form:typ>'];
+        yield 'druhá pozice kódu ELDP' => [338, 'deferred', '<form:kod>1P+</form:kod>', '<form:kod>1++</form:kod>'];
+    }
+
+    /**
+     * Číselníkové a odvozené kontroly nad hodnotou, kterou serializér zapsal:
+     * zapsaná hodnota kontrolou projde, stejné podání s hodnotou mimo číselník
+     * (nebo u odloženého příjmu typu 1 s kódem ELDP bez „P" na druhé pozici)
+     * kontrola zamítne.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('codebookControlCases')]
+    public function testCodebookControlsJudgeTheSerializedValue(
+        int $controlId,
+        string $case,
+        string $emitted,
+        string $broken,
+    ): void {
+        $document = match ($case) {
+            'assignment-ico' => $this->positionDocument('bezPriznaku', 'ico'),
+            'assignment-foreign' => $this->positionDocument('bezPriznaku', 'foreign'),
+            'risk' => $this->summaryMatrixDocument('bezPriznaku', 7, static function (array &$payload): void {
+                $payload['people'][0]['employments'][0]['term']['social_employer_rate_category'] = 'risk_employment';
+            }),
+            'deferred' => $this->summaryMatrixDocument('odlozenyPrijem', 7, static function (array &$payload): void {
+                $payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['code'] = '1P+';
+            }),
+        };
+        $xml = preg_replace('/>\s+</', '><', $this->summaryMatrixXml($document)) ?? '';
+        self::assertStringContainsString($emitted, $xml);
+
+        self::assertSame([JmhzControlOutcome::Passed], $this->controlOutcomes($xml, $controlId));
+        self::assertContains(
+            JmhzControlOutcome::Failed,
+            $this->controlOutcomes(str_replace($emitted, $broken, $xml), $controlId),
+        );
+    }
+
+    /**
+     * Kontroly 336, 337 a 339 porovnávají odložený příjem se stavem vztahu
+     * v registru ČSSZ. Lokálně je nelze rozhodnout: u typů, kterých se týkají,
+     * se předají cJMHZ (nevyhodnotitelné), u ostatních typů se neuplatní.
+     * Aplikace sama vykazuje jen typ 1 po skončení vztahu.
+     */
+    public function testRegistryDeferredIncomeControlsAreLeftToCssz(): void
+    {
+        $xml = preg_replace('/>\s+</', '><', $this->summaryMatrixXml(
+            $this->summaryMatrixDocument('odlozenyPrijem', 7, static function (array &$payload): void {
+                $payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['code'] = '1P+';
+            }),
+        )) ?? '';
+        $applies = [336 => ['1', '2', '4', '5', '6'], 337 => ['3'], 339 => ['2', '3', '6']];
+        foreach (['1', '2', '3', '4', '5', '6'] as $type) {
+            $typed = str_replace('<form:typ>1</form:typ>', "<form:typ>{$type}</form:typ>", $xml);
+            foreach ($applies as $controlId => $types) {
+                self::assertSame(
+                    [in_array($type, $types, true) ? JmhzControlOutcome::NotEvaluable : JmhzControlOutcome::NotApplicable],
+                    $this->controlOutcomes($typed, $controlId),
+                    "Kontrola {$controlId}, typ {$type}",
+                );
+            }
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function positionDocument(string $body, string $kind): array
+    {
+        $document = $this->summaryMatrixDocument($body);
+        $term = &$document['people'][0]['employments'][0]['term'];
+        $term['jmhz_apz_contribution_status'] = 'yes';
+        $term['jmhz_apz_instrument_code'] = '2';
+        $term['jmhz_temporary_assignment_status'] = 'yes';
+        $term['jmhz_assignment_user_kind'] = $kind;
+        if ($kind === 'ico') {
+            $term['jmhz_assignment_user_ico'] = '00000019';
+        } else {
+            $term['jmhz_assignment_user_country_code'] = 'DE';
+            $term['jmhz_assignment_user_foreign_id'] = '12345678';
+            $term['jmhz_assignment_user_name'] = 'Muster GmbH';
+        }
+        unset($term);
+
+        return $document;
+    }
+
+    /** @return list<JmhzControlOutcome> */
+    private function controlOutcomes(string $xml, int $controlId): array
+    {
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-14', schemaValidated: true));
+        $outcomes = [];
+        foreach ($report->findings as $finding) {
+            if ($finding->controlId === $controlId) {
+                $outcomes[] = $finding->outcome;
+            }
+        }
+
+        return $outcomes;
     }
 
     public function testInternationalHireWithChildCreditIsRefused(): void
