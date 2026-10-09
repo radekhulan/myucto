@@ -233,6 +233,77 @@ final class PayrollTakeoverEmploymentWriter
         return $written > 0 ? $counts + ['monthly_wage' => $written] : $counts;
     }
 
+    /**
+     * Týdenní pracovní doba vztahu v měsíci, jak ji zdroj u zpracované mzdy vedl.
+     *
+     * Vztah vzniká s týdenní dobou z karty zdroje, tedy s tou, která platí DNES. Měsíc, ve
+     * kterém zdroj počítal s jinou (kratší úvazek v minulosti, změna úvazku během roku), by
+     * jinak zůstal s dnešní dobou a fond i hlášení za něj by vyšly z ní; podané hlášení ji
+     * opravuje jen u měsíců, za které nějaké existuje. Doba ze mzdy měsíce je proto zdrojem
+     * pravdy pro ten měsíc: verze platná k jeho začátku se opraví na místě (první převáděný
+     * měsíc první verze, jako u sjednané mzdy), jinak vznikne nová verze od začátku měsíce.
+     * Úvazek se přepočte poměrem, takže stanovená týdenní doba zaměstnavatele (§ 79 ZP)
+     * zůstává, jak ji verze nesla. Verzi, po které už následuje další, převod nepřepisuje.
+     *
+     * @param bool $firstMonth první převáděný měsíc vztahu v tomto převodu
+     * @return array<string,int>
+     */
+    public function monthWeeklyHours(int $supplierId, int $employmentId, string $period, float $weeklyHours, bool $firstMonth, ?int $userId, PayrollTakeoverPolicy $policy): array
+    {
+        if ($weeklyHours <= 0) {
+            return [];
+        }
+        $employmentRow = $this->employmentById($supplierId, $employmentId)
+            ?? throw new \DomainException('pracovní vztah ve firmě není.');
+        if (in_array((string) $employmentRow['status'], ['ended', 'archived', 'no_show'], true)) {
+            return [];
+        }
+        $from = $period . '-01';
+        $at = $this->termsAt($supplierId, $employmentId, $from);
+        $desired = (int) round($weeklyHours * 100);
+        $currentWeekly = $at['weekly_hours'] === null ? null : (int) round((float) $at['weekly_hours'] * 100);
+        if ($currentWeekly === $desired) {
+            return [];
+        }
+        $current = $this->employments->currentTerms($supplierId, $employmentId)
+            ?? throw new \DomainException('pracovní vztah nemá verzi sjednaných podmínek.');
+        if ((int) $at['id'] !== (int) $current['id']) {
+            return ['weekly_hours_history_kept' => 1];
+        }
+        $workload = (int) ($current['workload_basis_points'] ?? 0);
+        $weekly = sprintf('%.2f', $desired / 100);
+        $changes = [
+            'weekly_hours' => $weekly,
+            'workload_basis_points' => $currentWeekly !== null && $currentWeekly > 0 && $workload > 0
+                ? max(1, min(10_000, (int) round($workload * $desired / $currentWeekly)))
+                : PayrollPersonCreateValidator::workloadBasisPoints($weekly),
+        ];
+        $body = RegistrationImportWriter::termsBody($current, 'Týdenní pracovní doba ze mzdy ' . $policy->label . ' za ' . $period . '.');
+        foreach ($changes as $field => $value) {
+            $body[$field] = $value;
+        }
+        $inPlace = $firstMonth && $from > (string) $current['effective_from']
+            && (int) $this->termsAt($supplierId, $employmentId, '0000-01-01')['id'] === (int) $current['id'];
+        $body['effective_from'] = $inPlace || $from <= (string) $current['effective_from'] ? (string) $current['effective_from'] : $from;
+        $terms = $this->employmentValidator->terms(
+            $body,
+            $this->employments->currentCzIscoCode($supplierId, $employmentId),
+            $this->employments->currentOtherWithholdingEligibility($supplierId, $employmentId),
+            $this->employments->currentRelationType($supplierId, $employmentId),
+        );
+        try {
+            if ($body['effective_from'] === (string) $current['effective_from']) {
+                $this->employments->correctTerms($supplierId, $employmentId, $terms, (int) $employmentRow['row_version'], $userId, null, null);
+            } else {
+                $this->employments->addTerms($supplierId, $employmentId, $terms, (int) $employmentRow['row_version'], $userId, null, null);
+            }
+        } catch (PayrollTermsSettledException) {
+            return ['weekly_hours_settled' => 1];
+        }
+
+        return ['weekly_hours' => 1];
+    }
+
     /** Vztah podle zdroje skončil před prvním měsícem, který počítá MyÚčto. */
     private function endedBeforeModuleStart(int $supplierId, PayrollTakeoverEmployment $employment): bool
     {
@@ -249,12 +320,12 @@ final class PayrollTakeoverEmploymentWriter
     /**
      * Verze podmínek platná k datu; před první verzí ta první.
      *
-     * @return array{id:int|string,effective_from:string,monthly_gross_minor:int|string|null}
+     * @return array{id:int|string,effective_from:string,monthly_gross_minor:int|string|null,weekly_hours:string|null,workload_basis_points:int|string|null}
      */
     private function termsAt(int $supplierId, int $employmentId, string $date): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, effective_from, monthly_gross_minor FROM payroll_employment_terms
+            'SELECT id, effective_from, monthly_gross_minor, weekly_hours, workload_basis_points FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?
               ORDER BY effective_from <= ? DESC,
                        CASE WHEN effective_from <= ? THEN effective_from END DESC,

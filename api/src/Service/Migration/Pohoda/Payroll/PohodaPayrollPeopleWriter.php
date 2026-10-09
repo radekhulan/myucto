@@ -411,6 +411,35 @@ final class PohodaPayrollPeopleWriter
     }
 
     /**
+     * Týdenní úvazek vztahů v měsíci, který převod právě zapsal, podle mzdy PAMICA za ten
+     * měsíc (`MZ.TUvazek`), ne podle karty vztahu, která nese jen dnešní úvazek
+     * ({@see PayrollTakeoverEmploymentWriter::monthWeeklyHours()}). Volá se po každém měsíci
+     * před schválením převzatého měsíce, protože schválený pracovní měsíc si úvazek zmrazí.
+     *
+     * @param list<array<string,mixed>> $records
+     */
+    public function writeMonthWeeklyHours(int $supplierId, ?int $userId, array $records, string $period, ImportProtocol $protocol, string $step): void
+    {
+        $policy = PohodaPayrollTakeover::policy();
+        foreach ($records as $record) {
+            $weekly = (array) ($record['weekly_hours_by_month'] ?? []);
+            if (!isset($weekly[$period])) {
+                continue;
+            }
+            $number = (string) $record['personal_number'];
+            $employment = $this->employmentByCode($supplierId, $number);
+            if ($employment === null) {
+                continue;
+            }
+            $employmentId = (int) $employment['id'];
+            $first = array_key_first($weekly) === $period;
+            $this->part($protocol, $step, $number, 'Týdenní úvazek ze mzdy', fn (): array => $this->employments->monthWeeklyHours(
+                $supplierId, $employmentId, $period, (float) $weekly[$period], $first, $userId, $policy,
+            ));
+        }
+    }
+
+    /**
      * Počáteční stavy ročních kumulací za měsíce roku před prvním obdobím, které zpracovává
      * MyÚčto (začátek vedení mezd). Jen souvislá řada měsíců; stavy, které zapsal dřívější
      * převod z PAMICA, se srovnají se zdrojem, zadané jinak převod nikdy nepřepíše.

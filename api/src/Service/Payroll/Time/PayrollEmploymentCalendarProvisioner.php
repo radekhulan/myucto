@@ -39,6 +39,9 @@ final class PayrollEmploymentCalendarProvisioner
 
     private const WORKDAYS = [1, 2, 3, 4, 5];
 
+    /** Začátek názvu kalendáře, který zakládá tahle třída (podle něj ho pozná i později). */
+    private const NAME_PREFIX = 'Rozvrh podle úvazku ';
+
     public function __construct(
         private readonly PayrollTimeRepository $repository,
         private readonly PayrollMonthlyFundService $monthlyFund,
@@ -77,6 +80,11 @@ final class PayrollEmploymentCalendarProvisioner
             $from = PayrollTimeValue::string($version['valid_from'] ?? null, 'valid_from');
             $to = $version['valid_to'] === null ? null : PayrollTimeValue::string($version['valid_to'], 'valid_to');
             if ($from <= $firstDay && ($to === null || $to >= $firstDay)) {
+                $changed = $from < $firstDay ? $this->followTermsChange($supplierId, $employmentId, $periodStart, $firstDay, $facts['weekly_hours'], $version, $userId) : null;
+                if ($changed !== null) {
+                    return self::result(true, null, null, $changed, $this->monthlyFund->minutes($supplierId, $employmentId, $period));
+                }
+
                 return self::result(
                     false,
                     null,
@@ -105,7 +113,7 @@ final class PayrollEmploymentCalendarProvisioner
             $calendar = $this->repository->createCalendarVersion(
                 $supplierId,
                 $employmentId,
-                sprintf('Rozvrh podle úvazku %s h týdně', self::hours($weeklyMinutes)),
+                sprintf(self::NAME_PREFIX . '%s h týdně', self::hours($weeklyMinutes)),
                 'Europe/Prague',
                 'regular',
                 self::weekPattern($weeklyMinutes),
@@ -128,6 +136,53 @@ final class PayrollEmploymentCalendarProvisioner
             PayrollTimeValue::int($calendar['id'] ?? null, 'id'),
             $this->monthlyFund->minutes($supplierId, $employmentId, $period),
         );
+    }
+
+    /**
+     * Kalendář, který tahle třída založila podle úvazku, když se úvazek od daného měsíce
+     * změnil (nová verze podmínek, typicky převod mezd po měsících). Bez nové verze by
+     * kalendář dál rozvrhoval původní týdenní dobu a sjednaný fond měsíce by vyšel z ní.
+     * Kalendář, který někdo přejmenoval nebo založil ručně, se nemění: o jeho rozvrhu
+     * rozhodl člověk. Uzavřený (schválený) měsíc nebo pozdější zamčený rozsah nová verze
+     * nepřepíše; pak zůstane, jak je.
+     *
+     * @param array<string,mixed> $version kalendář platný k prvnímu dni vztahu v měsíci
+     * @return ?int id nové verze, nebo null, když se nic nezměnilo
+     */
+    private function followTermsChange(int $supplierId, int $employmentId, string $periodStart, string $firstDay, ?string $weeklyHours, array $version, ?int $userId): ?int
+    {
+        $weeklyMinutes = PayrollAbsenceRepository::weeklyMinutesFromHours($weeklyHours);
+        if ($weeklyMinutes === null
+            || !str_starts_with((string) ($version['name'] ?? ''), self::NAME_PREFIX)
+            || PayrollTimeValue::int($version['weekly_minutes'] ?? null, 'weekly_minutes') === $weeklyMinutes
+        ) {
+            return null;
+        }
+        $month = $this->repository->monthState($supplierId, $employmentId, $periodStart);
+        if ($month !== null && ($month['status'] ?? null) !== 'open') {
+            return null;
+        }
+        try {
+            $calendar = $this->repository->createCalendarVersion(
+                $supplierId,
+                $employmentId,
+                sprintf(self::NAME_PREFIX . '%s h týdně', self::hours($weeklyMinutes)),
+                'Europe/Prague',
+                'regular',
+                self::weekPattern($weeklyMinutes),
+                $weeklyMinutes,
+                $firstDay,
+                $version['valid_to'] === null ? null : PayrollTimeValue::string($version['valid_to'], 'valid_to'),
+                PayrollTimeValue::int($version['row_version'] ?? null, 'row_version'),
+                $month === null ? 0 : PayrollTimeValue::int($month['row_version'] ?? null, 'row_version'),
+                [],
+                $userId,
+            );
+        } catch (PayrollTimeLockedException) {
+            return null;
+        }
+
+        return PayrollTimeValue::int($calendar['id'] ?? null, 'id');
     }
 
     /**

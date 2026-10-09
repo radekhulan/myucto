@@ -659,6 +659,71 @@ final class PohodaPayrollImportTest extends TestCase
     }
 
     /**
+     * Karta vztahu v PAMICA (`ZAMpomer.TUvazek`) nese dnešní úvazek, mzda měsíce
+     * (`MZ.TUvazek`) ten, se kterým PAMICA měsíc počítala. Převod bral jen kartu a opravoval
+     * ji podle podaného hlášení, takže měsíc bez hlášení zůstal s dnešními 40 h, i když ho
+     * PAMICA počítala s 20 h, a fond i hlášení za něj vyšly špatně. Úvazek mzdy měsíce je
+     * zdrojem pravdy pro ten měsíc: první převáděný měsíc opraví první verzi podmínek,
+     * pozdější změna založí novou verzi od svého měsíce.
+     */
+    public function testMonthlyWeeklyHoursFromPayslipOverrideTheCardValue(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = $this->payrollXml('weekly_hours', 2026, static function (\Closure $row): void {
+            $row('sMZslozky', ['ID' => 1, 'Cislo' => 'M01', 'Nazev' => 'Základní mzda měsíční']);
+            $row('sMzPoj', ['ID' => 1, 'IDS' => 'VZP', 'Kod' => '111']);
+            $row('ZAM', ['ID' => 1, 'OsCislo' => '6201', 'Jmeno' => 'Iva', 'Prijmeni' => 'Zkrácená', 'DatNar' => '1989-09-10',
+                'StatPris' => 'CZ', 'Nerezident' => 0, 'RefPoj' => 1, 'Ulice' => 'Zkušební', 'CP' => '3', 'Obec' => 'Brno',
+                'PSC' => '60200', 'Stat' => 'CZ']);
+            // Karta nese dnešní plný úvazek; leden a únor PAMICA počítala s polovičním.
+            $row('ZAMpomer', ['ID' => 1, 'RefZAM' => 1, 'Poradi' => 1, 'JeDPP' => 0, 'DatNast' => '2025-01-01', 'TUvazek' => 40, 'DUvazek' => 8]);
+            foreach ([1 => [20, 4, 80, 10000], 2 => [20, 4, 80, 10000], 3 => [40, 8, 176, 20000]] as $month => [$weekly, $daily, $hours, $gross]) {
+                $row('MZ', ['ID' => 10 + $month, 'RefZAM' => 1, 'RefPomer' => 1, 'Rok' => 2026, 'RelMes' => $month, 'HodFond' => $hours * 40 / $weekly,
+                    'DnyFond2' => 20, 'TUvazek' => $weekly, 'DUvazek' => $daily, 'HodOdpra' => $hours, 'RefPoj' => 1, 'KcHrubaM' => $gross,
+                    'KcCistaM' => (int) ($gross * 0.8), 'Prohlas' => 1, 'JeSocPP' => 1, 'KcSoc' => (int) ($gross * 0.071), 'KcZaklM' => $gross,
+                    'DnyPrac' => 20, 'DnyOdpra' => 20, 'Datum' => sprintf('2026-%02d-10', $month + 1), 'KcVyplat' => (int) ($gross * 0.8)]);
+                $row('MZslozky', ['ID' => $month, 'RefAg' => 10 + $month, 'RefSlozka' => 1, 'KcMzda' => $gross, 'Hodnota1' => $gross]);
+            }
+        });
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $employmentId = (int) $this->employment($supplierId, '6201')['id'];
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT effective_from, weekly_hours, workload_basis_points FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ? ORDER BY effective_from'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        self::assertSame([
+            ['effective_from' => '2025-01-01', 'weekly_hours' => '20.00', 'workload_basis_points' => 5000],
+            ['effective_from' => '2026-03-01', 'weekly_hours' => '40.00', 'workload_basis_points' => 10000],
+        ], array_map(static fn (array $r): array => [
+            'effective_from' => (string) $r['effective_from'],
+            'weekly_hours' => (string) $r['weekly_hours'],
+            'workload_basis_points' => (int) $r['workload_basis_points'],
+        ], $stmt->fetchAll(\PDO::FETCH_ASSOC)), $this->explain($protocol));
+        // Schválený převzatý měsíc si zmrazil sjednaný fond z úvazku mzdy, ne z karty
+        // (stanovená týdenní doba zaměstnavatele zůstává 40 h).
+        $months = $this->db->pdo()->prepare(
+            'SELECT DATE_FORMAT(period_start, "%Y-%m") AS period, weekly_work_centihours, standard_fund_millihours, agreed_fund_millihours
+               FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ? ORDER BY period_start, time_month_revision_no'
+        );
+        $months->execute([$supplierId, $employmentId]);
+        $shares = [];
+        foreach ($months->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $shares[$row['period']] = [(int) $row['weekly_work_centihours'],
+                round((int) $row['agreed_fund_millihours'] / max(1, (int) $row['standard_fund_millihours']), 2)];
+        }
+        self::assertSame(['2026-01' => [4000, 0.5], '2026-02' => [4000, 0.5], '2026-03' => [4000, 1.0]], $shares, $this->explain($protocol));
+
+        $again = $this->importer->run($supplierId, $this->userId, $file, 2026, false, null, null, null, false, true, PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $stmt->execute([$supplierId, $employmentId]);
+        self::assertCount(2, $stmt->fetchAll(\PDO::FETCH_ASSOC), $this->explain($again));
+    }
+
+    /**
      * Soubor `91_mzdy.xml` ze zadaných řádků tabulek. Syntetická data.
      *
      * @param \Closure(\Closure(string,array<string,mixed>):void):void $fill

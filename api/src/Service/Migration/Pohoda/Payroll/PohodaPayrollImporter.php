@@ -657,6 +657,10 @@ final class PohodaPayrollImporter
                     // žádný běh ho nepočítá a dohoda „za 3/2026" na kartě jen překáží
                     // (dřív jich tam bylo tolik, kolik převedených měsíců). Trvalou
                     // srážku pro další měsíce zapíše jednou krok srážek.
+                    // Úvazek měsíce ze mzdy PAMICA ještě před zápisem docházky: sjednaný fond
+                    // měsíce se počítá z podmínek platných při zápisu. Pracoviště (doplňuje se
+                    // do poslední verze podmínek) a oprava úvazku z podaného hlášení jdou až po něm.
+                    $this->people->writeMonthWeeklyHours($supplierId, $userOrNull, $records, $period, $protocol, self::STEP_MONTHS);
                     $applied = $this->attendance->apply(
                         $supplierId, $period, [$workbook], null, [], true, true, $userOrNull, null, true, $profileId,
                         false, true, true, false, false,

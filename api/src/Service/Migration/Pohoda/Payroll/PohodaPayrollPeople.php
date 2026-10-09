@@ -171,6 +171,8 @@ final class PohodaPayrollPeople
                 'gross' => PohodaXml::num($mz, 'KcHrubaM'),
                 'worked' => PohodaXml::num($mz, 'HodOdpra'),
                 'worked_days' => PohodaXml::num($mz, 'DnyOdpra'),
+                // Týdenní úvazek, se kterým PAMICA měsíc počítala; karta vztahu nese jen dnešní.
+                'weekly' => PohodaXml::num($mz, 'TUvazek'),
             ];
             $person = PohodaXml::text($mz, 'RefZAM');
             // Den, kdy PAMICA mzdu opravdu vyplatila. `Datum` je den výplaty (v exportu vždy
@@ -385,6 +387,8 @@ final class PohodaPayrollPeople
                 'children_without_credit' => $childrenWithoutCredit[$personId] ?? 0,
                 'monthly_wages' => self::monthlyWages($relationMonths[$relationId] ?? [], $year, $start, $end),
                 'hourly_wage' => $hourlyWage[$relationId] ?? false,
+                // Týdenní úvazek po měsících mezd (`MZ.TUvazek`); u dohody o provedení práce žádný.
+                'weekly_hours_by_month' => self::bool(PohodaXml::text($relation, 'JeDPP')) ? [] : self::weeklyByMonth($relationMonths[$relationId] ?? [], $year),
                 // Plnění, která se u vztahu opakují skoro každý měsíc (zdanitelná část
                 // stravování a podobně). Převod je nezakládá jako pravidelnou složku, protože
                 // částka se měsíc od měsíce mění; protokol je vypíše účetní.
@@ -453,6 +457,24 @@ final class PohodaPayrollPeople
         usort($records, static fn (array $a, array $b): int => strcmp((string) $a['personal_number'], (string) $b['personal_number']));
 
         return $records;
+    }
+
+    /**
+     * @param array<int,array<string,mixed>> $months měsíc => údaje mzdy vztahu
+     * @return array<string,float> `YYYY-MM` => týdenní úvazek v hodinách
+     */
+    private static function weeklyByMonth(array $months, int $year): array
+    {
+        ksort($months);
+        $out = [];
+        foreach ($months as $month => $data) {
+            $weekly = (float) ($data['weekly'] ?? 0);
+            if ($weekly > 0) {
+                $out[sprintf('%04d-%02d', $year, $month)] = $weekly;
+            }
+        }
+
+        return $out;
     }
 
     /**
