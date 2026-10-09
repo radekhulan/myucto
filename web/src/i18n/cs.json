@@ -12234,6 +12234,8 @@
       "sickness_variable_symbol_missing": "Mzdová účtárna pracovního vztahu nemá vyplněný variabilní symbol ČSSZ. Doplňte ho v Nastavení mezd, Zaměstnavatel, u účtárny vztahu a podání připravte znovu.",
       "zp_artifact_mismatch": "Otisk uloženého souboru neodpovídá zmrazené datové větě. Zkuste přípravu podání zopakovat.",
       "zp_bulk_notification_empty": "Hromadné oznámení musí obsahovat alespoň jednu větu. Za zvolené období a pojišťovnu nevznikla žádná věta, kterou aplikace umí doložit.",
+      "zp_bulk_notification_correction_required": "Pojišťovna už za toto období dostala hromadné oznámení s jiným datem nebo číslem pojištěnce. Nové oznámení by poslalo druhou přihlášku nebo odhlášku. Opravu podejte ručně opravnou větou X, Y nebo Z podle poučení pojišťovny.",
+      "zp_bulk_notification_previous_unreadable": "Dříve odeslané hromadné oznámení téhož období a pojišťovny nejde přečíst, takže nové s ním nelze porovnat a nesestaví se.",
       "zp_change_address_incomplete": "Adresa ve větě hromadného oznámení není úplná.",
       "zp_change_address_too_long": "Adresa ve větě hromadného oznámení přesahuje šedesát znaků, které datová věta dovoluje.",
       "zp_change_code_mapping_undocumented": "Kód změny pro danou povinnost se nedá odhadnout - schéma pro tento druh povinnosti kód nedokládá.",

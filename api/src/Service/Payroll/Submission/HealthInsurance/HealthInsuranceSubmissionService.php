@@ -1056,6 +1056,13 @@ final readonly class HealthInsuranceSubmissionService
                     'Firma hromadného oznámení nebyla nalezena.',
                 );
             }
+            $this->assertNoCorrectionOfDeliveredBulkNotification(
+                $supplierId,
+                $environment,
+                $subjectReference,
+                $bounds,
+                $payload,
+            );
             $obligation = $this->obligations->register(
                 $supplierId,
                 self::AGENDA_BULK_NOTIFICATION,
@@ -1898,6 +1905,47 @@ final readonly class HealthInsuranceSubmissionService
             ),
             'window' => $this->bulkNotificationWindow($duties),
         ];
+    }
+
+    /**
+     * HOZ téhož období a pojišťovny, které už pojišťovně odešlo, se nesmí
+     * „opravit“ novým HOZ s druhou větou P nebo O
+     * ({@see HealthBulkNotificationCorrectionGuard}).
+     *
+     * @param array{from:string,to:string} $bounds
+     */
+    private function assertNoCorrectionOfDeliveredBulkNotification(
+        int $supplierId,
+        string $environment,
+        string $subjectReference,
+        array $bounds,
+        HealthBulkNotificationPayload $payload,
+    ): void {
+        $previous = $this->submissionRepository->latestSubmissionForScopeForUpdate(
+            $supplierId,
+            $environment,
+            self::AGENDA_BULK_NOTIFICATION,
+            self::SUBJECT_EMPLOYER,
+            $subjectReference,
+            $bounds['from'],
+            $bounds['to'],
+            ['submitted', 'processing', 'accepted', 'partially_accepted', 'correction_required'],
+        );
+        if ($previous === null) {
+            return;
+        }
+        $artifactId = $this->submissionRepository->findOutboundXmlArtifactId(
+            $supplierId,
+            $environment,
+            $previous['id'],
+        );
+        $delivered = HealthBulkNotificationCorrectionGuard::linesFromXml(
+            $artifactId === null ? '' : $this->submissions->artifactBytes($supplierId, $artifactId),
+        );
+        $conflicts = HealthBulkNotificationCorrectionGuard::conflicts($delivered, $payload->changes);
+        if ($conflicts !== []) {
+            throw HealthBulkNotificationCorrectionGuard::exception($conflicts);
+        }
     }
 
     /**

@@ -1244,6 +1244,64 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertSame($first['artifact_sha256'], $second['artifact_sha256']);
     }
 
+    /**
+     * HOZ za březen odešel s přihláškou P k 1. 3. Účetní pak opraví datum
+     * nástupu na 2. 3. Nové HOZ by pojišťovně poslalo druhou přihlášku;
+     * správně je oprava kódem Y, kterou aplikace nevyrábí, proto se příprava
+     * zastaví s výzvou podat opravu ručně.
+     */
+    public function testCorrectedStartDateAfterDeliveredBulkNotificationRequiresManualCorrectionY(): void
+    {
+        $this->deliverMarchBulkNotification();
+        $this->db->pdo()->prepare('UPDATE payroll_employments SET start_date = "2026-03-02" WHERE id = ?')
+            ->execute([$this->employmentId]);
+
+        try {
+            $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
+            self::fail('Oprava data nástupu nesmí vyrobit druhou přihlášku P.');
+        } catch (HealthNotificationException $exception) {
+            self::assertSame('zp_bulk_notification_correction_required', $exception->errorCode);
+            self::assertStringContainsString('Nováková Jana', $exception->getMessage());
+            self::assertStringContainsString('oprava kódem Y', $exception->getMessage());
+        }
+    }
+
+    /** Opravené číslo pojištěnce po odeslaném HOZ: ruší se kódem X, ne novou větou P. */
+    public function testCorrectedInsuranceNumberAfterDeliveredBulkNotificationRequiresManualCorrectionX(): void
+    {
+        $this->deliverMarchBulkNotification();
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_identifiers WHERE supplier_id = ? AND employee_id = ? AND identifier_type = "birth_number"',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $this->insertIdentifier($this->db->pdo(), $this->employeeId, 'birth_number', '9052224313');
+
+        try {
+            $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
+            self::fail('Opravené číslo pojištěnce nesmí odejít jako nová přihláška P.');
+        } catch (HealthNotificationException $exception) {
+            self::assertSame('zp_bulk_notification_correction_required', $exception->errorCode);
+            self::assertStringContainsString('oprava kódem X', $exception->getMessage());
+        }
+    }
+
+    /** Nezměněné HOZ po odeslání dál jen zopakuje to, co odešlo. */
+    public function testUnchangedBulkNotificationAfterDeliveryStillReplays(): void
+    {
+        $first = $this->deliverMarchBulkNotification();
+        $again = $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
+
+        self::assertSame($first, $again['submission_id']);
+    }
+
+    private function deliverMarchBulkNotification(): int
+    {
+        $result = $this->service->prepareBulkNotification($this->supplierId, 'production', '2026-03', '111');
+        $this->db->pdo()->prepare('UPDATE payroll_submissions SET status = "submitted", submitted_at = NOW() WHERE id = ?')
+            ->execute([$result['submission_id']]);
+
+        return (int) $result['submission_id'];
+    }
+
     public function testBulkNotificationDownloadRebuildsFromSourceWithoutPreparing(): void
     {
         $artifact = $this->service->bulkNotificationDownload(

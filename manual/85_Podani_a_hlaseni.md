@@ -307,6 +307,12 @@ následujícího měsíce):
 3. Ruční sestavení: rozbalte **Podrobnosti: oznámení HOZ, ruční sestavení
    a historie**, vyberte pojišťovnu a klikněte na **Sestavit HOZ**.
 
+Opravíte-li po odeslání HOZ datum nástupu, datum skončení nebo číslo
+pojištěnce, aplikace nové HOZ za totéž období a pojišťovnu nesestaví:
+pojišťovna by dostala druhou přihlášku nebo odhlášku. Hláška jmenuje osobu
+a opravný kód (`X` u čísla pojištěnce, `Y` u data přihlášky, `Z` u data
+odhlášky). Opravnou větu podejte ručně podle poučení pojišťovny.
+
 **Jak poznáte, že je hotovo:** Přihláška má po načtení protokolu stav
 přijato a na kartě osoby a vztahu se objeví OIČ a ID PPV s původem „protokol
 ČSSZ“. Položka **Registrace ČSSZ / JMHZ** v checklistu nástupu je splněná.

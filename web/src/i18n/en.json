@@ -12234,6 +12234,8 @@
       "sickness_variable_symbol_missing": "The payroll office of the employment is missing its ČSSZ variable symbol. Fill it in under Payroll settings, Employer, at the employment's office and prepare the submission again.",
       "zp_artifact_mismatch": "The stored file's fingerprint does not match the frozen data record. Try preparing the submission again.",
       "zp_bulk_notification_empty": "The bulk notification must contain at least one record. No record could be documented by the application for the selected period and insurer.",
+      "zp_bulk_notification_correction_required": "The insurer has already received a bulk notification for this period with a different date or insurance number. A new notification would send a second registration or deregistration. File the correction manually with an X, Y or Z correction record as the insurer instructs.",
+      "zp_bulk_notification_previous_unreadable": "The bulk notification already sent for the same period and insurer cannot be read, so the new one cannot be compared with it and is not built.",
       "zp_change_address_incomplete": "The address in the bulk notification record is incomplete.",
       "zp_change_address_too_long": "The address in the bulk notification record exceeds the sixty characters allowed by the data record.",
       "zp_change_code_mapping_undocumented": "The change code for this duty cannot be determined - the schema does not document a code for this duty type.",
