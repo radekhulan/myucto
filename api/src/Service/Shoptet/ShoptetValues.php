@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Shoptet;
 
+use MyInvoice\Support\LocaleNumber;
+
 /**
  * Převod textových hodnot z exportů Shoptetu na čísla a data.
  *
@@ -19,22 +21,8 @@ final class ShoptetValues
         if ($raw === null) {
             return null;
         }
-        $value = trim(str_replace(["\u{00A0}", "\u{202F}", ' ', '%'], '', $raw));
-        if ($value === '') {
-            return null;
-        }
-        if (str_contains($value, ',') && str_contains($value, '.')) {
-            $value = strrpos($value, ',') > strrpos($value, '.')
-                ? str_replace(['.', ','], ['', '.'], $value)
-                : str_replace(',', '', $value);
-        } else {
-            $value = str_replace(',', '.', $value);
-        }
-        if (!is_numeric($value)) {
-            return null;
-        }
 
-        return (float) $value;
+        return LocaleNumber::toFloat(str_replace('%', '', $raw));
     }
 
     /** Datum a čas objednávky na 'Y-m-d H:i:s'; Shoptet píše `y-M-d H:m:s` i české `d.m.Y`. */

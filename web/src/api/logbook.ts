@@ -469,6 +469,8 @@ export const logbookApi = {
   createTrip: (data: TripPayload) => api.post<Trip>('/logbook/trips', data).then(r => r.data),
   updateTrip: (id: number, data: TripPayload) => api.put<Trip>(`/logbook/trips/${id}`, data).then(r => r.data),
   deleteTrip: (id: number) => api.delete<{ deleted: boolean }>(`/logbook/trips/${id}`).then(r => r.data),
+  bulkDeleteTrips: (body: { ids: number[] } | { all_matching: true; filters: Record<string, string | number> }) =>
+    api.post<{ deleted: number }>('/logbook/trips/bulk-delete', body).then(r => r.data),
   importTrips: (file: File) => {
     const fd = new FormData()
     fd.append('file', file, file.name)

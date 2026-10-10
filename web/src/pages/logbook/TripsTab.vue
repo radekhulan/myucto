@@ -232,6 +232,62 @@ async function removeTrip(tr: Trip) {
   } catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
 }
 
+// ── Hromadné mazání ─────────────────────────────────────────────
+// Výběr drží napříč stránkami; „všech dle filtru" maže na serveru vše, co odpovídá filtru.
+const canBulkDelete = computed(() => auth.canWrite('logbook.delete'))
+const selected = ref(new Set<number>())
+const allMatching = ref(false)
+const bulkDeleting = ref(false)
+const selectedCount = computed(() => allMatching.value ? total.value : selected.value.size)
+const pageAllSelected = computed(() => trips.value.length > 0 && trips.value.every(tr => selected.value.has(tr.id)))
+
+function clearSelection() { selected.value = new Set(); allMatching.value = false }
+function isSelected(id: number) { return allMatching.value || selected.value.has(id) }
+function toggleTrip(id: number) {
+  if (allMatching.value) {
+    selected.value = new Set(trips.value.map(tr => tr.id))
+    allMatching.value = false
+  }
+  const next = new Set(selected.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  selected.value = next
+}
+function groupAllSelected(g: { trips: Trip[] }) { return g.trips.every(tr => isSelected(tr.id)) }
+function toggleGroup(g: { trips: Trip[] }) {
+  const select = !groupAllSelected(g)
+  if (allMatching.value) {
+    selected.value = new Set(trips.value.map(tr => tr.id))
+    allMatching.value = false
+  }
+  const next = new Set(selected.value)
+  for (const tr of g.trips) { if (select) next.add(tr.id); else next.delete(tr.id) }
+  selected.value = next
+}
+function currentFilters(): Record<string, string | number> {
+  const f: Record<string, string | number> = {}
+  if (filterCar.value) f.car_id = filterCar.value
+  if (yearFilter.value) f.year = yearFilter.value
+  if (monthFilter.value) f.month = monthFilter.value
+  return f
+}
+watch([yearFilter, monthFilter, filterCar], () => { clearSelection() })
+
+async function removeSelected() {
+  if (selectedCount.value === 0) return
+  if (!confirm(t('logbook.confirm_delete_trips', { n: selectedCount.value }))) return
+  bulkDeleting.value = true
+  try {
+    const r = allMatching.value
+      ? await logbookApi.bulkDeleteTrips({ all_matching: true, filters: currentFilters() })
+      : await logbookApi.bulkDeleteTrips({ ids: [...selected.value] })
+    toast.success(t('logbook.trips_deleted', { n: r.deleted }))
+    clearSelection()
+    reload()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message ?? t('common.error'))
+  } finally { bulkDeleting.value = false }
+}
+
 // ── Import CSV/XLSX ─────────────────────────────────────────────
 const importOpen = ref(false)
 const importing = ref(false)
@@ -342,9 +398,30 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
     <template v-else>
       <div class="text-xs text-neutral-500 mb-3">{{ t('logbook.trips_summary', { count: total, km: fmtKm(totalKm) }) }}</div>
 
+      <div v-if="canBulkDelete && selectedCount > 0"
+        class="flex flex-wrap items-center gap-2 mb-3 px-4 py-2.5 border border-primary-200 bg-primary-50 rounded-lg text-sm">
+        <span class="font-medium text-neutral-800 whitespace-nowrap">{{ t('logbook.trips_selected', { n: selectedCount }) }}</span>
+        <button v-if="!allMatching && pageAllSelected && total > selected.size" @click="allMatching = true"
+          class="cursor-pointer text-primary-700 hover:underline whitespace-nowrap">
+          {{ t('logbook.select_all_matching', { n: total }) }}
+        </button>
+        <div class="flex flex-wrap gap-2 ml-auto">
+          <button @click="clearSelection" :class="btnOutline('neutral')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('logbook.clear_selection') }}
+          </button>
+          <button @click="removeSelected" :disabled="bulkDeleting" :class="btnFilled('danger')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('logbook.delete_selected') }}
+          </button>
+        </div>
+      </div>
+
       <section v-for="g in groups" :key="g.month" class="mb-5">
         <header class="flex items-center justify-between bg-neutral-50 border border-neutral-200 rounded-t-lg px-4 py-2.5">
           <div class="flex items-center gap-3">
+            <input v-if="canBulkDelete" type="checkbox" :checked="groupAllSelected(g)" @change="toggleGroup(g)"
+              :title="t('logbook.select_month')" :aria-label="t('logbook.select_month')" class="cursor-pointer" />
             <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-700">{{ formatMonth(g.month) }}</h2>
             <span class="text-xs text-neutral-500">{{ g.trips.length }}</span>
           </div>
@@ -355,10 +432,11 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
         <div class="hidden md:block bg-surface border border-t-0 border-neutral-200 rounded-b-lg overflow-hidden">
           <table class="w-full text-sm table-fixed">
             <colgroup>
-              <col class="w-32" /><col class="w-20" /><col /><col /><col class="w-24" /><col class="w-20" /><col class="w-20" /><col class="w-52" />
+              <col v-if="canBulkDelete" class="w-10" /><col class="w-32" /><col class="w-20" /><col /><col /><col class="w-24" /><col class="w-20" /><col class="w-20" /><col class="w-52" />
             </colgroup>
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
+                <th v-if="canBulkDelete" class="px-3 py-2"></th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('logbook.date') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('logbook.car') }}</th>
                 <th class="px-3 py-2 text-left font-medium">{{ t('logbook.route') }}</th>
@@ -370,7 +448,8 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="tr in g.trips" :key="tr.id" class="hover:bg-neutral-50">
+              <tr v-for="tr in g.trips" :key="tr.id" :class="isSelected(tr.id) ? 'bg-primary-50' : 'hover:bg-neutral-50'">
+                <td v-if="canBulkDelete" class="px-3 py-2"><input type="checkbox" :checked="isSelected(tr.id)" @change="toggleTrip(tr.id)" class="cursor-pointer" /></td>
                 <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(tr.trip_date) }}<span v-if="tr.time_start" class="block text-xs text-neutral-400">{{ tr.time_start }}</span></td>
                 <td class="px-3 py-2 font-mono text-xs">{{ tr.car_registration }}</td>
                 <td class="px-3 py-2">{{ [tr.origin, tr.destination].filter(Boolean).join(' → ') || '—' }}</td>
@@ -400,9 +479,9 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
 
         <!-- Mobile karty -->
         <div class="md:hidden bg-surface border border-t-0 border-neutral-200 rounded-b-lg divide-y divide-neutral-100 overflow-hidden">
-          <div v-for="tr in g.trips" :key="`m-${tr.id}`" class="px-4 py-3">
+          <div v-for="tr in g.trips" :key="`m-${tr.id}`" class="px-4 py-3" :class="isSelected(tr.id) ? 'bg-primary-50' : ''">
             <div class="flex items-baseline justify-between gap-2">
-              <span class="font-medium text-neutral-900">{{ formatDate(tr.trip_date) }}<span v-if="tr.time_start" class="text-neutral-400 text-xs ml-1">{{ tr.time_start }}</span></span>
+              <span class="font-medium text-neutral-900"><input v-if="canBulkDelete" type="checkbox" :checked="isSelected(tr.id)" @change="toggleTrip(tr.id)" class="cursor-pointer mr-2" />{{ formatDate(tr.trip_date) }}<span v-if="tr.time_start" class="text-neutral-400 text-xs ml-1">{{ tr.time_start }}</span></span>
               <span class="font-mono text-sm">{{ fmtKm(tr.distance_km) }} km</span>
             </div>
             <div class="text-sm text-neutral-700 mt-0.5">{{ [tr.origin, tr.destination].filter(Boolean).join(' → ') || '—' }}</div>

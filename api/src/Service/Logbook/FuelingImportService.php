@@ -8,6 +8,7 @@ use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\Bank\Card\CardNumberMask;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
+use MyInvoice\Support\LocaleNumber;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
@@ -327,20 +328,11 @@ final class FuelingImportService
 
     private function parseInt(string $s): ?int
     {
-        $s = (string) preg_replace('/[^\d]/', '', $s);
-        return $s === '' ? null : (int) $s;
+        return LocaleNumber::toInt($s);
     }
 
     private function parseFloat(string $s): ?float
     {
-        $s = str_replace(["\u{00A0}", ' ', 'Kč', 'CZK', 'EUR', '€'], '', trim($s));
-        if ($s === '') return null;
-        // „1.234,50" (CZ s tečkou tisíců) i „1,234.50" (EN) → rozhoduje poslední oddělovač.
-        if (str_contains($s, ',') && str_contains($s, '.')) {
-            $s = strrpos($s, ',') > strrpos($s, '.') ? str_replace(['.', ','], ['', '.'], $s) : str_replace(',', '', $s);
-        } else {
-            $s = str_replace(',', '.', $s);
-        }
-        return is_numeric($s) ? (float) $s : null;
+        return LocaleNumber::toFloat($s);
     }
 }

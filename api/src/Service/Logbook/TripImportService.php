@@ -8,6 +8,7 @@ use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\TripCategoryRepository;
 use MyInvoice\Repository\TripRepository;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
+use MyInvoice\Support\LocaleNumber;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
@@ -128,12 +129,16 @@ final class TripImportService
             throw new \InvalidArgumentException('Není určeno auto a neexistuje výchozí auto.');
         }
 
-        $odoStart = $this->parseInt($get('odo_start'));
-        $odoEnd   = $this->parseInt($get('odo_end'));
-        $distance = $this->parseFloat($get('distance'));
+        // Tachometr se ukládá v celých km; ujeté km se ale dopočtou z přesných stavů
+        // („128,5" → „135,2" = 6,7 km), ne až ze zaokrouhlených.
+        $odoStartKm = LocaleNumber::toFloat($get('odo_start'));
+        $odoEndKm   = LocaleNumber::toFloat($get('odo_end'));
+        $odoStart = $odoStartKm === null ? null : (int) round($odoStartKm);
+        $odoEnd   = $odoEndKm === null ? null : (int) round($odoEndKm);
+        $distance = LocaleNumber::toFloat($get('distance'));
         if ($distance === null || $distance <= 0.0) {
-            if ($odoStart !== null && $odoEnd !== null && $odoEnd >= $odoStart) {
-                $distance = (float) ($odoEnd - $odoStart);
+            if ($odoStartKm !== null && $odoEndKm !== null && $odoEndKm >= $odoStartKm) {
+                $distance = round($odoEndKm - $odoStartKm, 1);
             } else {
                 throw new \InvalidArgumentException('Chybí ujeté km i platný stav tachometru (od/do).');
             }
@@ -234,6 +239,9 @@ final class TripImportService
                         $cells[] = $dt->format('H:i:s') !== '00:00:00'
                             ? $dt->format('Y-m-d H:i')   // datum+čas (nebo jen čas → datum 1899)
                             : $dt->format('Y-m-d');
+                    } elseif (is_int($value) || is_float($value)) {
+                        // Čísla surově — formát sešitu („1 234,5") by závisel na locale.
+                        $cells[] = (string) $value;
                     } else {
                         $cells[] = (string) ($cell->getFormattedValue() ?? '');
                     }
@@ -276,22 +284,5 @@ final class TripImportService
             return sprintf('%02d:%02d', (int) $m[1], (int) $m[2]);
         }
         return null;
-    }
-
-    private function parseInt(string $s): ?int
-    {
-        $s = trim(str_replace(["\u{00A0}", ' '], '', $s));
-        if ($s === '') return null;
-        $s = preg_replace('/[^\d]/', '', $s);
-        return ($s === '' || $s === null) ? null : (int) $s;
-    }
-
-    private function parseFloat(string $s): ?float
-    {
-        $s = trim(str_replace(["\u{00A0}", ' '], '', $s));
-        if ($s === '') return null;
-        $s = str_replace(',', '.', $s);
-        if (!is_numeric($s)) return null;
-        return (float) $s;
     }
 }

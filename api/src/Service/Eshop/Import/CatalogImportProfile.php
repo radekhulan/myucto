@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Eshop\Import;
 
+use MyInvoice\Support\LocaleNumber;
+
 final class CatalogImportProfile
 {
     public const FIELDS = [
@@ -157,7 +159,7 @@ final class CatalogImportProfile
             return (int) $value;
         }
         if ($field === 'min_qty' || $field === 'price') {
-            $value = str_replace(["\u{00A0}", ' ', ','], ['', '', '.'], $value);
+            $value = LocaleNumber::parse($value) ?? '';
             $pattern = $field === 'price' ? '/^\d{1,10}(?:\.\d{1,2})?$/D' : '/^\d{1,11}(?:\.\d{1,3})?$/D';
             if (!preg_match($pattern, $value)) {
                 throw new \InvalidArgumentException('import_decimal_invalid');

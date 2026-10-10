@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Eshop\Pricing;
 
 use MyInvoice\Repository\CatalogJobItemRepository;
+use MyInvoice\Support\LocaleNumber;
 
 final class PriceMatrixCsv
 {
@@ -104,6 +105,12 @@ final class PriceMatrixCsv
             if (isset($overrides[$id . ':' . $currency])) {
                 fclose($stream);
                 throw new \InvalidArgumentException('CSV obsahuje duplicitní operaci pro kartu a měnu.');
+            }
+            // Ceny a přirážka z Excelu mohou mít české i anglické formátování.
+            foreach (['fixed_price', 'markup_pct'] as $numeric) {
+                if ($row[$numeric] !== '' && !is_numeric($row[$numeric])) {
+                    $row[$numeric] = LocaleNumber::parse($row[$numeric]) ?? $row[$numeric];
+                }
             }
             if ($operation === 'set_fixed') {
                 $override['fixed_price'] = $row['fixed_price'];

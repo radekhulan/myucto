@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Registration;
 
+use MyInvoice\Support\LocaleNumber;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
@@ -116,7 +117,7 @@ final class RegistrationAttributeDocument
             };
         }
         if ($type === 'number') {
-            return str_replace([' ', "\u{00A0}", ','], ['', '', '.'], $value);
+            return LocaleNumber::parse($value) ?? $value;
         }
 
         return $value;

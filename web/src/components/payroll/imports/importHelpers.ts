@@ -1,3 +1,4 @@
+import { parseLocaleNumber } from '@/utils/localeNumber'
 import type {
   AttendanceComponentCheck,
   AttendanceEmploymentOption,
@@ -896,7 +897,7 @@ export function buildPersonsPayload(
     const firstName = draft.first_name.trim()
     const lastName = draft.last_name.trim()
     const weekly = (person.weekly_hours ?? '').trim() || defaults.weekly_hours.trim()
-    const wage = Number((person.monthly_wage ?? '').replace(/\s/g, '').replace(',', '.'))
+    const wage = parseLocaleNumber(person.monthly_wage) ?? NaN
     return {
       person_key: person.key,
       full_name: [firstName, lastName].filter(Boolean).join(' ') || person.display_name,

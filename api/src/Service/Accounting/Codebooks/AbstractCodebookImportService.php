@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Codebooks;
 
+use MyInvoice\Support\LocaleNumber;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
@@ -331,29 +332,10 @@ abstract class AbstractCodebookImportService
         return trim((string) ($cols[$map[$field]] ?? ''));
     }
 
-    /** Desetinné číslo CZ (12 345,67) i EN (12345.67). zkopírováno z TripImportService. */
+    /** Desetinné číslo CZ (12 345,67) i EN (12,345.67), viz LocaleNumber. */
     public static function parseDecimal(string $s): ?float
     {
-        $s = trim(str_replace(["\u{00A0}", ' '], '', $s));
-        if ($s === '') {
-            return null;
-        }
-        $hasComma = str_contains($s, ',');
-        $hasDot = str_contains($s, '.');
-        if ($hasComma && $hasDot) {
-            if (strrpos($s, ',') > strrpos($s, '.')) {
-                $s = str_replace('.', '', $s);
-                $s = str_replace(',', '.', $s);
-            } else {
-                $s = str_replace(',', '', $s);
-            }
-        } elseif ($hasComma) {
-            $s = str_replace(',', '.', $s);
-        }
-        if (!is_numeric($s)) {
-            return null;
-        }
-        return (float) $s;
+        return LocaleNumber::toFloat($s);
     }
 
     /** 1/0, ano/ne, yes/no, true/false → bool; jinak null. */

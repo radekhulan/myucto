@@ -156,6 +156,29 @@ final class TripRepository
         return $stmt->rowCount() > 0;
     }
 
+    /** @param list<int> $ids */
+    public function deleteMany(int $supplierId, array $ids): int
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return 0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'DELETE FROM trips WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        return $stmt->rowCount();
+    }
+
+    /** Smaže všechny jízdy odpovídající filtru seznamu (stejný WHERE jako listPaged). */
+    public function deleteMatching(int $supplierId, array $filters): int
+    {
+        [$where, $params] = $this->buildWhere($supplierId, $filters);
+        $stmt = $this->db->pdo()->prepare('DELETE t FROM trips t WHERE ' . implode(' AND ', $where));
+        $stmt->execute($params);
+        return $stmt->rowCount();
+    }
+
     /**
      * Distinct účely cest pro našeptávač (nejnověji použité první).
      *

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Stock;
 
+use MyInvoice\Support\LocaleNumber;
+
 final class OpeningStockImportProfile
 {
     public const FIELDS = ['external_id', 'sku', 'quantity', 'unit_cost'];
@@ -86,6 +88,7 @@ final class OpeningStockImportProfile
 
     private static function decimal(string $value, int $integerDigits, int $scale, bool $allowZero, string $error): string
     {
+        $value = LocaleNumber::parse($value) ?? $value;
         if (!preg_match('/^(?:0|[1-9][0-9]*)(?:[.,]([0-9]+))?$/D', $value)) {
             throw new \InvalidArgumentException($error);
         }

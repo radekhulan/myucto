@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Eshop;
 
+use MyInvoice\Support\LocaleNumber;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ManufacturerRepository;
 use MyInvoice\Repository\StockItemRepository;
@@ -266,21 +267,9 @@ final class ProductImportService extends AbstractCodebookImportService
     /** Money parser (string in → normalizovaný decimal string, žádný float). */
     private function parseMoney(string $s): ?string
     {
-        $s = trim(str_replace(["\u{00A0}", ' '], '', $s));
-        if ($s === '') {
+        $s = LocaleNumber::parse($s);
+        if ($s === null) {
             return null;
-        }
-        $hasComma = str_contains($s, ',');
-        $hasDot = str_contains($s, '.');
-        if ($hasComma && $hasDot) {
-            if (strrpos($s, ',') > strrpos($s, '.')) {
-                $s = str_replace('.', '', $s);
-                $s = str_replace(',', '.', $s);
-            } else {
-                $s = str_replace(',', '', $s);
-            }
-        } elseif ($hasComma) {
-            $s = str_replace(',', '.', $s);
         }
         // Nezáporná cena; integer část ≤ 10 číslic (DECIMAL(12,2)) — mimo rozsah
         // by jinak skončilo PDO exception → 500.

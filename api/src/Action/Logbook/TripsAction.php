@@ -23,6 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST   /api/logbook/trips
  *   PUT    /api/logbook/trips/{id}
  *   DELETE /api/logbook/trips/{id}
+ *   POST   /api/logbook/trips/bulk-delete
  */
 final class TripsAction
 {
@@ -135,6 +136,30 @@ final class TripsAction
         $this->repo->delete($id, $supplierId);
         $this->log($request, 'trip.deleted', $id, []);
         return Json::ok($response, ['deleted' => true]);
+    }
+
+    /**
+     * Hromadné smazání: {ids: [...]} nebo {all_matching: true, filters: {...}} = vše,
+     * co odpovídá filtru seznamu (auto / rok / měsíc …), i přes více stránek.
+     */
+    public function bulkDelete(Request $request, Response $response): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (!empty($body['all_matching'])) {
+            $filters = array_intersect_key((array) ($body['filters'] ?? []),
+                array_flip(['car_id', 'category_id', 'year', 'month', 'date_from', 'date_to', 'q']));
+            $deleted = $this->repo->deleteMatching($supplierId, $filters);
+            $this->log($request, 'trip.bulk_deleted', 0, ['filters' => $filters, 'deleted' => $deleted]);
+            return Json::ok($response, ['deleted' => $deleted]);
+        }
+        $ids = array_values(array_filter(array_map('intval', is_array($body['ids'] ?? null) ? $body['ids'] : [])));
+        if ($ids === []) {
+            return Json::error($response, 'no_ids', 'Nebyly vybrány žádné jízdy.', 400);
+        }
+        $deleted = $this->repo->deleteMany($supplierId, $ids);
+        $this->log($request, 'trip.bulk_deleted', 0, ['ids' => $ids, 'deleted' => $deleted]);
+        return Json::ok($response, ['deleted' => $deleted]);
     }
 
     /** Validace + dopočet distance_km (mění $body in-place). */

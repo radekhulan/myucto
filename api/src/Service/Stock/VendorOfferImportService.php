@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Stock;
 
+use MyInvoice\Support\LocaleNumber;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemVendorRepository;
@@ -394,7 +395,7 @@ final class VendorOfferImportService extends AbstractCodebookImportService
         if ($raw === '') {
             return [null, null];
         }
-        $s = str_replace([' ', "\u{00A0}", ','], ['', '', '.'], $raw);
+        $s = LocaleNumber::parse($raw) ?? '';
         if (!preg_match('/^\d+(\.\d+)?$/', $s)) {
             return [null, 'Neplatná hodnota „' . $label . '": „' . $raw . '".'];
         }

@@ -349,7 +349,20 @@ datum, cas, auto, km_zacatek, km_konec, ujeto, ucel, odkud, kam, kategorie
   bez ohledu na formát zobrazení),
 - **auto** je SPZ nebo název; je-li prázdné a máte jen jedno auto, použije se ono,
 - **ujeto** se dopočítá z rozdílu tachometrů, když ho nevyplníte,
-- **kategorie**, která ještě neexistuje, se automaticky založí.
+- **kategorie**, která ještě neexistuje, se automaticky založí,
+- **stav tachometru** se ukládá v celých kilometrech (128,5 se zaokrouhlí na 129); ujeté
+  km se ale dopočtou z přesných stavů, takže 128,5 → 135,2 je 6,7 km.
+
+Čísla v importech (jízdy, tankování i ostatní importy v aplikaci) mohou mít české
+i anglické formátování: `128,5`, `128.5`, `1 234,50`, `1.234,50` i `1,234.50`. Obsahuje-li
+číslo čárku i tečku, desetinný oddělovač je ten poslední. Jediná čárka nebo tečka je vždy
+desetinná, opakovaná (`1.234.567`) odděluje tisíce.
+
+Chcete-li import zopakovat s opraveným souborem, původní jízdy smažte hromadně: zaškrtněte
+jízdy v seznamu (zaškrtávátko u měsíce označí celý měsíc na stránce) a zvolte **Smazat
+označené**. Jsou-li označeny všechny jízdy na stránce, nabídne lišta **Označit všech N jízd
+podle filtru**, které smaže vše, co odpovídá zvolenému autu, roku a měsíci, i přes více
+stránek.
 
 **Tankování** (CSV nebo XLSX, české i anglické názvy sloupců):
 
