@@ -1,0 +1,27 @@
+# Kontext pro .oss-scanner/Dockerfile. Má přednost před kořenovým .dockerignore, který
+# z produkčního image vyřazuje testy a CI; scanner je naopak potřebuje.
+.git
+.vscode
+.idea
+.claude
+
+api/vendor
+api/vendor.prod
+api/.phpunit.cache
+web/node_modules
+web/dist
+MCP/node_modules
+MCP/dist
+manual/generated
+manual/manual.pdf
+dist
+
+cfg.php
+cfg.local.php
+cfg.docker.php
+.env
+.env.*
+log
+storage
+private
+tmp
