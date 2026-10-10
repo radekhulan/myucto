@@ -21252,6 +21252,37 @@ paths:
                 properties:
                   deleted: { type: integer }
         '400': { description: 'Nebyly vybrány žádné jízdy' }
+  /api/v1/logbook/trips/recalculate-odometer:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Logbook]
+      summary: Přepočet stavu tachometru
+      description: |
+        Naváže stavy tachometru jízd jednoho auta v chronologickém pořadí: začátek
+        jízdy = konec předchozí, konec = začátek + ujeté km. Ujeté km se nemění.
+        S `after_trip_id` přepočte jízdy po této jízdě od jejího konečného stavu,
+        s `car_id` všechny jízdy auta od počátečního stavu první jízdy (nebo auta).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                after_trip_id: { type: integer }
+                car_id: { type: integer }
+      responses:
+        '200':
+          description: Počet jízd se změněným stavem tachometru
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+        '400': { description: 'Chybí auto nebo výchozí stav tachometru' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/logbook/trips/export:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

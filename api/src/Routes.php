@@ -3747,6 +3747,7 @@ final class Routes
 
         $app->post  ('/api/logbook/trips/import',         \MyInvoice\Action\Logbook\ImportTripsAction::class);
         $app->post  ('/api/logbook/trips/bulk-delete',    [\MyInvoice\Action\Logbook\TripsAction::class, 'bulkDelete']);
+        $app->post  ('/api/logbook/trips/recalculate-odometer', [\MyInvoice\Action\Logbook\TripsAction::class, 'recalculateOdometer']);
         $app->get   ('/api/logbook/trips/export',         \MyInvoice\Action\Logbook\ExportTripsAction::class);
         $app->get   ('/api/logbook/trips/purposes',       [\MyInvoice\Action\Logbook\TripsAction::class, 'purposes']);
         $app->get   ('/api/logbook/trips/places',         [\MyInvoice\Action\Logbook\TripsAction::class, 'places']);

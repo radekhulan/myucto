@@ -78,6 +78,19 @@ a seznam nově založených kategorií).
 Výstup je seskupený po vozidlech, s mezisoučty a celkovým počtem km. Hodí se jako
 příloha k daňové evidenci.
 
+### 36.3.3 Přepočítat stav tachometru
+
+Opravíte-li u jízdy konečný stav tachometru, aplikace se po uložení zeptá, zda
+přepočítat následující jízdy téhož auta. Každá další jízda pak začne na konci
+předchozí a její konec se dopočítá z ujetých km. Ujeté km se nemění.
+
+Celé auto přepočítáte tlačítkem **Přepočítat tachometr**: vyberte auto ve filtru
+nahoře a potvrďte. Řada začne počátečním stavem první jízdy, a nemá-li ho, počátečním
+stavem auta. Jízdy se řadí podle data a času odjezdu.
+
+**Jak poznáte, že je hotovo:** zobrazí se počet přepočítaných jízd a sloupec stavu
+tachometru v seznamu na sebe navazuje.
+
 ## 36.4 Krok za krokem: přidat auto
 
 1. Otevřete záložku **Automobily** a klikněte na **Nové auto**.

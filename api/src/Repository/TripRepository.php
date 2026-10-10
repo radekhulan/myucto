@@ -180,6 +180,69 @@ final class TripRepository
     }
 
     /**
+     * Přepočet stavu tachometru (issue #143): jízdy auta v chronologickém pořadí navážou
+     * na sebe, takže začátek = konec předchozí a konec = začátek + ujeté km. Ujeté km
+     * zůstávají beze změny, posouvají se jen stavy. S $afterTripId se přepočítají jízdy
+     * po této jízdě od jejího konečného stavu (oprava jedné jízdy), bez něj celé auto od
+     * počátečního stavu první jízdy, případně počátečního stavu auta.
+     *
+     * @return array{updated:int}|null null = auto/jízda neexistuje nebo chybí výchozí stav
+     */
+    public function recalculateOdometer(int $supplierId, int $carId, ?int $afterTripId = null): ?array
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id, odometer_start, odometer_end, distance_km
+               FROM trips
+              WHERE supplier_id = ? AND car_id = ?
+           ORDER BY trip_date, COALESCE(time_start, \'00:00:00\'), id'
+        );
+        $stmt->execute([$supplierId, $carId]);
+        $trips = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($afterTripId !== null) {
+            $pos = array_search($afterTripId, array_map('intval', array_column($trips, 'id')), true);
+            if ($pos === false) return null;
+            $anchor = $trips[$pos];
+            $running = $anchor['odometer_end'] !== null
+                ? (float) $anchor['odometer_end']
+                : ($anchor['odometer_start'] !== null ? (float) $anchor['odometer_start'] + (float) $anchor['distance_km'] : null);
+            $trips = array_slice($trips, $pos + 1);
+        } else {
+            $running = $trips !== [] && $trips[0]['odometer_start'] !== null ? (float) $trips[0]['odometer_start'] : null;
+            if ($running === null) {
+                $car = $pdo->prepare('SELECT odometer_start FROM cars WHERE id = ? AND supplier_id = ?');
+                $car->execute([$carId, $supplierId]);
+                $start = $car->fetchColumn();
+                $running = $start !== false && $start !== null ? (float) $start : null;
+            }
+        }
+        if ($running === null) return null;
+
+        $update = $pdo->prepare('UPDATE trips SET odometer_start = ?, odometer_end = ? WHERE id = ? AND supplier_id = ?');
+        $updated = 0;
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) $pdo->beginTransaction();
+        try {
+            foreach ($trips as $trip) {
+                $start = (int) round($running);
+                $running += (float) $trip['distance_km'];
+                $end = (int) round($running);
+                if ($trip['odometer_start'] === null || (int) $trip['odometer_start'] !== $start
+                    || $trip['odometer_end'] === null || (int) $trip['odometer_end'] !== $end) {
+                    $update->execute([$start, $end, (int) $trip['id'], $supplierId]);
+                    $updated++;
+                }
+            }
+            if ($ownTransaction) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['updated' => $updated];
+    }
+
+    /**
      * Distinct účely cest pro našeptávač (nejnověji použité první).
      *
      * @return list<string>

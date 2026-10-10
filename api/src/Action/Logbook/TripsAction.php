@@ -24,6 +24,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/logbook/trips/{id}
  *   DELETE /api/logbook/trips/{id}
  *   POST   /api/logbook/trips/bulk-delete
+ *   POST   /api/logbook/trips/recalculate-odometer
  */
 final class TripsAction
 {
@@ -160,6 +161,33 @@ final class TripsAction
         $deleted = $this->repo->deleteMany($supplierId, $ids);
         $this->log($request, 'trip.bulk_deleted', 0, ['ids' => $ids, 'deleted' => $deleted]);
         return Json::ok($response, ['deleted' => $deleted]);
+    }
+
+    /**
+     * Přepočet stavu tachometru: {after_trip_id} = jízdy po opravené jízdě,
+     * {car_id} = všechny jízdy auta od první.
+     */
+    public function recalculateOdometer(Request $request, Response $response): Response
+    {
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $afterTripId = (int) ($body['after_trip_id'] ?? 0) ?: null;
+        if ($afterTripId !== null) {
+            $trip = $this->repo->find($afterTripId, $supplierId);
+            if ($trip === null) return Json::error($response, 'not_found', 'Jízda nenalezena.', 404);
+            $carId = $trip['car_id'];
+        } else {
+            $carId = (int) ($body['car_id'] ?? 0);
+            if ($carId <= 0 || $this->cars->find($carId, $supplierId) === null) {
+                return Json::error($response, 'validation_failed', 'Vyberte auto.', 400);
+            }
+        }
+        $result = $this->repo->recalculateOdometer($supplierId, $carId, $afterTripId);
+        if ($result === null) {
+            return Json::error($response, 'no_odometer', 'Chybí výchozí stav tachometru. Vyplňte ho u první jízdy nebo u auta.', 400);
+        }
+        $this->log($request, 'trip.odometer_recalculated', $afterTripId ?? 0, ['car_id' => $carId] + $result);
+        return Json::ok($response, $result);
     }
 
     /** Validace + dopočet distance_km (mění $body in-place). */

@@ -187,7 +187,11 @@ function newTrip() {
   open.value = true
 }
 
+// Konečný stav tachometru před úpravou: když se změní, nabídneme přepočet navazujících jízd.
+let editedOdometerEnd: number | null = null
+
 function editTrip(tr: Trip) {
+  editedOdometerEnd = tr.odometer_end
   Object.assign(draft, {
     id: tr.id, car_id: tr.car_id, trip_date: tr.trip_date, time_start: tr.time_start ?? '', time_end: tr.time_end ?? '',
     odometer_start: tr.odometer_start, odometer_end: tr.odometer_end, distance_km: tr.distance_km,
@@ -210,10 +214,13 @@ async function save() {
       purpose: draft.purpose || null, origin: draft.origin || null, destination: draft.destination || null, note: draft.note || null,
     }
     const wasNew = !draft.id
-    if (draft.id) await logbookApi.updateTrip(draft.id, payload)
-    else await logbookApi.createTrip(payload)
+    const saved = draft.id ? await logbookApi.updateTrip(draft.id, payload) : await logbookApi.createTrip(payload)
     open.value = false
     toast.success(t('common.saved'))
+    if (!wasNew && saved.odometer_end != null && saved.odometer_end !== editedOdometerEnd
+        && confirm(t('logbook.recalc_following_confirm'))) {
+      await recalculate({ after_trip_id: saved.id })
+    }
     if (wasNew) page.value = 1 // nová jízda je nejnovější → skoč na 1. stranu (řazení date DESC)
     await load()
   } catch (e: any) {
@@ -230,6 +237,28 @@ async function removeTrip(tr: Trip) {
     // Smazání poslední položky na poslední straně → posuň se o stranu zpět.
     if (trips.value.length === 0 && page.value > 1) goToPage(page.value - 1)
   } catch (e: any) { toast.error(e?.response?.data?.error?.message ?? t('common.error')) }
+}
+
+// ── Přepočet stavu tachometru ───────────────────────────────────
+const recalculating = ref(false)
+
+async function recalculate(body: { after_trip_id: number } | { car_id: number }) {
+  recalculating.value = true
+  try {
+    const r = await logbookApi.recalculateOdometer(body)
+    toast.success(t('logbook.recalc_done', { n: r.updated }))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message ?? t('common.error'))
+  } finally { recalculating.value = false }
+}
+
+async function recalculateCar() {
+  const carId = filterCar.value || (cars.value.length === 1 ? cars.value[0].id : 0)
+  if (!carId) { toast.error(t('logbook.recalc_select_car')); return }
+  const car = cars.value.find(c => c.id === carId)
+  if (!confirm(t('logbook.recalc_car_confirm', { car: car?.registration ?? '' }))) return
+  await recalculate({ car_id: carId })
+  await load()
 }
 
 // ── Hromadné mazání ─────────────────────────────────────────────
@@ -381,6 +410,11 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
           :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
           {{ t('logbook.import') }}
+        </button>
+        <button v-if="auth.canWrite('logbook.write')" @click="recalculateCar" :disabled="total === 0 || recalculating"
+          :title="t('logbook.recalc_odometer_hint')" :class="btnOutline('warning')" class="whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+          {{ t('logbook.recalc_odometer') }}
         </button>
       <template #actions>
         <button v-if="auth.canWrite('logbook.write')" @click="newTrip" :disabled="cars.length === 0"

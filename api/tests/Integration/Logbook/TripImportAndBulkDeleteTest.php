@@ -86,6 +86,44 @@ final class TripImportAndBulkDeleteTest extends TestCase
         self::assertSame(400, $this->call('bulkDelete', ['ids' => []])->getStatusCode());
     }
 
+    public function testRecalculateOdometerChainsFollowingTrips(): void
+    {
+        $car = $this->car($this->supplierA, '9RO 0143', true);
+        $repo = $this->container->get(TripRepository::class);
+        $trip = fn (string $date, ?string $time, int $start, int $end, float $km): int => $repo->create($this->supplierA, [
+            'car_id' => $car, 'trip_date' => $date, 'time_start' => $time,
+            'odometer_start' => $start, 'odometer_end' => $end, 'distance_km' => $km,
+        ], null);
+        $first  = $trip('2099-05-01', null, 1000, 1050, 50.0);
+        $third  = $trip('2099-05-02', '14:00', 1080, 1100, 20.0);
+        $second = $trip('2099-05-02', '08:00', 1050, 1080, 30.0);
+        $fourth = $trip('2099-05-03', null, 1100, 1107, 6.6);
+        $fifth  = $trip('2099-05-04', null, 1107, 1112, 5.4);
+
+        // Oprava první jízdy: konec 1050 → 1060 (ujeto 60), následující jízdy zůstaly na starých stavech.
+        $repo->update($first, $this->supplierA, ['car_id' => $car, 'trip_date' => '2099-05-01',
+            'odometer_start' => 1000, 'odometer_end' => 1060, 'distance_km' => 60.0]);
+
+        $res = $this->call('recalculateOdometer', ['after_trip_id' => $first]);
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame(4, $this->json($res)['data']['updated'] ?? $this->json($res)['updated'] ?? null);
+        $odo = fn (int $id): array => [$repo->find($id, $this->supplierA)['odometer_start'], $repo->find($id, $this->supplierA)['odometer_end']];
+        self::assertSame([1000, 1060], $odo($first));
+        self::assertSame([1060, 1090], $odo($second));
+        self::assertSame([1090, 1110], $odo($third));
+        // Desetinné km se sčítají přesně: 1110 + 6,6 + 5,4 = 1122, ne 1117 + 5.
+        self::assertSame([1110, 1117], $odo($fourth));
+        self::assertSame([1117, 1122], $odo($fifth));
+        self::assertSame(6.6, $repo->find($fourth, $this->supplierA)['distance_km']);
+
+        // Celé auto od první jízdy: nic se nezmění, stav už navazuje.
+        $res = $this->call('recalculateOdometer', ['car_id' => $car]);
+        self::assertSame(0, $this->json($res)['data']['updated'] ?? $this->json($res)['updated'] ?? null);
+
+        self::assertSame(404, $this->call('recalculateOdometer', ['after_trip_id' => 999999999])->getStatusCode());
+        self::assertSame(400, $this->call('recalculateOdometer', [])->getStatusCode());
+    }
+
     private function call(string $method, array $body): ResponseInterface
     {
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/logbook/trips/bulk-delete')
