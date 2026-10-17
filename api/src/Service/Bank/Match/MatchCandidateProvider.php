@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\Match;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
@@ -31,6 +32,9 @@ final class MatchCandidateProvider
     public function candidatesFor(int $supplierId, array $tx): array
     {
         if ($supplierId <= 0 || (int) ($tx['id'] ?? 0) <= 0) return [];
+        $active = $this->db->pdo()->prepare('SELECT 1 FROM bank_transactions bt WHERE bt.id = ? AND ' . BankNoticeConfirmationScope::activeSql('bt'));
+        $active->execute([(int) $tx['id']]);
+        if ($active->fetchColumn() === false) return [];
         $amount = abs((float) ($tx['amount'] ?? 0.0));
         if ($amount <= 0.0) return [];
         $incoming = (float) $tx['amount'] > 0.0;

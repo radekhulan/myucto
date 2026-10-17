@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\Card;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use PDO;
 
 /**
@@ -133,7 +134,7 @@ final class CardPaymentCandidates
             "SELECT COUNT(*)
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.id <> ?
+              WHERE " . BankNoticeConfirmationScope::activeSql('bt') . " AND bt.id <> ?
                 AND bt.match_status = 'unmatched'
                 AND bt.amount < 0
                 AND ABS(ABS(bt.amount) - ?) < 0.005

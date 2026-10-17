@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /**
@@ -195,6 +196,11 @@ final class TaxAdvanceScheduleRepository
      * (do automatického součtu NEvstupuje, {@see paidTotals()} ji vrací zvlášť).
      */
     public function markPaid(int $supplierId, int $id, float $paidAmount, string $paidOn, int $transactionId, string $confidence = 'exact'): void
+    {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $transactionId, fn () => $this->markPaidMutable($supplierId, $id, $paidAmount, $paidOn, $transactionId, $confidence));
+    }
+
+    private function markPaidMutable(int $supplierId, int $id, float $paidAmount, string $paidOn, int $transactionId, string $confidence = 'exact'): void
     {
         $confidence = $confidence === 'uncertain' ? 'uncertain' : 'exact';
         $stmt = $this->db->pdo()->prepare(

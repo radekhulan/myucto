@@ -116,11 +116,21 @@ final class ClientBankAccess
             $posting = $row['posting'] ?? [];
             $row['resolution'] = !empty($posting['payroll_matched']) ? 'payroll'
                 : (!empty($posting['transfer']) ? 'transfer' : (!empty($posting['outside_saldo']) ? 'outside_saldo' : null));
-            $free = (bool) ($available[(int) $row['id']] ?? false);
-            $row['match_available'] = $free || in_array($row['match_status'], ['auto_exact', 'auto_partial', 'manual'], true);
-            $row['ignore_available'] = $free || ($row['match_status'] === 'ignored' && ($row['ignore_origin'] ?? null) === 'manual');
+            $readOnlyNotice = ($row['confirmation_state'] ?? null) === 'confirmed'
+                || ($row['confirmation_reason'] ?? null) === 'authoritative_removed';
+            $free = !$readOnlyNotice && (bool) ($available[(int) $row['id']] ?? false);
+            $row['match_available'] = !$readOnlyNotice && ($free || in_array($row['match_status'], ['auto_exact', 'auto_partial', 'manual'], true));
+            $row['ignore_available'] = !$readOnlyNotice && ($free || ($row['match_status'] === 'ignored' && ($row['ignore_origin'] ?? null) === 'manual'));
             return self::redactTransaction($request, $row);
         }, $rows);
+    }
+
+    public static function redactStatement(Request $request, array $statement): array
+    {
+        if (!RequestAuthorization::isClientType($request)) return $statement;
+        unset($statement['confirmation_summary'], $statement['deletion_blockers'],
+            $statement['can_delete_notices'], $statement['deleted_notice_confirmations']);
+        return $statement;
     }
 
     public static function redactTransaction(Request $request, array $row): array
@@ -135,7 +145,12 @@ final class ClientBankAccess
         }
         // Účetní kontace, mzdové vazby, držitelé karet a interní dimenze nejsou bankovní agenda klienta.
         foreach (['posting', 'card'] as $key) if (array_key_exists($key, $row)) $row[$key] = null;
-        unset($row['dimensions'], $row['match_reason'], $row['matched_by']);
+        unset($row['dimensions'], $row['match_reason'], $row['matched_by'], $row['candidates'], $row['blockers'],
+            $row['authoritative_transaction_id'], $row['authoritative_statement_id'], $row['authoritative_statement_ids']);
+        // Porovnání s výpisem a důvody potvrzení patří do interní účetní kontroly.
+        foreach (array_keys($row) as $key) {
+            if (str_starts_with($key, 'confirmation_')) unset($row[$key]);
+        }
         return $row;
     }
 }

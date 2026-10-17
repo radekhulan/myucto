@@ -3358,6 +3358,7 @@ paths:
         ID se zachová, source se změní na gpc a soubor lze stáhnout.
         Neúplný GPC již evidované pohyby neodstraňuje.
       parameters:
+        - { in: query, name: show_confirmed, schema: { type: boolean, default: false }, description: Zahrnout historii avíz nahrazených bankovními pohyby. }
         - in: query
           name: page
           schema: { type: integer, minimum: 1, default: 1 }
@@ -3446,6 +3447,8 @@ paths:
       summary: Detail výpisu vč. stránkovaných transakcí
       description: Mzdová úhrada vrací vazbu na existující zaúčtování v posting. Filtr zaúčtování a počty zahrnují bankovní i mzdové zápisy; pohyb se neúčtuje podruhé.
       parameters:
+        - { in: query, name: show_confirmed, schema: { type: boolean, default: false }, description: Zahrnout historii avíz nahrazených bankovními pohyby. }
+        - { in: query, name: confirmation_state, schema: { type: string, enum: [pending, review, confirmed] }, description: Stav potvrzení e-mailového avíza výpisem; nezávislý na párování s dokladem. Výslovný filtr confirmed zahrne historii. }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 5, maximum: 200, default: 50 } }
         - in: query
@@ -21325,7 +21328,8 @@ paths:
       summary: Seznam všech bankovních pohybů napříč účty a roky
       description: |
         Pohyby ze všech bankovních výpisů aktuální firmy, včetně spárovaných
-        a ignorovaných. Dostupné každé firmě s výpisy bez ohledu na režim
+        a ignorovaných. E-mailová avíza jsou dostupná ve vlastních přehledech
+        a do tohoto seznamu ani exportu nespárovaných pohybů nevstupují. Dostupné každé firmě s výpisy bez ohledu na režim
         účetnictví; vyžaduje čtení banky. Stav zaúčtování (`posting.status`,
         protiúčty, `period_closed`) vyplňuje jen firma v podvojném účetnictví,
         jinak `posting` nese nejvýš mzdové párování. Filtr a řazení podle
@@ -21348,6 +21352,61 @@ paths:
               schema: { $ref: '#/components/schemas/BankMovementPage' }
         '400': { description: 'Není zvolena firma.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/bank-statements/{id}/notice-confirmations:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [Bank]
+      summary: Zkontroluje dávku avíz proti bankovním výpisům
+      description: |
+        Vyžaduje zápis bank.match. Náhled nic nemění; zápis se provede jen při
+        dry_run=false. Skutečné globální počty zůstávají v confirmation_summary,
+        proposed_summary shrnuje pouze právě zkontrolovanou dávku. Pokračování
+        použije next_after_id. Potvrzení neznamená zaúčtování pohybu.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankNoticeConfirmationCheckRequest' }
+      responses:
+        '200':
+          description: Výsledek kontroly a aktuální bezpečnost odstranění
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankNoticeConfirmationBatch' }
+        '400': { description: Není zvolena firma. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Souběžná změna; akci lze opakovat. }
+  /api/v1/bank-transactions/{id}/notice-confirmation:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    post:
+      tags: [Bank]
+      summary: Ručně potvrdí avízo vybraným bankovním pohybem
+      description: |
+        Vyžaduje zápis bank.match a důvod. Ruční volba připouští rozdíl data a částky;
+        firma, účet, měna, směr a bezpečnost převodu vazeb se ověřují vždy.
+        Potvrzené avízo již nelze přesměrovat. Existující úhrady zachovají identitu,
+        částky a data; nevzniká druhá úhrada. Peněžní deník používá datum a částku
+        autoritativního pohybu, takže se může změnit období evidence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankNoticeConfirmationRequest' }
+      responses:
+        '200':
+          description: Aktuální potvrzení avíza
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankNoticeConfirmationResult' }
+        '400': { description: Není zvolena firma. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Nevyřešené vazby, obsazený protějšek nebo souběžná změna. }
+        '422': { description: Chybí důvod nebo je delší než 500 znaků. }
   /api/v1/bank-transactions/payment-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -37161,6 +37220,81 @@ components:
         reason: { type: string, enum: [variable_symbol, counterparty_account] }
         ignore_note: { type: [string, "null"], maxLength: 1000 }
 
+    BankNoticeConfirmationCheckRequest:
+      type: object
+      properties:
+        dry_run: { type: boolean, default: true }
+        limit: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        after_id: { type: integer, minimum: 0, default: 0 }
+    BankNoticeConfirmationRequest:
+      type: object
+      required: [authoritative_transaction_id, reason]
+      properties:
+        authoritative_transaction_id: { type: integer, format: int64, minimum: 1 }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    BankNoticeConfirmationResult:
+      type: object
+      properties:
+        confirmation_state: { type: string, enum: [pending, review, confirmed] }
+        confirmation_reason: { type: [string, 'null'] }
+        authoritative_transaction_id: { type: [integer, 'null'], format: int64 }
+        authoritative_statement_id: { type: [integer, 'null'], format: int64 }
+        authoritative_statement_ids: { type: array, items: { type: integer, format: int64 } }
+        candidates: { type: array, items: { $ref: '#/components/schemas/BankNoticeConfirmationCandidate' } }
+        blockers: { type: array, items: { type: string } }
+    BankNoticeConfirmationBatch:
+      type: object
+      properties:
+        confirmation_summary: { $ref: '#/components/schemas/BankNoticeConfirmationSummary' }
+        proposed_summary: { $ref: '#/components/schemas/BankNoticeConfirmationSummary', description: Pouze náhled a pouze právě zpracovaná dávka. }
+        can_delete_notices: { type: boolean }
+        deletion_blockers: { type: array, items: { $ref: '#/components/schemas/BankNoticeDeletionBlocker' } }
+        processed: { type: integer, minimum: 0 }
+        next_after_id: { type: [integer, 'null'], format: int64 }
+        has_more: { type: boolean }
+        dry_run: { type: boolean }
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/BankNoticeConfirmationResult'
+              - type: object
+                properties:
+                  id: { type: integer, format: int64 }
+                  transaction_id: { type: integer, format: int64 }
+                  posted_at: { type: string, format: date }
+                  amount: { type: number }
+                  currency: { type: [string, 'null'] }
+                  proposed_state: { type: string, enum: [pending, review, confirmed] }
+                  proposed_reason: { type: [string, 'null'] }
+    BankNoticeConfirmationSummary:
+      type: object
+      description: Počty všech položek měsíčních e-mailových avíz, nezávisle na stránkování a aktuálním filtru. Starší dosud nezkontrolované položky čekají na kontrolu proti výpisům.
+      required: [pending, review, confirmed, total]
+      properties:
+        pending: { type: integer, minimum: 0 }
+        review: { type: integer, minimum: 0 }
+        confirmed: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+    BankNoticeDeletionBlocker:
+      type: object
+      required: [code, count]
+      properties:
+        code: { type: string }
+        count: { type: integer, minimum: 0 }
+    BankNoticeConfirmationCandidate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        statement_id: { type: integer, format: int64 }
+        posted_at: { type: string, format: date }
+        amount: { type: number }
+        currency: { type: [string, "null"] }
+        variable_symbol: { type: [string, "null"] }
+        counterparty_name: { type: [string, "null"] }
+        counterparty_account: { type: [string, "null"] }
+        bank_ref: { type: [string, "null"] }
+
     BankStatement:
       type: object
       description: |
@@ -37174,6 +37308,12 @@ components:
         `source=pdf`, počáteční zůstatek prvního dne a konečný zůstatek posledního,
         jednotlivé dny jsou ze seznamu skryté jako jeho podklady.
       properties:
+        confirmation_summary: { $ref: '#/components/schemas/BankNoticeConfirmationSummary' }
+        can_delete_notices: { type: boolean, description: U avíz jde o předběžnou odstranitelnost podle dávkové kontroly vazeb. Potvrzení všech avíz není podmínkou; mazání ověřuje aktuální data znovu pod zámkem. }
+        deletion_blockers:
+          type: array
+          items: { $ref: '#/components/schemas/BankNoticeDeletionBlocker' }
+        deleted_notice_confirmations: { type: integer, minimum: 0, description: Počet již fyzicky odstraněných avíz potvrzených vlastními pohyby výpisu; při odstranění těchto pohybů se potvrzení zneplatní a avíza se neobnoví. }
         id: { type: integer, format: int64 }
         source: { type: string, enum: [gpc, pdf, email_notice, idoklad, bank_api, import], description: "Původ výpisu: gpc/pdf = bankovní výpis, bank_api = pohyby z přímého API bez konečného zůstatku, email_notice/idoklad = virtuální měsíční výpis, import = migrace z jiného účetního systému." }
         file_name: { type: string, example: "vypis_2026_05.gpc", description: "U měsíční projekce `bank_api` má syntetickou hodnotu `API-YYYY-MM`, u měsíce složeného z denních PDF výpisů `PDF-YYYY-MM`." }
@@ -37276,6 +37416,14 @@ components:
           type: boolean
           description: Dostupnost ignorování pohybu pro klienta; samotná akce navíc vyžaduje bank.ignore k zápisu.
         ignore_origin: { type: [string, "null"], enum: [manual, notice_transfer, superseded, null], description: Původ ignorování nebo převzetí avíza výpisem }
+        confirmation_state: { type: string, enum: [pending, review, confirmed], description: Jen u e-mailových avíz. Potvrzení výpisem je oddělené od match_status a od zaúčtování. }
+        confirmation_record_exists: { type: boolean, description: Jen pro interní uživatele v detailu avíz email_notice a idoklad. Rozlišuje existující historii potvrzení od dosud nekontrolovaného avíza. }
+        confirmation_reason: { type: [string, "null"], description: Strojový důvod čekání nebo kontroly. }
+        authoritative_transaction_id: { type: [integer, "null"], format: int64 }
+        authoritative_statement_id: { type: [integer, "null"], format: int64 }
+        authoritative_statement_ids: { type: array, items: { type: integer, format: int64 }, description: Dostupné podklady kanonického potvrzujícího pohybu. }
+        candidates: { type: array, items: { $ref: '#/components/schemas/BankNoticeConfirmationCandidate' } }
+        blockers: { type: array, items: { type: string }, description: Strojové důvody bránící bezpečnému potvrzení avíza. Úplné živé posouzení poskytuje kontrola avíz. Detail načítá uložené stavy a kandidáty pouze zobrazené stránky; seznam všech pohybů avíza neobsahuje. }
         id: { type: integer, format: int64 }
         source: { type: string, enum: [statement, email_notice, idoklad] }
         statement_id: { type: integer, format: int64, description: ID původního výpisu pohybu. U pohybu sdíleného mezi API a GPC se může lišit od ID právě zobrazeného výpisu. }

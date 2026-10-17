@@ -13,6 +13,7 @@ final class BankEmailNoticeRepository
     public function __construct(
         private readonly Connection $db,
         private readonly SecretEncryption $secrets,
+        private readonly ?\MyInvoice\Service\Bank\BankNoticeConfirmationService $noticeConfirmations = null,
     ) {}
 
     /**
@@ -603,6 +604,37 @@ final class BankEmailNoticeRepository
      * @return array{statement_id:int,transaction_id:int,match_result:array<string,mixed>}
      */
     public function createTransactionFromNotice(
+        int $supplierId,
+        \MyInvoice\Service\Bank\EmailNotice\ParsedBankEmailNotice $notice,
+        string $sourceRef,
+        ?float $tolerance,
+        \MyInvoice\Service\Bank\StatementMatcher $matcher,
+        ?string $accountCurrency = null,
+    ): array {
+        $confirmations = $this->noticeConfirmations ?? new \MyInvoice\Service\Bank\BankNoticeConfirmationService($this->db);
+        $lock = $confirmations->lockSupplier($supplierId);
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
+        try {
+            $scopedRef = 'supplier-' . $supplierId . ':' . hash('sha256', $sourceRef);
+            $tombstone = $confirmations->tombstone($supplierId, $scopedRef) ?? $confirmations->tombstone($supplierId, $sourceRef);
+            if ($tombstone !== null) {
+                $result = ['statement_id' => null, 'transaction_id' => null, 'match_result' => ['status' => 'ignored', 'already_recorded' => true, 'notice_replaced' => true]];
+            } else {
+                $result = $this->createTransactionFromNoticeLocked($supplierId, $notice, $sourceRef, $tolerance, $matcher, $accountCurrency);
+            }
+            if ($owns) $pdo->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        } finally {
+            $confirmations->unlockSupplier($lock);
+        }
+    }
+
+    private function createTransactionFromNoticeLocked(
         int $supplierId,
         \MyInvoice\Service\Bank\EmailNotice\ParsedBankEmailNotice $notice,
         string $sourceRef,

@@ -16,8 +16,35 @@ export interface BankPaymentCandidate {
   bank_code: string | null
 }
 
+export type NoticeConfirmationState = 'pending' | 'review' | 'confirmed'
+export interface NoticeConfirmationSummary { pending: number; review: number; confirmed: number; total: number }
+export interface NoticeConfirmationInspection {
+  confirmation_state?: NoticeConfirmationState
+  confirmation_record_exists?: boolean
+  confirmation_reason?: string | null
+  proposed_state?: NoticeConfirmationState
+  proposed_reason?: string | null
+  authoritative_transaction_id?: number | null
+  authoritative_statement_id?: number | null
+  authoritative_statement_ids?: number[]
+  candidates?: BankPaymentCandidate[]
+  blockers?: string[]
+}
+export interface NoticeConfirmationBatch {
+  confirmation_summary: NoticeConfirmationSummary
+  proposed_summary?: NoticeConfirmationSummary
+  processed: number
+  next_after_id: number | null
+  has_more: boolean
+  items: Array<NoticeConfirmationInspection & { id: number }>
+}
+
 export interface BankStatement {
   id: number
+  confirmation_summary?: NoticeConfirmationSummary
+  deleted_notice_confirmations?: number
+  can_delete_notices?: boolean
+  deletion_blockers?: Array<{ code: string; count: number }>
   /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu, 'import' = migrace z jiného účetního systému. */
   source?: 'gpc' | 'pdf' | 'email_notice' | 'idoklad' | 'bank_api' | 'import'
   file_name: string
@@ -86,7 +113,7 @@ export interface BankTransactionJournalNote {
   pinned: boolean
 }
 
-export interface BankTransaction {
+export interface BankTransaction extends NoticeConfirmationInspection {
   id: number
   /** 'statement' = z nahraného výpisu, 'email_notice' = z e-mailového avíza, 'idoklad' = z pohybu importovaného z iDokladu. */
   source?: 'statement' | 'email_notice' | 'idoklad'
@@ -301,6 +328,8 @@ export interface BankStatementDetail extends BankStatement {
 }
 
 export interface BankTransactionsParams {
+  show_confirmed?: 1
+  confirmation_state?: NoticeConfirmationState
   page?: number
   per_page?: number
   status?: MatchStatus | ''
@@ -403,6 +432,8 @@ export interface BankStatementPage {
 }
 
 export interface BankListParams {
+  show_confirmed?: 1
+  confirmation_state?: NoticeConfirmationState
   page?: number
   year?: number | ''
   month?: number | ''
@@ -462,9 +493,15 @@ export interface AccountBalancesResponse {
 }
 
 export const bankApi = {
+  noticeConfirmations: (id: number, params: { dry_run: boolean; limit?: number; after_id?: number }) =>
+    api.post<NoticeConfirmationBatch>(`/bank-statements/${id}/notice-confirmations`, params).then(r => r.data),
+  confirmNotice: (id: number, authoritative_transaction_id: number, reason: string) =>
+    api.post<NoticeConfirmationInspection>(`/bank-transactions/${id}/notice-confirmation`, { authoritative_transaction_id, reason }).then(r => r.data),
   list: (params: BankListParams = {}) =>
     api.get<BankStatementPage>('/bank-statements', { params: {
       page: params.page ?? 1,
+      ...(params.show_confirmed ? { show_confirmed: 1 } : {}),
+      ...(params.confirmation_state ? { confirmation_state: params.confirmation_state } : {}),
       ...(params.year !== undefined && params.year !== '' ? { 'filter[year]': params.year } : {}),
       ...(params.month !== undefined && params.month !== '' ? { 'filter[month]': params.month } : {}),
       ...(params.account ? { 'filter[account]': params.account } : {}),
@@ -478,6 +515,8 @@ export const bankApi = {
   get: (id: number, params: BankTransactionsParams = {}) =>
     api.get<BankStatementDetail>(`/bank-statements/${id}`, { params: {
       page: params.page ?? 1,
+      ...(params.show_confirmed ? { show_confirmed: 1 } : {}),
+      ...(params.confirmation_state ? { confirmation_state: params.confirmation_state } : {}),
       ...(params.per_page ? { per_page: params.per_page } : {}),
       ...(params.status ? { status: params.status } : {}),
       ...(params.posting_status ? { posting_status: params.posting_status } : {}),

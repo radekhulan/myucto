@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Service\Bank\Card\CardNumberMask;
 use PDO;
 
@@ -149,6 +150,11 @@ final class FuelingRepository
 
     public function create(int $supplierId, array $data, ?int $userId): int
     {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, isset($data['source_bank_transaction_id']) ? (int) $data['source_bank_transaction_id'] : null, fn () => $this->createMutable($supplierId, $data, $userId));
+    }
+
+    private function createMutable(int $supplierId, array $data, ?int $userId): int
+    {
         $pdo = $this->db->pdo();
         $pdo->prepare($this->insertSql())->execute($this->bind($supplierId, $data, $userId));
         return (int) $pdo->lastInsertId();
@@ -163,6 +169,11 @@ final class FuelingRepository
      * Vrací: >0 = id nově vloženého; -1 = doplněn existující; 0 = beze změny (true duplicate).
      */
     public function insertScanned(int $supplierId, array $data, ?int $userId): int
+    {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, isset($data['source_bank_transaction_id']) ? (int) $data['source_bank_transaction_id'] : null, fn () => $this->insertScannedMutable($supplierId, $data, $userId));
+    }
+
+    private function insertScannedMutable(int $supplierId, array $data, ?int $userId): int
     {
         $pdo = $this->db->pdo();
         $sql = $this->insertSql()
@@ -285,6 +296,11 @@ final class FuelingRepository
      */
     public function fillMissing(int $id, int $supplierId, array $data): bool
     {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, isset($data['source_bank_transaction_id']) ? (int) $data['source_bank_transaction_id'] : null, fn () => $this->fillMissingMutable($id, $supplierId, $data));
+    }
+
+    private function fillMissingMutable(int $id, int $supplierId, array $data): bool
+    {
         $b = $this->bind($supplierId, $data, null);
         $carMethod = $this->nullableStr($data['car_assigned_by'] ?? null);
         $stmt = $this->db->pdo()->prepare(
@@ -363,6 +379,11 @@ final class FuelingRepository
      *              source_bank_transaction_id?:int|null, source_journal_entry_id?:int|null} $links
      */
     public function setLinks(int $id, int $supplierId, array $links): void
+    {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, isset($links['source_bank_transaction_id']) ? (int) $links['source_bank_transaction_id'] : null, fn () => $this->setLinksMutable($id, $supplierId, $links));
+    }
+
+    private function setLinksMutable(int $id, int $supplierId, array $links): void
     {
         $set = [];
         $params = [];

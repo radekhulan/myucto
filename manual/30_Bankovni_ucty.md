@@ -598,35 +598,40 @@ Hlavní stav se průběžně odvozuje z aktuálního párování transakce. Poku
 
 Smazání záznamu (**Smazat záznam**) zde nemaže transakci ani fakturu. Maže jen deduplikační záznam, takže je možné stejný e-mail znovu zpracovat při dalším scanu. Používejte to jen jako emergency/debug akci.
 
-### 30.11.15 Když k avízu dorazí GPC výpis
+### 30.11.15 Potvrzení e-mailových avíz bankovním výpisem
 
-Zdroj pravdy je GPC. Když se importuje transakce, která už předtím přišla avízem a je spárovaná, aplikace **párování převezme z avíza na GPC transakci**: platba se přepojí, avízo zůstane rozpárované a nevznikne dvojí započtení. Je to důležité i účetně: **avízo se nikdy neúčtuje**, takže dokud platba visí na něm, nedostane se platební noha (u cizoměnové faktury včetně kurzového rozdílu) do deníku vůbec.
+E-mailové avízo je průběžná informace, zatímco GPC nebo jiný bankovní výpis dokládá zúčtovaný pohyb. Avízo se samo nikdy nezaúčtuje. Dokud ale není potvrzené výpisem, může mít navázané úhrady nebo jiné provozní vazby, a proto se nesmí považovat za vyřízené jen proto, že byl importován výpis za stejný měsíc.
 
-Převzetí je záměrně opatrné - proběhne jen při **právě jednom** kandidátovi se shodou účtu, měny, částky na haléř a data v okně ±5 dní. Identita se hledá takto:
+Potvrzení výpisem je oddělené od párování faktur. Každé avízo má vlastní stav:
 
-| Situace | Podmínka převzetí |
-|---------|-------------------|
-| GPC má variabilní symbol | VS musí číselně sedět s VS avíza |
-| GPC nemá VS, ale avízo nese VS nebo protiúčet | musí sedět protiúčet |
-| Ani jedna strana nemá VS ani protiúčet (karetní platba, „Blokace“) | stačí výše uvedená shoda účtu, měny, částky a data |
+| Stav | Význam |
+|---|---|
+| **Čeká na výpis** | Zatím nebyl nalezen jednoznačný potvrzující pohyb, případně avízo ještě nebylo zkontrolováno. |
+| **Vyžaduje kontrolu** | Existuje více možností, liší se částka nebo zůstala nevyřešená návaznost. |
+| **Nahrazeno výpisem** | Avízo je propojeno s konkrétním pohybem výpisu a jeho podporované vazby byly vyřešeny. Avízo už nemá samostatný vliv. |
 
-Poslední řádek pokrývá karetní úhrady, které VS ani protiúčet nenesou. Pokud by avízo bylo bez identity, ale GPC protistranu znal, jde nejspíš o běžný převod a k převzetí nedojde. Dvě stejné blokace ve stejném okně jsou nejednoznačné - aplikace nechá párování na vás.
+U nově načtených pohybů se jednoznačné a bezpečné shody prověří při zpracování výpisu. Dříve uložená avíza zkontrolujte v detailu měsíčního přehledu tlačítkem **Zkontrolovat proti výpisům**. První obrazovka je pouze náhled: ukáže, kolik avíz může být bezpečně převzato, a nic nezmění. Teprve **Použít kontrolu** znovu ověří aktuální data a provede bezpečně připravená potvrzení. Kontrolu můžete spustit opakovaně.
+
+Při automatickém převzetí spárovaného avíza aplikace kontroluje účet, měnu, identitu a jednoznačnost shody v okně ±5 dní. Podporuje i starší avíza bez kódu banky. U karetní blokace bez VS a protiúčtu může při neexistenci přesné shody převzít jedinou úhradu přijaté faktury s kurzovým rozdílem do 5 % a upravit ji na skutečně zúčtovanou částku. Složené úhrady s rozdílnou částkou zůstávají ke kontrole. Stejně se automaticky nepřevádějí avíza s nepodporovanými návaznostmi, například mzdovým párováním, vlastními převody, připojenými dokumenty nebo dimenzemi. V přehledu uvidíte důvod a můžete návaznost vyřešit. Nespárované avízo nahradí pouze pohyb se shodnou částkou a datum avíza musí ležet v období, které výpis skutečně pokrývá.
+
+U položky **Vyžaduje kontrolu** lze otevřít **Porovnat s výpisem**, vybrat skutečný protějšek a uvést povinný důvod ručního potvrzení. Obrazovka ukáže datum a částku obou pohybů i jejich rozdíly. Ručně lze potvrdit také odlišné datum a částku; stále musí souhlasit účet, měna a směr platby a návaznosti musí být převoditelné. Existující úhrady si zachovají ID, částky a data. Případný rozdíl úhrady proti bankovnímu zúčtování ověřte samostatně. Peněžní deník používá datum a částku pohybu výpisu, takže převzetí přes hranici měsíce nebo roku může změnit období evidence.
+
+Ruční potvrzení respektuje uzavřená účetní období, uzamčená data a uzavřené roky daňové evidence na obou stranách převodu i u souvisejících úhrad. Potvrzující pohyb nesmí být již zaúčtovaný. Důvod a autor potvrzení se zaznamenají do historie aktivit.
+
+Kontrola známého zůstatku používá výpis časově související s avízem: od data avíza do pozdějšího z konce potvrzujícího výpisu a data jeho pohybu plus pět dní. Libovolně pozdější nesouvisející zůstatek chybějící ověření nenahradí.
+
+V horní části přehledu uvidíte počty avíz čekajících na výpis, vyžadujících kontrolu a nahrazených výpisem. Potvrzená avíza jsou ve výchozím zobrazení skrytá; přepínač **Zobrazit nahrazená avíza** je vrátí do seznamu jako historii pouze pro čtení. U potvrzeného avíza je odkaz na výpis, který ho nahradil. Pokud je potvrzující pohyb odstraněn, avízo se znovu označí ke kontrole.
+
+**Smazání měsíčního přehledu avíz** vyžaduje oprávnění **Banka – zápis** a přístup k firmě; klientským uživatelům není dostupné. Smazání je možné, pokud nezůstávají úhrady ani jiné blokující návaznosti. Lze tak odstranit i prázdné přehledy, chybná nebo nepotvrzená avíza bez vazeb. Samotná možnost smazání nedokládá, že avízo bylo nahrazeno výpisem. Mazání blokují například vazby na úhrady faktur, mzdy, ostatní pohledávky a závazky, převody mezi účty, daňové zálohy, platební brány, účetní zápisy, dokumenty nebo návrhy párování. Detail ukáže počet a důvod zbývajících překážek. Před potvrzením smazání server podmínky ověří znovu. Smazání odstraní importovaná avíza, nikoli bankovní výpisy, jejich pohyby, převzaté úhrady ani původní zprávy v IMAP schránce. Deduplikační záznamy zpráv zůstávají, aby se stejné e-maily při dalším scanu znovu nezpracovaly.
 
 > [!WARNING]
-> Karetní **blokace** se může od finálně zúčtované částky lišit. Pak se částky neshodují, převzetí neproběhne a platbu je potřeba přepárovat ručně.
+> Samotný import výpisu ani nulový počet spárovaných avíz nedokazuje, že jsou všechna avíza nahrazena. Použijte kontrolu potvrzení a vyřešte všechny položky čekající na výpis nebo vyžadující kontrolu. Avízo s jinou částkou, například karetní blokaci, nemažte bez ověření skutečného pohybu.
 
-### 30.11.16 Nespárovaná avíza
+### 30.11.16 Dříve importovaná avíza a párování
 
-Karetní výdaje, bankovní poplatky a výběry se nemají s čím párovat, takže zůstanou v avízu jako nespárované a předchozí odstavec na ně nedosáhne - převzít u nich není co. Aby tentýž pohyb nezůstal v seznamu dvakrát, označí je import výpisu (a stejně tak tlačítko **Přepárovat výpis**) za **nahrazené oficiálním výpisem**: avízo dostane stav *Ignorováno* s poznámkou a v evidenci zůstane jediný pohyb - ten z výpisu. Kolik avíz se takhle odklidilo, ukáže hlášení po přepárování.
+Po zavedení potvrzování se dříve uložená avíza mohou nejprve zobrazit jako **Čeká na výpis**. Spusťte **Zkontrolovat proti výpisům**, prohlédněte náhled a použijte ho až po kontrole připravených shod. Náhled nic nepřevádí. Potvrzení přesune podporovanou úhradu z avíza na odpovídající pohyb výpisu, takže nevznikne dvojí započtení a úhrada zůstane evidovaná u autoritativního pohybu.
 
-Podmínky jsou přísnější než u převzetí, protože tu chybí doklad, na kterém by se dvojice potkala:
-
-- částka musí sedět **na haléř** (žádná tolerance na kurz blokace),
-- avízo nesmí nic nést - žádnou evidovanou úhradu, mzdový signál ani zálohu na daň,
-- den avíza musí spadat do **období, které importovaný výpis opravdu pokrývá** (jinak by výpis od 3. do 30. „nahradil“ avízo z 1., které v něm vůbec není),
-- kandidát musí být **právě jeden**; dvě nerozlišitelná avíza zůstanou obě.
-
-Nic se nepřepojuje, takže je to vratné: v detailu pohybu zrušte ignorování a avízo se vrátí mezi nespárované.
+Jestli se platba z avíza už spárovala s fakturou, ale výpis ji nepřevezme, ověřte kandidáta ručně v přehledu avíza. Částka, datum nebo identita se mohly změnit, případně může být protějšků více. Nespárované avízo se nepotvrzuje jen podle toho, že výpis pokrývá stejný měsíc: musí existovat konkrétní pohyb se shodou, kterou lze bezpečně doložit.
 
 ### 30.11.17 Cron pro e-mailová avíza
 

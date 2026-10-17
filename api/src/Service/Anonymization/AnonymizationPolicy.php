@@ -105,6 +105,9 @@ final class AnonymizationPolicy
         'UPDATE isds_gateway_registrations SET is_active = 0',
         'UPDATE mcp_server_settings SET enabled = 0',
         'UPDATE users SET totp_enabled = 0',
+        // Reference může obsahovat Message-ID s e-mailem; po jeho anonymizaci
+        // musí deduplikační otisk odpovídat téže referenci i u smazaných avíz.
+        'UPDATE bank_notice_confirmations SET notice_identity = SHA2(notice_source_ref, 256)',
     ];
 
     /**
@@ -158,6 +161,7 @@ final class AnonymizationPolicy
         'bank_email_processed_messages' => ['error_message' => 'text', 'fallback_hash' => 'keep', 'message_id' => 'text', 'parsed_payload' => 'json', 'provider_code' => 'keep', 'sender' => 'text', 'subject' => 'text'],
         'bank_match_audit' => ['invoice_ids' => 'keep', 'signals_json' => 'json'],
         'bank_match_suggestions' => ['candidates_json' => 'json', 'reason' => 'keep'],
+        'bank_notice_confirmations' => ['manual_reason' => 'text', 'method' => 'keep', 'notice_identity' => 'keep', 'notice_source_ref' => 'text', 'reason' => 'keep'],
         'bank_oauth_clients' => ['credentials_ciphertext' => 'wipe', 'provider' => 'keep'],
         'bank_payment_order_submissions' => ['error_code' => 'keep', 'payload_hash' => 'keep', 'provider' => 'keep', 'provider_reference' => 'keep'],
         'bank_posting_rules' => ['applies_currency' => 'keep', 'counterparty_account' => 'bank_account', 'counterparty_bank' => 'keep', 'counterparty_prefix' => 'keep', 'credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description' => 'text', 'message_contains' => 'text', 'name' => 'text', 'operation_type' => 'keep', 'system_template_key' => 'keep', 'variable_symbol' => 'symbol'],

@@ -52,6 +52,7 @@ final class UnmatchedBankExportService
         $repository = new \MyInvoice\Repository\BankPostingSuggestionRepository($this->db);
         $filters['scope'] = 'all';
         $filters['status'] = 'unmatched';
+        $filters['active_only'] = true;
         $rows = [];
         $offset = 0;
         do {
@@ -152,7 +153,7 @@ final class UnmatchedBankExportService
 
     private function unmatchedWhere(int $supplierId, int $statementId): string
     {
-        return StatementTransactionScope::sql($statementId)
+        return BankNoticeConfirmationScope::activeSql('bt') . ' AND ' . StatementTransactionScope::sql($statementId)
             . " AND bt.match_status = 'unmatched' AND NOT "
             . NonInvoiceBankTransactionScope::sql($supplierId, 'bt.id');
     }

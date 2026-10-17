@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /**
@@ -51,6 +52,11 @@ final class DimensionAssignmentRepository
      */
     public function replaceDocumentDimensions(int $supplierId, string $docType, int $docId, array $header, array $items): void
     {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $docType === 'bank_transaction' ? $docId : null, fn () => $this->replaceDocumentDimensionsMutable($supplierId, $docType, $docId, $header, $items));
+    }
+
+    private function replaceDocumentDimensionsMutable(int $supplierId, string $docType, int $docId, array $header, array $items): void
+    {
         $pdo = $this->db->pdo();
         $pdo->prepare('DELETE FROM document_dimensions WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?')
             ->execute([$supplierId, $docType, $docId]);
@@ -75,6 +81,11 @@ final class DimensionAssignmentRepository
      */
     public function addHeaderDimensionIfMissing(int $supplierId, string $docType, int $docId, int $typeId, int $valueId): bool
     {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $docType === 'bank_transaction' ? $docId : null, fn () => $this->addHeaderDimensionIfMissingMutable($supplierId, $docType, $docId, $typeId, $valueId));
+    }
+
+    private function addHeaderDimensionIfMissingMutable(int $supplierId, string $docType, int $docId, int $typeId, int $valueId): bool
+    {
         $stmt = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
              VALUES (?, ?, ?, 0, ?, ?)'
@@ -90,6 +101,11 @@ final class DimensionAssignmentRepository
      * a na začátku. Cíl, který už nějaké dimenze má, se nemění.
      */
     public function copyDocument(int $supplierId, string $docType, int $fromId, int $toId, ?string $toDocType = null): void
+    {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, ($toDocType ?? $docType) === 'bank_transaction' ? $toId : null, fn () => $this->copyDocumentMutable($supplierId, $docType, $fromId, $toId, $toDocType));
+    }
+
+    private function copyDocumentMutable(int $supplierId, string $docType, int $fromId, int $toId, ?string $toDocType = null): void
     {
         $fromDocType = $docType;
         $docType = $toDocType ?? $docType;
@@ -147,6 +163,11 @@ final class DimensionAssignmentRepository
 
     /** @param array<int,array<int,array<int,float>>> $splits pořadí položky => typ => hodnota => podíl */
     public function replaceDocumentSplits(int $supplierId, string $docType, int $docId, array $splits): void
+    {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $docType === 'bank_transaction' ? $docId : null, fn () => $this->replaceDocumentSplitsMutable($supplierId, $docType, $docId, $splits));
+    }
+
+    private function replaceDocumentSplitsMutable(int $supplierId, string $docType, int $docId, array $splits): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare('DELETE FROM document_dimension_splits WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?')

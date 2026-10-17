@@ -14,6 +14,7 @@ use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use PDO;
 use PDOException;
@@ -109,6 +110,11 @@ final class TransferPairService
     }
 
     public function postLeg(int $supplierId, int $txId, ?int $userId): int
+    {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $txId, fn () => $this->postLegMutable($supplierId, $txId, $userId));
+    }
+
+    private function postLegMutable(int $supplierId, int $txId, ?int $userId): int
     {
         $tx = $this->loadTx($txId);
         if ($tx === null) {
@@ -350,7 +356,7 @@ final class TransferPairService
     private function isFree(int $supplierId, int $txId): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM bank_transactions bt WHERE bt.id = :id AND ' . self::FREE_TX_SQL
+            'SELECT 1 FROM bank_transactions bt WHERE bt.id = :id AND ' . \MyInvoice\Service\Bank\BankNoticeConfirmationScope::activeSql('bt') . ' AND ' . self::FREE_TX_SQL
         );
         $stmt->execute(['id' => $txId, 'sid' => $supplierId, 'sid2' => $supplierId]);
         return $stmt->fetchColumn() !== false;
@@ -371,7 +377,7 @@ final class TransferPairService
                     bs.currency AS statement_currency, bs.supplier_id AS statement_supplier_id
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.id <> ? AND bt.amount = ? AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ' . $windowDays . ' DAY) AND DATE_ADD(?, INTERVAL ' . $windowDays . ' DAY)
+              WHERE ' . \MyInvoice\Service\Bank\BankNoticeConfirmationScope::activeSql('bt') . ' AND bt.id <> ? AND bt.amount = ? AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ' . $windowDays . ' DAY) AND DATE_ADD(?, INTERVAL ' . $windowDays . ' DAY)
                 AND COALESCE(bt.currency, bs.currency, "CZK") = ?
                 AND NOT EXISTS (SELECT 1 FROM bank_transfer_matches m
                                  WHERE m.out_transaction_id = bt.id OR m.in_transaction_id = bt.id)
@@ -403,6 +409,8 @@ final class TransferPairService
             sort($ids, SORT_NUMERIC);
             $lock = $pdo->prepare('SELECT id FROM bank_transactions WHERE id IN (?, ?) ORDER BY id FOR UPDATE');
             $lock->execute($ids);
+            $confirmations = new \MyInvoice\Service\Bank\BankNoticeConfirmationService($this->db);
+            foreach ($ids as $id) $confirmations->assertMutable($supplierId, $id);
             if ($this->pairRowForTx($supplierId, $txId) !== null || $this->pairRowForTx($supplierId, $otherId) !== null
                 || ($requireFree && (!$this->isFree($supplierId, $txId) || !$this->isFree($supplierId, $otherId)))) {
                 if ($ownTx) $pdo->commit();

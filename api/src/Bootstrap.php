@@ -660,6 +660,14 @@ final class Bootstrap
                 $c->get(Connection::class),
                 self::bankEmailNoticeParsers($c, $config),
             ),
+            \MyInvoice\Service\Bank\BankNoticeConfirmationService::class =>
+                \DI\autowire()->constructorParameter('gopay', \DI\get(\MyInvoice\Service\Accounting\GoPay\GoPayService::class)),
+            \MyInvoice\Action\Bank\BankStatementAction::class =>
+                \DI\autowire()->constructorParameter('noticeConfirmations', \DI\get(\MyInvoice\Service\Bank\BankNoticeConfirmationService::class)),
+            \MyInvoice\Repository\BankEmailNoticeRepository::class =>
+                \DI\autowire()->constructorParameter('noticeConfirmations', \DI\get(\MyInvoice\Service\Bank\BankNoticeConfirmationService::class)),
+            \MyInvoice\Service\Bank\EmailNoticeReconciler::class =>
+                \DI\autowire()->constructorParameter('noticeConfirmations', \DI\get(\MyInvoice\Service\Bank\BankNoticeConfirmationService::class)),
             \MyInvoice\Service\Bank\StatementMatcher::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementMatcher(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class),
@@ -680,6 +688,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
                 $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
+                $c->get(\MyInvoice\Service\Bank\BankNoticeConfirmationService::class),
             ),
 
             // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable
@@ -1277,7 +1286,12 @@ final class Bootstrap
             \MyInvoice\Service\System\ManagedModeGuard::KEY_APP_DEBUG,
             (bool) $config->get('app.debug', false),
         );
-        $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
+        $errorMiddleware = $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
+        $errorMiddleware->setErrorHandler(\MyInvoice\Service\Bank\BankNoticeConfirmationException::class,
+            static function ($request, \MyInvoice\Service\Bank\BankNoticeConfirmationException $error) use ($app) {
+                return \MyInvoice\Http\Json::error($app->getResponseFactory()->createResponse(),
+                    $error->errorCode, $error->getMessage(), $error->httpStatus, $error->details);
+            });
 
         return $app;
     }

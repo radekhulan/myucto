@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /** Polymorfní vazba dokument ↔ entita. */
@@ -80,6 +81,11 @@ final class DocumentLinkRepository
     }
 
     public function attach(int $supplierId, int $documentId, string $entityType, int $entityId): void
+    {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $entityType === 'bank_transaction' ? $entityId : null, fn () => $this->attachMutable($supplierId, $documentId, $entityType, $entityId));
+    }
+
+    private function attachMutable(int $supplierId, int $documentId, string $entityType, int $entityId): void
     {
         if (!in_array($entityType, self::ENTITY_TYPES, true)) return;
         $stmt = $this->db->pdo()->prepare(

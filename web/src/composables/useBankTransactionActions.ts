@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
+import { isBankNoticeReadOnly } from '@/utils/bankNotice'
 import {
   bankApi,
   type BankTransaction,
@@ -83,21 +84,26 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     return !!matchCtx.value && canMatchDocument(matchCtx.value.amount < 0 ? 'purchase_invoice' : 'invoice')
   }
 
+  function isLegacySupersededNotice(tx: BankTransaction): boolean {
+    return tx.match_status === 'ignored' && tx.ignore_origin === 'superseded' && ['email_notice', 'idoklad'].includes(tx.source ?? '')
+  }
+
   function canRunDetailAction(tx: BankTransaction, action: BankDetailAction): boolean {
-    if (tx.resolution === 'payroll' || tx.posting?.payroll_matched) return false
+    if (isBankNoticeReadOnly(tx) || tx.resolution === 'payroll' || tx.posting?.payroll_matched) return false
     const auth = useAuthStore()
     const status = tx.match_status
     if (action === 'create') return !auth.isClientRole && auth.canWrite('purchase_invoices.create') && tx.amount < 0 && status === 'unmatched'
     if (action === 'request') return !auth.isClientRole && auth.canWrite('documents.requests') && ['unmatched', 'auto_partial'].includes(status)
     if (!auth.isClientRole) {
       if (action === 'ignore') return auth.canWrite('bank.ignore') && status === 'unmatched'
+      if (action === 'unmatch' && isLegacySupersededNotice(tx)) return auth.canWrite('bank.ignore') && tx.confirmation_record_exists === false
       if (!auth.canWrite('bank.match')) return false
       if (action === 'match') return ['unmatched', 'auto_partial'].includes(status)
       return ['auto_exact', 'auto_partial', 'manual', 'ignored'].includes(status)
     }
     if (!auth.canRead('bank')) return false
     if (action === 'ignore') return tx.ignore_available !== false && auth.canWrite('bank.ignore') && status === 'unmatched'
-    if (action === 'unmatch' && status === 'ignored') return auth.canWrite('bank.ignore') && tx.ignore_origin === 'manual'
+    if (action === 'unmatch' && status === 'ignored') return tx.ignore_available !== false && auth.canWrite('bank.ignore') && tx.ignore_origin === 'manual'
     if (!auth.canWrite('bank.match')) return false
     if (action === 'match') return tx.match_available !== false && ['unmatched', 'auto_partial'].includes(status)
       && canMatchAnyDocument()
@@ -566,6 +572,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const creatingPi = ref(false)
 
   function openCreate(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     createTx.value = tx
     createVendorId.value = null
   }
@@ -600,6 +607,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
   const requestDocDeadline = ref('')
   const requestingDoc = ref(false)
   function openRequestDoc(tx: BankTransaction) {
+    if (isBankNoticeReadOnly(tx)) return
     requestDocTx.value = tx
     requestDocDeadline.value = ''
   }
@@ -696,7 +704,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     unmatching.value = true
     unmatchError.value = ''
     try {
-      if (useAuthStore().isClientRole && tx.match_status === 'ignored') await bankApi.unignore(tx.id)
+      if (tx.match_status === 'ignored' && (useAuthStore().isClientRole || isLegacySupersededNotice(tx))) await bankApi.unignore(tx.id)
       else await bankApi.unmatch(tx.id)
       Object.assign(tx, {
         match_status: 'unmatched', ignore_origin: null, ignore_note: null, matched_invoice_id: null, matched_purchase_invoice_id: null,

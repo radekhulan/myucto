@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use MyInvoice\Service\Bank\BankTransactionSort;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
@@ -697,6 +698,9 @@ final class BankPostingSuggestionRepository
     {
         $unpostedOnly = ($filters['scope'] ?? 'unposted') !== 'all';
         [$scopeSql, $scopeParams] = $this->transactionScope($supplierId, $unpostedOnly);
+        if (!empty($filters['active_only'])) {
+            $scopeSql .= ' AND ' . BankNoticeConfirmationScope::activeSql('bt');
+        }
         // Klientský bankovní přehled vyžaduje vlastnictví výpisu i při poškozené
         // vazbě na vlastní doklad. Účetní fronta si ponechává rozsah pro opravy vazeb.
         if (!empty($filters['strict_ownership'])) {
@@ -946,7 +950,7 @@ final class BankPostingSuggestionRepository
      */
     private function transactionScope(int $supplierId, bool $unpostedOnly): array
     {
-        $scopeSql = "bt.source = 'statement'
+        $scopeSql = "bt.source = 'statement'" . "
             " . ($unpostedOnly ? "AND bt.match_status <> 'ignored'
             AND NOT " . BankTransactionPostingScope::existsSql($supplierId, 'bt.id') : '') . "
             AND (

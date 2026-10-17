@@ -47,6 +47,7 @@ final class AnonymizationServiceTest extends TestCase
     private int $employeeId;
     private int $identifierId;
     private int $supplierId;
+    private int $noticeConfirmationId;
 
     protected function setUp(): void
     {
@@ -92,7 +93,7 @@ final class AnonymizationServiceTest extends TestCase
         );
 
         self::assertGreaterThan(0, array_sum($report['changed_rows']));
-        $dump = $this->tableTexts($this->target, ['clients', 'client_bank_accounts', 'payroll_employees', 'activity_log', 'supplier', 'users']);
+        $dump = $this->tableTexts($this->target, ['clients', 'client_bank_accounts', 'payroll_employees', 'activity_log', 'supplier', 'users', 'bank_notice_confirmations']);
         foreach ([self::COMPANY, 'Zkušební Montáže', self::PERSON, 'Zkušebnová', self::EMAIL, self::ACCOUNT, $this->ico, $this->birthNumber, str_replace('/', '', $this->birthNumber)] as $needle) {
             self::assertStringNotContainsString($needle, $dump, "V kopii zůstal originální údaj {$needle}.");
         }
@@ -118,6 +119,13 @@ final class AnonymizationServiceTest extends TestCase
         $revealed = $sensitive->reveal((string) $sealed['value_ciphertext'], PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $this->identifierId, PayrollRevealPurpose::ANONYMIZATION);
         self::assertSame($employee['birth_number'], $revealed, 'Šifrované a otevřené rodné číslo mají dostat týž pseudonym.');
         self::assertSame($sensitive->lookupHash($revealed, PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId), $sealed['value_hash']);
+
+        $notice = $this->row($this->target, 'SELECT notice_source_ref, notice_identity, method, reason, deleted_at FROM bank_notice_confirmations WHERE id = ?', [$this->noticeConfirmationId]);
+        self::assertNotSame('synthetic-message:' . self::EMAIL, $notice['notice_source_ref']);
+        self::assertSame(hash('sha256', (string) $notice['notice_source_ref']), $notice['notice_identity'], 'Deduplikační stopa smazaného avíza musí po anonymizaci odpovídat nové referenci.');
+        self::assertSame('manual', $notice['method']);
+        self::assertSame('authoritative_removed', $notice['reason']);
+        self::assertNotNull($notice['deleted_at']);
 
         self::assertSame(
             $this->scalar($this->source, 'SELECT SUM(total) FROM (SELECT COALESCE(SUM(amount), 0) AS total FROM journal_entry_lines UNION ALL SELECT COALESCE(SUM(total_with_vat), 0) FROM invoices) x'),
@@ -177,6 +185,10 @@ final class AnonymizationServiceTest extends TestCase
                 self::EMAIL, '+420 601 234 567', 'Smlouvu podepsala ' . self::PERSON . ', IČO: ' . $this->ico . ', účet ' . self::ACCOUNT . '/0100',
                 self::COMPANY . ' {DUZP_MM}/{DUZP_YYYY} pro ' . self::PERSON, 'Faktura ' . $this->ico . ' {VS}']);
         $this->clientId = (int) $pdo->lastInsertId();
+        $noticeReference = 'synthetic-message:' . self::EMAIL;
+        $pdo->prepare("INSERT INTO bank_notice_confirmations (supplier_id,notice_source_ref,notice_identity,state,reason,method,manual_reason,deleted_at) VALUES (?,?,?,'review','authoritative_removed','manual',?,NOW())")
+            ->execute([$this->supplierId, $noticeReference, hash('sha256', $noticeReference), self::PERSON . ' ověřila ' . self::COMPANY . ' <' . self::EMAIL . '>']);
+        $this->noticeConfirmationId = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO client_bank_accounts (supplier_id, client_id, account_number, bank_code, account_key, bank_key) VALUES (?, ?, ?, ?, ?, ?)')
             ->execute([$this->supplierId, $this->clientId, self::ACCOUNT, '0100', self::ACCOUNT, '0100']);
 

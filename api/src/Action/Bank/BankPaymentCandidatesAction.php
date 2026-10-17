@@ -7,10 +7,13 @@ namespace MyInvoice\Action\Bank;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Bank\BankMatchSearch;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
+use MyInvoice\Service\Bank\BankNoticeConfirmationException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -64,6 +67,21 @@ final class BankPaymentCandidatesAction
         } catch (\DomainException $exception) {
             return Json::error($response, 'payment_candidates_unavailable', $exception->getMessage(), $exception->getCode());
         }
+        $supplierId = SupplierGuard::currentId($request);
+        $transactionId = (int) ($args['id'] ?? 0);
+        if (!(new BankStatementOwnershipResolver($this->db))->transactionOwned($transactionId, $supplierId)) {
+            return Json::error($response, 'not_found', 'Bankovní pohyb nebyl nalezen.', 404);
+        }
+        try {
+            return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $transactionId,
+                fn (): Response => $this->matchLocked($request, $response, $args, $type, $document, $body));
+        } catch (BankNoticeConfirmationException $exception) {
+            return Json::error($response, $exception->errorCode, $exception->getMessage(), $exception->httpStatus);
+        }
+    }
+
+    private function matchLocked(Request $request, Response $response, array $args, string $type, array $document, array $body): Response
+    {
         $supplierId = SupplierGuard::currentId($request);
         $transactionId = (int) ($args['id'] ?? 0);
         $pdo = $this->db->pdo();

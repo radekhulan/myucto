@@ -19,6 +19,8 @@ import { formatAccountNumber } from '@/utils/bankAccount'
 import { statementClosingBalance, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
 import { downloadApiFile } from '@/utils/downloadFile'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
+import NoticeConfirmationSummary from '@/components/bank/NoticeConfirmationSummary.vue'
+import NoticeConfirmationCheck from '@/components/bank/NoticeConfirmationCheck.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
@@ -36,7 +38,7 @@ import { usePaneDom } from '@/composables/usePaneDom'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import BankTransactionSortSelect from '@/components/bank/BankTransactionSortSelect.vue'
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const toast = useToast()
 const router = useRouter()
 const auth = useAuthStore()
@@ -55,6 +57,10 @@ async function downloadStatementFile(url: string | undefined, fallbackName: stri
   } catch (e) {
     toast.error(apiErrorMessage(e))
   }
+}
+function blockerLabel(code: string) {
+  const key = `bank.notice_confirmation.reasons.${code}`
+  return te(key) ? t(key) : t('bank.notice_confirmation.reason_fallback')
 }
 const sendingUnmatched = ref(false)
 async function sendUnmatchedToClient() {
@@ -136,6 +142,9 @@ function statusLabel(s: string): string {
   const label = t(key)
   return label === key ? s : label
 }
+const showConfirmed = ref(false)
+const confirmationFilter = ref<'' | 'pending' | 'review' | 'confirmed'>('')
+const noticeFilterParams = computed(() => ({ show_confirmed: showConfirmed.value || confirmationFilter.value === 'confirmed' ? 1 as const : undefined, confirmation_state: confirmationFilter.value || undefined }))
 const statusFilter = ref<string>('')
 const postingFilter = ref<PostingFilter | ''>(route.query.posting_status === 'unposted' ? 'unposted' : '')
 // Řazení podle sloupce — řadí server přes všechny stránky (stránkuje se tam).
@@ -199,6 +208,7 @@ async function loadPage(reset: boolean) {
     const sort = txSort.sort.value
     const [res, suggestionsResult] = await Promise.all([
       bankApi.get(statementId, {
+        ...noticeFilterParams.value,
         page: requestedPage,
         status: statusFilter.value ? (statusFilter.value as MatchStatus) : undefined,
         posting_status: postingFilter.value || undefined,
@@ -237,7 +247,7 @@ async function refreshTransactions() {
   const posting = postingFilter.value
   const requestedPage = txPage.value
   const sort = txSort.sort.value
-  const params = { status: status ? status as MatchStatus : undefined, posting_status: posting || undefined, ...txSort.params.value }
+  const params = { ...noticeFilterParams.value, status: status ? status as MatchStatus : undefined, posting_status: posting || undefined, ...txSort.params.value }
   try {
     const [first, suggestions] = await Promise.all([
       bankApi.get(statementId, { ...params, page: 1 }), bankApi.matchSuggestions(statementId),
@@ -345,9 +355,10 @@ async function highlightLinkedTx(): Promise<void> {
 }
 
 // Změna filtru stavu spárování → reset na 1. stránku (server-side filtr).
-watch([statusFilter, postingFilter, txSort.sort, () => route.params.id, () => supplierStore.currentSupplierId], () => { loadGeneration++ }, { flush: 'sync' })
+watch([showConfirmed, confirmationFilter, statusFilter, postingFilter, txSort.sort, () => route.params.id, () => supplierStore.currentSupplierId], () => { loadGeneration++ }, { flush: 'sync' })
 onUnmounted(() => { disposed = true; loadGeneration++; linkedTxGeneration++ })
-watch([statusFilter, postingFilter, txSort.sort], () => {
+watch(() => supplierStore.currentSupplierId, () => { statement.value = null; void load(true) })
+watch([showConfirmed, confirmationFilter, statusFilter, postingFilter, txSort.sort], () => {
   if (statement.value) load(true)
 })
 
@@ -383,13 +394,14 @@ async function onDeletePdf() {
   }
 }
 
-// Smazání avízo-výpisu (e-mailová bankovní avíza). Nabízí se jen když na něm
-// nezbývá žádná spárovaná položka — typicky poté, co párování převzal oficiální
-// GPC výpis. Backend mazání je admin-only a guarduje matched_count > 0.
+// Bezpečnost odstranění avíz určuje backend podle potvrzení a závislostí;
+// počet spárovaných faktur sám o sobě odstranitelnost nedokazuje.
 const deletingStatement = ref(false)
 async function onDeleteStatement() {
-  if (!statement.value) return
-  if (!confirm(t(statement.value.api_evidence ? 'bank.statement_delete_evidence_confirm' : 'bank.statement_delete_confirm'))) return
+  if (!statement.value || (statement.value.source === 'email_notice' && !statement.value.can_delete_notices)) return
+  const prompt = t(statement.value.source === 'email_notice' ? 'bank.notice_confirmation.delete_confirm' : statement.value.api_evidence ? 'bank.statement_delete_evidence_confirm' : 'bank.statement_delete_confirm')
+  const noticeWarning = statement.value.deleted_notice_confirmations ? '\n\n' + t('bank.notice_confirmation.deleted_evidence_warning', { count: statement.value.deleted_notice_confirmations }) : ''
+  if (!confirm(prompt + noticeWarning)) return
   deletingStatement.value = true
   try {
     await bankApi.delete(statement.value.id)
@@ -529,9 +541,10 @@ const statementActions = computed<ActionItem[]>(() => {
       icon: 'trash',
       tier: 'advanced',
       variant: 'danger',
-      show: !auth.isClientRole && auth.isCompanyAdminRole && (s.api_evidence === true || (isVirtual.value && s.matched_count === 0)),
+      show: !auth.isClientRole && auth.canWrite('bank') && (s.source === 'email_notice' || auth.isCompanyAdminRole) && (s.api_evidence === true || isVirtual.value),
       title: t(s.api_evidence ? 'bank.statement_delete_evidence_hint' : 'bank.statement_delete_hint'),
-      disabled: deletingStatement.value,
+      disabled: deletingStatement.value || (s.source === 'email_notice' && !s.can_delete_notices),
+      disabledReason: s.source === 'email_notice' && !s.can_delete_notices ? t('bank.notice_confirmation.delete_blocked') : undefined,
       loading: deletingStatement.value,
       run: () => { void onDeleteStatement() },
     },
@@ -566,6 +579,22 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
       <span v-if="statement.currency" class="text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700 font-medium">{{ statement.currency }}</span>
       <span>· {{ statement.file_name }}</span>
     </p>
+
+    <section v-if="!auth.isClientRole && statement.source === 'email_notice'" class="mt-4 p-4 rounded-lg bg-surface border border-neutral-200 space-y-3">
+      <NoticeConfirmationSummary v-if="statement.confirmation_summary" :summary="statement.confirmation_summary" />
+      <p class="text-sm text-neutral-600">{{ t(statement.can_delete_notices ? 'bank.notice_confirmation.delete_ready' : 'bank.notice_confirmation.delete_blocked') }}</p>
+      <ul v-if="statement.deletion_blockers?.length" class="text-xs text-warning-700 space-y-1">
+        <li v-for="blocker in statement.deletion_blockers" :key="blocker.code">{{ t('bank.notice_confirmation.blocker', { count: blocker.count, reason: blockerLabel(blocker.code) }) }}</li>
+      </ul>
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="text-sm flex items-center gap-2"><input v-model="showConfirmed" type="checkbox" />{{ t('bank.notice_confirmation.show_confirmed') }}</label>
+        <select v-model="confirmationFilter" :aria-label="t('bank.notice_confirmation.filter')" class="border border-neutral-300 rounded bg-surface h-8 px-2 text-sm">
+          <option value="">{{ t('bank.notice_confirmation.all_states') }}</option>
+          <option v-for="state in (['pending', 'review', 'confirmed'] as const)" :key="state" :value="state">{{ t(`bank.notice_confirmation.states.${state}`) }}</option>
+        </select>
+        <NoticeConfirmationCheck v-if="auth.canWrite('bank.match')" :statement-id="statement.id" @changed="load()" />
+      </div>
+    </section>
 
     <!-- Import pohyby uložil, ale jejich zpracování (párování, zaúčtování) spadlo.
          Opakované nahrání souboru je nezpracuje, dokončí je jen přepárování výpisu. -->

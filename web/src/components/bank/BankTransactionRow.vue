@@ -10,6 +10,8 @@ import type { JournalNote } from '@/api/accounting'
 import BankTransactionNoteModal from './BankTransactionNoteModal.vue'
 import type { AutomationProvenance } from '@/api/automation'
 import type { BankPostingRule, BankPostingRulePayload, PostResult, RuleCreateResult } from '@/api/bankPosting'
+import NoticeConfirmationStatus from './NoticeConfirmationStatus.vue'
+import { isBankNoticeReadOnly } from '@/utils/bankNotice'
 import PostingRowActions from './PostingRowActions.vue'
 import RuleFormModal from './RuleFormModal.vue'
 import RepostModal from '@/components/accounting/RepostModal.vue'
@@ -76,7 +78,7 @@ const ruleTemplateOpen = ref(false)
 // Dimenze pohybu (Firma → Dimenze): štítky v řádku a vlastní rozbalovací editor.
 // Dřív byl editor jen v panelu „Dokumenty" a v řádku nebylo nic vidět.
 const dims = useDimensions()
-const dimensionsAvailable = computed(() => !auth.isClientRole && dims.enabled.value && dims.documentTypes.value.length > 0)
+const dimensionsAvailable = computed(() => !auth.isClientRole && !isBankNoticeReadOnly(props.tx) && dims.enabled.value && dims.documentTypes.value.length > 0)
 const dimensionsOpen = ref(false)
 const savedDimensions = ref<DimensionMap | null>(null)
 const txDimensions = computed<DimensionMap>(() => savedDimensions.value ?? props.tx.dimensions ?? {})
@@ -114,7 +116,7 @@ const statusText = computed(() => payrollMatched.value
   : ownTransfer.value ? t('bank.match_status.transfer')
     : outsideSaldo.value ? t('bank.match_status.outside_saldo') : statusLabel(props.tx.match_status))
 // Štítek „Nespárováno" je zkratka k párování — stejná podmínka jako akce „Spárovat" v menu.
-const badgeMatchable = computed(() => !noInvoiceExpected.value && props.actions.canRunDetailAction(props.tx, 'match'))
+const badgeMatchable = computed(() => !isBankNoticeReadOnly(props.tx) && !noInvoiceExpected.value && props.actions.canRunDetailAction(props.tx, 'match'))
 const statusTitle = computed(() => outsideSaldo.value
   ? t('bank.outside_saldo_hint')
   : badgeMatchable.value ? t('bank.match_badge_hint') : undefined)
@@ -233,6 +235,7 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
 
 // Řádkové akce párování banky → 2 tlačítka inline, zbytek do „…" popupu (RowActionsMenu).
 function matchActions(tx: BankTransaction): RowAction[] {
+  if (isBankNoticeReadOnly(tx)) return []
   const st = tx.match_status
   const canMatch = props.actions.canRunDetailAction(tx, 'match')
   return [
@@ -393,6 +396,7 @@ function candidateReject() {
         </template>
       </td>
       <td class="px-3 py-2 text-center">
+        <NoticeConfirmationStatus :tx="tx" @changed="emit('changed')" />
         <component :is="badgeMatchable ? 'button' : 'span'" :type="badgeMatchable ? 'button' : undefined"
           class="text-xs px-2 py-0.5 rounded font-medium"
           :class="[statusBadge(outsideSaldo ? 'ignored' : noInvoiceExpected ? 'auto_exact' : tx.match_status),
@@ -400,11 +404,11 @@ function candidateReject() {
           :title="statusTitle" @click="badgeMatchable && startMatch(tx)">
           {{ statusText }}
         </component>
-        <div v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
+        <div v-if="!isBankNoticeReadOnly(tx) && !noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
           class="mt-1 text-[11px] leading-tight text-neutral-500" :title="t('bank.match_reason_title')">
           {{ reasonLabel(tx.match_reason) }}
         </div>
-        <button v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
+        <button v-if="!isBankNoticeReadOnly(tx) && !noInvoiceExpected && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="mt-1 mx-auto inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
           @click="toggleSuggestion(tx.id)">
@@ -429,7 +433,7 @@ function candidateReject() {
       </td>
       <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
         <div class="flex items-center justify-end gap-1">
-          <PostingRowActions v-if="isDoubleEntry"
+          <PostingRowActions v-if="isDoubleEntry && !isBankNoticeReadOnly(tx)"
             :tx="tx" :currency="currency()"
             @changed="emit('changed')" @posted="onPosted" />
           <RowActionsMenu :actions="matchActions(tx)" :inline-count="0" />
@@ -443,7 +447,7 @@ function candidateReject() {
     <tr v-if="!payrollMatched && expandedSuggestions.has(tx.id) && suggestionFor(tx.id)">
       <td :colspan="colspan" class="bg-warning-50/40 px-4 py-3">
         <MatchSuggestionPanel variant="panel" :suggestion="suggestionFor(tx.id)!" :reviewing="reviewingSuggestion"
-          :can-review="actions.canReviewSuggestion(suggestionFor(tx.id)!)" :can-accept-candidate="actions.canAcceptCandidate" @accept="candidateAccept" @reject="candidateReject" />
+          :can-review="!isBankNoticeReadOnly(tx) && actions.canReviewSuggestion(suggestionFor(tx.id)!)" :can-accept-candidate="actions.canAcceptCandidate" @accept="candidateAccept" @reject="candidateReject" />
       </td>
     </tr>
     <tr v-if="expandedDocs.has(tx.id)">
@@ -466,6 +470,7 @@ function candidateReject() {
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </div>
       <div class="flex flex-col items-end gap-1">
+        <NoticeConfirmationStatus :tx="tx" @changed="emit('changed')" />
         <component :is="badgeMatchable ? 'button' : 'span'" :type="badgeMatchable ? 'button' : undefined"
           class="text-xs px-2 py-0.5 rounded font-medium whitespace-nowrap"
           :class="[statusBadge(outsideSaldo ? 'ignored' : noInvoiceExpected ? 'auto_exact' : tx.match_status),
@@ -473,11 +478,11 @@ function candidateReject() {
           :title="statusTitle" @click="badgeMatchable && startMatch(tx)">
           {{ statusText }}
         </component>
-        <span v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
+        <span v-if="!isBankNoticeReadOnly(tx) && !noInvoiceExpected && tx.match_status === 'unmatched' && reasonLabel(tx.match_reason)"
           class="text-[11px] leading-tight text-right text-neutral-500" :title="t('bank.match_reason_title')">
           {{ reasonLabel(tx.match_reason) }}
         </span>
-        <button v-if="!noInvoiceExpected && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
+        <button v-if="!isBankNoticeReadOnly(tx) && !noInvoiceExpected && tx.match_status === 'unmatched' && suggestionFor(tx.id)" type="button"
           class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600"
           :aria-expanded="expandedSuggestions.has(tx.id)" :title="t('bank.match_v2.title')"
           @click="toggleSuggestion(tx.id)">
@@ -568,7 +573,7 @@ function candidateReject() {
     </div>
     <MatchSuggestionPanel v-if="!payrollMatched && expandedSuggestions.has(tx.id) && suggestionFor(tx.id)" variant="inline"
       :suggestion="suggestionFor(tx.id)!" :reviewing="reviewingSuggestion"
-      :can-review="actions.canReviewSuggestion(suggestionFor(tx.id)!)" :can-accept-candidate="actions.canAcceptCandidate" @accept="candidateAccept" @reject="candidateReject" />
+      :can-review="!isBankNoticeReadOnly(tx) && actions.canReviewSuggestion(suggestionFor(tx.id)!)" :can-accept-candidate="actions.canAcceptCandidate" @accept="candidateAccept" @reject="candidateReject" />
     <div v-if="expandedDocs.has(tx.id)" class="pt-1">
       <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
     </div>
@@ -587,7 +592,7 @@ function candidateReject() {
          stavově relevantní — Otevřít u spárovaného pohybu, Spárovat u ostatních
          — takže na očích zůstane to, co uživatel na daném řádku opravdu chce. -->
     <div class="flex flex-wrap items-center justify-end gap-1.5 pt-1">
-      <PostingRowActions v-if="isDoubleEntry"
+      <PostingRowActions v-if="isDoubleEntry && !isBankNoticeReadOnly(tx)"
         :tx="tx" :currency="currency()"
         @changed="emit('changed')" @posted="onPosted" />
       <RowActionsMenu :actions="matchActions(tx)" :inline-count="1" />

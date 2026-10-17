@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Payment\IbanValidator;
 use PDO;
@@ -182,6 +183,18 @@ final class ClientBankAccountRepository
      * @param array{account_number:string,bank_code:?string,iban:?string,account_key:string,bank_key:string} $account
      */
     private function upsert(
+        int $clientId,
+        int $supplierId,
+        array $account,
+        bool $manual = false,
+        bool $vatRegistry = false,
+        bool $bankStatement = false,
+        ?int $transactionId = null,
+    ): int {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $transactionId, fn () => $this->upsertMutable($clientId, $supplierId, $account, $manual, $vatRegistry, $bankStatement, $transactionId));
+    }
+
+    private function upsertMutable(
         int $clientId,
         int $supplierId,
         array $account,

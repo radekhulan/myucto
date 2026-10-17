@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /**
@@ -83,6 +84,11 @@ final class DocumentRequestRepository
      * @param array{description:string,amount:?float,context_date:?string,deadline:?string,bank_transaction_id:?int} $data
      */
     public function create(int $supplierId, array $data, ?int $createdBy): int
+    {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, isset($data['bank_transaction_id']) ? (int) $data['bank_transaction_id'] : null, fn () => $this->createMutable($supplierId, $data, $createdBy));
+    }
+
+    private function createMutable(int $supplierId, array $data, ?int $createdBy): int
     {
         $stmt = $this->db->pdo()->prepare(
             "INSERT INTO document_requests

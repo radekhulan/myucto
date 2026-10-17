@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\GoPay;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\MovementClassificationRepository;
 use MyInvoice\Service\ActivityLogger;
@@ -632,6 +633,9 @@ final class GoPayService
     /** @return array<string,mixed>|null */
     public function payoutCandidateForTransaction(int $supplierId, int $transactionId): ?array
     {
+        $active = $this->db->pdo()->prepare('SELECT 1 FROM bank_transactions bt WHERE bt.id=? AND ' . \MyInvoice\Service\Bank\BankNoticeConfirmationScope::activeSql('bt'));
+        $active->execute([$transactionId]);
+        if ($active->fetchColumn() === false) return null;
         $transaction = $this->payoutTransaction($supplierId, $transactionId);
         $candidates = $this->payoutCandidates($supplierId, $transaction);
         if (count($candidates) > 1) {
@@ -648,6 +652,15 @@ final class GoPayService
 
     /** @return array<string,mixed> */
     public function associatePayoutTransaction(
+        int $supplierId,
+        int $clearingId,
+        int $transactionId,
+        ?int $userId,
+    ): array {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $transactionId, fn () => $this->associatePayoutTransactionMutable($supplierId, $clearingId, $transactionId, $userId));
+    }
+
+    private function associatePayoutTransactionMutable(
         int $supplierId,
         int $clearingId,
         int $transactionId,

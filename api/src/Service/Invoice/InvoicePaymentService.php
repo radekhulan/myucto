@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\Accounting\GoPay\GoPayPendingService;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -77,6 +78,16 @@ final class InvoicePaymentService
         private readonly PaymentTaxDocumentCreator $taxDocCreator,
         private readonly GoPayPendingService $goPayPending,
     ) {}
+
+    private function mutateBankPayment(int $invoiceId, ?int $transactionId, callable $mutation): mixed
+    {
+        if ($transactionId === null || $transactionId <= 0) return $mutation();
+        $statement = $this->db->pdo()->prepare('SELECT supplier_id FROM invoices WHERE id=?');
+        $statement->execute([$invoiceId]);
+        $supplierId = $statement->fetchColumn();
+        if ($supplierId === false) return $mutation();
+        return (new BankNoticeMutationGuard($this->db))->mutate((int) $supplierId, $transactionId, $mutation);
+    }
 
     /**
      * Odvozený platební stav dokladu. NULL pro draft/cancelled (nedává smysl).
@@ -184,6 +195,14 @@ final class InvoicePaymentService
      * @throws \RuntimeException při validační chybě (zpráva pro UI)
      */
     public function recordPayment(int $invoiceId, float $amount, string $paidOn, array $opts = []): array
+    {
+        $recomputeAfterGuard = !empty($opts['bank_transaction_id']) && !$this->db->pdo()->inTransaction();
+        $result = $this->mutateBankPayment($invoiceId, isset($opts['bank_transaction_id']) ? (int) $opts['bank_transaction_id'] : null, fn () => $this->recordPaymentMutable($invoiceId, $amount, $paidOn, $opts));
+        if ($recomputeAfterGuard) $this->stats->recomputeForInvoiceId($invoiceId);
+        return $result;
+    }
+
+    private function recordPaymentMutable(int $invoiceId, float $amount, string $paidOn, array $opts = []): array
     {
         if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $paidOn, $dm)
             || !checkdate((int) $dm[2], (int) $dm[3], (int) $dm[1])) {
@@ -389,6 +408,11 @@ final class InvoicePaymentService
      * @return array{payment_id: int, amount: float}
      */
     public function reconcileToBankTransaction(int $invoiceId, int $txId, array $opts = []): array
+    {
+        return $this->mutateBankPayment($invoiceId, $txId, fn () => $this->reconcileToBankTransactionMutable($invoiceId, $txId, $opts));
+    }
+
+    private function reconcileToBankTransactionMutable(int $invoiceId, int $txId, array $opts = []): array
     {
         $pdo = $this->db->pdo();
         $sel = $pdo->prepare(

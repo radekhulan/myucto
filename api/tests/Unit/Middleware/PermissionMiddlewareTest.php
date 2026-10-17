@@ -78,6 +78,8 @@ final class PermissionMiddlewareTest extends TestCase
             ['POST', '/api/bank-statements/7/pdf'],
             ['DELETE', '/api/bank-statements/7/pdf'],
             ['POST', '/api/bank-statements/7/rematch'],
+            ['POST', '/api/bank-statements/7/notice-confirmations'],
+            ['POST', '/api/bank-transactions/7/notice-confirmation'],
             ['GET', '/api/bank-statements/7/unmatched-recipients'],
             ['POST', '/api/bank-statements/7/send-unmatched'],
             ['GET', '/api/bank-statements/export-unmatched'],

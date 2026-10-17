@@ -25,6 +25,18 @@ function tx(status: 'ignored' | 'unmatched' = 'unmatched') {
 }
 beforeEach(() => vi.resetAllMocks())
 describe('bank confirmation dialogs', () => {
+  it.each(['confirmed', 'invalidated'] as const)('%s notice history cannot open mutation dialogs', (state) => {
+    const actions = useBankTransactionActions({ reload: vi.fn() })
+    const row: BankTransaction = { ...tx(), confirmation_state: state === 'confirmed' ? 'confirmed' : 'review', confirmation_reason: state === 'invalidated' ? 'authoritative_removed' : null }
+    actions.ignoreTx(row); actions.unmatchTx(row); actions.startMatch(row); actions.openCreate(row); actions.openRequestDoc(row)
+    expect(actions.ignoreTarget.value).toBeNull()
+    expect(actions.unmatchTarget.value).toBeNull()
+    expect(actions.matchingTx.value).toBeNull()
+    expect(actions.createTx.value).toBeNull()
+    expect(actions.requestDocTx.value).toBeNull()
+    expect(api.ignore).not.toHaveBeenCalled()
+  })
+
   it('cancel does not call API; success updates row and requests silent refresh', async () => {
     const refresh = vi.fn(), reload = vi.fn()
     const actions = useBankTransactionActions({ reload, refresh }), row = tx()

@@ -13,6 +13,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\EffectiveRole;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -324,6 +325,38 @@ final class ClientBankAccessTest extends TestCase
         self::assertSame([], $this->call('splitSuggestions', ['bank' => 1, 'invoices' => 1])[1]['suggestions']);
     }
 
+    public function testClientNoticeDetailHidesConfirmationComparisonAndStaffKeepsIt(): void
+    {
+        $target = $this->tx;
+        $this->pdo->prepare("INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_date, transaction_count)
+            VALUES (?, 'email_notice', 'synthetic-notice', ?, '1000000005', '0100', 'CZK', '2099-06-01', 1)")
+            ->execute([$this->supplier, hash('sha256', random_bytes(16))]);
+        $this->statement = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO bank_transactions (statement_id, source, posted_at, amount, currency, variable_symbol, description)
+            VALUES (?, 'email_notice', '2099-06-15', 1000, 'CZK', '1600001', 'Synthetic client notice')")
+            ->execute([$this->statement]);
+        $this->tx = (int) $this->pdo->lastInsertId();
+        [$status, $client] = $this->call('detail', ['bank' => 2, 'bank.match' => 2]);
+        self::assertSame(200, $status, json_encode($client));
+        self::assertSame($this->tx, $client['transactions'][0]['id']);
+        foreach (['candidates', 'blockers', 'authoritative_transaction_id', 'authoritative_statement_id',
+            'authoritative_statement_ids', 'confirmation_state', 'confirmation_reason'] as $key) {
+            self::assertArrayNotHasKey($key, $client['transactions'][0], $key);
+        }
+        foreach (['confirmation_summary', 'deletion_blockers', 'can_delete_notices', 'deleted_notice_confirmations'] as $key) {
+            self::assertArrayNotHasKey($key, $client, $key);
+        }
+        $request = $this->request(['bank' => 1])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'accountant'])
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Synthetic staff', 'staff', true, ['bank' => 1]));
+        $response = $this->bank->detail($request, new Response(), ['id' => $this->statement]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $staff = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertArrayHasKey('confirmation_summary', $staff);
+        self::assertSame('pending', $staff['transactions'][0]['confirmation_state']);
+        self::assertContains($target, array_column($staff['transactions'][0]['candidates'], 'id'));
+    }
+
     public function testReadResponsesRedactBothUnavailableAgendasAndInternalMetadata(): void
     {
         $this->pdo->prepare("UPDATE bank_transactions SET matched_invoice_id = ?, match_status = 'manual' WHERE id = ?")->execute([$this->invoice, $this->tx]);
@@ -343,6 +376,75 @@ final class ClientBankAccessTest extends TestCase
             self::assertArrayNotHasKey('dimensions', $row);
             self::assertArrayHasKey('ignore_origin', $row);
         }
+    }
+
+    public static function ordinaryMatchingPaths(): array
+    {
+        return [['document'], ['suggestion'], ['release']];
+    }
+
+    #[DataProvider('ordinaryMatchingPaths')]
+    public function testOrdinaryMatchingDoesNotWaitForAnotherImport(string $path): void
+    {
+        $suggestion = $path === 'suggestion'
+            ? $this->suggestion([['type' => 'invoice', 'invoice_id' => $this->invoice, 'score' => 0.9]]) : null;
+        if ($path === 'release') {
+            [$status, $body] = $this->call('manualMatch', ['bank' => 1, 'bank.match' => 2, 'invoices' => 1, 'invoices.mark_paid' => 2], ['invoice_id' => $this->invoice]);
+            self::assertSame(200, $status, json_encode($body));
+        }
+        $this->pdo->commit();
+        $this->committed = true;
+        $importer = Connection::withoutSharedTestConnection(static fn () => Bootstrap::buildContainer()->get(Connection::class));
+        $other = $importer->pdo();
+        $lock = \MyInvoice\Infrastructure\Database\NamedLockName::for($this->container->get(Connection::class), 'bank-import', (string) $this->supplier);
+        try {
+            $held = $other->prepare('SELECT GET_LOCK(?, 0)');
+            $held->execute([$lock]);
+            self::assertSame(1, (int) $held->fetchColumn());
+            $this->pdo->exec('SET SESSION max_statement_time=1');
+            if ($path === 'document') {
+                $request = $this->request(body: ['invoice_id' => $this->invoice])
+                    ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Superadmin', 'superadmin', true, [], 'superadmin'));
+                $response = $this->container->get(\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class)
+                    ->match($request, new Response(), ['id' => $this->tx]);
+                self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            } elseif ($path === 'suggestion') {
+                $result = $this->container->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class)
+                    ->accept($suggestion, $this->supplier, $this->user, 0);
+                self::assertSame($this->invoice, $result['invoice_id']);
+                self::assertSame('accepted', $this->pdo->query('SELECT status FROM bank_match_suggestions WHERE id=' . $suggestion)->fetchColumn());
+            } else {
+                $result = $this->container->get(\MyInvoice\Service\Bank\BankTransactionReleaseService::class)
+                    ->release($this->supplier, $this->tx, \MyInvoice\Service\Bank\BankTransactionReleaseService::MODE_UNMATCH, $this->user);
+                self::assertTrue($result['deleted_payment']);
+            }
+            self::assertSame($path === 'release' ? 'unmatched' : 'manual', $this->state()['match_status']);
+            self::assertSame($path === 'release' ? 0 : 1,
+                (int) $this->pdo->query('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id=' . $this->tx)->fetchColumn());
+            self::assertFalse($this->pdo->inTransaction());
+        } finally {
+            $this->pdo->exec('SET SESSION max_statement_time=0');
+            $other->prepare('SELECT RELEASE_LOCK(?)')->execute([$lock]);
+            $importer->close();
+        }
+    }
+
+    public function testAcceptingStaleSuggestionPersistsSupersededState(): void
+    {
+        $suggestion = $this->suggestion([['type' => 'invoice', 'invoice_id' => $this->invoice, 'score' => 0.9]]);
+        $this->pdo->prepare("UPDATE bank_transactions SET match_status='manual' WHERE id=?")->execute([$this->tx]);
+        $this->pdo->commit();
+        $this->committed = true;
+        try {
+            $this->container->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class)
+                ->accept($suggestion, $this->supplier, $this->user, 0);
+            self::fail('A suggestion for a matched movement must be refused.');
+        } catch (\MyInvoice\Service\Bank\Match\MatchSuggestionException $exception) {
+            self::assertSame('already_reviewed', $exception->errorCode);
+        }
+        self::assertFalse($this->pdo->inTransaction());
+        self::assertSame('superseded', $this->pdo->query('SELECT status FROM bank_match_suggestions WHERE id=' . $suggestion)->fetchColumn());
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM invoice_payments WHERE bank_transaction_id=' . $this->tx)->fetchColumn());
     }
 
     public function testClientImportWithoutPaymentWriteCannotBypassManualPairingCheck(): void

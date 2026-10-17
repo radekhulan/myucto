@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
@@ -363,7 +364,7 @@ final class OtherItemService
                          WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL AND reversed_on IS NULL
                          GROUP BY bank_transaction_id) a
                      ON a.bank_transaction_id = bt.id
-                  WHERE ' . $direction . '
+                  WHERE ' . \MyInvoice\Service\Bank\BankNoticeConfirmationScope::activeSql('bt') . ' AND ' . $direction . '
                     AND COALESCE(bt.currency, bs.currency, \'CZK\') = \'CZK\'
                     AND bt.match_status = \'unmatched\' AND bt.matched_invoice_id IS NULL
                     AND ABS(bt.amount) > COALESCE(a.used_amount, 0)
@@ -448,6 +449,11 @@ final class OtherItemService
     }
 
     public function allocate(int $supplierId, int $id, array $input, ?int $userId): array
+    {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, isset($input['bank_transaction_id']) ? (int) $input['bank_transaction_id'] : null, fn () => $this->allocateMutable($supplierId, $id, $input, $userId));
+    }
+
+    private function allocateMutable(int $supplierId, int $id, array $input, ?int $userId): array
     {
         $bankId = isset($input['bank_transaction_id']) ? (int) $input['bank_transaction_id'] : 0;
         $cashId = isset($input['cash_document_id']) ? (int) $input['cash_document_id'] : 0;

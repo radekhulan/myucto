@@ -93,7 +93,8 @@ final class EmailNoticeReconciler
 
     public function __construct(
         private readonly Connection $db,
-        private readonly GoPayService $gopay,
+        private readonly ?GoPayService $gopay,
+        private readonly ?BankNoticeConfirmationService $noticeConfirmations = null,
     ) {}
 
     /**
@@ -103,6 +104,25 @@ final class EmailNoticeReconciler
      *         null = nepřevzato (žádný/nejednoznačný kandidát, nebo to není GPC tx)
      */
     public function takeOverFromEmailNotice(int $gpcTxId): ?array
+    {
+        $candidate = $this->findTakeoverCandidate($gpcTxId);
+        if ($candidate === null) return null;
+        $supplierId = (int) $candidate['supplier_id'];
+        if ($candidate['source'] !== 'email_notice') {
+            $context = $this->authoritativeContext($this->db->pdo(), $gpcTxId);
+            return $this->transfer($this->db->pdo(), $gpcTxId, $candidate, $supplierId, (float) $context[0]['amount']);
+        }
+        $result = ($this->noticeConfirmations ?? new BankNoticeConfirmationService($this->db, $this->gopay))->reconcileNotice($supplierId, (int) $candidate['id']);
+        if ($result['confirmation_state'] !== 'confirmed' || $result['authoritative_transaction_id'] !== $gpcTxId) return null;
+        return [
+            'email_tx_id' => (int) $candidate['id'], 'email_statement_id' => (int) $candidate['statement_id'],
+            'secondary_tx_id' => (int) $candidate['id'], 'secondary_statement_id' => (int) $candidate['statement_id'],
+            'secondary_source' => 'email_notice', 'match_status' => (string) $candidate['match_status'],
+        ];
+    }
+
+    /** Read-only výběr používaný importem i rekonstrukcí potvrzení; tolerance mají jediný zdroj. */
+    public function findTakeoverCandidate(int $gpcTxId): ?array
     {
         $pdo = $this->db->pdo();
 
@@ -138,6 +158,7 @@ final class EmailNoticeReconciler
                 AND bs.source IN ('email_notice','idoklad')
                 AND ((bt.source = 'email_notice' AND bs.source = 'email_notice')
                   OR (bt.source = 'idoklad' AND bs.source = 'idoklad'))
+                AND NOT EXISTS (SELECT 1 FROM bank_notice_confirmations nc WHERE nc.notice_transaction_id=bt.id AND (nc.state='confirmed' OR nc.reason='authoritative_removed'))
                 AND bt.id <> ?
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)
@@ -155,7 +176,7 @@ final class EmailNoticeReconciler
                    OR EXISTS (SELECT 1 FROM gopay_clearings gc
                                WHERE gc.payout_match_transaction_id = bt.id
                                  AND gc.supplier_id = ?)
-                )"
+                )" . ($pdo->inTransaction() ? ' FOR UPDATE' : '')
         );
         $cand->execute([
             $gpcTxId,
@@ -200,7 +221,7 @@ final class EmailNoticeReconciler
             return null;
         }
 
-        return $this->transfer($pdo, $gpcTxId, $pool[0], $supplierId, $amount);
+        return $pool[0] + ['supplier_id' => $supplierId];
     }
 
     /**
@@ -230,6 +251,16 @@ final class EmailNoticeReconciler
      */
     public function supersedeUnmatchedEmailNotice(int $authoritativeTxId): ?int
     {
+        $noticeId = $this->findSupersededNotice($authoritativeTxId);
+        if ($noticeId === null) return null;
+        $context = $this->authoritativeContext($this->db->pdo(), $authoritativeTxId);
+        $result = ($this->noticeConfirmations ?? new BankNoticeConfirmationService($this->db, $this->gopay))->reconcileNotice($context[1], $noticeId);
+        return $result['confirmation_state'] === 'confirmed' && $result['authoritative_transaction_id'] === $authoritativeTxId ? $noticeId : null;
+    }
+
+    /** Read-only protějšek převzetí: navíc vyžaduje skutečně pokryté období (#76). */
+    public function findSupersededNotice(int $authoritativeTxId): ?int
+    {
         $pdo = $this->db->pdo();
 
         $context = $this->authoritativeContext($pdo, $authoritativeTxId);
@@ -243,12 +274,7 @@ final class EmailNoticeReconciler
 
         // Období pokryté autoritativním výpisem. Bez něj nemá smysl tvrdit, že tentýž
         // pohyb ve výpisu JE — a nahrazení je pak tichá ztráta řádku, ne deduplikace.
-        $period = $pdo->prepare(
-            'SELECT MIN(bt.posted_at) AS covered_from, MAX(bt.posted_at) AS covered_to
-               FROM bank_transactions bt WHERE bt.statement_id = ?'
-        );
-        $period->execute([(int) $authoritative['statement_id']]);
-        $covered = $period->fetch(PDO::FETCH_ASSOC) ?: [];
+        $covered = $this->coveredPeriod((int) $authoritative['statement_id']);
         if (empty($covered['covered_from']) || empty($covered['covered_to'])) {
             return null;
         }
@@ -270,13 +296,14 @@ final class EmailNoticeReconciler
                JOIN bank_statements   bs ON bs.id = bt.statement_id
               WHERE bt.source = 'email_notice' AND bs.source = 'email_notice'
                 AND bs.supplier_id = ?
+                AND NOT EXISTS (SELECT 1 FROM bank_notice_confirmations nc WHERE nc.notice_transaction_id=bt.id AND (nc.state='confirmed' OR nc.reason='authoritative_removed'))
                 AND bt.id <> ?
                 AND bt.match_status = 'unmatched'
                 AND bt.matched_invoice_id IS NULL
                 AND ABS(bt.amount - ?) <= ?
                 AND bt.posted_at BETWEEN DATE_SUB(?, INTERVAL ? DAY) AND DATE_ADD(?, INTERVAL ? DAY)
                 AND bt.posted_at BETWEEN ? AND ?
-                " . $unused
+                " . $unused . ($pdo->inTransaction() ? ' FOR UPDATE' : '')
         );
         $cand->execute([
             $supplierId,
@@ -302,11 +329,15 @@ final class EmailNoticeReconciler
             return null;
         }
 
-        $pdo->prepare(
-            "UPDATE bank_transactions SET match_status = 'ignored', ignore_note = ? WHERE id = ?"
-        )->execute([self::SUPERSEDED_NOTE, $matches[0]]);
-
         return $matches[0];
+    }
+
+    /** Skutečný rozsah řádků výpisu, společný pro nahrazení i jeho vysvětlení v UI. */
+    public function coveredPeriod(int $statementId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT MIN(posted_at) AS covered_from, MAX(posted_at) AS covered_to FROM bank_transactions WHERE statement_id=?');
+        $stmt->execute([$statementId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
     }
 
     /**
@@ -350,7 +381,7 @@ final class EmailNoticeReconciler
     }
 
     /** Týž vlastní účet (oba sloupce jsou account_number výpisu) i kód banky. */
-    private function sameOwnAccount(array $authoritative, array $candidate): bool
+    public static function sameOwnAccount(array $authoritative, array $candidate): bool
     {
         if (!AccountNumberNormalizer::equals(
             (string) ($authoritative['stmt_account'] ?? ''),
@@ -364,10 +395,10 @@ final class EmailNoticeReconciler
     }
 
     /** Měna — když ji známe na obou stranách, musí sedět (null = legacy, nevyřazuje). */
-    private function sameCurrency(array $authoritative, array $candidate): bool
+    public static function sameCurrency(array $authoritative, array $candidate): bool
     {
-        $currency = $this->effectiveCurrency($authoritative['currency'] ?? null, $authoritative['stmt_currency'] ?? null);
-        $candidateCurrency = $this->effectiveCurrency($candidate['currency'] ?? null, $candidate['stmt_currency'] ?? null);
+        $currency = self::effectiveCurrency($authoritative['currency'] ?? null, $authoritative['stmt_currency'] ?? null);
+        $candidateCurrency = self::effectiveCurrency($candidate['currency'] ?? null, $candidate['stmt_currency'] ?? null);
         return $currency === null || $candidateCurrency === null
             || strtoupper($currency) === strtoupper($candidateCurrency);
     }
@@ -389,7 +420,7 @@ final class EmailNoticeReconciler
      * samými nulami (`0000000000000000`), což je „žádná protistrana", ne účet;
      * surové `!== ''` by shodilo třetí úroveň.
      */
-    private static function twinIdentity(array $authoritative, array $candidate, string $authoritativeVsDigits): ?string
+    public static function twinIdentity(array $authoritative, array $candidate, string $authoritativeVsDigits): ?string
     {
         if ($authoritativeVsDigits !== '') {
             return VariableSymbolNormalizer::digits((string) ($candidate['variable_symbol'] ?? '')) === $authoritativeVsDigits
@@ -457,7 +488,9 @@ final class EmailNoticeReconciler
         $stmt->execute([(int) $twin['id'], (int) $twin['id'], $supplierId]);
         $counts = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['issued' => 0, 'payable' => 0];
 
-        return (int) $counts['issued'] === 0 && (int) $counts['payable'] > 0;
+        // Kurzovou odchylku lze přiřadit jediné úhradě; u splitu není zřejmé,
+        // na který doklad rozdíl připadá. Ruční potvrzení původní alokace zachová.
+        return (int) $counts['issued'] === 0 && (int) $counts['payable'] === 1;
     }
 
     /**
@@ -648,7 +681,7 @@ final class EmailNoticeReconciler
                   WHERE id = ?"
             )->execute([$emailStatementId, $emailStatementId]);
 
-            $this->gopay->completeTransferredPayout($supplierId, $gpcTxId);
+            $this->gopay?->completeTransferredPayout($supplierId, $gpcTxId);
 
             if ($owns) {
                 $pdo->commit();
@@ -670,7 +703,7 @@ final class EmailNoticeReconciler
         ];
     }
 
-    private function effectiveCurrency(mixed $txCcy, mixed $stmtCcy): ?string
+    private static function effectiveCurrency(mixed $txCcy, mixed $stmtCcy): ?string
     {
         if (is_string($txCcy) && $txCcy !== '') {
             return $txCcy;

@@ -3679,6 +3679,8 @@ final class Routes
         $app->delete('/api/bank-statements/{id:[0-9]+}/pdf', [BankStatementAction::class, 'deletePdf']);
         $app->delete('/api/bank-statements/{id:[0-9]+}',     [BankStatementAction::class, 'delete']);
         $app->post ('/api/bank-statements/{id:[0-9]+}/rematch', [BankStatementAction::class, 'rematch']);
+        $app->post ('/api/bank-statements/{id:[0-9]+}/notice-confirmations', [\MyInvoice\Action\Bank\BankNoticeConfirmationAction::class, 'check']);
+        $app->post ('/api/bank-transactions/{id:[0-9]+}/notice-confirmation', [\MyInvoice\Action\Bank\BankNoticeConfirmationAction::class, 'confirm']);
         $app->get  ('/api/bank-statements/{id:[0-9]+}/match-suggestions', [BankStatementAction::class, 'matchSuggestions']);
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/accept', [BankStatementAction::class, 'acceptMatchSuggestion']);
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/reject', [BankStatementAction::class, 'rejectMatchSuggestion']);

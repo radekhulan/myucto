@@ -1,0 +1,26 @@
+-- Potvrzení e-mailového avíza autoritativním pohybem a minimální deduplikační stopa.
+CREATE TABLE IF NOT EXISTS bank_notice_confirmations (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  supplier_id INT UNSIGNED NOT NULL,
+  notice_transaction_id BIGINT UNSIGNED NULL,
+  notice_source_ref VARCHAR(255) NOT NULL,
+  notice_identity CHAR(64) NOT NULL,
+  authoritative_transaction_id BIGINT UNSIGNED NULL,
+  original_authoritative_transaction_id BIGINT UNSIGNED NULL,
+  state ENUM('pending','review','confirmed') NOT NULL DEFAULT 'pending',
+  reason VARCHAR(80) NULL,
+  method VARCHAR(32) NULL,
+  confirmed_by BIGINT UNSIGNED NULL,
+  manual_reason VARCHAR(500) NULL,
+  confirmed_at DATETIME NULL,
+  checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  UNIQUE KEY uq_bnc_identity (supplier_id, notice_identity),
+  UNIQUE KEY uq_bnc_notice (notice_transaction_id),
+  UNIQUE KEY uq_bnc_authoritative (authoritative_transaction_id),
+  KEY idx_bnc_supplier_state (supplier_id, state),
+  CONSTRAINT fk_bnc_supplier FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE,
+  CONSTRAINT fk_bnc_notice FOREIGN KEY (notice_transaction_id) REFERENCES bank_transactions(id) ON DELETE SET NULL,
+  CONSTRAINT fk_bnc_authoritative FOREIGN KEY (authoritative_transaction_id) REFERENCES bank_transactions(id) ON DELETE SET NULL,
+  CONSTRAINT fk_bnc_user FOREIGN KEY (confirmed_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank\Match;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use PDO;
 
 final class MatchMetricsService
@@ -17,9 +18,11 @@ final class MatchMetricsService
         $stmt = $this->db->pdo()->prepare(
             "SELECT decision, COUNT(*) AS total,
                     SUM(decision = 'auto' AND reverted_at IS NOT NULL
-                        AND reverted_at <= DATE_ADD(created_at, INTERVAL 60 DAY)) AS reverted
-               FROM bank_match_audit
-              WHERE supplier_id = ? AND created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)
+                        AND reverted_at <= DATE_ADD(a.created_at, INTERVAL 60 DAY)) AS reverted
+               FROM bank_match_audit a
+               JOIN bank_transactions bt ON bt.id = a.bank_transaction_id
+              WHERE a.supplier_id = ? AND a.created_at >= ? AND a.created_at < DATE_ADD(?, INTERVAL 1 DAY)
+                AND " . BankNoticeConfirmationScope::activeSql('bt') . "
               GROUP BY decision"
         );
         $stmt->execute([$supplierId, $from, $to]);

@@ -16,10 +16,14 @@ function setup(query: Record<string, string> = { tx: '42', detail: '1' }) {
   const mounted: (() => void)[] = []
   const unmounted: (() => void)[] = []
   const watchers: (() => void)[] = []
+  const showConfirmed = ref(false)
+  const confirmationFilter = ref('')
   const row = { scrollIntoView: vi.fn(), classList: { add: vi.fn(), remove: vi.fn() } }
   const context = {
     route: { params: { id: '7' }, query }, supplierStore: { currentSupplierId: 1 },
     statusFilter: ref(''), postingFilter: ref(''), txSort: { sort: ref(null), params: ref({}) },
+    showConfirmed, confirmationFilter,
+    noticeFilterParams: { get value() { return { show_confirmed: showConfirmed.value ? 1 : undefined, confirmation_state: confirmationFilter.value || undefined } } },
     txPage: ref(1), txTotal: ref(0), txPages: ref(1), loading: ref(false), loadingMore: ref(false),
     loadGeneration: 0, refreshing: ref(false), pendingLoadMore: null,
     statement: ref<{ transactions: { id: number }[] } | null>(null),
@@ -87,6 +91,18 @@ describe('statement transaction deep link', () => {
     page.mount()
     await settle()
     expect(page.bankApi.get).toHaveBeenCalledWith(7, { page: 1, status: 'unmatched', posting_status: undefined })
+  })
+  it('passes notice confirmation filters when loading the statement', async () => {
+    const page = setup({})
+    page.showConfirmed.value = true
+    page.confirmationFilter.value = 'review'
+    page.bankApi.get.mockResolvedValue(page.respond([42]))
+    page.mount()
+    await settle()
+    expect(page.bankApi.get).toHaveBeenCalledWith(7, {
+      show_confirmed: 1, confirmation_state: 'review', page: 1,
+      status: undefined, posting_status: undefined,
+    })
   })
   it('reports a page-load error once without retrying or opening a wrong transaction', async () => {
     const page = setup()

@@ -12,6 +12,7 @@ function setup() {
   const context = {
     route: { params: { id: '7' } }, statusFilter: ref('unmatched'), postingFilter: ref(''),
     txSort: { sort: ref(null), params: ref({}) },
+    noticeFilterParams: ref<{ show_confirmed?: number; confirmation_state?: string }>({}),
     txPage: ref(3), txTotal: ref(120), txPages: ref(3), loading: ref(false), loadingMore: ref(false),
     loadGeneration: 0, refreshing: ref(false), pendingLoadMore: null,
     statement: ref({ transactions: [{ id: 99 }], matched_count: 0 }),
@@ -121,4 +122,15 @@ it('shares a pending load-more request between the button and linked-transaction
   expect(page.statement.value.transactions.map(tx => tx.id)).toEqual([99, 2])
   expect(lookupCompleted).toBe(true)
   expect(page.loadingMore.value).toBe(false)
+})
+it('retains confirmation-history filters across load and refresh pages', async () => {
+  const page = setup()
+  page.noticeFilterParams.value = { show_confirmed: 1, confirmation_state: 'confirmed' }
+  page.bankApi.get.mockResolvedValue({ transactions: [], transactions_meta: { total: 0, pages: 1 } })
+  await page.load()
+  await page.refresh()
+  expect(page.bankApi.get).toHaveBeenCalledTimes(2)
+  for (const [, params] of page.bankApi.get.mock.calls) {
+    expect(params).toMatchObject({ show_confirmed: 1, confirmation_state: 'confirmed' })
+  }
 })

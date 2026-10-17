@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /**
@@ -80,6 +81,19 @@ final class PayrollPaymentSettlementSignalRepository
      * ať se nekryje skutečná vada za „už tam bylo".
      */
     public function insert(
+        int $supplierId,
+        int $liabilityId,
+        string $origin,
+        ?int $bankTransactionId,
+        string $paidOn,
+        int $amountMinor,
+        ?string $note,
+        ?int $createdBy,
+    ): bool {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $bankTransactionId, fn () => $this->insertMutable($supplierId, $liabilityId, $origin, $bankTransactionId, $paidOn, $amountMinor, $note, $createdBy));
+    }
+
+    private function insertMutable(
         int $supplierId,
         int $liabilityId,
         string $origin,

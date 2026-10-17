@@ -1007,7 +1007,8 @@
         "2035_invoice_item_line_discount.sql",
         "2036_unit_quantity_decimals.sql",
         "2037_simplified_document_series_and_customer.sql",
-        "2038_invoice_edit_issued_permission.sql"
+        "2038_invoice_edit_issued_permission.sql",
+        "2039_bank_notice_confirmations.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2686,6 +2687,43 @@
             "checks": {
                 "candidates_json": "json_valid(`candidates_json`)"
             }
+        },
+        "bank_notice_confirmations": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "authoritative_transaction_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "checked_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "confirmed_at": "datetime NULL DEFAULT NULL",
+                "confirmed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "deleted_at": "datetime NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "manual_reason": "varchar(500) NULL DEFAULT NULL",
+                "method": "varchar(32) NULL DEFAULT NULL",
+                "notice_identity": "char(64) NOT NULL",
+                "notice_source_ref": "varchar(255) NOT NULL",
+                "notice_transaction_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "original_authoritative_transaction_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "reason": "varchar(80) NULL DEFAULT NULL",
+                "state": "enum('pending','review','confirmed') NOT NULL DEFAULT 'pending'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_bnc_user": "BTREE (confirmed_by)",
+                "idx_bnc_supplier_state": "BTREE (supplier_id, state)",
+                "uq_bnc_authoritative": "UNIQUE BTREE (authoritative_transaction_id)",
+                "uq_bnc_identity": "UNIQUE BTREE (supplier_id, notice_identity)",
+                "uq_bnc_notice": "UNIQUE BTREE (notice_transaction_id)"
+            },
+            "foreign_keys": {
+                "fk_bnc_authoritative": "(authoritative_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_bnc_notice": "(notice_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_bnc_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_bnc_user": "(confirmed_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": []
         },
         "bank_notice_ignore_transfers": {
             "type": "BASE TABLE",

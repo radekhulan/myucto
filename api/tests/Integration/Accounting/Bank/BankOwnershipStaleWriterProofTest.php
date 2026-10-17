@@ -268,6 +268,38 @@ final class BankOwnershipStaleWriterProofTest extends TestCase
         return $invoice;
     }
 
+    public function testOldSnapshotCannotBypassNoticeGuardForNewConfirmedMovement(): void
+    {
+        [$supplier, , $actor, , $target, , , $container] = $this->fixture();
+        [$a, $b] = $this->connections;
+        $pdo = $a->pdo();
+        $pdo->beginTransaction();
+        $pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn();
+        $other = $b->pdo();
+        $other->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,source)
+            VALUES (?,'synthetic-late.eml',?,'19-1000000005','0100','CZK','2096-06-01','email_notice')")
+            ->execute([$supplier, hash('sha256', 'late-notice-' . $supplier)]);
+        $statement = (int) $other->lastInsertId();
+        $reference = 'synthetic-late-confirmation-' . $supplier;
+        $other->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,source,source_ref)
+            VALUES (?,'2096-06-01',49.99,'CZK','email_notice',?)")->execute([$statement, $reference]);
+        $notice = (int) $other->lastInsertId();
+        $other->prepare("INSERT INTO bank_notice_confirmations(supplier_id,notice_transaction_id,notice_source_ref,notice_identity,state,authoritative_transaction_id)
+            VALUES (?,?,?,?,'confirmed',?)")->execute([$supplier, $notice, $reference, hash('sha256', $reference), $target]);
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/test')
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier);
+        $response = $container->get(\MyInvoice\Action\Bank\BankStatementAction::class)
+            ->ignore($request, new \Slim\Psr7\Response(), ['id' => $notice]);
+        self::assertSame(404, $response->getStatusCode(), (string) $response->getBody());
+        self::assertTrue($pdo->inTransaction());
+        $current = $pdo->prepare('SELECT match_status, ignore_origin FROM bank_transactions WHERE id=? FOR UPDATE');
+        $current->execute([$notice]);
+        self::assertSame(['match_status' => 'unmatched', 'ignore_origin' => null], $current->fetch(PDO::FETCH_ASSOC));
+        $pdo->rollBack();
+    }
+
     public static function actionMutations(): array
     {
         return ['match' => ['manualMatch'], 'ignore' => ['ignore'], 'unmatch' => ['unmatch'], 'unignore' => ['unignore'], 'delete' => ['delete']];
@@ -460,22 +492,49 @@ final class BankOwnershipStaleWriterProofTest extends TestCase
         }
     }
 
-    public function testPeriodConflictPrecedesSourceLockAndPreservesOrdinaryCallerTransaction(): void
+    public static function periodLockWriters(): array
+    {
+        return ['posting' => ['posting'], 'notice mutation' => ['mutation'], 'manual confirmation' => ['confirmation']];
+    }
+
+    #[DataProvider('periodLockWriters')]
+    public function testPeriodConflictPrecedesSourceLockAndPreservesOrdinaryCallerTransaction(string $writer): void
     {
         [$supplier, , $actor, $statement, $transaction, , , $container] = $this->fixture();
         [$a, $b] = $this->connections;
         $pdo = $a->pdo();
         $pdo->exec('SET SESSION innodb_lock_wait_timeout=1');
+        $notice = 0;
+        if ($writer === 'confirmation') {
+            $pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,source)
+                VALUES (?,'synthetic.eml',?,'19-1000000005','0100','CZK','2096-06-01','email_notice')")
+                ->execute([$supplier, hash('sha256', 'notice-' . $supplier)]);
+            $noticeStatement = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,source,source_ref)
+                VALUES (?,'2096-06-01',49.99,'CZK','email_notice',?)")
+                ->execute([$noticeStatement, 'synthetic-period-order-' . $supplier]);
+            $notice = (int) $pdo->lastInsertId();
+        }
         $b->pdo()->beginTransaction();
         $b->pdo()->prepare('SELECT id FROM accounting_periods WHERE supplier_id=? FOR UPDATE')->execute([$supplier]);
         $pdo->beginTransaction();
         $pdo->prepare("UPDATE supplier SET city='Caller marker' WHERE id=?")->execute([$supplier]);
         try {
-            $container->get(BankPostingService::class)->postManual($supplier, $transaction,
-                ['debit_account_code' => '221', 'credit_account_code' => '648'], ['user_id' => $actor]);
+            if ($writer === 'mutation') {
+                (new \MyInvoice\Service\Bank\BankNoticeMutationGuard($a))->mutate($supplier, $transaction, static fn () => null);
+            } elseif ($writer === 'confirmation') {
+                $container->get(\MyInvoice\Service\Bank\BankNoticeConfirmationService::class)
+                    ->confirmManually($supplier, $notice, $transaction, $actor, 'Synthetic period lock test');
+            } else {
+                $container->get(BankPostingService::class)->postManual($supplier, $transaction,
+                    ['debit_account_code' => '221', 'credit_account_code' => '648'], ['user_id' => $actor]);
+            }
             self::fail('The held period must block before the bank source.');
         } catch (\PDOException $e) {
             self::assertSame(1205, (int) ($e->errorInfo[1] ?? 0));
+        } catch (\MyInvoice\Service\Bank\BankNoticeConfirmationException $e) {
+            self::assertSame('confirmation', $writer);
+            self::assertSame('bank_busy', $e->errorCode);
         }
         self::assertTrue($pdo->inTransaction());
         $source = $b->pdo()->prepare('SELECT id FROM bank_transactions WHERE id=? FOR UPDATE NOWAIT');

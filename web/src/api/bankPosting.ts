@@ -95,6 +95,8 @@ export type UnpostedBankTransaction = BankTransaction & {
 }
 
 export type BankMovementListParams = {
+  show_confirmed?: 1
+  confirmation_state?: 'pending' | 'review' | 'confirmed'
   page?: number; per_page?: number; year?: number; q?: string; scope?: 'unposted' | 'all'; account?: string
   status?: 'unmatched' | 'auto_exact' | 'auto_partial' | 'manual' | 'ignored'
   posting_status?: 'unposted' | 'posted'

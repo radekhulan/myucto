@@ -134,8 +134,26 @@ final class BankTransactionReleaseService
      */
     public function release(int $supplierId, int $txId, string $mode, ?int $userId = null): array
     {
+        // DELETE je součást dávkového uvolnění výpisu a smí po jeho validaci
+        // odstranit i potvrzené avízo; samostatné odpárování jde přes notice guard.
+        if ($mode === self::MODE_DELETE) return $this->releaseUnderLock($supplierId, $txId, $mode, $userId);
+        if (!(new \MyInvoice\Repository\BankStatementOwnershipResolver($this->db))->transactionOwned($txId, $supplierId)) {
+            throw new BankTransactionReleaseException('not_found', 'Transakce nenalezena.', 404);
+        }
+        try {
+            return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $txId,
+                fn (): array => $this->releaseUnderLock($supplierId, $txId, $mode, $userId));
+        } catch (BankNoticeConfirmationException $exception) {
+            throw new BankTransactionReleaseException($exception->errorCode, $exception->getMessage(), $exception->httpStatus, $exception);
+        }
+    }
+
+    private function releaseUnderLock(int $supplierId, int $txId, string $mode, ?int $userId): array
+    {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
+        $confirmations = new BankNoticeConfirmationService($this->db);
+        $noticeLock = $ownTx && $mode === self::MODE_DELETE ? $confirmations->lockSupplier($supplierId) : null;
         if ($ownTx) {
             $pdo->beginTransaction();
         }
@@ -143,6 +161,14 @@ final class BankTransactionReleaseService
             $tx = $this->bankPosting->lockTransaction($supplierId, $txId);
             if ($tx === null) {
                 throw new BankTransactionReleaseException('not_found', 'Transakce nenalezena.', 404);
+            }
+
+            if ($mode !== self::MODE_DELETE) {
+                try {
+                    $confirmations->assertMutable($supplierId, $txId);
+                } catch (BankNoticeConfirmationException $exception) {
+                    throw new BankTransactionReleaseException($exception->errorCode, $exception->getMessage(), $exception->httpStatus, $exception);
+                }
             }
 
             // Guard (#89): nestornovaný daňový doklad k přijaté platbě — zrušení platby
@@ -167,6 +193,8 @@ final class BankTransactionReleaseService
                 $pdo->rollBack();
             }
             throw $e;
+        } finally {
+            if ($noticeLock !== null) $confirmations->unlockSupplier($noticeLock);
         }
     }
 

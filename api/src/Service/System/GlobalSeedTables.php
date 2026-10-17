@@ -324,7 +324,7 @@ final class GlobalSeedTables
         'bank_counterparty_observations', 'bank_email_attachment_ingests', 'bank_email_processed_messages',
         'bank_match_audit', 'bank_match_suggestions', 'bank_payment_order_submissions',
         'bank_posting_suggestions', 'bank_statements', 'bank_transaction_imports', 'bank_transactions',
-        'bank_notice_ignore_transfers',
+        'bank_notice_confirmations', 'bank_notice_ignore_transfers',
         'bank_transfer_matches',
         'cars',
         'cash_document_vat_lines', 'cash_documents', 'cash_journal_notes', 'cash_registers',

@@ -376,7 +376,7 @@ final class BankEmailNoticeScanner
             $matchStatus = (string) ($match['status'] ?? 'unmatched');
             $isMatched = $matchStatus !== 'unmatched'
                 && ($matchedInvoiceId !== null || $matchedPurchaseInvoiceId !== null);
-            $status = $isMatched ? 'processed_success' : 'match_failed';
+            $status = ($isMatched || !empty($match['notice_replaced'])) ? 'processed_success' : 'match_failed';
             $postError = null;
             if ($status === 'processed_success') {
                 $postError = $this->safePostProcess($settings, $message, 'success');

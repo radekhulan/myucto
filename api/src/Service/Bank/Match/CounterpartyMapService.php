@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\Match;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 final class CounterpartyMapService
@@ -17,6 +18,11 @@ final class CounterpartyMapService
     ) {}
 
     public function record(int $supplierId, string $account, string $bank, string $side, int $clientId, bool $manual, ?float $feePct = null, ?int $transactionId = null): void
+    {
+        (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $transactionId, fn () => $this->recordMutable($supplierId, $account, $bank, $side, $clientId, $manual, $feePct, $transactionId));
+    }
+
+    private function recordMutable(int $supplierId, string $account, string $bank, string $side, int $clientId, bool $manual, ?float $feePct = null, ?int $transactionId = null): void
     {
         $key = AccountNumberNormalizer::canonical($account);
         if ($supplierId <= 0 || $clientId <= 0 || $key === null || !in_array($side, ['incoming', 'outgoing'], true)) return;

@@ -34,6 +34,20 @@ final class PurchasePaymentMatchWriter
         ?int $userId = null,
         ?AdvanceFinalMatchGuard $advanceGuard = null,
     ): void {
+        (new BankNoticeMutationGuard($pdo))->mutate($supplierId, $transactionId, fn () => self::recordMutable($pdo, $supplierId, $transactionId, $purchaseInvoiceId, $amount, $matchType, $confidence, $userId, $advanceGuard));
+    }
+
+    private static function recordMutable(
+        PDO $pdo,
+        int $supplierId,
+        int $transactionId,
+        int $purchaseInvoiceId,
+        float $amount,
+        string $matchType,
+        ?int $confidence = null,
+        ?int $userId = null,
+        ?AdvanceFinalMatchGuard $advanceGuard = null,
+    ): void {
         // Platba zálohy nepatří na konečnou fakturu ({@see AdvanceFinalMatchGuard}). Volající
         // bez strážce je vědomé obejití (force) nebo oprava dat, která párování přesouvá
         // NA zálohu.

@@ -118,7 +118,11 @@ final class SecurityFixesTest extends TestCase
         self::assertIsString($code);
 
         // Najdi `ignore` method
-        $start = strpos($code, 'public function ignore(');
+        $wrapperStart = strpos($code, 'public function ignore(');
+        $wrapper = substr($code, $wrapperStart, strpos($code, "\n    }", $wrapperStart) - $wrapperStart);
+        self::assertStringContainsString('withNoticeLock', $wrapper);
+        self::assertStringContainsString('ignoreLocked', $wrapper);
+        $start = strpos($code, 'private function ignoreLocked(');
         self::assertNotFalse($start, 'ignore() metoda musí existovat');
         $end = strpos($code, "\n    }", $start);
         $methodBody = substr($code, $start, $end - $start);
@@ -141,7 +145,12 @@ final class SecurityFixesTest extends TestCase
         self::assertIsString($code);
 
         foreach (['manualMatch', 'unmatch', 'ignore'] as $method) {
-            $start = strpos($code, "public function $method(");
+            $wrapperStart = strpos($code, "public function $method(");
+            self::assertNotFalse($wrapperStart);
+            $wrapper = substr($code, $wrapperStart, strpos($code, "\n    }", $wrapperStart) - $wrapperStart);
+            self::assertStringContainsString('withNoticeLock', $wrapper);
+            self::assertStringContainsString($method . 'Locked', $wrapper);
+            $start = strpos($code, "private function {$method}Locked(");
             self::assertNotFalse($start, "$method() metoda musí existovat");
             $end = strpos($code, "\n    }", $start);
             $body = substr($code, $start, $end - $start);

@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Tests\Support\BankSqlitePdo;
 use PDO;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -14,12 +15,12 @@ use PHPUnit\Framework\TestCase;
 /** Skutečné SQL nad izolovanými daty; MariaDB regex funkce emuluje SQLite. */
 final class StatementMatcherPurchasePaymentTest extends TestCase
 {
-    private \Pdo\Sqlite $pdo;
+    private BankSqlitePdo $pdo;
     private StatementMatcher $matcher;
 
     protected function setUp(): void
     {
-        $this->pdo = new \Pdo\Sqlite('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $this->pdo = new BankSqlitePdo();
         $this->pdo->createFunction('regexp', static fn ($pattern, $value) => preg_match('~' . $pattern . '~', (string) $value));
         $this->pdo->createFunction('REGEXP_REPLACE', static fn ($value, $pattern, $replacement) => preg_replace('~' . $pattern . '~', $replacement, (string) $value));
         $this->pdo->createFunction('NOW', static fn () => '2099-06-15 12:00:00');
@@ -34,10 +35,11 @@ final class StatementMatcherPurchasePaymentTest extends TestCase
                 rounding REAL DEFAULT 0, exchange_rate REAL, status TEXT DEFAULT 'received',
                 document_kind TEXT DEFAULT 'invoice', paid_at TEXT);
             CREATE TABLE bank_transactions (id INTEGER PRIMARY KEY, statement_id INTEGER DEFAULT 1, currency TEXT, amount REAL,
-                match_status TEXT DEFAULT 'unmatched', matched_at TEXT);
+                match_status TEXT DEFAULT 'unmatched', matched_at TEXT, source TEXT DEFAULT 'statement');
             INSERT INTO bank_transactions (id) VALUES (1);
             CREATE TABLE bank_statements (id INTEGER PRIMARY KEY, currency TEXT DEFAULT 'CZK');
             INSERT INTO bank_statements (id) VALUES (1);
+            CREATE TABLE bank_notice_confirmations (notice_transaction_id INTEGER, state TEXT, reason TEXT, authoritative_transaction_id INTEGER);
             CREATE TABLE cash_documents (id INTEGER PRIMARY KEY, supplier_id INTEGER, purchase_invoice_id INTEGER,
                 doc_type TEXT, status TEXT, total_amount REAL, currency_code TEXT DEFAULT 'CZK', amount_foreign REAL);
             CREATE TABLE other_item_allocations (bank_transaction_id INTEGER);

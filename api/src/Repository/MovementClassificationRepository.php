@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /**
@@ -75,6 +76,17 @@ final class MovementClassificationRepository
         ?string $note,
         ?int $userId,
     ): array {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $sourceType === 'bank' ? $sourceId : null, fn () => $this->upsertMutable($supplierId, $sourceType, $sourceId, $taxBucket, $note, $userId));
+    }
+
+    private function upsertMutable(
+        int $supplierId,
+        string $sourceType,
+        int $sourceId,
+        string $taxBucket,
+        ?string $note,
+        ?int $userId,
+    ): array {
         $pdo = $this->db->pdo();
         $bankId = $sourceType === 'bank' ? $sourceId : null;
         $cashId = $sourceType === 'cash' ? $sourceId : null;
@@ -115,6 +127,11 @@ final class MovementClassificationRepository
 
     /** Smaže override (pohyb se vrátí k auto-klasifikaci). Vrací, zda něco smazal. */
     public function delete(int $supplierId, string $sourceType, int $sourceId, ?int $userId = null): bool
+    {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $sourceType === 'bank' ? $sourceId : null, fn () => $this->deleteMutable($supplierId, $sourceType, $sourceId, $userId));
+    }
+
+    private function deleteMutable(int $supplierId, string $sourceType, int $sourceId, ?int $userId = null): bool
     {
         $previous = $this->find($supplierId, $sourceType, $sourceId);
         $col = $sourceType === 'bank' ? 'bank_transaction_id' : 'cash_document_id';

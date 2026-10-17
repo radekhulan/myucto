@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\BankNoticeMutationGuard;
 use PDO;
 
 /**
@@ -95,6 +96,11 @@ final class CashJournalNoteRepository
 
     public function add(int $supplierId, string $sourceType, int $sourceId, string $body, bool $pinned, ?int $userId): int
     {
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $sourceType === 'bank' ? $sourceId : null, fn () => $this->addMutable($supplierId, $sourceType, $sourceId, $body, $pinned, $userId));
+    }
+
+    private function addMutable(int $supplierId, string $sourceType, int $sourceId, string $body, bool $pinned, ?int $userId): int
+    {
         $this->db->pdo()->prepare(
             'INSERT INTO cash_journal_notes (supplier_id, source_type, source_id, body, pinned, created_by)
              VALUES (?, ?, ?, ?, ?, ?)'
@@ -103,6 +109,12 @@ final class CashJournalNoteRepository
     }
 
     public function update(int $id, int $supplierId, string $sourceType, int $sourceId, ?string $body, ?bool $pinned, ?int $userId): bool
+    {
+        if ($sourceType === 'bank' && !$this->hasLiveNote($id, $supplierId, $sourceType, $sourceId)) return false;
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $sourceType === 'bank' ? $sourceId : null, fn () => $this->updateMutable($id, $supplierId, $sourceType, $sourceId, $body, $pinned, $userId));
+    }
+
+    private function updateMutable(int $id, int $supplierId, string $sourceType, int $sourceId, ?string $body, ?bool $pinned, ?int $userId): bool
     {
         $sets = [];
         $params = [];
@@ -130,12 +142,25 @@ final class CashJournalNoteRepository
 
     public function softDelete(int $id, int $supplierId, string $sourceType, int $sourceId, ?int $userId): bool
     {
+        if ($sourceType === 'bank' && !$this->hasLiveNote($id, $supplierId, $sourceType, $sourceId)) return false;
+        return (new BankNoticeMutationGuard($this->db))->mutate($supplierId, $sourceType === 'bank' ? $sourceId : null, fn () => $this->softDeleteMutable($id, $supplierId, $sourceType, $sourceId, $userId));
+    }
+
+    private function softDeleteMutable(int $id, int $supplierId, string $sourceType, int $sourceId, ?int $userId): bool
+    {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE cash_journal_notes SET deleted_at = CURRENT_TIMESTAMP, updated_by = ?
               WHERE id = ? AND supplier_id = ? AND source_type = ? AND source_id = ? AND deleted_at IS NULL'
         );
         $stmt->execute([$userId, $id, $supplierId, $sourceType, $sourceId]);
         return $stmt->rowCount() > 0;
+    }
+
+    private function hasLiveNote(int $id, int $supplierId, string $sourceType, int $sourceId): bool
+    {
+        $statement = $this->db->pdo()->prepare('SELECT 1 FROM cash_journal_notes WHERE id=? AND supplier_id=? AND source_type=? AND source_id=? AND deleted_at IS NULL');
+        $statement->execute([$id, $supplierId, $sourceType, $sourceId]);
+        return $statement->fetchColumn() !== false;
     }
 
     /**

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\Card;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\PaymentCardRepository;
+use MyInvoice\Service\Bank\BankNoticeConfirmationScope;
 use PDO;
 
 /**
@@ -71,7 +72,7 @@ final class CardPaymentOverview
                      WHERE w.supplier_id = ? AND w.source_type = 'card_writeoff'
                        AND w.source_id = bt.id AND w.reversed_by IS NULL
                 )
-                AND " . BankStatementOwnershipResolver::sql('bs') . "
+                AND " . BankNoticeConfirmationScope::activeSql('bt') . " AND " . BankStatementOwnershipResolver::sql('bs') . "
               ORDER BY bt.posted_at DESC, bt.id DESC
               LIMIT " . (self::MAX_ROWS + 1)
         );
@@ -200,7 +201,7 @@ final class CardPaymentOverview
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ?
-                AND " . BankStatementOwnershipResolver::sql('bs')
+                AND " . BankNoticeConfirmationScope::activeSql('bt') . " AND " . BankStatementOwnershipResolver::sql('bs')
         );
         $stmt->execute(array_merge([$supplierId, $transactionId], BankStatementOwnershipResolver::params($supplierId)));
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
