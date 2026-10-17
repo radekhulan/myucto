@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import Toaster from '@/components/Toaster.vue'
 import SessionLockOverlay from '@/components/SessionLockOverlay.vue'
 import WebAuthnCeremonyPrompt from '@/components/WebAuthnCeremonyPrompt.vue'
+import TableViewportScrollbars from '@/components/ui/TableViewportScrollbars.vue'
 import { useTheme } from '@/composables/useTheme'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
@@ -64,4 +65,5 @@ const showColdStartGate = computed(() => protectedPrivateRoute.value
   </div>
   <SessionLockOverlay />
   <WebAuthnCeremonyPrompt />
+  <TableViewportScrollbars v-if="showRoutedContent && !privateContentCovered" />
 </template>

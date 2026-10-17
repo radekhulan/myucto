@@ -20703,6 +20703,7 @@
     "entry": "entry"
   },
   "common": {
+    "tableHorizontalScroll": "Scroll table horizontally",
     "show": "Show",
     "reset_sort": "Restore default order",
     "pdf_saved_to_folder": "PDF saved to the selected folder.",

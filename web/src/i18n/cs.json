@@ -20703,6 +20703,7 @@
     "entry": "zápis"
   },
   "common": {
+    "tableHorizontalScroll": "Vodorovné posouvání tabulky",
     "show": "Zobrazit",
     "reset_sort": "Obnovit výchozí řazení",
     "pdf_saved_to_folder": "PDF uloženo do zvolené složky.",

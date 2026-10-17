@@ -15,6 +15,7 @@ import { installFrameNavigation, internalAnchorNavigation } from '@/workspace/fr
 import { windowContextKey } from '@/workspace/windowContext'
 import Toaster from '@/components/Toaster.vue'
 import WebAuthnCeremonyPrompt from '@/components/WebAuthnCeremonyPrompt.vue'
+import TableViewportScrollbars from '@/components/ui/TableViewportScrollbars.vue'
 import { internalRouteFromAnchor } from '@/workspace/panelLinks'
 import {
   isWindowFrameParentMessage,
@@ -153,7 +154,7 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
         },
       }
       provide(windowContextKey, context)
-      return () => h(Fragment, [h(RouterView), h(Toaster), h(WebAuthnCeremonyPrompt)])
+      return () => h(Fragment, [h(RouterView), h(Toaster), h(WebAuthnCeremonyPrompt), h(TableViewportScrollbars)])
     },
   })
 

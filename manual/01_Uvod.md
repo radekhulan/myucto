@@ -65,6 +65,21 @@ Datum zadáváte ve formátu jazyka aplikace: česky `d. m. rrrr` (`1. 9. 2026`,
 
 **Jak poznáte, že je hotovo:** aplikace se spouští ve vlastním okně s ikonou MyÚčto.
 
+### 1.3.3 Široké tabulky
+
+Pokud se tabulka nevejde do šířky okna nebo pracovního panelu, můžete ji posouvat
+vodorovně. Když běžný spodní posuvník leží mimo viditelnou část dlouhé tabulky,
+zobrazí se náhradní posuvník při jejím spodním viditelném okraji. Není tedy nutné
+nejprve sjet až na poslední řádek. Jakmile je běžný posuvník pod tabulkou v dohledu,
+náhradní lišta se skryje, aby se nezobrazovaly dva posuvníky současně.
+Souhrnnou patičku tabulky nepřekrývá; podle potřeby se posune nad ni.
+
+Přetáhněte úchyt myší nebo dotykem, případně klikněte do dráhy. Po zaměření
+klávesou **Tab** lze použít šipky vlevo a vpravo, **Page Up / Page Down** pro větší
+posun a **Home / End** pro začátek či konec. Běžné posouvání tabulky a tento
+posuvník jsou propojené. Každý pracovní panel používá vlastní posuvník; u tabulky,
+která se do šířky vejde, se nezobrazuje. Při tisku se nezobrazuje.
+
 ## 1.4 Když něco nejde
 
 <!-- cols: 34 33 33 -->
