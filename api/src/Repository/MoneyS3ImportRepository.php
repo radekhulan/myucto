@@ -30,6 +30,12 @@ final class MoneyS3ImportRepository extends AbstractMigrationImportRepository
     public const KIND_DIMENSION_VALUE = 'dimension_value';
     public const KIND_ASSET = 'asset';
     public const KIND_SMALL_ASSET = 'small_asset';
+    /** Daňová evidence: úhrada z peněžního deníku, zápočet, zařazení pohybu, ostatní položka, podání DPH. */
+    public const KIND_TAX_PAYMENT = 'tax_payment';
+    public const KIND_TAX_OFFSET = 'tax_offset';
+    public const KIND_TAX_CLASSIFICATION = 'tax_classification';
+    public const KIND_OTHER_ITEM = 'other_item';
+    public const KIND_VAT_FILING = 'vat_filing';
 
     protected function runsTable(): string
     {

@@ -52,6 +52,28 @@ function run(overrides: Partial<NonNullable<MoneyS3Run['protocol']>> = {}, statu
 }
 
 describe('MoneyS3Protocol', () => {
+  it('u daňové evidence ukáže peněžní deník MyÚčta proti Money po letech', () => {
+    const wrapper = mount(MoneyS3Protocol, {
+      props: {
+        run: run({
+          reconciliation: [],
+          tax_records_reconciliation: [
+            { year: 2024, ok: true, money: { income_taxable: 10000, expense_taxable: 900 }, myucto: { income_taxable: 10000, expense_taxable: 900, unclassified: 0 }, differences: 0, missing: 0, extra: 0, non_cash: 0 },
+            { year: 2025, ok: false, money: { income_taxable: 500, expense_taxable: 3000 }, myucto: { income_taxable: 500, expense_taxable: 3420, unclassified: 0.5 }, differences: 1, missing: 0, extra: 0, non_cash: 0 },
+          ],
+        }),
+      },
+    })
+    const table = wrapper.find('[data-testid="tax-records-reconciliation"]')
+    expect(table.exists()).toBe(true)
+    expect(table.text()).toContain('money_s3.protocol.tax_records_title')
+    expect(wrapper.find('[data-testid="tax-records-2024"]').text()).toContain('money_s3.protocol.ok')
+    const year2025 = wrapper.find('[data-testid="tax-records-2025"]').text()
+    expect(year2025).toContain('money_s3.protocol.not_ok')
+    expect(year2025.replace(/\s/g, '')).toContain('3420,00/3000,00')
+    expect(wrapper.find('[data-testid="reconciliation-2024"]').exists()).toBe(false)
+  })
+
   it('ukáže kroky, zprávy, rekonciliaci, uzávěrku a osiřelé doklady', () => {
     const wrapper = mount(MoneyS3Protocol, { props: { run: run() } })
     const text = wrapper.text()

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { MoneyS3Diff, MoneyS3PayrollMonth, MoneyS3Run } from '@/api/moneyS3'
+import type { MoneyS3Diff, MoneyS3PayrollMonth, MoneyS3Run, MoneyS3TaxRecordsYear } from '@/api/moneyS3'
 import type { PohodaRun } from '@/api/pohoda'
 import type { PremierRun } from '@/api/premier'
 import type { StereoProtocolRun } from '@/api/stereoNx'
@@ -52,6 +52,11 @@ const closing = computed(() => {
   return data && 'closing' in data ? data.closing ?? [] : []
 })
 const orphans = computed<{ type: string; document_no: string; id: number; year?: number }[]>(() => protocol.value?.orphans ?? [])
+/** Rekonciliace převedené daňové evidence (Money S3): peněžní deník MyÚčta proti Money po letech. */
+const taxRecords = computed<MoneyS3TaxRecordsYear[]>(() => {
+  const data = protocol.value
+  return data && 'tax_records_reconciliation' in data ? data.tax_records_reconciliation ?? [] : []
+})
 const payrollTotals = computed<MoneyS3PayrollMonth[]>(() => {
   const data = protocol.value
   return data && 'payroll_totals' in data ? data.payroll_totals ?? [] : []
@@ -144,6 +149,33 @@ function levelClass(level: string): string {
           <span class="font-medium">{{ label('level', m.acceptable ? 'difference' : m.level) }} · {{ label('steps', m.step) }}:</span> {{ m.text }}
         </li>
       </ul>
+    </section>
+
+    <section v-if="taxRecords.length" data-testid="tax-records-reconciliation">
+      <h4 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.tax_records_title')) }}</h4>
+      <p class="mb-2 text-sm text-neutral-500">{{ t(k('protocol.tax_records_hint')) }}</p>
+      <div class="overflow-x-auto rounded-lg border border-neutral-200">
+        <table class="min-w-full text-sm">
+          <thead class="bg-neutral-50 text-left text-xs text-neutral-500">
+            <tr>
+              <th class="px-3 py-2">{{ t(k('col_year')) }}</th>
+              <th class="px-3 py-2 text-right">{{ t(k('protocol.col_tax_income')) }}</th>
+              <th class="px-3 py-2 text-right">{{ t(k('protocol.col_tax_expense')) }}</th>
+              <th class="px-3 py-2 text-right">{{ t(k('protocol.col_unclassified')) }}</th>
+              <th class="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="year in taxRecords" :key="year.year" :data-testid="`tax-records-${year.year}`">
+              <td class="px-3 py-2 font-medium">{{ year.year }}</td>
+              <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ pair(year.myucto.income_taxable, year.money.income_taxable) }}</td>
+              <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ pair(year.myucto.expense_taxable, year.money.expense_taxable) }}</td>
+              <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ money.format(year.myucto.unclassified) }}</td>
+              <td class="px-3 py-2"><span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="year.ok ? statusClass('ok') : statusClass('error')">{{ year.ok ? t(k('protocol.ok')) : t(k('protocol.not_ok')) }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section v-if="reconciliation.length">

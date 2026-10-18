@@ -7,7 +7,9 @@ namespace MyInvoice\Service\Migration\MoneyS3;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TableStatistics;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Shared\FiscalYearMismatchException;
@@ -37,7 +39,7 @@ final class MoneyS3Importer
     public const STEP_ACCOUNTING_MODE = 'accounting_mode';
 
     /** Kroky, bez kterých nemá smysl pokračovat — další na nich stojí. */
-    private const CRITICAL_STEPS = [ChartImporter::STEP, JournalImporter::STEP, self::STEP_ACCOUNTING_MODE];
+    private const CRITICAL_STEPS = [ChartImporter::STEP, JournalImporter::STEP, self::STEP_ACCOUNTING_MODE, TaxRecordsImporter::STEP_PLAN];
 
     public function __construct(
         private readonly Connection $db,
@@ -58,11 +60,38 @@ final class MoneyS3Importer
         private readonly TableStatistics $statistics,
         private readonly PayrollImporter $payroll,
         private readonly RecurringSeriesTakeover $recurring,
+        private readonly AccountingModeRepository $modes,
+        private readonly TaxRecordsImporter $taxRecords,
+        private readonly TaxRecordsReconciler $taxRecordsReconciler,
+        private readonly VatFilingsTakeover $vatFilings,
+        private readonly AccountingSupplierSettingsRepository $settings,
     ) {}
 
-    /** @return list<string> klíče kroků v pořadí, v jakém běží */
-    public static function stepKeys(): array
+    /**
+     * Klíče kroků v pořadí, v jakém běží. `$taxRecords` = převod agendy vedené v Money jako
+     * daňová evidence ({@see taxEvidenceSteps()}).
+     *
+     * @return list<string>
+     */
+    public static function stepKeys(bool $taxRecords = false): array
     {
+        if ($taxRecords) {
+            return [
+                TaxRecordsImporter::STEP_PLAN,
+                CodebookImporter::STEP_PARTNERS,
+                TaxRecordsImporter::STEP_VAT_STATUS,
+                InvoiceImporter::STEP_PURCHASE,
+                InvoiceImporter::STEP_ISSUED,
+                CashBankImporter::STEP_CASH,
+                CashBankImporter::STEP_BANK,
+                TaxRecordsImporter::STEP_PAYMENTS,
+                TaxRecordsImporter::STEP_CLASSIFICATION,
+                TaxRecordsImporter::STEP_OTHER_ITEMS,
+                RecurringSeriesTakeover::STEP,
+                TaxRecordsReconciler::STEP,
+                VatFilingsTakeover::STEP,
+            ];
+        }
         return [
             ChartImporter::STEP,
             JournalImporter::STEP,
@@ -205,18 +234,29 @@ final class MoneyS3Importer
             $add('warning', $w['code'], $w['message']);
         }
 
-        $plan = $journalPreview['plan'] ?? $this->journal->plan($backup, $options, $calendar);
-        if ($plan === [] && $agenda->taxRecordsOnly()) {
-            $add('error', 'tax_records_not_supported', AgendaInfo::TEXT_TAX_RECORDS_NOT_SUPPORTED);
-        } elseif ($plan === [] && $options->fromYear !== null) {
+        // Převod nikdy nezapíše podvojné účetnictví pro rok, který Money vede jako daňovou
+        // evidenci: agendu, která se do daňové evidence vrátila, zastaví.
+        $conflict = $agenda->taxRecordsAfterDoubleEntry();
+        if ($conflict !== null) {
+            $add('error', 'tax_records_after_double_entry', AgendaInfo::textTaxRecordsAfterDoubleEntry($conflict), $conflict);
+        }
+        $taxRecords = $agenda->taxRecordsOnly();
+        if ($taxRecords) {
+            array_push($out, ...$this->taxRecordsPreflight($supplierId, $backup, $agenda, $options));
+        }
+
+        // Daňová evidence deník nemá: rozvrh roků je rok Money ({@see TaxRecordsImporter::plan()}),
+        // roky a jejich kontrolu vypsal taxRecordsPreflight().
+        $plan = $taxRecords ? [] : ($journalPreview['plan'] ?? $this->journal->plan($backup, $options, $calendar));
+        if (!$taxRecords && $plan === [] && $options->fromYear !== null) {
             $add('error', 'from_year_empty', "Od roku {$options->fromYear} záloha nemá žádný účetní rok — není co převést.", ['from_year' => $options->fromYear]);
-        } elseif ($plan === []) {
+        } elseif (!$taxRecords && $plan === []) {
             $add('error', 'no_journal', 'Záloha neobsahuje účetní deník — není co převést.');
         }
         // meta.json ukládá celé částky bez desetinné části jako celá čísla.
-        $breaks = $journalPreview !== null
+        $breaks = $taxRecords ? [] : ($journalPreview !== null
             ? array_map(static fn (array $b): array => ['accounts' => array_map('floatval', (array) $b['accounts'])] + $b, $journalPreview['chain_breaks'])
-            : $this->journal->chainBreaks($backup, $options, $calendar);
+            : $this->journal->chainBreaks($backup, $options, $calendar));
         foreach ($breaks as $b) {
             $code = (string) array_key_first($b['accounts']);
             $add('warning', 'opening_chain_break', sprintf(
@@ -252,8 +292,113 @@ final class MoneyS3Importer
                 $add('error', 'period_not_open', "Účetní období {$item['year']} je v MyÚčtu uzavřené.", ['year' => $item['year']]);
             }
         }
-        if (($supplier['accounting_mode'] ?? '') !== 'double_entry') {
+        if ($plan !== [] && !$taxRecords && $conflict === null && ($supplier['accounting_mode'] ?? '') !== 'double_entry') {
             $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');
+        }
+        return $out;
+    }
+
+    /**
+     * Kontrola agendy vedené v Money jako daňová evidence ({@see TaxRecordsPlan}): co v ní
+     * je, co by převod zastavilo, a že firma zůstane v daňové evidenci. Firma, která roky
+     * agendy vede v MyÚčtu jako podvojné účetnictví, převod nedostane — převod režim firmy
+     * nemění.
+     *
+     * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
+     */
+    private function taxRecordsPreflight(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options): array
+    {
+        $out = [];
+        $check = TaxRecordsPlan::check($backup, $agenda, $options->fromYear);
+        if ($check['years'] === [] && $options->fromYear !== null) {
+            $out[] = ['level' => 'error', 'code' => 'from_year_empty', 'message' => "Od roku {$options->fromYear} záloha nemá žádný rok daňové evidence — není co převést.",
+                'context' => ['from_year' => $options->fromYear]];
+        }
+        // Daňová evidence se vede po kalendářních letech (§ 7b ZDP).
+        if ($this->periods->fiscalCalendar($supplierId)->startMonth() !== 1) {
+            $out[] = ['level' => 'error', 'code' => 'tax_records_fiscal_year', 'message' => 'Daňová evidence se vede po kalendářních letech, firma má v MyÚčtu nastavený '
+                . 'hospodářský rok (Firma → Nastavení, Daně a účetnictví, Účetní rok začíná). Nastavte leden a převod spusťte znovu.', 'context' => []];
+        }
+        array_push($out, ...$this->taxRecordsTargetChecks($supplierId, array_values(array_filter(array_map(
+            static fn (array $y): ?int => $y['year'], $check['years'])))));
+        foreach ($check['years'] as $y) {
+            $links = $y['links'] === [] ? 'žádné' : implode(', ', array_map(static fn (string $t, int $n): string => "{$t} {$n}", array_keys($y['links']), $y['links']));
+            $out[] = ['level' => 'info', 'code' => 'tax_records_year_plan', 'message' => sprintf(
+                '%s: peněžní deník má %d pohybů (banka %d, pokladna %d, interní doklady %d), vazby na uhrazené doklady: %s.',
+                $y['year'] !== null ? "Rok {$y['year']} (adresář {$y['dir']})" : "Rok v adresáři {$y['dir']}",
+                $y['movements'], $y['bank'], $y['cash'], $y['internal'], $links,
+            ), 'context' => $y];
+        }
+        foreach ($check['issues'] as $issue) {
+            $out[] = $issue;
+        }
+        // Rozhoduje režim firmy v letech agendy (firma, která v MyÚčtu přešla na podvojné
+        // účetnictví až později, historii daňové evidence převzít smí). Záloha bez roků
+        // Money se porovná s dnešním režimem firmy.
+        $years = [];
+        foreach ($agenda->years as $y) {
+            if (($y['accounting_mode'] ?? null) === 'tax_evidence' && ($y['money_year'] ?? null) !== null) {
+                $years[] = (int) $y['money_year'];
+            }
+        }
+        $doubleEntry = array_values(array_filter($years, fn (int $year): bool => $this->modes->forYear($supplierId, $year) === 'double_entry'));
+        if ($doubleEntry !== [] || ($years === [] && $this->modes->forYear($supplierId, (int) date('Y')) === 'double_entry')) {
+            sort($doubleEntry);
+            $out[] = ['level' => 'error', 'code' => 'target_double_entry', 'message' => 'Agenda vede v Money daňovou evidenci, firma v MyÚčtu '
+                . ($doubleEntry !== [] ? 'vede roky ' . implode(', ', $doubleEntry) . ' jako podvojné účetnictví' : 'vede podvojné účetnictví')
+                . '. Převod režim firmy nemění, daňovou evidenci převede jen do firmy v daňové evidenci.', 'context' => ['years' => $doubleEntry]];
+        } else {
+            $out[] = ['level' => 'info', 'code' => 'tax_evidence_kept', 'message' => 'Firma zůstane v daňové evidenci, převod její režim nemění.', 'context' => []];
+        }
+        return $out;
+    }
+
+    /**
+     * Cílová firma pro převod daňové evidence: převáděné roky nesmí obsahovat doklady, výpisy
+     * ani pokladní doklady, které nevznikly převodem z Money (do rozjeté evidence se převod
+     * nepřimíchává), a první převod nesmí zapisovat pod zámek dokladů firmy. Opakovaný převod
+     * (doklady z mapy) projde.
+     *
+     * @param list<int> $years
+     * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
+     */
+    private function taxRecordsTargetChecks(int $supplierId, array $years): array
+    {
+        $out = [];
+        $pdo = $this->db->pdo();
+        $foreign = [
+            'invoices' => ["SELECT COUNT(*) FROM invoices d WHERE d.supplier_id = ? AND d.issue_date BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = 'invoice' AND m.target_id = d.id)", 'vydaných dokladů'],
+            'purchase_invoices' => ["SELECT COUNT(*) FROM purchase_invoices d WHERE d.supplier_id = ? AND d.issue_date BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = 'purchase_invoice' AND m.target_id = d.id)", 'přijatých dokladů'],
+            'cash_documents' => ["SELECT COUNT(*) FROM cash_documents d WHERE d.supplier_id = ? AND d.issue_date BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = 'cash_document' AND m.target_id = d.id)", 'pokladních dokladů'],
+            'bank_transactions' => ["SELECT COUNT(*) FROM bank_transactions d JOIN bank_statements s ON s.id = d.statement_id
+                WHERE s.supplier_id = ? AND d.posted_at BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = s.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = d.id)", 'bankovních pohybů'],
+        ];
+        foreach ($years as $year) {
+            $found = [];
+            foreach ($foreign as [$sql, $label]) {
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$supplierId, sprintf('%04d-01-01', $year), sprintf('%04d-12-31 23:59:59', $year)]);
+                $count = (int) $stmt->fetchColumn();
+                if ($count > 0) {
+                    $found[] = "{$count} {$label}";
+                }
+            }
+            if ($found !== []) {
+                $out[] = ['level' => 'error', 'code' => 'tax_records_year_not_empty', 'message' => "Rok {$year} už v MyÚčtu obsahuje " . implode(', ', $found)
+                    . ', které nevznikly převodem z Money. Daňová evidence z Money se do rozjeté evidence nepřimíchává.', 'context' => ['year' => $year]];
+            }
+        }
+        $lockedUntil = $this->settings->getLockedUntil($supplierId);
+        $first = $years === [] ? null : min($years);
+        if ($lockedUntil !== null && $first !== null && sprintf('%04d-01-01', $first) <= $lockedUntil
+            && $this->map->all($supplierId, MoneyS3ImportRepository::KIND_INVOICE) === []
+            && $this->map->all($supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION) === []) {
+            $out[] = ['level' => 'error', 'code' => 'tax_records_locked', 'message' => 'Doklady firmy jsou v MyÚčtu uzamčené do ' . date('j. n. Y', (int) strtotime($lockedUntil))
+                . ", převod by zapisoval do uzamčeného období (od roku {$first}). Zámek zrušte a převod spusťte znovu.", 'context' => ['locked_until' => $lockedUntil]];
         }
         return $out;
     }
@@ -299,6 +444,10 @@ final class MoneyS3Importer
         $ctx = new ImportContext($supplierId, $userId, $backup, $agenda, $options, $protocol, $this->periods->fiscalCalendar($supplierId));
         $ctx->runId = $runId;
         $ctx->progress = $progress;
+        $ctx->taxRecords = $agenda->taxRecordsOnly();
+        // Daňová evidence se neúčtuje: automatika účtování ani výchozí nastavení účetní
+        // jednotky se jí netýkají a převod je nemění.
+        $automationManaged = !$ctx->taxRecords;
 
         $pdo = $this->db->pdo();
         $dryRun = $options->isDryRun();
@@ -314,20 +463,22 @@ final class MoneyS3Importer
             // Stav před PRVNÍM ostrým během, po kterém se automatika neobnovila (neúspěšný
             // nebo spadlý běh ji nechal vypnutou) — jinak by se „obnovilo" vypnuto. K běhu
             // se ukládá PŘED vypnutím: kdyby spadl i tenhle běh, další snímek najde.
-            $snapshot = ($dryRun ? null : $this->map->pendingAutomationSnapshot($supplierId)) ?? $this->unit->snapshot($supplierId);
-            if (!$dryRun && $runId !== null) {
+            $snapshot = $automationManaged ? (($dryRun ? null : $this->map->pendingAutomationSnapshot($supplierId)) ?? $this->unit->snapshot($supplierId)) : [];
+            if ($automationManaged && !$dryRun && $runId !== null) {
                 $this->map->saveAutomationSnapshot($runId, $supplierId, $snapshot);
             }
             // Zkouška nanečisto vypnutí automatiky jen ohlásí. Zápis do řádku firmy by v její
             // jediné transakci držel zámek až do konce a každý nový doklad firmy (cizí klíč
             // na firmu) by na něj čekal; převod sám automatiku ke své práci nepotřebuje.
-            if (!$dryRun) {
+            if ($automationManaged && !$dryRun) {
                 $this->unit->disableAutomation($supplierId, $userId > 0 ? $userId : null);
             }
-            $automation = ['before' => $snapshot, 'during' => $dryRun ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
-            $protocol->set('automation', $automation);
+            $automation = ['before' => $snapshot, 'during' => $dryRun || !$automationManaged ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
+            if ($automationManaged) {
+                $protocol->set('automation', $automation);
+            }
 
-            $steps = $this->steps($ctx);
+            $steps = $ctx->taxRecords ? $this->taxEvidenceSteps($ctx) : $this->steps($ctx);
             $total = count($steps);
             $index = 0;
             foreach ($steps as $key => $fn) {
@@ -337,7 +488,7 @@ final class MoneyS3Importer
                 }
                 $ctx->report($key, $index++, $total);
                 $protocol->begin($key);
-                if (!$dryRun && $key === MoneyS3Reconciler::STEP) {
+                if (!$dryRun && in_array($key, [MoneyS3Reconciler::STEP, TaxRecordsReconciler::STEP], true)) {
                     $this->statistics->refreshAfterImport(['money_s3_import_map']);
                 }
                 try {
@@ -373,13 +524,15 @@ final class MoneyS3Importer
                 $this->invoices->recomputeClientStats($ctx);
             }
 
-            if (!$dryRun && !$protocol->hasErrors()) {
+            if ($automationManaged && !$dryRun && !$protocol->hasErrors()) {
                 $this->unit->restoreAutomation($supplierId, $snapshot, $userId > 0 ? $userId : null);
                 $this->map->markAutomationRestored($supplierId);
                 $automation['restored'] = true;
                 $automation['after'] = $this->unit->automationLevel($supplierId);
             }
-            $protocol->set('automation', $automation);
+            if ($automationManaged) {
+                $protocol->set('automation', $automation);
+            }
         } finally {
             if ($savepoint && $pdo->inTransaction()) {
                 $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_dry_run');
@@ -413,6 +566,34 @@ final class MoneyS3Importer
             HistoricalYearCloser::STEP => fn () => $this->closer->run($ctx),
             PayrollImporter::STEP => fn () => $this->payroll->run($ctx),
             MoneyS3Reconciler::STEP => fn () => $this->reconciler->run($ctx),
+        ];
+    }
+
+    /**
+     * Kroky převodu agendy vedené v Money jako daňová evidence: bez osnovy, deníku, režimu
+     * účetní jednotky, předkontací, vazeb na deník, dimenzí, uzávěrky, majetku a mezd.
+     * Doklady, banku a pokladnu převádějí stávající kroky, z peněžního deníku přibudou
+     * úhrady, zařazení pohybů, ostatní položky a plátcovství ({@see TaxRecordsImporter}),
+     * na konci rekonciliace peněžního deníku a podaná přiznání DPH.
+     *
+     * @return array<string,callable():void>
+     */
+    private function taxEvidenceSteps(ImportContext $ctx): array
+    {
+        return [
+            TaxRecordsImporter::STEP_PLAN => fn () => $this->taxRecords->plan($ctx),
+            CodebookImporter::STEP_PARTNERS => fn () => $this->codebooks->importPartners($ctx),
+            TaxRecordsImporter::STEP_VAT_STATUS => fn () => $this->taxRecords->vatStatus($ctx),
+            InvoiceImporter::STEP_PURCHASE => fn () => $this->invoices->importPurchases($ctx),
+            InvoiceImporter::STEP_ISSUED => fn () => $this->invoices->importIssued($ctx),
+            CashBankImporter::STEP_CASH => fn () => $this->cashBank->importCash($ctx),
+            CashBankImporter::STEP_BANK => fn () => $this->cashBank->importBank($ctx),
+            TaxRecordsImporter::STEP_PAYMENTS => fn () => $this->taxRecords->payments($ctx),
+            TaxRecordsImporter::STEP_CLASSIFICATION => fn () => $this->taxRecords->classification($ctx),
+            TaxRecordsImporter::STEP_OTHER_ITEMS => fn () => $this->taxRecords->otherItems($ctx),
+            RecurringSeriesTakeover::STEP => fn () => $this->takeOverRecurring($ctx),
+            TaxRecordsReconciler::STEP => fn () => $this->taxRecordsReconciler->run($ctx),
+            VatFilingsTakeover::STEP => fn () => $this->vatFilings->run($ctx),
         ];
     }
 

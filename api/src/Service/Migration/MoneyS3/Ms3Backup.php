@@ -256,6 +256,47 @@ final class Ms3Backup
     }
 
     /**
+     * Nastavení účetního roku Money z `Rok.DAT` adresáře ROK.nnn (řádky Section1/Variable/Value
+     * jako `Agenda.DAT`, sekce „Global"): rok, hranice období (dny Money jako text), zda rok
+     * vede podvojné účetnictví a plátcovství DPH. Údaj, který tabulka nemá, je null.
+     *
+     * @return array{year:?int,period_start:?string,period_end:?string,double_entry:?bool,vat_payer:?bool}
+     */
+    public function yearSettings(string $dir): array
+    {
+        $out = ['year' => null, 'period_start' => null, 'period_end' => null, 'double_entry' => null, 'vat_payer' => null];
+        $table = $this->table('Rok', $dir);
+        if ($table === null || !$table->hasData()) {
+            return $out;
+        }
+        foreach ($table->rows(['Section1', 'Variable', 'Value']) as $r) {
+            if (self::foldKey((string) ($r['Section1'] ?? '')) !== 'global') {
+                continue;
+            }
+            $value = trim((string) ($r['Value'] ?? ''));
+            match (self::foldKey((string) ($r['Variable'] ?? ''))) {
+                'ucetni rok' => $out['year'] = preg_match('/^\d{4}$/', $value) === 1 ? (int) $value : null,
+                'hospodarsky rok od' => $out['period_start'] = preg_match('/^\d{1,6}$/', $value) === 1 ? Ms3Table::dateFromDays((int) $value) : null,
+                'hospodarsky rok do' => $out['period_end'] = preg_match('/^\d{1,6}$/', $value) === 1 ? Ms3Table::dateFromDays((int) $value) : null,
+                'podvojne ucetnictvi' => $out['double_entry'] = self::flag($value),
+                'platce dph' => $out['vat_payer'] = self::flag($value),
+                default => null,
+            };
+        }
+        return $out;
+    }
+
+    /** Příznak z nastavení Money: Y/A/1 = ano, N/0 = ne, jiná hodnota = neznámo. */
+    private static function flag(string $value): ?bool
+    {
+        return match (strtoupper($value)) {
+            'Y', 'A', '1' => true,
+            'N', '0' => false,
+            default => null,
+        };
+    }
+
+    /**
      * Účetní roky v záloze: podadresáře ROK.001, ROK.002, …
      *
      * @return list<string>

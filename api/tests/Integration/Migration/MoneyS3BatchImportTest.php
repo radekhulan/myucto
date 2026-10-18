@@ -25,6 +25,7 @@ use MyInvoice\Service\Tax\Return\DppoReturnCalculator;
 use MyInvoice\Service\Tax\Return\DppoXmlBuilder;
 use MyInvoice\Service\Tax\TaxConstants;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
+use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticTaxAgenda;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -207,15 +208,40 @@ final class MoneyS3BatchImportTest extends TestCase
      * Agendu vedenou v Money jako daňová evidence převod nepřevede. Dávka ji proto odmítne
      * s vysvětlením dřív, než firmu založí - jinak by po ní zůstala prázdná firma.
      */
-    public function testTaxRecordsAgendaIsRefusedBeforeCompanyIsCreated(): void
+    /**
+     * Agendu vedenou v Money jako daňová evidence dávka převede do nové firmy v daňové
+     * evidenci: firmu do podvojného účetnictví nepřepne a deník nezaloží.
+     */
+    public function testTaxRecordsAgendaIsConvertedIntoTaxEvidenceCompany(): void
     {
         SyntheticAgenda::writeLzFiles($this->tmp . '/evidence.lz',
-            SyntheticAgenda::forCompany(SyntheticAgenda::filesWithTaxRecords(), self::ICO_A, 'Dávková evidence s.r.o.'));
+            SyntheticAgenda::forCompany(SyntheticTaxAgenda::files(), self::ICO_A, 'Dávková evidence s.r.o.'));
 
         $results = $this->runBatch(['evidence.lz'], $this->options(self::LIVE));
 
+        self::assertContains($results[0]['status'], [MigrationBatchRunner::COMPLETED, MigrationBatchRunner::COMPLETED_WITH_WARNINGS], json_encode($results[0], JSON_UNESCAPED_UNICODE) ?: '');
+        $supplier = $this->supplierRow(self::ICO_A);
+        self::assertSame('tax_evidence', $supplier['accounting_mode'] ?? null);
+        $supplierId = (int) $supplier['id'];
+        self::assertSame(0, $this->rows('journal_entries', $supplierId));
+        self::assertSame(0, $this->rows('supplier_accounting_modes', $supplierId, "accounting_mode = 'double_entry'"));
+        self::assertSame(2, $this->rows('invoices', $supplierId));
+    }
+
+    /**
+     * Agenda, která se v Money z podvojného účetnictví vrátila do daňové evidence: dávka by
+     * firmu založila a převod ji přepnul do podvojného i pro roky daňové evidence. Odmítne
+     * ji dřív, než firmu založí.
+     */
+    public function testAgendaReturnedToTaxRecordsIsRefusedBeforeCompanyIsCreated(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/navrat.lz',
+            SyntheticAgenda::forCompany(SyntheticTaxAgenda::filesReturnedToTaxRecords(), self::ICO_A, 'Dávkový návrat s.r.o.'));
+
+        $results = $this->runBatch(['navrat.lz'], $this->options(self::LIVE));
+
         self::assertSame(MigrationBatchRunner::FAILED, $results[0]['status'], json_encode($results[0], JSON_UNESCAPED_UNICODE) ?: '');
-        self::assertStringContainsString('daňovou evidenci', (string) $results[0]['error']);
+        self::assertStringContainsString('znovu daňovou evidenci', (string) $results[0]['error']);
         self::assertSame(0, $this->rows('supplier', null, "TRIM(LEADING '0' FROM ic) = '" . self::ICO_A . "'"));
     }
 

@@ -16,6 +16,10 @@ export interface MoneyS3YearInfo {
   /** Hranice období u firmy s hospodářským rokem; kalendářní firma je nedostává. */
   period_start?: string
   period_end?: string
+  /** Účetní rok, jak ho vede Money (`Rok.DAT`); null = záloha ho nenese. */
+  money_year: number | null
+  /** Režim roku v Money: podvojné účetnictví, nebo daňová evidence; null = rok bez dat i nastavení. */
+  accounting_mode: 'double_entry' | 'tax_evidence' | null
   journal_rows: number
   /** Živé řádky peněžního deníku daňové evidence. Pokud firma vede podvojné účetnictví, je hodnota nulová, protože peněžní deník se v něm nevede. */
   cashbook_rows: number
@@ -41,6 +45,8 @@ export interface MoneyS3Agenda {
   years: MoneyS3YearInfo[]
   partners: number
   warnings: { code: string; message: string }[]
+  /** Agenda vedená v Money celá jako daňová evidence (převod do daňové evidence firmy). */
+  tax_records?: boolean
 }
 
 export interface MoneyS3Message {
@@ -140,6 +146,20 @@ export interface MoneyS3ProtocolData {
   orphans?: { type: string; year: number; document_no: string; id: number }[]
   automation?: { during: string; restored: boolean; after: string | null }
   payroll_totals?: MoneyS3PayrollMonth[]
+  /** Rekonciliace převedené daňové evidence: peněžní deník MyÚčta proti Money po letech. */
+  tax_records_reconciliation?: MoneyS3TaxRecordsYear[]
+}
+
+/** Rok převedené daňové evidence: daňové příjmy a výdaje v MyÚčtu a v Money (Kč). */
+export interface MoneyS3TaxRecordsYear {
+  year: number
+  ok: boolean
+  money: { income_taxable: number; expense_taxable: number }
+  myucto: { income_taxable: number; expense_taxable: number; unclassified: number }
+  differences: number
+  missing: number
+  extra: number
+  non_cash: number
 }
 
 /** Měsíční kontrolní úhrny mezd celé firmy z mzdových dokladů Money (Kč). */

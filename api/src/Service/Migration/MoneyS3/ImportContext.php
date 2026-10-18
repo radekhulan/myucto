@@ -54,6 +54,26 @@ final class ImportContext
     /** @var array<string,true>|null "rok|zdroj|číslo dokladu" dokladů, které má deník Money (líně) */
     public ?array $journalDocuments = null;
 
+    /**
+     * Převod agendy vedené v Money jako daňová evidence ({@see TaxRecordsImporter}): bez
+     * deníku, osnovy a účetních období, firma zůstává v daňové evidenci.
+     */
+    public bool $taxRecords = false;
+
+    /** @var array<string,Ms3CashBook> adresář ROK.nnn => peněžní deník roku (jen převod daňové evidence) */
+    public array $cashBooks = [];
+
+    /**
+     * Doklady peněžního deníku převzaté do MyÚčta: 'bank'|'cash' => "adresář|číslo dokladu
+     * Money" ({@see Ms3CashBook::key()} bez zdroje) => id pohybu nebo pokladního dokladu.
+     *
+     * @var array{bank:array<string,int>,cash:array<string,int>}
+     */
+    public array $movements = ['bank' => [], 'cash' => []];
+
+    /** Zámek dokladů firmy (`locked_until`) — u daňové evidence hranice uzavřené historie. */
+    public ?string $lockedUntil = null;
+
     public ?int $runId = null;
 
     /** @var (callable(string,int,int):void)|null */
@@ -90,9 +110,15 @@ final class ImportContext
         return $this->dirYears[(string) ($row['__dir'] ?? '')] ?? null;
     }
 
-    /** Rok, jehož knihy už jsou v MyÚčtu uzavřené — doklady do něj už nepřibývají. */
+    /**
+     * Rok, jehož knihy už jsou v MyÚčtu uzavřené — doklady do něj už nepřibývají. Daňová
+     * evidence účetní období nemá: uzavřený je rok, který celý leží pod zámkem dokladů.
+     */
     public function isLocked(int $year): bool
     {
+        if ($this->taxRecords) {
+            return $this->lockedUntil !== null && sprintf('%04d-12-31', $year) <= $this->lockedUntil;
+        }
         return (bool) ($this->periods[$year]['locked'] ?? false);
     }
 }

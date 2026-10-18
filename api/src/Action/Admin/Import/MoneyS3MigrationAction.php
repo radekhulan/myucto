@@ -203,7 +203,10 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
         $agenda = MoneyS3Importer::companyAgenda((array) $meta['agenda'], (array) $meta['journal_preview']);
-        $years = array_map('intval', array_filter(array_column((array) ($agenda['years'] ?? []), 'fiscal_year')));
+        // Obratová předvaha je sestava podvojného účetnictví; daňovou evidenci rekonciliace
+        // porovnává s peněžním deníkem ze zálohy.
+        $years = array_map('intval', array_column(array_filter((array) ($agenda['years'] ?? []),
+            static fn (mixed $y): bool => is_array($y) && ($y['fiscal_year'] ?? null) !== null && ($y['accounting_mode'] ?? null) !== 'tax_evidence'), 'fiscal_year'));
         if (!in_array($year, $years, true)) {
             return Json::error($response, 'invalid_year', 'Rok sestavy musí být jeden z účetních roků zálohy.', 422);
         }

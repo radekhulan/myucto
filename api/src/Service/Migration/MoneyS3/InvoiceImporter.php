@@ -161,9 +161,18 @@ final class InvoiceImporter
                     $p->count(self::STEP_PURCHASE, 'self_assessed');
                 }
             }
-            $paidAt = self::date($r, ['Uhrazeno']);
+            // Daňová evidence: zaplaceno až podle navázaných úhrad z peněžního deníku
+            // ({@see TaxRecordsImporter::payments()}). Doklad označený zaplaceným bez vazby
+            // na pohyb by peněžní deník MyÚčta započetl jako virtuální výdaj podruhé.
+            $paidAt = $ctx->taxRecords ? null : self::date($r, ['Uhrazeno']);
             // Zálohovou fakturu Money neúčtuje — v MyÚčtu je přijatá, ne zaúčtovaná.
-            $unbooked = $review || $class['kind'] === 'advance';
+            // Daňová evidence doklady neúčtuje vůbec.
+            $unbooked = $review || $class['kind'] === 'advance' || $ctx->taxRecords;
+            // Konečná faktura s plnými sazbami a odečtenou zálohou (`SumZaloha`): zálohu
+            // zaplatil doklad zálohy, faktura ji má jako uhrazenou zálohu.
+            $advancePaid = $ctx->taxRecords && (float) ($r['SumZaloha'] ?? 0) < 0
+                && abs(round((float) ($r['CelkemSDPH'] ?? 0), 2) - $amounts['total']) < 0.005
+                ? min(round(-(float) $r['SumZaloha'], 2), $amounts['total']) : 0.0;
             // Odpočet, který Money přesunulo do pozdějšího období (§ 73), se uplatní ke dni
             // z Money — stejně jako ručně zadané datum přijetí dokladu.
             $claimDate = $claimShifts[$key] ?? null;
@@ -205,6 +214,7 @@ final class InvoiceImporter
                     noteAboveItems: mb_substr(trim((string) ($r['Popis'] ?? '')), 0, 255) ?: null,
                     noteBelowItems: self::note($docNo, $class['reasons'], $fx),
                     createdBy: $ctx->userId,
+                    advancePaidAmount: $advancePaid,
                     paymentVariableSymbol: mb_substr(trim((string) ($r['VarSymbol'] ?? '')), 0, 20) ?: null,
                     paymentMethod: self::paymentMethod((string) ($r['Uhrada'] ?? '')),
                     paidAt: $paidAt,
@@ -233,6 +243,9 @@ final class InvoiceImporter
                 );
             }
             $this->writer->insertPurchaseItems($id, $items);
+            if ($ctx->taxRecords) {
+                $this->applyTaxRecordsDeductibility($ctx, $id, $r, $docNo, $year);
+            }
             ForeignCurrencyTakeover::report($p, self::STEP_PURCHASE, $docNo, $fx);
             if ($claimDate !== null) {
                 $p->count(self::STEP_PURCHASE, 'claim_shifted');
@@ -323,8 +336,10 @@ final class InvoiceImporter
                 continue;
             }
             // Zálohovou fakturu Money neúčtuje — v MyÚčtu je vystavená, ne zaúčtovaná.
-            $unbooked = $review || $class['kind'] === 'proforma';
-            $paidAt = self::date($r, ['Uhrazeno']);
+            // Daňová evidence doklady neúčtuje vůbec.
+            $unbooked = $review || $class['kind'] === 'proforma' || $ctx->taxRecords;
+            // Daňová evidence: úhrady z peněžního deníku ({@see TaxRecordsImporter::payments()}).
+            $paidAt = $ctx->taxRecords ? null : self::date($r, ['Uhrazeno']);
             // Money vede úhradu jen jako datum (celá, nebo žádná) - částečná úhrada doklad neblokuje.
             $fx = $this->takeOverCurrency($ctx, $r, $amounts, null);
             try {
@@ -457,7 +472,7 @@ final class InvoiceImporter
                 'country' => trim((string) ($r['AdStat'] ?? '')),
             ];
             $clientId = $this->codebooks->resolvePartner($ctx, $snapshot);
-            $paidAt = self::date($r, ['UhDatum']);
+            $paidAt = $ctx->taxRecords ? null : self::date($r, ['UhDatum']);
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,
                 invoiceType: $total < 0 ? 'credit_note' : 'invoice',
@@ -481,8 +496,8 @@ final class InvoiceImporter
                 createdBy: $ctx->userId > 0 ? $ctx->userId : null,
                 paidTotal: $paidAt !== null ? $total : 0.0,
                 paidAt: $paidAt,
-                bookedAt: (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
-                bookedBy: $ctx->userId > 0 ? $ctx->userId : null,
+                bookedAt: $ctx->taxRecords ? null : (self::date($r, ['DatUcPr']) ?? $issue) . ' 00:00:00',
+                bookedBy: !$ctx->taxRecords && $ctx->userId > 0 ? $ctx->userId : null,
                 vatClassificationCode: $resolved['code'],
             ));
             foreach ($items as $i => $item) {
@@ -496,6 +511,35 @@ final class InvoiceImporter
             $ctx->otherReceivables[$year . '|' . $docNo] = $id;
             $clients[$clientId] = $clientId;
             $p->count(self::STEP_ISSUED, 'other_receivables');
+        }
+    }
+
+    /**
+     * Daňová uznatelnost přijatého dokladu v daňové evidenci podle předkontace daňové
+     * evidence Money (`PredKontac` → pohyb → sloupec peněžního deníku,
+     * {@see Ms3CashBook::ruleBucket()}). Doklad s nedaňovým výdajem (nedaňové výdaje,
+     * investiční majetek, osobní spotřeba) je daňově neuznatelný; doklad bez předkontace
+     * zůstává uznatelný jako jinde v MyÚčtu.
+     *
+     * @param array<string,mixed> $r
+     */
+    private function applyTaxRecordsDeductibility(ImportContext $ctx, int $id, array $r, string $docNo, int $year): void
+    {
+        $rule = trim((string) ($r['PredKontac'] ?? ''));
+        $book = $ctx->cashBooks[(string) ($r['__dir'] ?? '')] ?? null;
+        if ($rule === '' || $book === null) {
+            return;
+        }
+        $bucket = $book->ruleBucket($rule);
+        if ($bucket === null) {
+            $ctx->protocol->warn(self::STEP_PURCHASE, 'tax_records_rule_unknown', "Faktura {$docNo} ({$year}): předkontaci daňové evidence „{$rule}“ převod nezná, "
+                . 'doklad zůstává daňově uznatelný, zkontrolujte ho.', ['document_no' => $docNo, 'year' => $year]);
+            return;
+        }
+        if (!in_array($bucket, ['expense_taxable', Ms3CashBook::VAT], true)) {
+            $this->db->pdo()->prepare('UPDATE purchase_invoices SET tax_deductible = 0 WHERE id = ? AND supplier_id = ?')
+                ->execute([$id, $ctx->supplierId]);
+            $ctx->protocol->count(self::STEP_PURCHASE, 'tax_non_deductible');
         }
     }
 

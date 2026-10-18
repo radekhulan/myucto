@@ -255,10 +255,11 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
 
     /**
      * Agenda vedená v Money jako daňová evidence má místo účetního deníku peněžní deník.
-     * Kontrola před převodem to musí říct, ne jen „záloha neobsahuje účetní deník" - uživatel
-     * jinak hledá chybu v záloze. Platí i pro náhled z meta.json.
+     * Kontrola před převodem ji nehlásí jako „záloha neobsahuje účetní deník" (uživatel by
+     * hledal chybu v záloze), ale projde peněžní deník: deník, jehož řádky nevedou na doklady
+     * banky a pokladny, převod zastaví s vysvětlením. Platí i pro náhled z meta.json.
      */
-    public function testTaxRecordsAgendaIsRejectedWithExplanation(): void
+    public function testTaxRecordsAgendaIsCheckedNotRejectedAsMissingJournal(): void
     {
         $supplierId = $this->supplier();
         SyntheticAgenda::writeLzFiles($this->tmp . '/evidence.lz', SyntheticAgenda::filesWithTaxRecords());
@@ -271,11 +272,13 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
                 new ImportOptions(), $roundTrip($this->importer->journalPreview($backup))),
         ] as $source => $preflight) {
             $byCode = array_column($preflight, null, 'code');
-            self::assertSame('error', $byCode['tax_records_not_supported']['level'] ?? null, $source . ': ' . (json_encode($preflight, JSON_UNESCAPED_UNICODE) ?: ''));
-            self::assertStringContainsString('daňovou evidenci', $byCode['tax_records_not_supported']['message']);
+            $dump = $source . ': ' . (json_encode($preflight, JSON_UNESCAPED_UNICODE) ?: '');
+            self::assertSame('error', $byCode['cashbook_orphan']['level'] ?? null, $dump);
+            self::assertStringContainsString('peněžní deník', $byCode['cashbook_orphan']['message']);
+            self::assertSame('info', $byCode['tax_evidence_kept']['level'] ?? null, $dump);
             self::assertArrayNotHasKey('no_journal', $byCode, $source);
             self::assertArrayNotHasKey('empty_year', $byCode, $source);
-            self::assertSame('warning', $byCode['tax_records_year']['level'] ?? null, $source);
+            self::assertArrayNotHasKey('switch_to_double_entry', $byCode, $source);
         }
 
         // Agenda bez účetního i peněžního deníku dál hlásí obecnou chybu.
@@ -285,7 +288,7 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         $empty = Ms3Backup::extract($this->tmp . '/empty.lz', $this->tmp . '/empty');
         $codes = array_column($this->importer->preflight($supplierId, $empty, AgendaInfo::fromBackup($empty), new ImportOptions()), 'code');
         self::assertContains('no_journal', $codes);
-        self::assertNotContains('tax_records_not_supported', $codes);
+        self::assertNotContains('tax_evidence_kept', $codes);
     }
 
     /**
