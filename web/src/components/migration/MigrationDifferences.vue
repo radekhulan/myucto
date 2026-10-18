@@ -28,7 +28,7 @@ const items = computed(() => props.differences.map((d, i) => ({ ...d, key: `${d.
     <h3 class="font-semibold">{{ t(k('differences.title'), { count: differences.length }) }}</h3>
     <p class="mt-1">{{ t(k('differences.hint')) }}</p>
     <ul class="mt-3 max-h-72 space-y-1 overflow-y-auto">
-      <li v-for="d in items" :key="d.key" class="rounded border border-warning-500/20 bg-surface px-3 py-2 text-neutral-700">
+      <li v-for="d in items" :key="d.key" class="rounded border border-warning-500/20 bg-surface px-3 py-2 whitespace-pre-line text-neutral-700">
         <span class="font-medium">{{ d.stepLabel }}:</span> {{ d.text }}
       </li>
     </ul>

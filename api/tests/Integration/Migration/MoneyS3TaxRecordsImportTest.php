@@ -188,13 +188,42 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
         self::assertTrue($refused->hasErrors(), $this->explain($refused));
         self::assertTrue($refused->acceptableOnly(), $this->explain($refused));
         $messages = array_column(array_column($refused->toArray()['steps'], null, 'key')['tax_records_reconciliation']['messages'], null, 'code');
-        self::assertSame([['documents' => 'PV25003', 'money_amount' => 0.0, 'myucto_amount' => 0.0, 'money_taxable' => 420.0, 'myucto_taxable' => 0.0]],
-            $messages['tax_records_difference']['context']['differences']);
+        self::assertSame([['document' => 'přijatá faktura FP25002', 'documents' => 'PV25003', 'cause' => 'zero_document', 'money_amount' => 0.0,
+            'myucto_amount' => 0.0, 'money_taxable' => 420.0, 'myucto_taxable' => 0.0]], $messages['tax_records_difference']['context']['differences']);
+        self::assertSame("Rok 2025: 1 doklad má v peněžním deníku MyÚčta jinou částku nebo daňovou část úhrad než v Money:\n"
+            . '– přijatá faktura FP25002, nulový doklad PV25003 z 20. 2. 2025. Money: daňový výdaj -420,00 Kč (VP_106), DPH 420,00 Kč (VP_DPH). '
+            . 'MyÚčto: bez pohybu. Nulový doklad PV25003 v Money přeúčtoval 420,00 Kč z daňového výdaje do DPH (typicky DPH zálohy při vyúčtování '
+            . 'faktury), MyÚčto nulové doklady nepřebírá. Daňový výdaj je v MyÚčtu o 420,00 Kč vyšší.', $messages['tax_records_difference']['text']);
 
         $accepted = $this->importer->run($supplierId, $this->userId, $this->taxBackup($files),
             new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, null, ImportOptions::DISPOSAL_YEAR_TAX_HALF, true));
         self::assertFalse($accepted->hasErrors(), $this->explain($accepted));
         self::assertSame('completed_with_warnings', $accepted->status());
+    }
+
+    /**
+     * Úhrady, které Money rozdělil na základ a DPH jinak než MyÚčto, hláška rozepíše po
+     * dokladech: uhrazený doklad, číslo a datum pohybu, rozdělení v Money s kódem pohybu,
+     * rozdělení v MyÚčtu a příčinu. Zbytek platby nad fakturu, který MyÚčto nezařadí, se
+     * hlásí jednou, u nezařazených pohybů, ne ještě jako rozdíl dokladu a součtu roku.
+     */
+    public function testPaymentSplitDifferencesAreItemized(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->taxBackup(SyntheticTaxAgenda::filesWithPaymentSplitDifferences()),
+            new ImportOptions(ImportOptions::MODE_DRY_RUN));
+        self::assertTrue($protocol->acceptableOnly(), $this->explain($protocol));
+        $messages = array_column(array_column($protocol->toArray()['steps'], null, 'key')['tax_records_reconciliation']['messages'], null, 'code');
+        self::assertSame(['tax_records_unclassified', 'tax_records_difference'], array_keys($messages), $this->explain($protocol));
+        self::assertSame("Rok 2025: peněžní deník MyÚčta má nezařazené pohyby za 0,60 Kč, které nevstoupí do daňového základu:\n"
+            . '– BP25002 z 20. 6. 2025 (příjem 775,00 Kč): navázané doklady (vydaná faktura FV25002) pokrývají jen 774,40 Kč, zbytek 0,60 Kč '
+            . 'zůstane nezařazený (zařazení v peněžním deníku platí pro celý pohyb). Money zbytek vede jako daňový příjem 0,60 Kč (PP_504).',
+            $messages['tax_records_unclassified']['text']);
+        self::assertSame("Rok 2025: 1 doklad má v peněžním deníku MyÚčta jinou částku nebo daňovou část úhrad než v Money:\n"
+            . '– přijatá faktura FP25005, úhrada BV25003 z 12. 5. 2025 (1 210,00 Kč). Money: DPH 1 210,00 Kč (VP_DPH). '
+            . 'MyÚčto: daňový výdaj 1 000,00 Kč, DPH a nedaňové 210,00 Kč. Money vede celou úhradu jako DPH, MyÚčto ji rozdělí na základ '
+            . 'a DPH poměrem DPH dokladu. Daňový výdaj je v MyÚčtu o 1 000,00 Kč vyšší.', $messages['tax_records_difference']['text']);
+        self::assertSame('vat_only', $messages['tax_records_difference']['context']['differences'][0]['cause']);
     }
 
     /** Zkouška nanečisto projde stejnými kroky a v databázi nic nenechá. */

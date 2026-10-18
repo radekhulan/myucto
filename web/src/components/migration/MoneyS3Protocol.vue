@@ -145,7 +145,7 @@ function levelClass(level: string): string {
     <section v-if="messages.length">
       <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.messages')) }}</h4>
       <ul class="space-y-2">
-        <li v-for="(m, i) in messages" :key="i" class="rounded-lg border px-3 py-2 text-sm" :class="levelClass(m.level)">
+        <li v-for="(m, i) in messages" :key="i" class="rounded-lg border px-3 py-2 text-sm whitespace-pre-line" :class="levelClass(m.level)">
           <span class="font-medium">{{ label('level', m.acceptable ? 'difference' : m.level) }} · {{ label('steps', m.step) }}:</span> {{ m.text }}
         </li>
       </ul>

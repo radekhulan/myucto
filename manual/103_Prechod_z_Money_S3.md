@@ -732,6 +732,11 @@ vznikají typicky tam, kde Money:
   nezařazené,
 - vedl nepeněžní pohyb (zápočet) s daňovým příjmem nebo výdajem.
 
+Hláška rozdílu vypíše každý doklad zvlášť: uhrazený doklad, číslo a datum
+pohybu, rozdělení úhrady v Money s kódem pohybu peněžního deníku (podle něj
+pohyb v Money dohledáte), rozdělení v MyÚčtu, pravděpodobnou příčinu a o kolik
+je daňový příjem nebo výdaj v MyÚčtu vyšší nebo nižší.
+
 Zápočet ostatní pohledávky proti ostatnímu závazku daňová evidence MyÚčta
 nemá: doklady zůstanou neuhrazené a převod to ohlásí.
 

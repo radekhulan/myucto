@@ -341,6 +341,41 @@ final class SyntheticTaxAgenda
     }
 
     /**
+     * Agenda s úhradami, které Money rozdělil na základ a DPH jinak než MyÚčto: přijatou
+     * fakturu FP25005 (1 000 Kč + DPH 210 Kč) vede Money uhrazenou celou jako DPH a vydanou
+     * fakturu FV25002 (640 Kč + DPH 134,40 Kč) odběratel zaplatil zaokrouhleně 775 Kč;
+     * zbytek 0,60 Kč vede Money jako daňový příjem bez vazby na fakturu.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPaymentSplitDifferences(): array
+    {
+        $like = static fn (array $rows, string $doc): array => array_values(array_filter($rows, static fn (array $r): bool => $r['Doklad'] === $doc))[0];
+        $files = self::with(self::files(), 'ROK.001/VFaktury.DAT', self::ISSUED_FIELDS, static fn (array $rows): array => [...$rows,
+            ['Cislo' => 2, 'Doklad' => 'FV25002', 'VarSymbol' => '2025002', 'Zaklad_2' => 640.0, 'DPH_2' => 134.4, 'CelkemSDPH' => 774.4,
+                'Proplatit' => 0.0, 'Uhrazeno' => '2025-06-20', 'UDoklad' => 'BP25002'] + $like($rows, 'FV25001')]);
+        $files = self::with($files, 'ROK.001/PFaktury.DAT', self::PURCHASE_FIELDS, static fn (array $rows): array => [...$rows,
+            ['Cislo' => 5, 'Doklad' => 'FP25005', 'PrijatDokl' => 'DF-2025-030', 'VarSymbol' => '2025030', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-05-12', 'UDoklad' => 'BV25003', 'Popis' => 'Servis', 'PredKontac' => 'V106'] + $like($rows, 'FP25003')]);
+        $files = self::with($files, 'ROK.001/BankKnih.DAT', self::BANK_FIELDS, static fn (array $rows): array => [...$rows,
+            ['Cislo' => 4, 'Doklad' => 'BV25003', 'Ucet' => 'BAN', 'Vydej' => 1, 'DatUcPr' => '2025-05-12', 'DatPlat' => '2025-05-12', 'Celkem' => 1210.0,
+                'VarSym' => '2025030', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP25005', 'Vypis' => 5, 'PrKont' => 'V106'],
+            ['Cislo' => 5, 'Doklad' => 'BP25002', 'Ucet' => 'BAN', 'Vydej' => 0, 'DatUcPr' => '2025-06-20', 'DatPlat' => '2025-06-20', 'Celkem' => 775.0,
+                'VarSym' => '2025002', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV25002', 'Vypis' => 6, 'PrKont' => 'P504'],
+        ]);
+        $row = static fn (int $id, string $date, int $number, string $doc, string $type, string $movement, float $amount, ?array $link): array => [
+            'Cislo' => $id, 'Datum' => $date, 'Zdroj' => 'BK', 'ZRadek' => $number, 'Doklad' => $doc, 'Typ' => $type, 'Pohyb' => $movement,
+            'Castka' => $amount, 'UZdroj' => $link[0] ?? '', 'URadek' => $link[1] ?? 0, 'Mena' => 'Kč', 'Kurz' => 1.0,
+        ];
+        return self::with($files, 'ROK.001/UcPenDen.DAT', self::CASHBOOK_FIELDS, static fn (array $rows): array => [...$rows,
+            $row(90, '2025-05-12', 4, 'BV25003', 'V', 'VP_DPH', 1210.0, ['FP', 5]),
+            $row(91, '2025-06-20', 5, 'BP25002', 'P', 'PP_504', 640.0, ['FV', 2]),
+            $row(92, '2025-06-20', 5, 'BP25002', 'P', 'PP_DPH', 134.4, ['FV', 2]),
+            $row(93, '2025-06-20', 5, 'BP25002', 'P', 'PP_504', 0.6, null),
+        ]);
+    }
+
+    /**
      * Řádky tabulky ze souborů agendy (všechna pole, jak je přečte převod).
      *
      * @param array<string,string> $files

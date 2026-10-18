@@ -520,12 +520,11 @@ final class TaxRecordsImporter
     private function document(ImportContext $ctx, string $table, string $dir, int $number): ?array
     {
         $year = $ctx->dirYears[$dir] ?? null;
-        $name = Ms3CashBook::LINK_TABLES[$table] ?? null;
-        if ($year === null || $name === null || $table === 'KZ') {
+        if ($year === null || $table === 'KZ') {
             return null;
         }
-        $docNo = trim((string) ($this->rows($ctx, $dir, $name, ['Cislo', 'Doklad'])[$number]['Doklad'] ?? ''));
-        if ($docNo === '') {
+        $docNo = $this->linkedDocumentNo($ctx, ['table' => $table, 'dir' => $dir, 'number' => $number]);
+        if ($docNo === null) {
             return null;
         }
         $id = match ($table) {
@@ -534,6 +533,19 @@ final class TaxRecordsImporter
             'KP' => $ctx->otherReceivables[$year . '|' . $docNo] ?? null,
         };
         return $id === null ? null : [$table === 'FP' ? 'purchase' : 'issued', (int) $id, $docNo];
+    }
+
+    /**
+     * Číslo dokladu Money, na který vede vazba peněžního deníku: vydaná a přijatá faktura,
+     * ostatní závazek a pohledávka. Null = doklad v záloze není.
+     *
+     * @param array{table:string,dir:string,number:int} $link
+     */
+    public function linkedDocumentNo(ImportContext $ctx, array $link): ?string
+    {
+        $name = Ms3CashBook::LINK_TABLES[$link['table']] ?? null;
+        $docNo = $name !== null ? trim((string) ($this->rows($ctx, $link['dir'], $name, ['Cislo', 'Doklad'])[$link['number']]['Doklad'] ?? '')) : '';
+        return $docNo !== '' ? $docNo : null;
     }
 
     /**
