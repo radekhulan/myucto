@@ -517,7 +517,7 @@ final class TaxRecordsImporter
      *
      * @return array{0:string,1:int,2:string}|null
      */
-    private function document(ImportContext $ctx, string $table, string $dir, int $number): ?array
+    public function document(ImportContext $ctx, string $table, string $dir, int $number): ?array
     {
         $year = $ctx->dirYears[$dir] ?? null;
         if ($year === null || $table === 'KZ') {

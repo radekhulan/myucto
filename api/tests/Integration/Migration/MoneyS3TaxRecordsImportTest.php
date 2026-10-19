@@ -188,12 +188,14 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
         self::assertTrue($refused->hasErrors(), $this->explain($refused));
         self::assertTrue($refused->acceptableOnly(), $this->explain($refused));
         $messages = array_column(array_column($refused->toArray()['steps'], null, 'key')['tax_records_reconciliation']['messages'], null, 'code');
-        self::assertSame([['document' => 'přijatá faktura FP25002', 'documents' => 'PV25003', 'cause' => 'zero_document', 'money_amount' => 0.0,
-            'myucto_amount' => 0.0, 'money_taxable' => 420.0, 'myucto_taxable' => 0.0]], $messages['tax_records_difference']['context']['differences']);
+        self::assertSame([['document' => 'přijatá faktura FP25002', 'documents' => 'PV25003', 'cause' => 'zero_document',
+            'settlements' => ['odečtená záloha 2 420,00 Kč'], 'money_amount' => 0.0, 'myucto_amount' => 0.0, 'money_taxable' => 420.0, 'myucto_taxable' => 0.0,
+            'expected_taxable' => null, 'verdict' => null]], $messages['tax_records_difference']['context']['differences']);
         self::assertSame("Rok 2025: 1 doklad má v peněžním deníku MyÚčta jinou částku nebo daňovou část úhrad než v Money:\n"
-            . '– přijatá faktura FP25002, nulový doklad PV25003 z 20. 2. 2025. Money: daňový výdaj -420,00 Kč (VP_106), DPH 420,00 Kč (VP_DPH). '
-            . 'MyÚčto: bez pohybu. Nulový doklad PV25003 v Money přeúčtoval 420,00 Kč z daňového výdaje do DPH (typicky DPH zálohy při vyúčtování '
-            . 'faktury), MyÚčto nulové doklady nepřebírá. Daňový výdaj je v MyÚčtu o 420,00 Kč vyšší.', $messages['tax_records_difference']['text']);
+            . '– přijatá faktura FP25002 (základ 2 000,00 Kč + DPH 420,00 Kč = 2 420,00 Kč), odečtená záloha 2 420,00 Kč, nulový doklad PV25003 z 20. 2. 2025. '
+            . 'Money: daňový výdaj -420,00 Kč (VP_106) + DPH 420,00 Kč (VP_DPH). MyÚčto: bez pohybu. Nulový doklad PV25003 v Money přeúčtoval '
+            . '420,00 Kč z daňového výdaje do DPH (typicky DPH zálohy při vyúčtování faktury), MyÚčto nulové doklady nepřebírá. '
+            . 'Daňový výdaj je v MyÚčtu o 420,00 Kč vyšší.', $messages['tax_records_difference']['text']);
 
         $accepted = $this->importer->run($supplierId, $this->userId, $this->taxBackup($files),
             new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, null, ImportOptions::DISPOSAL_YEAR_TAX_HALF, true));
@@ -203,9 +205,10 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
 
     /**
      * Úhrady, které Money rozdělil na základ a DPH jinak než MyÚčto, hláška rozepíše po
-     * dokladech: uhrazený doklad, číslo a datum pohybu, rozdělení v Money s kódem pohybu,
-     * rozdělení v MyÚčtu a příčinu. Zbytek platby nad fakturu, který MyÚčto nezařadí, se
-     * hlásí jednou, u nezařazených pohybů, ne ještě jako rozdíl dokladu a součtu roku.
+     * dokladech: uhrazený doklad s částkou a DPH, zápočet dobropisu, číslo a datum pohybu,
+     * rozdělení v Money s kódem pohybu, v MyÚčtu a podle dokladu (po zápočtu) a které z nich
+     * dokladu odpovídá. Zbytek platby nad fakturu, který MyÚčto nezařadí, se hlásí jednou,
+     * u nezařazených pohybů, ne ještě jako rozdíl dokladu a součtu roku.
      */
     public function testPaymentSplitDifferencesAreItemized(): void
     {
@@ -219,11 +222,18 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
             . '– BP25002 z 20. 6. 2025 (příjem 775,00 Kč): navázané doklady (vydaná faktura FV25002) pokrývají jen 774,40 Kč, zbytek 0,60 Kč '
             . 'zůstane nezařazený (zařazení v peněžním deníku platí pro celý pohyb). Money zbytek vede jako daňový příjem 0,60 Kč (PP_504).',
             $messages['tax_records_unclassified']['text']);
-        self::assertSame("Rok 2025: 1 doklad má v peněžním deníku MyÚčta jinou částku nebo daňovou část úhrad než v Money:\n"
-            . '– přijatá faktura FP25005, úhrada BV25003 z 12. 5. 2025 (1 210,00 Kč). Money: DPH 1 210,00 Kč (VP_DPH). '
-            . 'MyÚčto: daňový výdaj 1 000,00 Kč, DPH a nedaňové 210,00 Kč. Money vede celou úhradu jako DPH, MyÚčto ji rozdělí na základ '
-            . 'a DPH poměrem DPH dokladu. Daňový výdaj je v MyÚčtu o 1 000,00 Kč vyšší.', $messages['tax_records_difference']['text']);
-        self::assertSame('vat_only', $messages['tax_records_difference']['context']['differences'][0]['cause']);
+        self::assertSame("Rok 2025: 2 doklady mají v peněžním deníku MyÚčta jinou částku nebo daňovou část úhrad než v Money:\n"
+            . '– přijatá faktura FP25005 (základ 1 000,00 Kč + DPH 210,00 Kč = 1 210,00 Kč), úhrada BV25003 z 12. 5. 2025 (1 210,00 Kč). '
+            . 'Money: daňový výdaj 0,00 Kč + DPH 1 210,00 Kč (VP_DPH). MyÚčto: daňový výdaj 1 000,00 Kč + DPH 210,00 Kč. '
+            . 'Podle dokladu: daňový výdaj 1 000,00 Kč + DPH 210,00 Kč. Daňový výdaj je v MyÚčtu o 1 000,00 Kč vyšší. '
+            . "Rozdělení v MyÚčtu odpovídá dokladu, v Money ne, oprava není potřeba.\n"
+            . '– přijatá faktura FP25006 (základ 1 000,00 Kč + DPH 210,00 Kč = 1 210,00 Kč), zápočet s dobropisem FP25007 z 10. 3. 2025 (500,00 Kč), '
+            . 'úhrada BV25004 z 10. 7. 2025 (710,00 Kč). Money: daňový výdaj 500,00 Kč (VP_106) + DPH 210,00 Kč (VP_DPH). '
+            . 'MyÚčto: daňový výdaj 586,78 Kč + DPH 123,22 Kč. Podle dokladu po zápočtu: daňový výdaj 500,00 Kč + DPH 210,00 Kč. '
+            . 'Daňový výdaj je v MyÚčtu o 86,78 Kč vyšší. Rozdělení v Money odpovídá dokladu, v MyÚčtu ne (MyÚčto dělí úhradu poměrem DPH celého dokladu).',
+            $messages['tax_records_difference']['text']);
+        self::assertSame([['vat_only', 'myucto', -1000.0], ['vat_split', 'money', -500.0]], array_map(
+            static fn (array $d): array => [$d['cause'], $d['verdict'], $d['expected_taxable']], $messages['tax_records_difference']['context']['differences']));
     }
 
     /** Zkouška nanečisto projde stejnými kroky a v databázi nic nenechá. */

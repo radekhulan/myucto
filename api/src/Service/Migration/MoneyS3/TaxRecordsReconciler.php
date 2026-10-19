@@ -4,7 +4,12 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\MoneyS3;
 
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\CreditNoteOffsetService;
+use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
+use MyInvoice\Service\Vat\VatStatusService;
+use PDO;
 
 /**
  * Rekonciliace převedené daňové evidence: peněžní deník, který MyÚčto spočítá z převzatých
@@ -18,9 +23,12 @@ use MyInvoice\Service\TaxEvidence\CashJournalService;
  *   - jiná daňová část úhrad dokladu, chybějící pohyb, nezařazený pohyb (`nezarazeno`)
  *     nebo nepeněžní pohyb Money (zápočet) s daňovou částí — rozdíl k přijetí.
  *
- * Hláška vypíše každý doklad zvlášť: číslo a datum pohybu, uhrazený doklad, rozdělení úhrady
- * v Money (s kódem pohybu peněžního deníku, podle kterého se dá v Money dohledat) a v MyÚčtu
- * a nejpravděpodobnější příčinu.
+ * Hláška vypíše každý doklad zvlášť: uhrazený doklad s částkou a DPH, jeho vyrovnání bez
+ * peněz (zápočet dobropisu, odečtená záloha), číslo a datum pohybu, rozdělení úhrady v Money
+ * (s kódem pohybu peněžního deníku, podle kterého se dá v Money dohledat) a v MyÚčtu,
+ * nejpravděpodobnější příčinu a dopad na daňový základ. U běžného dokladu navíc spočítá,
+ * kolik z úhrady připadá podle dokladu na daňovou část a DPH, a řekne, které rozdělení
+ * tomu odpovídá.
  */
 final class TaxRecordsReconciler
 {
@@ -28,6 +36,15 @@ final class TaxRecordsReconciler
 
     /** Haléřová tolerance (zaokrouhlení poměrného rozdělení DPH). */
     private const TOLERANCE = 0.01;
+
+    /**
+     * Odchylka daňové části úhrady od rozdělení podle dokladu, kterou hláška bere jako
+     * zaokrouhlení (poměrné rozdělení, haléřové vyrovnání dokladu).
+     */
+    private const SPLIT_TOLERANCE = 1.0;
+
+    /** Druhy dokladů, u kterých rozdělení úhrady podle dokladu dává smysl (ne záloha ani daňový doklad k platbě). */
+    private const SPLIT_KINDS = ['invoice', 'receipt', 'credit_note'];
 
     /** Kolik položek vypíše text hlášky; kontext jich nese až {@see ImportProtocol::LIST_LIMIT}. */
     private const EXAMPLES = 20;
@@ -45,6 +62,9 @@ final class TaxRecordsReconciler
     public function __construct(
         private readonly CashJournalService $cashJournal,
         private readonly TaxRecordsImporter $taxRecords,
+        private readonly CreditNoteOffsetService $creditNotes,
+        private readonly VatStatusService $vatStatus,
+        private readonly Connection $db,
     ) {}
 
     public function run(ImportContext $ctx): void
@@ -243,8 +263,11 @@ final class TaxRecordsReconciler
     }
 
     /**
-     * Položka rozdílu za uhrazený doklad: doklad, pohyby, rozdělení úhrad v Money a v MyÚčtu
-     * a nejpravděpodobnější příčina. Částky jsou ve směru dokladu (u výdaje kladně výdaj).
+     * Položka rozdílu za uhrazený doklad. Skládá se z částí, které se vypíšou, jen když pro
+     * ně jsou údaje: doklad s částkou a DPH, jeho vyrovnání bez peněz (zápočet dobropisu,
+     * odečtená záloha), pohyby, rozdělení úhrad v Money a v MyÚčtu, nejpravděpodobnější
+     * příčina a dopad na daňový základ. U běžného dokladu navíc rozdělení úhrad podle dokladu
+     * a které z obou rozdělení mu odpovídá. Částky jsou ve směru dokladu (u výdaje kladně výdaj).
      *
      * @param array<string,mixed> $g skupina pohybů dokladu z {@see run()}
      * @return array{text:string,context:array<string,mixed>}
@@ -253,6 +276,7 @@ final class TaxRecordsReconciler
     {
         $sign = $income ? 1 : -1;
         $tax = $income ? 'daňový příjem' : 'daňový výdaj';
+        $document = $this->documentFacts($ctx, $g['link']);
         $paid = [];
         $zero = [];
         foreach ($g['movements'] as $m) {
@@ -262,16 +286,8 @@ final class TaxRecordsReconciler
                 $paid[] = $m['document_no'] . ' z ' . self::date($m['date']) . ' (' . self::money($sign * $m['amount']) . ' Kč)';
             }
         }
-        $movements = implode(', ', [...($paid !== [] ? [(count($paid) > 1 ? 'úhrady ' : 'úhrada ') . implode(', ', $paid)] : []), ...$zero]);
-
-        if ($g['myucto_rows'] === 0) {
-            $myucto = 'bez pohybu';
-        } else {
-            $rest = round($g['myucto_amount'] - $g['myucto_taxable'] - $g['myucto_unclassified'], 2);
-            $myucto = $tax . ' ' . self::money($sign * $g['myucto_taxable']) . ' Kč'
-                . (abs($rest) >= self::TOLERANCE ? ', DPH a nedaňové ' . self::money($sign * $rest) . ' Kč' : '')
-                . (abs($g['myucto_unclassified']) >= self::TOLERANCE ? ', nezařazeno ' . self::money($sign * $g['myucto_unclassified']) . ' Kč' : '');
-        }
+        $movements = implode(', ', [...($document['settlements'] ?? []),
+            ...($paid !== [] ? [(count($paid) > 1 ? 'úhrady ' : 'úhrada ') . implode(', ', $paid)] : []), ...$zero]);
 
         $moneyVat = 0.0;
         foreach ($g['money_parts'] as $partKey => $amount) {
@@ -280,6 +296,21 @@ final class TaxRecordsReconciler
             }
         }
         $moneyVat = round($moneyVat, 2);
+
+        // Rozdělení úhrad ve stejném tvaru pro Money, MyÚčto i doklad: daňová část + DPH.
+        // Zbytek řádku MyÚčta je u daňového dokladu s DPH právě DPH (poměr DPH dokladu).
+        $vatDocument = $document !== null && $document['deductible'] && $document['vat'] >= self::TOLERANCE;
+        $money = self::split($g['money_parts'], $sign, $tax, $vatDocument || abs($moneyVat) >= self::TOLERANCE);
+        if ($g['myucto_rows'] === 0) {
+            $myucto = 'bez pohybu';
+        } else {
+            $rest = round($g['myucto_amount'] - $g['myucto_taxable'] - $g['myucto_unclassified'], 2);
+            $myucto = $tax . ' ' . self::money($sign * $g['myucto_taxable']) . ' Kč'
+                . ($vatDocument || abs($rest) >= self::TOLERANCE
+                    ? ' + ' . ($vatDocument ? 'DPH' : ($income ? 'nedaňový příjem' : 'nedaňový výdaj')) . ' ' . self::money($sign * $rest) . ' Kč' : '')
+                . (abs($g['myucto_unclassified']) >= self::TOLERANCE ? ' + nezařazeno ' . self::money($sign * $g['myucto_unclassified']) . ' Kč' : '');
+        }
+
         $whole = static fn (float $a, float $b): bool => abs($a - $b) < self::TOLERANCE;
         $taxGenitive = $income ? 'daňového příjmu' : 'daňového výdaje';
         [$cause, $reason] = match (true) {
@@ -290,27 +321,161 @@ final class TaxRecordsReconciler
             abs($amountDiff) >= self::TOLERANCE => ['amount', sprintf('Pohyby jsou v MyÚčtu o %s Kč %s než v Money.',
                 self::money(abs($amountDiff)), $sign * $amountDiff > 0 ? 'vyšší' : 'nižší')],
             $whole($g['money_taxable'], 0.0) && $whole($moneyVat, $g['money_amount']) => ['vat_only',
-                'Money vede celou úhradu jako DPH, MyÚčto ji rozdělí na základ a DPH poměrem DPH dokladu.'],
+                'Money zapsal celou úhradu do DPH, MyÚčto ji rozdělí na daňovou část a DPH poměrem DPH dokladu.'],
             $whole($g['money_taxable'], 0.0) => ['money_not_taxable',
-                'Money úhradu do daňového základu nezahrnul, MyÚčto ano (podle dokladu).'],
+                'Money úhradu do daňové části nezahrnul, MyÚčto ano (podle dokladu).'],
             $whole($g['myucto_taxable'], 0.0) => ['myucto_not_taxable',
-                'MyÚčto úhradu do daňového základu nezahrnulo (doklad je v MyÚčtu nedaňový nebo záloha), Money ano.'],
+                'MyÚčto úhradu do daňové části nezahrnulo (doklad je v MyÚčtu nedaňový nebo záloha), Money ano.'],
             $whole($g['money_taxable'], $g['money_amount']) => ['money_without_vat',
-                'Money vede celou úhradu jako daňovou bez DPH, MyÚčto z ní oddělí DPH poměrem DPH dokladu.'],
-            default => ['vat_split', 'Money rozdělil úhradu na základ a DPH jinak, než ji MyÚčto rozdělí poměrem DPH dokladu.'],
+                'Money zapsal celou úhradu do daňové části bez DPH, MyÚčto z ní oddělí DPH poměrem DPH dokladu.'],
+            default => ['vat_split', 'Money rozdělil úhradu na daňovou část a DPH jinak, než ji MyÚčto rozdělí poměrem DPH dokladu.'],
         };
-        if (abs($taxableDiff) >= self::TOLERANCE) {
-            $reason .= sprintf(' %s je v MyÚčtu o %s Kč %s.', ucfirst($tax), self::money(abs($taxableDiff)), $sign * $taxableDiff > 0 ? 'vyšší' : 'nižší');
+
+        // Rozdělení podle dokladu jen tam, kde ho jde spočítat: úhrady sedí v obou denících,
+        // nic nepřeúčtoval nulový doklad a úhrada nepřevyšuje zbytek dokladu. Pak už příčina,
+        // která jen popisuje rozdělení, nic nepřidá.
+        $expected = null;
+        $verdict = null;
+        $byDocument = '';
+        $remaining = $document['remaining'] ?? null;
+        if ($remaining !== null && abs($g['reclass']) < self::TOLERANCE && abs($amountDiff) < self::TOLERANCE
+            && abs($g['myucto_unclassified']) < self::TOLERANCE && $remaining[0] >= self::TOLERANCE
+            && abs($g['money_amount']) >= self::TOLERANCE && abs($g['money_amount']) <= $remaining[0] + self::SPLIT_TOLERANCE) {
+            $date = $g['movements'][0]['date'] ?? null;
+            $payer = $date === null || $this->vatStatus->isVatPayerAt($ctx->supplierId, (string) $date);
+            $expected = round($g['money_amount'] * ($payer ? ($remaining[0] - $remaining[1]) / $remaining[0] : 1.0), 2);
+            $myuctoFits = abs($g['myucto_taxable'] - $expected) <= self::SPLIT_TOLERANCE;
+            $moneyFits = abs($g['money_taxable'] - $expected) <= self::SPLIT_TOLERANCE;
+            $verdict = match (true) {
+                $myuctoFits && $moneyFits => 'both',
+                $myuctoFits => 'myucto',
+                $moneyFits => 'money',
+                default => 'neither',
+            };
+            $byDocument = sprintf(' Podle dokladu%s: %s %s Kč + DPH %s Kč.', ($document['settlements'] ?? []) !== [] ? ' po zápočtu' : '',
+                $tax, self::money($sign * $expected), self::money($sign * round($g['money_amount'] - $expected, 2)));
+            if (in_array($cause, ['vat_only', 'money_not_taxable', 'money_without_vat', 'vat_split'], true)) {
+                $reason = '';
+            }
         }
+        $text = $byDocument . ($reason !== '' ? ' ' . $reason : '');
+        if (abs($taxableDiff) >= self::TOLERANCE) {
+            $text .= sprintf(' %s je v MyÚčtu o %s Kč %s.', ucfirst($tax), self::money(abs($taxableDiff)), $sign * $taxableDiff > 0 ? 'vyšší' : 'nižší');
+        }
+        $text .= match ($verdict) {
+            'both' => ' Obě rozdělení odpovídají dokladu až na zaokrouhlení, oprava není potřeba.',
+            'myucto' => ' Rozdělení v MyÚčtu odpovídá dokladu, v Money ne, oprava není potřeba.',
+            'money' => ' Rozdělení v Money odpovídá dokladu, v MyÚčtu ne (MyÚčto dělí úhradu poměrem DPH celého dokladu).',
+            'neither' => ' Ani jedno rozdělení neodpovídá dokladu.',
+            null => '',
+        };
+
         $subject = $this->subject($ctx, $g['link']);
+        $amounts = match (true) {
+            $document === null => '',
+            $document['vat'] >= self::TOLERANCE => sprintf(' (základ %s Kč + DPH %s Kč = %s Kč)',
+                self::money(round($document['total'] - $document['vat'], 2)), self::money($document['vat']), self::money($document['total'])),
+            default => sprintf(' (%s Kč bez DPH)', self::money($document['total'])),
+        };
         return [
-            'text' => sprintf('– %s, %s. Money: %s. MyÚčto: %s. %s', $subject, $movements, self::parts($g['money_parts'], $sign), $myucto, $reason),
+            'text' => sprintf('– %s%s, %s. Money: %s. MyÚčto: %s.%s', $subject, $amounts, $movements, $money, $myucto, $text),
             'context' => [
                 'document' => $subject, 'documents' => implode(', ', array_column($g['movements'], 'document_no')), 'cause' => $cause,
+                'settlements' => $document['settlements'] ?? [],
                 'money_amount' => $g['money_amount'], 'myucto_amount' => $g['myucto_amount'],
                 'money_taxable' => $g['money_taxable'], 'myucto_taxable' => $g['myucto_taxable'],
+                'expected_taxable' => $expected, 'verdict' => $verdict,
             ],
         ];
+    }
+
+    /**
+     * Převzatý doklad, na který vede vazba pohybu Money, jak ho zná MyÚčto: částka a DPH
+     * v Kč, vyrovnání bez peněz (zápočty dobropisů, odečtená záloha) a zbytek dokladu
+     * k úhradě penězi [celkem, DPH]. Zbytek je null, když rozdělení úhrady podle dokladu
+     * nedává smysl: záloha, daňový doklad k platbě, nedaňový doklad nebo krácený odpočet,
+     * doklad s odečtenou zálohou (DPH zálohy převod nezná).
+     *
+     * @param array{table:string,dir:string,number:int}|null $link
+     * @return array{total:float,vat:float,deductible:bool,settlements:list<string>,remaining:?array{0:float,1:float}}|null
+     */
+    private function documentFacts(ImportContext $ctx, ?array $link): ?array
+    {
+        if ($link === null || !in_array($link['table'], ['FV', 'FP'], true)) {
+            return null;
+        }
+        $found = $this->taxRecords->document($ctx, $link['table'], $link['dir'], $link['number']);
+        $purchase = $link['table'] === 'FP';
+        $doc = $found !== null ? $this->amounts($ctx->supplierId, $purchase, [$found[1]])[$found[1]] ?? null : null;
+        if ($doc === null) {
+            return null;
+        }
+        $id = $found[1];
+        $offsets = $this->creditNotes->forDocument($ctx->supplierId, $purchase ? 'purchase_invoice' : 'invoice', $id)['offsets'];
+        $others = $this->amounts($ctx->supplierId, $purchase,
+            array_map(static fn (array $o): int => $o['invoice_id'] === $id ? $o['credit_note_id'] : $o['invoice_id'], $offsets));
+        $numbers = array_flip($purchase ? $ctx->purchaseInvoices : $ctx->issuedInvoices);
+        $settlements = [];
+        $offsetTotal = 0.0;
+        $offsetVat = 0.0;
+        $complete = true;
+        foreach ($offsets as $o) {
+            $asInvoice = $o['invoice_id'] === $id;
+            $otherId = $asInvoice ? $o['credit_note_id'] : $o['invoice_id'];
+            // Zápočet ubere z faktury v poměru DPH dobropisu, z dobropisu v jeho vlastním.
+            $ratio = $asInvoice ? $others[$otherId] ?? null : $doc;
+            $amount = round($o['amount'] * $doc['rate'], 2);
+            $offsetTotal += $amount;
+            if ($ratio !== null && $ratio['total'] >= self::TOLERANCE) {
+                $offsetVat += $amount * $ratio['vat'] / $ratio['total'];
+            } else {
+                $complete = false;
+            }
+            $number = isset($numbers[$otherId]) ? explode('|', $numbers[$otherId], 2)[1]
+                : (($asInvoice ? $o['credit_note_number'] : $o['invoice_number']) ?? '#' . $otherId);
+            $settlements[] = sprintf('zápočet s %s %s z %s (%s Kč)', $asInvoice ? 'dobropisem' : 'fakturou', $number, self::date($o['offset_on']), self::money($amount));
+        }
+        if ($doc['advance'] >= self::TOLERANCE) {
+            $settlements[] = 'odečtená záloha ' . self::money($doc['advance']) . ' Kč';
+        }
+        $splittable = $complete && $doc['deductible'] && $doc['advance'] < self::TOLERANCE && in_array($doc['kind'], self::SPLIT_KINDS, true);
+        return [
+            'total' => $doc['total'], 'vat' => $doc['vat'], 'deductible' => $doc['deductible'], 'settlements' => $settlements,
+            'remaining' => $splittable ? [round($doc['total'] - $offsetTotal, 2), round($doc['vat'] - $offsetVat, 2)] : null,
+        ];
+    }
+
+    /**
+     * Částky převzatých dokladů v Kč (kladně, i u dobropisu) a údaje, podle kterých se
+     * úhrada dělí na daňovou část a DPH.
+     *
+     * @param list<int> $ids
+     * @return array<int,array{total:float,vat:float,rate:float,advance:float,kind:string,deductible:bool}>
+     */
+    private function amounts(int $supplierId, bool $purchase, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(sprintf(
+            'SELECT id, total_with_vat, %s AS home_total, %s AS home_vat, advance_paid_amount, %s AS kind, %s AS deductible
+               FROM %s WHERE supplier_id = ? AND id IN (%s)',
+            ForeignCurrencyTakeover::homeAmountSql('total_with_vat', 'exchange_rate'), ForeignCurrencyTakeover::homeAmountSql('total_vat', 'exchange_rate'),
+            $purchase ? 'document_kind' : 'invoice_type', $purchase ? "(tax_deductible = 1 AND vat_deduction = 'full')" : '1',
+            $purchase ? 'purchase_invoices' : 'invoices', implode(',', array_fill(0, count($ids), '?')),
+        ));
+        $stmt->execute([$supplierId, ...array_values($ids)]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $total = abs((float) $r['total_with_vat']);
+            $home = abs((float) $r['home_total']);
+            $rate = $total >= self::TOLERANCE ? $home / $total : 1.0;
+            $out[(int) $r['id']] = [
+                'total' => $home, 'vat' => abs((float) $r['home_vat']), 'rate' => $rate,
+                'advance' => round(abs((float) $r['advance_paid_amount']) * $rate, 2), 'kind' => (string) $r['kind'], 'deductible' => (bool) $r['deductible'],
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -419,6 +584,39 @@ final class TaxRecordsReconciler
     private static function signed(array $row): float
     {
         return round((float) ($row['income'] ?? 0) - (float) ($row['expense'] ?? 0), 2);
+    }
+
+    /**
+     * Rozdělení pohybů Money ve tvaru „daňový výdaj X Kč (VP_106) + DPH Y Kč (VP_DPH)" ve
+     * směru dokladu: daňová část vždy, DPH když ho doklad nebo Money má, ostatní zařazení,
+     * jen když mají částku.
+     *
+     * @param array<string,float> $parts "zařazení|kód pohybu" => částka se znaménkem peněžního toku
+     */
+    private static function split(array $parts, int $sign, string $tax, bool $withVat): string
+    {
+        $groups = ['taxable' => ['amount' => 0.0, 'codes' => []]];
+        if ($withVat) {
+            $groups[Ms3CashBook::VAT] = ['amount' => 0.0, 'codes' => []];
+        }
+        foreach ($parts as $partKey => $amount) {
+            if (abs($amount) < self::TOLERANCE) {
+                continue;
+            }
+            [$bucket, $code] = explode('|', $partKey, 2);
+            $key = in_array($bucket, ['income_taxable', 'expense_taxable'], true) ? 'taxable' : $bucket;
+            $groups[$key] ??= ['amount' => 0.0, 'codes' => []];
+            $groups[$key]['amount'] += $amount;
+            if ($code !== '') {
+                $groups[$key]['codes'][$code] = true;
+            }
+        }
+        $out = [];
+        foreach ($groups as $key => $group) {
+            $out[] = ($key === 'taxable' ? $tax : self::BUCKET_LABELS[$key] ?? $key) . ' ' . self::money($sign * round($group['amount'], 2)) . ' Kč'
+                . ($group['codes'] !== [] ? ' (' . implode(', ', array_keys($group['codes'])) . ')' : '');
+        }
+        return implode(' + ', $out);
     }
 
     /**

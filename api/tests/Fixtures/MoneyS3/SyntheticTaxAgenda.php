@@ -344,7 +344,10 @@ final class SyntheticTaxAgenda
      * Agenda s úhradami, které Money rozdělil na základ a DPH jinak než MyÚčto: přijatou
      * fakturu FP25005 (1 000 Kč + DPH 210 Kč) vede Money uhrazenou celou jako DPH a vydanou
      * fakturu FV25002 (640 Kč + DPH 134,40 Kč) odběratel zaplatil zaokrouhleně 775 Kč;
-     * zbytek 0,60 Kč vede Money jako daňový příjem bez vazby na fakturu.
+     * zbytek 0,60 Kč vede Money jako daňový příjem bez vazby na fakturu. Přijatou fakturu
+     * FP25006 (1 000 Kč + DPH 210 Kč) zčásti vyrovnal zápočet s dobropisem FP25007 bez DPH
+     * (500 Kč), zbytek 710 Kč (500 Kč + DPH 210 Kč) Money rozdělil správně, MyÚčto ho dělí
+     * poměrem DPH celé faktury.
      *
      * @return array<string,string>
      */
@@ -356,12 +359,24 @@ final class SyntheticTaxAgenda
                 'Proplatit' => 0.0, 'Uhrazeno' => '2025-06-20', 'UDoklad' => 'BP25002'] + $like($rows, 'FV25001')]);
         $files = self::with($files, 'ROK.001/PFaktury.DAT', self::PURCHASE_FIELDS, static fn (array $rows): array => [...$rows,
             ['Cislo' => 5, 'Doklad' => 'FP25005', 'PrijatDokl' => 'DF-2025-030', 'VarSymbol' => '2025030', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
-                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-05-12', 'UDoklad' => 'BV25003', 'Popis' => 'Servis', 'PredKontac' => 'V106'] + $like($rows, 'FP25003')]);
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-05-12', 'UDoklad' => 'BV25003', 'Popis' => 'Servis', 'PredKontac' => 'V106'] + $like($rows, 'FP25003'),
+            ['Cislo' => 6, 'Doklad' => 'FP25006', 'PrijatDokl' => 'DF-2025-040', 'VarSymbol' => '2025040', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-07-10', 'UDoklad' => 'ID25003', 'Popis' => 'Servis', 'PredKontac' => 'V106'] + $like($rows, 'FP25003'),
+            ['Cislo' => 7, 'Doklad' => 'FP25007', 'PrijatDokl' => 'DB-2025-040', 'VarSymbol' => '2025040', 'Zaklad_0' => -500.0, 'Zaklad_2' => 0.0,
+                'DPH_2' => 0.0, 'CelkemSDPH' => -500.0, 'Uhrazeno' => '2025-03-15', 'UDoklad' => 'ID25004', 'Popis' => 'Sleva bez DPH',
+                'PredKontac' => 'V106'] + $like($rows, 'FP25004'),
+        ]);
+        $files = self::with($files, 'ROK.001/IntDokl.DAT', self::INTERNAL_FIELDS, static fn (array $rows): array => [...$rows,
+            ['Cislo' => 3, 'Doklad' => 'ID25003', 'Popis' => 'Zápočet FP25006', 'DatUcPr' => '2025-03-15', 'Celkem' => 500.0, 'CisloZapoc' => 2],
+            ['Cislo' => 4, 'Doklad' => 'ID25004', 'Popis' => 'Zápočet FP25007', 'DatUcPr' => '2025-03-15', 'Celkem' => 500.0, 'CisloZapoc' => 2],
+        ]);
         $files = self::with($files, 'ROK.001/BankKnih.DAT', self::BANK_FIELDS, static fn (array $rows): array => [...$rows,
             ['Cislo' => 4, 'Doklad' => 'BV25003', 'Ucet' => 'BAN', 'Vydej' => 1, 'DatUcPr' => '2025-05-12', 'DatPlat' => '2025-05-12', 'Celkem' => 1210.0,
                 'VarSym' => '2025030', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP25005', 'Vypis' => 5, 'PrKont' => 'V106'],
             ['Cislo' => 5, 'Doklad' => 'BP25002', 'Ucet' => 'BAN', 'Vydej' => 0, 'DatUcPr' => '2025-06-20', 'DatPlat' => '2025-06-20', 'Celkem' => 775.0,
                 'VarSym' => '2025002', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV25002', 'Vypis' => 6, 'PrKont' => 'P504'],
+            ['Cislo' => 6, 'Doklad' => 'BV25004', 'Ucet' => 'BAN', 'Vydej' => 1, 'DatUcPr' => '2025-07-10', 'DatPlat' => '2025-07-10', 'Celkem' => 710.0,
+                'VarSym' => '2025040', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP25006', 'Vypis' => 7, 'PrKont' => 'V106'],
         ]);
         $row = static fn (int $id, string $date, int $number, string $doc, string $type, string $movement, float $amount, ?array $link): array => [
             'Cislo' => $id, 'Datum' => $date, 'Zdroj' => 'BK', 'ZRadek' => $number, 'Doklad' => $doc, 'Typ' => $type, 'Pohyb' => $movement,
@@ -372,6 +387,8 @@ final class SyntheticTaxAgenda
             $row(91, '2025-06-20', 5, 'BP25002', 'P', 'PP_504', 640.0, ['FV', 2]),
             $row(92, '2025-06-20', 5, 'BP25002', 'P', 'PP_DPH', 134.4, ['FV', 2]),
             $row(93, '2025-06-20', 5, 'BP25002', 'P', 'PP_504', 0.6, null),
+            $row(94, '2025-07-10', 6, 'BV25004', 'V', 'VP_106', 500.0, ['FP', 6]),
+            $row(95, '2025-07-10', 6, 'BV25004', 'V', 'VP_DPH', 210.0, ['FP', 6]),
         ]);
     }
 
