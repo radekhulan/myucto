@@ -25,6 +25,7 @@ final class RoutePermissionMapTest extends TestCase
             ['GET', '/api/purchase-invoices/payment-orders/history', 'purchase_invoices.payment_orders', AccessLevel::READ],
             ['POST', '/api/purchase-invoices/scan-inbox', 'purchase_invoices.scan', AccessLevel::WRITE],
             ['POST', '/api/purchase-invoices/import-structured', 'purchase_invoices.create', AccessLevel::WRITE],
+            ['POST', '/api/purchase-invoices/import-ai', 'purchase_invoices.scan', AccessLevel::WRITE],
             ['GET', '/api/purchase-invoice-submissions', 'documents.inbox', AccessLevel::READ],
             ['POST', '/api/purchase-invoice-submissions', 'documents.inbox', AccessLevel::WRITE],
             ['DELETE', '/api/purchase-invoice-submissions/7', 'documents.inbox.delete', AccessLevel::WRITE],

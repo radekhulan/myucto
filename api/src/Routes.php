@@ -703,6 +703,7 @@ final class Routes
 
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
         $app->post   ('/api/purchase-invoices/import-structured',         ImportStructuredPurchaseInvoiceAction::class);
+        $app->post   ('/api/purchase-invoices/import-ai',                 AiExtractPdfAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);

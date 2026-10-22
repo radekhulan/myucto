@@ -90,6 +90,17 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame('token_endpoint_forbidden', $this->errorCode($r));
     }
 
+    public function testPurchaseInvoiceAiImportRequiresWriteScopeOnTokenRoute(): void
+    {
+        $path = '/api/purchase-invoices/import-ai';
+        $read = $this->middleware()->process($this->bearer('POST', $path, 'read'), $this->okHandler());
+        self::assertSame(403, $read->getStatusCode());
+        self::assertSame('insufficient_scope', $this->errorCode($read));
+
+        $write = $this->middleware()->process($this->bearer('POST', $path, 'read_write'), $this->okHandler());
+        self::assertSame(204, $write->getStatusCode());
+    }
+
     /**
      * Účetní a daňová vrstva je pro token jednosměrná. Bez tohohle testu by stačilo
      * přidat `/api/accounting` do allowlistu (kvůli čtení sestav) a token s právem

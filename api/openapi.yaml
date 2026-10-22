@@ -6369,6 +6369,36 @@ paths:
         '403': { description: Pouze admin/accountant }
         '409': { description: '`managed_installation` — spravovaná instalace (cfg `app.managed`) skenování adresářů na serveru nepovoluje' }
 
+  /api/v1/purchase-invoices/import-ai:
+    post:
+      tags: [Purchase invoices]
+      summary: AI import PDF do konceptu přijaté faktury
+      description: |
+        Zpracuje PDF přes embedded ISDOC nebo nastaveného AI poskytovatele.
+        Vyžaduje bearer token se scope `read_write` a oprávnění
+        `purchase_invoices.scan`. Vytvoří pouze koncept.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: query
+          name: import_batch_id
+          required: false
+          schema: { type: string, maxLength: 32 }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [pdf]
+              properties:
+                pdf: { type: string, format: binary }
+      responses:
+        '201': { description: Koncept vytvořen nebo nalezen jako duplicita }
+        '400': { description: Chybí PDF nebo kontext dodavatele }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { description: Soubor je větší než 32 MiB }
+        '422': { description: Extrakce nebo validace selhala }
+
   /api/v1/reports/dphdp3/preview:
     get:
       tags: [Reports]
