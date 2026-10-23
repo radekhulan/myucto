@@ -347,7 +347,8 @@ final class SyntheticTaxAgenda
      * zbytek 0,60 Kč vede Money jako daňový příjem bez vazby na fakturu. Přijatou fakturu
      * FP25006 (1 000 Kč + DPH 210 Kč) zčásti vyrovnal zápočet s dobropisem FP25007 bez DPH
      * (500 Kč), zbytek 710 Kč (500 Kč + DPH 210 Kč) Money rozdělil správně, MyÚčto ho dělí
-     * poměrem DPH celé faktury.
+     * poměrem DPH celé faktury. Úhradu vydané faktury FV25003 (1 000 Kč + DPH 210 Kč) vede
+     * Money celou jako nedaňový příjem, bez DPH.
      *
      * @return array<string,string>
      */
@@ -356,7 +357,9 @@ final class SyntheticTaxAgenda
         $like = static fn (array $rows, string $doc): array => array_values(array_filter($rows, static fn (array $r): bool => $r['Doklad'] === $doc))[0];
         $files = self::with(self::files(), 'ROK.001/VFaktury.DAT', self::ISSUED_FIELDS, static fn (array $rows): array => [...$rows,
             ['Cislo' => 2, 'Doklad' => 'FV25002', 'VarSymbol' => '2025002', 'Zaklad_2' => 640.0, 'DPH_2' => 134.4, 'CelkemSDPH' => 774.4,
-                'Proplatit' => 0.0, 'Uhrazeno' => '2025-06-20', 'UDoklad' => 'BP25002'] + $like($rows, 'FV25001')]);
+                'Proplatit' => 0.0, 'Uhrazeno' => '2025-06-20', 'UDoklad' => 'BP25002'] + $like($rows, 'FV25001'),
+            ['Cislo' => 3, 'Doklad' => 'FV25003', 'VarSymbol' => '2025003', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0,
+                'Proplatit' => 0.0, 'Uhrazeno' => '2025-08-15', 'UDoklad' => 'BP25003'] + $like($rows, 'FV25001')]);
         $files = self::with($files, 'ROK.001/PFaktury.DAT', self::PURCHASE_FIELDS, static fn (array $rows): array => [...$rows,
             ['Cislo' => 5, 'Doklad' => 'FP25005', 'PrijatDokl' => 'DF-2025-030', 'VarSymbol' => '2025030', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
                 'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-05-12', 'UDoklad' => 'BV25003', 'Popis' => 'Servis', 'PredKontac' => 'V106'] + $like($rows, 'FP25003'),
@@ -377,6 +380,8 @@ final class SyntheticTaxAgenda
                 'VarSym' => '2025002', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV25002', 'Vypis' => 6, 'PrKont' => 'P504'],
             ['Cislo' => 6, 'Doklad' => 'BV25004', 'Ucet' => 'BAN', 'Vydej' => 1, 'DatUcPr' => '2025-07-10', 'DatPlat' => '2025-07-10', 'Celkem' => 710.0,
                 'VarSym' => '2025040', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP25006', 'Vypis' => 7, 'PrKont' => 'V106'],
+            ['Cislo' => 7, 'Doklad' => 'BP25003', 'Ucet' => 'BAN', 'Vydej' => 0, 'DatUcPr' => '2025-08-15', 'DatPlat' => '2025-08-15', 'Celkem' => 1210.0,
+                'VarSym' => '2025003', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV25003', 'Vypis' => 8, 'PrKont' => 'P999'],
         ]);
         $row = static fn (int $id, string $date, int $number, string $doc, string $type, string $movement, float $amount, ?array $link): array => [
             'Cislo' => $id, 'Datum' => $date, 'Zdroj' => 'BK', 'ZRadek' => $number, 'Doklad' => $doc, 'Typ' => $type, 'Pohyb' => $movement,
@@ -389,6 +394,7 @@ final class SyntheticTaxAgenda
             $row(93, '2025-06-20', 5, 'BP25002', 'P', 'PP_504', 0.6, null),
             $row(94, '2025-07-10', 6, 'BV25004', 'V', 'VP_106', 500.0, ['FP', 6]),
             $row(95, '2025-07-10', 6, 'BV25004', 'V', 'VP_DPH', 210.0, ['FP', 6]),
+            $row(96, '2025-08-15', 7, 'BP25003', 'P', 'PP_999', 1210.0, ['FV', 3]),
         ]);
     }
 

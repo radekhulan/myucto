@@ -724,8 +724,8 @@ dokladu sám za sebe), a protokol ukáže daňové příjmy a výdaje obou. Rozd
 k přijetí ([§ 103.10.5.1](#1031051-chyby-upozorneni-a-rozdily-k-prijeti))
 vznikají typicky tam, kde Money:
 
-- rozdělil úhradu na základ a DPH jinak, než ji MyÚčto rozpočítá poměrem
-  (například úhrada jen ve výši DPH),
+- rozdělil úhradu na základ a DPH jinak než MyÚčto (například celou úhradu
+  zapsal do DPH),
 - při vyúčtování zálohy přeúčtoval DPH zálohy nulovým dokladem; MyÚčto nulové
   doklady nepřebírá a zaplacenou zálohu uplatní jako výdaj při její úhradě,
 - vedl zaokrouhlení úhrady jako samostatný řádek bez dokladu; v MyÚčtu zůstane
@@ -734,14 +734,17 @@ vznikají typicky tam, kde Money:
 
 Hláška rozdílu vypíše každý doklad zvlášť: uhrazený doklad se základem a DPH,
 jeho vyrovnání bez peněz (zápočet s dobropisem, odečtenou zálohu), číslo
-a datum pohybu a rozdělení úhrady na daňovou část a DPH v Money (s kódem
-pohybu peněžního deníku, podle něj pohyb v Money dohledáte) a v MyÚčtu. Dál
-uvede o kolik je daňový příjem nebo výdaj v MyÚčtu vyšší nebo nižší a, kde to
-nevyplývá z čísel, pravděpodobnou příčinu. U běžné faktury nebo dobropisu
-hláška navíc spočítá, jak úhrada připadá na daňovou část a DPH podle dokladu
-(po odečtení započtených dobropisů), a řekne, které rozdělení dokladu
-odpovídá. Když dokladu odpovídá rozdělení v MyÚčtu, oprava není potřeba:
-součet roku v MyÚčtu se jen bude lišit od Money.
+a datum pohybu a rozdělení úhrady na daňovou část a DPH v peněžním deníku
+Money (s kódem pohybu, podle něj pohyb v Money dohledáte) a v MyÚčtu. Dál
+uvede, o kolik je daňový příjem nebo výdaj v MyÚčtu vyšší nebo nižší. Je-li
+částka úhrady v obou stejná, uvede i opačný rozdíl DPH: částka se jen přelila
+mezi daňovou částí a DPH. Kde příčina nevyplývá z čísel, uvede pravděpodobnou
+příčinu. U běžné faktury nebo dobropisu hláška navíc ověří, jak úhrada
+připadá na daňovou část a DPH podle dokladu (po odečtení započtených
+dobropisů). Když dokladu odpovídá rozdělení v MyÚčtu, hláška řekne, že se
+použije a oprava není potřeba: součet roku v MyÚčtu se jen bude lišit od
+Money. Když mu neodpovídá, vypíše i rozdělení podle dokladu a řekne, zda mu
+odpovídá Money.
 
 Zápočet ostatní pohledávky proti ostatnímu závazku daňová evidence MyÚčta
 nemá: doklady zůstanou neuhrazené a převod to ohlásí.
