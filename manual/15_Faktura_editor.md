@@ -906,6 +906,12 @@ každý sám za sebe. Započíst je jde tlačítkem **Započíst s fakturou**.
 
 - Zápočet vzniká jen v plné výši dobropisu a jen tehdy, když ho zbytek faktury pokryje. Dobropis k
   už zaplacené faktuře zůstává k vrácení peněz jako dosud.
+- V peněžním deníku daňové evidence je příjmem jen zaplacený zbytek. U plátce DPH se dělí na
+  příjem a DPH podle faktury po odečtení dobropisu, ne poměrem celé faktury. Stornuje-li dobropis
+  z faktury se sazbami 21 % a 0 % jen položku s 21 %, zbytek DPH nenese.
+- Úhrada zaplacená ještě před zápočtem se dělí podle celé faktury a zápočet ji zpětně nemění, ani
+  v uzavřeném roce. Rozdíl ukáže peněžní deník ke dni zápočtu řádkem **Oprava rozdělení dřívějších
+  úhrad po zápočtu dobropisu** s nulovou částkou, který o rozdíl upraví daňový příjem a opačně DPH.
 - V detailu dobropisu je odkaz na fakturu a tlačítko **Zrušit zápočet**. Když odběratel přesto
   zaplatí celou původní částku, spárování té platby zápočet zruší samo a dobropis se vrací k
   vrácení peněz. Dobropis vystavený dřív se dá započíst tlačítkem **Započíst s fakturou**.

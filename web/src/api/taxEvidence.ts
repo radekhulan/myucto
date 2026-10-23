@@ -106,6 +106,7 @@ export interface CashJournalChecks {
     partial_payments: number
     cash_sales_without_invoice: number
     virtual_leg: number
+    credit_note_offsets: number
   }
   explained_total: number
   residual: number

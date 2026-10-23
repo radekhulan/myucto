@@ -27303,6 +27303,7 @@
       "check_partial": "Partial payments (invoice not paid)",
       "check_cash_sale": "Cash sale without invoice",
       "check_virtual_leg": "Payments without statement import",
+      "check_credit_note_offsets": "Corrections of earlier payments after a credit note offset",
       "check_note": "The difference is informative (cash vs accrual basis), not an error.",
       "class_income_taxable": "Taxable income",
       "class_income_exempt": "Exempt income",

@@ -33,7 +33,11 @@ nezaúčtovává: rozhoduje doklad, jeho úhrada a zařazení v peněžním den�
 **Jak poznáte, že je hotovo:** v detailu faktury je řádek **Zbývá uhradit sníženo ... dobropisem** a v platbách zápočet se zdrojem
 **Zápočet dobropisu**. Po úhradě zbytku je faktura zaplacená.
 
-- V peněžním deníku je jen skutečná úhrada zbytku. Zápočet dobropisu není platba, DPH se nemění.
+- V peněžním deníku je jen skutečná úhrada zbytku. Zápočet dobropisu není platba, DPH se nemění. U plátce DPH se úhrada
+  zbytku dělí na základ a DPH podle faktury po odečtení dobropisu.
+- Část faktury zaplacená ještě před zápočtem se dělí podle celé faktury a pozdější zápočet ji nemění, ani v uzavřeném roce.
+  Rozdíl ukáže peněžní deník ke dni zápočtu řádkem **Oprava rozdělení dřívějších úhrad po zápočtu dobropisu** s nulovou
+  částkou: o rozdíl upraví daňový příjem (výdaj) a o stejnou částku opačně DPH. Zrušením zápočtu řádek zmizí.
 - Byla-li faktura v době dobropisu už zaplacená, dobropis zůstává k vrácení peněz. Vrácení spárujte v bance jako odchozí platbu.
 - Starší dobropis započtete v jeho detailu tlačítkem **Započíst s fakturou**, zápočet zrušíte tlačítkem **Zrušit zápočet**.
 

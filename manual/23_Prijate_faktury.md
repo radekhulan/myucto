@@ -814,7 +814,11 @@ fakturu, je zaplacená i faktura. V podvojném účetnictví se dobropis automat
 dobropis s jiným kurzem, než má faktura, tam započíst nejde (kurzový rozdíl by zůstal na saldokontu).
 Zápočet se dělá jen v plné výši dobropisu. V detailu dobropisu ho zrušíte tlačítkem **Zrušit zápočet**, starší dobropis
 započtete tlačítkem **Započíst s fakturou**. Do [peněžního deníku](74_Danova_evidence.md) zápočet nevstupuje, výdajem je
-až skutečně zaplacený zbytek. DPH se nemění.
+až skutečně zaplacený zbytek. DPH se nemění. U plátce DPH se zaplacený zbytek dělí na daňový výdaj a DPH podle faktury
+po odečtení dobropisu, ne poměrem celé faktury: stornuje-li dobropis jen položku s jednou sazbou, má zbytek jiný podíl
+DPH než celá faktura. Úhrada zaplacená ještě před zápočtem se dělí podle celé faktury a zápočet ji zpětně nemění, ani
+v uzavřeném roce. Rozdíl ukáže peněžní deník ke dni zápočtu řádkem **Oprava rozdělení dřívějších úhrad po zápočtu
+dobropisu** s nulovou částkou, který o rozdíl upraví daňový výdaj a opačně DPH.
 
 ### 23.11.12 Kurz cizí měny a jeho přenačítání
 

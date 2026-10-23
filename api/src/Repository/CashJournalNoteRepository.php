@@ -17,7 +17,7 @@ use PDO;
  */
 final class CashJournalNoteRepository
 {
-    public const SOURCE_TYPES = ['cash', 'bank', 'invoice_payment', 'purchase_invoice', 'gopay'];
+    public const SOURCE_TYPES = ['cash', 'bank', 'invoice_payment', 'purchase_invoice', 'gopay', 'credit_note_offset'];
 
     public const MAX_BODY_LENGTH = JournalEntryNoteRepository::MAX_BODY_LENGTH;
 
@@ -56,6 +56,7 @@ final class CashJournalNoteRepository
             'invoice_payment' => 'SELECT 1 FROM invoice_payments WHERE id = ? AND supplier_id = ?',
             'purchase_invoice' => 'SELECT 1 FROM purchase_invoices WHERE id = ? AND supplier_id = ?',
             'gopay' => 'SELECT 1 FROM gopay_movements WHERE id = ? AND supplier_id = ?',
+            'credit_note_offset' => 'SELECT 1 FROM credit_note_offsets WHERE id = ? AND supplier_id = ?',
             default => null,
         };
         if ($sql === null) {

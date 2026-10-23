@@ -474,6 +474,7 @@ function onNotesChanged(notes: CashJournalNote[]) {
           <div class="flex justify-between gap-2"><span class="text-neutral-500">{{ t('tax_evidence.cash_journal.check_partial') }}</span><span class="font-mono">{{ formatMoney(report.checks.explanations.partial_payments) }}</span></div>
           <div class="flex justify-between gap-2"><span class="text-neutral-500">{{ t('tax_evidence.cash_journal.check_cash_sale') }}</span><span class="font-mono">{{ formatMoney(report.checks.explanations.cash_sales_without_invoice) }}</span></div>
           <div class="flex justify-between gap-2"><span class="text-neutral-500">{{ t('tax_evidence.cash_journal.check_virtual_leg') }}</span><span class="font-mono">{{ formatMoney(report.checks.explanations.virtual_leg) }}</span></div>
+          <div class="flex justify-between gap-2"><span class="text-neutral-500">{{ t('tax_evidence.cash_journal.check_credit_note_offsets') }}</span><span class="font-mono">{{ formatMoney(report.checks.explanations.credit_note_offsets) }}</span></div>
           <div class="flex justify-between gap-2"><span class="text-neutral-500">{{ t('tax_evidence.cash_journal.check_residual') }}</span><span class="font-mono">{{ formatMoney(report.checks.residual) }}</span></div>
         </div>
         <p class="mt-2 text-xs text-neutral-400">{{ t('tax_evidence.cash_journal.check_note') }}</p>

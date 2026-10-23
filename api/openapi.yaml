@@ -24666,7 +24666,7 @@ paths:
         pak nejnovější. Cizí nebo neexistující pohyb vrací 404.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { name: source, in: path, required: true, schema: { type: string, enum: [cash, bank, invoice_payment, purchase_invoice, gopay] } }
+        - { name: source, in: path, required: true, schema: { type: string, enum: [cash, bank, invoice_payment, purchase_invoice, gopay, credit_note_offset] } }
         - { name: id, in: path, required: true, schema: { type: integer } }
       responses:
         '200':

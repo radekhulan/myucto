@@ -27303,6 +27303,7 @@
       "check_partial": "Částečné úhrady (faktura není zaplacená)",
       "check_cash_sale": "Hotovostní prodej bez faktury",
       "check_virtual_leg": "Úhrady bez importu výpisu",
+      "check_credit_note_offsets": "Opravy dřívějších úhrad po zápočtu dobropisu",
       "check_note": "Rozdíl je informativní (kasová vs fakturační báze), ne chyba.",
       "class_income_taxable": "Daňový příjem",
       "class_income_exempt": "Osvobozený příjem",

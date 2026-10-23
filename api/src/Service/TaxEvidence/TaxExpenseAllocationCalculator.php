@@ -10,6 +10,14 @@ use PDO;
 
 final class TaxExpenseAllocationCalculator
 {
+    /** Zápočty dobropisů proti přijatým fakturám i s poli dobropisu, které potřebuje paymentTaxable(). */
+    private const OFFSETS_SQL =
+        "SELECT o.id AS offset_id, o.invoice_id, o.offset_on, o.amount AS offset_amount, cn.id, cn.tax_deductible,
+                cn.total_vat, cn.total_with_vat, cn.vat_deduction, cn.vat_deduction_percent
+           FROM credit_note_offsets o
+           JOIN purchase_invoices cn ON cn.id = o.credit_note_id AND cn.supplier_id = o.supplier_id
+          WHERE o.supplier_id = ? AND o.doc_type = 'purchase_invoice'";
+
     public function __construct(
         private readonly Connection $db,
         private readonly VatCoefficientRepository $coefficients,
@@ -39,6 +47,34 @@ final class TaxExpenseAllocationCalculator
         }
     }
 
+    /**
+     * Zápočty všech přijatých faktur firmy jedním dotazem, klíč faktura. Peněžní deník je
+     * načte jednou na sestavení a předává je {@see forPurchaseInvoice()}, aby se nedotazoval
+     * pro každou úhradu zvlášť.
+     *
+     * @return array<int, list<array<string,mixed>>>
+     */
+    public function purchaseOffsets(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(self::OFFSETS_SQL . ' ORDER BY o.id');
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['invoice_id']][] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * Daňová část úhrady přijaté faktury.
+     *
+     * @param string|null                            $offsetsAsOf     zápočty dobropisů známé k datu úhrady
+     *                                                                (paymentTaxable()); null = všechny zápočty
+     * @param int|null                               $throughOffsetId opravný řádek zápočtu: ze zápočtů dne
+     *                                                                $offsetsAsOf jen do tohoto id
+     * @param list<array<string,mixed>>|null         $offsets         zápočty faktury načtené předem
+     *                                                                ({@see purchaseOffsets()}); null = dotaz
+     */
     public function forPurchaseInvoice(
         int $supplierId,
         int $purchaseInvoiceId,
@@ -46,6 +82,9 @@ final class TaxExpenseAllocationCalculator
         bool $isVatPayer,
         int $year,
         float $fixedAssetLimit,
+        ?string $offsetsAsOf = null,
+        ?int $throughOffsetId = null,
+        ?array $offsets = null,
     ): float {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, status, document_kind, tax_deductible, is_fixed_asset, parent_purchase_invoice_id,
@@ -79,7 +118,80 @@ final class TaxExpenseAllocationCalculator
             return 0.0;
         }
 
-        return round($this->taxableAmount($supplierId, $invoice, $allocations, $paidAmountCzk, $isVatPayer, $year), 2);
+        return round($this->paymentTaxable(
+            $supplierId, $invoice, $allocations, $paidAmountCzk, $isVatPayer, $year, $offsetsAsOf, $throughOffsetId, $offsets,
+        ), 2);
+    }
+
+    /**
+     * Daňová část úhrady faktury. Fakturu, kterou zčásti vyrovnal zápočet dobropisu
+     * (`credit_note_offsets`), zbývá penězi uhradit jen zbytek, a ten nemá složení celé
+     * faktury: dobropis z ní ubral část ve svém složení (jiná sazba, jen některé položky).
+     * Zbytek je faktura minus započtené dobropisy: brutto minus částka zápočtu (táž veličina,
+     * kterou od faktury odečítá noha C2 peněžního deníku), daňová část minus daňová část
+     * dobropisu. Kryje-li zápočet celé brutto dobropisu, odečte se celá daňová část dobropisu,
+     * jinak (dobropis s odečtenou zálohou) její poměrná část podle částky zápočtu. Daňovou
+     * část každého dokladu počítá taxableAmount() i s řádkovým rozpisem a kráceným odpočtem,
+     * bez ořezu a se znaménkem podle brutto dokladu: opravný dobropis s brutto −395 a DPH
+     * +105 sníží daňovou část o 500, ne o 395. Vydaná strana odečítá brutto a DPH týmž
+     * pravidlem ({@see \MyInvoice\Support\Sql\CreditNoteOffsetRemainderExpr}).
+     *
+     * Dobropis, který není daňovým výdajem (`tax_deductible = 0`), vrací nedaňovou část
+     * faktury, například soukromou položku řádkového rozpisu. Daňovou část zbytku proto
+     * nesnižuje, stejně jako jeho vratka penězi nesnižuje daňový výdaj (forPurchaseInvoice
+     * u něj vrací nulu).
+     *
+     * Úhrada se pak dělí poměrem daňové části zbytku k brutto zbytku; ořízne se až výsledek,
+     * jako na vydané straně v CashJournalService::prorateBase. Úhrada celého zbytku tak
+     * dostane přesně daňovou část zbytku, poměr rozhoduje jen u částečné úhrady. Bez
+     * zápočtu, nebo když zápočet vyrovnal celou fakturu, rozhoduje faktura sama.
+     *
+     * Zápočty se berou jen k datu úhrady ($asOf), pozdější zápočet dřívější úhradu nemění.
+     * Rozdíl nese opravný řádek peněžního deníku ke dni zápočtu, který srovnává úhradu se
+     * zápočty do daného zápočtu ($throughOffsetId) a bez něj
+     * ({@see \MyInvoice\Support\Sql\CreditNoteOffsetRemainderExpr}).
+     *
+     * @param array<string,mixed> $invoice @param list<array<string,mixed>> $allocations
+     * @param list<array<string,mixed>>|null $offsets zápočty faktury načtené předem, null = dotaz
+     */
+    private function paymentTaxable(
+        int $supplierId,
+        array $invoice,
+        array $allocations,
+        float $paidAmount,
+        bool $isVatPayer,
+        int $year,
+        ?string $asOf,
+        ?int $throughOffsetId,
+        ?array $offsets,
+    ): float {
+        if ($offsets === null) {
+            $stmt = $this->db->pdo()->prepare(self::OFFSETS_SQL . ' AND o.invoice_id = ? ORDER BY o.id');
+            $stmt->execute([$supplierId, (int) $invoice['id']]);
+            $offsets = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+        $asOfDay = $asOf !== null ? substr($asOf, 0, 10) : null;
+        $notes = array_values(array_filter($offsets, static fn (array $o): bool => $asOfDay === null
+            || (string) $o['offset_on'] < $asOfDay
+            || ((string) $o['offset_on'] === $asOfDay && ($throughOffsetId === null || (int) $o['offset_id'] <= $throughOffsetId))));
+
+        $remaining = (float) $invoice['total_with_vat'];
+        $taxable = $this->taxableAmount($supplierId, $invoice, $allocations, $remaining, $isVatPayer, $year, false);
+        foreach ($notes as $note) {
+            $offset = (float) $note['offset_amount'];
+            $noteGross = abs((float) $note['total_with_vat']);
+            $noteTaxable = (int) $note['tax_deductible'] === 1 ? $this->taxableAmount(
+                $supplierId, $note, $this->allocations($supplierId, (int) $note['id']), $noteGross, $isVatPayer, $year, false,
+            ) : 0.0;
+            $remaining -= $offset;
+            $taxable -= $noteGross >= 0.005 && abs($offset - $noteGross) >= 0.005
+                ? $noteTaxable * $offset / $noteGross
+                : $noteTaxable;
+        }
+        if ($notes === [] || $remaining < 0.005) {
+            return $this->taxableAmount($supplierId, $invoice, $allocations, $paidAmount, $isVatPayer, $year);
+        }
+        return $paidAmount * max(0.0, min($remaining, $taxable)) / $remaining;
     }
 
     /**
@@ -115,12 +227,17 @@ final class TaxExpenseAllocationCalculator
         return abs($entryPrice) > $fixedAssetLimit;
     }
 
+    /**
+     * @param array<int, list<array<string,mixed>>>|null $offsetsByInvoice zápočty načtené předem
+     *                                                                     ({@see purchaseOffsets()}); null = dotaz
+     */
     public function forBankPayment(
         int $supplierId,
         int $bankTransactionId,
         bool $isVatPayer,
         int $year,
         float $fixedAssetLimit,
+        ?array $offsetsByInvoice = null,
     ): float {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pm.purchase_invoice_id, pm.amount, bt.currency, bt.posted_at
@@ -131,17 +248,56 @@ final class TaxExpenseAllocationCalculator
         $stmt->execute([$supplierId, $bankTransactionId]);
         $total = 0.0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $payment) {
-            $rate = $this->exchangeRate((string) ($payment['currency'] ?: 'CZK'), (string) $payment['posted_at']);
-            $total += $this->forPurchaseInvoice(
+            $total += $this->forBankMatch(
                 $supplierId,
                 (int) $payment['purchase_invoice_id'],
-                round((float) $payment['amount'] * $rate, 2),
+                (float) $payment['amount'],
+                (string) $payment['currency'],
+                (string) $payment['posted_at'],
                 $isVatPayer,
                 $year,
                 $fixedAssetLimit,
+                (string) $payment['posted_at'],
+                null,
+                $offsetsByInvoice !== null ? ($offsetsByInvoice[(int) $payment['purchase_invoice_id']] ?? []) : null,
             );
         }
         return round($total, 2);
+    }
+
+    /**
+     * Daňová část jednoho bankovního párování přijaté faktury. Částka párování je v měně
+     * bankovního pohybu, na Kč se převádí kurzem ke dni pohybu.
+     *
+     * @param string|null                    $offsetsAsOf     viz {@see forPurchaseInvoice()}
+     * @param int|null                       $throughOffsetId viz {@see forPurchaseInvoice()}
+     * @param list<array<string,mixed>>|null $offsets         viz {@see forPurchaseInvoice()}
+     */
+    public function forBankMatch(
+        int $supplierId,
+        int $purchaseInvoiceId,
+        float $amount,
+        string $currency,
+        string $postedAt,
+        bool $isVatPayer,
+        int $year,
+        float $fixedAssetLimit,
+        ?string $offsetsAsOf,
+        ?int $throughOffsetId = null,
+        ?array $offsets = null,
+    ): float {
+        $rate = $this->exchangeRate($currency !== '' ? $currency : 'CZK', $postedAt);
+        return $this->forPurchaseInvoice(
+            $supplierId,
+            $purchaseInvoiceId,
+            round($amount * $rate, 2),
+            $isVatPayer,
+            $year,
+            $fixedAssetLimit,
+            $offsetsAsOf,
+            $throughOffsetId,
+            $offsets,
+        );
     }
 
     public function forCashDocument(int $supplierId, int $cashDocumentId, bool $isVatPayer, int $year): float
@@ -206,9 +362,14 @@ final class TaxExpenseAllocationCalculator
      * Dřív záporné brutto vracelo nulu, takže vratka k přijatému dobropisu daňový výdaj
      * nesnížila. Zrcadlo CashJournalService::prorateBase na příjmové straně.
      *
+     * DPH se bere se znaménkem podle brutto dokladu a u úhrady se ořízne do [0, brutto].
+     * Bez ořezu ($clampVat = false) slouží jako složka zbytku po zápočtu (paymentTaxable):
+     * opravný doklad s opačným znaménkem DPH a brutto tam musí přispět skutečnou daňovou
+     * částí a výsledek pak může mít opačné znaménko než $paidAmount; ořízne se až zbytek.
+     *
      * @param array<string,mixed> $invoice @param list<array<string,mixed>> $allocations
      */
-    private function taxableAmount(int $supplierId, array $invoice, array $allocations, float $paidAmount, bool $isVatPayer, int $year): float
+    private function taxableAmount(int $supplierId, array $invoice, array $allocations, float $paidAmount, bool $isVatPayer, int $year, bool $clampVat = true): float
     {
         $signedGross = (float) $invoice['total_with_vat'];
         $sign = $signedGross < 0.0 ? -1.0 : 1.0;
@@ -222,7 +383,10 @@ final class TaxExpenseAllocationCalculator
             }
             // The paid gross can include document rounding. Only the stored VAT
             // is deductible; gross - net would wrongly treat rounding as VAT.
-            $vat = min($gross, max(0.0, $sign * (float) $invoice['total_vat']));
+            $vat = $sign * (float) $invoice['total_vat'];
+            if ($clampVat) {
+                $vat = min($gross, max(0.0, $vat));
+            }
             $deductible = $gross - $vat * $this->deductionRatio(
                 $supplierId,
                 (string) $invoice['vat_deduction'],
