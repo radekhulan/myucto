@@ -7,14 +7,20 @@
 body { font-family: montserrat, dejavusans, sans-serif; font-size: 9pt; color: #171522; }
 h1 { font-size: 18pt; margin-bottom: 3mm; }
 h2 { font-size: 11pt; margin-top: 5mm; margin-bottom: 2mm; page-break-after: avoid; }
+h3 { font-size: 9pt; margin: 3mm 0 1mm; page-break-after: avoid; }
 .meta { color: #555; margin-bottom: 2mm; }
 .status { background-color: #eef2ff; padding: 3mm; margin: 3mm 0; }
 .failed { color: #991b1b; }
 .notice { color: #92400e; background-color: #fef3c7; padding: 3mm; margin: 3mm 0; }
 .hint { color: #666; font-size: 8pt; }
+.group { border: 0.2mm solid #e7e5ed; padding: 2mm 3mm; margin: 0 0 3mm; }
+.group-title { margin: 0; }
+.group-count { color: #666; font-weight: normal; }
+.detail-label { color: #666; font-weight: bold; }
 table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
 th { background-color: #f1f0f5; color: #555; text-align: left; padding: 2mm; font-size: 8pt; }
 td { border-bottom: 0.2mm solid #e7e5ed; padding: 2mm; vertical-align: top; overflow-wrap: break-word; }
+tr { page-break-inside: avoid; }
 </style>
 </head>
 <body>
@@ -28,12 +34,33 @@ td { border-bottom: 0.2mm solid #e7e5ed; padding: 2mm; vertical-align: top; over
 <p class="hint">{{ labels.full_hint }}</p>
 {% for section in sections %}
 <h2>{{ section.title }}</h2>
+{% if section.type == 'messages' %}
+{% for group in section.groups %}
+<div class="group" data-message-level="{{ group.level_key }}">
+<h3 class="group-title">{{ group.level }}: {{ group.title }} <span class="group-count">({{ labels.message_count }}: {{ group.count }})</span></h3>
+<table><thead><tr><th>{{ labels.document }}</th><th>{{ labels.message }}</th></tr></thead><tbody>
+{% for detail in group.details %}<tr><td>{{ detail.document }}</td><td>{{ detail.message }}{% if detail.count > 1 %} ({{ labels.message_count }}: {{ detail.count }}){% endif %}</td></tr>{% endfor %}
+</tbody></table>
+</div>
+{% endfor %}
+{% elseif section.type == 'reviews' %}
+{% for group in section.groups %}
+<div class="group" data-review-code="{{ group.code }}">
+<h3 class="group-title">{{ group.title }} <span class="group-count">({{ labels.review_item_count }}: {{ group.count }}{% if group.message_count|default(0) > 0 %}; {{ labels.linked_messages }}: {{ group.message_count }}{% endif %})</span></h3>
+{% if group.documents is not empty %}<ul>{% for record in group.documents %}<li>{% if record.kind %}<span class="detail-label">{{ record.kind }}:</span> {% endif %}{{ record.document }}
+{% for detail in record.messages %}<div class="detail"><span class="detail-label">{{ detail.level }}: {{ detail.document }}:</span> {{ detail.message }}{% if detail.count > 1 %} ({{ labels.message_count }}: {{ detail.count }}){% endif %}</div>{% endfor %}</li>{% endfor %}</ul>{% endif %}
+{% if group.movements is not empty %}<ul>{% for record in group.movements %}<li><span class="detail-label">{{ record.kind|default(labels.movement) }}:</span> {{ record.document }}
+{% for detail in record.messages %}<div class="detail"><span class="detail-label">{{ detail.level }}: {{ detail.document }}:</span> {{ detail.message }}{% if detail.count > 1 %} ({{ labels.message_count }}: {{ detail.count }}){% endif %}</div>{% endfor %}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endfor %}
+{% else %}
 <table>
 <thead><tr>{% for header in section.headers %}<th style="width:{{ section.widths[loop.index0] }}%{% if section.numeric_last and loop.last %};text-align:right{% endif %}">{{ header }}</th>{% endfor %}</tr></thead>
 <tbody>
 {% for row in section.rows %}<tr>{% for cell in row %}<td style="width:{{ section.widths[loop.index0] }}%{% if section.numeric_last and loop.last %};text-align:right{% endif %}">{{ cell }}</td>{% endfor %}</tr>{% endfor %}
 </tbody>
 </table>
+{% endif %}
 {% endfor %}
 </body>
 </html>

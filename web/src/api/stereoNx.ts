@@ -30,6 +30,26 @@ export interface StereoPreview {
   nonprofit_notice?: MigrationNonprofitNotice
 }
 
+export interface StereoAccountMapping {
+  accounts: Record<string, string>
+  bank_accounts: Record<string, string>
+  vat: null | { input: string; output: string; settlement: string; unresolved: string | null }
+}
+
+export interface StereoAccountMappingProposal extends StereoAccountMapping {
+  used_accounts: Array<{ source_code: string; name: string; target_code: string; count: number }>
+  banks: Array<{ source_key: string; label: string; target_code: string; identity_key?: string }>
+  unresolved: Array<{
+    source_key: string; side: string; source_code: string; reason: string
+    date?: string; document_no?: string; description?: string; amount_cents?: number
+    is_opening?: boolean; debit?: string; credit?: string; source_name?: string
+  }>
+  vat_counts: { input: number; output: number; settlement: number; unresolved: number; reverse_charge_unresolved?: number }
+  available_accounts?: Array<{ code: string; name: string; is_active?: boolean }>
+  suggested_accounts?: Array<{ code: string; name: string }>
+  vat_account_names?: Partial<Record<'input' | 'output' | 'settlement' | 'unresolved', string>>
+}
+
 export interface StereoUpload {
   token: string
   filename: string
@@ -37,6 +57,19 @@ export interface StereoUpload {
   received: number
   complete: boolean
   created_at: number
+}
+
+export type StereoPartnerCountries = Record<string, string>
+
+export interface StereoCountryCandidate {
+  source_key: string
+  name: string
+  ico: string
+  dic: string
+  source_country: string
+  country_code: string
+  confirmed_country: string | null
+  documents: Array<{ source_key: string; document_no: string; kind: 'issued' | 'purchase' }>
 }
 
 export interface StereoReport {
@@ -52,6 +85,7 @@ export interface StereoReport {
   review_reasons?: Record<string, number>
   movement_review_reasons?: Record<string, number>
   date_bounds?: { from: string; to: string }
+  partner_country_candidates?: StereoCountryCandidate[]
   review_movements?: Array<{
     kind: 'bank' | 'cash'
     source_key: string
@@ -93,15 +127,19 @@ export const stereoNxApi = {
     (await api.post<StereoPreview>(`${BASE}/uploads/${token}/preview`, {})).data,
   fillCompanyProfile: async (token: string, company: number, fields: string[], expectedValues: Record<string, string>): Promise<{ filled_fields: string[] }> =>
     (await api.post<{ filled_fields: string[] }>(`${BASE}/uploads/${token}/company-profile`, { company, fields, expected_values: expectedValues })).data,
+  accountMapping: async (token: string, company: number, matchBankAccountSeries = false): Promise<StereoAccountMappingProposal> =>
+    (await api.post<StereoAccountMappingProposal>(`${BASE}/uploads/${token}/account-mapping`, { company, match_bank_account_series: matchBankAccountSeries })).data,
+  partnerCountries: async (token: string, company: number, blankCountryIsCz = false, matchBankAccountSeries = false, countries: StereoPartnerCountries = {}): Promise<StereoCountryCandidate[]> =>
+    (await api.post<{ partners: StereoCountryCandidate[] }>(`${BASE}/uploads/${token}/partner-countries`, { company, blank_country_is_cz: blankCountryIsCz, match_bank_account_series: matchBankAccountSeries, partner_countries: countries })).data.partners,
   /**
    * Zkouška nanečisto i převod běží na serveru jako job: po založení se polluje jeho stav
    * (společné `/admin/imports/{id}`, `onJob` dostává každý stav) a po doběhnutí se stáhne
    * výsledek. Job, který skončil bez výsledku, vrátí chybu s textem jobu.
    */
-  run: async (token: string, company: number, mode: 'dry_run' | 'import', blankCountryIsCz: boolean, onJob?: (job: FileImportJob) => void, matchBankAccountSeries = false): Promise<StereoReport> =>
-    stereoNxApi.follow(token, await stereoNxApi.start(token, company, mode, blankCountryIsCz, matchBankAccountSeries), onJob),
-  start: async (token: string, company: number, mode: 'dry_run' | 'import', blankCountryIsCz: boolean, matchBankAccountSeries = false): Promise<number> =>
-    (await api.post<{ job_id: number }>(`${BASE}/uploads/${token}/run`, { company, mode, blank_country_is_cz: blankCountryIsCz, match_bank_account_series: matchBankAccountSeries })).data.job_id,
+  run: async (token: string, company: number, mode: 'dry_run' | 'import', blankCountryIsCz: boolean, onJob?: (job: FileImportJob) => void, matchBankAccountSeries = false, accountMapping?: StereoAccountMapping, partnerCountries?: StereoPartnerCountries): Promise<StereoReport> =>
+    stereoNxApi.follow(token, await stereoNxApi.start(token, company, mode, blankCountryIsCz, matchBankAccountSeries, accountMapping, partnerCountries), onJob),
+  start: async (token: string, company: number, mode: 'dry_run' | 'import', blankCountryIsCz: boolean, matchBankAccountSeries = false, accountMapping?: StereoAccountMapping, partnerCountries?: StereoPartnerCountries): Promise<number> =>
+    (await api.post<{ job_id: number }>(`${BASE}/uploads/${token}/run`, { company, mode, blank_country_is_cz: blankCountryIsCz, match_bank_account_series: matchBankAccountSeries, ...(accountMapping ? { account_mapping: accountMapping } : {}), ...(partnerCountries && Object.keys(partnerCountries).length ? { partner_countries: partnerCountries } : {}) })).data.job_id,
   /** Sleduje už založený job do konce a vrátí jeho výsledek (i job spuštěný před opuštěním stránky). */
   follow: async (token: string, jobId: number, onJob?: (job: FileImportJob) => void): Promise<StereoReport> => {
     for (;;) {

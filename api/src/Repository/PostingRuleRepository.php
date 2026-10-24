@@ -98,6 +98,27 @@ final class PostingRuleRepository
         return (int) $stmt->fetchColumn();
     }
 
+    /**
+     * Potvrzené nastavení převodu zapisujeme jednou dávkou; počet předkontací není
+     * důvod k opakovanému načítání jejich ID.
+     * @param list<array{rule_key:string,debit_account_code:?string,credit_account_code:?string,description:string}> $rules
+     */
+    public function upsertOverrides(int $supplierId, array $rules): void
+    {
+        if ($rules === []) return;
+        $params = [];
+        foreach ($rules as $rule) {
+            array_push($params, $supplierId, $rule['rule_key'], $rule['description'],
+                $rule['debit_account_code'], $rule['credit_account_code'], self::OVERRIDE_PRIORITY);
+        }
+        $this->db->pdo()->prepare('INSERT INTO posting_rules
+            (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
+            VALUES ' . implode(', ', array_fill(0, count($rules), '(?, ?, ?, ?, ?, ?, 1)')) . '
+            ON DUPLICATE KEY UPDATE description=VALUES(description),
+            debit_account_code=VALUES(debit_account_code), credit_account_code=VALUES(credit_account_code), is_active=1')
+            ->execute($params);
+    }
+
     private function cast(array $r): array
     {
         $r['id'] = (int) $r['id'];

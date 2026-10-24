@@ -34,6 +34,20 @@ final class StereoNxAccountingJournalPlanTest extends TestCase
         self::assertSame(-5025, $plan['entries'][1]['amount_cents']);
     }
 
+    public function testNormalizationCollisionBlocksImportInsteadOfMergingSourceAccounts(): void
+    {
+        $plan = StereoNxAccountingJournalPlan::build([], [['Ucet' => '321001'], ['Ucet' => '321.001']]);
+        self::assertFalse($plan['ok']);
+        self::assertContains('chart_account_normalization_collision', array_column($plan['blockers'], 'code'));
+    }
+
+    public function testLengthLimitIncludesInsertedAnalyticSeparator(): void
+    {
+        $plan = StereoNxAccountingJournalPlan::build([], [['Ucet' => '3211234567']]);
+        self::assertFalse($plan['ok']);
+        self::assertContains('target_account_code_too_long', array_column($plan['blockers'], 'code'));
+    }
+
     public function testPostingDateDeterminesYearAndSourceYearRemainsVisible(): void
     {
         $plan = self::plan([self::row(['Rok' => 2025])]);

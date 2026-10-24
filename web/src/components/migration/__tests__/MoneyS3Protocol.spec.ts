@@ -52,6 +52,14 @@ function run(overrides: Partial<NonNullable<MoneyS3Run['protocol']>> = {}, statu
 }
 
 describe('MoneyS3Protocol', () => {
+  it('allows a dedicated message view without changing the default protocol sections', () => {
+    const wrapper = mount(MoneyS3Protocol, { props: { run: run() },
+      slots: { messages: '<p data-testid="custom-messages">Custom grouped report</p>' } })
+    expect(wrapper.get('[data-testid="custom-messages"]').text()).toBe('Custom grouped report')
+    expect(wrapper.text()).not.toContain('1 dokladů nemá zápis.')
+    expect(wrapper.find('[data-testid="reconciliation-2024"]').exists()).toBe(true)
+  })
+
   it('hides empty document reconciliation while preserving the year, checks and journal differences', () => {
     const wrapper = mount(MoneyS3Protocol, { props: { run: run({ reconciliation: [{
       year: 2026, period_id: 1, ok: true,

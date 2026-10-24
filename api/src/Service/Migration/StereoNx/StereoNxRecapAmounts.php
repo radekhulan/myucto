@@ -4,9 +4,18 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Accounting\JournalLineAmount;
+
 /** Důkazy prázdných volitelných polí NX; povinné částky nadále ověřují převodníky. */
 final class StereoNxRecapAmounts
 {
+    /** NX1 částka musí být číselného typu; převod haléřů sdílí účetní jádro. */
+    public static function moneyCents(mixed $value): ?int
+    {
+        if ((!is_int($value) && !is_float($value)) || !is_finite((float) $value) || abs($value) > 999999999999.99) return null;
+        return JournalLineAmount::cents($value);
+    }
+
     /** @param array<string,mixed> $header */
     public static function isUnusedBucket(array $header, string $slot): bool
     {

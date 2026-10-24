@@ -43,30 +43,123 @@ final class StereoNxProtocolPdfRenderer extends ReportPdfRendererBase
             }
             if ($rows !== []) $sections[] = ['title' => $labels[$title], 'headers' => [$labels['metric'], $labels['count']], 'rows' => $rows];
         }
-        $messages = [];
+        $messageGroups = [];
         foreach (['preflight' => 'info', 'errors' => 'error', 'warnings' => 'warning'] as $key => $fallback) {
             foreach (($report[$key] ?? []) as $item) {
                 $text = is_string($item) ? $item : (is_array($item) && is_string($item['message'] ?? null) ? $item['message'] : '');
                 if ($text === '') continue;
                 $level = is_array($item) && isset($catalog['level'][$item['level'] ?? '']) ? $item['level'] : $fallback;
                 $document = is_array($item) && is_string($item['document_no'] ?? null) ? $item['document_no'] : '';
-                $messages[] = [$label('level', $level), $document, $text];
+                $code = is_array($item) && is_string($item['code'] ?? null) ? trim($item['code']) : '';
+                $groupKey = $level . "\0" . ($code !== '' ? 'code:' . $code : 'text:' . $text);
+                $occurrences = is_array($item) && is_numeric($item['count'] ?? null) ? max(1, (int) $item['count']) : 1;
+                if (!isset($messageGroups[$groupKey])) {
+                    $messageGroups[$groupKey] = ['level_key' => $level, 'code' => $code, 'title' => '', 'count' => 0, 'details' => []];
+                }
+                $messageGroups[$groupKey]['count'] += $occurrences;
+                $messageGroups[$groupKey]['details'][] = [
+                    'document' => $document !== '' ? $document : $labels['unknown_document'],
+                    '_document_no' => $document,
+                    '_source_key' => is_array($item) && is_string($item['source_key'] ?? null) ? $item['source_key'] : '',
+                    '_code' => $code,
+                    '_level_key' => $level,
+                    'message' => $text,
+                    'count' => $occurrences,
+                ];
+                if ($messageGroups[$groupKey]['title'] === '') {
+                    $messageGroups[$groupKey]['title'] = $this->reasonTitle($catalog, $code, $text);
+                }
             }
         }
-        if ($messages !== []) $sections[] = ['title' => $labels['messages'], 'headers' => [$labels['level'], $labels['document'], $labels['message']], 'rows' => $messages];
-        foreach (['review_reasons', 'movement_review_reasons'] as $key) {
-            $rows = [];
-            foreach (($report[$key] ?? []) as $reason => $count) $rows[] = [$label('reasons', (string) $reason), $number($count)];
-            if ($rows !== []) $sections[] = ['title' => $labels[$key === 'review_reasons' ? 'document_reasons' : 'movement_reasons'], 'headers' => [$labels['reason'], $labels['count']], 'rows' => $rows];
+        $reviewGroups = [];
+        foreach ([
+            'review_reasons' => ['collection' => 'review_documents', 'kind' => 'document'],
+            'movement_review_reasons' => ['collection' => 'review_movements', 'kind' => 'movement'],
+        ] as $summaryKey => $settings) {
+            foreach (($report[$summaryKey] ?? []) as $reason => $count) {
+                $reason = (string) $reason;
+                if (!isset($reviewGroups[$reason])) $reviewGroups[$reason] = ['code' => $reason, 'title' => $this->reasonTitle($catalog, $reason, ''), 'count' => 0, 'documents' => [], 'movements' => []];
+                $count = is_numeric($count) ? max(0, (int) $count) : 0;
+                if ($settings['kind'] === 'document') $reviewGroups[$reason]['document_count'] = $count;
+                else $reviewGroups[$reason]['movement_count'] = $count;
+            }
         }
-        $rows = [];
-        foreach (['review_documents', 'review_movements'] as $key) {
+        foreach (['review_documents' => 'documents', 'review_movements' => 'movements'] as $key => $collection) {
             foreach (($report[$key] ?? []) as $record) {
-                $reasons = array_map(static fn ($code): string => $label('reasons', (string) $code), $record['review_codes'] ?? []);
-                $rows[] = [$label('kind', (string) ($record['kind'] ?? '')), (string) ($record['document_no'] ?? '') ?: $labels['unknown_document'], implode('; ', $reasons)];
+                if (!is_array($record)) continue;
+                $codes = array_values(array_unique(array_filter(array_map('strval', is_array($record['review_codes'] ?? null) ? $record['review_codes'] : []), static fn (string $code): bool => $code !== '')));
+                if ($codes === []) $codes = ['unknown_review_reason'];
+                foreach ($codes as $code) {
+                    if (!isset($reviewGroups[$code])) $reviewGroups[$code] = ['code' => $code, 'title' => $this->reasonTitle($catalog, $code, ''), 'count' => 0, 'documents' => [], 'movements' => []];
+                    $reviewGroups[$code]['count']++;
+                    $reviewGroups[$code][$collection][] = [
+                        'kind' => $label('kind', (string) ($record['kind'] ?? '')),
+                        'document' => (string) ($record['document_no'] ?? '') ?: $labels['unknown_document'],
+                        '_document_no' => (string) ($record['document_no'] ?? ''),
+                        '_source_key' => is_string($record['source_key'] ?? null) ? $record['source_key'] : '',
+                        'messages' => [],
+                    ];
+                }
             }
         }
-        if ($rows !== []) $sections[] = ['title' => $labels['documents_review'], 'headers' => [$labels['metric'], $labels['document'], $labels['reason']], 'rows' => $rows];
+        $reviewIndexBySource = [];
+        $reviewIndexByNumber = [];
+        foreach ($reviewGroups as $code => &$group) {
+            foreach (['documents', 'movements'] as $collection) {
+                foreach ($group[$collection] as $index => $record) {
+                    $location = [$collection, $index];
+                    if ($record['_source_key'] !== '') $reviewIndexBySource[$code][$record['_source_key']][] = $location;
+                    if ($record['_document_no'] !== '') $reviewIndexByNumber[$code][$record['_document_no']][] = $location;
+                }
+            }
+        }
+        unset($group);
+        foreach ($messageGroups as $groupKey => &$messageGroup) {
+            if ($messageGroup['code'] === '' || !isset($reviewGroups[$messageGroup['code']])) continue;
+            $code = $messageGroup['code'];
+            if (!isset($catalog['reasons'][$code]) && !in_array($code, [
+                'document_rounding_account_review', 'document_item_account_ambiguous', 'document_items_reconstructed',
+            ], true)) {
+                $reviewGroups[$code]['title'] = $messageGroup['title'];
+            }
+            $matchedDetails = [];
+            foreach ($messageGroup['details'] as $detailIndex => $detail) {
+                // Souhrnné varování může zastupovat několik záznamů, proto ho
+                // nelze přiřadit jednomu konkrétnímu řádku kontroly.
+                if ($detail['_level_key'] !== 'warning' || $detail['count'] !== 1) continue;
+                $candidateLocations = $detail['_source_key'] !== ''
+                    ? ($reviewIndexBySource[$code][$detail['_source_key']] ?? [])
+                    : ($detail['_document_no'] !== '' ? ($reviewIndexByNumber[$code][$detail['_document_no']] ?? []) : []);
+                if (count($candidateLocations) !== 1) continue;
+                [$collection, $index] = $candidateLocations[0];
+                $reviewGroups[$messageGroup['code']][$collection][$index]['messages'][] = [
+                    'level' => $label('level', $detail['_level_key']),
+                    'document' => $detail['document'], 'message' => $detail['message'], 'count' => $detail['count'],
+                ];
+                $reviewGroups[$messageGroup['code']]['message_count'] = ($reviewGroups[$messageGroup['code']]['message_count'] ?? 0) + $detail['count'];
+                $matchedDetails[$detailIndex] = $detail['count'];
+            }
+            foreach ($matchedDetails as $detailIndex => $count) {
+                unset($messageGroup['details'][$detailIndex]);
+                $messageGroup['count'] -= $count;
+            }
+            if ($matchedDetails !== []) $messageGroup['details'] = array_values($messageGroup['details']);
+        }
+        unset($messageGroup);
+        $messageGroups = array_filter($messageGroups, static fn (array $group): bool => $group['count'] > 0 && $group['details'] !== []);
+        $severityRank = ['error' => 0, 'warning' => 1, 'info' => 2];
+        uasort($messageGroups, static fn (array $left, array $right): int => ($severityRank[$left['level_key']] <=> $severityRank[$right['level_key']]));
+        foreach ($messageGroups as &$group) $group['level'] = $label('level', $group['level_key']);
+        unset($group);
+        if ($messageGroups !== []) $sections[] = ['type' => 'messages', 'title' => $labels['messages'], 'groups' => array_values($messageGroups)];
+        foreach ($reviewGroups as &$group) {
+            $group['count'] = max($group['count'], ($group['document_count'] ?? 0) + ($group['movement_count'] ?? 0));
+            $group['document_count'] ??= count($group['documents']);
+            $group['movement_count'] ??= count($group['movements']);
+        }
+        unset($group);
+        $reviewGroups = array_filter($reviewGroups, static fn (array $group): bool => $group['count'] > 0);
+        if ($reviewGroups !== []) $sections[] = ['type' => 'reviews', 'title' => $labels['documents_review'], 'groups' => array_values($reviewGroups)];
         $rows = [];
         foreach (($report['not_transferred'] ?? []) as $table) $rows[] = [(string) ($table['table'] ?? ''), $number($table['count'] ?? null)];
         if ($rows !== []) $sections[] = ['title' => $labels['not_transferred'], 'headers' => [$labels['table'], $labels['count']], 'rows' => $rows];
@@ -82,11 +175,15 @@ final class StereoNxProtocolPdfRenderer extends ReportPdfRendererBase
             }
             if ($rows !== []) $sections[] = ['title' => $title, 'headers' => [$labels['account'], $labels['target'], $labels['source']], 'rows' => $rows];
         }
-        $hasWarnings = !empty($report['warnings']) || !empty($report['review_reasons']) || !empty($report['movement_review_reasons']) || !empty($report['partial']);
+        $hasWarnings = $reviewGroups !== [] || !empty($report['partial']);
+        foreach (($report['warnings'] ?? []) as $item) {
+            if (!is_array($item) || ($item['level'] ?? '') !== 'info') $hasWarnings = true;
+        }
         foreach (($report['preflight'] ?? []) as $item) {
             if (is_array($item) && ($item['level'] ?? '') === 'warning') $hasWarnings = true;
         }
         foreach ($sections as &$section) {
+            if (isset($section['type'])) continue;
             $section['numeric_last'] = end($section['headers']) === $labels['count'];
             $section['widths'] = count($section['headers']) === 2
                 ? ($section['numeric_last'] ? [82, 18] : [65, 35])
@@ -104,6 +201,15 @@ final class StereoNxProtocolPdfRenderer extends ReportPdfRendererBase
             'partial' => !empty($report['partial']), 'failed' => ($report['ok'] ?? false) !== true,
             'status' => $catalog['status'][($report['ok'] ?? false) !== true ? 'failed' : ($hasWarnings ? 'completed_with_warnings' : 'completed')],
         ];
+    }
+
+    /** Název důvodu je lidsky čitelný i pro starší či neznámé kódy. */
+    private function reasonTitle(array $catalog, string $code, string $fallback): string
+    {
+        if (isset($catalog['reasons'][$code])) return (string) $catalog['reasons'][$code];
+        if ($fallback === '') return (string) ($catalog['ui']['unknown_reason'] ?? $code);
+        $fallback = preg_replace('/\s+/u', ' ', trim($fallback)) ?? trim($fallback);
+        return mb_strlen($fallback, 'UTF-8') > 160 ? mb_substr($fallback, 0, 157, 'UTF-8') . '...' : $fallback;
     }
 
     private function date(string $date, string $lang, bool $time = false): string

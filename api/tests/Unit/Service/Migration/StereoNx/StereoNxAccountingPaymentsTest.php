@@ -432,6 +432,47 @@ final class StereoNxAccountingPaymentsTest extends TestCase
         self::assertSame(['payment_agenda_not_imported'], $plan['records']['reviews'][0]['review_codes']);
     }
 
+    #[\PHPUnit\Framework\Attributes\DataProvider('openingRawCases')]
+    public function testNullOpeningTaxFieldsCreateOnlyDedicatedOpeningCandidate(string $case): void
+    {
+        $tables = self::tables();
+        $tables['LFirma'][0]['DruhPS'] = 'OPEN';
+        $cash = &$tables['CPokl'][0];
+        $cash['Druh'] = 'OPEN';
+        $cash['ZpracovatDPH'] = false;
+        $cash['TypDPH'] = '';
+        $cash['DoklSRada'] = '';
+        $cash['DoklSCislo'] = null;
+        $cash['Castka'] = $cash['CastkaVlastni'] = 456.78;
+        foreach (['ZaklDPHz', 'DPHz', 'ZaklDPHs', 'DPHs', 'ZaklDPHt', 'DPHt', 'BezDane'] as $field) $cash[$field] = null;
+        if ($case === 'ordinary') $cash['Druh'] = 'OTHER';
+        if ($case === 'tax_flag') $cash['ZpracovatDPH'] = true;
+        if ($case === 'vat_type') $cash['TypDPH'] = 'TU';
+        if ($case === 'payment') { $cash['DoklSRada'] = 'VF'; $cash['DoklSCislo'] = '77'; }
+        if ($case === 'missing_kind') unset($tables['LFirma'][0]['DruhPS']);
+        if ($case === 'missing_tax_field') unset($cash['DPHz']);
+        if (str_starts_with($case, 'tax_') && $case !== 'tax_flag') $cash[substr($case, 4)] = 1.0;
+        unset($cash);
+        $path = $this->archive($tables);
+        try {
+            $module = (new \ReflectionClass(StereoNxAccountingPayments::class))->newInstanceWithoutConstructor();
+            $plan = $module->prepare(StereoNxBackup::open($path, 0));
+        } finally {
+            @unlink($path);
+        }
+        $movement = $plan['records']['cash_transactions'][0];
+        self::assertSame($case === 'nulls', $plan['cash_opening_candidates'][$movement['source_key']] ?? false);
+        self::assertSame([], $plan['non_vat_cash_candidates']);
+        self::assertTrue($movement['requires_draft']);
+        self::assertSame(str_starts_with($case, 'tax_') && $case !== 'tax_flag' ? ['movement_vat_unverified'] : ['pending_reconciliation'], $movement['review_codes']);
+    }
+
+    public static function openingRawCases(): iterable
+    {
+        foreach (['nulls', 'ordinary', 'tax_flag', 'vat_type', 'payment', 'missing_kind', 'missing_tax_field',
+            'tax_ZaklDPHz', 'tax_DPHz', 'tax_ZaklDPHs', 'tax_DPHs', 'tax_ZaklDPHt', 'tax_DPHt', 'tax_BezDane'] as $case) yield $case => [$case];
+    }
+
     /** @return array<string,list<array<string,mixed>>> */
     public static function tables(): array
     {

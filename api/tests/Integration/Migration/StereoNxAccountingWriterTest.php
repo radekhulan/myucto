@@ -119,16 +119,54 @@ final class StereoNxAccountingWriterTest extends TestCase
         self::assertSame([
             '221kb' => 120025,
             '321' => -120025,
-            '353001' => 1000000,
-            '411010' => -1000000,
+            '353.001' => 1000000,
+            '411.010' => -1000000,
             '701' => 0,
         ], $this->balances());
+
+        $mappedCodes = Bootstrap::buildContainer()->get(StereoNxImportMap::class)->accountCodes(
+            $this->supplierId, $prepared['identity']['ico'], $prepared['company_index'],
+        );
+        self::assertSame('353.001', $mappedCodes['353001']);
+        self::assertSame('411.010', $mappedCodes['411010']);
+        self::assertSame('221kb', $mappedCodes['221kb']);
+        self::assertArrayNotHasKey('353.001', $mappedCodes, 'Identita importu zůstává ve zdrojovém tvaru.');
 
         $before = $this->snapshot();
         $repeat = $this->writer->write($prepared, $this->supplierId, $this->userId);
         self::assertSame(0, $repeat['journal_entries_created']);
         self::assertSame(4, $repeat['journal_entries_existing']);
         self::assertSame($before, $this->snapshot());
+    }
+
+    public function testRepeatOfLegacyUndottedImportKeepsOriginalAccountsAndEntries(): void
+    {
+        $prepared = $this->writer->prepare($this->backup());
+        $this->writer->write($prepared, $this->supplierId, $this->userId);
+        $this->db->pdo()->prepare("UPDATE chart_of_accounts SET account_code = REPLACE(account_code, '.', '')
+            WHERE supplier_id = ? AND account_code IN ('353.001', '411.010')")->execute([$this->supplierId]);
+        $before = $this->snapshot();
+        $repeat = $this->writer->write($prepared, $this->supplierId, $this->userId);
+        self::assertSame(0, $repeat['journal_entries_created']);
+        self::assertSame(4, $repeat['journal_entries_existing']);
+        self::assertSame($before, $this->snapshot());
+        self::assertArrayHasKey(353001, $this->balances());
+        self::assertArrayNotHasKey('353.001', $this->balances());
+    }
+
+    public function testUnmappedUndottedTargetIsNotSilentlyMergedOrRenamed(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $accounts = $container->get(ChartOfAccountsRepository::class);
+        $parent = $accounts->findByCode($this->supplierId, '353');
+        (new \MyInvoice\Service\Migration\Shared\ChartAccountCreator($accounts))->createAnalytic(
+            $this->supplierId, '353001', 'Syntetický nepřiřazený účet', $parent,
+        );
+        $prepared = $this->writer->prepare($this->backup());
+        $this->expectException(StereoNxException::class);
+        $this->expectExceptionMessage('bez importní vazby');
+        $this->writer->write($prepared, $this->supplierId, $this->userId);
     }
 
     public function testChangedSourceAndChangedTargetAreRejectedWithoutAdditionalRows(): void
@@ -201,13 +239,13 @@ final class StereoNxAccountingWriterTest extends TestCase
         self::assertTrue($prepared['ok'], json_encode($prepared['errors'], JSON_UNESCAPED_UNICODE));
         $this->writer->write($prepared, $this->supplierId, $this->userId);
         $query = $this->db->pdo()->prepare("SELECT account_code, tax_deductibility FROM chart_of_accounts
-            WHERE supplier_id = ? AND account_code IN ('501', '501001', '602', '602001') ORDER BY account_code");
+            WHERE supplier_id = ? AND account_code IN ('501', '501.001', '602', '602.001') ORDER BY account_code");
         $query->execute([$this->supplierId]);
         self::assertSame([
             ['account_code' => '501', 'tax_deductibility' => 'deductible'],
-            ['account_code' => '501001', 'tax_deductibility' => 'non_deductible'],
+            ['account_code' => '501.001', 'tax_deductibility' => 'non_deductible'],
             ['account_code' => '602', 'tax_deductibility' => 'deductible'],
-            ['account_code' => '602001', 'tax_deductibility' => 'non_deductible'],
+            ['account_code' => '602.001', 'tax_deductibility' => 'non_deductible'],
         ], $query->fetchAll(PDO::FETCH_ASSOC));
     }
 

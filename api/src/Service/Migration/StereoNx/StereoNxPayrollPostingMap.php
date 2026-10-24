@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Migration\Shared\ImportedAccountCode;
+
 use MyInvoice\Service\Payroll\Migration\PayrollLegacyPostingRow;
 use MyInvoice\Service\Payroll\Migration\PayrollLegacyPostingSource;
 
@@ -46,8 +48,9 @@ final class StereoNxPayrollPostingMap implements PayrollLegacyPostingSource
      * @param list<array<string,mixed>> $parameters MPARUCT
      * @param list<array<string,mixed>> $transfer MPARZPR
      * @param list<array<string,mixed>> $journal Cdenik
+     * @param array<string,string> $accountCodes doložené vazby účtů již provedeného převodu
      */
-    public static function fromTables(array $parameters, array $transfer, array $journal, ?int $year = null): self
+    public static function fromTables(array $parameters, array $transfer, array $journal, ?int $year = null, array $accountCodes = []): self
     {
         $series = self::journalSeries($transfer);
         if ($series === null) return new self([], null);
@@ -105,7 +108,9 @@ final class StereoNxPayrollPostingMap implements PayrollLegacyPostingSource
             $rows[] = new PayrollLegacyPostingRow(
                 self::SOURCE, 'MPARUCT/MPARZPR/Cdenik:' . $year,
                 self::JOURNAL_LABELS[$bucket['label']][1], $bucket['label'],
-                $bucket['debit'], $bucket['credit'], $bucket['debit'], $bucket['credit'],
+                ImportedAccountCode::target($bucket['debit'], $accountCodes),
+                ImportedAccountCode::target($bucket['credit'], $accountCodes),
+                $bucket['debit'], $bucket['credit'],
                 $bucket['lines'], $bucket['amount'],
             );
         }

@@ -165,6 +165,8 @@ final class StereoNxImporter
             'new_documents' => ['issued' => [], 'purchase' => []], 'new_statements' => [],
             'touched_documents' => ['issued' => [], 'purchase' => []], 'touched_statements' => [], 'zero_cash' => [],
             'bank_writer' => new BankStatementImportWriter($this->db, 'stereo-nx'),
+            'bank_statement_records' => array_column($plan['bank_statements'] ?? [], null, 'source_key'),
+            'cash_numbers' => [],
             'written' => ['bank_accounts' => 0, 'bank_statements' => 0, 'bank_transactions' => 0,
                 'cash_transactions' => 0, 'payments' => 0, 'skipped_zero_cash' => 0],
         ];
@@ -194,7 +196,16 @@ final class StereoNxImporter
         foreach ($plan['bank_transactions'] ?? [] as $record) $this->importBankTransaction($context, $record);
         foreach ($plan['cash_transactions'] ?? [] as $record) $this->importCashTransaction($context, $record);
         foreach ($plan['payments'] ?? [] as $record) $this->importPayment($context, $record);
-        $linkReviews = (new StereoNxMovementJournalLinks($this->db, $this->map))->write($context, $plan);
+        $linkPlan = $plan;
+        if (($plan['cash_openings'] ?? []) !== []) {
+            $context['written']['cash_openings'] = (new StereoNxCashOpeningWriter($this->db, $this->map))
+                ->write($context, $plan['cash_openings'], $plan['journal_plan'] ?? []);
+            // Počáteční stav má informační vazbu na opening, běžné pohyby vlastní kontaci.
+            $openingKeys = array_fill_keys(array_column(array_column($plan['cash_openings'], 'movement'), 'source_key'), true);
+            $linkPlan['cash_transactions'] = array_values(array_filter($plan['cash_transactions'] ?? [],
+                static fn (array $movement): bool => !isset($openingKeys[$movement['source_key']])));
+        }
+        $linkReviews = (new StereoNxMovementJournalLinks($this->db, $this->map))->write($context, $linkPlan);
         $allReviews = [];
         foreach ([...($plan['reviews'] ?? []), ...$linkReviews] as $review) {
             $reviewKey = $review['kind'] . ':' . $review['source_key'];
@@ -206,6 +217,10 @@ final class StereoNxImporter
         }
         $plan['reviews'] = array_values($allReviews);
         $this->refreshBalances($context);
+        if (($plan['bank_openings'] ?? []) !== []) {
+            $context['written']['bank_openings'] = (new StereoNxBankOpeningWriter($this->db, $this->map))
+                ->write($context, $plan['bank_openings'], $plan['journal_plan'] ?? []);
+        }
         $reviews = [];
         foreach ($plan['reviews'] ?? [] as $review) {
             $kind = (string) ($review['kind'] ?? ''); $key = (string) ($review['source_key'] ?? '');
@@ -229,7 +244,7 @@ final class StereoNxImporter
      *
      * @return array<string,mixed>
      */
-    public function run(StereoNxBackup $backup, int $supplierId, int $userId, bool $dryRun, bool $blankCountryIsCz = false): array
+    public function run(StereoNxBackup $backup, int $supplierId, int $userId, bool $dryRun, bool $blankCountryIsCz = false, array $partnerCountries = []): array
     {
         $statsClientIds = [];
         $report = [
@@ -241,7 +256,9 @@ final class StereoNxImporter
             StereoNxCompanyCompatibility::assertAccountingMode($backup->companyIdentity(), 'tax_evidence');
             $backup->assertBankAccountSeriesReady();
             array_push($report['warnings'], ...$backup->bankAccountSeriesWarnings());
-            $plan = $this->sourcePlan->build($backup, $blankCountryIsCz);
+            $plan = $this->sourcePlan->build($backup, $blankCountryIsCz, $partnerCountries);
+            $report['partner_country_candidates'] = $plan['partner_country_candidates'];
+            array_push($report['warnings'], ...$plan['partner_country_warnings']);
             $report['counts'] = $plan['counts'] ?? [];
             $reviewReasons = [];
             foreach (['issued' => 'issued', 'purchases' => 'purchase'] as $section => $kind) {
@@ -603,7 +620,7 @@ final class StereoNxImporter
         $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE supplier_id = ? AND varsymbol = ? LIMIT 1");
         $stmt->execute([$ctx['supplier_id'], $number]);
         if ($stmt->fetchColumn() !== false) throw new StereoNxException('document_number_taken', 'Číslo zdrojového dokladu už ve firmě používá jiný doklad.');
-        $items = $record['items'] ?? [];
+        $items = $record['target_items'] ?? $record['items'] ?? [];
         if (!is_array($items)) throw new StereoNxException('document_items_invalid', 'Položky dokladu nejsou platné.');
         $base = $this->money($record['total_without_vat'] ?? null);
         $vat = $this->money($record['total_vat'] ?? null);
@@ -768,10 +785,12 @@ final class StereoNxImporter
                 $this->writer->insertIssuedItem($documentId, MigratedDocumentItem::issued(
                     $description, $quantity, $unit, $unitPrice, $rateId, $rate, $base, $vat, $gross, $code,
                     OssMigrationPolicy::DOMESTIC_COLUMNS,
+                    revenueAccountCode: $item['target_revenue_account_code'] ?? $item['revenue_account_code'] ?? null,
                 ), $i);
             } else {
                 $this->writer->insertPurchaseItem($documentId, MigratedDocumentItem::purchase(
                     $description, $quantity, $unit, $unitPrice, $rateId, $rate, $base, $vat, $gross, $code,
+                    expenseAccountCode: $item['target_expense_account_code'] ?? $item['expense_account_code'] ?? null,
                 ), $i);
             }
         }
@@ -814,10 +833,14 @@ final class StereoNxImporter
         $registered = (new BankAccountRegistrar($this->db, $this->bankAccounts))->register($ctx['supplier_id'], [
             $key => ['number' => $number, 'bank' => (string) ($record['bank_code'] ?? ''),
                 'iban' => (string) ($record['iban'] ?? ''), 'currency' => (string) ($record['currency'] ?? 'CZK'),
-                'label' => (string) ($record['label'] ?? 'Stereo NX'), 'suffix' => null],
+                'label' => (string) ($record['label'] ?? 'Stereo NX'), 'suffix' => $record['target_analytic_suffix'] ?? null],
         ]);
         $id = $registered[$key] ?? null;
         if ($id === null) throw new StereoNxException('bank_account_conflict', 'Vlastní bankovní účet nelze bezpečně přiřadit vybrané firmě.');
+        if (isset($record['target_analytic_suffix'])
+            && ($this->bankAccounts->find($ctx['supplier_id'], $id)['analytic_suffix'] ?? null) !== $record['target_analytic_suffix']) {
+            throw new StereoNxException('account_mapping_bank_collision', 'Bankovní účet nemohl získat potvrzenou analytiku.');
+        }
         $this->put($ctx, 'bank_account', $key, $hash, $id);
         $ctx['ids']['bank_account'][$key] = $id;
     }
@@ -911,6 +934,7 @@ final class StereoNxImporter
             mb_substr((string) ($record['description'] ?? 'Stereo NX'), 0, 255), $amount, $draft, $ctx['user_id']);
         $this->put($ctx, 'cash', $key, $hash, $id);
         $ctx['ids']['cash'][$key] = $id;
+        $ctx['cash_numbers'][$key] = $number;
         $ctx['written']['cash_transactions']++;
     }
 
@@ -935,6 +959,8 @@ final class StereoNxImporter
         $existing = $this->mapped($ctx, $mapKind, $key, $hash);
         if ($existing !== null) {
             $this->validateExistingPayment($ctx['supplier_id'], $kind, $movementType, $docId, $movementId, $amount, $existing);
+            // Koncept mohl být mezitím vystaven; ověřená úhrada musí znovu obnovit jeho stav i datum.
+            $ctx['touched_documents'][$kind][$docId] = $docId;
             return;
         }
         try {
@@ -1112,11 +1138,17 @@ final class StereoNxImporter
      * hash porovnává jejich kanonický obsah, ne raw hlavičku programu.
      * @param array<string,mixed> $record
      */
-    private static function sourceHash(array $record, bool $legacyEuReview = true, bool $omitDefaultDocumentFields = false): string
+    public static function sourceHash(array $record, bool $legacyEuReview = true, bool $omitDefaultDocumentFields = false): string
     {
         // Ověřené korunové částky cizoměnového dokladu jsou součástí identity zdroje.
         // Změna těchto důkazů musí zastavit opakovaný převod před vrácením starého mapování.
         unset($record['row'], $record['header']);
+        // Potvrzené cílové účty jsou výsledek převodu, nikoli změna zdrojové zálohy.
+        unset($record['target_analytic_suffix'], $record['target_items']);
+        foreach ($record['items'] ?? [] as $index => $item) {
+            unset($record['items'][$index]['target_expense_account_code'],
+                $record['items'][$index]['target_revenue_account_code']);
+        }
         if ($omitDefaultDocumentFields) {
             // Kompatibilní otisk první verze plánu, která tato odvozená pole neměla.
             // Odlišná měna, kurz nebo dobropis v otisku naopak zůstávají.

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\StereoNx;
 
 use MyInvoice\Service\Accounting\FiscalCalendar;
+use MyInvoice\Service\Migration\Shared\ImportedAccountCode;
 
 /**
  * Čistá kontrola zdrojového účetního deníku před převodem.
@@ -24,6 +25,7 @@ final class StereoNxAccountingJournalPlan
     {
         $calendar ??= FiscalCalendar::calendar();
         $chartCodes = [];
+        $targetCodes = [];
         $blockers = [];
         $warnings = [];
         foreach ($chart as $index => $row) {
@@ -38,7 +40,13 @@ final class StereoNxAccountingJournalPlan
                 continue;
             }
             $chartCodes[$chartKey] = $code;
-            if (strlen($code) > 10) {
+            $targetCode = ImportedAccountCode::normalize($code);
+            if (isset($targetCodes['#' . $targetCode])) {
+                $blockers[] = ['code' => 'chart_account_normalization_collision', 'account' => $code,
+                    'other_account' => $targetCodes['#' . $targetCode], 'target_account' => $targetCode];
+            }
+            $targetCodes['#' . $targetCode] = $code;
+            if (strlen($targetCode) > 10) {
                 $blockers[] = ['code' => 'target_account_code_too_long', 'account' => $code];
             }
         }
@@ -87,7 +95,7 @@ final class StereoNxAccountingJournalPlan
                 } elseif (!isset($chartCodes['#' . $account])) {
                     $blockers[] = ['code' => 'journal_account_not_in_chart', 'key' => $key, 'side' => $side, 'account' => $account];
                 }
-                if (strlen($account) > 10) $blockers[] = ['code' => 'target_account_code_too_long', 'key' => $key, 'account' => $account];
+                if (strlen(ImportedAccountCode::normalize($account)) > 10) $blockers[] = ['code' => 'target_account_code_too_long', 'key' => $key, 'account' => $account];
             }
             $rawAmount = $row['Celkem'] ?? null;
             if ((!is_int($rawAmount) && !is_float($rawAmount)) || !is_finite((float) $rawAmount)) {

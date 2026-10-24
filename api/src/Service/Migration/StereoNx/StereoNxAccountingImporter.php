@@ -35,9 +35,10 @@ final class StereoNxAccountingImporter
         private readonly PayrollMigrationModuleSetup $payrollSetup,
         private readonly StereoNxReconciler $reconciler,
         private readonly AccountingUnitSwitch $accountingUnit,
+        private readonly StereoNxAccountMappingService $accountMapping,
     ) {}
 
-    public function run(StereoNxBackup $backup, int $supplierId, int $userId, bool $dryRun, bool $blankCountryIsCz = false): array
+    public function run(StereoNxBackup $backup, int $supplierId, int $userId, bool $dryRun, bool $blankCountryIsCz = false, ?array $accountMapping = null, array $partnerCountries = []): array
     {
         $report = ['ok' => false, 'dry_run' => $dryRun, 'database_writes' => false,
             'accounting_mode' => 'double_entry', 'preflight' => [], 'errors' => [], 'warnings' => [],
@@ -53,15 +54,7 @@ final class StereoNxAccountingImporter
                     throw new StereoNxException('source_decode', 'Některou tabulku NX1 nelze úplně načíst.');
                 }
             }
-            $partners = StereoNxSourcePlan::partners(iterator_to_array($backup->rows('LAdresy'), false), $blankCountryIsCz);
-            $report['counts']['clients'] = count($partners);
-            foreach ($partners as $partner) {
-                if ($partner['country_unresolved']) {
-                    $report['warnings'][] = ['level' => 'warning', 'code' => 'partner_country_unresolved',
-                        'message' => 'Země některé protistrany zůstává k ruční kontrole v adresáři.'];
-                    break;
-                }
-            }
+            $partnerCountries = StereoNxPartnerCountries::configuration($partnerCountries);
             $payrollMonths = iterator_to_array($backup->rows('MMzdy'), false);
             $calendar = $this->journal->calendar($supplierId);
             $plans = [
@@ -76,15 +69,30 @@ final class StereoNxAccountingImporter
                         ? iterator_to_array($backup->rows('MOdvPar'), false) : [],
                 ], $backup->companyIdentity(), $backup->companyIndex()),
                 'inventory' => $this->inventoryWriter->prepare($backup),
-                'documents' => $this->accountingDocuments->prepare($backup, $blankCountryIsCz, $calendar),
+                'documents' => $this->accountingDocuments->prepare($backup, $blankCountryIsCz, $calendar, $partnerCountries),
                 'payments' => $this->accountingPayments->prepare($backup, $calendar),
             ];
+            $report['partner_country_candidates'] = $plans['documents']['partner_country_candidates'];
+            $accountMapping = StereoNxAccountMappingService::configuration($accountMapping);
+            if ($accountMapping !== null) {
+                $plans['journal'] = (new StereoNxAccountMappingPlan())->apply($plans['journal'], $accountMapping, $plans['payments']);
+                $plans['journal'] = $this->accountMapping->resolveExistingTargets($plans['journal'], $supplierId,
+                    $backup->companyIdentity()['ico'], $backup->companyIndex());
+                $accountMapping = $plans['journal']['account_mapping'];
+                array_push($plans['journal']['warnings'], ...$this->accountMapping->validateTargets($plans['journal'], $supplierId));
+                $plans['journal']['account_mapping_names'] = StereoNxAccountMappingService::targetNames($plans['journal'], $plans['payments'], $accountMapping);
+                $plans['payments'] = $this->accountMapping->preparePayments($plans['payments'], $accountMapping, $supplierId);
+                $plans['documents'] = StereoNxAccountingDocuments::withAccountMapping($plans['documents'], $plans['journal']);
+                $report['account_mapping'] = $accountMapping;
+            }
             // Samostatný převod osob stále hlásí mzdy jako nepřevzaté. V účetním
             // převodu už měsíce posoudí a spočítá modul historických mezd.
             $plans['employees']['warnings'] = array_values(array_filter(
                 $plans['employees']['warnings'],
                 static fn (array $warning): bool => $warning['code'] !== 'historical_payroll_skipped',
             ));
+            $plans['payments'] = StereoNxBankOpeningPlan::resolve($plans['payments'], $plans['journal']);
+            $plans['payments'] = StereoNxCashOpeningPlan::resolve($plans['payments'], $plans['journal']);
             $plans['payments'] = $this->accountingPayments->resolveNonVatCash($plans['payments'], $plans['journal']);
             $plans['payments']['documents'] = $plans['documents']['records'];
             $plans['payments']['journal_plan'] = $plans['journal'];
@@ -130,7 +138,7 @@ final class StereoNxAccountingImporter
                 $report['warnings'][] = ['level' => 'warning', 'code' => 'agenda_not_transferred',
                     'message' => $label . ': ' . $count . ' zdrojových záznamů nebylo převedeno.'];
             }
-            $report['partial'] = $report['not_transferred'] !== [] || $report['warnings'] !== [];
+            $report['partial'] = self::isPartialReport($report);
             $report['date_bounds'] = $plans['journal']['date_bounds'] ?? null;
             $documentDates = [];
             foreach (['issued', 'purchases'] as $kind) {
@@ -197,6 +205,9 @@ final class StereoNxAccountingImporter
                     'inventory' => $this->inventoryWriter, 'documents' => $this->accountingDocuments,
                     'payments' => $this->accountingPayments] as $key => $module) {
                     $result = $module->write($plans[$key], $supplierId, $userId);
+                    if ($key === 'journal' && $accountMapping !== null) {
+                        $this->accountMapping->applySettings($accountMapping, $supplierId, $identity['ico'], $backup->companyIndex(), $plans['journal']);
+                    }
                     foreach ($result['written'] ?? $result['counts'] ?? $result as $counter => $value) {
                         if (is_int($value)) $report['written'][$counter] = $value;
                     }
@@ -243,7 +254,7 @@ final class StereoNxAccountingImporter
                     }
                 }
                 unset($review);
-                $report['partial'] = $report['partial'] || $report['warnings'] !== [];
+                $report['partial'] = $report['partial'] || self::isPartialReport($report);
                 if ($dryRun) {
                     $nested ? $pdo->exec('ROLLBACK TO SAVEPOINT stereo_nx_accounting') : $pdo->rollBack();
                     if ($nested) $pdo->exec('RELEASE SAVEPOINT stereo_nx_accounting');
@@ -281,6 +292,13 @@ final class StereoNxAccountingImporter
             unset($review);
         }
         return $report;
+    }
+
+    /** Informační potvrzení převodu samo o sobě neznamená neúplný import. */
+    public static function isPartialReport(array $report): bool
+    {
+        return ($report['not_transferred'] ?? []) !== [] || array_any($report['warnings'] ?? [],
+            static fn (array $warning): bool => ($warning['level'] ?? 'warning') !== 'info');
     }
 
     /** Doklady mohou mít jiné datum než jejich kontace v převzatém deníku. */

@@ -144,6 +144,9 @@ final class StereoNxAccountingPayments
         $skippedCash = 0;
         $skippedZeroCash = 0;
         $nonVatCashCandidates = [];
+        $cashOpeningCandidates = [];
+        $companyRows = $read('LFirma');
+        $openingKind = count($companyRows) === 1 ? trim((string) ($companyRows[0]['DruhPS'] ?? '')) : '';
         foreach ($read('CPokl') as $row) {
             $sourceDates[] = self::date($row, 'KdyUcPripad');
             if (self::cents($row['Castka'] ?? null) === 0) {
@@ -171,6 +174,7 @@ final class StereoNxAccountingPayments
                 'review_codes' => [$reviewCode],
             ];
             if (self::explicitNonVatCash($row)) $nonVatCashCandidates[$key] = true;
+            if (self::explicitOpeningCash($row, $openingKind)) $cashOpeningCandidates[$key] = true;
             self::collectLink($linked, 'cash', $key, $row);
         }
 
@@ -291,6 +295,7 @@ final class StereoNxAccountingPayments
                 'requires_review' => count($reviews)],
             'warnings' => $warnings, 'errors' => [],
             'non_vat_cash_candidates' => $nonVatCashCandidates,
+            'cash_opening_candidates' => $cashOpeningCandidates,
             'records' => ['bank_accounts' => array_values($usedAccounts), 'bank_statements' => array_values($statements),
                 'bank_transactions' => array_values($bank), 'cash_transactions' => array_values($cash),
                 'payments' => $payments, 'reviews' => array_values($reviews)]];
@@ -464,6 +469,28 @@ final class StereoNxAccountingPayments
             $value = $row[$field] ?? null;
             if ((!is_int($value) && !is_float($value)) || !is_finite((float) $value)
                 || self::cents($value) !== 0) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Počáteční stav může mít nepoužitá pole NULL. Výjimka platí jen pro výslovný DruhPS;
+     * planner navíc vyžaduje přesnou otevírací kontaci. Obecné explicitNonVatCash zůstává přísné.
+     */
+    private static function explicitOpeningCash(array $row, string $openingKind): bool
+    {
+        if ($openingKind === '' || trim((string) ($row['Druh'] ?? '')) !== $openingKind
+            || ($row['ZpracovatDPH'] ?? null) !== false) return false;
+        foreach (['TypDPH', 'DoklSRada', 'DoklSCislo'] as $field) {
+            if (!array_key_exists($field, $row)) return false;
+            $value = $row[$field];
+            if ($value !== null && (!is_string($value) || trim($value) !== '')) return false;
+        }
+        foreach (['ZaklDPHz', 'DPHz', 'ZaklDPHs', 'DPHs', 'ZaklDPHt', 'DPHt', 'BezDane'] as $field) {
+            if (!array_key_exists($field, $row)) return false;
+            $value = $row[$field];
+            if ($value !== null && ((!is_int($value) && !is_float($value)) || !is_finite((float) $value)
+                || self::cents($value) !== 0)) return false;
         }
         return true;
     }

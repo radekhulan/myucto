@@ -130,6 +130,15 @@ final class BankStatementImportWriter
         $this->setBalances($supplierId, $statementId, self::amount($prev), self::amount($curr), self::amount($credit), self::amount($debit));
     }
 
+    /** Doložená kotva bez pohybů; volající ověřil prázdný výpis a drží transakci převodu. */
+    public function setOpeningBalanceInCents(int $supplierId, int $statementId, int $opening, string $balanceDate): void
+    {
+        $this->setBalancesInCents($supplierId, $statementId, $opening, $opening, 0, 0);
+        $this->db->pdo()->prepare(
+            'UPDATE bank_statements SET statement_date=?, transaction_count=0, matched_count=0 WHERE supplier_id=? AND id=?'
+        )->execute([$balanceDate, $supplierId, $statementId]);
+    }
+
     /**
      * Stav účtu banky na začátku období podle otevíracího zápisu deníku (MD − D na účtu).
      * Kotva zůstatků výpisů převzatých ze zdroje, který deník vede.

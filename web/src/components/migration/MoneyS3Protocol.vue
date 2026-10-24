@@ -140,6 +140,7 @@ function levelClass(level: string): string {
 
     </slot>
 
+    <slot name="messages" :messages="messages">
     <section v-if="messages.length">
       <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.messages')) }}</h4>
       <ul class="space-y-2">
@@ -148,6 +149,7 @@ function levelClass(level: string): string {
         </li>
       </ul>
     </section>
+    </slot>
 
     <section v-if="reconciliation.length">
       <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.reconciliation_title')) }}</h4>

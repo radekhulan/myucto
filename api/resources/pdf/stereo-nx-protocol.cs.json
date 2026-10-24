@@ -36,7 +36,12 @@
     "created_by": "Zpracováno v MyÚčto.cz",
     "unknown_document": "Bez čísla dokladu",
     "document_reasons": "Důvody kontroly dokladů",
-    "movement_reasons": "Důvody kontroly peněžních pohybů"
+    "movement_reasons": "Důvody kontroly peněžních pohybů",
+    "message_count": "Počet výskytů",
+    "review_item_count": "Počet položek kontroly",
+    "linked_messages": "souvisejících zpráv",
+    "movement": "Pohyb",
+    "unknown_reason": "Neurčený důvod kontroly"
   },
   "counts": {
     "settled": "vypořádaných let",
@@ -297,7 +302,10 @@
     "mixed_vat_deduction": "Doklad kombinuje položky s různým nárokem na odpočet DPH",
     "foreign_currency_rate_mismatch": "Korunová částka dokladu neodpovídá částce v cizí měně a kurzu",
     "foreign_currency_vat_base_mismatch": "Korunový základ DPH nesouhlasí s přepočtenou částkou dokladu",
-    "payment_agenda_not_imported": "Úhrada závazku mimo převáděné faktury"
+    "payment_agenda_not_imported": "Úhrada závazku mimo převáděné faktury",
+    "document_rounding_account_review": "Zaokrouhlení dokladu vyžaduje kontrolu zaúčtování",
+    "document_item_account_ambiguous": "Účet položky nelze jednoznačně určit",
+    "document_items_reconstructed": "Položky dokladu byly sestaveny z účetního deníku"
   },
   "checks": {
     "turnover_balanced": "Obraty MD = D",

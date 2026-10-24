@@ -7,8 +7,13 @@ namespace MyInvoice\Tests\Integration\Migration;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Migration\StereoNx\StereoNxAccountingImporter;
 use MyInvoice\Service\Migration\StereoNx\StereoNxBackup;
+use MyInvoice\Service\Migration\StereoNx\StereoNxAccountMappingService;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticResolver;
+use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Vat\VatClearingService;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticNx1Archive;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxAccountingTables;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxTables;
@@ -110,6 +115,75 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         self::assertSame($after, $this->snapshot());
     }
 
+    public function testRepeatRefreshesValidatedPaymentAfterDraftInvoiceWasIssued(): void
+    {
+        $tables = self::tables();
+        $tables['Svfp'] = [];
+        $backup = $this->backup($tables);
+        $first = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
+        self::assertTrue($first['ok'], json_encode($first['errors'], JSON_UNESCAPED_UNICODE));
+        $invoice = $this->issuedPaymentState();
+        self::assertSame('draft', $invoice['status']);
+        self::assertSame(121.0, (float) $invoice['paid_total']);
+        self::assertSame((float) $invoice['amount_to_pay'], (float) $invoice['paid_total']);
+        // Uživatel zkontroloval a vystavil převzatý koncept. Původní platba zůstala beze změny.
+        $this->db->pdo()->prepare("UPDATE invoices SET status='issued',paid_at=NULL WHERE supplier_id=? AND id=?")
+            ->execute([$this->supplierId, $invoice['id']]);
+        $before = $this->paymentRecordSnapshot();
+        $repeat = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
+        self::assertTrue($repeat['ok'], json_encode($repeat['errors'], JSON_UNESCAPED_UNICODE));
+        $invoice = $this->issuedPaymentState();
+        self::assertSame('paid', $invoice['status']);
+        self::assertSame('2025-03-15', substr((string) $invoice['paid_at'], 0, 10));
+        self::assertSame(121.0, (float) $invoice['paid_total']);
+        self::assertSame(0, $repeat['written']['payments']);
+        self::assertSame(0, $repeat['written']['bank_transactions']);
+        self::assertSame(0, $repeat['written']['cash_transactions']);
+        self::assertSame($before, $this->paymentRecordSnapshot(), 'Přepočet nesmí přidat platbu, pohyb, vazbu ani účetní zápis.');
+    }
+
+    public function testRepeatOfValidatedPaymentKeepsTrueDraftInvoiceForReview(): void
+    {
+        $tables = self::tables();
+        $tables['Svfp'] = [];
+        $backup = $this->backup($tables);
+        $first = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
+        self::assertTrue($first['ok'], json_encode($first['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('draft', $this->issuedPaymentState()['status']);
+        $before = $this->paymentRecordSnapshot();
+        $repeat = $this->importer->run($backup, $this->supplierId, $this->userId, false, true);
+        self::assertTrue($repeat['ok'], json_encode($repeat['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('draft', $this->issuedPaymentState()['status']);
+        self::assertSame(121.0, (float) $this->issuedPaymentState()['paid_total']);
+        self::assertSame(0, $repeat['written']['payments']);
+        self::assertSame($before, $this->paymentRecordSnapshot());
+    }
+
+    private function issuedPaymentState(): array
+    {
+        $query = $this->db->pdo()->prepare("SELECT id,status,paid_total,paid_at,amount_to_pay FROM invoices WHERE supplier_id=? AND varsymbol='VF-1'");
+        $query->execute([$this->supplierId]);
+        $row = $query->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        return $row;
+    }
+
+    private function paymentRecordSnapshot(): array
+    {
+        $out = [];
+        foreach (['invoice_payments', 'payment_matches', 'journal_entries', 'journal_entry_lines',
+            'journal_entry_document_links', 'stereo_nx_import_map', 'cash_documents'] as $table) {
+            $order = $table === 'stereo_nx_import_map' ? 'kind,source_key' : 'id';
+            $q = $this->db->pdo()->prepare("SELECT * FROM {$table} WHERE supplier_id=? ORDER BY {$order}");
+            $q->execute([$this->supplierId]);
+            $out[$table] = $q->fetchAll(\PDO::FETCH_ASSOC);
+        }
+        $q = $this->db->pdo()->prepare('SELECT bt.* FROM bank_transactions bt JOIN bank_statements bs ON bs.id=bt.statement_id WHERE bs.supplier_id=? ORDER BY bt.id');
+        $q->execute([$this->supplierId]);
+        $out['bank_transactions'] = $q->fetchAll(\PDO::FETCH_ASSOC);
+        return $out;
+    }
+
     public function testReconciliationDetectsBalancedChangeToImportedJournal(): void
     {
         $backup = $this->backup(self::tables());
@@ -127,6 +201,160 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
         self::assertFalse($checked['reconciliation'][0]['ok']);
         self::assertNotEmpty($checked['reconciliation'][0]['journal_diffs']);
         self::assertFalse($checked['criteria']['total']['K1']);
+    }
+
+    public function testConfirmedMappingRollsBackAndContinuesIntoNativeBankVatAndDocumentPosting(): void
+    {
+        $backup = $this->backup(self::mappingTables());
+        $container = Bootstrap::buildApp()->getContainer();
+        $proposal = $container->get(StereoNxAccountMappingService::class)->propose($backup, $this->supplierId);
+        $configuration = ['accounts' => $proposal['accounts'], 'bank_accounts' => $proposal['bank_accounts'],
+            'vat' => ['input' => '343.811', 'output' => '343.822', 'settlement' => '343.899', 'unresolved' => null]];
+        $configuration['accounts']['518001'] = '518.777';
+        $configuration['accounts']['221kb'] = '221.710';
+        $configuration['accounts']['343021'] = '343.899';
+        $configuration['accounts']['321001'] = '321.700';
+        $configuration['bank_accounts']['B'] = '221.710';
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET vat_period='monthly' WHERE id=?")->execute([$this->supplierId]);
+
+        $before = $this->mappingSnapshot();
+        $dry = $this->importer->run($backup, $this->supplierId, $this->userId, true, true, $configuration);
+        self::assertTrue($dry['ok'], json_encode($dry['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame($before, $this->mappingSnapshot(), 'Zkouška musí vrátit i bankovní analytiku a předkontace DPH.');
+        $actual = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $configuration);
+        self::assertTrue($actual['ok'], json_encode($actual['errors'], JSON_UNESCAPED_UNICODE));
+
+        $mapped = $pdo->prepare("SELECT m.source_key, a.account_code FROM stereo_nx_import_map m
+            JOIN chart_of_accounts a ON a.id=m.target_id AND a.supplier_id=m.supplier_id
+            WHERE m.supplier_id=? AND m.kind='accounting_account' AND m.source_key IN ('518001','221kb','343021')
+            ORDER BY m.source_key");
+        $mapped->execute([$this->supplierId]);
+        self::assertSame(['221kb' => '221.710', '343021' => '343.899', '518001' => '518.777'],
+            $mapped->fetchAll(\PDO::FETCH_KEY_PAIR));
+        $suffix = $pdo->prepare('SELECT analytic_suffix FROM supplier_bank_accounts WHERE supplier_id=?');
+        $suffix->execute([$this->supplierId]);
+        self::assertSame(['710'], $suffix->fetchAll(\PDO::FETCH_COLUMN));
+        $chartBeforeResolver = $this->scalar('SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id=?');
+        $resolver = $container->get(BankAnalyticResolver::class);
+        $ownBank = ['recipient_account' => '19-1000000005', 'recipient_bank' => '0100'];
+        self::assertSame('221.710', $resolver->existingAnalyticCodeFor($this->supplierId, $ownBank));
+        self::assertSame('221.710', $resolver->analyticCodeFor($this->supplierId, $ownBank));
+        self::assertSame($chartBeforeResolver, $this->scalar('SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id=?'));
+        $bankLines = $pdo->prepare("SELECT DISTINCT a.account_code FROM journal_entry_lines l
+            JOIN chart_of_accounts a ON a.id=l.account_id JOIN journal_entries e ON e.id=l.entry_id
+            WHERE e.supplier_id=? AND a.account_code LIKE '221%' ORDER BY a.account_code");
+        $bankLines->execute([$this->supplierId]);
+        self::assertSame(['221.710'], $bankLines->fetchAll(\PDO::FETCH_COLUMN));
+
+        $vatBalances = $pdo->prepare("SELECT a.account_code,
+                SUM(CASE WHEN l.side='debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
+            FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id
+            JOIN journal_entries e ON e.id=l.entry_id
+            WHERE e.supplier_id=? AND e.entry_date >= '2025-03-01' AND e.entry_date < '2025-04-01'
+                AND a.account_code IN ('343.811','343.822','343.899') GROUP BY a.account_code ORDER BY a.account_code");
+        $vatBalances->execute([$this->supplierId]);
+        $vatBalances = array_map('floatval', $vatBalances->fetchAll(\PDO::FETCH_KEY_PAIR));
+        self::assertSame(['343.811' => 21.0, '343.822' => -21.0, '343.899' => 5.0], $vatBalances);
+        $preview = $container->get(VatClearingService::class)->preview($this->supplierId, 2025, 3);
+        self::assertSame(['input' => '343.811', 'output' => '343.822', 'settlement' => '343.899'], $preview['accounts']);
+        self::assertSame($vatBalances['343.811'], $preview['input_vat']);
+        self::assertSame(-$vatBalances['343.822'], $preview['output_vat']);
+        self::assertSame(0.0, $preview['settlement']);
+
+        $after = $this->mappingSnapshot();
+        $repeat = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $configuration);
+        self::assertTrue($repeat['ok'], json_encode($repeat['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame($after, $this->mappingSnapshot());
+        $changed = $configuration;
+        $changed['accounts']['518001'] = '518.778';
+        $rejected = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $changed);
+        self::assertFalse($rejected['ok']);
+        self::assertContains('mapped_target_changed', array_column($rejected['errors'], 'code'));
+        self::assertSame($after, $this->mappingSnapshot());
+
+        $purchase = $pdo->prepare("SELECT id FROM purchase_invoices WHERE supplier_id=? AND varsymbol='PF-1'");
+        $purchase->execute([$this->supplierId]);
+        $purchaseId = (int) $purchase->fetchColumn();
+        self::assertGreaterThan(0, $purchaseId);
+        $itemAccount = $pdo->prepare('SELECT expense_account_code FROM purchase_invoice_items WHERE purchase_invoice_id=?');
+        $itemAccount->execute([$purchaseId]);
+        self::assertSame(['518.777'], $itemAccount->fetchAll(\PDO::FETCH_COLUMN));
+        $posting = $container->get(PostingService::class);
+        $lines = $posting->buildFromPurchaseInvoice($this->supplierId, $purchaseId);
+        self::assertContains('518.777', array_column($lines, 'account_code'));
+        self::assertContains('343.811', array_column($lines, 'account_code'));
+        self::assertContains('321.700', array_column($lines, 'account_code'));
+        $pdo->prepare('UPDATE purchase_invoice_items SET unit_price_without_vat=200, total_without_vat=200,
+            total_vat=42, total_with_vat=242 WHERE purchase_invoice_id=?')->execute([$purchaseId]);
+        $pdo->prepare("UPDATE purchase_invoices SET total_without_vat=200, total_vat=42, total_with_vat=242,
+            tax_date='2025-03-16' WHERE id=? AND supplier_id=?")->execute([$purchaseId, $this->supplierId]);
+        $editedLines = $posting->buildFromPurchaseInvoice($this->supplierId, $purchaseId);
+        $expenseLines = array_values(array_filter($editedLines, static fn (array $line): bool => $line['account_code'] === '518.777'));
+        self::assertCount(1, $expenseLines);
+        self::assertSame(200.0, (float) $expenseLines[0]['amount']);
+        self::assertContains('343.811', array_column($editedLines, 'account_code'));
+        self::assertContains('321.700', array_column($editedLines, 'account_code'));
+    }
+
+    public function testChainedSourceAccountCodesDoNotTranslateNativeRulesAgainOnRepeat(): void
+    {
+        $tables = self::mappingTables();
+        foreach (['518', '518.100'] as $code) {
+            $tables['Lrozvrh'][] = ['Ucet' => $code, 'Nazev' => 'Syntetický řetězený účet ' . $code,
+                'TypUctu' => 'N', 'Danovy' => true];
+            $tables['Cdenik'][] = array_replace($tables['Cdenik'][2], [
+                'Agenda' => 'U', 'DoklRada' => 'CHAIN', 'DoklCislo' => count($tables['Cdenik']),
+                'UcetMD' => $code, 'UcetD' => '321001', 'Celkem' => 10.0]);
+        }
+        $backup = $this->backup($tables);
+        $container = Bootstrap::buildApp()->getContainer();
+        $proposal = $container->get(StereoNxAccountMappingService::class)->propose($backup, $this->supplierId);
+        $configuration = ['accounts' => $proposal['accounts'], 'bank_accounts' => $proposal['bank_accounts'], 'vat' => $proposal['vat']];
+        $configuration['accounts']['518'] = '518.100';
+        $configuration['accounts']['518.100'] = '518.200';
+        $rules = $container->get(PostingRuleRepository::class);
+        self::assertSame('518', $rules->resolve($this->supplierId, 'invoice.services.received')['debit_account_code']);
+        $first = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $configuration);
+        self::assertTrue($first['ok'], json_encode($first['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('518.100', $rules->resolve($this->supplierId, 'invoice.services.received')['debit_account_code']);
+        $before = $this->mappingSnapshot();
+        $repeat = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $configuration);
+        self::assertTrue($repeat['ok'], json_encode($repeat['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('518.100', $rules->resolve($this->supplierId, 'invoice.services.received')['debit_account_code'],
+            '518.100 je již cílové pravidlo; opakování z něj nesmí udělat zdrojové 518.100 → 518.200.');
+        self::assertSame($before, $this->mappingSnapshot());
+    }
+
+    public function testManualVatMappingRetainsProvenInputOutputAndSettlementInNativeRules(): void
+    {
+        $backup = $this->backup(self::mappingTables(true));
+        $container = Bootstrap::buildApp()->getContainer();
+        $proposal = $container->get(StereoNxAccountMappingService::class)->propose($backup, $this->supplierId);
+        $configuration = ['accounts' => $proposal['accounts'], 'bank_accounts' => $proposal['bank_accounts'], 'vat' => null];
+        foreach (['343101' => '343.811', '343201' => '343.822', '343901' => '343.899'] as $source => $target) {
+            $configuration['accounts'][$source] = $target;
+        }
+        $configuration['accounts']['321001'] = '321.700';
+        $before = $this->mappingSnapshot();
+        $dry = $this->importer->run($backup, $this->supplierId, $this->userId, true, true, $configuration);
+        self::assertTrue($dry['ok'], json_encode($dry['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame($before, $this->mappingSnapshot());
+        $actual = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $configuration);
+        self::assertTrue($actual['ok'], json_encode($actual['errors'], JSON_UNESCAPED_UNICODE));
+        $rules = $container->get(PostingRuleRepository::class);
+        self::assertSame('343.811', $rules->resolve($this->supplierId, 'invoice.vat.input')['debit_account_code']);
+        self::assertSame('343.822', $rules->resolve($this->supplierId, 'invoice.vat.output')['credit_account_code']);
+        self::assertSame('343.899', $rules->resolve($this->supplierId, 'vat.clearing.output')['credit_account_code']);
+        $purchase = $this->db->pdo()->prepare("SELECT id FROM purchase_invoices WHERE supplier_id=? AND varsymbol='PF-1'");
+        $purchase->execute([$this->supplierId]);
+        $lines = $container->get(PostingService::class)->buildFromPurchaseInvoice($this->supplierId, (int) $purchase->fetchColumn());
+        self::assertContains('343.811', array_column($lines, 'account_code'));
+        self::assertContains('321.700', array_column($lines, 'account_code'));
+        $after = $this->mappingSnapshot();
+        $repeat = $this->importer->run($backup, $this->supplierId, $this->userId, false, true, $configuration);
+        self::assertTrue($repeat['ok'], json_encode($repeat['errors'], JSON_UNESCAPED_UNICODE));
+        self::assertSame($after, $this->mappingSnapshot());
     }
 
     public function testNegativeExpensesPreserveCreditSettlementReversalAndRedStornoLinks(): void
@@ -320,6 +548,36 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
     }
 
     /** @return array<string,list<array<string,mixed>>> */
+    private static function mappingTables(bool $separateVatSources = false): array
+    {
+        $tables = self::tables();
+        $vatCodes = $separateVatSources ? ['343101', '343201', '343901'] : ['343021', '343021', '343021'];
+        foreach ([['518001', 'Syntetický náklad', 'N'], ['602007', 'Syntetický výnos', 'V'],
+            ['311', 'Syntetické pohledávky', 'A'], ['321001', 'Syntetický závazek', 'P'],
+            ...array_map(static fn (string $code): array => [$code, 'Syntetická DPH ' . $code, 'R'], array_unique($vatCodes))]
+            as [$code, $name, $type]) {
+            $tables['Lrozvrh'][] = ['Ucet' => $code, 'Nazev' => $name, 'TypUctu' => $type, 'Danovy' => true];
+        }
+        foreach ($tables['Cdenik'] as &$entry) {
+            if ($entry['UcetD'] === '321') $entry['UcetD'] = '321001';
+        }
+        unset($entry);
+        $tables['Spfp'] = [[...$tables['Svfp'][0], 'DoklSRada' => 'PF', 'DoklSCislo' => 1]];
+        $template = $tables['Cdenik'][2];
+        foreach ([['PF', 'PF', 1, 1, '518001', '321001', 100.0],
+            ['PF', 'PF', 1, 2, $vatCodes[0], '321001', 21.0],
+            ['VF', 'VF', 1, 1, '311', '602007', 100.0],
+            ['VF', 'VF', 1, 2, '311', $vatCodes[1], 21.0],
+            ['B', 'B', 2, 1, $vatCodes[2], '221kb', 5.0]] as [$agenda, $series, $number, $order, $debit, $credit, $amount]) {
+            $tables['Cdenik'][] = array_replace($template, ['Agenda' => $agenda, 'DoklRada' => $series,
+                'DoklCislo' => $number, 'Klic' => 1, 'Poradi' => $order,
+                'KdyUcPripad' => '2025-03-15', 'Rok' => 2025, 'Mesic' => 3,
+                'UcetMD' => $debit, 'UcetD' => $credit, 'Celkem' => $amount]);
+        }
+        return $tables;
+    }
+
+    /** @return array<string,list<array<string,mixed>>> */
     private static function tables(): array
     {
         $documents = SyntheticStereoNxTables::tables();
@@ -372,6 +630,18 @@ final class StereoNxAccountingPaymentsOrchestrationTest extends TestCase
             'journal_entries', 'stereo_nx_import_map', 'payroll_employees', 'payroll_employments',
             'payroll_migration_reference_totals'] as $table) {
             $out[$table] = $this->scalar("SELECT COUNT(*) FROM {$table} WHERE supplier_id=?");
+        }
+        return $out;
+    }
+
+    /** Nastavení včetně obsahu musí při zkoušce i odmítnutém převodu zůstat shodné. */
+    private function mappingSnapshot(): array
+    {
+        $out = $this->snapshot();
+        foreach (['posting_rules', 'supplier_bank_accounts', 'chart_of_accounts'] as $table) {
+            $stmt = $this->db->pdo()->prepare("SELECT * FROM {$table} WHERE supplier_id=? ORDER BY id");
+            $stmt->execute([$this->supplierId]);
+            $out[$table] = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         }
         return $out;
     }

@@ -36,7 +36,12 @@
     "created_by": "Prepared in MyÚčto.cz",
     "unknown_document": "No document number",
     "document_reasons": "Document review reasons",
-    "movement_reasons": "Money movement review reasons"
+    "movement_reasons": "Money movement review reasons",
+    "message_count": "Occurrences",
+    "review_item_count": "Review items",
+    "linked_messages": "related messages",
+    "movement": "Movement",
+    "unknown_reason": "Unspecified review reason"
   },
   "counts": {
     "settled": "years settled",
@@ -297,7 +302,10 @@
     "mixed_vat_deduction": "Document combines items with different VAT deduction eligibility",
     "foreign_currency_rate_mismatch": "CZK document amount does not match the foreign amount and exchange rate",
     "foreign_currency_vat_base_mismatch": "CZK VAT base differs from the converted document amount",
-    "payment_agenda_not_imported": "Payment of a liability outside the imported invoices"
+    "payment_agenda_not_imported": "Payment of a liability outside the imported invoices",
+    "document_rounding_account_review": "Document rounding account requires review",
+    "document_item_account_ambiguous": "The document item account cannot be determined unambiguously",
+    "document_items_reconstructed": "Document items were reconstructed from the journal"
   },
   "checks": {
     "turnover_balanced": "Debit = credit turnover",

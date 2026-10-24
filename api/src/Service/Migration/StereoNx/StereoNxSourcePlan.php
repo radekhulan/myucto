@@ -7,25 +7,28 @@ namespace MyInvoice\Service\Migration\StereoNx;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\BankSymbols;
+use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 
 /** Jediný čitelný zdrojový plán pro zápis daňové evidence a zkoušku nanečisto. */
 final class StereoNxSourcePlan
 {
     /** @param list<array<string,mixed>> $rows @return array<string,array<string,mixed>> */
-    public static function partners(array $rows, bool $blankCountryIsCz): array
+    public static function partners(array $rows, bool $blankCountryIsCz, array $partnerCountries = []): array
     {
+        $partnerCountries = StereoNxPartnerCountries::configuration($partnerCountries);
         $clients = [];
         foreach ($rows as $row) {
             $key = self::nonempty($row, 'Firma');
             if (isset($clients[$key])) throw new StereoNxException('client_duplicate', 'Duplicitní identita firmy v adresáři.');
             $countrySource = self::first($row, ['FakStat', 'Stat']);
-            $country = self::country($countrySource, (string) ($row['DIC'] ?? ''), $blankCountryIsCz);
+            $country = self::country($countrySource, (string) ($row['DIC'] ?? ''), isset($partnerCountries[$key]) ? false : $blankCountryIsCz);
             $mainCountry = trim((string) ($row['Stat'] ?? ''));
             $billingCountry = trim((string) ($row['FakStat'] ?? ''));
             if ($mainCountry !== '' && $billingCountry !== ''
                 && self::country($mainCountry, '', false)['code'] !== self::country($billingCountry, '', false)['code']) {
                 $country['unresolved'] = true;
             }
+            $country = StereoNxPartnerCountries::resolve($country, $key, $partnerCountries);
             $clients[$key] = ['source_key' => $key, 'row' => $row,
                 'name' => self::first($row, ['FakNazev', 'Nazev']),
                 'ico' => trim((string) ($row['ICO'] ?? '')), 'dic' => trim((string) ($row['DIC'] ?? '')),
@@ -43,7 +46,7 @@ final class StereoNxSourcePlan
     }
 
     /** @return array<string,mixed> */
-    public static function build(StereoNxBackup $backup, bool $blankCountryIsCz = false): array
+    public static function build(StereoNxBackup $backup, bool $blankCountryIsCz = false, array $partnerCountries = []): array
     {
         $backup->assertBankAccountSeriesReady();
         $inventory = $backup->inventory();
@@ -66,7 +69,7 @@ final class StereoNxSourcePlan
             'Spfp', 'Cpz', 'CPZZ', 'ZAZPVDPH', 'CBanka', 'CBankap', 'CPokl', 'Cdenik'];
         $tables = [];
         foreach ($required as $name) $tables[$name] = iterator_to_array($backup->rows($name), false);
-        $plan = self::fromTables($tables, $backup->companyIdentity(), $blankCountryIsCz);
+        $plan = self::fromTables($tables, $backup->companyIdentity(), $blankCountryIsCz, partnerCountries: $partnerCountries);
         $plan['source_company_index'] = $backup->companyIndex();
         return $plan;
     }
@@ -82,8 +85,9 @@ final class StereoNxSourcePlan
      * @return array<string,mixed>
      */
     public static function fromTables(array $tables, array $identity, bool $blankCountryIsCz = false, bool $documentsOnly = false,
-        ?FiscalCalendar $calendar = null): array
+        ?FiscalCalendar $calendar = null, array $partnerCountries = []): array
     {
+        $partnerCountries = StereoNxPartnerCountries::configuration($partnerCountries);
         $calendar ??= FiscalCalendar::calendar();
         foreach (['LAdresy', 'LFirmaUc', 'Lsdph', 'LSloupce', 'Svfh', 'Svfp', 'SPFH',
             'Spfp', 'Cpz', 'CPZZ', 'ZAZPVDPH', 'CBanka', 'CBankap', 'CPokl', 'Cdenik'] as $name) {
@@ -98,7 +102,7 @@ final class StereoNxSourcePlan
         $reconciliation = StereoNxPaymentReconciliation::check($tables['Cpz'], $tables['CBankap'], $tables['CPokl']);
         if (!$documentsOnly && !$reconciliation['ok']) throw new StereoNxException('payment_reconciliation', 'Zdrojové vazby a součty úhrad nesouhlasí.');
 
-        $clients = self::partners($tables['LAdresy'], $blankCountryIsCz);
+        $clients = self::partners($tables['LAdresy'], $blankCountryIsCz, $partnerCountries);
         $lines = [];
         $lineKeys = [];
         foreach ($tables['Svfp'] as $row) {
@@ -153,7 +157,8 @@ final class StereoNxSourcePlan
                     $partner = 'snapshot:' . $kind . ':' . $key;
                     if (strlen($partner) > 190) throw new StereoNxException('source_key_too_long', 'Identita historické protistrany přesahuje limit importní mapy.');
                     $snapshotName = self::first($row, ['FirmaNazev', 'FirmaJmeno']);
-                    $country = self::country((string) ($row['FirmaStat'] ?? ''), (string) ($row['FirmaDIC'] ?? ''), $blankCountryIsCz);
+                    $country = StereoNxPartnerCountries::resolve(self::country((string) ($row['FirmaStat'] ?? ''),
+                        (string) ($row['FirmaDIC'] ?? ''), isset($partnerCountries[$partner]) ? false : $blankCountryIsCz), $partner, $partnerCountries);
                     $clients[$partner] = ['source_key' => $partner, 'row' => [],
                         'name' => $snapshotName !== '' ? $snapshotName : 'Neurčená protistrana',
                         'ico' => trim((string) ($row['FirmaICO'] ?? '')),
@@ -169,7 +174,8 @@ final class StereoNxSourcePlan
                     if (!$documentsOnly) throw new StereoNxException('document_partner_missing', 'Doklad odkazuje na chybějící firmu.');
                     $partner = 'snapshot:' . $kind . ':' . $key;
                     $snapshotName = self::first($row, ['FirmaNazev', 'FirmaJmeno']);
-                    $country = self::country((string) ($row['FirmaStat'] ?? ''), (string) ($row['FirmaDIC'] ?? ''), $blankCountryIsCz);
+                    $country = StereoNxPartnerCountries::resolve(self::country((string) ($row['FirmaStat'] ?? ''),
+                        (string) ($row['FirmaDIC'] ?? ''), isset($partnerCountries[$partner]) ? false : $blankCountryIsCz), $partner, $partnerCountries);
                     $clients[$partner] = ['source_key' => $partner, 'row' => [],
                         'name' => $snapshotName !== '' ? $snapshotName : 'Neurčená protistrana',
                         'ico' => trim((string) ($row['FirmaICO'] ?? '')), 'dic' => trim((string) ($row['FirmaDIC'] ?? '')),
@@ -242,7 +248,19 @@ final class StereoNxSourcePlan
                 $mapped['source_key'] = $key;
                 $mapped['header'] = $row;
                 $mapped['partner_key'] = $partner;
-                $snapshotCountry = self::country((string) ($row['FirmaStat'] ?? ''), (string) ($row['FirmaDIC'] ?? ''), $blankCountryIsCz);
+                $snapshotCountry = self::country((string) ($row['FirmaStat'] ?? ''), (string) ($row['FirmaDIC'] ?? ''),
+                    isset($partnerCountries[$partner]) ? false : $blankCountryIsCz);
+                $historicalIco = PartnerIdentityMatcher::ico((string) ($row['FirmaICO'] ?? ''));
+                $partnerIco = PartnerIdentityMatcher::ico((string) ($clients[$partner]['ico'] ?? ''));
+                $historicalDic = PartnerIdentityMatcher::vatId((string) ($row['FirmaDIC'] ?? ''));
+                $partnerDic = PartnerIdentityMatcher::vatId((string) ($clients[$partner]['dic'] ?? ''));
+                // Potvrzení adresáře nesmí vyřešit zemi historicky jiného subjektu.
+                // Stejnou normalizaci a konflikt DIČ používá importClient při párování karty.
+                $differentHistoricalPartner = ($historicalIco !== '' && $partnerIco !== '' && $historicalIco !== $partnerIco)
+                    || ($historicalDic !== '' && $partnerDic !== '' && $historicalDic !== $partnerDic);
+                if (!$differentHistoricalPartner) {
+                    $snapshotCountry = StereoNxPartnerCountries::resolve($snapshotCountry, $partner, $partnerCountries);
+                }
                 $mapped['partner_snapshot'] = [
                     'name' => self::first($row, ['FirmaNazev', 'FirmaJmeno']),
                     'ico' => trim((string) ($row['FirmaICO'] ?? '')),
@@ -287,7 +305,8 @@ final class StereoNxSourcePlan
                     $mapped['review_codes'][] = 'partner_identity_missing';
                     $mapped['requires_draft'] = true;
                 }
-                if ($clients[$partner]['country_unresolved']) {
+                if ($clients[$partner]['country_unresolved']
+                    || (isset($partnerCountries[$partner]) && $differentHistoricalPartner && $snapshotCountry['unresolved'])) {
                     $mapped['review_codes'][] = strtoupper(trim((string) ($clients[$partner]['country'] ?? ''))) === 'EU'
                         ? 'partner_country_eu_unspecified' : 'partner_country_unresolved';
                     $mapped['requires_draft'] = true;
@@ -300,8 +319,12 @@ final class StereoNxSourcePlan
         }
         foreach (array_keys($lines) as $key) if (!isset($documentsByBareKey[$key]) || !isset($issued[$documentsByBareKey[$key]])) throw new StereoNxException('issued_orphan_line', 'Položka vydaného dokladu nemá hlavičku.');
         foreach (array_keys($purchaseLines) as $key) if (!isset($documentsByBareKey[$key]) || !isset($purchases[$documentsByBareKey[$key]])) throw new StereoNxException('purchase_orphan_line', 'Položka přijatého dokladu nemá hlavičku.');
+        StereoNxPartnerCountries::assertKnown($partnerCountries, $clients);
+        $countryCandidates = StereoNxPartnerCountries::candidates($clients, $issued, $purchases, $partnerCountries);
+        $countryWarnings = StereoNxPartnerCountries::directoryWarnings($clients, $countryCandidates);
         if ($documentsOnly) {
-            return ['identity' => $identity, 'clients' => array_values($clients),
+            return ['partner_country_candidates' => $countryCandidates, 'partner_country_warnings' => $countryWarnings,
+                'identity' => $identity, 'clients' => array_values($clients),
                 'issued' => array_values($issued), 'purchases' => array_values($purchases),
                 'counts' => ['clients' => count($clients), 'issued' => count($issued),
                     'purchases' => count($purchases),
@@ -509,7 +532,8 @@ final class StereoNxSourcePlan
             }
         }
         if ($journal !== []) throw new StereoNxException('cashbook_orphan', 'Peněžní deník obsahuje pohyb bez banky nebo pokladny.');
-        return ['identity' => $identity, 'clients' => array_values($clients),
+        return ['partner_country_candidates' => $countryCandidates, 'partner_country_warnings' => $countryWarnings,
+            'identity' => $identity, 'clients' => array_values($clients),
             'issued' => array_values($issued), 'purchases' => array_values($purchases),
             'bank_accounts' => array_values($accounts), 'bank_statements' => array_values($statements),
             'bank_transactions' => array_values($bank), 'cash_transactions' => array_values($cash),

@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
+use MyInvoice\Service\Migration\Shared\ImportedAccountCode;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
 /**
@@ -174,6 +175,7 @@ final class StereoNxAssets
         }
         $written = ['assets_created' => 0, 'assets_existing' => 0,
             'small_assets_created' => 0, 'small_assets_existing' => 0];
+        $accountCodes = $this->map->accountCodes($supplierId, $ico, $companyIndex);
 
         foreach ((array) ($plan['records']['assets'] ?? []) as $record) {
             if ($this->alreadyImported($supplierId, $ico, $companyIndex, self::ASSET_KIND, $record)) {
@@ -182,9 +184,15 @@ final class StereoNxAssets
             }
             try {
                 $meta = ['user_id' => $userId > 0 ? $userId : null];
+                $card = (array) $record['card'];
+                foreach (['asset_account_code', 'acquisition_account_code', 'accumulated_account_code'] as $field) {
+                    if (is_string($card[$field] ?? null)) {
+                        $card[$field] = ImportedAccountCode::target($card[$field], $accountCodes);
+                    }
+                }
                 $created = isset($record['imported_depreciation_plan'])
-                    ? $this->assets->createImported($supplierId, (array) $record['card'], (array) $record['imported_depreciation_plan'], $meta)
-                    : $this->assets->create($supplierId, (array) $record['card'], $meta);
+                    ? $this->assets->createImported($supplierId, $card, (array) $record['imported_depreciation_plan'], $meta)
+                    : $this->assets->create($supplierId, $card, $meta);
             } catch (AssetException $e) {
                 throw new StereoNxException('asset_write_rejected', 'Kartu dlouhodobého majetku cílová evidence odmítla: ' . $e->getMessage());
             }

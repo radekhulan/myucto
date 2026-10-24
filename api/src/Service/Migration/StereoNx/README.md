@@ -216,7 +216,30 @@ využívají `BankAccountRegistrar`, `BankStatementImportWriter`, `BankSymbols`,
 `JournalEntryLinker`. Neověřená měnová vazba úhrady se neodhaduje.
 
 Osnova a období používají `ChartAccountCreator`, `MigrationPeriods` a
-`MigrationHomeCurrency`. Výslovný typ účtu a strana ze Stereo jsou volbami
+`MigrationHomeCurrency`. `ImportedAccountCode` sjednocuje čistě číselné analytiky
+do tečkovaného tvaru. Plán deníku, klíče a otisky zůstávají zdrojové; účetní
+zapisovač převádí původní kódy na cílová ID. Majetek a návrh mzdových předkontací
+čtou tutéž mapu skutečných cílových kódů přes `StereoNxImportMap::accountCodes()`.
+To zachovává i opakování starších importů bez přejmenování již převzatých účtů.
+Kolize po normalizaci a překročení cílové délky blokují plán před zápisem.
+
+`StereoNxAccountMappingPlan` navrhuje jen použité účty a přidává potvrzené
+`target_debit`/`target_credit`, aniž mění zdrojová pole nebo otisky. Bankovní
+řady sdílejí analytiku podle identity fyzického účtu. Role DPH se dokazují
+stejným klasifikátorem v návrhu i při odvození nativních předkontací; samostatný
+počáteční stav roli nedokazuje. `StereoNxAccountMappingService` ověřuje aktivitu
+cílů, zachovává doložené starší vazby a společně s deníkem ukládá bankovní
+suffixy a nativní předkontace. Zkouška vrací i tyto změny. Otisk konfigurace
+váže import na úspěšnou zkoušku; importní vazba nastavení brání opakovanému
+překladu již cílových účtů při dalším importu. Starší bankovní účet bez tečky
+vyžaduje sjednocení vazby, nikoliv založení druhého účtu.
+
+`StereoNxAccountingDocuments::withAccountMapping()` přenáší doložené účty
+na existující položková pole společného `MigratedDocumentItem`. Více účtů
+rozliší z částek jen při jediném úplném rozpisu; omezené hledání při nejasnosti
+zanechá upozornění. Odvozené položkové cíle nejsou součástí otisku zdroje.
+
+Výslovný typ účtu a strana ze Stereo jsou volbami
 společného zapisovače, nikoli druhou implementací pravidel. Předvahu proti
 zdrojovému deníku porovnávají `TrialBalanceReconciliation` a
 `ReconciliationCriteria`. Karty majetku používají společné služby majetku,

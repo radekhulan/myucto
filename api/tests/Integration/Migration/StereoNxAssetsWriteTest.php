@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxIntangibleTables;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/../../Fixtures/StereoNx/SyntheticStereoNxIntangibleTables.php';
@@ -83,6 +84,45 @@ final class StereoNxAssetsWriteTest extends TestCase
         self::assertSame(1, $again['small_assets_existing']);
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM assets WHERE supplier_id = ?'));
         self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM small_assets WHERE supplier_id = ?'));
+    }
+
+    #[DataProvider('accountFormats')]
+    public function testAssetAccountsFollowNormalizedChartAndLegacyImportMappings(bool $legacy): void
+    {
+        $container = Bootstrap::buildContainer();
+        $accounts = $container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class);
+        $creator = new \MyInvoice\Service\Migration\Shared\ChartAccountCreator($accounts);
+        $map = $container->get(\MyInvoice\Service\Migration\StereoNx\StereoNxImportMap::class);
+        $tables = $this->tables();
+        $expected = [];
+        foreach (['asset_account_code' => ['022', 'UcetMDZarazeni'],
+            'acquisition_account_code' => ['042', 'UcetDalZarazeni'],
+            'accumulated_account_code' => ['082', 'UcetDalOdpisu']] as $field => [$parentCode, $sourceField]) {
+            $sourceCode = $parentCode . '024';
+            $targetCode = $legacy ? $sourceCode : $parentCode . '.024';
+            $id = $creator->createAnalytic($this->supplierId, $targetCode,
+                'Syntetická analytika', $accounts->findByCode($this->supplierId, $parentCode));
+            if ($legacy) {
+                $map->put($this->supplierId, $this->identity()['ico'], 1,
+                    'accounting_account', $sourceCode, str_repeat('b', 64), $id);
+            }
+            $tables['JMajetek'][0][$sourceField] = $sourceCode;
+            $expected[$field] = $targetCode;
+        }
+        $plan = StereoNxAssets::fromTables($tables, $this->identity(), 1);
+        self::assertSame(1, $plan['counts']['assets_ready']);
+        $this->assets->write($plan, $this->supplierId, $this->userId);
+        $query = $this->db->pdo()->prepare('SELECT asset_account_code, acquisition_account_code, accumulated_account_code FROM assets WHERE supplier_id = ?');
+        $query->execute([$this->supplierId]);
+        self::assertSame($expected, $query->fetch(\PDO::FETCH_ASSOC));
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ?'));
+        self::assertSame(1, $this->assets->write($plan, $this->supplierId, $this->userId)['assets_existing']);
+    }
+
+    public static function accountFormats(): iterable
+    {
+        yield 'nový převod' => [false];
+        yield 'opakování staršího převodu' => [true];
     }
 
     public function testChangedSourceCardIsRejectedInsteadOfDuplicated(): void
