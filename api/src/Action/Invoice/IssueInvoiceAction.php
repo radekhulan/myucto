@@ -71,6 +71,7 @@ final class IssueInvoiceAction
         private readonly TaxConstantsRepository $taxConstants,
         private readonly ClientRepository $clients,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
+        private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -445,6 +446,8 @@ final class IssueInvoiceAction
                 $releaseAllocated();
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
+            // Koncept může mít úhrady už před potvrzením. Výstupy obnoví běžná větev po commitu.
+            if (!$autoPaid) $this->payments->recompute($id, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $id, isset($user['id']) ? (int) $user['id'] : null);
             if ($stockEnabled) $this->stockIssue->issueForInvoice(
                 $supplierId,

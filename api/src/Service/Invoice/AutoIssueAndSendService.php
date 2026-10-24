@@ -47,6 +47,7 @@ final class AutoIssueAndSendService
         private readonly StockIssueService $stockIssue,
         private readonly DocumentAutoPoster $autoPoster,
         private readonly ClientRepository $clients,
+        private readonly InvoicePaymentService $payments,
     ) {}
 
     /**
@@ -96,6 +97,8 @@ final class AutoIssueAndSendService
                 if ($issue->rowCount() === 0) {
                     throw new \RuntimeException('Faktura byla mezitím změněna.');
                 }
+                // I dříve otevřený koncept může mít platby; PDF/statistiky obnoví stávající tok po commitu.
+                $this->payments->recompute($invoiceId, refreshOutputs: false);
                 InvoiceIssuer::record($pdo, $invoiceId, $userIsIssuer ? $userId : null);
                 if ($stockEnabled) $this->stockIssue->issueForInvoice($supplierId, $invoice, $userId);
                 $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);

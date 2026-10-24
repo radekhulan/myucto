@@ -2580,6 +2580,13 @@ final class PurchaseInvoiceRepository
             throw new \InvalidArgumentException("Invalid status: $newStatus");
         }
 
+        $wasDraft = false;
+        if ($newStatus === 'received') {
+            $lock = $this->db->pdo()->prepare('SELECT status FROM purchase_invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $lock->execute([$supplierId, $id]);
+            $wasDraft = $lock->fetchColumn() === 'draft';
+        }
+
         $sets = ['status = ?'];
         $params = [$newStatus];
 
@@ -2616,6 +2623,11 @@ final class PurchaseInvoiceRepository
              . ($requireUnbooked ? ' AND booked_at IS NULL' : '');
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
+
+        if ($wasDraft && $stmt->rowCount() > 0) {
+            (new \MyInvoice\Service\PurchaseInvoice\PurchaseReceivedPaymentStatus($this->db))
+                ->afterDraftReceived($supplierId, $id);
+        }
 
         // State machine nezná no-op přechod (status se vždy mění), takže rowCount 0
         // při requireUnbooked = booked_at podmínka nesedla → doklad mezitím zaúčtován.

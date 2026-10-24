@@ -70,6 +70,7 @@ final class RecurringInvoiceGenerator
         // sazbu tady by uživateli tiše vyměnilo jeho volbu za jinou.
         private readonly OssItemDeriver $ossDeriver,
         private readonly ClientRepository $clients,
+        private readonly InvoicePaymentService $payments,
     ) {}
 
     /**
@@ -802,6 +803,8 @@ final class RecurringInvoiceGenerator
             if ($issue->rowCount() === 0) {
                 throw new \RuntimeException('Faktura byla mezitím změněna.');
             }
+            // I dříve otevřený koncept může mít platby; PDF/statistiky obnoví stávající tok po commitu.
+            $this->payments->recompute($invoiceId, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $invoiceId, $issuerId);
             if ($stockEnabled) $this->stockIssue->issueForInvoice(
                 $supplierId,

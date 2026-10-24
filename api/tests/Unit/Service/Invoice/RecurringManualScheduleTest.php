@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Invoice;
 
+use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\RecurringTemplateRepository;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
 use MyInvoice\Service\Invoice\RecurringPriceListService;
 use MyInvoice\Service\Oss\OssItemDeriver;
@@ -101,6 +103,10 @@ final class RecurringManualScheduleTest extends TestCase
             $issueAndSend->method('run')->willThrowException(new StockException('insufficient_stock', 'Test stock shortage'));
             $repo->expects(self::once())->method('setLastError');
         }
+        // Finální platební službu sestaví DI; případný přístup k DB zůstává v lokálním SQLite.
+        $services = Bootstrap::buildContainer();
+        $services->set(Connection::class, $db);
+        $payments = $services->get(InvoicePaymentService::class);
         $reflection = new \ReflectionClass(RecurringInvoiceGenerator::class);
         $args = [];
         foreach ($reflection->getConstructor()->getParameters() as $parameter) {
@@ -109,6 +115,7 @@ final class RecurringManualScheduleTest extends TestCase
                 OssItemDeriver::class => $oss,
                 AutoIssueAndSendService::class => $issueAndSend,
                 Connection::class => $db,
+                InvoicePaymentService::class => $payments,
                 RecurringTemplateRepository::class => $repo,
                 InvoiceRepository::class => $invoices,
                 RecurringPriceListService::class => $priceList,

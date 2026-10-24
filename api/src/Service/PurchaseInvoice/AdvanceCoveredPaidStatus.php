@@ -131,8 +131,9 @@ final class AdvanceCoveredPaidStatus
         bool $allowRevert = true,
         bool $apply = true,
         ?string $advancePaidAtOverride = null,
+        bool $currentRead = false,
     ): ?array {
-        $settled = PurchaseSettledExpr::settled('f');
+        $settled = PurchaseSettledExpr::settled('f', currentRead: $currentRead);
         $stmt = $this->db->pdo()->prepare(
             "SELECT f.status, f.paid_at, f.amount_to_pay, f.total_with_vat, ({$settled}) AS own_settled,
                     a.status AS advance_status, a.paid_at AS advance_paid_at
@@ -141,7 +142,7 @@ final class AdvanceCoveredPaidStatus
                  ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
                 AND a.document_kind = 'advance'
               WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
-                AND f.status IN ('received', 'booked', 'paid')"
+                AND f.status IN ('received', 'booked', 'paid')" . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$finalId, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -250,33 +251,34 @@ final class AdvanceCoveredPaidStatus
      * @param list<int> $ids
      * @return array<int,string>
      */
-    public function lastPaymentDates(int $supplierId, array $ids): array
+    public function lastPaymentDates(int $supplierId, array $ids, bool $currentRead = false): array
     {
         $dates = [];
+        $lock = $currentRead ? ' FOR UPDATE' : '';
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0)));
         foreach (array_chunk($ids, 200) as $chunk) {
             $placeholders = implode(',', array_fill(0, count($chunk), '?'));
             $stmt = $this->db->pdo()->prepare(
                 "SELECT doc_id, MAX(d) AS paid_on FROM (
-                    SELECT pm.purchase_invoice_id AS doc_id, DATE(bt.posted_at) AS d
+                    (SELECT pm.purchase_invoice_id AS doc_id, DATE(bt.posted_at) AS d
                       FROM payment_matches pm
                       JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id AND bt.amount < 0
-                     WHERE pm.supplier_id = ? AND pm.purchase_invoice_id IN ($placeholders)
+                     WHERE pm.supplier_id = ? AND pm.purchase_invoice_id IN ($placeholders){$lock})
                     UNION ALL
-                    SELECT cd.purchase_invoice_id, cd.issue_date FROM cash_documents cd
+                    (SELECT cd.purchase_invoice_id, cd.issue_date FROM cash_documents cd
                      WHERE cd.supplier_id = ? AND cd.purchase_invoice_id IN ($placeholders)
-                       AND cd.status = 'posted' AND cd.doc_type = 'out'
+                       AND cd.status = 'posted' AND cd.doc_type = 'out'{$lock})
                     UNION ALL
-                    SELECT oi.doc_id, oa.agreement_date FROM offset_agreement_items oi
+                    (SELECT oi.doc_id, oa.agreement_date FROM offset_agreement_items oi
                       JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = 'confirmed'
-                     WHERE oi.supplier_id = ? AND oi.doc_type = 'purchase_invoice' AND oi.doc_id IN ($placeholders)
+                     WHERE oi.supplier_id = ? AND oi.doc_type = 'purchase_invoice' AND oi.doc_id IN ($placeholders){$lock})
                     UNION ALL
-                    SELECT s.doc_id, s.settled_on FROM invoice_settlements s
+                    (SELECT s.doc_id, s.settled_on FROM invoice_settlements s
                      WHERE s.supplier_id = ? AND s.doc_type = 'purchase_invoice' AND s.doc_id IN ($placeholders)
-                       AND s.status = 'confirmed'
+                       AND s.status = 'confirmed'{$lock})
                     UNION ALL
-                    SELECT cno.invoice_id, cno.offset_on FROM credit_note_offsets cno
-                     WHERE cno.supplier_id = ? AND cno.doc_type = 'purchase_invoice' AND cno.invoice_id IN ($placeholders)
+                    (SELECT cno.invoice_id, cno.offset_on FROM credit_note_offsets cno
+                     WHERE cno.supplier_id = ? AND cno.doc_type = 'purchase_invoice' AND cno.invoice_id IN ($placeholders){$lock})
                  ) x GROUP BY doc_id"
             );
             $params = [];

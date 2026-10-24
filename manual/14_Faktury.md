@@ -388,6 +388,10 @@ Jak oba stavy vznikají a co s každým z nich dělat, popisuje
 > **Dobropis** není stav, ale typ dokladu (opravný daňový doklad vystavený k původní
 > faktuře). Původní faktura si svůj stav ponechává.
 
+Pokud má koncept už evidované úhrady, při vystavení se přepočte jeho platební stav.
+Plně zaplacená faktura přejde do stavu **Zaplaceno** s datem poslední evidované úhrady;
+částečná úhrada zůstane zohledněná v doplatku. Samotná úhrada koncept nevystaví.
+
 > [!WARNING]
 > Upravujte jen koncepty. Vystavená faktura má neměnný snapshot dodavatele, klienta a banky.
 > Pro změnu je potřeba storno a nová faktura, nebo dobropis. Správce (a role s právem

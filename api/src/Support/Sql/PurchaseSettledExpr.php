@@ -42,7 +42,8 @@ final class PurchaseSettledExpr
      * Parametry `exclude*` slouží přepočtu při ZMĚNĚ daného dokladu — potvrzovaná dohoda,
      * rušený zápočet, přepárovaný pohyb nebo přepočítávaný pokladní doklad se nesmí počítat
      * proti sobě. Jde o čísla (int), takže se do SQL vkládají literálem; žádná uživatelská
-     * hodnota se tudy nedostane.
+     * hodnota se tudy nedostane. `currentRead` v otevřené transakci čte a zamyká
+     * aktuální úhrady i při starším snímku REPEATABLE READ.
      *
      * @param string $alias      alias tabulky `purchase_invoices` v okolním dotazu
      * @param int    $excludeAgreementId  ID dohody o zápočtu, kterou vynechat (0 = žádnou)
@@ -54,6 +55,7 @@ final class PurchaseSettledExpr
         int $excludeSettlementId = 0,
         int $excludeBankTransactionId = 0,
         int $excludeCashDocumentId = 0,
+        bool $currentRead = false,
     ): string {
         $a = $alias === '' ? '' : $alias . '.';
 
@@ -63,21 +65,21 @@ final class PurchaseSettledExpr
                          LEFT JOIN bank_statements pmbs ON pmbs.id = pmbt.statement_id
                          LEFT JOIN currencies pmdc ON pmdc.id = %1$scurrency_id
                         WHERE pm.supplier_id = %1$ssupplier_id AND pm.purchase_invoice_id = %1$sid
-                          AND (%6$d = 0 OR pm.bank_transaction_id <> %6$d)), 0)
+                          AND (%6$d = 0 OR pm.bank_transaction_id <> %6$d)%11$s), 0)
            + COALESCE((SELECT SUM(%9$s) FROM cash_documents pcd
                          LEFT JOIN currencies pcdc ON pcdc.id = %1$scurrency_id
                         WHERE pcd.supplier_id = %1$ssupplier_id AND pcd.purchase_invoice_id = %1$sid
-                          AND pcd.status = %8$s AND pcd.id <> %10$d), 0)
+                          AND pcd.status = %8$s AND pcd.id <> %10$d%11$s), 0)
            + COALESCE((SELECT SUM(oi.amount) FROM offset_agreement_items oi
                         JOIN offset_agreements oa ON oa.id = oi.agreement_id AND oa.status = %2$s
                        WHERE oi.supplier_id = %1$ssupplier_id AND oi.doc_type = %3$s
-                         AND oi.doc_id = %1$sid AND oa.id <> %4$d), 0)
+                         AND oi.doc_id = %1$sid AND oa.id <> %4$d%11$s), 0)
            + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
                        WHERE s.supplier_id = %1$ssupplier_id AND s.doc_type = %3$s
-                         AND s.doc_id = %1$sid AND s.status = %2$s AND s.id <> %5$d), 0)
+                         AND s.doc_id = %1$sid AND s.status = %2$s AND s.id <> %5$d%11$s), 0)
            + COALESCE((SELECT SUM(cno.amount) FROM credit_note_offsets cno
                        WHERE cno.supplier_id = %1$ssupplier_id AND cno.doc_type = %3$s
-                         AND cno.invoice_id = %1$sid), 0)',
+                         AND cno.invoice_id = %1$sid%11$s), 0)',
             $a,
             "'confirmed'",
             "'purchase_invoice'",
@@ -88,6 +90,7 @@ final class PurchaseSettledExpr
             "'posted'",
             self::cashAmountSql('pcd', $alias, 'pcdc'),
             $excludeCashDocumentId,
+            $currentRead ? ' FOR UPDATE' : '',
         );
     }
 
@@ -252,10 +255,10 @@ final class PurchaseSettledExpr
      * úhrada existuje, rozhoduje její výše, takže nedoplatek na „uhrazeném" dokladu
      * zůstane vidět.
      */
-    public static function paidAmount(string $alias = 'pi'): string
+    public static function paidAmount(string $alias = 'pi', bool $currentRead = false): string
     {
         $a = $alias === '' ? '' : $alias . '.';
-        $settled = self::settled($alias);
+        $settled = self::settled($alias, currentRead: $currentRead);
 
         // DDKP (§ 28 ZDPH) nic nedluží: peníze odešly na zálohové faktuře a jeho
         // `amount_to_pay` je jen generované brutto zálohy ({@see PayablePredicate}).
@@ -274,10 +277,10 @@ final class PurchaseSettledExpr
      * takže nulový zbytek zůstává nulou. Doklad bez zaokrouhlení CASE zkratuje a výraz
      * se pro něj nemění.
      */
-    public static function remainingAmount(string $alias = 'pi'): string
+    public static function remainingAmount(string $alias = 'pi', bool $currentRead = false): string
     {
         $a = $alias === '' ? '' : $alias . '.';
-        $nominal = "{$a}amount_to_pay - (" . self::paidAmount($alias) . ')';
+        $nominal = "{$a}amount_to_pay - (" . self::paidAmount($alias, $currentRead) . ')';
 
         return "CASE WHEN COALESCE({$a}rounding, 0) = 0 OR ABS({$nominal}) < 0.005 THEN {$nominal}
                      ELSE {$nominal} + {$a}rounding END";

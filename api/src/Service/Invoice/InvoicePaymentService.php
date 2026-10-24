@@ -592,9 +592,11 @@ final class InvoicePaymentService
      * stav faktury měnily mimo evidenci plateb (zrušení párování z doby před
      * evidencí), ať o stavu rozhoduje totéž pravidlo jako po každé platbě.
      *
+     * Volající s vlastním obnovením PDF/statistik po commitu vypne refreshOutputs.
+     *
      * @return array{became_paid: bool, became_unpaid: bool, remaining: float, paid_total: float}
      */
-    public function recompute(int $invoiceId): array
+    public function recompute(int $invoiceId, bool $refreshOutputs = true): array
     {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -613,7 +615,9 @@ final class InvoicePaymentService
             throw $e;
         }
 
-        $this->afterTransition($invoiceId, $transition);
+        if ($refreshOutputs) {
+            $this->afterTransition($invoiceId, $transition);
+        }
         return $transition;
     }
 

@@ -337,6 +337,10 @@ Neobsahuje pevnou výchozí částku. Pravidlo samo nemění fakturu. Úhrady fa
 | **Uhrazená** | Zaplaceno ručně nebo automaticky z bankovního výpisu | Konečný stav |
 | **Stornovaná** | Stornovaný doklad, ponechaný pro audit | Vrátit ze storna |
 
+Má-li koncept už evidované úhrady, při potvrzení přijetí (včetně dokončení schválení)
+se znovu posoudí zbývající doplatek. Plně uhrazený doklad přejde rovnou do stavu
+**Uhrazená** s datem poslední úhrady. Do potvrzení zůstává konceptem.
+
 Smazat jde **jen koncept**. Pro pozdější stavy použijte **Stornovat**, zachová auditní stopu. Omylem stornovaný doklad
 obnovíte v detailu akcí **Vrátit ze storna**, doklad se vrátí do stavu **Přijatá** (viz
 [§ 23.11.25](#231125-vratit-ze-storna-a-stejne-cislo-dokladu)).
