@@ -82,6 +82,23 @@ final class RoutePermissionPathEscapeSweepTest extends TestCase
             $policy = $map->match($method, $clean);
             if ($policy === null) continue;
 
+            if ($policy->kind === RoutePermissionMap::INSTANCE_ADMIN) {
+                foreach (array_merge([$clean], $variants) as $path) {
+                    foreach ([
+                        [new EffectiveRole(2, 'Staff', 'staff', true, []), 403],
+                        [new EffectiveRole(3, 'Technický správce', 'instance_admin', true, [], 'instance_admin'), 204],
+                        [new EffectiveRole(1, 'Superadmin', 'superadmin', true, [], 'superadmin'), 204],
+                    ] as [$role, $expected]) {
+                        $this->role = $role;
+                        $this->access = new SupplierAccess(0, true, null);
+                        if ($this->statusFor($middleware, $method, $path) !== $expected) {
+                            $failures[$method . ' ' . $path . ' ' . $role->type] = 'technická cesta změnila rozsah oprávnění';
+                        }
+                    }
+                }
+                continue;
+            }
+
             if ($policy->kind === RoutePermissionMap::SUPERADMIN) {
                 foreach ($variants as $escaped) {
                     $routeKey = $method . ' ' . $pattern . ' → ' . $escaped;
@@ -224,7 +241,8 @@ final class RoutePermissionPathEscapeSweepTest extends TestCase
     private function statusFor(PermissionMiddleware $middleware, string $method, string $path): int
     {
         $request = (new ServerRequestFactory())->createServerRequest($method, 'http://localhost' . $path)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 5, 'role_id' => 2]);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 5, 'role_id' => 2])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
 
         return $middleware->process($request, $this->handler())->getStatusCode();
     }

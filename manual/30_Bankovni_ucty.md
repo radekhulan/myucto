@@ -412,6 +412,7 @@ Každá firma může mít více IMAP účtů, typicky jeden pro každou banku.
 | **Vyžadovat ověření autenticity (DKIM/DMARC)** | Zpracují se jen e-maily, u kterých přijímací server potvrdil DKIM/DMARC; **zapnuto** |
 | **Důvěryhodný authserv-id** | Povinné při zapnutém ověření autenticity; přesný identifikátor přijímacího serveru z jeho hlavičky `Authentication-Results` (např. `mx.mojedomena.cz`) |
 | **Načítat bankovní avíza** | Z těla e-mailu se čte avízo o pohybu a zakládá se z něj bankovní transakce. Vypněte, když vám banka posílá i PDF výpisy a avíza by pohyby zdvojovala; přílohy se dál zpracují podle přepínačů níže; **zapnuto** |
+| **Po načtení avíza označit jako přečtené** | Označí e-mail po úspěšném uložení bankovního pohybu, i když zatím není spárovaný s fakturou. Vyžaduje zápis do schránky; **vypnuto** |
 | **Přijímat přeposlaná (FW) avíza** | Rozpozná banku i z těla e-mailu, když avíza chodí do schránky přeposlaná (odesílatel je vaše adresa, ne banka) |
 | **E-mail přeposílatele (volitelně)** | Volitelné omezení, od koho smí přeposlaná avíza chodit - adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
 | **Načítat PDF faktury z příloh** | Vedle avíz se z každé zprávy posoudí i PDF přílohy a doklady adresované vaší firmě se založí do Nákup → Příchozí doklady; **vypnuto** |
@@ -422,6 +423,8 @@ Každá firma může mít více IMAP účtů, typicky jeden pro každou banku.
 Pokud do schránky chodí avíza **přeposlaná** (například z firemní schránky na sběrnou adresu), zapněte **Přijímat přeposlaná (FW) avíza**. U přímého avíza se banka pozná podle odesílatele, ale přeposláním se odesílatelem stáváte vy, proto se pak banka hledá i z těla e-mailu. Volitelně omezte **E-mail přeposílatele**, ať se zpracují jen avíza od vaší adresy.
 
 Polling zprávy standardně **neoznačuje jako přečtené**. Systém si úspěšně zpracované e-maily pamatuje v databázi podle `Message-ID` / UID / fallback hashe, takže funguje i s účtem, kde aplikace nemůže zprávy přesouvat nebo označovat. Pokud má účet zápis povolený, můžete zvolit doplňkovou akci po úspěchu: neměnit zprávu, přidat flag, přesunout do jiné složky nebo označit jako přečtené.
+
+Chcete-li označit i dosud **nespárovaná avíza**, zapněte **Po načtení avíza označit jako přečtené**. U avíz tato volba nezávisí na akci **Po úspěchu**, která se provádí při spárování během načtení. Označení se provede před případným přesunem zprávy. Zprávy odmítnuté kontrolou autenticity, nerozpoznaná avíza a avíza bez mapování účtu tato volba neoznačí; nevztahuje se ani na samotný import PDF příloh. Chyba označení zůstane uvedená u zpracované zprávy a uložená platba se tím nezruší. Volba platí pro nově zpracovávaná avíza; dříve evidované zprávy se znovu neoznačují a neúspěšné označení se automaticky neopakuje.
 
 ### 30.11.9 Ověření autenticity e-mailu (DKIM/DMARC)
 

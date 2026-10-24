@@ -29,15 +29,17 @@ final class UserAdminAction
         'mfa_recovery_codes', 'mfa_step_up_proofs', 'oauth_sessions', 'password_resets',
         'saved_filters', 'sessions', 'trusted_devices', 'user_preferences',
         'user_suppliers', 'webauthn_ceremonies', 'webauthn_credentials',
+        'user_technical_access', 'user_technical_suppliers', 'instance_smtp_test_attempts',
     ];
 
     /**
-     * Auditní stopa smazání nebrání a autora si drží dál: `activity_log.user_id` nemá
+     * Auditní stopa smazání nebrání a autora si drží dál. `activity_log.user_id` nemá
      * cizí klíč (migrace 1945), protože vstupuje do hashe řetězu a nesmí se přepsat.
+     * Stejně se zachová autor technické události a neměnného schválení SMTP cíle.
      * Výjimka platí jen pro sloupec BEZ cizího klíče — instalace, kde klíč ještě je,
      * by záznamy vynulovala, a proto u ní smazání blokuje dál.
      */
-    private const AUDIT_USER_TABLES = ['activity_log'];
+    private const AUDIT_USER_TABLES = ['activity_log', 'instance_admin_events', 'instance_smtp_targets'];
 
     public function __construct(
         private readonly Connection $db,
@@ -232,7 +234,8 @@ final class UserAdminAction
         if (array_key_exists('role_id', $body)) {
             $newRole = $this->activeRole((int) $body['role_id']);
             if ($newRole === null) return Json::error($response, 'validation_failed', 'Vybraná role neexistuje nebo není aktivní.', 400);
-            if ($newRole['role_type'] !== $row['role']['type']) {
+            if ($newRole['role_type'] !== $row['role']['type']
+                && $newRole['role_type'] !== 'instance_admin' && $row['role']['type'] !== 'instance_admin') {
                 $incompatible = $this->incompatibleOverrides($id, (string) $newRole['role_type']);
                 if ($incompatible !== []) {
                     return Json::error($response, 'incompatible_supplier_roles', 'Nejprve odstraň nekompatibilní role u přiřazených firem.', 409, [
@@ -274,7 +277,7 @@ final class UserAdminAction
         if ($sets === []) return Json::ok($response, $row);
 
         try {
-            if (!$this->guardedUserUpdate($id, implode(', ', $sets), $params, $willBeSuperadmin, $willBeActive)) {
+            if (!$this->guardedUserUpdate($id, implode(', ', $sets), $params, $willBeSuperadmin, $willBeActive, $newRole)) {
                 return Json::error($response, 'last_admin', 'Nelze odebrat roli ani deaktivovat posledního aktivního superadmina.', 409);
             }
         } catch (LicenseSeatLimitExceeded $e) {
@@ -457,6 +460,7 @@ final class UserAdminAction
         array $params,
         bool $willBeSuperadmin,
         bool $willBeActive,
+        ?array $roleChange = null,
     ): bool
     {
         return $this->capacity->mutateSeats(function () use (
@@ -465,6 +469,7 @@ final class UserAdminAction
             $params,
             $willBeSuperadmin,
             $willBeActive,
+            $roleChange,
         ): bool {
             $pdo = $this->db->pdo();
             $stmt = $pdo->query(
@@ -481,6 +486,27 @@ final class UserAdminAction
                 return false;
             }
 
+            // Konverze role, odstranění rozsahů a revokace přístupů musí být atomické.
+            $target = $pdo->prepare('SELECT u.role_id, r.role_type FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? FOR UPDATE');
+            $target->execute([$id]);
+            $currentRole = $target->fetch(\PDO::FETCH_ASSOC);
+            $technicalTransition = $roleChange !== null && $currentRole !== false
+                && (int) $currentRole['role_id'] !== (int) $roleChange['id']
+                && ($currentRole['role_type'] === 'instance_admin' || $roleChange['role_type'] === 'instance_admin');
+            if ($technicalTransition) {
+                foreach (['user_suppliers', 'user_technical_suppliers', 'user_technical_access'] as $table) {
+                    $pdo->prepare("DELETE FROM {$table} WHERE user_id = ?")->execute([$id]);
+                }
+                $pdo->prepare('UPDATE users SET default_supplier_id = NULL WHERE id = ?')->execute([$id]);
+                $pdo->prepare('UPDATE sessions SET revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP(6)) WHERE user_id = ?')->execute([$id]);
+                $pdo->prepare('UPDATE api_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = ?')->execute([$id]);
+                $pdo->prepare('UPDATE mcp_oauth_grants SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = ?')->execute([$id]);
+                // MFA faktory zůstávají; rozpracované přihlášení nebo souhlas pokračovat nesmí.
+                foreach (['mcp_oauth_codes', 'oauth_sessions', 'bank_oauth_sessions', 'trusted_devices',
+                    'login_otps', 'webauthn_ceremonies', 'mfa_step_up_proofs', 'password_resets'] as $table) {
+                    $pdo->prepare("DELETE FROM {$table} WHERE user_id = ?")->execute([$id]);
+                }
+            }
             $params[] = $id;
             $pdo->prepare('UPDATE users SET ' . $setSql . ' WHERE id = ?')->execute($params);
             return true;

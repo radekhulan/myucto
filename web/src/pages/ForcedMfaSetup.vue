@@ -54,7 +54,7 @@ async function continueAfterSetup(): Promise<void> {
     }
     return
   }
-  await router.replace('/')
+  await router.replace(auth.isInstanceAdmin ? '/instance-admin' : '/')
 }
 
 // Vynucená varianta odsud nepustí jinam než odhlášením; nabídka ano. Rozhoduje

@@ -18,6 +18,7 @@ use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionResolver;
+use MyInvoice\Security\InstanceAdminRoutePolicy;
 use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\InvoiceRounding;
@@ -66,11 +67,13 @@ final class MeAction
         // VŽDY jen membership (0 řádků → prázdný seznam, fail-closed). Bez filtru
         // by klient viděl názvy/IČO cizích firem instance.
         $isSuperadmin = (bool) ($user['is_superadmin'] ?? false);
-        $allowed = $isSuperadmin
+        $isInstanceAdmin = InstanceAdminRoutePolicy::isTechnicalUser($user);
+        $allowed = $isSuperadmin || $isInstanceAdmin
             ? []
             : $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0));
-        if (!$isSuperadmin && $allowed === []) {
+        if ($isInstanceAdmin || (!$isSuperadmin && $allowed === [])) {
             $suppliers = [];
+            if ($isInstanceAdmin) $currentSupplierId = 0;
         } else {
             $ossSelect = $this->db->hasColumn('supplier', 'oss_enabled')
                 ? 'oss_enabled'
@@ -252,7 +255,8 @@ final class MeAction
                 : null;
         }
 
-        $licenseSummary = (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary();
+        $licenseSummary = $isInstanceAdmin ? null
+            : (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary();
         if ($effectiveRole->isClientType()) {
             $licenseSummary['subscription_state'] = null;
         }
@@ -264,6 +268,7 @@ final class MeAction
                 'name'            => $user['name'] ?? '',
                 'role'            => $roleSummary,
                 'is_superadmin'   => $isSuperadmin,
+                'is_instance_admin' => $isInstanceAdmin,
                 'can_create_supplier' => $defaultRole->canCreateSupplier(),
                 'locale'          => $user['locale'] ?? 'cs',
                 'totp_enabled'    => $totpEnabled,
@@ -277,7 +282,7 @@ final class MeAction
             'csrf_token'          => $session['csrf_token'] ?? '',
             'current_supplier_id' => $currentSupplierId,
             'suppliers'           => $suppliers,
-            'domain_context'      => $domainContext instanceof TenantDomainContext
+            'domain_context'      => !$isInstanceAdmin && $domainContext instanceof TenantDomainContext
                 ? $domainContext->toArray()
                 : null,
             'permissions'         => $effectiveRole->isSuperadmin() ? [] : $effectiveRole->permissions,
@@ -293,9 +298,9 @@ final class MeAction
             'license'             => $licenseSummary,
             // Výběr testovacího prostředí podání úřadům (ČSSZ, ZP, ISDS). Mimo
             // vývojovou instalaci ho UI skryje a backend test odmítne.
-            'submission_test_environment_allowed' => (new SubmissionEnvironmentPolicy($this->config))->testAllowed(),
+            'submission_test_environment_allowed' => !$isInstanceAdmin && (new SubmissionEnvironmentPolicy($this->config))->testAllowed(),
             // Web faktura (veřejný odkaz) — vypnutá instalace UI tlačítko skryje.
-            'invoice_public_links_enabled' => (new InvoicePublicLinkFeature($this->config))->isEnabled(),
+            'invoice_public_links_enabled' => !$isInstanceAdmin && (new InvoicePublicLinkFeature($this->config))->isEnabled(),
         ]);
     }
 

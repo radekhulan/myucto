@@ -536,6 +536,7 @@ export interface BankEmailImapSettings {
   require_email_auth: boolean
   allow_forwarded: boolean
   ingest_notices: boolean
+  mark_seen_after_import: boolean
   ingest_pdf_invoices: boolean
   ingest_pdf_statements: boolean
   /** Výpisy, avíza a PDF doklady se rozdělují mezi všechny firmy vlastníka rozdělování. */

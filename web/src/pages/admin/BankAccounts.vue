@@ -232,6 +232,7 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     // Aviza jsou puvodni ucel schranky, takze novy ucet je ma zapnuta;
     // PDF prilohy nize jsou naopak opt-in.
     ingest_notices: true,
+    mark_seen_after_import: false,
     ingest_pdf_invoices: false,
     ingest_pdf_statements: false,
     distribute_to_suppliers: false,
@@ -1320,6 +1321,14 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <span>
                   {{ t('bank_accounts.ingest_notices') }}
                   <span class="block text-xs text-neutral-500">{{ t('bank_accounts.ingest_notices_hint') }}</span>
+                </span>
+              </label>
+              <label class="flex items-start gap-2 text-sm md:col-span-2" data-testid="imap-mark-seen-after-import">
+                <input v-model="imapDraft.mark_seen_after_import" type="checkbox" :disabled="!imapDraft.ingest_notices"
+                  class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                <span>
+                  {{ t('bank_accounts.mark_seen_after_import') }}
+                  <span class="block text-xs text-neutral-500">{{ t('bank_accounts.mark_seen_after_import_hint') }}</span>
                 </span>
               </label>
               <label class="flex items-start gap-2 text-sm">

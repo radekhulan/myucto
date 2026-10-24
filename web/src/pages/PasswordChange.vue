@@ -60,7 +60,7 @@ async function returnToClientDomain() {
 
 type Tab = 'password' | 'totp' | 'passkeys' | 'session-lock' | 'shortcuts'
 function tabFromQuery(value: unknown): Tab {
-  return value === 'totp' || value === 'passkeys' || value === 'session-lock' || value === 'shortcuts'
+  return value === 'totp' || value === 'passkeys' || value === 'session-lock' || (value === 'shortcuts' && !auth.isInstanceAdmin)
     ? value
     : 'password'
 }
@@ -350,7 +350,7 @@ onMounted(() => {
       <option value="totp">{{ t('auth.totp_tab') }}</option>
       <option value="passkeys">{{ t('passkeys.title') }}</option>
       <option value="session-lock">{{ t('session_lock.preference_tab') }}</option>
-      <option value="shortcuts">{{ t('keyboard_shortcuts.title') }}</option>
+      <option v-if="!auth.isInstanceAdmin" value="shortcuts">{{ t('keyboard_shortcuts.title') }}</option>
     </select>
 
     <div class="hidden md:flex flex-wrap border-b border-neutral-200 mb-4 gap-1">
@@ -386,7 +386,7 @@ onMounted(() => {
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('session_lock.preference_tab') }}
       </button>
-      <button type="button" @click="setTab('shortcuts')"
+      <button v-if="!auth.isInstanceAdmin" type="button" @click="setTab('shortcuts')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
         :class="tab === 'shortcuts'
           ? 'border-primary-600 text-primary-700 font-medium'

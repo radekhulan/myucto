@@ -167,6 +167,8 @@ final class LoginSessionIssuer
                 // frontend na ní staví `role.type` i `role.system_key`.
                 'role' => $roleProfile,
                 'is_superadmin' => $this->roleProfile->isSuperadmin($userId),
+                'is_instance_admin' => $roleProfile['type'] === 'instance_admin'
+                    && $roleProfile['system_key'] === 'instance_admin',
                 'locale' => (string) ($user['locale'] ?? 'cs'),
                 'totp_enabled' => $totpEnabled,
                 'must_setup_totp' => $requireTotp && !$totpEnabled,

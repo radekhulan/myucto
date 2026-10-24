@@ -54,8 +54,9 @@ final class IpAllowlistMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        // apply_to=admin_only — IP check jen pro /api/admin/* (path-based, nezávislé na user.role)
-        if ($applyTo === 'admin_only' && !str_starts_with($path, '/api/admin/')) {
+        // Technická správa instance patří pod stejnou IP bránu jako ostatní administrace.
+        if ($applyTo === 'admin_only' && !str_starts_with($path, '/api/admin/')
+            && !str_starts_with($path, '/api/instance-admin/')) {
             return $handler->handle($request);
         }
 

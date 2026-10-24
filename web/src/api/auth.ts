@@ -8,6 +8,7 @@ export interface User {
   name: string
   role: RoleSummary
   is_superadmin: boolean
+  is_instance_admin?: boolean
   can_create_supplier?: boolean
   locale: 'cs' | 'en'
   totp_enabled?: boolean
@@ -27,7 +28,7 @@ export interface User {
 export interface RoleSummary {
   id: number
   name: string
-  type: 'superadmin' | 'staff' | 'client'
+  type: 'superadmin' | 'staff' | 'client' | 'instance_admin'
   is_active?: boolean
   system_key?: string | null
 }

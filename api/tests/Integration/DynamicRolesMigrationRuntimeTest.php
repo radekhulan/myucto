@@ -176,6 +176,31 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         self::assertSame(1, (int) $db->query("SELECT COUNT(*) FROM role_permissions WHERE role_id=" . (int) $roles['accountant'] . " AND permission_key='property.settlements.post'")->fetchColumn());
     }
 
+    public function testTaxSubmissionManagementDefaultsPreserveExplicitAndRemovedGrants(): void
+    {
+        $db = $this->databasePdo();
+        $db->exec('SET SESSION sql_mode = \'STRICT_ALL_TABLES\'');
+        $db->exec('CREATE TABLE roles (id INT UNSIGNED PRIMARY KEY, system_key VARCHAR(32) NULL, role_type VARCHAR(20) NOT NULL) ENGINE=InnoDB');
+        $db->exec('CREATE TABLE role_permissions (role_id INT UNSIGNED NOT NULL, permission_key VARCHAR(120) NOT NULL, access_level TINYINT UNSIGNED NOT NULL, PRIMARY KEY (role_id, permission_key)) ENGINE=InnoDB');
+        $db->exec('CREATE TABLE app_meta (k VARCHAR(64) PRIMARY KEY, v MEDIUMTEXT NOT NULL) ENGINE=InnoDB');
+        $db->exec("INSERT INTO roles VALUES (1, 'admin', 'staff'), (2, 'admin_plus', 'staff'), (3, 'accountant', 'staff'), (4, 'readonly', 'staff'), (5, 'client', 'client'), (6, NULL, 'staff')");
+        $db->exec("INSERT INTO role_permissions VALUES (2, 'reports.submissions.manage', 0), (6, 'reports.submit', 2)");
+        $migration = ['2189_client_tax_submission_permissions.sql'];
+        $this->runMigrator($migration);
+        $grants = $db->query("SELECT role_id, access_level FROM role_permissions WHERE permission_key='reports.submissions.manage' ORDER BY role_id")->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertSame([1 => 2, 2 => 0, 3 => 2], array_map('intval', $grants));
+        self::assertSame(0, (int) $db->query('SELECT COUNT(*) FROM role_permissions WHERE role_id=5')->fetchColumn(), 'Klientský výchozí přístup zůstává vypnutý.');
+        self::assertSame(2, (int) $db->query("SELECT access_level FROM role_permissions WHERE role_id=6 AND permission_key='reports.submit'")->fetchColumn());
+
+        $db->exec("DELETE FROM role_permissions WHERE role_id=1 AND permission_key='reports.submissions.manage'");
+        $db->exec("UPDATE role_permissions SET access_level=1 WHERE role_id=3 AND permission_key='reports.submissions.manage'");
+        $db->exec("DELETE FROM migrations WHERE filename='2189_client_tax_submission_permissions.sql'");
+        $this->runMigrator($migration);
+        $grants = $db->query("SELECT role_id, access_level FROM role_permissions WHERE permission_key='reports.submissions.manage' ORDER BY role_id")->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertSame([2 => 0, 3 => 1], array_map('intval', $grants), 'Opakování neobnoví odebrané právo ani nepřepíše výslovně uloženou úroveň.');
+        self::assertSame('1', $db->query("SELECT v FROM app_meta WHERE k='rbac_tax_submission_defaults_initialized'")->fetchColumn());
+    }
+
     private function createLegacyParentTables(PDO $db): void
     {
         $tables = [
@@ -315,14 +340,14 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         );
     }
 
-    private function runMigrator(): void
+    private function runMigrator(?array $only = null): void
     {
         $command = [
             PHP_BINARY,
             $this->rootDir . '/api/bin/migrate.php',
             '--no-backfills',
             '--no-analyze',
-            '--only=' . implode(',', [
+            '--only=' . implode(',', $only ?? [
                 '0017_app_meta.sql',
                 '1074_dynamic_roles_permissions.sql',
                 '1186_payroll_module_foundation.sql',
@@ -351,6 +376,7 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
                 '2109_property_funds_role_defaults.sql',
                 '2118_property_service_unwind_permission.sql',
                 '2183_eet_role_permissions.sql',
+                '2189_client_tax_submission_permissions.sql',
             ]),
         ];
         $env = getenv();

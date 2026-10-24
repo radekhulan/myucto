@@ -9,7 +9,10 @@ use Webklex\PHPIMAP\ClientManager;
 
 final class WebklexImapMailboxClient implements ImapMailboxClientInterface
 {
-    public function __construct(private readonly EmailNoticeTextNormalizer $normalizer) {}
+    public function __construct(
+        private readonly EmailNoticeTextNormalizer $normalizer,
+        private readonly ?\Closure $clientFactory = null,
+    ) {}
 
     public function latest(array $settings, int $limit): array
     {
@@ -124,32 +127,43 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
         }
     }
 
-    public function postProcess(array $settings, BankEmailNoticeMessage $message, string $kind): ?string
+    public function postProcess(array $settings, BankEmailNoticeMessage $message, string $kind, bool $noticeImported = false): ?string
     {
         $action = (string) ($settings[$kind . '_action'] ?? 'none');
-        if ($action === 'none' || $message->uid === null) {
+        $markSeen = $noticeImported && !empty($settings['mark_seen_after_import']);
+        if ($action === 'none' && !$markSeen) {
             return null;
+        }
+        if ($message->uid === null) {
+            return 'Zprávu nelze upravit: chybí IMAP UID.';
         }
 
         try {
             $client = $this->client($settings);
             $client->connect();
-            $folder = $this->folder($client, $settings);
-            $imapMessage = $folder->query()->leaveUnread()->getMessageByUid($message->uid);
-            if ($action === 'mark_seen' && $kind === 'success') {
-                $imapMessage->setFlag('Seen');
-            } elseif ($action === 'add_flag') {
-                $flag = (string) ($settings[$kind . '_flag'] ?? '');
-                if ($flag !== '') {
-                    $imapMessage->setFlag($flag);
+            try {
+                $folder = $this->folder($client, $settings);
+                $imapMessage = $folder->query()->leaveUnread()->getMessageByUid($message->uid);
+                // Příznak zapisujeme před případným přesunem, který mění složku a UID.
+                if ($markSeen || ($action === 'mark_seen' && $kind === 'success')) {
+                    if (!$imapMessage->setFlag('Seen') || !$imapMessage->hasFlag('seen')) {
+                        throw new \RuntimeException('IMAP server nepotvrdil označení zprávy jako přečtené.');
+                    }
                 }
-            } elseif ($action === 'move') {
-                $target = (string) ($settings[$kind . '_move_folder'] ?? '');
-                if ($target !== '') {
-                    $imapMessage->move($target);
+                if ($action === 'add_flag') {
+                    $flag = (string) ($settings[$kind . '_flag'] ?? '');
+                    if ($flag !== '') {
+                        $imapMessage->setFlag($flag);
+                    }
+                } elseif ($action === 'move') {
+                    $target = (string) ($settings[$kind . '_move_folder'] ?? '');
+                    if ($target !== '') {
+                        $imapMessage->move($target);
+                    }
                 }
+            } finally {
+                $client->disconnect();
             }
-            $client->disconnect();
             return null;
         } catch (\Throwable $e) {
             return $e->getMessage();
@@ -161,6 +175,9 @@ final class WebklexImapMailboxClient implements ImapMailboxClientInterface
      */
     private function client(array $settings): \Webklex\PHPIMAP\Client
     {
+        if ($this->clientFactory !== null) {
+            return ($this->clientFactory)($settings);
+        }
         if (!class_exists(ClientManager::class)) {
             throw new \RuntimeException('Knihovna webklex/php-imap není nainstalovaná.');
         }

@@ -380,12 +380,12 @@ final class BankEmailNoticeScanner
             $status = $isMatched ? 'processed_success' : 'match_failed';
             $postError = null;
             if ($status === 'processed_success') {
-                $postError = $this->safePostProcess($settings, $message, 'success');
+                $postError = $this->safePostProcess($settings, $message, 'success', true);
                 if ($postError !== null) {
                     $status = 'postprocess_failed';
                 }
             } else {
-                $postError = $this->safePostProcess($settings, $message, 'failure');
+                $postError = $this->safePostProcess($settings, $message, 'failure', true);
             }
             $recordId = $this->repo->recordMessage($base + [
                 'provider_id' => $provider->id,
@@ -434,9 +434,9 @@ final class BankEmailNoticeScanner
     /**
      * @param array<string,mixed> $settings
      */
-    private function safePostProcess(array $settings, BankEmailNoticeMessage $message, string $kind): ?string
+    private function safePostProcess(array $settings, BankEmailNoticeMessage $message, string $kind, bool $noticeImported = false): ?string
     {
-        return $this->imap->postProcess($settings, $message, $kind);
+        return $this->imap->postProcess($settings, $message, $kind, $noticeImported);
     }
 
     /**

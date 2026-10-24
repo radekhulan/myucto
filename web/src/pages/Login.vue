@@ -209,6 +209,7 @@ onMounted(async () => {
  * nepřiměřené. Nabídka nezmizí — server ji drží, dokud ji uživatel neodmítne.
  */
 function postLoginTarget(fallback: string): string {
+  if (auth.isInstanceAdmin && !auth.mustSetupMfa && !auth.mustSetupTotp && !auth.shouldOfferMfa) return '/instance-admin'
   if (auth.mustSetupMfa || auth.mustSetupTotp) return '/setup-mfa'
   if (auth.domainContext?.locked) return fallback
   return auth.shouldOfferMfa ? '/setup-mfa' : fallback

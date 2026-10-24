@@ -11,6 +11,7 @@
     "eet",
     "favorites",
     "hosting",
+    "instance_admin",
     "instance_alert",
     "invoice",
     "jointAllocations",
@@ -172,6 +173,11 @@
     "workReportTracking"
   ],
   "routes": {
+    "instance-admin-profile": [
+      "domain_login",
+      "mfa_setup",
+      "recovery_codes"
+    ],
     "login": [
       "app",
       "domain_login"

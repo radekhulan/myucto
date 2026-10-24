@@ -19,6 +19,9 @@ use MyInvoice\Service\Mail\RateLimit\MailRecipientBatcher;
 use MyInvoice\Service\Mail\RateLimit\MailSendCounter;
 use MyInvoice\Service\Signing\Email\EmailSigningService;
 use MyInvoice\Service\System\ManagedModeGuard;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\InstanceAdmin\InstanceSmtpRepository;
+use MyInvoice\Service\InstanceAdmin\NeutralSmtpTestSender;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Mailer as SymfonyMailer;
@@ -64,6 +67,8 @@ final class Mailer
     private ?MailOutbox $outbox = null;
     /** Reentrance guard: vyprazdňování fronty volá zpátky sendTemplateDetailed(). */
     private bool $draining = false;
+    private bool $instanceSmtpLoaded = false;
+    private ?array $instanceSmtp = null;
 
     public function __construct(
         private readonly Config $config,
@@ -342,7 +347,7 @@ final class Mailer
         }
 
         // From: per-supplier override (vars['supplier'].email + display_name) > globální cfg
-        $globalFromEmail = (string) $this->config->get('smtp.from_email');
+        $globalFromEmail = (string) ($this->instanceSmtp()['from_email'] ?? $this->config->get('smtp.from_email'));
         $globalFromName  = (string) $this->config->get('smtp.from_name');
         $supplier = is_array($vars['supplier'] ?? null) ? $vars['supplier'] : null;
         $emailProfile = $managedSystemMail ? null : ($emailProfileOverride ?? $this->defaultEmailProfile($supplier));
@@ -789,7 +794,7 @@ final class Mailer
     private function sendPlainAlert(string $to, string $subject, string $body): bool
     {
         try {
-            $from = (string) $this->config->get('smtp.from_email', '');
+            $from = (string) ($this->instanceSmtp()['from_email'] ?? $this->config->get('smtp.from_email', ''));
             if ($from === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
                 return false;
             }
@@ -947,11 +952,26 @@ final class Mailer
             return Transport::fromDsn($this->sendmailDsn($command));
         }
 
+        if (($instance = $this->instanceSmtp()) !== null) {
+            return NeutralSmtpTestSender::transport($instance);
+        }
+
         // Bez profilu (nebo profil s transport_type='global'): použij PŮVODNÍ globální
         // transport přes Transport::fromDsn(buildDsn()) — bit-za-bit shodný s masterem.
         // Ruční EsmtpTransport (smtpTransport) se tak dotkne JEN profilů s vlastním SMTP;
         // instalace, které si SMTP v profilu vědomě nenastaví, mají zaručeně 0 regresí.
         return Transport::fromDsn($this->buildDsn());
+    }
+
+    /** Schválený transport je opt-in; staré instalace a konfigurace hostingu se nemění. */
+    private function instanceSmtp(): ?array
+    {
+        if (!$this->instanceSmtpLoaded) {
+            $this->instanceSmtp = (new InstanceSmtpRepository($this->db, $this->config,
+                new SecretEncryption($this->config), new ManagedModeGuard($this->config)))->runtime();
+            $this->instanceSmtpLoaded = true;
+        }
+        return $this->instanceSmtp;
     }
 
     /**

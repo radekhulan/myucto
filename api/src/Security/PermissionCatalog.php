@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-10-eet-v1';
+    public const VERSION = '2026-10-eet-client-tax-submissions-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -116,7 +116,9 @@ final class PermissionCatalog
             ['tax_evidence.export', 'tax_evidence', 'Exportovat daňovou evidenci', $staffOnly],
             ['reports', 'reports', 'Daně a výkazy', $staffOnly],
             ['reports.finalize', 'reports', 'Finalizovat výkaz', $staffOnly],
-            ['reports.submit', 'reports', 'Elektronicky podat', $staffOnly],
+            ['reports.submissions', 'reports', 'Připravená podání DPH, KH a SH', $clientOnly],
+            ['reports.submit', 'reports', 'Elektronicky podat', $both],
+            ['reports.submissions.manage', 'reports', 'Spravovat nastavení daňových podání', $staffOnly],
             ['reports.reopen', 'reports', 'Znovu otevřít výkaz', $staffOnly],
             ['reports.export', 'reports', 'Exportovat výkaz', $staffOnly],
             ['payroll', 'payroll', 'Mzdy', $staffOnly],

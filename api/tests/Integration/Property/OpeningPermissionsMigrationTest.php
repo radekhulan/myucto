@@ -11,6 +11,7 @@ use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\{AccessLevel, EffectiveRole, PermissionCatalog, PermissionChecker, PermissionResolver};
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use PDO;
+use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 
@@ -22,16 +23,71 @@ final class OpeningPermissionsMigrationTest extends TestCase
     private ?Connection $db = null;
     private string $database = '';
     private bool $ownsDatabase = false;
+    private ?\WeakReference $ownedPdo = null;
 
     protected function tearDown(): void
     {
-        $this->db?->close();
+        $this->closeOwnedConnection();
         if ($this->ownsDatabase && $this->server !== null && preg_match('/^myucto_opening_roles_[a-f0-9]{12}_test$/D', $this->database)) {
-            $sessions = $this->server->prepare('SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE DB=? AND ID<>CONNECTION_ID()');
-            $sessions->execute([$this->database]);
-            self::assertSame(0, (int) $sessions->fetchColumn(), 'Owned opening test database still has active sessions.');
+            $this->assertOwnedSessionsClosed();
             $this->server->exec("DROP DATABASE `{$this->database}`");
         }
+    }
+
+    public function testCleanupRejectsAnOwnedPdoThatIsStillReferenced(): void
+    {
+        $this->createDatabase();
+        $held = $this->db->pdo();
+        try {
+            try {
+                $this->closeOwnedConnection();
+                self::fail('Cleanup accepted a retained PDO reference.');
+            } catch (AssertionFailedError $error) {
+                self::assertStringContainsString('Owned opening PDO is still referenced.', $error->getMessage());
+            }
+        } finally {
+            unset($held);
+        }
+    }
+
+    public function testCleanupStillRejectsAnotherLiveSessionOnOwnedDatabase(): void
+    {
+        $this->createDatabase();
+        $config = Config::load(dirname(__DIR__, 4));
+        $other = new PDO(sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
+            $config->get('db.host'), $config->get('db.port', 3306), $this->database),
+            $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        try {
+            $this->closeOwnedConnection();
+            try {
+                $this->assertOwnedSessionsClosed(10);
+                self::fail('Cleanup accepted another live session.');
+            } catch (AssertionFailedError $error) {
+                self::assertStringContainsString('Owned opening test database still has active sessions.', $error->getMessage());
+            }
+        } finally {
+            $other = null;
+        }
+    }
+
+    private function closeOwnedConnection(): void
+    {
+        $this->db?->close();
+        self::assertNull($this->ownedPdo?->get(), 'Owned opening PDO is still referenced.');
+    }
+
+    private function assertOwnedSessionsClosed(int $timeoutMilliseconds = 1000): void
+    {
+        $sessions = $this->server->prepare('SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE DB=? AND ID<>CONNECTION_ID()');
+        $deadline = hrtime(true) + $timeoutMilliseconds * 1_000_000;
+        do {
+            $sessions->execute([$this->database]);
+            $remaining = (int) $sessions->fetchColumn();
+            if ($remaining === 0 || hrtime(true) >= $deadline) break;
+            // Zánik PDO odešle QUIT, ale server jej nemusí zpracovat před dotazem jiného spojení.
+            usleep(1000);
+        } while (true);
+        self::assertSame(0, $remaining, 'Owned opening test database still has active sessions.');
     }
 
     public function testLegacyAccountantCanPrepareAndPostButCannotReviseOpening(): void
@@ -114,6 +170,7 @@ final class OpeningPermissionsMigrationTest extends TestCase
         $this->db = Connection::withoutSharedTestConnection(static fn (): Connection => new Connection(new Config($data)));
         self::assertSame($this->database, $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn());
         $this->db->pdo()->exec("SET SESSION sql_mode='STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION'");
+        $this->ownedPdo = \WeakReference::create($this->db->pdo());
     }
 
     private function assertEffectiveLevels(int $roleId, array $levels): void

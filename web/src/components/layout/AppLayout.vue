@@ -383,6 +383,7 @@ const navSections = computed<NavSection[]>(() => {
         items: [
           { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
           { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey },
+          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive, permission: 'reports.submissions' as PermissionKey },
         ],
       },
       ...(isStockEnabled ? [{
@@ -848,6 +849,7 @@ const navSections = computed<NavSection[]>(() => {
         ] : []),
         ...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers', label: t('nav.suppliers'), icon: ICONS.suppliers }] : []),
         ...(isAdmin ? [
+          { to: '/instance-admin', label: t('instance_admin.title'), icon: ICONS.cron },
           { to: '/admin/users',        label: t('nav.users'),      icon: ICONS.users },
           { to: '/admin/roles',        label: t('nav.roles'),      icon: ICONS.approvals },
           { to: '/admin/emails',       label: t('nav.emails'),     icon: ICONS.email },

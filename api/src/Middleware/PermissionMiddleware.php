@@ -10,9 +10,12 @@ use MyInvoice\Repository\PurchaseInvoiceApprovalRepository;
 use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\ClientBankRoutePolicy;
 use MyInvoice\Security\ClientStockRoutePolicy;
+use MyInvoice\Security\ClientTaxSubmissionPolicy;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Security\FrameworkScopePolicy;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RoutePermissionMap;
+use MyInvoice\Security\InstanceAdminRoutePolicy;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -58,6 +61,18 @@ final class PermissionMiddleware implements MiddlewareInterface
         // na hrubší modulový catch-all, zatímco router doručí tutéž Action.
         $path = RequestPath::normalize($request->getUri()->getPath());
 
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if (InstanceAdminRoutePolicy::isTechnicalUser($user)
+            || InstanceAdminRoutePolicy::isTechnicalEndpoint($method, $path)) {
+            $role = $this->roles->resolveDefault($request);
+            if (!RequestAuthorization::isSessionAuth($request) || !$role->isActive
+                || (!$role->isInstanceAdmin() && !$role->isSuperadmin())
+                || !InstanceAdminRoutePolicy::allows($method, $path)) {
+                return $this->forbidden($request);
+            }
+            return $handler->handle($this->withEffectiveRole($request, $role));
+        }
+
         $route = $this->routes->match($method === 'HEAD' ? 'GET' : $method, $path);
         if ($route === null) return $this->forbidden($request);
         if ($route->kind === RoutePermissionMap::PUBLIC || $route->kind === RoutePermissionMap::SELF_SERVICE) {
@@ -95,7 +110,10 @@ final class PermissionMiddleware implements MiddlewareInterface
         if ($permission !== null && array_any([$permission, ...$route->alternativeKeys],
             fn (string $key): bool => $this->checker->allows($role, $key, $route->minimum))) {
             if ($role->isClientType() && (!ClientBankRoutePolicy::allows($method, $path, $route->key)
-                || !ClientStockRoutePolicy::allows($method, $path, $route->key))) {
+                || !ClientStockRoutePolicy::allows($method, $path, $route->key)
+                || !ClientTaxSubmissionPolicy::allowsRoute($method, $path)
+                || (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1
+                    && !RequestAuthorization::isSessionAuth($request)))) {
                 return $this->forbidden($request);
             }
             // Agendy NNO/504 a SVJ: oprávnění nestačí, firma musí být tou organizací.
@@ -137,6 +155,7 @@ final class PermissionMiddleware implements MiddlewareInterface
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $user['effective_role'] = $role;
         $user['is_superadmin'] = $role->isSuperadmin();
+        $user['is_instance_admin'] = $role->isInstanceAdmin();
         return $request
             ->withAttribute(AuthMiddleware::ATTR_USER, $user)
             ->withAttribute('auth.effective_role', $role);

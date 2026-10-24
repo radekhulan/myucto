@@ -18,6 +18,7 @@ import IsdsSendMethods from '@/components/submission/IsdsSendMethods.vue'
 const props = defineProps<{
   submissionId: number
   title: string
+  clientMode?: boolean
 }>()
 const emit = defineEmits<{ close: []; sent: []; changed: [] }>()
 const { t, locale } = useI18n()
@@ -200,13 +201,14 @@ onMounted(() => { void enqueue() })
                 :outbox-id="outboxId"
                 environment="production"
                 :transport="queued.transport"
+                :gateway-only="clientMode"
                 :gateway-start="dataBoxApi.gatewayStartTax"
                 @sent="onSent"
               />
               <p v-if="queued.transport.channel === 'manual_upload'" class="mt-2 text-xs text-neutral-500" data-test="tax-isds-transport-manual">{{ t('reports.submissions.isds.transport_manual') }}</p>
             </div>
 
-            <div class="rounded-lg border border-dashed border-neutral-300 p-3 text-xs text-neutral-600">
+            <div v-if="!clientMode" class="rounded-lg border border-dashed border-neutral-300 p-3 text-xs text-neutral-600">
               <p>{{ t('reports.submissions.isds.manual_hint') }}</p>
               <a :href="outboxLink" :class="[btnOutlineSm('neutral'), 'mt-2']" data-test="tax-isds-open-outbox">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

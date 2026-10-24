@@ -11,6 +11,7 @@
 |---|---|---|
 | Potřebujete zahraniční sazbu DPH, jednotku nebo upravit klasifikaci DPH | Upravit číselník | [§ 96.3](#963-krok-za-krokem-ciselniky) |
 | Přichází nový kolega nebo externí účetní | Založit uživatele a přidělit roli a firmy | [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam) |
+| Technickou správu zajišťuje někdo, kdo nesmí vidět klientská data | Založit Správce instance a vymezit technický rozsah | [§ 96.4.1](#9641-spravce-instance) |
 | Chcete si změnit heslo, zapnout 2FA nebo passkey | Upravit Můj profil | [§ 96.5](#965-krok-za-krokem-muj-profil) |
 | Chcete změnit text e-mailů pro aktuální firmu | Upravit její e-mailovou šablonu | [§ 96.6](#966-krok-za-krokem-e-mailove-sablony) |
 | Posíláte e-maily z jiné adresy nebo přes jiný server | Nastavit odesílací profil | [§ 96.7](#967-krok-za-krokem-odesilaci-e-mailove-profily) |
@@ -106,6 +107,7 @@ Stránka `Systém → Uživatelé` je jen pro superadmina.
 **Přiřadit firmy:** v editaci uživatele vyhledejte firmu podle názvu, IČO nebo ID a přidejte ji. Každý uživatel kromě
 superadmina má přístup pouze k firmám, které mu superadmin výslovně přidá. U přiřazené firmy ponechte **Výchozí roli**,
 nebo vyberte jinou aktivní roli stejného typu.
+Správce instance používá oddělené technické přiřazení popsané níže; běžné firemní oprávnění tím nezískává.
 
 **Odebrat uživatele:** aktivního uživatele nejdřív **deaktivujte**. U neaktivního se pak zobrazí **Smazat**. Smazání je
 trvalé a aplikace ho odmítne, pokud jsou na uživatele navázaná firemní, účetní nebo auditní data. V takovém případě účet
@@ -119,6 +121,49 @@ její deaktivace nebo odebrání firmy se projeví bez nového přihlášení a 
 
 > [!WARNING]
 > Aplikace brání odebrání nebo deaktivaci posledního aktivního superadmina.
+
+### 96.4.1 Správce instance
+
+**Správce instance** zajišťuje technický provoz bez přístupu k firemním agendám. Nezabírá uživatelské ani mzdové
+licenční místo. Přihlašuje se běžným účtem, může používat vlastní MFA a po přihlášení otevře samostatnou
+**Správu instance**. Superadmin do ní může vstoupit také z menu Systém.
+
+**Založení a rozsah:**
+
+1. Superadmin otevře `Systém → Uživatelé`, založí účet a vybere roli **Správce instance**.
+2. Běžné firemní role se tomuto účtu nepřiřazují. Technický rozsah může zůstat prázdný, obsahovat vybrané firmy
+   nebo výslovně všechny firmy včetně budoucích.
+3. U přidělených firem správce vidí jen technické ID, název a omezený technický stav. Přidělení neotevře účetnictví,
+   doklady, kontakty, banku, mzdy ani přílohy.
+
+| Oblast | Dostupný rozsah |
+|---|---|
+| Stav instance | Verze aplikace, PHP a databáze, dostupnost potřebných rozšíření a technický stav úložiště |
+| SMTP | Výběr cíle schváleného superadminem a zadání nového hesla |
+| Test pošty | Neutrální zpráva na adresu předem schválenou superadminem |
+| Přidělené firmy | Název, technické ID a informace o použití společného nebo vlastního poštovního transportu |
+| Technický audit | Vlastní technické operace v aktuálně povoleném rozsahu, bez tajemství a obsahu dokladů |
+| Vlastní účet | Profil, heslo, MFA a vlastní relace |
+
+**Nastavení SMTP:** Superadmin ve Správě instance nejprve přidá schválený cíl: název, server, port, TLS režim,
+uživatelské jméno, odesílatele a testovacího příjemce. Cíl se neupravuje; pro jinou adresu nebo identitu vzniká nový.
+Používaný cíl nelze smazat. Správce instance pak zvolí povolený cíl a zadá heslo. Při přechodu na jiný cíl musí zadat
+nové heslo; aplikace na jiný server nepřenese dříve uložené tajemství. U stejného cíle může ponechat heslo beze změny.
+Uložené heslo se nikdy nezobrazuje.
+Superadmin může akcí **Použít konfiguraci instance** odstranit aktivní přepis i jeho uložené heslo a vrátit
+společné odesílání k původní konfiguraci. Schválené cíle přitom zůstanou uložené. Správce instance tuto akci nemá.
+
+Test má pevný neutrální obsah, neposílá doklad, firemní šablonu, podpis ani kopii do IMAP archivu. Příjemce se při
+testu nezadává. Opakování testu omezuje časový limit. Test společného transportu u přidělené firmy neověřuje její
+vlastní SMTP profil; firma s vlastním profilem takový test nenabízí. Nastavení vybraného společného transportu
+platí také pro běžné odesílání, které používá globální transport. Vlastní firemní transporty se spravují odděleně.
+Je-li transport řízen prostředím nebo spravovaným hostingem, technický správce jej nemůže přepsat.
+
+Správce instance nemůže spravovat uživatele, rozšiřovat svůj rozsah, obnovovat cizí hesla nebo MFA, vytvářet API
+tokeny, připojovat MCP, stahovat či obnovovat zálohy ani číst původní provozní logy. Stejná omezení platí pro přímé
+odkazy a API. Změny a testy zůstávají v auditu bez hodnot hesel. Odebrání technického přiřazení platí i pro otevřenou
+relaci. Převod běžného uživatele na tuto roli odebere jeho dřívější firemní přístupy a zneplatní přístupové relace
+a tokeny; osobní MFA faktory zůstávají zachované.
 
 ## 96.5 Krok za krokem: Můj profil
 
@@ -616,7 +661,7 @@ externí roli typu **client** a pro každou nastavit oprávnění po modulech a 
 | **Zápis** | Zahrnuje čtení a dovoluje příslušnou změnu nebo akci. |
 
 Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné pro klientský portál; interní účetnictví,
-banka a globální správa se jim nepovolí. Tři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
+banka a globální správa se jim nepovolí. Čtyři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
 smazat ani upravit jejich matici:
 
 <!-- cols: 22 78 -->
@@ -625,6 +670,7 @@ smazat ani upravit jejich matici:
 | **Superadmin** | Plný přístup k firmám i celému systému. Jako jediný spravuje uživatele, role a přiřazení firem. |
 | **Admin** | Může dělat vše v přidělených firmách a pracovat s více firmami, které mu přidělí superadmin. Nemění celosystémové položky v menu Systém. |
 | **Admin Plus** | Má práva role Admin a navíc může v `Systém → Firmy` založit novou firmu. K nové firmě automaticky získá práva Admin. |
+| **Správce instance** | Technická správa bez přístupu k firemním agendám. Samostatný technický rozsah a schválené SMTP cíle, bez spotřeby licenčního místa. |
 
 Provozní nastavení firmy má pět samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
 **Branding firmy**, **Platební QR firmy** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
