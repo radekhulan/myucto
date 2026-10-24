@@ -1134,6 +1134,28 @@ final class RoutePermissionMap
         if ($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1) {
             return new RoutePermission(self::SUPERADMIN);
         }
+        // Klientský archiv je úzká alternativa k internímu čtení výkazů.
+        // Whitelist současně zabrání tomu, aby nová routa automaticky zdědila
+        // klientská práva z obecného fallbacku podání.
+        if (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1) {
+            if ($method === 'GET' && ClientTaxSubmissionPolicy::allowsRoute($method, $path)) {
+                if ($path === '/api/reports/submissions/epo-credentials') {
+                    return new RoutePermission(self::PERMISSION, 'reports.submit', AccessLevel::WRITE);
+                }
+                $key = $path === '/api/reports/submissions/settings'
+                    ? 'reports.submit'
+                    : (preg_match('#/(?:xml|download)$#D', $path) === 1 ? 'reports.export' : 'reports');
+                return new RoutePermission(self::PERMISSION, $key, AccessLevel::READ,
+                    $path === '/api/reports/submissions/settings'
+                        ? ['reports.submissions', 'reports.submissions.manage']
+                        : ['reports.submissions']);
+            }
+            if ($method === 'PUT' && in_array($path, [
+                '/api/reports/submissions/settings', '/api/reports/submissions/isds-routes',
+            ], true)) {
+                return new RoutePermission(self::PERMISSION, 'reports.submissions.manage', AccessLevel::WRITE, ['reports.submit']);
+            }
+        }
         foreach (self::RULES as [$ruleMethod, $pattern, $key, $level]) {
             if (($ruleMethod === '*' || $ruleMethod === $method) && preg_match($pattern, $path) === 1) {
                 return new RoutePermission(self::PERMISSION, $key, $level);

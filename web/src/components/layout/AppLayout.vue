@@ -383,6 +383,7 @@ const navSections = computed<NavSection[]>(() => {
         items: [
           { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
           { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey },
+          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive, permission: 'reports.submissions' as PermissionKey },
         ],
       },
       ...(isStockEnabled ? [{

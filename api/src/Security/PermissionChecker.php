@@ -13,6 +13,10 @@ final class PermissionChecker
         if ($role->isSuperadmin()) return true;
         if (!$role->isActive || !$this->catalog->has($key)) return false;
         if (!$this->catalog->allowsRoleType($key, $role->type)) return false;
+        if ($role->isClientType()) {
+            if ($key === 'reports.submissions' && $minimum === AccessLevel::WRITE) return false;
+            if ($key === 'reports.submit' && !$role->level('reports.submissions')->allows(AccessLevel::READ)) return false;
+        }
         if ($role->isClientType() && in_array($key, ['bank.import', 'bank.match', 'bank.ignore'], true)
             && !$role->level('bank')->allows(AccessLevel::READ)) return false;
         if ($role->isClientType() && ($key === 'stock' || str_starts_with($key, 'stock.'))) {

@@ -286,8 +286,8 @@ function clientRouteParityErrors(manifestRoutes: readonly ManifestRoute[]): stri
 
 describe('sdílená klientská plocha vlastní domény', () => {
   it('obsahuje auditovanou klientskou plochu včetně nastavení firmy a legacy aliasů', () => {
-    expect(clientDomainRoutes).toHaveLength(58)
-    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(58)
+    expect(clientDomainRoutes).toHaveLength(59)
+    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(59)
     expect(clientDomainRoutes.slice(-3).map(route => route.name))
       .toEqual(['data-exchange', 'admin-export', 'admin-import'])
   })
@@ -309,7 +309,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       if (route!.path.includes(':')) parameterized.push(definition.name)
     }
 
-    expect(rendered).toHaveLength(50)
+    expect(rendered).toHaveLength(51)
     expect(redirects).toEqual([
       'profile-totp',
       'profile-shortcuts',
@@ -340,7 +340,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
     }
     expect(Object.fromEntries(kindCounts)).toEqual({
       client_redirect: 4,
-      permission: 43,
+      permission: 44,
       router_redirect: 8,
       self_service: 3,
     })
@@ -410,7 +410,11 @@ describe('sdílená klientská plocha vlastní domény', () => {
         continue
       }
       if (!definition.permission) continue
-      expect(route?.meta.permission, definition.name).toBe(definition.permission)
+      if (route?.meta.permissionAny) {
+        expect(route.meta.permissionAny.filter(isClientPermission), definition.name).toEqual([definition.permission])
+      } else {
+        expect(route?.meta.permission, definition.name).toBe(definition.permission)
+      }
       expect(route?.meta.access, definition.name).toBe(definition.access)
       expect(isClientPermission(definition.permission), definition.name).toBe(true)
     }
@@ -457,7 +461,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
 
   it('pokrývá každý literální cíl klientské navigace manifestem a routerem', () => {
     const paths = [...new Set(clientNavigationPaths())]
-    expect(paths).toHaveLength(23)
+    expect(paths).toHaveLength(24)
 
     const routeNames = new Set(clientDomainRoutes.map(route => route.name))
     for (const path of paths) {
@@ -486,6 +490,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       'purchase-invoices',
       'recurring',
       'recurring-new',
+      'reports-submissions',
       'stock-fulfillment',
       'stock-item-new',
       'stock-items',

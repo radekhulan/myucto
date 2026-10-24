@@ -192,6 +192,11 @@ final class RoleRepository
             if ($level !== AccessLevel::NONE) $out[(string) $key] = $level->value;
         }
         if ($roleType === 'client') {
+            // Podávání vždy zpřístupní i archiv připravených výkazů; obecný zápis
+            // do výkazů tím klient nezíská, odeslání má samostatné oprávnění.
+            if (isset($out['reports.submissions']) || isset($out['reports.submit'])) {
+                $out['reports.submissions'] = AccessLevel::READ->value;
+            }
             // Klientský sklad nemá obecný zápis; správa karet a expedice jsou
             // samostatné akce, které potřebují čtení jejich podkladů.
             if (isset($out['stock']) || isset($out['stock.items.write']) || isset($out['stock.fulfillment.write'])) {

@@ -25746,6 +25746,11 @@
     "tax_f_nonprofit_reduction_university_min": "University and research reduction floor (CZK)"
   },
   "roles": {
+    "submission_permissions": {
+      "reports_submissions": "Prepared tax submissions (VAT, control and recapitulative statements)",
+      "reports_submit": "Send tax submissions",
+      "reports_submissions_manage": "Manage tax submissions"
+    },
     "operational_permissions": {
       "email_profiles": "Company sender profiles",
       "email_templates": "Company email templates",
@@ -26545,6 +26550,14 @@
       "ik_mpsv_warning": "IK MPSV could not be recognized in this certificate. Signing may work, but EPO may not automatically link the signer; verify the certificate details.",
       "upload_certificate": "Store a new P12/PFX",
       "upload_certificate_hint": "Use a personal qualified electronic-signature certificate, not an ordinary SSL or commercial certificate.",
+      "client_subtitle": "VAT returns, control statements and recapitulative statements prepared by your accountant. Download XML, confirmations and payment details, or send submissions when your role allows it.",
+      "own_certificate_title": "Upload your own certificate",
+      "own_certificate_hint": "The P12 or PFX certificate is saved in your personal vault and enabled for this company. Only your own certificates are available.",
+      "own_certificate_file": "Certificate file (P12/PFX)",
+      "own_certificate_label": "Certificate label",
+      "own_certificate_password": "Certificate password",
+      "own_certificate_upload": "Upload certificate",
+      "own_certificate_uploaded": "Your certificate has been uploaded.",
       "upload_moved_title": "Uploading a certificate",
       "upload_moved_hint": "Certificates are uploaded in one place — System → Emails & certificates → Certificates and electronic signatures. EPO, PDF signing, S/MIME and payroll submissions all read them from there. Here you only pick which of them this company may use.",
       "upload_moved_link": "Go to Certificates",

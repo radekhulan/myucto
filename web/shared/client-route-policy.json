@@ -11,6 +11,8 @@
     { "name": "admin-approvals", "path_pattern": "^/admin/approvals/?$", "kind": "permission", "permission": "invoices.approval", "access": "read" },
     { "name": "admin-support", "path_pattern": "^/admin/support/?$", "kind": "permission", "permission": "profile", "access": "read" },
 
+    { "name": "reports-submissions", "path_pattern": "^/reports/submissions/?$", "kind": "permission", "permission": "reports.submissions", "access": "read" },
+
     { "name": "bank-statements", "path_pattern": "^/bank/?$", "kind": "permission", "permission": "bank", "access": "read" },
     { "name": "bank-detail", "path_pattern": "^/bank/[0-9]+/?$", "kind": "permission", "permission": "bank", "access": "read" },
 

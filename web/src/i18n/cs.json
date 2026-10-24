@@ -25746,6 +25746,11 @@
     "tax_nonprofit_hint": "Snížení základu daně podle § 20 odst. 7. Sazbu zadejte jako desetinný podíl: 0,30 znamená 30 %. Způsobilost určuje doložený právní profil. Finální důkazy používají uloženou roční sadu."
   },
   "roles": {
+    "submission_permissions": {
+      "reports_submissions": "Připravená daňová podání (DPH, KH, SH)",
+      "reports_submit": "Odesílání daňových podání",
+      "reports_submissions_manage": "Správa daňových podání"
+    },
     "operational_permissions": {
       "email_profiles": "Odesílací profily firmy",
       "email_templates": "E-mailové šablony firmy",
@@ -26545,6 +26550,14 @@
       "ik_mpsv_warning": "V certifikátu se nepodařilo rozpoznat IK MPSV. Podpis může fungovat, ale EPO nemusí automaticky propojit podepisující osobu; ověřte údaje certifikátu.",
       "upload_certificate": "Uložit nový P12/PFX",
       "upload_certificate_hint": "Použijte osobní kvalifikovaný certifikát pro elektronický podpis, nikoli běžný SSL nebo komerční certifikát.",
+      "client_subtitle": "Podání DPH, kontrolní a souhrnná hlášení připravená účetní. Můžete stáhnout XML, potvrzení a platební údaje; s oprávněním k odesílání také podání odeslat.",
+      "own_certificate_title": "Nahrát vlastní certifikát",
+      "own_certificate_hint": "Certifikát P12 nebo PFX se uloží do vašeho osobního trezoru a povolí pro tuto firmu. Používáte jen své vlastní certifikáty.",
+      "own_certificate_file": "Soubor certifikátu (P12/PFX)",
+      "own_certificate_label": "Označení certifikátu",
+      "own_certificate_password": "Heslo k certifikátu",
+      "own_certificate_upload": "Nahrát certifikát",
+      "own_certificate_uploaded": "Vlastní certifikát byl nahrán.",
       "upload_moved_title": "Nahrání certifikátu",
       "upload_moved_hint": "Certifikáty se nahrávají na jednom místě - Systém → E-maily a certifikáty → Certifikáty a elektronické podpisy. Odtud si je bere EPO, podpis PDF, S/MIME i mzdová podání. Tady se jen vybírá, který z nich smí tahle firma použít.",
       "upload_moved_link": "Přejít na Certifikáty",

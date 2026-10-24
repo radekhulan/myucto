@@ -38,6 +38,11 @@ info:
     `403 token_write_forbidden` — i tokenu se scope `read_write`. Mzdová část má
     vlastní omezený kontrakt popsaný níže.
 
+    Klientské oprávnění `reports.submissions` je výjimkou i pro čtení: archiv
+    připravených DPH, KH a SH je klientovi dostupný pouze v přihlášené webové
+    session. Bearer token klientské role dostane `403` také na čtecích cestách
+    `/api/v1/reports/submissions/**`.
+
     Zápisové výjimky jsou dvě. První jsou **koncepty ostatních pohledávek a závazků**.
     Token se scope `read_write` smí založit koncept (`POST /accounting/other-items`),
     upravit a smazat koncept (`PUT`/`DELETE /accounting/other-items/{id}`), nastavit
@@ -9344,10 +9349,17 @@ paths:
             application/xml: {}
 
   # ── Tax submissions archive ──────────────────────────────────────────────
+  # Klientský přístup je pouze v přihlášené webové session; bearer token
+  # klientské role vrací 403 i u čtecích cest.
   /api/v1/reports/submissions:
     get:
       tags: [Reports]
       summary: Historie všech generovaných EPO XML výkazů
+      description: |
+        Interní role čtou archiv podle oprávnění `reports`. Role typu client
+        potřebuje čtení `reports.submissions` a přihlášení v prohlížeči; uvidí
+        pouze snapshoty `dphdp3`, `dphkh1`, `dphshv` své vybrané firmy. Omezení
+        platí i pro filtry, souhrny a přímé načtení podle `submission_id`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - name: scope
@@ -9368,6 +9380,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TaxSubmissionList' }
         '422': { description: Neplatný filtr podání }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/reports/submissions/settings:
     parameters:
@@ -9375,17 +9388,27 @@ paths:
     get:
       tags: [Reports]
       summary: Nastavení kořenových složek důkazního archivu EPO
+      description: |
+        Klient s `reports.submissions` obdrží pouze `epo_environment` a jen ve
+        webové session. Interní role s `reports` může číst plné nastavení;
+        interní správce s `reports.submissions.manage` potřebuje také čtení
+        `reports`, zatímco držiteli původního `reports.submit` zůstává přístup.
       responses:
         '200':
           description: Aktuální nastavení
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/EpoSubmissionSettings' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/EpoSubmissionSettings' }
+                  - { $ref: '#/components/schemas/ClientEpoSubmissionSettings' }
         '403': { $ref: '#/components/responses/Forbidden' }
     put:
       tags: [Reports]
       summary: Uloží kořenové složky důkazního archivu EPO
       description: |
+        Jen interní role s `reports.submissions.manage` nebo původním právem
+        `reports.submit`; klientská role změnu provést nesmí.
         Částečná aktualizace (viz úvod). Obě ID složek jsou nepovinná: vynechané ID zůstane, `null`
         ho vymaže. Schéma `EpoSubmissionSettings` je sdílené s odpovědí, proto v něm zůstávají
         uvedené povinné vlastnosti.
@@ -9410,6 +9433,9 @@ paths:
       tags: [Reports]
       summary: Datové schránky finančního úřadu pro podání DPH, KH, SH a daně z příjmů
       description: |
+        Klient s `reports.submissions` obdrží pouze směrování DPH, KH a SH;
+        skupina daně z příjmů chybí a seznam `recipients` je prázdný. Vyžaduje
+        přihlášenou webovou session.
         Výchozí schránka se odvozuje z kódu finančního úřadu (krajské FÚ a Specializovaný FÚ),
         ruční přepis platí zvlášť pro každý druh výkazu. Při odeslání rozhoduje kód FÚ
         zapsaný v odesílaném XML (`c_ufo_cil`, jinak `c_ufo`).
@@ -9418,7 +9444,10 @@ paths:
           description: Směrování podání datovou schránkou
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/TaxIsdsRoutes' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/TaxIsdsRoutes' }
+                  - { $ref: '#/components/schemas/ClientTaxIsdsRoutes' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/reports/submissions/epo-credentials:
@@ -9427,7 +9456,10 @@ paths:
     get:
       tags: [Reports]
       summary: Seznam osobních certifikátů přihlášeného uživatele pro EPO
-      description: Nikdy nevrací PFX, soukromý klíč, heslo PFX ani jejich ciphertext.
+      description: |
+        Vyžaduje zápis `reports.submit`; klient navíc potřebuje čtení
+        `reports.submissions` a webovou session. Vrací jen vlastní certifikáty,
+        nikdy PFX, soukromý klíč, heslo PFX ani jejich ciphertext.
       responses:
         '200':
           description: Certifikáty vlastníka včetně příznaku povolení pro aktuální firmu
@@ -9441,6 +9473,8 @@ paths:
       tags: [Reports]
       summary: Zašifruje a uloží osobní P12/PFX certifikát pro přímé EPO
       description: |
+        Klient smí spravovat pouze vlastní certifikát při oprávněních
+        `reports.submissions` a `reports.submit` ve webové session.
         Vyžaduje session, znovu aktuální heslo a TOTP, pokud je u uživatele
         aktivní. Server odmítne ukládání bez samostatného
         `app.secret_encryption_key`. Certifikát se současně povolí pro aktuální firmu.
@@ -9504,8 +9538,10 @@ paths:
       tags: [Reports]
       summary: Vyřadí vlastní certifikát z aktivního EPO trezoru
       description: |
-        Smí jen vlastník certifikátu. Volby certifikátu pro mzdová podání se
-        zruší v téže transakci a odpověď je vypíše v `payroll_selections_removed`.
+        Jen interní role; klientská role tuto operaci nesmí volat ani pro vlastní
+        certifikát. Interní uživatel musí být jeho vlastníkem. Volby certifikátu
+        pro mzdová podání se zruší v téže transakci a odpověď je vypíše v
+        `payroll_selections_removed`.
       requestBody:
         required: true
         content:
@@ -9543,6 +9579,7 @@ paths:
     get:
       tags: [Reports]
       summary: Detail záznamu (vč. XML)
+      description: Klientské čtení `reports.submissions` platí jen pro DPH/KH/SH ve vlastní firmě a ve webové session.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -9553,10 +9590,12 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TaxSubmission' }
         '404': { description: Not found }
+        '403': { $ref: '#/components/responses/Forbidden' }
     delete:
       tags: [Reports]
       summary: Smaže archivovaný záznam (jen admin)
       description: >-
+        Klientská role mazání nemá ani s oprávněním `reports.submit`.
         Blokuje jen to, co prokazatelně odešlo. Testovací pokus EPO (`test=1`) mazání
         nebrání. U předání, jehož výsledek aplikace nezná, je potřeba vědomé potvrzení
         `not_submitted_note` — pokus se tím uzavře jako nepodaný.
@@ -9586,7 +9625,7 @@ paths:
     get:
       tags: [Reports]
       summary: Zprávy z datové schránky, které mohou patřit k podání
-      description: Zprávy od finančního úřadu a nerozpoznané zprávy bez vazby na jiné podání.
+      description: Jen interní role; klient nečte obecnou příchozí schránku ani kandidáty k přiřazení. Zprávy od finančního úřadu a nerozpoznané zprávy bez vazby na jiné podání.
       responses:
         '200':
           description: Kandidáti k přiřazení
@@ -9606,7 +9645,7 @@ paths:
     get:
       tags: [Reports]
       summary: Stáhne archivované XML
-      description: Název obsahuje období, ID snapshotu a čas jeho vygenerování, takže opakované exporty nekolidují.
+      description: Klient s `reports.submissions` stáhne jen DPH/KH/SH své firmy ve webové session. Název obsahuje období, ID snapshotu a čas jeho vygenerování, takže opakované exporty nekolidují.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -9615,12 +9654,14 @@ paths:
           description: XML download
           content:
             application/xml: {}
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/reports/submissions/{id}/payment:
     get:
       tags: [Reports]
       summary: Platební údaje přiznání k DPH
       description: >-
+        Klientské čtení `reports.submissions` platí jen pro DPH/KH/SH ve vlastní firmě a ve webové session.
         Účet finančního úřadu (předčíslí 705 a matrika podle kódu FÚ z XML snapshotu), variabilní
         symbol z DIČ, částka z rekapitulace přiznání, splatnost a QR platba. Úhradu dohledá
         v bankovních výpisech firmy. U jiných výkazů vrací `supported: false`.
@@ -9641,6 +9682,8 @@ paths:
       tags: [Reports]
       summary: Soupis dokladů podle podaného kontrolního hlášení s porovnáním proti aktuálním datům
       description: |
+        Jen interní role; klientovi jsou soupis zdrojových dokladů a porovnání
+        s aktuálními daty nepřístupné.
         Jen pro podání formuláře `dphkh1` ve stavu `submitted` nebo `accepted` (jinak 422).
         Řádky se čtou z podaného XML a porovnávají po dokladech s aktuálním soupisem téhož období:
         `match`, `amount_diff`, `only_submitted`, `only_current`. Oddíly A.5 a B.3 jsou v KH souhrnné
@@ -9659,7 +9702,7 @@ paths:
     get:
       tags: [Reports]
       summary: Export soupisu podle podaného KH do PDF nebo XLSX
-      description: Hlavička nese firmu, období, filtr, zdroj „podle podaného KH" s datem a typem podání a okamžik sestavení.
+      description: Jen interní role. Hlavička nese firmu, období, filtr, zdroj „podle podaného KH" s datem a typem podání a okamžik sestavení.
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -9684,6 +9727,9 @@ paths:
       tags: [Reports]
       summary: Předá uložený XML snapshot do asistovaného formuláře EPO
       description: |
+        Klient potřebuje `reports.submissions` (čtení), `reports.submit` (zápis)
+        a webovou session; smí předat jen DPH/KH/SH své firmy. Bearer token
+        klientské role ani token s `read_write` podání neodešle.
         Odešle přesné archivované XML na oficiální EPO endpoint s
         `otevriFormular=1`. Krátkodobé návratové URL se vrací pouze v odpovědi,
         server je neukládá do databáze ani logu; klient je může ponechat pouze
@@ -9730,6 +9776,8 @@ paths:
       tags: [Reports]
       summary: Podepíše snapshot a provede úplný test EPO s test=1
       description: |
+        Klient potřebuje čtení `reports.submissions`, zápis `reports.submit`
+        a webovou session; testuje jen DPH/KH/SH své firmy a vlastní certifikát.
         Vytvoří připojený CMS/PKCS#7 signedData v DER s právě jedním podpisem,
         kontrolní hlášení před podpisem vloží jako jediné XML do ZIP, odešle
         payload na nakonfigurované EPO prostředí a archivuje celý XML protokol.
@@ -9773,6 +9821,8 @@ paths:
       tags: [Reports]
       summary: Právně účinně podepíše a odešle snapshot do EPO
       description: |
+        Klient potřebuje čtení `reports.submissions`, zápis `reports.submit`
+        a webovou session; odesílá jen DPH/KH/SH své firmy a vlastním certifikátem.
         Vyžaduje úspěšný test téhož snapshotu a certifikátu, session step-up
         heslem a případně TOTP. Při síťovém timeoutu výsledek označí jako
         `uncertain` a nikdy automaticky neopakuje POST. Při `epo_test=true`
@@ -9811,6 +9861,7 @@ paths:
     post:
       tags: [Reports]
       summary: Obnoví stav přímého nebo rozsáhlého EPO podání
+      description: Klient potřebuje `reports.submissions` a `reports.submit` ve webové session a smí obnovit jen DPH/KH/SH své firmy.
       requestBody:
         required: true
         content:
@@ -9840,6 +9891,7 @@ paths:
       tags: [Reports]
       summary: Ověří nalezené P7S/P7M a bezpečně dokončí nejisté přímé podání
       description: |
+        Klient potřebuje `reports.submissions` a `reports.submit` ve webové session a smí dokončit jen DPH/KH/SH své firmy.
         Vyžaduje session step-up. Produkční potvrzení musí mít platný podpis a
         řetězec EPO; sandboxové potvrzení platný podpis a přesnou testovací
         identitu GFŘ. Potvrzení se musí vztahovat k archivovanému odchozímu CMS.
@@ -9875,6 +9927,7 @@ paths:
       tags: [Reports]
       summary: Auditovaně uvolní nejednoznačný pokus ověřený jako nepřijatý
       description: |
+        Jen interní role; klient nemůže pokus uvolnit ani s právem `reports.submit`.
         Nikdy nekontaktuje submit endpoint. Je dostupné jen pro `uncertain` bez
         vzdáleného identifikátoru nebo pro `submitting` starší 15 minut, pokud
         nejsou dostupné údaje pro stavový dotaz. Vyžaduje session step-up,
@@ -9910,6 +9963,8 @@ paths:
       tags: [Reports]
       summary: Nahraje potvrzení a další artefakty EPO do dokumentů
       description: |
+        Klient potřebuje `reports.submissions` a `reports.submit` ve webové session
+        a smí nahrát artefakty jen k DPH/KH/SH své firmy.
         Přijímá nejvýše 20 souborů XML, P7S/P7M nebo PDF. Před uložením
         automaticky vytvoří nakonfigurovanou stromovou strukturu archivu podle
         druhu formuláře a období. U podepsaného potvrzení se ověří dostupné
@@ -9951,6 +10006,7 @@ paths:
     get:
       tags: [Reports]
       summary: Stáhne důkazní artefakt EPO v rámci oprávnění k reportům
+      description: Klient s `reports.submissions` stáhne artefakt jen ke DPH/KH/SH své firmy ve webové session.
       responses:
         '200':
           description: Soubor jako bezpečná příloha
@@ -25382,6 +25438,9 @@ paths:
       tags: [Reports]
       summary: Zaznamená podání archivovaného EPO XML jako prokazatelně podané
       description: |
+        Klient potřebuje čtení `reports.submissions`, zápis `reports.submit`
+        a webovou session; smí doložit jen DPH/KH/SH své firmy. Bearer token
+        klientské role ani token `read_write` tento zápis neprovede.
         Zkušební asistovaný pokus nelze touto operací potvrdit jako právně účinné podání.
 
         Při opětovném označení již podaného snímku zůstanou vynechané `submitted_at` a
@@ -49158,6 +49217,13 @@ components:
           readOnly: true
           description: Aktivní složky firmy dostupné pro konfiguraci bez oprávnění k celému modulu Dokumenty.
           items: { $ref: '#/components/schemas/DocumentFolder' }
+    ClientEpoSubmissionSettings:
+      type: object
+      additionalProperties: false
+      required: [epo_environment]
+      description: Klientská odpověď bez ID složek a jejich seznamu.
+      properties:
+        epo_environment: { type: string, enum: [production, test] }
     EpoSubmissionAttempt:
       type: object
       required: [id, channel, epo_environment, status, request_sha256, requested_at]
@@ -49345,6 +49411,25 @@ components:
         recipients:
           type: array
           items: { $ref: '#/components/schemas/TaxIsdsRecipient' }
+    ClientTaxIsdsRoutes:
+      type: object
+      additionalProperties: false
+      required: [office_code, groups, recipients]
+      description: Klientská odpověď bez směrování daně z příjmů a bez seznamu příjemců.
+      properties:
+        office_code: { type: [string, "null"] }
+        groups:
+          type: object
+          additionalProperties: false
+          required: [vat, kh, sh]
+          properties:
+            vat: { $ref: '#/components/schemas/TaxIsdsRoute' }
+            kh: { $ref: '#/components/schemas/TaxIsdsRoute' }
+            sh: { $ref: '#/components/schemas/TaxIsdsRoute' }
+        recipients:
+          type: array
+          maxItems: 0
+          items: { $ref: '#/components/schemas/TaxIsdsRecipient' }
     VatPaymentInstruction:
       type: object
       required: [supported]
@@ -49450,14 +49535,17 @@ components:
         valid_to: { type: string, format: date-time }
         ik_mpsv_present: { type: boolean }
         epo_verified: { type: boolean, description: Alespoň jeden test=1 s tímto přesným otiskem úspěšně prošel EPO. }
-        epo_verified_at: { type: [string, "null"], format: date-time }
+        epo_verified_at:
+          type: [string, "null"]
+          format: date-time
+          description: U klienta se ověření certifikátu vztahuje pouze k aktuální firmě.
         valid_now: { type: boolean }
         enabled_for_supplier: { type: boolean }
-        linked_profiles_count: { type: integer, minimum: 0, description: Počet aktivních podpisových profilů používajících certifikát napříč firmami vlastníka. }
+        linked_profiles_count: { type: integer, minimum: 0, description: Počet aktivních podpisových profilů používajících certifikát napříč firmami vlastníka; u klienta pouze v aktuální firmě. }
         linked_supplier_profiles_count: { type: integer, minimum: 0, description: Počet aktivních podpisových profilů používajících certifikát v aktuální firmě. }
-        linked_data_box_count: { type: integer, minimum: 0, description: Počet přístupů k datové schránce, které se certifikátem přihlašují. Blokuje smazání. }
-        linked_isds_gateway_count: { type: integer, minimum: 0, description: Počet registrací odesílací brány ISDS s tímto certifikátem. Blokuje smazání. }
-        linked_payroll_selections_count: { type: integer, minimum: 0, description: Počet voleb certifikátu pro mzdová podání (firma a prostředí). Smazání certifikátu je zruší. }
+        linked_data_box_count: { type: integer, minimum: 0, description: Počet přístupů k datové schránce, které se certifikátem přihlašují. Blokuje smazání. Klientovi se nevrací. }
+        linked_isds_gateway_count: { type: integer, minimum: 0, description: Počet registrací odesílací brány ISDS s tímto certifikátem. Blokuje smazání. Klientovi se nevrací. }
+        linked_payroll_selections_count: { type: integer, minimum: 0, description: Počet voleb certifikátu pro mzdová podání (firma a prostředí). Smazání certifikátu je zruší. Klientovi se nevrací. }
         created_at: { type: string, format: date-time }
     EpoDirectTestResult:
       type: object

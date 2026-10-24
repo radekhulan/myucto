@@ -115,6 +115,22 @@ final class PermissionResolverTest extends TestCase
         self::assertTrue($defaultRole->canCreateSupplier());
     }
 
+    public function testClientEffectivePermissionsDoNotAdvertiseSubmitWithoutArchiveRead(): void
+    {
+        $this->insertRole(8, 'Podatel bez archivu', 'client', true, ['reports.submit' => 2]);
+        $role = $this->resolver(new SupplierAccess(11, false, null))->resolve($this->request(8, 'client'));
+        self::assertArrayNotHasKey('reports.submit', $role->permissions,
+            'Matice pro UI musí odmítnout podávání stejně jako serverový PermissionChecker.');
+    }
+
+    public function testClientEffectiveArchiveGrantIsReadOnlyAndKeepsExplicitSubmit(): void
+    {
+        $this->insertRole(8, 'Podatel s archivem', 'client', true, ['reports.submissions' => 2, 'reports.submit' => 2]);
+        $role = $this->resolver(new SupplierAccess(11, false, null))->resolve($this->request(8, 'client'));
+        self::assertSame(1, $role->permissions['reports.submissions']);
+        self::assertSame(2, $role->permissions['reports.submit']);
+    }
+
     /** @param array<string, int> $permissions */
     private function insertRole(
         int $id,

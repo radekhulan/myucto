@@ -1089,7 +1089,8 @@
         "2185_eet_stored_value_and_external.sql",
         "2186_user_favorites.sql",
         "2187_receipt_links.sql",
-        "2188_quick_receipts.sql"
+        "2188_quick_receipts.sql",
+        "2189_client_tax_submission_permissions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

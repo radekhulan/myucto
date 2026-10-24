@@ -106,6 +106,16 @@ final class PermissionResolver
             $permissions[$permissionKey] = $level;
         }
 
+        // Stejná hranice jako v PermissionCheckeru platí i pro matici vrácenou UI.
+        // Poškozený nebo historický grant nesmí nabízet zakázané akce v prohlížeči.
+        if ($type === 'client') {
+            if (($permissions['reports.submissions'] ?? 0) > 0) {
+                $permissions['reports.submissions'] = AccessLevel::READ->value;
+            } else {
+                unset($permissions['reports.submit']);
+            }
+        }
+
         return new EffectiveRole(
             (int) $first['id'],
             (string) $first['name'],

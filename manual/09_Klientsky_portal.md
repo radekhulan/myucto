@@ -10,6 +10,12 @@ menu. Smí vystavovat a upravovat vlastní doklady, dokud je účetní nezaúčt
 
 Administrátor může klientské roli zpřístupnit také **Peníze → Bankovní účty**. Čtení banky, nahrávání výpisů, párování a ignorování plateb jsou volitelná oprávnění; klient bez jejich přidělení banku neuvidí. Přístup se týká pouze jeho firmy, včetně přihlášení na klientské doméně. Podrobnosti popisuje kapitola [Banka](29_Banka.md).
 
+Samostatně může správce povolit **Daně → EPO podání a archív**. Klient pak čte připravená přiznání k DPH,
+kontrolní a souhrnná hlášení své firmy, stahuje archivované XML a potvrzení a vidí platební údaje DPH.
+S dalším právem k podávání je může odeslat přes EPO nebo odesílací bránu datové schránky.
+Výchozí klientská role tato práva nemá; postup a hranice přístupu popisuje
+[Klientské podávání připravených výkazů](49_Archiv_podani_a_rekonciliace.md#4921-klientske-podavani-pripravenych-vykazu).
+
 Superadmin má v nabídce **Dokumenty → Předat doklady účetní** také přístup
 k předávání dokladů a odpovědím na požadavky účetní v právě vybrané firmě.
 Zároveň mu zůstávají dostupné účetní funkce.
@@ -41,7 +47,7 @@ Kapitolu otevřete, když:
 ## 9.2 Než začnete
 
 1. **Účet superadmina.** Klientské uživatele zakládá jen superadmin v `Systém → Uživatelé`.
-2. **Aktivní role typu client.** Role se vybírá při zakládání uživatele. Role typu **readonly** je něco jiného: je to interní pracovník, který smí jen číst. Klient je externí osoba, která smí vystavovat a upravovat vlastní doklady, ale nevidí účetnictví, reporty ani nastavení systému; banku vidí jen s výslovně přidělenými bankovními oprávněními (viz [§ 96.2.2 Role](96_Nastaveni.md#96164-role-a-opravneni)).
+2. **Aktivní role typu client.** Role se vybírá při zakládání uživatele. Role typu **readonly** je něco jiného: je to interní pracovník, který smí jen číst. Klient je externí osoba, která smí vystavovat a upravovat vlastní doklady, ale nevidí účetnictví, obecné reporty ani nastavení systému; banku a archiv připravených výkazů DPH, KH a SH vidí jen s výslovně přidělenými oprávněními (viz [§ 96.2.2 Role](96_Nastaveni.md#96164-role-a-opravneni)).
 3. **Firma, ke které klient patří.** Bez přiřazené firmy klient po přihlášení uvidí jen prázdný stav. Přístup je záměrně zamčený: žádná firma mu není vidět, dokud ji superadmin nepřiřadí.
 4. **Pro klientské nastavení firmy** musí mít jeho role právo **Zápis** alespoň u jedné provozní oblasti: odesílací profily, e-mailové šablony, branding, platební QR nebo firemní podpisové profily a PDF podpisy.
 5. **Pro vlastní doménu** musí správce serveru zapnout funkci v konfiguraci (viz [§ 9.11.11](#91111-vlastni-domena-pravidla)).

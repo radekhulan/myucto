@@ -201,6 +201,52 @@ final class RequestAuthorization
         return self::isCompanyAdmin($request);
     }
 
+    /** Klient čte jen připravená podání, interní role dál používají agendu výkazů. */
+    public static function canReadTaxSubmissions(Request $request): bool
+    {
+        return self::isClientType($request)
+            ? self::isSessionAuth($request) && self::allows($request, 'reports.submissions', AccessLevel::READ)
+            : self::allows($request, 'reports', AccessLevel::READ);
+    }
+
+    /** XML a důkazy jsou součástí klientského archivu; interní export má vlastní právo. */
+    public static function canExportTaxSubmission(Request $request): bool
+    {
+        return self::isClientType($request)
+            ? self::canReadTaxSubmissions($request)
+            : self::allows($request, 'reports.export', AccessLevel::READ);
+    }
+
+    /** Řádek musí volající nejprve dohledat v aktuální firmě. */
+    public static function canAccessTaxSubmission(Request $request, array $submission): bool
+    {
+        return !self::isClientType($request)
+            || (self::canReadTaxSubmissions($request)
+                && ClientTaxSubmissionPolicy::allowsForm((string) ($submission['form_code'] ?? '')));
+    }
+
+    /** Mazání archivu zachovává původní právo interních rolí k exportu se zápisem. */
+    public static function canDeleteTaxSubmission(Request $request): bool
+    {
+        return !self::isClientType($request)
+            && self::allows($request, 'reports.export', AccessLevel::WRITE);
+    }
+
+    /** Správa důkazů a korespondence zůstává interním podávajícím rolím. */
+    public static function canManageTaxSubmissionEvidence(Request $request): bool
+    {
+        return !self::isClientType($request)
+            && self::allows($request, 'reports.submit', AccessLevel::WRITE);
+    }
+
+    /** Stávající interní podávající role si zachovávají správu nastavení. */
+    public static function canManageTaxSubmissions(Request $request): bool
+    {
+        return !self::isClientType($request)
+            && (self::allows($request, 'reports.submissions.manage', AccessLevel::WRITE)
+                || self::allows($request, 'reports.submit', AccessLevel::WRITE));
+    }
+
     /**
      * Akceptace nativního výpočtu DPPO 504 odblokuje finalizaci, XML a podání. Jde o
      * rozhodnutí správce firmy, nikoli delegované účetní role.
@@ -259,6 +305,12 @@ final class RequestAuthorization
         string $permission,
         AccessLevel $minimum = AccessLevel::READ,
     ): bool {
+        if (self::isClientType($request)
+            && in_array($permission, ['reports.submissions', 'reports.submit'], true)
+            && !self::isSessionAuth($request)
+        ) {
+            return false;
+        }
         self::$catalog ??= new PermissionCatalog();
         self::$checker ??= new PermissionChecker(self::$catalog);
         return self::$checker->allows(self::effectiveRole($request), $permission, $minimum);

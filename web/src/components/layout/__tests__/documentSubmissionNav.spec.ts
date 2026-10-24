@@ -107,3 +107,15 @@ describe('AppLayout price list navigation', () => {
     }
   })
 })
+
+describe('AppLayout client tax submissions', () => {
+  it('shows prepared submissions only with the dedicated permission and keeps internal reports hidden', () => {
+    const allowed = renderNavigation('client', { 'reports.submissions': true, reports: false })
+    expect(allowed.find('a[href="/reports/submissions"]').exists()).toBe(true)
+    expect(allowed.find('a[href="/reports/vat-return"]').exists()).toBe(false)
+    expect(allowed.find('a[href="/admin/databox"]').exists()).toBe(false)
+    expect(allowed.find('a[href="/admin/electronic-signatures"]').exists()).toBe(false)
+    expect(renderNavigation('client', { 'reports.submissions': false, reports: true })
+      .find('a[href="/reports/submissions"]').exists()).toBe(false)
+  })
+})
