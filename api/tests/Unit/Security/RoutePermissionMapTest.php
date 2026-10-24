@@ -59,7 +59,7 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/reports/monthly-export/start', 'reports.export', AccessLevel::WRITE],
             ['POST', '/api/reports/monthly-export/jobs/7/cancel', 'reports.export', AccessLevel::WRITE],
             ['DELETE', '/api/reports/monthly-export/jobs/7', 'reports.export', AccessLevel::WRITE],
-            ['GET', '/api/reports/submissions/settings', 'reports.submit', AccessLevel::WRITE],
+            ['GET', '/api/reports/submissions/settings', 'reports.submit', AccessLevel::READ],
             ['GET', '/api/reports/submissions/7/artifacts/9/download', 'reports.export', AccessLevel::READ],
             ['POST', '/api/accounting/periods/4/close', 'accounting.periods.close', AccessLevel::WRITE],
             ['POST', '/api/accounting/assets/4/dispose', 'assets.dispose', AccessLevel::WRITE],

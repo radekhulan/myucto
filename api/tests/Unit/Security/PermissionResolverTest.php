@@ -115,6 +115,22 @@ final class PermissionResolverTest extends TestCase
         self::assertTrue($defaultRole->canCreateSupplier());
     }
 
+    public function testClientEffectivePermissionsDoNotAdvertiseSubmitWithoutArchiveRead(): void
+    {
+        $this->insertRole(8, 'Podatel bez archivu', 'client', true, ['reports.submit' => 2]);
+        $role = $this->resolver(new SupplierAccess(11, false, null))->resolve($this->request(8, 'client'));
+        self::assertArrayNotHasKey('reports.submit', $role->permissions,
+            'Matice pro UI musí odmítnout podávání stejně jako serverový PermissionChecker.');
+    }
+
+    public function testClientEffectiveArchiveGrantIsReadOnlyAndKeepsExplicitSubmit(): void
+    {
+        $this->insertRole(8, 'Podatel s archivem', 'client', true, ['reports.submissions' => 2, 'reports.submit' => 2]);
+        $role = $this->resolver(new SupplierAccess(11, false, null))->resolve($this->request(8, 'client'));
+        self::assertSame(1, $role->permissions['reports.submissions']);
+        self::assertSame(2, $role->permissions['reports.submit']);
+    }
+
     /** @param array<string, int> $permissions */
     private function insertRole(
         int $id,
@@ -135,6 +151,31 @@ final class PermissionResolverTest extends TestCase
         foreach ($permissions as $key => $level) {
             $stmt->execute([$id, $key, $level]);
         }
+    }
+
+    public function testTechnicalMarkerPreventsSuperadminAndMembershipFallbacks(): void
+    {
+        $this->insertRole(19, 'Technický správce', 'instance_admin', true, ['invoices' => 2], 'instance_admin');
+        $this->insertRole(20, 'Nekonzistentní role', 'superadmin', true, [], 'instance_admin');
+        $resolver = $this->resolver(new SupplierAccess(77, false, 999));
+        foreach ([
+            ['id' => 19, 'type' => 'instance_admin', 'system_key' => 'superadmin'],
+            ['id' => 19, 'type' => 'superadmin', 'system_key' => 'instance_admin'],
+        ] as $summary) {
+            $request = $this->request(19, 'instance_admin')->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 10, 'role_id' => 19, 'role' => 'admin', 'is_superadmin' => true, 'role_summary' => $summary,
+            ]);
+            foreach ([$resolver->resolve($request), $resolver->resolveDefault($request)] as $role) {
+                self::assertTrue($role->isInstanceAdmin());
+                self::assertFalse($role->isSuperadmin());
+                self::assertSame([], $role->permissions);
+            }
+        }
+        $malformed = $this->request(20, 'instance_admin')->withAttribute(AuthMiddleware::ATTR_USER, [
+            'id' => 10, 'role_id' => 20, 'is_superadmin' => true,
+            'role_summary' => ['type' => 'instance_admin', 'system_key' => 'superadmin'],
+        ]);
+        self::assertFalse($resolver->resolveDefault($malformed)->isActive);
     }
 
     private function resolver(SupplierAccess $access): PermissionResolver

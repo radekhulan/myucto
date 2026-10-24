@@ -8,6 +8,7 @@ use MyInvoice\Http\RequestPath;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\ClientBankRoutePolicy;
 use MyInvoice\Security\ClientStockRoutePolicy;
+use MyInvoice\Security\ClientTaxSubmissionPolicy;
 use MyInvoice\Security\RoutePermissionMap;
 use MyInvoice\Service\Auth\WebAuthnOperationPolicy;
 
@@ -140,6 +141,7 @@ final class ClientRoutePolicy
     public function allowsApiRequest(string $method, string $path): bool
     {
         $method = strtoupper($method);
+        if ($method === 'HEAD') $method = 'GET';
 
         // Passkeys jsou RP/origin-bound ke canonical app.url. Vlastní doména
         // používá serverem svázaný handoff. Rozhodnutí je sémantické: zahrnuje
@@ -163,9 +165,11 @@ final class ClientRoutePolicy
             return false;
         }
 
-        return $this->catalog->allowsRoleType($permission->key, 'client')
+        return array_any([$permission->key, ...$permission->alternativeKeys],
+                fn (string $key): bool => $this->catalog->allowsRoleType($key, 'client'))
             && ClientBankRoutePolicy::allows($method, $path, $permission->key)
-            && ClientStockRoutePolicy::allows($method, $path, $permission->key);
+            && ClientStockRoutePolicy::allows($method, $path, $permission->key)
+            && ClientTaxSubmissionPolicy::allowsRoute($method, $path);
     }
 
     /** @return list<array<string,mixed>> */

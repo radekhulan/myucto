@@ -149,6 +149,21 @@ final class Config
         return $this->data;
     }
 
+    /** Je některý klíč sekce skutečně přepsán prostředím, podle stejných pravidel jako load()? */
+    public static function hasEnvironmentOverride(string $section): bool
+    {
+        foreach (self::envOverrideMap() as $name => [$path]) {
+            if (($path === $section || str_starts_with($path, $section . '.')) && self::hasEnvValue($name)) return true;
+        }
+        return false;
+    }
+
+    private static function hasEnvValue(string $name): bool
+    {
+        $raw = getenv($name);
+        return $raw !== false && $raw !== '' && !self::isUnresolvedEnvReference($raw);
+    }
+
     /**
      * Vrací absolutní cestu z `MYINVOICE_DATA_DIR`, pokud je ENV nastavená.
      * Když je nastavená, všechny stateful adresáře žijí pod touto cestou.
@@ -536,17 +551,14 @@ final class Config
 
         // 3) Per-key ENV overrides
         foreach (self::envOverrideMap() as $envName => [$path, $type]) {
-            $raw = getenv($envName);
             // Nepřítomná i prázdná ENV se ignoruje. Docker Compose při mapovém
             // zápisu `KEY: ${VAR}` dosadí prázdný řetězec i když VAR v .env chybí
             // — bez tohoto guardu by takový prázdný override přebil hodnotu
             // z cfg.php (např. SMTP z bind-mountnutého cfg.docker.php → smtp.port=0).
-            if ($raw === false || $raw === '') {
+            if (!self::hasEnvValue($envName)) {
                 continue;
             }
-            if (self::isUnresolvedEnvReference($raw)) {
-                continue;
-            }
+            $raw = (string) getenv($envName);
             $value = self::castEnv($raw, $type);
             $data  = self::setByPath($data, $path, $value);
         }

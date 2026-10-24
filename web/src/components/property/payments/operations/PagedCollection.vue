@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="T extends { id: number; [key: string]: any }">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { propertyPaymentOperationsApi, type OpsCollection } from '@/api/propertyPaymentOperations'
 import PropertyButton from '@/components/property/PropertyButton.vue'
@@ -8,7 +8,7 @@ const props = withDefaults(defineProps<{ supplier: number; collection: OpsCollec
 const emit = defineEmits<{ loaded: [items: T[]] }>()
 defineSlots<{ row(props: { item: T }): unknown }>()
 const { t } = useI18n()
-const items = ref<T[]>([]) as { value: T[] }
+const items = ref<T[]>([]) as Ref<T[]>
 const next = ref<number | null>(null)
 const loading = ref(false)
 const error = ref('')

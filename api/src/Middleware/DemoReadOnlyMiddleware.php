@@ -46,6 +46,9 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
         '/api/admin/cron-jobs',
         '/api/admin/update',
         '/api/admin/instance-export',
+        // Správa SMTP instance a klientů obsahuje provozní údaje odesílatele.
+        '/api/admin/instance-smtp',
+        '/api/instance-admin',
         '/api/admin/smtp-log-analysis',
         // Adresář účtů a odeslaná pošta: „syntetická demo data" tu neplatí, protože
         // v demo databázi je i reálný provozní účet, kterým se ukázka spravuje.

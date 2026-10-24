@@ -109,6 +109,9 @@ const credentials = ref<EpoSigningCredential[]>([])
 const selectedCredentialId = ref<number | null>(null)
 const credentialModalOpen = ref(false)
 const credentialBusy = ref(false)
+const credentialFile = ref<File | null>(null)
+const credentialLabel = ref('')
+const credentialPfxPassword = ref('')
 const stepPassword = ref('')
 const stepTotpCode = ref('')
 const directBusy = ref(false)
@@ -233,7 +236,8 @@ const isdsInboxError = ref('')
 const isdsAttachBusy = ref<number | null>(null)
 
 const canWrite = computed(() => auth.canWrite('reports.submit'))
-const canDelete = computed(() => canWrite.value && auth.canWrite('reports.export'))
+const canManage = computed(() => !auth.isClientRole && (auth.canWrite('reports.submissions.manage') || canWrite.value))
+const canDelete = computed(() => canManage.value && auth.canWrite('reports.export'))
 const selected = computed(() => items.value.find(item => item.id === expandedId.value) ?? null)
 const submitEnvironment = computed<'production' | 'test' | null>(() => {
   if (submitMode.value === 'test') return epoEnvironment.value
@@ -682,7 +686,7 @@ async function loadVatPayment(item: TaxSubmission) {
 
 watch(expandedId, () => {
   const item = selected.value
-  if (item && isdsDispatch(item)) void loadIsdsInbox(item)
+  if (item && !auth.isClientRole && isdsDispatch(item)) void loadIsdsInbox(item)
   if (item) void loadVatPayment(item)
   else vatPayment.value = null
 })
@@ -735,6 +739,7 @@ function canDirectTest(item: TaxSubmission): boolean {
 }
 
 function canResolveDirectAttempt(attempt: EpoAttempt | null): boolean {
+  if (auth.isClientRole || !canWrite.value) return false
   if (!attempt || attempt.channel !== 'epo_direct' || attempt.refresh_available) return false
   if (attempt.status === 'uncertain') return true
   if (attempt.status !== 'submitting') return false
@@ -1012,6 +1017,7 @@ async function createHandoff(item: TaxSubmission) {
 }
 
 function openPendingHandoff(item: TaxSubmission) {
+  if (!canWrite.value) return
   const link = handoffLinks.value[item.id]
   if (!link) return
   if (!canOfferHandoffLink(link, item.xml_sha256)) {
@@ -1155,6 +1161,34 @@ async function loadCredentials() {
   }
 }
 
+watch(credentialModalOpen, open => {
+  if (!open) {
+    credentialFile.value = null
+    credentialPfxPassword.value = ''
+  }
+})
+
+async function uploadOwnCredential() {
+  if (!canWrite.value || !credentialFile.value || credentialBusy.value || !requireCredentialStepUp()) return
+  credentialBusy.value = true
+  try {
+    const credential = await epoSubmissionsApi.uploadCredential(
+      credentialFile.value, credentialLabel.value, credentialPfxPassword.value, stepProof(),
+    )
+    credentialFile.value = null
+    credentialLabel.value = ''
+    credentialPfxPassword.value = ''
+    resetCredentialSecrets()
+    await loadCredentials()
+    selectedCredentialId.value = credential.id
+    toast.success(t('reports.submissions.own_certificate_uploaded'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    credentialBusy.value = false
+  }
+}
+
 async function openCredentialModal() {
   credentialModalOpen.value = true
   credentialBusy.value = true
@@ -1205,6 +1239,7 @@ async function toggleCredential(credential: EpoSigningCredential) {
 }
 
 async function deleteCredential(credential: EpoSigningCredential) {
+  if (auth.isClientRole || !canWrite.value) return
   if (credential.linked_profiles_count > 0) {
     toast.error(t('reports.submissions.credential_used_by_profiles'))
     return
@@ -1371,7 +1406,9 @@ function openStatePassword(item: TaxSubmission) {
 }
 
 function openRecoveryModal(item: TaxSubmission, mode: 'confirmation' | 'not_submitted') {
+  if (!canWrite.value) return
   const attempt = latestDirectAttempt(item)
+  if (mode === 'not_submitted' && !canResolveDirectAttempt(attempt)) return
   if (!attempt) return
   expandedId.value = item.id
   recoveryMode.value = mode
@@ -1392,6 +1429,7 @@ function onRecoveryFile(event: Event) {
 async function confirmRecovery() {
   const item = selected.value
   if (!item || recoveryAttemptId.value === null || directBusy.value) return
+  if (recoveryMode.value === 'not_submitted' && !canResolveDirectAttempt(latestDirectAttempt(item))) return
   directBusy.value = true
   try {
     if (recoveryMode.value === 'state_password') {
@@ -1553,6 +1591,7 @@ async function saveSettings() {
 }
 
 async function loadEpoEnvironment() {
+  if (auth.isClientRole && !canWrite.value) return
   try {
     const settings = await epoSubmissionsApi.settings()
     epoEnvironment.value = settings.epo_environment
@@ -1596,7 +1635,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'send',
       tier: 'primary',
       variant: 'warning',
-      show: !!pendingHandoffLink(s),
+      show: canWrite.value && !!pendingHandoffLink(s),
       run: () => openPendingHandoff(s),
     },
     {
@@ -1624,7 +1663,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       label: t('reports.submissions.isds.open_outbox'),
       icon: 'link',
       tier: 'overflow',
-      show: isdsDispatch(s) !== null,
+      show: !auth.isClientRole && isdsDispatch(s) !== null,
       to: isdsDispatch(s) ? isdsOutboxLink(isdsDispatch(s)!) : undefined,
     },
     {
@@ -1651,7 +1690,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'table',
       tier: 'secondary',
       variant: 'neutral',
-      show: s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
+      show: !auth.isClientRole && auth.canRead('reports') && s.form_code === 'dphkh1' && ['submitted', 'accepted'].includes(s.status),
       to: { name: 'reports-submissions-kh-evidence', params: { id: s.id } },
     },
     {
@@ -1659,7 +1698,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       label: t('reports.submissions.refresh_epo_status'),
       icon: 'cycle',
       tier: 'overflow',
-      show: attempt?.refresh_available === true,
+      show: canWrite.value && attempt?.refresh_available === true,
       disabled: directBusy.value,
       run: () => refreshDirectStatus(s),
     },
@@ -1671,7 +1710,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       label: t('reports.submissions.refresh_epo_status'),
       icon: 'cycle',
       tier: 'overflow',
-      show: !attempt?.refresh_available && assistedStatusAttempt(s) !== null,
+      show: canWrite.value && !attempt?.refresh_available && assistedStatusAttempt(s) !== null,
       disabled: directBusy.value,
       run: () => refreshDirectStatus(s, assistedStatusAttempt(s)),
     },
@@ -1681,7 +1720,7 @@ const submissionActions = computed<ActionItem[]>(() => {
       icon: 'upload',
       tier: 'overflow',
       variant: 'warning',
-      show: attempt?.confirmation_recovery_available === true
+      show: canWrite.value && attempt?.confirmation_recovery_available === true
         && ['submitting', 'processing', 'confirmed', 'uncertain'].includes(attempt?.status ?? ''),
       disabled: directBusy.value,
       run: () => openRecoveryModal(s, 'confirmation'),
@@ -1725,9 +1764,9 @@ onMounted(async () => {
         </h2>
         <h1 v-else class="text-2xl font-semibold">{{ t('reports.submissions.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1 max-w-3xl">
-          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : 'reports.submissions.subtitle') }}
+          {{ t(scope === 'payroll' ? 'reports.submissions.payroll_subtitle' : auth.isClientRole ? 'reports.submissions.client_subtitle' : 'reports.submissions.subtitle') }}
         </p>
-        <p class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
+        <p v-if="canWrite || !auth.isClientRole" class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
         <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="openCredentialModal">
@@ -1736,7 +1775,7 @@ onMounted(async () => {
           </svg>
           {{ t('reports.submissions.certificates') }}
         </button>
-        <button v-if="canWrite" type="button" :class="btnOutline('neutral')" @click="openSettings">
+        <button v-if="canManage" type="button" :class="btnOutline('neutral')" @click="openSettings">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 1 0 0 4m0-4a2 2 0 1 1 0 4m-6 8a2 2 0 1 0 0-4m0 4v2m0-6V4m12 14a2 2 0 1 0 0-4m0 4v2m0-6V4"/>
           </svg>
@@ -1764,7 +1803,7 @@ onMounted(async () => {
       </div>
     </div>
     <div
-      v-else-if="epoEnvironment === null"
+      v-else-if="canWrite && epoEnvironment === null"
       class="rounded-lg border border-danger-500/40 bg-danger-50 p-4 flex gap-3 text-danger-700"
     >
       <svg class="w-5 h-5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -1776,7 +1815,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="rounded-lg border border-primary-500/25 bg-primary-50 p-4 flex gap-3">
+    <div v-if="canWrite || !auth.isClientRole" class="rounded-lg border border-primary-500/25 bg-primary-50 p-4 flex gap-3">
       <svg class="w-5 h-5 text-primary-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/>
       </svg>
@@ -1922,7 +1961,7 @@ onMounted(async () => {
                     </svg>
                     {{ isdsSendLabel(item) }}
                   </button>
-                  <button v-if="pendingHandoffLink(item)" type="button" :class="btnFilledSm('warning')" @click="openPendingHandoff(item)">
+                  <button v-if="canWrite && pendingHandoffLink(item)" type="button" :class="btnFilledSm('warning')" @click="openPendingHandoff(item)">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send"/>
                     </svg>
@@ -2024,7 +2063,7 @@ onMounted(async () => {
 
           <!-- U MOSS/OSS písemností panel nesvítí vůbec: sliboval by cestu, kterou
                portál odmítne, a přitom hned nad ním stojí opačné sdělení. -->
-          <div v-if="!isMossOssForm(selected)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
+          <div v-if="!isMossOssForm(selected) && (canWrite || !auth.isClientRole)" class="rounded-lg border border-primary-500/25 bg-primary-50/60 p-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h3 class="font-medium text-sm text-primary-900">{{ t('reports.submissions.direct_panel_title') }}</h3>
@@ -2087,7 +2126,7 @@ onMounted(async () => {
             </ul>
           </div>
 
-          <div v-if="pendingHandoffLink(selected)" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 flex flex-wrap items-center justify-between gap-3">
+          <div v-if="canWrite && pendingHandoffLink(selected)" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div class="font-medium text-warning-800 text-sm">{{ t('reports.submissions.handoff_ready') }}</div>
               <div class="text-xs text-warning-700 mt-1">{{ t('reports.submissions.handoff_window') }}</div>
@@ -2200,7 +2239,7 @@ onMounted(async () => {
                   {{ isdsReceiptBusy ? t('common.loading') : t('reports.submissions.isds.upload_receipt') }}
                 </button>
               </template>
-              <RouterLink :to="isdsOutboxLink(isdsDispatch(selected)!)" class="whitespace-nowrap" :class="btnOutlineSm('neutral')">
+              <RouterLink v-if="!auth.isClientRole" :to="isdsOutboxLink(isdsDispatch(selected)!)" class="whitespace-nowrap" :class="btnOutlineSm('neutral')">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link"/>
                 </svg>
@@ -2208,7 +2247,7 @@ onMounted(async () => {
               </RouterLink>
             </div>
 
-            <div class="mt-4 border-t border-neutral-100 pt-3">
+            <div v-if="!auth.isClientRole" class="mt-4 border-t border-neutral-100 pt-3">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <h4 class="font-medium text-sm">{{ t('reports.submissions.isds.inbox_title') }}</h4>
                 <button type="button" class="whitespace-nowrap" :class="btnOutlineSm('neutral')" :disabled="isdsInboxLoading" @click="loadIsdsInbox(selected)">
@@ -2253,7 +2292,7 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div>
+          <div v-if="canWrite">
             <h3 class="font-medium text-sm">{{ t('reports.submissions.upload_title') }}</h3>
             <p class="text-xs text-neutral-500 mt-1">{{ t('reports.submissions.upload_hint') }}</p>
             <input ref="fileInput" type="file" multiple class="hidden"
@@ -2287,7 +2326,7 @@ onMounted(async () => {
               <h3 class="font-medium text-sm">{{ t('reports.submissions.artifacts_title') }}</h3>
               <div class="flex items-center gap-3">
                 <RouterLink
-                  v-if="artifactsFolderId(selected)"
+                  v-if="!auth.isClientRole && auth.canRead('documents') && artifactsFolderId(selected)"
                   :to="{ name: 'documents', query: { folder: String(artifactsFolderId(selected)) } }"
                   class="text-xs text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1"
                 >
@@ -2367,7 +2406,7 @@ onMounted(async () => {
               >
               <p v-if="!vatPayment.account" class="mt-3 text-xs text-warning-700">{{ t('reports.submissions.vat_payment.unknown_office') }}</p>
               <RouterLink
-                v-if="vatPayment.account && !vatPayment.payment?.paid"
+                v-if="!auth.isClientRole && auth.canWrite('purchase_invoices.payment_orders') && vatPayment.account && !vatPayment.payment?.paid"
                 to="/purchase-invoices/payment-orders"
                 :class="[btnOutlineSm('success'), 'mt-3 w-full justify-center whitespace-nowrap']"
               >
@@ -2445,7 +2484,7 @@ onMounted(async () => {
 
             <!-- Heslo pro dotaz na stav: bez něj se na Daňovém portálu nedá stáhnout opis.
                  Odhaluje se vědomě, přes step-up a se záznamem v auditu. -->
-            <div v-if="statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
+            <div v-if="(canWrite || !auth.isClientRole) && statePasswordAttemptId(selected)" class="mt-3 border-t border-neutral-100 pt-3">
               <div class="text-xs text-neutral-500">{{ t('reports.submissions.state_password') }}</div>
               <div class="mt-1 flex items-center gap-2">
                 <code v-if="revealedPassword[selected.id]" class="rounded bg-neutral-50 px-2 py-1 text-xs tracking-wider">{{ revealedPassword[selected.id] }}</code>
@@ -2531,7 +2570,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <div v-if="settingsOpen" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" @click.self="settingsOpen = false">
+    <div v-if="canManage && settingsOpen" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" @click.self="settingsOpen = false">
       <div class="w-full max-w-xl rounded-xl bg-surface shadow-xl border border-neutral-200">
         <div class="px-5 py-4 border-b border-neutral-200 flex items-center justify-between">
           <div>
@@ -2606,15 +2645,16 @@ onMounted(async () => {
     </div>
 
     <TaxIsdsSendDialog
-      v-if="isdsDialogFor"
+      v-if="canWrite && isdsDialogFor"
       :submission-id="isdsDialogFor.id"
+      :client-mode="auth.isClientRole"
       :title="`${formCodeLabel(isdsDialogFor.form_code)} · ${periodLabel(isdsDialogFor)}`"
       @close="isdsDialogFor = null"
       @changed="load(false)"
       @sent="onIsdsSent"
     />
 
-    <div v-if="credentialModalOpen" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" @click.self="credentialModalOpen = false">
+    <div v-if="canWrite && credentialModalOpen" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" @click.self="credentialModalOpen = false">
       <div class="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl bg-surface shadow-xl border border-neutral-200">
         <div class="sticky top-0 z-10 bg-surface px-5 py-4 border-b border-neutral-200 flex items-center justify-between">
           <div>
@@ -2718,7 +2758,7 @@ onMounted(async () => {
                     @click="toggleCredential(credential)">
                     {{ credential.enabled_for_supplier ? t('reports.submissions.disable_for_company') : t('reports.submissions.enable_for_company') }}
                   </button>
-                  <button type="button" :class="btnOutlineSm('danger')" :disabled="credentialBusy || credential.linked_profiles_count > 0" @click="deleteCredential(credential)">
+                  <button v-if="!auth.isClientRole" type="button" :class="btnOutlineSm('danger')" :disabled="credentialBusy || credential.linked_profiles_count > 0" @click="deleteCredential(credential)">
                     {{ t('common.delete') }}
                   </button>
                 </div>
@@ -2726,7 +2766,28 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="border-t border-neutral-200 pt-5">
+          <form v-if="auth.isClientRole" class="border-t border-neutral-200 pt-5 space-y-3" @submit.prevent="uploadOwnCredential">
+            <h3 class="font-medium text-sm">{{ t('reports.submissions.own_certificate_title') }}</h3>
+            <p class="text-xs text-neutral-500">{{ t('reports.submissions.own_certificate_hint') }}</p>
+            <label class="block text-sm">
+              {{ t('reports.submissions.own_certificate_file') }}
+              <input type="file" accept=".p12,.pfx" required class="block mt-1 w-full text-sm"
+                @change="credentialFile = ($event.target as HTMLInputElement).files?.[0] ?? null">
+            </label>
+            <label class="block text-sm">
+              {{ t('reports.submissions.own_certificate_label') }}
+              <input v-model="credentialLabel" type="text" maxlength="120" class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
+            </label>
+            <label class="block text-sm">
+              {{ t('reports.submissions.own_certificate_password') }}
+              <input v-model="credentialPfxPassword" type="password" autocomplete="new-password" class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
+            </label>
+            <button type="submit" :class="btnFilled('primary')" :disabled="credentialBusy || !credentialFile || !!credentialStepUpMissing">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload"/></svg>
+              {{ t('reports.submissions.own_certificate_upload') }}
+            </button>
+          </form>
+          <div v-else class="border-t border-neutral-200 pt-5">
             <h3 class="font-medium text-sm">{{ t('reports.submissions.upload_moved_title') }}</h3>
             <p class="text-xs text-neutral-500 mt-1">{{ t('reports.submissions.upload_moved_hint') }}</p>
             <RouterLink to="/admin/electronic-signatures" :class="btnOutline('primary')" class="mt-3"

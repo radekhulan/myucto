@@ -191,7 +191,15 @@ export interface AdminBankRuleTemplateCatalog {
   }>
 }
 
+export interface TechnicalSupplierScope {
+  all_suppliers: boolean
+  supplier_ids: number[]
+  suppliers: Array<{ supplier_id: number; name: string }>
+}
+
 export const adminApi = {
+  getTechnicalSuppliers: (id: number) => api.get<TechnicalSupplierScope>(`/admin/users/${id}/technical-suppliers`).then(r => r.data),
+  setTechnicalSuppliers: (id: number, scope: Pick<TechnicalSupplierScope, 'all_suppliers' | 'supplier_ids'>) => api.put<TechnicalSupplierScope>(`/admin/users/${id}/technical-suppliers`, scope).then(r => r.data),
   activityLog: (params: { action?: string; user_id?: number; entity_type?: string; entity_id?: number; limit?: number; offset?: number } = {}) =>
     api.get<ActivityLogResponse>('/admin/activity-log', { params }).then(r => r.data),
 

@@ -24,6 +24,7 @@ use MyInvoice\Service\Auth\WebAuthnCeremony;
 use MyInvoice\Service\Auth\WebAuthnCeremonyStore;
 use MyInvoice\Service\IpMatcher;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -32,8 +33,22 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[AllowMockObjectsWithoutExpectations]
 final class SessionActionTest extends TestCase
 {
-    public function testStatusReturnsMinimalAuthoritativeContract(): void
+    public static function sessionIdentities(): iterable
     {
+        yield 'běžný účet' => [false];
+        yield 'technický správce' => [true];
+    }
+
+    #[DataProvider('sessionIdentities')]
+    public function testStatusReturnsMinimalAuthoritativeContract(bool $technical): void
+    {
+        $role = [
+            'id' => 3,
+            'name' => $technical ? 'Správce instance' : 'Administrátor',
+            'type' => $technical ? 'instance_admin' : 'internal',
+            'is_active' => true,
+            'system_key' => $technical ? 'instance_admin' : 'admin',
+        ];
         $locks = $this->createMock(SessionLockService::class);
         $locks->expects(self::never())->method('evaluateForRequest');
         $lockResult = SessionLockResult::active(
@@ -68,14 +83,9 @@ final class SessionActionTest extends TestCase
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 17,
                 'role' => 'admin',
-                'role_summary' => [
-                    'id' => 3,
-                    'name' => 'Administrátor',
-                    'type' => 'internal',
-                    'is_active' => true,
-                    'system_key' => 'admin',
-                ],
+                'role_summary' => $role,
                 'is_superadmin' => false,
+                'is_instance_admin' => $technical,
             ])
             ->withAttribute(AuthMiddleware::ATTR_SESSION, [
                 'csrf_token' => str_repeat('b', 64),
@@ -99,14 +109,9 @@ final class SessionActionTest extends TestCase
                 'name' => '',
                 // Souhrn role, ne string — klient si tenhle objekt při zamčené
                 // session ukládá jako plnohodnotného uživatele (viz SessionAction).
-                'role' => [
-                    'id' => 3,
-                    'name' => 'Administrátor',
-                    'type' => 'internal',
-                    'is_active' => true,
-                    'system_key' => 'admin',
-                ],
+                'role' => $role,
                 'is_superadmin' => false,
+                'is_instance_admin' => $technical,
                 'locale' => 'cs',
                 'totp_enabled' => false,
             ],

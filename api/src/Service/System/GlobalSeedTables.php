@@ -58,6 +58,9 @@ final class GlobalSeedTables
         'instance_storage_usage'   => 'podklad pro měření úložiště u poskytovatele',
         'cron_settings'            => 'režim plánovaných úloh, migrace 1184/1320',
         'mcp_server_settings'      => 'stav serverového MCP, migrace ho po resetu znovu nevloží',
+        // Reset dat nesmí přepnout provozní poštu na původní transport z konfigurace.
+        'instance_smtp_targets'    => 'schválené neměnné SMTP cíle instance',
+        'instance_smtp_settings'   => 'aktuální provozní SMTP transport a jeho šifrované tajemství',
     ];
 
     /**
@@ -193,6 +196,7 @@ final class GlobalSeedTables
         'user_preferences', 'saved_filters', 'user_favorites',
         // Dynamické role a per-firma override zůstávají spolu s uživateli.
         'roles', 'role_permissions', 'user_suppliers',
+        'user_technical_access', 'user_technical_suppliers',
         // Identita firmy, skupiny firem, přihlašovací domény, měny, číslování dokladů.
         'supplier', 'supplier_groups', 'supplier_domains', 'branding_profiles',
         'currencies', 'invoice_counters', 'purchase_invoice_counters', 'app_meta',
@@ -389,6 +393,7 @@ final class GlobalSeedTables
         'import_jobs',
         'income_tax_finalization_overrides', 'income_tax_return_snapshots', 'income_tax_returns',
         'instance_exports',
+        'instance_admin_events', 'instance_smtp_test_attempts',
         'integration_change_log', 'integration_change_state', 'integration_inbox', 'integration_inbox_state',
         'integration_outbox',
         'invoice_attachments', 'invoice_items', 'invoice_payment_schedule', 'invoice_payments',

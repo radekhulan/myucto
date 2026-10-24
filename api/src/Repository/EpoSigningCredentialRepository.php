@@ -14,18 +14,25 @@ final class EpoSigningCredentialRepository
     /**
      * @return list<array<string,mixed>>
      */
-    public function listOwnedForSupplier(int $ownerUserId, int $supplierId): array
+    public function listOwnedForSupplier(int $ownerUserId, int $supplierId, bool $supplierScoped = false): array
     {
+        // Klientský náhled nezjišťuje použití certifikátu v jiných firmách.
+        $verifiedSupplierSql = $supplierScoped ? 'a.supplier_id = ? AND ' : '';
+        $params = [$supplierId];
+        if ($supplierScoped) {
+            $params[] = $supplierId;
+        }
+        array_push($params, $supplierId, $ownerUserId);
         $stmt = $this->db->pdo()->prepare(
             'SELECT c.id, c.label, c.fingerprint_sha256, c.subject_dn, c.issuer_dn,
                      c.serial_hex, c.valid_from, c.valid_to, c.ik_mpsv_present,
-                    (SELECT COUNT(*)
+                    ' . ($supplierScoped ? '0' : '(SELECT COUNT(*)
                        FROM signing_credentials sc
                        JOIN signing_profiles sp ON sp.id = sc.profile_id
                       WHERE sc.vault_credential_id = c.id
                         AND sc.deleted_at IS NULL
                         AND sp.deleted_at IS NULL
-                    ) AS linked_profiles_count,
+                    )') . ' AS linked_profiles_count,
                     (SELECT COUNT(*)
                        FROM signing_credentials sc
                        JOIN signing_profiles sp ON sp.id = sc.profile_id
@@ -36,7 +43,7 @@ final class EpoSigningCredentialRepository
                     ) AS linked_supplier_profiles_count,
                     (SELECT MAX(a.tested_at)
                        FROM tax_submission_attempts a
-                      WHERE a.signing_credential_id = c.id
+                      WHERE ' . $verifiedSupplierSql . 'a.signing_credential_id = c.id
                         AND a.channel = \'epo_direct\'
                         AND a.test_passed = 1
                         AND a.signing_fingerprint = c.fingerprint_sha256
@@ -48,11 +55,18 @@ final class EpoSigningCredentialRepository
               WHERE c.owner_user_id = ? AND c.deleted_at IS NULL
               ORDER BY c.valid_to DESC, c.id DESC'
         );
-        $stmt->execute([$supplierId, $supplierId, $ownerUserId]);
+        $stmt->execute($params);
         $rows = array_map(
             fn (array $row): array => $this->normalizePublic($row),
             $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
         );
+        if ($supplierScoped) {
+            foreach ($rows as &$row) {
+                $row['linked_profiles_count'] = $row['linked_supplier_profiles_count'];
+            }
+            unset($row);
+            return $rows;
+        }
         foreach ($rows as &$row) {
             $usage = $this->usage((int) $row['id']);
             $row['linked_data_box_count'] = $usage['data_box_channels'];

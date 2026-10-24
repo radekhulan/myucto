@@ -49,6 +49,8 @@ const inviteFailed = ref(false)
 const form = reactive({ id: null as number | null, email: '', name: '', role_id: 0, locale: 'cs' as 'cs' | 'en', is_active: true, password: '' })
 const selectedRole = computed(() => roles.value.find(r => r.id === form.role_id) ?? null)
 const compatibleRoles = computed(() => roles.value.filter(r => r.is_active && r.role_type === selectedRole.value?.role_type && r.role_type !== 'superadmin'))
+const selectedIsInstanceAdmin = computed(() => selectedRole.value?.role_type === 'instance_admin')
+const technicalAllSuppliers = ref(false)
 const selectedIsSuperadmin = computed(() => selectedRole.value?.system_key === 'superadmin')
 /**
  * Ne-superadmin BEZ přiřazené firmy je na backendu fail-closed (SupplierAccessResolver
@@ -56,7 +58,7 @@ const selectedIsSuperadmin = computed(() => selectedRole.value?.system_key === '
  * Dřív to bylo jen měkké varování a uložit šlo — vznikl tak uživatel, který se přihlásí
  * a nic neuvidí. Proto tvrdá podmínka: bez firmy nejde uložit.
  */
-const supplierRequired = computed(() => !selectedIsSuperadmin.value && assignments.value.length === 0)
+const supplierRequired = computed(() => !selectedIsSuperadmin.value && !selectedIsInstanceAdmin.value && assignments.value.length === 0)
 const activeSuperadminCount = computed(() => users.value.filter(u => u.is_active && (u.is_superadmin || u.role.system_key === 'superadmin')).length)
 const isLastActiveSuperadmin = (user: AdminUser | undefined): boolean => !!user?.is_active
   && (user.is_superadmin || user.role.system_key === 'superadmin')
@@ -86,6 +88,7 @@ function openCreate() {
   const initial = roles.value.find(r => r.is_active && r.role_type === 'staff' && r.system_key !== 'superadmin') ?? roles.value.find(r => r.is_active)
   Object.assign(form, { id: null, email: '', name: '', role_id: initial?.id ?? 0, locale: 'cs', is_active: true, password: '' })
   assignments.value = []
+  technicalAllSuppliers.value = false
   showForm.value = true
 }
 
@@ -94,7 +97,14 @@ async function openEdit(user: AdminUser) {
   inviteFailed.value = false
   resetSupplierSearch()
   Object.assign(form, { id: user.id, email: user.email, name: user.name, role_id: user.role_id || user.role.id, locale: user.locale, is_active: user.is_active, password: '' })
-  assignments.value = user.is_superadmin ? [] : (await adminApi.listUserSuppliers(user.id)).map(a => ({ ...a, role_id: a.role_id }))
+  technicalAllSuppliers.value = false
+  if (user.role.type === 'instance_admin') {
+    const scope = await adminApi.getTechnicalSuppliers(user.id)
+    technicalAllSuppliers.value = scope.all_suppliers
+    assignments.value = scope.suppliers.map(supplier => ({ ...supplier, ic: null, role_id: null, effective_role: user.role }))
+  } else {
+    assignments.value = user.is_superadmin ? [] : (await adminApi.listUserSuppliers(user.id)).map(a => ({ ...a, role_id: a.role_id }))
+  }
   showForm.value = true
 }
 
@@ -164,6 +174,27 @@ async function sendPasswordLink() {
   finally { sendingLink.value = false }
 }
 
+watch(() => form.role_id, (next, previous) => {
+  const nextType = roles.value.find(role => role.id === next)?.role_type
+  const previousType = roles.value.find(role => role.id === previous)?.role_type
+  if (nextType !== previousType) {
+    assignments.value = []
+    technicalAllSuppliers.value = false
+    resetSupplierSearch()
+  }
+})
+
+async function saveAssignments(userId: number) {
+  if (selectedIsInstanceAdmin.value) {
+    await adminApi.setTechnicalSuppliers(userId, {
+      all_suppliers: technicalAllSuppliers.value,
+      supplier_ids: technicalAllSuppliers.value ? [] : assignments.value.map(item => item.supplier_id),
+    })
+  } else if (!selectedIsSuperadmin.value) {
+    await adminApi.setUserSuppliers(userId, assignments.value.map(item => ({ supplier_id: item.supplier_id, role_id: item.role_id })))
+  }
+}
+
 async function save() {
   error.value = ''
   if (!form.role_id) { error.value = t('users.role_required'); return }
@@ -174,22 +205,26 @@ async function save() {
   // Pojistka i tady, ne jen přes :disabled — formulář jde odeslat Enterem.
   if (supplierRequired.value) { error.value = t('users.supplier_required'); return }
   saving.value = true
+  const creating = form.id === null
   try {
     if (form.id === null) {
       // Prázdné heslo se NEPOSÍLÁ jako prázdný řetězec — server podle jeho
       // nepřítomnosti pozná, že má vydat pozvánku.
       const user = await adminApi.createUser({ email: form.email, name: form.name, role_id: form.role_id, locale: form.locale, ...(form.password ? { password: form.password } : {}) })
       inviteFailed.value = form.password === '' && user.invite_sent === false
-      if (!selectedIsSuperadmin.value) await adminApi.setUserSuppliers(user.id, assignments.value.map(a => ({ supplier_id: a.supplier_id, role_id: a.role_id })))
+      // Účet už existuje i při neúspěchu dalšího zápisu; opakování pokračuje úpravou.
+      form.id = user.id
+      users.value.push(user)
+      await saveAssignments(user.id)
     } else {
       await adminApi.updateUser(form.id, { name: form.name, role_id: form.role_id, locale: form.locale, is_active: form.is_active, ...(form.password ? { password: form.password } : {}) })
-      if (!selectedIsSuperadmin.value) await adminApi.setUserSuppliers(form.id, assignments.value.map(a => ({ supplier_id: a.supplier_id, role_id: a.role_id })))
+      await saveAssignments(form.id)
     }
     // ⚠️ Neodeslaná pozvánka nesmí zmizet se zavřeným formulářem. Účet už
     // existuje a jeho heslo je náhodné — dokud odkaz nedorazí, je nepoužitelný.
     if (inviteFailed.value) {
       toast.error(t('users.invite_failed'))
-    } else if (form.id === null && form.password === '') {
+    } else if (creating && form.password === '') {
       toast.success(t('users.invite_sent'))
     }
     showForm.value = false
@@ -222,6 +257,7 @@ async function deleteInactive(user: AdminUser) {
 
 function roleBadge(role: AdminUser['role']): string {
   if (role.type === 'superadmin') return 'bg-primary-100 text-primary-700'
+  if (role.type === 'instance_admin') return 'bg-neutral-100 text-neutral-700'
   if (role.type === 'client') return 'bg-success-50 text-success-600'
   return 'bg-warning-50 text-warning-600'
 }
@@ -275,13 +311,14 @@ onMounted(load)
         </div>
 
         <section v-if="!selectedIsSuperadmin" class="border-t border-neutral-200 pt-4 space-y-3">
-          <div><h3 class="font-medium">{{ t('users.suppliers_title') }}<RequiredMark v-if="!selectedIsSuperadmin" /></h3><p class="text-xs text-neutral-500">{{ t('users.suppliers_hint') }}</p></div>
-          <div v-for="(item,index) in assignments" :key="item.supplier_id" class="border border-neutral-200 rounded-md p-3 flex flex-wrap items-center gap-2">
+          <div><h3 class="font-medium">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope' : 'users.suppliers_title') }}<RequiredMark v-if="!selectedIsInstanceAdmin" /></h3><p class="text-xs text-neutral-500">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope_hint' : 'users.suppliers_hint') }}</p></div>
+          <label v-if="selectedIsInstanceAdmin" class="flex items-center gap-2 text-sm"><input v-model="technicalAllSuppliers" data-technical-all type="checkbox" />{{ t('instance_admin.all_suppliers') }}</label>
+          <div v-for="(item,index) in technicalAllSuppliers && selectedIsInstanceAdmin ? [] : assignments" :key="item.supplier_id" class="border border-neutral-200 rounded-md p-3 flex flex-wrap items-center gap-2">
             <div class="flex-1 min-w-40"><div class="font-medium">{{ item.name }}</div><div v-if="item.ic" class="text-xs text-neutral-500">{{ t('common.ic') }} {{ item.ic }}</div></div>
-            <select v-model.number="item.role_id" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm"><option :value="null">{{ t('users.supplier_role_inherit') }}</option><option v-for="role in compatibleRoles" :key="role.id" :value="role.id">{{ role.name }}</option></select>
+            <select v-if="!selectedIsInstanceAdmin" v-model.number="item.role_id" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm"><option :value="null">{{ t('users.supplier_role_inherit') }}</option><option v-for="role in compatibleRoles" :key="role.id" :value="role.id">{{ role.name }}</option></select>
             <button type="button" :class="btnOutline('danger')" @click="assignments.splice(index,1)">{{ t('common.remove') }}</button>
           </div>
-          <div class="relative">
+          <div v-if="!selectedIsInstanceAdmin || !technicalAllSuppliers" class="relative">
             <input
               v-model="supplierQuery"
               type="text"

@@ -40,7 +40,9 @@ final class SetupStatusAction
         // nestačí: instance, která ten příznak zdědí z cizího cfg nad ostrou
         // databází, by rozdávala funkční přístup k reálným datům. Platí proto
         // tytéž dvě pojistky, kterými se řídí provisioning (assertSafeTarget()).
-        $demoEnabled = (bool) $this->config->get('demo.enabled', false) && $this->demoTargetMatches();
+        $user = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, []);
+        $demoEnabled = !\MyInvoice\Security\InstanceAdminRoutePolicy::isTechnicalUser($user)
+            && (bool) $this->config->get('demo.enabled', false) && $this->demoTargetMatches();
         $demoEmail = $demoEnabled ? trim((string) $this->config->get('demo.login_email', '')) : '';
         $demoPassword = $demoEnabled ? (string) $this->config->get('demo.login_password', '') : '';
 

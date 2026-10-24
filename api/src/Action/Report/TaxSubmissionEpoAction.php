@@ -51,13 +51,15 @@ final class TaxSubmissionEpoAction
             return $denied;
         }
         $supplierId = SupplierGuard::currentId($request);
-        return Json::ok($response, $this->settingsPayload($supplierId));
+        return Json::ok($response, RequestAuthorization::isClientType($request)
+            ? ['epo_environment' => $this->environment()]
+            : $this->settingsPayload($supplierId));
     }
 
     public function updateSettings(Request $request, Response $response): Response
     {
-        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
-            return $denied;
+        if (!RequestAuthorization::canManageTaxSubmissions($request)) {
+            return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $body = (array) ($request->getParsedBody() ?? []);
@@ -110,6 +112,9 @@ final class TaxSubmissionEpoAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $submissionId = (int) ($args['id'] ?? 0);
+        if (($denied = $this->deniedSubmission($request, $response, $submissionId, $supplierId)) !== null) {
+            return $denied;
+        }
         $userId = $this->userId($request);
         $body = (array) ($request->getParsedBody() ?? []);
         $replaceActive = filter_var(
@@ -180,6 +185,10 @@ final class TaxSubmissionEpoAction
         $submission = $this->submissions->find($submissionId, $supplierId);
         if ($submission === null) {
             return Json::error($response, 'not_found', 'Podání nebylo nalezeno.', 404);
+        }
+
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $submission)) {
+            return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
 
         $uploaded = $request->getUploadedFiles();
@@ -347,10 +356,13 @@ final class TaxSubmissionEpoAction
 
     public function downloadArtifact(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
+        if (!RequestAuthorization::canExportTaxSubmission($request)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění exportovat podání.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
+        if (($denied = $this->deniedSubmission($request, $response, (int) ($args['id'] ?? 0), $supplierId)) !== null) {
+            return $denied;
+        }
         $artifact = $this->epo->artifact(
             (int) ($args['artifactId'] ?? 0),
             (int) ($args['id'] ?? 0),
@@ -383,7 +395,10 @@ final class TaxSubmissionEpoAction
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
         $permission = $level === AccessLevel::WRITE ? 'reports.submit' : 'reports';
-        if (!RequestAuthorization::allows($request, $permission, $level)) {
+        if (!($level === AccessLevel::READ
+            ? RequestAuthorization::canReadTaxSubmissions($request)
+            : RequestAuthorization::allows($request, $permission, $level)
+        )) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         return null;
@@ -401,10 +416,24 @@ final class TaxSubmissionEpoAction
         return [
             ...$this->epo->settings($supplierId),
             'folders' => $this->folders->listAll($supplierId),
-            'epo_environment' => $this->config->get('epo_test', false)
-                ? 'test'
-                : 'production',
+            'epo_environment' => $this->environment(),
         ];
+    }
+
+    private function environment(): string
+    {
+        return $this->config->get('epo_test', false) ? 'test' : 'production';
+    }
+
+    private function deniedSubmission(Request $request, Response $response, int $id, int $supplierId): ?Response
+    {
+        $submission = $this->submissions->find($id, $supplierId);
+        if ($submission === null) {
+            return Json::error($response, 'not_found', 'Podání nebylo nalezeno.', 404);
+        }
+        return RequestAuthorization::canAccessTaxSubmission($request, $submission)
+            ? null
+            : Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
     }
 
     private function clientIp(Request $request): ?string

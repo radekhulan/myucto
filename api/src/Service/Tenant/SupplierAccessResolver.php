@@ -59,6 +59,9 @@ final class SupplierAccessResolver
     public function resolve(Request $request): SupplierAccess
     {
         $user     = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if (\MyInvoice\Security\InstanceAdminRoutePolicy::isTechnicalUser($user)) {
+            return new SupplierAccess(0, true, null);
+        }
         $userId   = (int) ($user['id'] ?? 0);
         $roleId = (int) ($user['role_id'] ?? ($user['role_summary']['id'] ?? 0));
         $isSuperadmin = (bool) ($user['is_superadmin'] ?? false)

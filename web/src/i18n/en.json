@@ -25746,6 +25746,11 @@
     "tax_f_nonprofit_reduction_university_min": "University and research reduction floor (CZK)"
   },
   "roles": {
+    "submission_permissions": {
+      "reports_submissions": "Prepared tax submissions (VAT, control and recapitulative statements)",
+      "reports_submit": "Send tax submissions",
+      "reports_submissions_manage": "Manage tax submissions"
+    },
     "operational_permissions": {
       "email_profiles": "Company sender profiles",
       "email_templates": "Company email templates",
@@ -25779,6 +25784,7 @@
     "usage": "Users: {users}, company overrides: {overrides}",
     "superadmin_locked": "The system superadmin role is locked and always has full access.",
     "system_descriptions": {
+      "instance_admin": "A fixed technical role without business access. The superadmin assigns its scope; it does not consume a licensed seat.",
       "superadmin": "A predefined system role with fixed permissions. It has full access to every company and is the only role that manages users, roles, licensing, and system-wide settings.",
       "admin": "A predefined role with fixed permissions. It can do everything in assigned companies and work with multiple companies assigned by a superadmin. It cannot change system-wide items in the System menu.",
       "admin_plus": "A predefined role with fixed permissions. It has the same permissions as Admin and can also create a company under System → Companies; it automatically receives Admin permissions for that company."
@@ -25786,7 +25792,8 @@
     "types": {
       "superadmin": "Superadmin",
       "staff": "Staff",
-      "client": "Client"
+      "client": "Client",
+      "instance_admin": "Instance administrator"
     },
     "levels": [
       "Hidden",
@@ -26545,6 +26552,14 @@
       "ik_mpsv_warning": "IK MPSV could not be recognized in this certificate. Signing may work, but EPO may not automatically link the signer; verify the certificate details.",
       "upload_certificate": "Store a new P12/PFX",
       "upload_certificate_hint": "Use a personal qualified electronic-signature certificate, not an ordinary SSL or commercial certificate.",
+      "client_subtitle": "VAT returns, control statements and recapitulative statements prepared by your accountant. Download XML, confirmations and payment details, or send submissions when your role allows it.",
+      "own_certificate_title": "Upload your own certificate",
+      "own_certificate_hint": "The P12 or PFX certificate is saved in your personal vault and enabled for this company. Only your own certificates are available.",
+      "own_certificate_file": "Certificate file (P12/PFX)",
+      "own_certificate_label": "Certificate label",
+      "own_certificate_password": "Certificate password",
+      "own_certificate_upload": "Upload certificate",
+      "own_certificate_uploaded": "Your certificate has been uploaded.",
       "upload_moved_title": "Uploading a certificate",
       "upload_moved_hint": "Certificates are uploaded in one place — System → Emails & certificates → Certificates and electronic signatures. EPO, PDF signing, S/MIME and payroll submissions all read them from there. Here you only pick which of them this company may use.",
       "upload_moved_link": "Go to Certificates",
@@ -39409,5 +39424,86 @@
     "eet_pok": "Confirmation code (POK)",
     "eet_pending": "The sale is stored and awaiting confirmation by the tax authority.",
     "valid_until": "The receipt is available until {date}."
+  },
+  "instance_admin": {
+    "title": "Instance administration",
+    "overview": "Overview",
+    "back_to_app": "Back to application",
+    "subtitle": "Technical administration without access to business or accounting data.",
+    "runtime": "Operational status",
+    "app_version": "Application version",
+    "php_version": "PHP version",
+    "database": "Database",
+    "free_space": "Free space",
+    "available": "Available",
+    "unavailable": "Unavailable",
+    "smtp": "Outgoing email",
+    "smtp_hint": "Select an approved SMTP destination. The stored password is never displayed.",
+    "managed_locked": "The hosting operator manages the mail transport. Settings cannot be changed.",
+    "environment_locked": "Environment variables control the mail transport. Settings cannot be changed.",
+    "approved_target": "Approved SMTP destination",
+    "no_approved_targets": "Before SMTP can be configured or tested, a superadmin must approve a destination and test recipient.",
+    "configuration_source": "Instance configuration is in use",
+    "target_identity": "Username: {username} · Sender: {sender}",
+    "new_password": "New SMTP password",
+    "password_required": "Enter a new password for a new destination. Stored credentials are never transferred to another destination.",
+    "password_keep": "Leave empty to keep the password for the same destination.",
+    "fixed_recipient": "Test recipient approved by the superadmin: {recipient}",
+    "send_test": "Send neutral test",
+    "saved": "SMTP settings saved.",
+    "test_sent": "A neutral test was sent to {recipient}.",
+    "suppliers": "Technical company administration",
+    "suppliers_hint": "Only companies assigned for technical administration are listed.",
+    "no_suppliers": "No companies are assigned to you for technical administration.",
+    "technical_status": "Technical status",
+    "supplier_profile_unsupported": "This company uses its own mail profile. Testing it is unavailable in technical administration.",
+    "supplier_global_transport": "This company uses the instance mail transport. The test contains only neutral text.",
+    "target_management": "SMTP destination approval",
+    "target_management_hint": "Approved destinations cannot be edited. A different host, identity or recipient requires a new destination and password.",
+    "target_name": "Destination name",
+    "host": "SMTP host",
+    "port": "Port",
+    "encryption": "Connection security",
+    "starttls": "STARTTLS",
+    "implicit_tls": "Implicit TLS",
+    "username": "Username",
+    "sender": "Sender address",
+    "test_recipient": "Approved test recipient",
+    "approve_target": "Approve destination",
+    "target_created": "SMTP destination approved.",
+    "reset_override": "Use instance configuration",
+    "reset_override_confirm": "Enable the original mail transport from the instance configuration? This removes the active SMTP override and the password stored for that override. Approved destinations will be retained.",
+    "reset_override_done": "The mail transport is using the instance configuration again.",
+    "delete_target_confirm": "Delete approved SMTP destination {name}?",
+    "audit": "Technical audit",
+    "audit_hint": "Your technical operations within your current scope are listed.",
+    "no_audit": "No technical operations have been recorded yet.",
+    "technical_change": "Technical operation",
+    "technical_scope": "Technical company scope",
+    "technical_scope_hint": "Assignment permits technical administration only. It does not open business modules or consume a licensed seat.",
+    "all_suppliers": "All companies, including future companies",
+    "audit_actions": {
+      "smtp_updated": "SMTP settings changed",
+      "smtp_test": "Mail delivery test",
+      "target_approved": "SMTP destination approved",
+      "target_deleted": "SMTP destination deleted",
+      "override_reset": "Instance configuration restored"
+    },
+    "audit_results": {
+      "ok": "Completed",
+      "started": "Started",
+      "sent": "Sent",
+      "failed": "Failed"
+    },
+    "errors": {
+      "smtp_test_rate_limited": "Wait for the protective interval before sending another test.",
+      "smtp_not_configured": "Configure an approved SMTP destination first.",
+      "smtp_test_failed": "The test email could not be sent. Check the approved destination and credentials.",
+      "smtp_target_requires_password": "A new SMTP destination requires a new password.",
+      "smtp_supplier_profile_unsupported": "Testing this company mail profile is unavailable.",
+      "smtp_target_in_use": "An SMTP destination in use cannot be deleted.",
+      "smtp_managed": "The hosting operator manages this mail transport.",
+      "smtp_environment_locked": "Environment variables control this mail transport."
+    }
   }
 }

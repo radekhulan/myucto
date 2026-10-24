@@ -5,13 +5,13 @@ import { resolve } from 'node:path'
 const rolesPage = readFileSync(resolve(process.cwd(), 'src/pages/admin/Roles.vue'), 'utf8')
 
 describe('pevné předdefinované role', () => {
-  it('zamyká pouze Superadmin, Admin a Admin Plus', () => {
-    expect(rolesPage).toContain("const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus'])")
+  it('zamyká pouze Superadmin, Admin, Admin Plus a Správce instance', () => {
+    expect(rolesPage).toContain("const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus', 'instance_admin'])")
     expect(rolesPage).toContain('v-if="isFixedRole(role)"')
     expect(rolesPage).toContain('v-if="!isFixedRole(role)"')
   })
 
-  it('zobrazuje popis všech tří předdefinovaných rolí', () => {
+  it('zobrazuje popis všech čtyř předdefinovaných rolí', () => {
     expect(rolesPage).toContain("if (!fixedRoleKeys.has(systemKey ?? '')) return ''")
     expect(rolesPage).toContain('roles.system_descriptions.${systemKey}')
     expect(rolesPage).toContain('roleDescription(role.system_key)')

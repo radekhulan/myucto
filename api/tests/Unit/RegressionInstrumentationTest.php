@@ -16,6 +16,11 @@ final class RegressionInstrumentationTest extends TestCase
         self::assertSame(array_fill(0, 8, true), self::probe('config-snapshot')['preserved']);
     }
 
+    public function testMutatedEnvironmentHelperAndLoaderSourcesAreStillRejected(): void
+    {
+        self::assertSame([true, true], self::probe('config-source-mutated')['rejected']);
+    }
+
     public function testOriginalAndGuardedSqliteSelectNullAndTransactionAreIdentical(): void
     {
         $original = self::probe('sqlite-original');

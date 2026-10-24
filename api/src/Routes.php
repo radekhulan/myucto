@@ -3176,6 +3176,22 @@ final class Routes
         $app->get ('/api/dashboard/purchase-summary', PurchaseSummaryAction::class);
 
         // Admin (M6)
+        // Technická správa má vlastní úzké akce; neotevírá obecnou administraci.
+        $app->get('/api/instance-admin/status', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'status']);
+        $app->get('/api/instance-admin/suppliers', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'suppliers']);
+        $app->get('/api/instance-admin/suppliers/{id:[0-9]+}/status', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'supplierStatus']);
+        $app->get('/api/instance-admin/smtp', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'smtp']);
+        $app->put('/api/instance-admin/smtp', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'saveSmtp']);
+        $app->post('/api/instance-admin/smtp/test', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'testSmtp']);
+        $app->get('/api/instance-admin/suppliers/{id:[0-9]+}/smtp', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'supplierSmtp']);
+        $app->post('/api/instance-admin/suppliers/{id:[0-9]+}/smtp/test', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'testSmtp']);
+        $app->get('/api/instance-admin/audit', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'audit']);
+        $app->get('/api/admin/instance-smtp/targets', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'targets']);
+        $app->post('/api/admin/instance-smtp/targets', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'createTarget']);
+        $app->delete('/api/admin/instance-smtp/targets/{id:[0-9]+}', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'deleteTarget']);
+        $app->delete('/api/admin/instance-smtp/override', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'resetSmtpOverride']);
+        $app->get('/api/admin/users/{id:[0-9]+}/technical-suppliers', [\MyInvoice\Action\Admin\TechnicalSupplierAccessAction::class, 'get']);
+        $app->put('/api/admin/users/{id:[0-9]+}/technical-suppliers', [\MyInvoice\Action\Admin\TechnicalSupplierAccessAction::class, 'put']);
         $app->get    ('/api/admin/activity-log',    ListActivityLogAction::class);
         $app->get    ('/api/admin/sent-emails',     ListSentEmailsAction::class);
         $app->get    ('/api/admin/smtp-log-analysis', \MyInvoice\Action\Admin\SmtpLogAnalysisAction::class);

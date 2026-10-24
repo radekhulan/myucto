@@ -111,6 +111,7 @@ function offenders(block, requireAuthMeta) {
     if (requireAuthMeta && !/\brequiresAuth:\s*true/.test(obj)) continue
     if (/\bredirect\b/.test(obj)) continue          // pure redirect — guard ji nezahodí
     if (!/\bcomponent:/.test(obj)) continue          // nerenderuje stránku
+    if (/\binstanceAdminOnly:\s*true/.test(obj)) continue // samostatná technická plocha, ověřuje authorizationGuard
     if (/\bmfaSetupOnly:\s*true/.test(obj)) continue // výjimku nese meta, viz beforeEach
     if (routePermissions.has(name)) continue
     if (superadminRouteNames.has(name)) continue

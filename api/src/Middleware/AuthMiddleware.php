@@ -132,6 +132,13 @@ final class AuthMiddleware implements MiddlewareInterface
                 return $response;
             }
 
+            // I dříve vydaný token po změně role přestává být použitelný.
+            if (($tokenRow['user_role_type'] ?? null) === 'instance_admin'
+                || ($tokenRow['user_role_system_key'] ?? null) === 'instance_admin') {
+                return Json::error($this->responseFactory->createResponse(403),
+                    'token_forbidden', 'Technický účet používá pouze webovou relaci.', 403);
+            }
+
             if (($tokenRow['audience'] ?? 'api') === 'mcp') {
                 $grant = $this->db->pdo()->prepare(
                     'SELECT resource, revoked_at, (expires_at > NOW()) AS active

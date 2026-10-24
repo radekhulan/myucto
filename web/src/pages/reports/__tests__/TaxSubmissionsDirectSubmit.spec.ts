@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { EpoAttempt, TaxSubmission } from '@/api/epoSubmissions'
+import { loadEpoHandoffLinks, saveEpoHandoffLinks } from '@/utils/epoHandoffCache'
 
 /**
  * Regrese k „Podepsat a podat" zůstávalo zašedlé i po úspěšném produkčním testu.
@@ -16,7 +17,10 @@ const m = vi.hoisted(() => ({
   credentials: vi.fn(),
   settings: vi.fn(),
   submitDirect: vi.fn(),
+  uploadCredential: vi.fn(),
   canWrite: true,
+  isClientRole: false,
+  canManageOnly: false,
 }))
 
 vi.mock('@/api/epoSubmissions', async (importOriginal) => {
@@ -28,6 +32,7 @@ vi.mock('@/api/epoSubmissions', async (importOriginal) => {
       credentials: m.credentials,
       settings: m.settings,
       submitDirect: m.submitDirect,
+      uploadCredential: m.uploadCredential,
       xmlUrl: (id: number) => `/api/reports/submissions/${id}/xml`,
       artifactDownloadUrl: (id: number) => `/api/documents/${id}`,
     },
@@ -52,8 +57,9 @@ vi.mock('vue-i18n', () => ({
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
+    isClientRole: m.isClientRole,
     user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] },
-    canWrite: () => m.canWrite,
+    canWrite: (permission: string) => m.canManageOnly ? permission === 'reports.submissions.manage' : m.canWrite,
     canRead: () => true,
   }),
 }))
@@ -112,7 +118,7 @@ function submission(attempts: EpoAttempt[]): TaxSubmission {
     period_month: 7,
     period_quarter: null,
     xml_size_bytes: 2048,
-    xml_sha256: 'e43f2c6559baab9e',
+    xml_sha256: 'e43f2c6559baab9e'.repeat(4),
     validation_status: 'passed',
     validation_errors: [],
     status: 'downloaded',
@@ -168,7 +174,11 @@ describe('TaxSubmissions.vue — dostupnost „Podepsat a podat"', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
+    localStorage.clear()
     m.canWrite = true
+    m.isClientRole = false
+    m.canManageOnly = false
+    m.uploadCredential.mockReset()
     m.list.mockReset()
     m.credentials.mockReset()
     m.settings.mockReset()
@@ -196,6 +206,112 @@ describe('TaxSubmissions.vue — dostupnost „Podepsat a podat"', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
+    localStorage.clear()
+  })
+
+  it('read-only client cannot continue a cached EPO handoff after losing send permission', async () => {
+    m.isClientRole = true
+    m.canWrite = false
+    const link = {
+      url: 'https://adisspr.mfcr.cz/dpr/idpr_epo/epo2/formular?x=synthetic',
+      expiresAt: iso(-10),
+      attemptId: 25,
+      xmlSha256: submission([]).xml_sha256,
+    }
+    saveEpoHandoffLinks(localStorage, 1, 1, { 1103: link })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { wrapper, item } = await mountWith([
+      attempt({ id: 25, channel: 'epo_assisted', status: 'awaiting_confirmation', handoff_expires_at: link.expiresAt }),
+    ])
+    const vm = wrapper.vm as any
+    expect(vm.pendingHandoffLink(item)).toEqual(link)
+    expect.soft(wrapper.findAll('button').filter(button => button.text() === 'reports.submissions.continue_epo')).toHaveLength(0)
+    vm.openPendingHandoff(item)
+    expect(open).not.toHaveBeenCalled()
+    expect(loadEpoHandoffLinks(localStorage, 1, 1)[item.id]?.consumedAt).toBeUndefined()
+  })
+
+  it('read-only client loads the prepared archive without signing dependencies or write controls', async () => {
+    m.isClientRole = true
+    m.canWrite = false
+    const { wrapper } = await mountWith([])
+    const vm = wrapper.vm as any
+    vm.toggleDetail(submission([]))
+    await flushPromises()
+    expect(m.list).toHaveBeenCalledOnce()
+    expect(m.credentials).not.toHaveBeenCalled()
+    expect(m.settings).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('reports.submissions.settings')
+    expect(wrapper.text()).not.toContain('reports.submissions.certificates')
+    expect(wrapper.text()).not.toContain('reports.submissions.upload_title')
+    const actions = vm.submissionActions as Array<{ key: string; show?: boolean }>
+    expect(actions.filter(action => action.show !== false).map(action => action.key)).toEqual(['download_xml'])
+  })
+
+  it('client submitter keeps send actions while management and source evidence stay hidden', async () => {
+    m.isClientRole = true
+    const { wrapper } = await mountWith([
+      attempt({ id: 22, channel: 'epo_direct', status: 'uncertain', confirmation_recovery_available: true }),
+    ])
+    const vm = wrapper.vm as any
+    vm.toggleDetail(submission([]))
+    await flushPromises()
+    const actions = vm.submissionActions as Array<{ key: string; show?: boolean }>
+    for (const key of ['delete', 'resolve_not_submitted', 'isds_outbox', 'kh_evidence']) {
+      expect(actions.find(action => action.key === key)?.show, key).toBe(false)
+    }
+    expect(wrapper.text()).not.toContain('reports.submissions.settings')
+    expect(wrapper.text()).toContain('reports.submissions.certificates')
+    expect(m.credentials).toHaveBeenCalledOnce()
+    expect(m.settings).toHaveBeenCalledOnce()
+  })
+
+  it('client certificate controls keep supplier selection without global vault deletion', async () => {
+    m.isClientRole = true
+    const own = (await m.credentials())[0]
+    m.credentials.mockResolvedValue([{ ...own, linked_profiles_count: 0, linked_supplier_profiles_count: 0 }])
+    const { wrapper } = await mountWith([])
+    await (wrapper.vm as any).openCredentialModal()
+    await flushPromises()
+    expect(wrapper.findAll('button').some(button => button.text() === 'common.delete')).toBe(false)
+    expect(wrapper.findAll('button').some(button => button.text() === 'reports.submissions.disable_for_company')).toBe(true)
+    expect(wrapper.text()).toContain('reports.submissions.own_certificate_upload')
+  })
+
+  it('staff archive management without send permission cannot force release evidence', async () => {
+    m.canManageOnly = true
+    const uncertain = attempt({ id: 30, channel: 'epo_direct', status: 'uncertain' })
+    const { wrapper, item } = await mountWith([uncertain])
+    const vm = wrapper.vm as any
+    vm.toggleDetail(item)
+    await flushPromises()
+    expect(vm.canManage).toBe(true)
+    expect.soft(vm.canResolveDirectAttempt(uncertain)).toBe(false)
+    expect.soft(vm.submissionActions.find((action: { key: string }) => action.key === 'resolve_not_submitted').show).toBe(false)
+    vm.openRecoveryModal(item, 'not_submitted')
+    expect(vm.recoveryModalOpen).toBe(false)
+  })
+
+  it('client can upload an owned certificate using the existing step-up proof without settings navigation', async () => {
+    m.isClientRole = true
+    const { wrapper } = await mountWith([])
+    const vm = wrapper.vm as any
+    await vm.openCredentialModal()
+    await flushPromises()
+    expect(wrapper.find('a[href="/admin/electronic-signatures"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('reports.submissions.own_certificate_title')
+    const file = new File(['synthetic certificate'], 'synthetic.p12')
+    vm.credentialFile = file
+    vm.credentialLabel = 'Synthetic client certificate'
+    vm.credentialPfxPassword = 'synthetic-pfx-password'
+    vm.stepPassword = 'synthetic-account-password'
+    m.uploadCredential.mockResolvedValue({ id: 7 })
+    await vm.uploadOwnCredential()
+    expect(m.uploadCredential).toHaveBeenCalledWith(file, 'Synthetic client certificate', 'synthetic-pfx-password',
+      expect.objectContaining({ password: 'synthetic-account-password' }))
+    expect(vm.credentialPfxPassword).toBe('')
+    expect(vm.stepPassword).toBe('')
   })
 
   it('(a) starší asistovaný pokus „Čeká na P7S" v živém okně novější úspěšný test nepřebije', async () => {

@@ -65,6 +65,8 @@ export const useAuthStore = defineStore('auth', () => {
   // backend stejně odmítne 404.
   const domainsFeatureEnabled = computed(() => domainContext.value?.feature_enabled === true)
 
+  const isInstanceAdmin = computed(() => user.value?.is_instance_admin === true
+    || user.value?.role?.type === 'instance_admin' || user.value?.role?.system_key === 'instance_admin')
   const isSuperadmin = computed(() => user.value?.is_superadmin === true)
   const isAdminPlusRole = computed(() => user.value?.is_superadmin !== true && (
     user.value?.can_create_supplier === true
@@ -318,6 +320,7 @@ export const useAuthStore = defineStore('auth', () => {
     permissionCatalogVersion,
     permissionsLoading,
     isSuperadmin,
+    isInstanceAdmin,
     isAdminPlusRole,
     isCompanyAdminRole,
     isClientRole,

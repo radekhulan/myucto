@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { rolesApi, type PermissionCatalogResponse, type RoleDetail, type RoleListItem } from '@/api/roles'
-import { CLIENT_BANK_ACTION_KEYS, CLIENT_STOCK_ACTION_KEYS, OPERATIONAL_SETTINGS_KEYS, setRolePermission, type PermissionValue } from '@/security/permissions'
+import { CLIENT_BANK_ACTION_KEYS, CLIENT_STOCK_ACTION_KEYS, OPERATIONAL_SETTINGS_KEYS, rolePermissionLevels, setRolePermission, type PermissionValue } from '@/security/permissions'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
@@ -16,7 +16,7 @@ const saving = ref(false)
 const creating = ref(false)
 const form = reactive({ name: '', role_type: 'staff' as 'staff' | 'client', is_active: true, permissions: {} as Record<string, PermissionValue> })
 
-const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus'])
+const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus', 'instance_admin'])
 const fixedRoleOrder: Record<string, number> = { superadmin: 0, admin_plus: 1, admin: 2 }
 const orderedRoles = computed(() => [...roles.value].sort((a, b) =>
   (fixedRoleOrder[a.system_key ?? ''] ?? Number.MAX_SAFE_INTEGER)
@@ -30,6 +30,7 @@ const applicableGroups = computed(() => Object.entries(catalog.value?.groups ?? 
 function permissionLabel(permission: { key: string; label: string }): string {
   if ((OPERATIONAL_SETTINGS_KEYS as readonly string[]).includes(permission.key)) return t(`roles.operational_permissions.${permission.key.slice(9)}`)
   if (permission.key === 'stock' || (CLIENT_STOCK_ACTION_KEYS as readonly string[]).includes(permission.key)) return t(`roles.stock_permissions.${permission.key.replaceAll('.', '_')}`)
+  if (['reports.submissions', 'reports.submissions.manage', 'reports.submit'].includes(permission.key)) return t(`roles.submission_permissions.${permission.key.replaceAll('.', '_')}`)
   if (permission.key === 'price_list') return t('permissions.groups.price_list')
   if (permission.key === 'bank' || (CLIENT_BANK_ACTION_KEYS as readonly string[]).includes(permission.key)) return t(`roles.bank_permissions.${permission.key.replace('.', '_')}`)
   if (locale.value === 'cs') return permission.label
@@ -38,11 +39,7 @@ function permissionLabel(permission: { key: string; label: string }): string {
 }
 
 function permissionLevels(key: string): readonly PermissionValue[] {
-  if ((OPERATIONAL_SETTINGS_KEYS as readonly string[]).includes(key)) return [0, 2]
-  if (form.role_type === 'client' && (key === 'bank' || key === 'stock')) return [0, 1]
-  if (form.role_type === 'client' && (CLIENT_STOCK_ACTION_KEYS as readonly string[]).includes(key)) return [0, 2]
-  if (form.role_type === 'client' && (CLIENT_BANK_ACTION_KEYS as readonly string[]).includes(key)) return [0, 2]
-  return [0, 1, 2]
+  return rolePermissionLevels(form.role_type, key)
 }
 
 function isFixedRole(role: Pick<RoleListItem, 'system_key'>): boolean {

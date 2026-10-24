@@ -72,6 +72,40 @@ try {
         exit(0);
     }
     require $root . '/api/vendor/autoload.php';
+    if ($mode === 'config-source-mutated') {
+        $directory = sys_get_temp_dir() . '/regression-config-signature-' . bin2hex(random_bytes(8));
+        $path = $directory . '/api/src/Infrastructure/Config';
+        mkdir($path, 0700, true);
+        $file = $path . '/Config.php';
+        $source = file_get_contents($root . '/api/src/Infrastructure/Config/Config.php');
+        $mutations = [
+            "return \$raw !== false && \$raw !== '' && !self::isUnresolvedEnvReference(\$raw);" => 'return true;',
+            '$merged = self::applyEnvOverrides($merged);' => '$merged = $base;',
+        ];
+        $rejected = [];
+        try {
+            foreach ($mutations as $find => $replacement) {
+                $mutated = str_replace($find, $replacement, $source, $count);
+                if ($count !== 1) throw new LogicException('config_probe_mutation_not_applied');
+                file_put_contents($file, $mutated);
+                try {
+                    \MyUctoRegression\ConfigSnapshot::prepare($directory,
+                        new \MyInvoice\Infrastructure\Config\Config([]),
+                        'myucto_snapshot_12345678_test', '127.0.0.1', $directory . '/runtime');
+                    $rejected[] = false;
+                } catch (RuntimeException $error) {
+                    $rejected[] = $error->getMessage() === 'unsupported_config_source_signature';
+                }
+            }
+        } finally {
+            unlink($file);
+            foreach (['/api/src/Infrastructure/Config', '/api/src/Infrastructure', '/api/src', '/api', ''] as $suffix) {
+                rmdir($directory . $suffix);
+            }
+        }
+        echo json_encode(['rejected' => $rejected], JSON_THROW_ON_ERROR);
+        exit(0);
+    }
     if ($mode === 'config-snapshot') {
         $data = [
             'db' => ['host' => 'localhost', 'name' => 'original_instance', 'user' => 'synthetic_user', 'pass' => 'synthetic_test_value', 'port' => 3307, 'strict' => true],

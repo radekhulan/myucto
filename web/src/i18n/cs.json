@@ -25746,6 +25746,11 @@
     "tax_nonprofit_hint": "Snížení základu daně podle § 20 odst. 7. Sazbu zadejte jako desetinný podíl: 0,30 znamená 30 %. Způsobilost určuje doložený právní profil. Finální důkazy používají uloženou roční sadu."
   },
   "roles": {
+    "submission_permissions": {
+      "reports_submissions": "Připravená daňová podání (DPH, KH, SH)",
+      "reports_submit": "Odesílání daňových podání",
+      "reports_submissions_manage": "Správa daňových podání"
+    },
     "operational_permissions": {
       "email_profiles": "Odesílací profily firmy",
       "email_templates": "E-mailové šablony firmy",
@@ -25779,6 +25784,7 @@
     "usage": "Uživatelé: {users}, role u firem: {overrides}",
     "superadmin_locked": "Systémová role superadmin je uzamčená a má vždy plný přístup.",
     "system_descriptions": {
+      "instance_admin": "Pevná technická role bez přístupu k firemním agendám. Rozsah přiděluje superadmin; účet nezabírá licenční místo.",
       "superadmin": "Předdefinovaná systémová role s pevnými právy. Má plný přístup ke všem firmám a jako jediná spravuje uživatele, role, licence a celosystémová nastavení.",
       "admin": "Předdefinovaná role s pevnými právy. Může dělat vše v přidělených firmách a pracovat s více firmami, které jí přidělí superadmin. Nemůže měnit celosystémové položky v menu Systém.",
       "admin_plus": "Předdefinovaná role s pevnými právy. Má stejná práva jako Admin a navíc může v Systém → Firmy založit novou firmu; k ní automaticky dostane práva Admin."
@@ -25786,7 +25792,8 @@
     "types": {
       "superadmin": "Superadmin",
       "staff": "Interní",
-      "client": "Klientská"
+      "client": "Klientská",
+      "instance_admin": "Správce instance"
     },
     "levels": [
       "Neviditelné",
@@ -26545,6 +26552,14 @@
       "ik_mpsv_warning": "V certifikátu se nepodařilo rozpoznat IK MPSV. Podpis může fungovat, ale EPO nemusí automaticky propojit podepisující osobu; ověřte údaje certifikátu.",
       "upload_certificate": "Uložit nový P12/PFX",
       "upload_certificate_hint": "Použijte osobní kvalifikovaný certifikát pro elektronický podpis, nikoli běžný SSL nebo komerční certifikát.",
+      "client_subtitle": "Podání DPH, kontrolní a souhrnná hlášení připravená účetní. Můžete stáhnout XML, potvrzení a platební údaje; s oprávněním k odesílání také podání odeslat.",
+      "own_certificate_title": "Nahrát vlastní certifikát",
+      "own_certificate_hint": "Certifikát P12 nebo PFX se uloží do vašeho osobního trezoru a povolí pro tuto firmu. Používáte jen své vlastní certifikáty.",
+      "own_certificate_file": "Soubor certifikátu (P12/PFX)",
+      "own_certificate_label": "Označení certifikátu",
+      "own_certificate_password": "Heslo k certifikátu",
+      "own_certificate_upload": "Nahrát certifikát",
+      "own_certificate_uploaded": "Vlastní certifikát byl nahrán.",
       "upload_moved_title": "Nahrání certifikátu",
       "upload_moved_hint": "Certifikáty se nahrávají na jednom místě - Systém → E-maily a certifikáty → Certifikáty a elektronické podpisy. Odtud si je bere EPO, podpis PDF, S/MIME i mzdová podání. Tady se jen vybírá, který z nich smí tahle firma použít.",
       "upload_moved_link": "Přejít na Certifikáty",
@@ -39409,5 +39424,86 @@
     "eet_pok": "POK",
     "eet_pending": "Tržba je uložená a čeká na potvrzení finanční správou.",
     "valid_until": "Účtenka je dostupná do {date}."
+  },
+  "instance_admin": {
+    "title": "Správa instance",
+    "overview": "Přehled",
+    "back_to_app": "Zpět do aplikace",
+    "subtitle": "Technická správa bez přístupu k obchodním a účetním datům.",
+    "runtime": "Provozní stav",
+    "app_version": "Verze aplikace",
+    "php_version": "Verze PHP",
+    "database": "Databáze",
+    "free_space": "Volné místo",
+    "available": "Dostupné",
+    "unavailable": "Nedostupné",
+    "smtp": "Odesílání e-mailů",
+    "smtp_hint": "Vyberte schválený SMTP cíl. Původní heslo se nikdy nezobrazuje.",
+    "managed_locked": "Poštovní transport spravuje provozovatel. Nastavení nelze měnit.",
+    "environment_locked": "Poštovní transport řídí proměnné prostředí. Nastavení nelze měnit.",
+    "approved_target": "Schválený SMTP cíl",
+    "no_approved_targets": "Pro nastavení a test SMTP musí superadmin nejprve schválit cíl a testovacího příjemce.",
+    "configuration_source": "Používá se konfigurace instance",
+    "target_identity": "Uživatel: {username} · Odesílatel: {sender}",
+    "new_password": "Nové heslo SMTP",
+    "password_required": "Pro nový cíl zadejte nové heslo. Uložené heslo se na jiný cíl nepřenáší.",
+    "password_keep": "Prázdné pole zachová heslo pro stejný cíl.",
+    "fixed_recipient": "Testovací příjemce schválený superadminem: {recipient}",
+    "send_test": "Odeslat neutrální test",
+    "saved": "SMTP nastavení bylo uloženo.",
+    "test_sent": "Neutrální test byl odeslán na {recipient}.",
+    "suppliers": "Technická správa firem",
+    "suppliers_hint": "Zobrazují se pouze firmy přidělené pro technickou správu.",
+    "no_suppliers": "Nemáte přidělenou žádnou firmu k technické správě.",
+    "technical_status": "Technický stav",
+    "supplier_profile_unsupported": "Firma používá vlastní poštovní profil. Jeho testování není v technické správě dostupné.",
+    "supplier_global_transport": "Firma používá poštovní transport instance. Test obsahuje pouze neutrální text.",
+    "target_management": "Schvalování SMTP cílů",
+    "target_management_hint": "Schválený cíl je neměnný. Nový hostitel, identita nebo příjemce vyžaduje nový cíl a nové heslo.",
+    "target_name": "Název cíle",
+    "host": "SMTP server",
+    "port": "Port",
+    "encryption": "Zabezpečení spojení",
+    "starttls": "STARTTLS",
+    "implicit_tls": "TLS od navázání spojení",
+    "username": "Přihlašovací jméno",
+    "sender": "Adresa odesílatele",
+    "test_recipient": "Schválený příjemce testu",
+    "approve_target": "Schválit cíl",
+    "target_created": "SMTP cíl byl schválen.",
+    "reset_override": "Použít konfiguraci instance",
+    "reset_override_confirm": "Zapnout původní poštovní transport z konfigurace instance? Tato akce odstraní aktivní SMTP přepis a heslo uložené pro tento přepis. Schválené cíle zůstanou zachované.",
+    "reset_override_done": "Poštovní transport opět používá konfiguraci instance.",
+    "delete_target_confirm": "Smazat schválený SMTP cíl {name}?",
+    "audit": "Technický audit",
+    "audit_hint": "Zobrazují se vaše technické operace v aktuálně povoleném rozsahu.",
+    "no_audit": "Zatím nejsou zaznamenané žádné technické operace.",
+    "technical_change": "Technická operace",
+    "technical_scope": "Technický rozsah firem",
+    "technical_scope_hint": "Přiřazení umožní jen technickou správu. Neotevírá firemní agendy a účet nezabírá licenční místo.",
+    "all_suppliers": "Všechny firmy včetně budoucích",
+    "audit_actions": {
+      "smtp_updated": "Změna SMTP",
+      "smtp_test": "Test odesílání",
+      "target_approved": "Schválení SMTP cíle",
+      "target_deleted": "Smazání SMTP cíle",
+      "override_reset": "Návrat ke konfiguraci instance"
+    },
+    "audit_results": {
+      "ok": "Dokončeno",
+      "started": "Zahájeno",
+      "sent": "Odesláno",
+      "failed": "Neúspěšné"
+    },
+    "errors": {
+      "smtp_test_rate_limited": "Další test lze odeslat po uplynutí ochranného intervalu.",
+      "smtp_not_configured": "Nejprve nastavte schválený SMTP cíl.",
+      "smtp_test_failed": "Testovací e-mail se nepodařilo odeslat. Ověřte schválený cíl a přihlašovací údaje.",
+      "smtp_target_requires_password": "Pro nový SMTP cíl je nutné zadat nové heslo.",
+      "smtp_supplier_profile_unsupported": "Test vlastního firemního profilu není dostupný.",
+      "smtp_target_in_use": "Používaný SMTP cíl nelze smazat.",
+      "smtp_managed": "Poštovní transport spravuje provozovatel.",
+      "smtp_environment_locked": "Poštovní transport řídí proměnné prostředí."
+    }
   }
 }

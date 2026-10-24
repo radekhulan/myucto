@@ -47,6 +47,8 @@ final class PayrollUsagePolicy
             "SELECT COUNT(DISTINCT users.id)
                FROM users
               WHERE users.is_active = 1
+                AND NOT EXISTS (SELECT 1 FROM roles tr WHERE tr.id = users.role_id
+                    AND (tr.role_type = 'instance_admin' OR tr.system_key = 'instance_admin'))
                 AND (
                     EXISTS (
                         SELECT 1
@@ -66,6 +68,8 @@ final class PayrollUsagePolicy
                           JOIN roles effective_role
                             ON effective_role.id = COALESCE(membership.role_id, users.role_id)
                            AND effective_role.is_active = 1
+                           AND effective_role.role_type <> 'instance_admin'
+                           AND COALESCE(effective_role.system_key, '') <> 'instance_admin'
                           JOIN role_permissions permission
                             ON permission.role_id = effective_role.id
                            AND permission.permission_key LIKE 'payroll%'

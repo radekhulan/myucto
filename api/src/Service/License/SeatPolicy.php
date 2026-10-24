@@ -35,6 +35,8 @@ use MyInvoice\Security\AccessLevel;
  *
  * Vedlejší efekt, který je taky správně: vlastní role typu „Auditor" nebo
  * „Náhled" místo nezaberou, protože zápis nemají, a demo účet taky ne.
+ * Technický správce má samostatný uzavřený typ bez obchodních oprávnění;
+ * nezabírá místo ani při poškozené matici práv nebo obchodním membershipu.
  */
 final class SeatPolicy
 {
@@ -73,8 +75,11 @@ final class SeatPolicy
             return (int) $statement->fetchColumn();
         }
 
-        $sql = 'SELECT COUNT(DISTINCT u.id) FROM users u
-                 WHERE u.is_active = 1 AND (' . $this->seatConditionSql('u.role_id', 'u.id') . ')';
+        $sql = "SELECT COUNT(DISTINCT u.id) FROM users u
+                 WHERE u.is_active = 1
+                   AND NOT EXISTS (SELECT 1 FROM roles tr WHERE tr.id = u.role_id
+                       AND (tr.role_type = 'instance_admin' OR tr.system_key = 'instance_admin'))
+                   AND (" . $this->seatConditionSql('u.role_id', 'u.id') . ')';
 
         $statement = $this->db->pdo()->query($sql);
         if ($statement === false) {
@@ -93,6 +98,12 @@ final class SeatPolicy
         if (!$this->supportsPermissionCounting()) {
             return true;
         }
+        if ($defaultRoleId !== null) {
+            $stmt = $this->db->pdo()->prepare("SELECT 1 FROM roles WHERE id = ?
+                AND (role_type = 'instance_admin' OR system_key = 'instance_admin')");
+            $stmt->execute([$defaultRoleId]);
+            if ($stmt->fetchColumn() !== false) return false;
+        }
         foreach (array_merge($defaultRoleId === null ? [] : [$defaultRoleId], $overrideRoleIds) as $roleId) {
             if ($this->roleGrantsWrite((int) $roleId)) {
                 return true;
@@ -104,8 +115,8 @@ final class SeatPolicy
     /**
      * Dává aktivní role alespoň jedno business WRITE oprávnění?
      *
-     * Typ role nerozhoduje: zapisující staff i client role zabírají místo.
-     * Jedinou výjimkou jsou samoobslužná práva vlastního profilu a tokenů.
+     * Zapisující staff i client role zabírají místo. Technický typ nemá
+     * obchodní přístup; další výjimkou jsou samoobslužná práva profilu a tokenů.
      */
     public function roleGrantsWrite(int $roleId): bool
     {
@@ -117,7 +128,7 @@ final class SeatPolicy
         // implicitní. Kdyby se počítalo jen podle uložených práv, jediný účet,
         // který instalaci opravdu ovládá, by se do počtu nikdy nezapočítal.
         $stmt = $this->db->pdo()->prepare(
-            "SELECT r.role_type, r.is_active,
+            "SELECT r.role_type, r.system_key, r.is_active,
                     EXISTS (
                         SELECT 1 FROM role_permissions rp
                          WHERE rp.role_id = r.id
@@ -134,6 +145,7 @@ final class SeatPolicy
         if (!(bool) $row['is_active']) {
             return false;
         }
+        if ($row['role_type'] === 'instance_admin' || ($row['system_key'] ?? null) === 'instance_admin') return false;
         if ((string) $row['role_type'] === 'superadmin') {
             return true;
         }
@@ -164,6 +176,7 @@ final class SeatPolicy
                       JOIN role_permissions rp ON rp.role_id = r.id
                      WHERE r.id = {$roleIdExpr}
                        AND r.is_active = 1
+                       AND r.role_type <> 'instance_admin' AND COALESCE(r.system_key, '') <> 'instance_admin'
                        AND rp.access_level >= {$write}
                        AND rp.permission_key NOT IN ({$keys}))
          OR EXISTS (SELECT 1 FROM user_suppliers us
@@ -171,6 +184,7 @@ final class SeatPolicy
                       JOIN role_permissions rp2 ON rp2.role_id = r2.id
                      WHERE us.user_id = {$userIdExpr}
                        AND r2.is_active = 1
+                       AND r2.role_type <> 'instance_admin' AND COALESCE(r2.system_key, '') <> 'instance_admin'
                        AND rp2.access_level >= {$write}
                        AND rp2.permission_key NOT IN ({$keys}))";
     }
