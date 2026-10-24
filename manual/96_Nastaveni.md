@@ -345,6 +345,10 @@ _myucto-challenge.portal.klient.cz TXT myucto-verification=<token>
 
 **Jak poznáte, že je hotovo:** Doména má stav **Aktivní** a obsluhuje svůj účel.
 
+Přihlášení z klientské domény vždy vyžaduje nové ověření heslem a případným druhým faktorem nebo passkey.
+Existující přihlášení na hlavní adrese aplikace se automaticky nepřebírá. Můžete se tak na klientské doméně
+přihlásit jiným účtem a současně zůstat přihlášeni jako správce v hlavním okně.
+
 Stavy domény: **Čeká na ověření** (publikujte DNS TXT, routing a TLS), **Ověřeno** (poslední kontrola prošla, lze
 aktivovat), **Aktivní**, **Ověření selhalo** (karta ukáže důvod), **Deaktivováno** (hostname nevydává firemní data).
 Rotace challenge zneplatní předchozí TXT hodnotu a vrátí neaktivní doménu do stavu čekání. Aktivní doménu nejdřív

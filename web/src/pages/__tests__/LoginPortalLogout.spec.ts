@@ -15,7 +15,7 @@ vi.mock('@/composables/useTurnstile', () => ({ useTurnstile: () => ({}) }))
 vi.mock('@/security/webauthn', () => ({ isWebAuthnAvailable: () => false }))
 vi.mock('@/security/domainLogin', () => ({
   beginDomainLogin: m.begin, hasPendingCanonicalDomainLogin: () => false,
-  reconcileCanonicalDomainLoginSession: vi.fn(),
+  canonicalDomainLoginSessionCsrf: () => null,
 }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: m.query }), useRouter: () => ({ replace: m.replace }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))

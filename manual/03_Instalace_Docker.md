@@ -598,6 +598,8 @@ U nginx, Traefiku nebo Cloudflare Tunnel platí stejný princip: všechny hostna
 
 Aktivní vlastní doména používá oddělenou host-only session cookie. Přihlášení včetně passkey proběhne na kanonické `app.url` a prohlížeč se vrátí jednorázovým PKCE tokenem. Pro každého klienta proto nemusíte (a nesmíte) registrovat novou WebAuthn RP doménu.
 
+Každé nové přihlášení z klientské domény vyžaduje nové ověření. Existující relace na hlavní adrese se automaticky nepřebírá; přihlášení klienta zachová účet správce otevřený v hlavním okně.
+
 ### 3.12.9 Image: Alpine/nginx (výchozí) a Debian
 
 Pro hosting s omezeným diskem a pamětí je výchozí image **Alpine/nginx**: `php:8.5-fpm-alpine` + nginx + php-fpm místo Debian/Apache. Funkčně je identický (stejné API, `.htaccess` přeložený 1:1 do konfigurace nginx), jen štíhlejší.

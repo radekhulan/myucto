@@ -1,3 +1,4 @@
+import { domainLoginRequestContext, pendingDomainLoginRequestContext } from '@/security/domainLoginContext'
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { SupplierBrief } from '@/api/auth'
@@ -16,6 +17,7 @@ const STORAGE_KEY = 'myinvoice.current_supplier_id'
  */
 export const useSupplierStore = defineStore('supplier', () => {
   const initial = (() => {
+    if (pendingDomainLoginRequestContext()) return 0
     const scoped = requestSupplierIdNumber()
     if (getWindowSupplierScope()) return scoped
     const v = localStorage.getItem(STORAGE_KEY)
@@ -36,7 +38,7 @@ export const useSupplierStore = defineStore('supplier', () => {
   )
 
   watch(currentSupplierId, (v) => {
-    if (getWindowSupplierScope()) return
+    if (getWindowSupplierScope() || domainLoginRequestContext()) return
     if (domainLocked.value) {
       localStorage.removeItem(STORAGE_KEY)
       return
@@ -53,6 +55,7 @@ export const useSupplierStore = defineStore('supplier', () => {
     }
     if (domainLocked.value && id !== currentSupplierId.value) return
     currentSupplierId.value = id
+    if (domainLoginRequestContext()) return
     if (id > 0) localStorage.setItem(STORAGE_KEY, String(id))
     else localStorage.removeItem(STORAGE_KEY)
   }
@@ -66,7 +69,7 @@ export const useSupplierStore = defineStore('supplier', () => {
       return
     }
     if (locked) {
-      localStorage.removeItem(STORAGE_KEY)
+      if (!domainLoginRequestContext()) localStorage.removeItem(STORAGE_KEY)
       currentSupplierId.value = serverCurrent || (list[0]?.id ?? 0)
       return
     }

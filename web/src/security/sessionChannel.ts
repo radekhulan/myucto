@@ -1,3 +1,5 @@
+import { pendingDomainLoginRequestContext } from '@/security/domainLoginContext'
+
 export type SessionChannelEvent = 'locked' | 'unlocked' | 'logout'
 
 const CHANNEL_NAME = 'myinvoice-session-state'
@@ -12,7 +14,8 @@ function getChannel(): BroadcastChannel | null {
 }
 
 export function broadcastSessionEvent(type: SessionChannelEvent): void {
-  getChannel()?.postMessage({ type })
+  const request = pendingDomainLoginRequestContext()?.requestToken
+  getChannel()?.postMessage({ type, ...(request ? { domainLoginRequest: request } : {}) })
 }
 
 export function subscribeSessionEvents(
@@ -22,6 +25,10 @@ export function subscribeSessionEvents(
   if (!current) return () => undefined
 
   const receive = (event: MessageEvent<unknown>) => {
+    // Dočasné ověření klienta nesmí odhlásit ani zamknout hlavní okno.
+    // Rozsah čteme až při doručení, protože požadavek se může v okně změnit.
+    const scope = (event.data as { domainLoginRequest?: unknown } | null)?.domainLoginRequest
+    if ((scope ?? null) !== (pendingDomainLoginRequestContext()?.requestToken ?? null)) return
     const type = (event.data as { type?: unknown } | null)?.type
     if (type === 'locked' || type === 'unlocked' || type === 'logout') {
       listener(type)

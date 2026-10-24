@@ -22,7 +22,7 @@ import {
   authorizePendingDomainLogin,
   beginDomainLogin,
   captureCanonicalDomainLogin,
-  clearCanonicalDomainLogin,
+  cancelPendingDomainLogin,
   confirmPendingDomainLogin,
   hasPendingCanonicalDomainLogin,
   hasPendingCanonicalDomainLoginCleanup,
@@ -31,7 +31,7 @@ import {
   pendingCanonicalDomainLoginHandoff,
   previewPendingDomainLogin,
   recordCanonicalDomainLoginSession,
-  reconcileCanonicalDomainLoginSession,
+  canonicalDomainLoginSessionCsrf,
 } from '@/security/domainLogin'
 import {
   clientDomainCanonicalHandoffPath,
@@ -70,7 +70,7 @@ const passkeySupported = isWebAuthnAvailable()
 const error = ref<string>('')
 const domainLoginBusy = ref(false)
 const domainCleanupPending = ref(false)
-// Potvrzovací obrazovka předání existujícího přihlášení na vlastní doménu.
+// Dodatečné potvrzení cíle odděleného klientského přihlášení.
 const domainConfirmation = ref<DomainLoginConfirmation | null>(null)
 const domainConfirmationLoading = ref(false)
 const portalLoggedOut = ref(isPortalLoggedOut())
@@ -126,7 +126,7 @@ onMounted(async () => {
     return
   }
   const demo = auth.setupStatus?.demo
-  if (demo?.enabled) {
+  if (demo?.enabled && !hasPendingCanonicalDomainLogin()) {
     email.value = demo.email
     password.value = demo.password
   }
@@ -161,9 +161,9 @@ onMounted(async () => {
   // Rozhoduje `isAuthenticated`, NE návratová hodnota refresh() — router guard
   // (router/index.ts) čte taky stav storu, a jakýkoli rozjezd těch dvou podmínek
   // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
-  await auth.refresh()
-  if (auth.isAuthenticated) {
-    reconcileCanonicalDomainLoginSession(auth.csrfToken)
+  const freshDomainLogin = hasPendingCanonicalDomainLogin() && !canonicalDomainLoginSessionCsrf()
+  if (!freshDomainLogin) await auth.refresh()
+  if (!freshDomainLogin && auth.isAuthenticated) {
     if (await finishDomainLoginIfNeeded()) return
     router.replace(postLoginTarget(auth.domainContext?.locked
       ? requestedDomainReturnPath()
@@ -174,7 +174,7 @@ onMounted(async () => {
     if (!portalLoggedOut.value) await startPortalLogin()
     return
   }
-  if (demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
+  if (!hasPendingCanonicalDomainLogin() && demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
     try {
       await auth.login(demo.email, demo.password)
       if (await finishDomainLoginIfNeeded()) return
@@ -331,10 +331,19 @@ async function confirmDomainLogin(): Promise<void> {
   await finishDomainLoginIfNeeded()
 }
 
-function cancelDomainLogin(): void {
-  clearCanonicalDomainLogin()
-  domainConfirmation.value = null
-  void router.replace('/')
+async function cancelDomainLogin(): Promise<void> {
+  if (domainLoginBusy.value) return
+  domainLoginBusy.value = true
+  error.value = ''
+  try {
+    await cancelPendingDomainLogin()
+    domainConfirmation.value = null
+    await router.replace('/')
+  } catch {
+    error.value = t('domain_login.cleanup_failed')
+  } finally {
+    domainLoginBusy.value = false
+  }
 }
 
 async function submit() {

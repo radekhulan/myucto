@@ -1,4 +1,5 @@
 import './styles/main.css'
+import { captureInitialDomainLogin } from '@/security/domainLoginContext'
 import { parseWindowFrameBootstrap } from '@/workspace/frameProtocol'
 
 // Nasazení nové verze uklidí assety předchozích vydání a záložka se starou verzí pak
@@ -12,6 +13,8 @@ window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault()
   window.location.reload()
 })
+
+captureInitialDomainLogin(window.location)
 
 const frame = parseWindowFrameBootstrap(window.location.search, window.parent !== window)
 

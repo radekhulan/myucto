@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\TenantDomainMiddleware;
+use MyInvoice\Middleware\DomainLoginSessionMiddleware;
 use MyInvoice\Repository\SupplierDomainRepository;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\UserRoleProfile;
@@ -24,6 +25,7 @@ use MyInvoice\Service\Tenant\TenantDomainResolver;
 use PDO;
 use PDOStatement;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\TestWith;
 use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class DomainLoginMembershipTest extends TestCase
@@ -32,6 +34,29 @@ final class DomainLoginMembershipTest extends TestCase
     private const SUPPLIER_ID = 23;
     private const DOMAIN_ID = 17;
     private const HOSTNAME = 'portal.example.test';
+
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function testExistingCanonicalSessionCannotAuthorizeEvenWithConfirmation(bool $confirmed): void
+    {
+        $memberships = $this->createStub(UserSupplierRepository::class);
+        $memberships->method('allowedSupplierIds')->willReturn([self::SUPPLIER_ID]);
+        $row = $this->requestRow(str_repeat('r', 43), str_repeat('s', 43));
+        $row['authorization_code_hash'] = null;
+        $service = $this->service($this->pdoForStatements(
+            $this->statementReturning($row), null, $this->statementWithRowCount(1),
+        ), $memberships);
+        $this->expectException(DomainLoginException::class);
+        $this->expectExceptionMessage('nové přihlášení');
+        $service->authorize(
+            $this->canonicalRequest()->withoutAttribute(DomainLoginSessionMiddleware::ATTR_VERIFIED_FLOW),
+            str_repeat('r', 43),
+            str_repeat('s', 43),
+            ['id' => self::USER_ID],
+            ['auth_method' => 'passkey', 'assurance_level' => 'strong'],
+            $confirmed,
+        );
+    }
 
     /**
      * Superadmin má přístup ke všem firmám, takže se na vlastní doménu firmy
@@ -413,7 +438,10 @@ final class DomainLoginMembershipTest extends TestCase
             TenantDomainContext::CANONICAL,
             'app.example.test',
             'https://app.example.test',
-        ));
+        ))->withAttribute(DomainLoginSessionMiddleware::ATTR_VERIFIED_FLOW, [
+            'request_token_hash' => hash('sha256', str_repeat('r', 43)),
+            'state_hash' => hash('sha256', str_repeat('s', 43)),
+        ]);
     }
 
     private function customRequest(): \Psr\Http\Message\ServerRequestInterface

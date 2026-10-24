@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\TenantDomainMiddleware;
+use MyInvoice\Middleware\DomainLoginSessionMiddleware;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\Tenant\ClientRoutePolicy;
@@ -219,6 +220,14 @@ final class DomainLoginService
         }
         self::assertOpaqueToken($requestToken);
         self::assertOpaqueToken($state);
+        $flow = $request->getAttribute(DomainLoginSessionMiddleware::ATTR_VERIFIED_FLOW);
+        // Potvrzení cílové domény nenahrazuje nové přihlášení do oddělené relace.
+        if (!is_array($flow)
+            || !hash_equals(self::hash($requestToken), (string) ($flow['request_token_hash'] ?? ''))
+            || !hash_equals(self::hash($state), (string) ($flow['state_hash'] ?? ''))
+        ) {
+            throw new DomainLoginException('fresh_authentication_required', 'Pro klientskou doménu je nutné nové přihlášení.', 401);
+        }
         $userId = (int) ($user['id'] ?? 0);
         if ($userId < 1 || ($session['assurance_level'] ?? 'setup') === 'setup') {
             throw new DomainLoginException('authentication_required', 'Nejdřív dokonči přihlášení včetně MFA.', 401);

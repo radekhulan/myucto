@@ -7,7 +7,7 @@ import {
 } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getWindowManager } from '@/workspace/windowRegistry'
-import { hasPendingCanonicalDomainLoginCleanup, pendingCanonicalDomainLoginQuery } from '@/security/domainLogin'
+import { captureCanonicalDomainLogin, hasPendingCanonicalDomainLogin, hasPendingCanonicalDomainLoginCleanup, pendingCanonicalDomainLoginQuery } from '@/security/domainLogin'
 import type { DomainContext } from '@/api/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
@@ -20,6 +20,7 @@ import { workspaceShellRoutes } from './workspaceShellRoutes'
 import { switchSupplierForDeepLink } from './supplierDeepLink'
 import { payrollStartPeriodGuard } from './payrollStartPeriodGuard'
 import {
+  canonicalDomainLoginHandoffPath,
   clientDomainCanonicalHandoffPath,
   clientDomainRedirect,
   isClientDomainAuthenticatedPath,
@@ -408,6 +409,11 @@ export async function authorizationGuard(
     }
   }
 
+  if (to.name === 'login' && auth.domainContext?.mode === 'canonical') {
+    captureCanonicalDomainLogin(to.query.domain_login_request, to.query.state, to.query.domain_login_handoff)
+  }
+  if (auth.prepareDomainLogin()) useSessionSecurityStore().clear()
+
   if (auth.needsSetup && to.name !== 'setup') {
     return { name: 'setup' }
   }
@@ -416,7 +422,9 @@ export async function authorizationGuard(
   }
 
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
-  if (requiresAuth && auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLoginCleanup()) {
+  if (requiresAuth && auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLogin()
+      && (hasPendingCanonicalDomainLoginCleanup()
+        || (to.name !== 'setup-mfa' && canonicalDomainLoginHandoffPath(to.fullPath) === null))) {
     // Obnovení stránky po MFA nesmí pustit dočasnou relaci do hlavní aplikace.
     return { name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} }
   }
@@ -451,6 +459,9 @@ export async function authorizationGuard(
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
+      if (auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLogin()) {
+        return { name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} }
+      }
       recordLoginBounce()
       if (auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)) {
         return { name: 'login', query: { return_to: to.fullPath } }

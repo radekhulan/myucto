@@ -10,9 +10,11 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\TenantDomainMiddleware;
+use MyInvoice\Middleware\DomainLoginSessionMiddleware;
 use MyInvoice\Repository\SupplierDomainRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\DomainLoginException;
+use MyInvoice\Service\Auth\DomainLoginSessionCookie;
 use MyInvoice\Service\Auth\DomainLoginService;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\SessionAuthContext;
@@ -34,6 +36,8 @@ final class DomainLoginFlowTest extends TestCase
     private SessionCookieFactory $cookies;
     private IpMatcher $ipMatcher;
     private AuthMiddleware $auth;
+    private DomainLoginSessionMiddleware $flowMiddleware;
+    private DomainLoginSessionCookie $flowCookies;
     private string $cookieName = '';
     /** @var list<int> */
     private array $extraUserIds = [];
@@ -56,6 +60,8 @@ final class DomainLoginFlowTest extends TestCase
             $this->cookies = $container->get(SessionCookieFactory::class);
             $this->ipMatcher = $container->get(IpMatcher::class);
             $this->auth = $container->get(AuthMiddleware::class);
+            $this->flowMiddleware = $container->get(DomainLoginSessionMiddleware::class);
+            $this->flowCookies = $container->get(DomainLoginSessionCookie::class);
             $this->cookieName = (string) $container->get(Config::class)
                 ->get('session.cookie_name', '__Host-myinvoice_session');
             // Connection je lazy; ověř ji uvnitř stejného skip guardu, jinak
@@ -235,7 +241,7 @@ final class DomainLoginFlowTest extends TestCase
         $verifier = self::opaqueToken();
         $flow = $this->start($verifier);
         $authorized = $this->login->authorize(
-            $this->canonicalRequest(),
+            $this->verifiedRequest($flow),
             $flow['request_token'],
             $flow['state'],
             ['id' => $this->userId],
@@ -284,7 +290,7 @@ final class DomainLoginFlowTest extends TestCase
         $verifier = self::opaqueToken();
         $flow = $this->start($verifier);
         $authorized = $this->login->authorize(
-            $this->canonicalRequest(),
+            $this->verifiedRequest($flow),
             $flow['request_token'],
             $flow['state'],
             ['id' => $userId],
@@ -329,13 +335,51 @@ final class DomainLoginFlowTest extends TestCase
         self::assertNotNull($this->sessions->load($token));
     }
 
-    /**
-     * Uživatel přihlášený na canonical adrese dřív, než vznikl požadavek, dostane
-     * podstrčený odkaz. Autorizace bez potvrzení nesmí vydat kód ani požadavek
-     * spotřebovat; projde až výslovné potvrzení a pak celý tok až po session
-     * vázanou na doménu.
-     */
-    public function testExistingCanonicalSessionNeedsExplicitConfirmationEndToEnd(): void
+    /** Běžnou relaci nelze předat ani výslovným potvrzením cílové domény. */
+    public function testExistingCanonicalSessionCannotBeTransferredEvenWithConfirmation(): void
+    {
+        $canonical = $this->canonicalSession();
+        $flow = $this->start(self::opaqueToken());
+        foreach ([[], ['preview' => true], ['confirmed' => true]] as $extra) {
+            $response = $this->authorizeViaAction($canonical['token'], $flow, $extra, false);
+            self::assertSame(401, $response['status']);
+            self::assertSame('fresh_authentication_required', $response['body']['error']['code'] ?? null);
+        }
+        // Samotné hlavičky toku bez šifrované dočasné cookie nestačí.
+        $forged = $this->authorizeViaAction('', $flow, ['confirmed' => true], true, $canonical['token']);
+        self::assertSame(401, $forged['status']);
+        self::assertSame(0, $this->authorizedRequests($flow));
+        self::assertNotNull($this->sessions->load($canonical['token']));
+    }
+
+    public function testClientLoginPreservesDifferentCanonicalUserAndDomainBinding(): void
+    {
+        $adminId = $this->createSuperadminWithoutMembership();
+        $admin = $this->sessions->create(
+            $adminId, '192.0.2.15', 'Independent admin',
+            new SessionAuthContext('totp', 'strong', new \DateTimeImmutable(), null),
+        );
+        $verifier = self::opaqueToken();
+        $flow = $this->start($verifier);
+        $client = $this->canonicalSession();
+        $authorized = $this->authorizeViaAction($client['token'], $flow, [], true, $admin['token']);
+        self::assertSame(200, $authorized['status']);
+        parse_str((string) parse_url((string) $authorized['body']['redirect_url'], PHP_URL_QUERY), $callback);
+        $result = $this->login->exchange(
+            $this->customRequest(), $flow['request_token'], (string) $callback['code'],
+            $flow['state'], $verifier, '192.0.2.15',
+        );
+        self::assertSame($this->userId, $result['user_id']);
+        self::assertSame($this->domainId, $this->sessions->load($result['session']['token'])['supplier_domain_id'] ?? null);
+        $this->sessions->destroy($client['token']);
+        $canonical = $this->authenticate($this->canonicalRequest('GET', '/api/auth/me'), $admin['token']);
+        self::assertSame($adminId, $canonical['user_id']);
+        $replay = $this->authenticate($this->canonicalRequest('GET', '/api/auth/me'), $result['session']['token']);
+        self::assertSame(401, $replay['status']);
+    }
+
+    /** I ověřená dočasná cookie podléhá kontrole stáří a výslovnému potvrzení cíle. */
+    public function testOlderIsolatedSessionNeedsExplicitConfirmationEndToEnd(): void
     {
         $canonical = $this->canonicalSession();
         $this->backdateSession($canonical['token']);
@@ -379,7 +423,7 @@ final class DomainLoginFlowTest extends TestCase
         self::assertSame($this->userId, $result['user_id']);
         $portal = $this->authenticate($this->customRequest(null, 'GET', '/api/auth/me'), $result['session']['token']);
         self::assertSame($this->userId, $portal['user_id']);
-        // Canonical session zůstává přihlášená, potvrzení ji neruší.
+        // Potvrzení samo dočasnou relaci neruší; její úklid provádí frontend.
         self::assertNotNull($this->sessions->load($canonical['token']));
     }
 
@@ -428,7 +472,7 @@ final class DomainLoginFlowTest extends TestCase
 
         try {
             $this->login->authorize(
-                $this->canonicalRequest(),
+                $this->verifiedRequest($flow),
                 $flow['request_token'],
                 $flow['state'],
                 ['id' => $this->userId],
@@ -664,7 +708,7 @@ final class DomainLoginFlowTest extends TestCase
         $session = $this->sessions->load($this->canonicalSession()['token']);
         self::assertIsArray($session);
         return $this->login->authorize(
-            $this->canonicalRequest(),
+            $this->verifiedRequest($flow),
             $flow['request_token'],
             $flow['state'],
             [
@@ -714,8 +758,13 @@ final class DomainLoginFlowTest extends TestCase
      * @param array<string,mixed> $extra
      * @return array{status:int,body:array<string,mixed>}
      */
-    private function authorizeViaAction(string $token, array $flow, array $extra = []): array
-    {
+    private function authorizeViaAction(
+        string $token,
+        array $flow,
+        array $extra = [],
+        bool $isolated = true,
+        ?string $canonicalToken = null,
+    ): array {
         $action = new DomainLoginAction(
             $this->login,
             $this->cookies,
@@ -738,7 +787,29 @@ final class DomainLoginFlowTest extends TestCase
                 ...$extra,
             ])
             ->withCookieParams([$this->cookieName => $token]);
-        $response = $this->auth->process($request, $handler);
+        if ($isolated) {
+            $params = [$this->cookieName => $canonicalToken ?? $token];
+            if ($token !== '') {
+                $params[$this->flowCookies->name($flow['request_token'])] = $this->flowCookies->seal(
+                    $token, $flow['request_token'], $flow['state'],
+                );
+            }
+            $request = $request
+                ->withHeader(DomainLoginSessionMiddleware::REQUEST_HEADER, $flow['request_token'])
+                ->withHeader(DomainLoginSessionMiddleware::STATE_HEADER, $flow['state'])
+                ->withCookieParams($params);
+        }
+        $authHandler = new class($this->auth, $handler) implements \Psr\Http\Server\RequestHandlerInterface {
+            public function __construct(
+                private readonly AuthMiddleware $auth,
+                private readonly \Psr\Http\Server\RequestHandlerInterface $next,
+            ) {}
+            public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+            {
+                return $this->auth->process($request, $this->next);
+            }
+        };
+        $response = $this->flowMiddleware->process($request, $authHandler);
         $body = json_decode((string) $response->getBody(), true);
         return ['status' => $response->getStatusCode(), 'body' => is_array($body) ? $body : []];
     }
@@ -838,6 +909,15 @@ final class DomainLoginFlowTest extends TestCase
         $userId = (int) $pdo->lastInsertId();
         $this->extraUserIds[] = $userId;
         return $userId;
+    }
+
+    /** @param array{request_token:string,state:string} $flow */
+    private function verifiedRequest(array $flow): \Psr\Http\Message\ServerRequestInterface
+    {
+        return $this->canonicalRequest()->withAttribute(DomainLoginSessionMiddleware::ATTR_VERIFIED_FLOW, [
+            'request_token_hash' => hash('sha256', $flow['request_token']),
+            'state_hash' => hash('sha256', $flow['state']),
+        ]);
     }
 
     private function canonicalRequest(

@@ -19,7 +19,7 @@ vi.mock('@/security/webauthn', () => ({ isWebAuthnAvailable: () => false }))
 vi.mock('@/security/domainLogin', () => ({
   captureCanonicalDomainLogin: vi.fn(), hasPendingCanonicalDomainLogin: () => true,
   hasPendingCanonicalDomainLoginCleanup: () => false,
-  reconcileCanonicalDomainLoginSession: vi.fn(),
+  canonicalDomainLoginSessionCsrf: () => 'fresh-flow-csrf',
   pendingCanonicalDomainLoginHandoff: () => m.handoff,
   needsCanonicalDomainLoginConfirmation: () => m.needsConfirm,
   previewPendingDomainLogin: m.preview, confirmPendingDomainLogin: m.confirm,

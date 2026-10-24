@@ -287,7 +287,13 @@ passwordless passkey, passkey jako druhý faktor nebo TOTP. Aplikace potom vydá
 jednorázový kód platný 60 sekund, svázaný s PKCE verifierem, uživatelem, firmou
 a přesným cílovým hostnamem. Kód lze spotřebovat jen jednou a skutečný session
 token se v URL nikdy neobjeví. Na cílové doméně vznikne samostatná host-only
-session; správa passkeys a ostatní interní obrazovky zůstávají na canonical
+session. Každé nové přihlášení z klientské domény vyžaduje nové ověření uživatele;
+existující relace hlavní instance se k němu automaticky nepoužije. Ověření na hlavní
+adrese používá vlastní krátkodobou HttpOnly cookie svázanou s konkrétním požadavkem
+na přihlášení. Přihlášení jiným účtem ani úklid této dočasné relace nepřepíše
+a neodhlásí účet otevřený v hlavním okně.
+
+Správa passkeys a ostatní interní obrazovky zůstávají na canonical
 originu. Přímé WebAuthn operace na vlastní doméně server odmítne, včetně správy
 klíčů a options/verify pro odemčení session. Zamykací obrazovka místo nich zahájí
 nové ověření na canonical originu a po jednorázovém PKCE návratu vytvoří pro
