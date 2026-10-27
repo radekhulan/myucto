@@ -162,6 +162,36 @@ znamená zákaz.
 **Jak poznáte, že je hotovo:** Podezřelé záznamy jste vysvětlili nebo
 eskalovali. Doporučujeme kontrolu aspoň jednou měsíčně.
 
+### 101.9.1 Aktivní relace
+
+Superadmin otevře **Systém → Uživatelé → Aktivní relace**. Přehled ukazuje platná přihlášení,
+s vlastní relací **vždy první**, i na dalších stránkách. Ostatní relace jsou
+seřazené podle **posledního kontaktu od nejnovějšího**. Každá relace uvádí uživatele, přihlášení,
+poslední kontakt, konec platnosti, IP adresu a prohlížeč.
+Vlastní přihlášení označuje štítek **Tato relace**. Více zařízení stejného uživatele má samostatné řádky.
+
+**Nedávný kontakt** znamená požadavek za posledních pět minut. Čas kontaktu se zapisuje nejvýše
+jednou za pět minut, může zahrnovat i požadavky na pozadí a není důkazem, že člověk právě pracuje.
+Zavření prohlížeče platné přihlášení nemusí ukončit.
+Přehled se automaticky obnovuje každých 30 sekund, pokud je stránka viditelná a relace není uzamčená.
+Tlačítko **Obnovit** načte aktuální stav hned; větší seznam se stránkuje.
+
+Tlačítkem **Ukončit relaci** a následným potvrzením superadmin odvolá vybrané přihlášení včetně
+jeho bezpečnostně obnovených generací. Ostatní přihlášení stejného uživatele zůstanou platná.
+Odvolání se projeví při příštím požadavku daného zařízení; uživatel se musí znovu přihlásit.
+Ukončení vlastní relace přejde na přihlášení. Operace se zaznamená do Logu jako `auth.session_revoked`.
+Pro hromadné ukončení označte jednotlivé relace nebo **Vybrat všechny na stránce** a stiskněte
+**Ukončit vybrané**. Potvrzení upozorní, pokud výběr zahrnuje i vlastní přihlášení. Jedna operace
+ukončí nejvýše 50 vybraných relací atomicky; chyba auditu vrátí celou operaci. Jestliže některá
+vybraná relace mezitím skončila, seznam se obnoví a výběr je potřeba zopakovat. Hromadná operace
+se zapisuje do Logu jako `auth.sessions_revoked`.
+
+API tokeny ani MCP připojení tento přehled neukazuje a tlačítko je neodvolává.
+
+**Správce instance** má ve své samostatné ploše odkaz **Aktivní relace**. Vidí jména uživatelů a časy
+relací napříč instancí pro plánování údržby. Nevidí jejich e-maily, IP adresy ani zařízení a relace nemůže
+ukončovat. Firemní agendy mu tento přehled nezpřístupňuje.
+
 ## 101.10 Když něco nejde
 
 <!-- cols: 30 34 36 -->

@@ -1,6 +1,7 @@
 import { api } from './client'
 
 export interface UpdateStatus {
+  other_recent_sessions?: number
   current: string
   latest: string | null
   has_update: boolean
@@ -77,9 +78,9 @@ export const updateApi = {
       .then((r) => r.data),
 
   /** Admin — spustit upgrade: Docker fronta, nebo nativní worker na pozadí. */
-  trigger: (target_version?: string) =>
+  trigger: (target_version?: string, confirmActiveSessions = false) =>
     api
-      .post<UpdateTriggerResponse>('/admin/update/trigger', { target_version: target_version ?? null })
+      .post<UpdateTriggerResponse>('/admin/update/trigger', { target_version: target_version ?? null, confirm_active_sessions: confirmActiveSessions })
       .then((r) => r.data),
 
   /** Admin — zrušit zaseknutý „upgrade probíhá" flag (watcher neběží / upgrade proběhl ručně). */

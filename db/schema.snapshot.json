@@ -1105,7 +1105,8 @@
         "2201_stock_history_import.sql",
         "2202_cash_journal_offset_notes.sql",
         "2203_readonly_seat_policy.sql",
-        "2204_supplier_receipt_payable_account.sql"
+        "2204_supplier_receipt_payable_account.sql",
+        "2205_sessions_admin_last_seen.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -23261,6 +23262,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_sess_user": "BTREE (user_id, expires_at)",
+                "idx_sessions_admin_last_seen": "BTREE (revoked_at, replaced_at, last_seen, session_family_id, expires_at)",
                 "idx_sessions_family_revocation": "BTREE (session_family_id, revoked_at)",
                 "idx_sessions_user_revocation": "BTREE (user_id, revoked_at, expires_at)",
                 "uq_sessions_family_generation": "UNIQUE BTREE (session_family_id, generation)"

@@ -20,10 +20,10 @@ final class InstanceAdminRoutePolicy
         $method = strtoupper($method) === 'HEAD' ? 'GET' : strtoupper($method);
         return match ($method) {
             'GET' => in_array($path, ['/api/instance-admin/status', '/api/instance-admin/suppliers',
-                '/api/instance-admin/smtp', '/api/instance-admin/audit'], true)
+                '/api/instance-admin/smtp', '/api/instance-admin/audit', '/api/instance-admin/sessions', '/api/instance-admin/updates'], true)
                 || preg_match('#^/api/instance-admin/suppliers/[1-9][0-9]*/(status|smtp)$#D', $path) === 1,
             'PUT' => $path === '/api/instance-admin/smtp',
-            'POST' => $path === '/api/instance-admin/smtp/test'
+            'POST' => in_array($path, ['/api/instance-admin/smtp/test', '/api/instance-admin/updates/check', '/api/instance-admin/updates/trigger'], true)
                 || preg_match('#^/api/instance-admin/suppliers/[1-9][0-9]*/smtp/test$#D', $path) === 1,
             default => false,
         };

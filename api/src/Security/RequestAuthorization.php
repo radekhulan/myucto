@@ -152,6 +152,12 @@ final class RequestAuthorization
             && ($role->isSuperadmin() || $role->isInstanceAdmin());
     }
 
+    /** Ukončování cizích browserových relací patří výhradně superadminovi. */
+    public static function canTerminateUserSessions(Request $request): bool
+    {
+        return self::isSessionAuth($request) && self::isSuperadmin($request);
+    }
+
     public static function canCreateSupplier(Request $request): bool
     {
         return self::effectiveRole($request)->canCreateSupplier();

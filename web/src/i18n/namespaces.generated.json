@@ -89,6 +89,7 @@
     "group_stats",
     "imports",
     "instance_export",
+    "instance_updates",
     "integrations",
     "internal_documents",
     "invoice_default_note",
@@ -168,6 +169,7 @@
     "tax_evidence",
     "template_tools",
     "time_billing",
+    "user_sessions",
     "users",
     "validation",
     "vat_classifications",
@@ -175,6 +177,12 @@
     "workReportTracking"
   ],
   "routes": {
+    "instance-admin-updates": [
+      "instance_updates"
+    ],
+    "instance-admin-sessions": [
+      "user_sessions"
+    ],
     "instance-admin-profile": [
       "domain_login",
       "mfa_setup",
@@ -1077,6 +1085,7 @@
     "admin-users": [
       "roles",
       "settings",
+      "user_sessions",
       "users"
     ],
     "admin-roles": [
@@ -1310,6 +1319,9 @@
       "recurring",
       "settings",
       "time_billing"
+    ],
+    "admin-update": [
+      "instance_updates"
     ],
     "admin-diagnostics": [
       "diagnostics"

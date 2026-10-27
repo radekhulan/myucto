@@ -280,36 +280,43 @@ final class SessionManager
 
     /**
      * Revokuje celou lineage i při logoutu přes starší nahrazenou generaci.
+     * Volitelný audit proběhne ve stejné transakci; jeho chyba revokaci vrátí.
      */
-    public function destroy(string $token): void
+    public function destroy(string $token, ?callable $onRevoked = null): void
     {
-        if (!self::isTokenShapeValid($token)) {
-            return;
-        }
+        $this->destroyMany([$token], $onRevoked);
+    }
 
+    /** Atomická revokace nejvýše 50 vybraných lineage, se společným transakčním auditem. */
+    public function destroyMany(array $tokens, ?callable $onRevoked = null): void
+    {
+        $tokens = array_values(array_unique(array_filter($tokens, self::isTokenShapeValid(...))));
+        if ($tokens === []) return;
+        if (count($tokens) > 50) throw new \InvalidArgumentException('Příliš mnoho relací.');
+        sort($tokens);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
             $cutoff = $this->securityClock->capture($pdo);
-            $family = $pdo->prepare('SELECT session_family_id FROM sessions WHERE id = ? FOR UPDATE');
-            $family->execute([$token]);
-            $familyId = $family->fetchColumn();
-            if (!is_string($familyId) || $familyId === '') {
+            $placeholders = implode(',', array_fill(0, count($tokens), '?'));
+            $family = $pdo->prepare('SELECT session_family_id FROM sessions WHERE id IN (' . $placeholders . ') ORDER BY id FOR UPDATE');
+            $family->execute($tokens);
+            $families = array_values(array_unique($family->fetchAll(PDO::FETCH_COLUMN)));
+            if ($families === []) {
                 $pdo->commit();
                 return;
             }
-
+            $placeholders = implode(',', array_fill(0, count($families), '?'));
             $revoke = $pdo->prepare(
-                'UPDATE sessions
-                    SET revoked_at = COALESCE(revoked_at, ?)
-                  WHERE session_family_id = ?'
+                'UPDATE sessions SET revoked_at = COALESCE(revoked_at, ?)
+                  WHERE session_family_id IN (' . $placeholders . ')'
             );
-            $revoke->execute([$cutoff->utcSql, $familyId]);
+            $revoke->execute([$cutoff->utcSql, ...$families]);
+            // Administrátorský audit musí uspět ve stejné transakci jako revokace.
+            if ($onRevoked !== null) $onRevoked();
             $pdo->commit();
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }

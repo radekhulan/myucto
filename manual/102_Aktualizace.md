@@ -9,6 +9,21 @@ MyÚčto.cz kontroluje GitHub Releases API a v `Systém → Aktualizace`
 Aplikaci lze aktualizovat z uživatelského rozhraní nebo provozním skriptem;
 konkrétní postup závisí na typu instalace.
 
+
+Správce instance má ve své samostatné ploše odkaz **Aktualizace**. Zobrazuje nainstalovanou a poslední
+známou dostupnou verzi, čas poslední kontroly, průběh a výsledek poslední aktualizace. **Obnovit** načte
+uložené údaje, **Zkontrolovat nyní** provede novou kontrolu dostupné verze. Nezjištěná či zastaralá
+verze se neoznačuje jako potvrzený aktuální stav.
+
+**Spustit aktualizaci** vyžaduje potvrzení a zpřístupní se jen pro novější verzi z úspěšné aktuální kontroly,
+pokud jiná aktualizace neběží. Správce instance nemůže zadat libovolnou starší verzi. Před spuštěním má
+zkontrolovat **Aktivní relace** a domluvit přerušení práce. Plocha ukazuje počet ostatních relací
+s kontaktem za posledních pět minut a upozorní na přerušení práce i ztrátu neuložených změn.
+Potvrzení tuto výstrahu zopakuje. Pokud se po načtení stavu připojí další uživatelé a výstraha nebyla
+potvrzena, server spuštění odmítne a je potřeba nové potvrzení. Používá se stejný updater jako u superadmina;
+pokud automatické spuštění prostředí nepodporuje, je nutný ruční postup správce serveru. Ve spravované
+instalaci kontrolu a spuštění řídí provozovatel a technická plocha nabízí jen čtení stavu. Spuštění podléhá stejným bezpečnostním pojistkám a auditování jako správa aktualizací superadmina.
+
 ## 102.1 Kdy to potřebujete
 
 - V patičce aplikace se objevilo upozornění na novou verzi.

@@ -138,10 +138,12 @@ licenční místo, mzdové místo nečerpá. Přihlašuje se běžným účtem, 
 
 | Oblast | Dostupný rozsah |
 |---|---|
+| Aktualizace | Nainstalovaná a dostupná verze, kontrola nové verze, průběh a potvrzené spuštění aktualizace; spravovanou instalaci aktualizuje provozovatel |
 | Stav instance | Verze aplikace, PHP a databáze, dostupnost potřebných rozšíření a technický stav úložiště |
 | SMTP | Výběr cíle schváleného superadminem a zadání nového hesla |
 | Test pošty | Neutrální zpráva na adresu předem schválenou superadminem |
 | Přidělené firmy | Název, technické ID a informace o použití společného nebo vlastního poštovního transportu |
+| Aktivní relace | Jména přihlášených uživatelů a časy relací napříč instancí pro plánování údržby, pouze ke čtení ([§ 101.9.1](101_Bezpecnost.md#10191-aktivni-relace)) |
 | Technický audit | Vlastní technické operace v aktuálně povoleném rozsahu, bez tajemství a obsahu dokladů |
 | Vlastní účet | Profil, heslo, MFA a vlastní relace |
 

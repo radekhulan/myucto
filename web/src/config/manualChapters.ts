@@ -98,6 +98,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/profile\/mcp-server(?:\/|$)/, '105_MCP_server'],
   [/^\/profile\/api-tokens(?:\/|$)/, '103_API'],
   [/^\/activation(?:\/|$)|^\/hosting(?:\/|$)/, '104_Licence_a_aktivace'],
+  [/^\/instance-admin\/updates(?:\/|$)/, '102_Aktualizace'],
   [/^\/instance-admin\/profile(?:\/|$)/, '08_Prihlaseni'],
   [/^\/instance-admin(?:\/|$)/, '96_Nastaveni'],
 

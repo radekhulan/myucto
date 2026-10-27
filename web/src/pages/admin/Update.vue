@@ -105,14 +105,17 @@ async function refresh() {
 
 async function triggerUpgrade() {
   if (!status.value?.latest || triggering.value) return
-  const question = nativeAuto.value
+  const contacts = status.value.other_recent_sessions ?? 0
+  const question = contacts > 0
+    ? t('instance_updates.confirm_trigger_active', { n: contacts, version: status.value.latest })
+    : nativeAuto.value
     ? t('updates.trigger_native_confirm', { version: status.value.latest })
     : t('updates.trigger_update', { version: status.value.latest }) + '?'
   if (!confirm(question)) return
   triggering.value = true
   triggerResult.value = null
   try {
-    const r = await updateApi.trigger(status.value.latest)
+    const r = await updateApi.trigger(status.value.latest, contacts > 0)
     triggerResult.value = r
     // Pro Docker: po queue startuj polling, ať vidíme result.json až watcher dojede
     if (r.status === 'queued') {
@@ -121,7 +124,11 @@ async function triggerUpgrade() {
       await load()
     }
   } catch (e: unknown) {
-    errorMsg.value = (e as Error)?.message ?? 'Trigger failed'
+    const detail = (e as { response?: { data?: { error?: { code?: string } } } }).response?.data?.error
+    if (detail?.code === 'active_sessions') {
+      await load()
+      errorMsg.value = t('instance_updates.active_changed')
+    } else errorMsg.value = (e as Error)?.message ?? 'Trigger failed'
   } finally {
     triggering.value = false
   }
@@ -219,6 +226,7 @@ function fmtDate(s?: string | null): string {
       <h1 class="text-2xl font-semibold text-neutral-900">{{ t('updates.title') }}</h1>
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('updates.subtitle') }}</p>
     </header>
+    <p v-if="status && (status.other_recent_sessions ?? 0) > 0" role="alert" class="mb-4 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700">{{ t('instance_updates.active_warning', { n: status.other_recent_sessions }) }}</p>
 
     <div v-if="!isAdmin" class="rounded-md bg-warning-50 border border-warning-200 p-4 text-sm text-warning-800">
       {{ t('updates.no_admin') }}

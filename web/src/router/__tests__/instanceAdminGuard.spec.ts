@@ -39,6 +39,8 @@ describe('Správce instance — oddělený router', () => {
     const auth = signIn()
     auth.permissions = {}
     expect(await authorizationGuard(resolve('/instance-admin'))).toBe(true)
+    expect(await authorizationGuard(resolve('/instance-admin/sessions'))).toBe(true)
+    expect(await authorizationGuard(resolve('/instance-admin/updates'))).toBe(true)
     expect(resolve('/instance-admin').matched[0]?.components?.default).not.toBe(resolve('/').matched[0]?.components?.default)
   })
 

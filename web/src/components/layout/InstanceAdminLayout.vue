@@ -34,6 +34,8 @@ async function logout() {
         <RouterLink to="/instance-admin" class="font-semibold text-primary-700">{{ t('instance_admin.title') }}</RouterLink>
         <nav class="flex flex-wrap items-center gap-2" :aria-label="t('instance_admin.title')">
           <RouterLink to="/instance-admin" :class="btnOutline('neutral')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('instance_admin.overview') }}</RouterLink>
+          <RouterLink to="/instance-admin/sessions" :class="btnOutline('neutral')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.user" /></svg>{{ t('user_sessions.title') }}</RouterLink>
+          <RouterLink to="/instance-admin/updates" :class="btnOutline('neutral')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('instance_updates.title') }}</RouterLink>
           <RouterLink to="/instance-admin/profile" :class="btnOutline('neutral')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('auth.profile_title') }}</RouterLink>
           <RouterLink v-if="auth.isSuperadmin" to="/" :class="btnOutline('neutral')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('instance_admin.back_to_app') }}</RouterLink>
           <ThemeToggle /><LanguageToggle />

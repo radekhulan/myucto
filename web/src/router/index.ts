@@ -64,6 +64,8 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, instanceAdminOnly: true },
     children: [
       { path: '', name: 'instance-admin', component: () => import('@/pages/admin/InstanceAdmin.vue') },
+      { path: 'updates', name: 'instance-admin-updates', component: () => import('@/pages/admin/InstanceUpdates.vue') },
+      { path: 'sessions', name: 'instance-admin-sessions', component: () => import('@/components/security/ActiveSessions.vue'), props: { standalone: true } },
       { path: 'profile', name: 'instance-admin-profile', component: () => import('@/pages/PasswordChange.vue') },
     ],
   },

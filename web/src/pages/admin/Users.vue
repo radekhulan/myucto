@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type AdminSupplierSearchItem, type AdminUser, type UserSupplierAssignment } from '@/api/admin'
 import { rolesApi, type RoleListItem } from '@/api/roles'
@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
+import ActiveSessions from '@/components/security/ActiveSessions.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -21,6 +22,7 @@ const seatWarning = computed(() => {
   if (auth.newUserBlocked === 'seat_limit') return t('users.seat_blocked_limit')
   return ''
 })
+const tab = ref<'users' | 'sessions'>('users')
 const users = ref<AdminUser[]>([])
 const roles = ref<RoleListItem[]>([])
 const loading = ref(false)
@@ -257,12 +259,20 @@ function roleBadge(role: AdminUser['role']): string {
   if (role.type === 'client') return 'bg-success-50 text-success-600'
   return 'bg-warning-50 text-warning-600'
 }
+let firstActivation = true
 onMounted(load)
+onActivated(() => { if (firstActivation) firstActivation = false; else void load() })
 </script>
 
 <template>
   <div>
-    <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button v-if="tab === 'users'" :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
+    <nav class="mb-4 flex flex-wrap gap-2" :aria-label="t('users.title')">
+      <button type="button" :class="tab === 'users' ? btnFilled('primary') : btnOutline('neutral')" class="whitespace-nowrap" :aria-pressed="tab === 'users'" @click="tab = 'users'"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.user" /></svg>{{ t('users.title') }}</button>
+      <button type="button" :class="tab === 'sessions' ? btnFilled('primary') : btnOutline('neutral')" class="whitespace-nowrap" :aria-pressed="tab === 'sessions'" data-sessions-tab @click="tab = 'sessions'"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('user_sessions.title') }}</button>
+    </nav>
+    <ActiveSessions v-if="tab === 'sessions'" />
+    <template v-else>
     <p v-if="seatWarning" class="mb-4 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">{{ seatWarning }}</p>
     <div v-if="loading" class="py-12 text-center text-neutral-500">{{ t('common.loading') }}</div>
     <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden">
@@ -279,6 +289,8 @@ onMounted(load)
         </button>
       </div>
     </div>
+
+    </template>
 
     <div v-if="showForm" class="fixed inset-0 z-50 bg-black/40 p-4 overflow-y-auto" @click.self="showForm=false">
       <form class="bg-surface max-w-2xl mx-auto my-6 rounded-xl shadow-lg p-5 space-y-4" @submit.prevent="save">

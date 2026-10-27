@@ -46,6 +46,7 @@ describe('contextual manual for application menu', () => {
     ['/admin/support', '999_Reseni_problemu'],
     ['/admin/bank-rule-templates', '65_Sablony'],
     ['/instance-admin', '96_Nastaveni'],
+    ['/instance-admin/updates', '102_Aktualizace'],
     ['/instance-admin/smtp', '96_Nastaveni'],
     ['/instance-admin/profile', '08_Prihlaseni'],
     ['/instance-admin/profile/totp', '08_Prihlaseni'],
