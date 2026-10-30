@@ -1,0 +1,892 @@
+{
+  "schemaVersion": 1,
+  "presetVersion": 1,
+  "presets": {
+    "company-v1": {
+      "schemaVersion": 1,
+      "presetVersion": 1,
+      "widgets": [
+        {
+          "id": "actions-quick",
+          "type": "actions.quick",
+          "span": 4,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "actions-todo",
+          "type": "actions.todo",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "documents-requests",
+          "type": "documents.requests",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-2",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "kpi-current-month",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "current_month",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-last-month",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "last_month",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-ytd",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "ytd",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-prev-year-ytd",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "prev_year_ytd",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-3",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "kpi-last-12m",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "last_12m",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "business-monthly",
+          "type": "business.monthly",
+          "span": 9,
+          "options": {
+            "months": 12,
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-4",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "sales-summary",
+          "type": "sales.summary",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "purchases-summary",
+          "type": "purchases.summary",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-5",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "invoices-drafts",
+          "type": "invoices.drafts",
+          "span": 8,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "invoices-approvals",
+          "type": "invoices.approvals",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-6",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "receivables-aging",
+          "type": "receivables.aging",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "payables-aging",
+          "type": "payables.aging",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "cashflow-weekly",
+          "type": "cashflow.weekly",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-7",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "receivables-due",
+          "type": "receivables.due",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "cashflow-collections",
+          "type": "cashflow.collections",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-8",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "invoices-overdue",
+          "type": "invoices.overdue",
+          "span": 6,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "invoices-upcoming",
+          "type": "invoices.upcoming",
+          "span": 6,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-9",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "clients-top",
+          "type": "clients.top",
+          "span": 12,
+          "options": {
+            "rows": 5,
+            "display": "both",
+            "currency": "auto",
+            "tablePosition": "left"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-10",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "vat-current",
+          "type": "vat.current",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "tax-deadlines",
+          "type": "tax.deadlines",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        }
+      ]
+    },
+    "portal-v1": {
+      "schemaVersion": 1,
+      "presetVersion": 1,
+      "widgets": [
+        {
+          "id": "actions-quick",
+          "type": "actions.quick",
+          "span": 4,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "actions-todo",
+          "type": "actions.todo",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "documents-requests",
+          "type": "documents.requests",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-2",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "kpi-current-month",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "current_month",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-last-month",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "last_month",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-ytd",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "ytd",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-prev-year-ytd",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "prev_year_ytd",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-3",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "kpi-last-12m",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "last_12m",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "business-monthly",
+          "type": "business.monthly",
+          "span": 9,
+          "options": {
+            "months": 12,
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-4",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "sales-summary",
+          "type": "sales.summary",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "purchases-summary",
+          "type": "purchases.summary",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-5",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "invoices-drafts",
+          "type": "invoices.drafts",
+          "span": 8,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "invoices-approvals",
+          "type": "invoices.approvals",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-6",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "receivables-aging",
+          "type": "receivables.aging",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "payables-aging",
+          "type": "payables.aging",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "cashflow-weekly",
+          "type": "cashflow.weekly",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-7",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "receivables-due",
+          "type": "receivables.due",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "cashflow-collections",
+          "type": "cashflow.collections",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-8",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "invoices-overdue",
+          "type": "invoices.overdue",
+          "span": 6,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "invoices-upcoming",
+          "type": "invoices.upcoming",
+          "span": 6,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-9",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "clients-top",
+          "type": "clients.top",
+          "span": 12,
+          "options": {
+            "rows": 5,
+            "display": "both",
+            "currency": "auto",
+            "tablePosition": "left"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-10",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "vat-current",
+          "type": "vat.current",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "tax-deadlines",
+          "type": "tax.deadlines",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        }
+      ]
+    },
+    "home-v1": {
+      "schemaVersion": 1,
+      "presetVersion": 1,
+      "widgets": [
+        {
+          "id": "actions-quick",
+          "type": "actions.quick",
+          "span": 4,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "actions-todo",
+          "type": "actions.todo",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "documents-requests",
+          "type": "documents.requests",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-2",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "kpi-current-month",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "current_month",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-last-month",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "last_month",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-ytd",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "ytd",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "kpi-prev-year-ytd",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "prev_year_ytd",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-3",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "kpi-last-12m",
+          "type": "business.kpi",
+          "span": 3,
+          "options": {
+            "period": "last_12m",
+            "currency": "all"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "business-monthly",
+          "type": "business.monthly",
+          "span": 9,
+          "options": {
+            "months": 12,
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-4",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "sales-summary",
+          "type": "sales.summary",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "purchases-summary",
+          "type": "purchases.summary",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-5",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "invoices-drafts",
+          "type": "invoices.drafts",
+          "span": 8,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "invoices-approvals",
+          "type": "invoices.approvals",
+          "span": 4,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-6",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "receivables-aging",
+          "type": "receivables.aging",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "payables-aging",
+          "type": "payables.aging",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "cashflow-weekly",
+          "type": "cashflow.weekly",
+          "span": 4,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-7",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "receivables-due",
+          "type": "receivables.due",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "cashflow-collections",
+          "type": "cashflow.collections",
+          "span": 6,
+          "options": {
+            "currency": "auto"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-8",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "invoices-overdue",
+          "type": "invoices.overdue",
+          "span": 6,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "invoices-upcoming",
+          "type": "invoices.upcoming",
+          "span": 6,
+          "options": {
+            "rows": 5
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-9",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "clients-top",
+          "type": "clients.top",
+          "span": 12,
+          "options": {
+            "rows": 5,
+            "display": "both",
+            "currency": "auto",
+            "tablePosition": "left"
+          },
+          "height": "auto"
+        },
+        {
+          "id": "divider-10",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "vat-current",
+          "type": "vat.current",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "tax-deadlines",
+          "type": "tax.deadlines",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "divider-11",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "accounting-status",
+          "type": "accounting.status",
+          "span": 12,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "divider-12",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "tax-calendar",
+          "type": "tax.calendar",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "tax-net",
+          "type": "tax.net",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        },
+        {
+          "id": "divider-13",
+          "type": "layout.divider",
+          "span": 12,
+          "height": "auto",
+          "options": {}
+        },
+        {
+          "id": "tax-advances",
+          "type": "tax.advances",
+          "span": 6,
+          "options": {},
+          "height": "auto"
+        }
+      ]
+    }
+  }
+}

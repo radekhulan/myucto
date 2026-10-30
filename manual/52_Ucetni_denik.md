@@ -1226,7 +1226,7 @@ tam neexistuje) porovná doklady s deníkem a hledá pět typů nesrovnalostí:
 
 Job je **čistě diagnostický - nic sám neopravuje**, jen zapíše počty a ukázku
 nálezů (přepis při každém běhu). Výsledek vidíte
-na dashboardu ([Zkontroluj integritu deníku](10_Prehled.md#101062-zkontroluj-integritu-deniku)) -
+v widgetu [Akce pro tebe](10_Prehled.md#10106-akce-pro-tebe) -
 karta **„Zkontroluj integritu deníku"** se zobrazí jen když job něco našel, se
 závažností vždy **vysoká**. Aplikace nemá samostatnou stránku s výpisem
 jednotlivých nálezů. Karta i každý štítek rozpadu vedou zpátky na tento

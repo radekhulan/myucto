@@ -69,6 +69,8 @@
     "creditas_bank",
     "cron_jobs",
     "dashboard",
+    "dashboardBoard",
+    "dashboardWidgets",
     "databox",
     "diagnostics",
     "dimensions",
@@ -222,18 +224,17 @@
       "errors"
     ],
     "home": [
-      "activation",
-      "automation",
-      "bank",
       "dashboard",
-      "errors",
-      "taxReturn",
-      "time_billing"
+      "dashboardBoard",
+      "portal",
+      "reports"
     ],
     "portal-mcp": [
       "client_mcp"
     ],
     "portal": [
+      "dashboard",
+      "dashboardBoard",
       "portal",
       "reports"
     ],

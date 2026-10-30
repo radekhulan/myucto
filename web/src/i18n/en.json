@@ -40829,5 +40829,178 @@
       "smtp_managed": "The hosting operator manages this mail transport.",
       "smtp_environment_locked": "Environment variables control this mail transport."
     }
+  },
+  "dashboardBoard": {
+    "edit": "Edit dashboard",
+    "save": "Save",
+    "cancel": "Cancel",
+    "reset": "Restore defaults",
+    "add": "Add widget",
+    "remove": "Remove",
+    "up": "Move up",
+    "down": "Move down",
+    "width": "Width",
+    "empty": "No widgets. Add them in the editor.",
+    "loading": "Loading dashboard…",
+    "loadError": "Could not load dashboard.",
+    "widgetError": "Could not load widget data.",
+    "unavailable": "Widget unavailable for this company.",
+    "noData": "No data yet.",
+    "conflict": "Dashboard changed in another window. Cancel changes and reload the latest version.",
+    "retry": "Retry",
+    "hidden": "Some widgets are hidden for this company. Their settings will be preserved.",
+    "limit": "Maximum 32 widgets.",
+    "options": "Settings",
+    "open": "Open",
+    "count": "Count",
+    "amount": "Amount",
+    "date": "Date",
+    "period": "Period",
+    "currency": "Currency",
+    "months": "Months",
+    "rows": "Rows",
+    "display": "Display",
+    "all": "All currencies",
+    "auto": "Automatic",
+    "table": "Table",
+    "chart": "Chart",
+    "both": "Table and chart",
+    "inflow": "Inflows",
+    "outflow": "Outflows",
+    "net": "Net flow",
+    "running": "Cumulative",
+    "submitted": "Filed",
+    "pending": "Pending",
+    "paid": "Paid",
+    "unpaid": "Unpaid",
+    "backfill_pending": "Pending backfill",
+    "bank_posting_pending": "Unposted bank transactions",
+    "automation_auto_today": "Automatic postings today",
+    "pending_approvals": "Invoices awaiting approval",
+    "recurring_due": "Recurring invoices due",
+    "bank_unmatched": "Unmatched bank transactions",
+    "overdue_invoices": "Overdue invoices",
+    "height": "Height",
+    "height_auto": "Automatic",
+    "height_compact": "Compact",
+    "height_normal": "Normal",
+    "height_tall": "Tall",
+    "addDivider": "Add new row",
+    "divider": "New row",
+    "dividerHint": "Following widgets start below the previous group.",
+    "resize": "Resize widget",
+    "resizeWidth": "Resize widget width only",
+    "resizeHeight": "Resize widget height only",
+    "move": "Move widget",
+    "tablePosition": "Table position",
+    "left": "Left of chart",
+    "right": "Right of chart",
+    "above": "Above chart",
+    "below": "Below chart",
+    "overdue_payables": "Overdue payables",
+    "purchase_drafts": "Draft received invoices",
+    "purchase_approvals_pending": "Received invoices awaiting approval",
+    "accounting_period_missing": "Missing accounting period",
+    "jmhz_unsent": "Payroll submissions to send"
+  },
+  "dashboardWidgets": {
+    "widgets": {
+      "business_kpi": {
+        "title": "Period results",
+        "description": "Invoiced amounts, costs and their difference by currency."
+      },
+      "business_monthly": {
+        "title": "Monthly invoicing and costs",
+        "description": "Monthly invoiced amounts and costs."
+      },
+      "sales_summary": {
+        "title": "Issued invoices",
+        "description": "Document counts, due amounts and average payment time."
+      },
+      "purchases_summary": {
+        "title": "Received invoices",
+        "description": "Document counts and unpaid liabilities."
+      },
+      "receivables_aging": {
+        "title": "Receivables aging",
+        "description": "Receivables by age and currency."
+      },
+      "payables_aging": {
+        "title": "Payables aging",
+        "description": "Payables by age and currency."
+      },
+      "cashflow_weekly": {
+        "title": "Four-week net cash flow",
+        "description": "Expected business inflows and outflows."
+      },
+      "cashflow_collections": {
+        "title": "Expected collections",
+        "description": "Expected invoice collections in 30, 60 and 90 days."
+      },
+      "receivables_due": {
+        "title": "Upcoming due dates",
+        "description": "Receivables due today, this week and this month."
+      },
+      "invoices_overdue": {
+        "title": "Overdue invoices",
+        "description": "Individual unpaid overdue invoices."
+      },
+      "invoices_upcoming": {
+        "title": "Invoices not yet due",
+        "description": "Individual unpaid invoices not yet due."
+      },
+      "clients_top": {
+        "title": "Top customers",
+        "description": "Leading customers by invoiced amounts."
+      },
+      "invoices_drafts": {
+        "title": "Draft invoices",
+        "description": "Draft invoices and work reports."
+      },
+      "invoices_approvals": {
+        "title": "Invoice approvals",
+        "description": "Issued invoices awaiting approval."
+      },
+      "documents_requests": {
+        "title": "Missing documents",
+        "description": "Open requests for missing documents."
+      },
+      "actions_quick": {
+        "title": "Quick actions",
+        "description": "Create an invoice, received invoice or contact."
+      },
+      "actions_todo": {
+        "title": "Your tasks",
+        "description": "Tasks available with your permissions."
+      },
+      "vat_current": {
+        "title": "Current VAT",
+        "description": "Indicative summary of the current VAT period."
+      },
+      "tax_deadlines": {
+        "title": "Tax deadlines",
+        "description": "Upcoming company tax deadlines."
+      },
+      "tax_calendar": {
+        "title": "Tax calendar",
+        "description": "Extended overview of deadlines, filings and payments."
+      },
+      "tax_net": {
+        "title": "Projected net income",
+        "description": "Projected net income for a self-employed person."
+      },
+      "tax_advances": {
+        "title": "Upcoming advances",
+        "description": "Upcoming tax and insurance advance payments."
+      },
+      "accounting_status": {
+        "title": "Accounting processing status",
+        "description": "Backfill, bank posting and automatic postings."
+      },
+      "layout_divider": {
+        "title": "New row",
+        "description": "An invisible break aligns following widgets below the previous group."
+      }
+    }
   }
 }

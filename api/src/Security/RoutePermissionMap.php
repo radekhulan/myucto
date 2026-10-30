@@ -1094,6 +1094,15 @@ final class RoutePermissionMap
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
+        // Rozložení je osobní UI preference, nikoli zápis do dokladů. Permission
+        // middleware přesto musí vyřešit roli aktuální firmy; SELF_SERVICE ji přeskočí.
+        if ((in_array($method, ['GET', 'HEAD'], true) && $path === '/api/dashboard-widgets/catalog')
+            || ($method === 'POST' && $path === '/api/dashboard-widgets/query')
+            || (in_array($method, ['GET', 'HEAD', 'PUT', 'DELETE'], true)
+                && preg_match('#^/api/user/dashboard-layouts/(home|portal)$#D', $path) === 1)
+        ) {
+            return new RoutePermission(self::PERMISSION, 'profile', AccessLevel::READ, ['dashboard']);
+        }
         if (InstanceAdminRoutePolicy::isTechnicalEndpoint($method, $path)) {
             return new RoutePermission(self::INSTANCE_ADMIN);
         }

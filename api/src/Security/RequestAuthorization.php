@@ -18,6 +18,32 @@ final class RequestAuthorization
             || (!self::isClientType($request) && self::allows($request, 'profile.tokens', $minimum));
     }
 
+    /** Přehled používá výhradně vyřešenou roli aktuální firmy a ověřenou webovou relaci. */
+    public static function canAccessDashboardBoard(Request $request, string $board): bool
+    {
+        $role = $request->getAttribute('auth.effective_role');
+        $user = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, []);
+        if (!self::isSessionAuth($request) || (int) ($user['id'] ?? 0) <= 0
+            || !$role instanceof EffectiveRole || !$role->isActive
+            || (int) $request->getAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, 0) <= 0
+        ) {
+            return false;
+        }
+        return match ($board) {
+            'home' => !$role->isClientType() && self::allows($request, 'dashboard'),
+            'portal' => self::allows($request, 'profile'),
+            default => false,
+        };
+    }
+
+    /** Celý výpis přepárují interní role; klient může párovat jen jednotlivé pohyby. */
+    public static function canRematchBankStatements(Request $request): bool
+    {
+        return !self::isClientType($request)
+            && self::allows($request, 'bank')
+            && self::allows($request, 'bank.match', AccessLevel::WRITE);
+    }
+
     /**
      * Je požadavek z přihlášené browserové relace?
      *

@@ -1,0 +1,702 @@
+{
+  "schemaVersion": 1,
+  "widgets": [
+    {
+      "type": "business.kpi",
+      "titleKey": "dashboardWidgets.widgets.business_kpi.title",
+      "descriptionKey": "dashboardWidgets.widgets.business_kpi.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 3,
+      "options": {
+        "period": {
+          "type": "enum",
+          "values": [
+            "current_month",
+            "last_month",
+            "ytd",
+            "prev_year_ytd",
+            "last_12m"
+          ],
+          "default": "current_month"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "all"
+        }
+      },
+      "repeatable": true,
+      "dependencies": [
+        "business.overview"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "business.monthly",
+      "titleKey": "dashboardWidgets.widgets.business_monthly.title",
+      "descriptionKey": "dashboardWidgets.widgets.business_monthly.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 9,
+      "options": {
+        "months": {
+          "type": "enum",
+          "values": [
+            6,
+            12,
+            24
+          ],
+          "default": 12
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "business.monthly"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "sales.summary",
+      "titleKey": "dashboardWidgets.widgets.sales_summary.title",
+      "descriptionKey": "dashboardWidgets.widgets.sales_summary.description",
+      "accessRule": "invoices.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "sales.summary"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "purchases.summary",
+      "titleKey": "dashboardWidgets.widgets.purchases_summary.title",
+      "descriptionKey": "dashboardWidgets.widgets.purchases_summary.description",
+      "accessRule": "purchases.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "purchases.summary"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "receivables.aging",
+      "titleKey": "dashboardWidgets.widgets.receivables_aging.title",
+      "descriptionKey": "dashboardWidgets.widgets.receivables_aging.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "receivables.aging"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "payables.aging",
+      "titleKey": "dashboardWidgets.widgets.payables_aging.title",
+      "descriptionKey": "dashboardWidgets.widgets.payables_aging.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "payables.aging"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "cashflow.weekly",
+      "titleKey": "dashboardWidgets.widgets.cashflow_weekly.title",
+      "descriptionKey": "dashboardWidgets.widgets.cashflow_weekly.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "cashflow.weekly"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "cashflow.collections",
+      "titleKey": "dashboardWidgets.widgets.cashflow_collections.title",
+      "descriptionKey": "dashboardWidgets.widgets.cashflow_collections.description",
+      "accessRule": "invoices.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "cashflow.collections"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "receivables.due",
+      "titleKey": "dashboardWidgets.widgets.receivables_due.title",
+      "descriptionKey": "dashboardWidgets.widgets.receivables_due.description",
+      "accessRule": "invoices.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "receivables.due"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "invoices.overdue",
+      "titleKey": "dashboardWidgets.widgets.invoices_overdue.title",
+      "descriptionKey": "dashboardWidgets.widgets.invoices_overdue.description",
+      "accessRule": "invoices.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "invoices.overdue"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "invoices.upcoming",
+      "titleKey": "dashboardWidgets.widgets.invoices_upcoming.title",
+      "descriptionKey": "dashboardWidgets.widgets.invoices_upcoming.description",
+      "accessRule": "invoices.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "invoices.upcoming"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "clients.top",
+      "titleKey": "dashboardWidgets.widgets.clients_top.title",
+      "descriptionKey": "dashboardWidgets.widgets.clients_top.description",
+      "accessRule": "clients.invoices.read",
+      "scope": "company",
+      "minSpan": 6,
+      "maxSpan": 12,
+      "defaultSpan": 12,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        },
+        "display": {
+          "type": "enum",
+          "values": [
+            "table",
+            "chart",
+            "both"
+          ],
+          "default": "both"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^(all|auto|[A-Z]{3})$",
+          "default": "auto"
+        },
+        "tablePosition": {
+          "type": "enum",
+          "values": [
+            "left",
+            "right",
+            "above",
+            "below"
+          ],
+          "default": "left"
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "clients.top"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "invoices.drafts",
+      "titleKey": "dashboardWidgets.widgets.invoices_drafts.title",
+      "descriptionKey": "dashboardWidgets.widgets.invoices_drafts.description",
+      "accessRule": "invoices.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 8,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "invoices.drafts"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "invoices.approvals",
+      "titleKey": "dashboardWidgets.widgets.invoices_approvals.title",
+      "descriptionKey": "dashboardWidgets.widgets.invoices_approvals.description",
+      "accessRule": "invoices.approval.read",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "invoices.approvals"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "documents.requests",
+      "titleKey": "dashboardWidgets.widgets.documents_requests.title",
+      "descriptionKey": "dashboardWidgets.widgets.documents_requests.description",
+      "accessRule": "documents.requests",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "documents.requests"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "actions.quick",
+      "titleKey": "dashboardWidgets.widgets.actions_quick.title",
+      "descriptionKey": "dashboardWidgets.widgets.actions_quick.description",
+      "accessRule": "actions.quick",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "actions.quick"
+      ],
+      "emptyState": "hide",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "actions.todo",
+      "titleKey": "dashboardWidgets.widgets.actions_todo.title",
+      "descriptionKey": "dashboardWidgets.widgets.actions_todo.description",
+      "accessRule": "actions.todo",
+      "scope": "company",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "options": {
+        "rows": {
+          "type": "enum",
+          "values": [
+            5,
+            10,
+            20
+          ],
+          "default": 5
+        }
+      },
+      "repeatable": false,
+      "dependencies": [
+        "actions.todo"
+      ],
+      "emptyState": "hide",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "vat.current",
+      "titleKey": "dashboardWidgets.widgets.vat_current.title",
+      "descriptionKey": "dashboardWidgets.widgets.vat_current.description",
+      "accessRule": "base",
+      "scope": "vat_payer",
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "vat.current"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "tax.deadlines",
+      "titleKey": "dashboardWidgets.widgets.tax_deadlines.title",
+      "descriptionKey": "dashboardWidgets.widgets.tax_deadlines.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "tax.deadlines"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "tax.calendar",
+      "titleKey": "dashboardWidgets.widgets.tax_calendar.title",
+      "descriptionKey": "dashboardWidgets.widgets.tax_calendar.description",
+      "accessRule": "reports.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "tax.calendar"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "tax.net",
+      "titleKey": "dashboardWidgets.widgets.tax_net.title",
+      "descriptionKey": "dashboardWidgets.widgets.tax_net.description",
+      "accessRule": "reports.read",
+      "scope": "self_employed",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "tax.net"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "tax.advances",
+      "titleKey": "dashboardWidgets.widgets.tax_advances.title",
+      "descriptionKey": "dashboardWidgets.widgets.tax_advances.description",
+      "accessRule": "reports.read",
+      "scope": "company",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "tax.advances"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "accounting.status",
+      "titleKey": "dashboardWidgets.widgets.accounting_status.title",
+      "descriptionKey": "dashboardWidgets.widgets.accounting_status.description",
+      "accessRule": "accounting.status",
+      "scope": "double_entry",
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 12,
+      "options": {},
+      "repeatable": false,
+      "dependencies": [
+        "accounting.status"
+      ],
+      "emptyState": "show",
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    {
+      "type": "layout.divider",
+      "titleKey": "dashboardWidgets.widgets.layout_divider.title",
+      "descriptionKey": "dashboardWidgets.widgets.layout_divider.description",
+      "accessRule": "base",
+      "scope": "company",
+      "minSpan": 12,
+      "maxSpan": 12,
+      "defaultSpan": 12,
+      "options": {},
+      "repeatable": true,
+      "dependencies": [],
+      "emptyState": "hide",
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    }
+  ]
+}

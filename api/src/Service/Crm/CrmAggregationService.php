@@ -254,6 +254,12 @@ final class CrmAggregationService
         return $rows;
     }
 
+    /** Obchodní KPI se stejným přepočtem jako portál, bez ostatních období a pipeline. */
+    public function dashboardRange(int $supplierId, string $from, string $toExclusive, ?string $period = null): array
+    {
+        return $this->aggregateRange($supplierId, $this->isVatPayer($supplierId), $from, $toExclusive, $period);
+    }
+
     /**
      * Predikát vyřazující doklady, jejichž protistrana je spojená osoba. Prázdný,
      * když se vyřazovat nemá, takže výchozí dotazy zůstávají beze změny.
@@ -3272,7 +3278,7 @@ final class CrmAggregationService
      *   total_in: float, total_out: float, total_net: float
      * }
      */
-    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK'): array
+    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK', bool $includeOtherItems = true): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
@@ -3364,7 +3370,8 @@ final class CrmAggregationService
             $outByBucket[(int) $r['bucket']] = (float) $r['amt'];
         }
 
-        foreach ((new OtherItemForecastService($this->db))->dueBetween($supplierId, $globalStart, $globalEnd, $currency) as $item) {
+        // Sdílený obchodní widget zobrazuje pouze faktury; původní CRM kontrakt zahrnuje i jiné položky.
+        foreach ($includeOtherItems ? (new OtherItemForecastService($this->db))->dueBetween($supplierId, $globalStart, $globalEnd, $currency) : [] as $item) {
             foreach ($bounds as $idx => [$start, $end]) {
                 if ($item['due_on'] < $start->format('Y-m-d') || $item['due_on'] > $end->format('Y-m-d')) continue;
                 if ($item['side'] === 'receivable') $inByBucket[$idx] = ($inByBucket[$idx] ?? 0.0) + $item['remaining'];

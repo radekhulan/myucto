@@ -4,7 +4,7 @@
 > projít úkoly, které na vás čekají, a jak si přizpůsobit menu, panely
 > a vzhled aplikace. Pro každého uživatele.
 
-Přehled je úvodní obrazovka po přihlášení: kolik jste vystavili, co je po splatnosti, jaký je obrat za letošní a loňský rok a kdo jsou vaši top klienti. V hlavním menu je to první položka sekce **Grafy**, označená jako **Akce pro tebe**.
+Přehled je úvodní obrazovka po přihlášení. Hlavička obsahuje název firmy a vedle něj tlačítko **Upravit přehled**; při úpravě jsou ve stejném řádku také **Uložit**, **Zrušit** a **Obnovit výchozí**. Widgety ukazují obchodní výsledky a podle vašich oprávnění také úkoly, účetní a daňové informace. Jejich rozložení si můžete upravit. V hlavním menu je Přehled první položkou sekce **Grafy**, označenou jako **Akce pro tebe**.
 
 ![Přehled (dashboard)](img/05_dashboard.webp)
 
@@ -15,6 +15,7 @@ Kapitolu otevřete, když:
 - se ráno přihlásíte a chcete vědět, co dnes udělat,
 - chcete rychle založit fakturu, klienta nebo jiný doklad,
 - potřebujete poslat upomínku po splatnosti,
+- chcete upravit widgety a jejich rozložení,
 - začínáte s novou firmou a nevíte, co nastavit dřív,
 - chcete změnit menu (nahoře, vlevo, kompaktní), rozdělit obrazovku na víc panelů nebo přepnout světlý a tmavý režim,
 - čísla na přehledu nesedí.
@@ -23,40 +24,39 @@ Kapitolu otevřete, když:
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
 | denně | Projít frontu úkolů a vyřídit, co hlásí | widget **Akce pro tebe** na Přehledu |
-| denně | Zkontrolovat doklady po splatnosti a poslat upomínky | tabulka **Po splatnosti** pod grafy |
+| denně | Zkontrolovat doklady po splatnosti a poslat upomínky | widget **Faktury po splatnosti** |
 | před termínem DPH a KH | Zkontrolovat daňové termíny | widget **Daňový kalendář** |
 | do 20. dne měsíce | Odeslat připravené měsíční hlášení (JMHZ) | položka **Odešli měsíční hlášení** v **Akce pro tebe** |
 | při zavádění firmy | Projít průvodce prvním nastavením | Přehled, dokud nemáte doklady |
 
 ## 10.2 Než začnete
 
-- **Oprávnění k zápisu.** Widget **Akce pro tebe**, průvodce prvním nastavením a rychlé vytváření (**+**) vidí jen uživatelé s právem zápisu. U role jen pro čtení jsou skryté.
+- **Oprávnění.** Jednotlivé položky widgetu **Akce pro tebe** a rychlé akce se zobrazují podle oprávnění k příslušné činnosti. Průvodce prvním nastavením je určen uživatelům s právem zápisu.
 - **Aktivní firma.** Všechna čísla se týkají firmy zvolené v přepínači firem. Máte-li víc firem, přepněte nejdřív na tu správnou. V režimu horního menu je přepínač uprostřed spodní lišty, v režimu levého menu vpravo v hlavičce.
-- **Měny.** Dlaždice s obratem v EUR se zobrazí jen u aktivní měny EUR (`Systém → Sazby a číselníky`).
-- **Podvojné účetnictví.** Položky **Zaúčtuj doklady** a **Zkontroluj integritu deníku** se zobrazí jen firmám v tomto režimu.
+- **Měny.** Widgety s částkami zobrazují měny podle svého nastavení. V editoru můžete u podporovaných widgetů zvolit měnu nebo zobrazit všechny měny.
+- **Podvojné účetnictví.** Některé účetní úkoly a souhrny jsou dostupné jen firmám v tomto režimu a uživatelům s odpovídajícím oprávněním.
 
 ## 10.3 Krok za krokem: Projít úkoly po přihlášení
 
 1. Přihlaste se. Otevře se Přehled (nebo `Grafy → Akce pro tebe`).
-2. V horní části najděte widget **Akce pro tebe**. Odznak ukazuje počet úkolů.
+2. Najděte widget **Akce pro tebe**. Jeho umístění závisí na vašem rozložení; v editoru ho můžete přesunout.
 3. Klikněte na položku, kterou chcete vyřídit. Aplikace vás přenese na filtrovaný seznam nebo správnou obrazovku (např. **Pošli upomínky** otevře faktury po splatnosti).
-4. Vyřiďte úkol a vraťte se na Přehled.
-5. Úkol, který teď řešit nechcete, skryjte v jeho menu: **Den**, **Týden**, **Pro historická data** nebo **Navždy**.
+4. Vyřiďte úkol a vraťte se na Přehled. Položka zmizí, když už nevyžaduje zásah.
 
-**Jak poznáte, že je hotovo:** položka z widgetu zmizí a odznak klesne. Při skrytých položkách se dole objeví odkaz **Obnovit skrytá (N)**, kterým je vrátíte.
+**Jak poznáte, že je hotovo:** položka už není v seznamu úkolů.
 
 Co která položka znamená, popisuje [§ 10.10.6](#10106-akce-pro-tebe).
 
 ## 10.4 Krok za krokem: Poslat upomínku po splatnosti
 
-1. Na Přehledu sjeďte pod grafy do tabulky **Po splatnosti**. U každé faktury vidíte počet dní po splatnosti.
+1. Na Přehledu najděte widget **Faktury po splatnosti**. Jeho polohu můžete upravit v editoru. U každé faktury vidíte počet dní po splatnosti.
 2. Klikněte na číslo faktury. Otevře se [detail faktury](16_Faktura_PDF.md).
 3. Klikněte na **Odeslat upomínku**.
 4. V potvrzovacím dialogu zkontrolujte příjemce a odeslání potvrďte.
 
 Chcete-li upomenout víc faktur najednou, klikněte v hlavičce tabulky na **Zobrazit vše**. Otevře se seznam faktur po splatnosti, kde upomínky pošlete hromadně (viz [Upomínky](22_Upominky.md)).
 
-**Jak poznáte, že je hotovo:** faktura přejde do stavu **Upomínka** a položka **Pošli upomínky** v **Akce pro tebe** ubyde.
+**Jak poznáte, že je hotovo:** faktura přejde do stavu **Upomínka** a po obnovení Přehledu se změní seznam faktur po splatnosti i odpovídající úkoly.
 
 ## 10.5 Krok za krokem: Založit nový doklad nebo záznam
 
@@ -136,10 +136,10 @@ Výchozí zkratky jsou v [§ 10.10.11](#101011-klavesove-zkratky).
 <!-- cols: 34 30 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Čísla na Přehledu nesedí (např. po ruční úpravě v databázi) | Statistiky se přepočítávají při vystavení, zrušení nebo úhradě faktury | Správce spustí přepočet z příkazové řádky (viz [§ 10.10.13](#101013-aktualizace-dat)) |
-| Chybí widget **Akce pro tebe** | Role je jen pro čtení | Požádejte správce o oprávnění k zápisu |
-| Chybí **Zaúčtuj doklady** nebo **Zkontroluj integritu deníku** | Firma nevede podvojné účetnictví | Je to správně, položky se týkají jen podvojného účetnictví |
-| Chybí dlaždice v EUR | Měna EUR není aktivní | Aktivujte ji v `Systém → Sazby a číselníky` |
+| Čísla na Přehledu nesedí (např. po ruční úpravě v databázi) | Některé souhrny používají agregační cache, kterou přímá změna v databázi neobnoví | Správce může spustit přepočet souhrnných statistik (viz [§ 10.10.13](#101013-aktualizace-dat)) |
+| V widgetu **Akce pro tebe** chybí některá položka | Nemáte oprávnění k odpovídající akci nebo není co řešit | Požádejte správce o potřebné oprávnění, případně ověřte stav dané agendy |
+| Chybí účetní úkol nebo widget | Firma nevede podvojné účetnictví nebo role nemá příslušné oprávnění | Ověřte účetní režim firmy a svá oprávnění |
+| Ve widgetu chybí měna | Je vybraná jiná měna nebo pro firmu nejsou data v dané měně | Změňte nastavení měny widgetu nebo ověřte doklady |
 | Chybí průvodce prvním nastavením | Firma už eviduje doklad (třeba jen přijatou fakturu) | Je to správně, rozhoduje existence dokladu, ne jeho částka nebo rok |
 | Úkol **Odešli měsíční hlášení** zmizel, ale protokol z ČSSZ nemáte | Položka mizí odesláním, ne přijetím | Protokol sledujte v [Podání a hlášení](85_Podani_a_hlaseni.md) |
 | Při Ctrl+klik se otevřela nová záložka | Ctrl+klik v posledním panelu, Cmd+klik a prostřední tlačítko myši otevírají záložku prohlížeče | Použijte Ctrl+klik v panelu, který není poslední |
@@ -149,98 +149,72 @@ Výchozí zkratky jsou v [§ 10.10.11](#101011-klavesove-zkratky).
 
 ## 10.10 Podrobnosti a pravidla
 
-### 10.10.1 KPI dlaždice
+### 10.10.1 Výsledky za období
 
-Horní řada dlaždic se přizpůsobí počtu aktivních měn (4 až 6 dlaždic):
+Widget **Výsledky za období** zobrazuje fakturované částky, náklady a rozdíl
+za období zvolená v jeho nastavení. Výchozí sestava nabízí tento měsíc, minulý
+měsíc, letošní rok, loňský rok do dneška a posledních 12 měsíců. Widget lze
+vložit vícekrát a každé instanci samostatně nastavit období a měny. Pořadí
+a šířka karet nejsou pevné; při první úpravě je najdete tam, kam jste je
+umístili, nebo v aktuální výchozí sestavě.
 
-<!-- cols: 30 70 -->
-| Dlaždice | Význam |
-|---|---|
-| **Obrat YYYY (CZK)** | Součet všech vystavených (i nezaplacených) faktur v CZK za aktuální rok. Pod číslem je pro porovnání obrat minulého roku ve stejném období. |
-| **Obrat YYYY (EUR)** | Totéž pro EUR, jen pokud je měna EUR aktivní v číselnících. |
-| **Vystaveno YYYY** | Počet faktur za rok (všechny stavy kromě konceptů). |
-| **Po splatnosti** | Suma neuhrazených faktur po splatnosti, součet CZK a EUR, červeně. Klik otevře filtrovaný seznam. |
-| **Ø doba úhrady** | Průměrný počet dní mezi vystavením a zaplacením (jen letošní zaplacené faktury). |
+### 10.10.2 Top odběratelé
 
-### 10.10.2 Top klienti
-
-Levý koláč ukazuje 3 největší klienty letos, pravý 3 největší loni. Hover nad výsečí ukáže jméno klienta a obrat, klik na legendu výseč odfiltruje.
+Widget **Top odběratelé** lze nastavit jako tabulku, graf nebo obojí. Když
+zobrazujete tabulku i graf, v nastavení zvolíte její umístění vlevo, vpravo,
+nad nebo pod grafem. V tabulce jsou názvy odběratelů, počty faktur a obrat
+přepočtený do CZK. Počet řádků lze nastavit v možnostech widgetu.
 
 > [!TIP]
-> Máte-li přístup k více firmám, koláč ukazuje data jen pro aktuálně vybranou firmu.
+> Widget se zobrazí uživatelům s oprávněním číst vydané faktury i klienty a vždy
+> ukazuje data právě vybrané firmy.
 
-### 10.10.3 Stav faktur
+### 10.10.3 Vydané a přijaté faktury
 
-Koláč rozdělí letošní faktury podle stavu:
+Widgety **Vydané faktury** a **Přijaté faktury** shrnují počty a nezaplacené
+nebo po splatnosti doklady. Konkrétní doklady se zobrazují v samostatných
+widgetech podle oprávnění, například **Faktury po splatnosti** nebo
+**Faktury před splatností**. Widgety můžete přesouvat nezávisle.
 
-- zelená - **Zaplaceno**,
-- fialová - **Odesláno** (klientovi šel e-mail s PDF, čeká se na platbu),
-- žlutá - **Vystaveno (neodesláno)** (vystaveno, ale zatím neodesláno),
-- oranžová - **Upomínka** (po splatnosti, byla odeslána upomínka),
-- černá - **Storno / dobropis**.
+### 10.10.4 Vývoj fakturace a nákladů
 
-### 10.10.4 Obrat po měsících
+Widget **Vývoj fakturace a nákladů** zobrazuje měsíční částky za zvolený počet
+měsíců. Jeho šířku a výšku lze upravit; další možnosti se řídí nastavením
+měny.
 
-Spodní dva grafy ukazují měsíční obrat (CZK a EUR samostatně). Letošní rok je plnou barvou, minulý prázdnou pro porovnání. Hover nad sloupcem ukáže přesnou částku.
+### 10.10.5 Splatnosti faktur
 
-### 10.10.5 Po splatnosti a nezaplacené faktury
-
-Pod grafy je tabulka:
-
-- **Po splatnosti** (červená) - faktury ve stavu odesláno, vystaveno nebo upomínka, které překročily splatnost, s počtem dní po splatnosti. Upomínku pošlete z detailu faktury tlačítkem **Odeslat upomínku**.
-- **Nezaplacené (před splatností)** - faktury ve stejných stavech, které ještě nejsou po splatnosti.
-
-Klik na číslo faktury otevře [Detail faktury](16_Faktura_PDF.md).
+Widget **Faktury po splatnosti** uvádí neuhrazené faktury po termínu a počet
+dnů prodlení. **Faktury před splatností** ukazují neuhrazené doklady, jejichž
+termín teprve přijde. Kliknutím na doklad otevřete [jeho detail](16_Faktura_PDF.md);
+upomínku odešlete z detailu faktury tlačítkem **Odeslat upomínku**. Každý
+widget má vlastní polohu v rozložení.
 
 ### 10.10.6 Akce pro tebe
 
-Widget úplně nahoře na Přehledu (nad KPI dlaždicemi) je průběžně skládaná fronta věcí, které čekají na váš zásah, s odznakem počtu. Vidí ho každý, kdo smí zapisovat (u role jen pro čtení je skrytý). Každá položka se zobrazí jen tehdy, když má co hlásit.
+Widget **Akce pro tebe** shrnuje úkoly, které lze vyřídit v dalších agendách.
+Můžete ho umístit kamkoli na Přehled. Zobrazí se, pokud máte oprávnění
+alespoň k jedné nabízené akci; jednotlivé položky se řídí oprávněním pro svou
+agendu a tím, zda je co řešit.
 
-<!-- cols: 22 40 38 -->
-| Položka | Kdy se objeví | Vede na |
-|---|---|---|
-| Pošli upomínky | Faktury po splatnosti bez odeslané upomínky | Faktury (filtr po splatnosti) |
-| Spáruj platby z banky | Nespárované bankovní transakce | [Banka](29_Banka.md) |
-| Vystav pravidelné faktury | Splatné pravidelné faktury čekají na vygenerování | [Pravidelné faktury](17_Pravidelne_fakturace.md) |
-| Zaplať dodavatelům | Přijaté faktury po splatnosti se skutečným zůstatkem po odečtení banky a zápočtů | Přijaté faktury (filtr po splatnosti) |
-| Zkontroluj koncepty přijatých faktur | Rozpracované koncepty přijatých faktur | [Přijaté faktury](23_Prijate_faktury.md) (filtr koncept) |
-| **Zaúčtuj doklady** | Jen podvojné účetnictví, viz [§ 10.10.6.1](#101061-zauctuj-doklady) | Filtrovaný seznam vydaných, přijatých faktur nebo banky |
-| **Zkontroluj integritu deníku** | Jen podvojné účetnictví, viz [§ 10.10.6.2](#101062-zkontroluj-integritu-deniku) | [Účetní deník](52_Ucetni_denik.md) |
-| Termín DPH / KH | Blíží se nebo uplynul termín podání | [Výkazy DPH](41_Vykazy_DPH.md) |
-| Souhrnné hlášení za uplynulý měsíc | Termín SH | [Souhrnné hlášení](44_Souhrnne_hlaseni.md) |
-| Kontaktuj neaktivní klienty | Klienti bez aktivity delší dobu (riziko odchodu) | [Zisk](11_Zisk.md) |
-| **Odešli měsíční hlášení** | Připravené měsíční hlášení (JMHZ) čeká na odeslání na ČSSZ, viz [§ 10.10.6.3](#101063-odesli-mesicni-hlaseni) | [Podání a hlášení](85_Podani_a_hlaseni.md) |
-| Nainstalujte MyÚčto na plochu telefonu | Jen na mobilu a jen když aplikace neběží z plochy. V Chrome nebo Edge na Androidu stačí klepnout na **Nainstalovat**, na iPhonu a iPadu klepněte v prohlížeči na **Sdílet** a zvolte **Přidat na plochu** | - |
+Mezi možné položky patří upomínky, schvalování dokladů, opakovaná fakturace,
+nespárované bankovní pohyby, přijaté doklady, daňové termíny, chybějící
+účetní období a připravená měsíční hlášení JMHZ. Složení seznamu se proto může
+lišit podle uživatele a firmy. Kliknutím přejdete na odpovídající agendu.
 
-Každá položka má menu se skrytím (na den, týden, natrvalo, nebo jen pro historická data). Po skrytí se dole objeví odkaz **Obnovit skrytá (N)**.
+Jednotlivé položky v tomto widgetu nemají nabídku pro skrytí nebo odložení.
+Úkol vyřiďte v příslušné agendě; po načtení aktuálního stavu se už nebude
+nabízet, pokud přestal vyžadovat zásah. Chcete-li odstranit celý widget,
+odeberte jej v editoru a kdykoli jej můžete znovu přidat z katalogu.
 
-Přijatá faktura plně vyrovnaná bankou, vzájemným zápočtem nebo zápočtem proti účtu se v položce **Zaplať dodavatelům** znovu nenabízí. U částečné úhrady se do souhrnů a platebních příkazů započítá jen zbývající částka.
-
-#### 10.10.6.1 Zaúčtuj doklady
-
-Zobrazí se jen firmám v režimu **podvojné účetnictví** (daňová evidence zaúčtování nepoužívá). Sečte tři zdroje nezaúčtovaných dokladů a u každého ukáže samostatný klikatelný štítek s počtem:
-
-- **Vydané** - vydané faktury, dobropisy a daňové doklady k platbě bez zaúčtování (mimo koncepty a stornované), vede na seznam vydaných faktur s filtrem nezaúčtovaných (viz [§ 14.11.4](14_Faktury.md#14114-filtry)).
-- **Přijaté** - přijaté faktury bez zaúčtování (mimo koncepty a stornované), vede na seznam přijatých faktur s filtrem nezaúčtovaných (viz [§ 23.11.1](23_Prijate_faktury.md#23111-seznam-prijatych-faktur)).
-- **Banka** - nevyřízené návrhy zaúčtování bankovních transakcí, vede na [Banku](29_Banka.md).
-
-Zálohové (proforma) faktury se do počtu záměrně nepočítají. Nejsou daňový doklad, zaúčtování u nich zůstává trvale prázdné, takže by číslo jen uměle nafukovaly. Klik na hlavní řádek otevře první neprázdný zdroj, klik na štítek rovnou jeho filtrovaný seznam. Jak zaúčtování z detailu dokladu funguje, popisují kapitoly [Faktury](14_Faktury.md) a [Přijaté faktury](23_Prijate_faktury.md).
-
-#### 10.10.6.2 Zkontroluj integritu deníku
-
-Také jen podvojné účetnictví. Na rozdíl od ostatních položek nepočítá nic naživo, čte poslední uložený běh **nočního kontrolního jobu** (viz [§ 52.14.11 Kontrola integrity deníku](52_Ucetni_denik.md#521411-kontrola-integrity-deniku-nocni-job)), aby dotaz na dashboard zůstal levný. Pokud job našel nesrovnalost mezi doklady a deníkem, položka se zobrazí se závažností **vysoká** a počtem nálezů v popisku. Klik, na hlavním řádku i na kterémkoli štítku rozpadu, vede vždy na [Účetní deník](52_Ucetni_denik.md). Aplikace nemá samostatnou stránku s výpisem jednotlivých nálezů, ty najdete jen přes příkazovou řádku (viz [§ 52.14.11](52_Ucetni_denik.md#521411-kontrola-integrity-deniku-nocni-job)).
-
-#### 10.10.6.3 Odešli měsíční hlášení
-
-Objeví se, jakmile je měsíční hlášení zaměstnavatele (JMHZ) **připravené k odeslání** na ČSSZ a nikdo je neodeslal. Má závažnost **vysokou** a v popisku počet takových podání. Klik vede na obrazovku mzdových podání.
-
-Odeslání zůstává na výslovném potvrzení člověka. Je to právní úkon přičitatelný zaměstnavateli a poslední okamžik, kdy si někdo může všimnout, že je něco špatně. Automatické odeslání by tento okamžik vzalo. Zapomenout na něj ale znamená propásnout lhůtu do 20. dne následujícího měsíce, a to je chyba, která se sama ničím neprojeví. Proto hlášení visí mezi úkoly tak dlouho, dokud je skutečně neodešlete.
-
-Položka **zmizí odesláním, ne přijetím**. Na protokol z ČSSZ se nečeká, ten sledujete dál v [Podání a hlášení](85_Podani_a_hlaseni.md). Nabízí se jen ostré prostředí a jen kanál ČSSZ: testovací podání nikdo podávat nemusí a podání na portál zdravotní pojišťovny aplikace odeslat neumí, protože žádná ze sedmi pojišťoven nemá zveřejněné strojové rozhraní. Vyzývat k úkonu, který se odsud udělat nedá, by bylo horší než mlčet.
+Je-li mezi úkoly připravené měsíční hlášení zaměstnavatele (JMHZ), widget
+nabídne proklik na [Podání a hlášení](85_Podani_a_hlaseni.md). Odeslání zůstává
+na výslovném potvrzení člověka; položka se přestane zobrazovat, až ji už není
+třeba řešit.
 
 ### 10.10.7 Daňový kalendář
 
-Widget **Daňový kalendář** (pod dlaždicemi, vedle nadcházejících záloh) shrnuje blížící se daňové termíny aktuálního dodavatele do jednoho seznamu:
+Widget **Daňový kalendář** shrnuje blížící se daňové termíny aktuálního dodavatele do jednoho seznamu. Jeho umístění můžete změnit v editoru:
 
 - **DPH přiznání** a **Kontrolní hlášení** - podle periodicity dodavatele (měsíčně nebo čtvrtletně, viz [Výkazy DPH](41_Vykazy_DPH.md)).
 - **Souhrnné hlášení** - jen pokud má firma za předchozí měsíc EU B2B plnění.
@@ -339,14 +313,14 @@ Dokud v prohlížeči není uložená žádná volba (první návštěva), aplik
 
 ### 10.10.13 Aktualizace dat
 
-Statistiky se nepočítají v reálném čase. Používají agregační cache, která se přepočítá pokaždé, když vystavíte, zrušíte nebo označíte jako zaplacenou fakturu. Pokud zjistíte, že čísla nesedí (např. po ruční úpravě v databázi), správce spustí z příkazové řádky:
+Widgety získávají data ze souhrnných výpočtů. Některé hodnoty používají agregační cache, kterou změny provedené přes aplikaci průběžně obnovují. Přímá úprava databáze ji neobnoví. Pokud jsou po takové změně souhrny zastaralé, správce může spustit:
 
 ```bash
 php api/bin/recompute-stats.php
 ```
 
 > [!TIP]
-> Ukázková data vygenerovaná průvodcem počátečního nastavení přepočítají statistiky automaticky hned po dokončení.
+> Ukázková data vygenerovaná průvodcem počátečního nastavení přepočítají souhrnné statistiky automaticky hned po dokončení.
 
 ### 10.10.14 Průvodce prvním nastavením
 
@@ -369,6 +343,18 @@ Průvodce vidí každý, kdo smí zapisovat. Je to rozcestník po místech, kter
 | První klient / první faktura | [Klienti](18_Klienti.md) a [Faktury](14_Faktury.md) |
 
 Kroky se odškrtávají ručně, odškrtnutí je jen vaše poznámka. Po kliknutí na **Skrýt průvodce** zůstane řádek s odkazem **Zobrazit průvodce**. Stav (odškrtnuté kroky i skrytí) se ukládá per uživatel.
+
+### 10.10.15 Upravit rozložení Přehledu
+
+Tlačítkem **Upravit přehled** v řádku s názvem firmy otevřete editor widgetů. Karty můžete přidat z prohledávatelného katalogu, odebrat, přesouvat pomocí plovoucí překryvné lišty s úchytem nebo tlačítky se šipkami a upravit jejich nastavení. Lišta nabízí také nastavení a odebrání widgetu; nezasahuje do výšky jeho obsahu. Odebraný widget lze z katalogu přidat znovu. Šířku změníte svislou ryskou uprostřed pravé hrany, výšku vodorovnou ryskou uprostřed spodní hrany a oba rozměry diagonálním úchytem v rohu. Jednosměrné úchyty zachovají druhý rozměr; zobrazují se pouze pro rozměry, které widget podporuje. Použít můžete myš nebo klávesy se šipkami po zaměření úchytu; šířka se mění po jednom sloupci až do plné šířky a nejmenší šířku určuje konkrétní widget. Na mobilu se widgety skládají do jednoho sloupce.
+
+Katalog se přizpůsobuje dostupné šířce. Na širokém displeji ukazuje čtyři až šest položek vedle sebe; na menších obrazovkách postupně ubírá sloupce. Vyhledávání prochází názvy i popisy ve zvoleném jazyce.
+
+Výchozí výška nových widgetů je **Automatická** a přizpůsobuje se obsahu. U podporovaných widgetů můžete zvolit také menší, běžnou nebo větší výšku; vlastní uložené volby zůstávají zachované.
+
+Tlačítkem **Nový řádek** rozdělíte přehled na skupiny. V editoru se oddělovač zobrazuje jako lišta přes celou šířku. Přetáhněte jeho úchyt do prázdného místa skupiny; vloží se na její konec před následující oddělovač. Další skupina začíná pod nejvyšším widgetem předchozí skupiny, takže se její obsah neposune vedle vyšší karty. Oddělovač lze přesouvat nebo odstranit pouze při úpravě přehledu.
+
+Změny potvrďte tlačítkem **Uložit**, vraťte zpět tlačítkem **Zrušit** nebo obnovte původní sestavu přes **Obnovit výchozí**. Rozložení se ukládá k vašemu uživatelskému účtu a platí napříč firmami. Widget skrytý kvůli oprávněním nebo nastavení firmy se znovu zobrazí, až bude dostupný; jeho nastavení zůstane zachované.
 
 ## 10.11 Související kapitoly
 

@@ -40829,5 +40829,178 @@
       "smtp_managed": "Poštovní transport spravuje provozovatel.",
       "smtp_environment_locked": "Poštovní transport řídí proměnné prostředí."
     }
+  },
+  "dashboardBoard": {
+    "edit": "Upravit přehled",
+    "save": "Uložit",
+    "cancel": "Zrušit",
+    "reset": "Obnovit výchozí",
+    "add": "Přidat widget",
+    "remove": "Odebrat",
+    "up": "Posunout nahoru",
+    "down": "Posunout dolů",
+    "width": "Šířka",
+    "empty": "Žádné widgety. Přidejte je v editoru.",
+    "loading": "Načítání přehledu…",
+    "loadError": "Přehled se nepodařilo načíst.",
+    "widgetError": "Data widgetu se nepodařilo načíst.",
+    "unavailable": "Widget není pro tuto firmu dostupný.",
+    "noData": "Zatím nejsou k dispozici data.",
+    "conflict": "Přehled byl změněn v jiném okně. Zrušte úpravy a načtěte aktuální verzi.",
+    "retry": "Zkusit znovu",
+    "hidden": "Některé widgety jsou pro tuto firmu skryté. Jejich nastavení zůstane zachované.",
+    "limit": "Nejvýše 32 widgetů.",
+    "options": "Nastavení",
+    "open": "Otevřít",
+    "count": "Počet",
+    "amount": "Částka",
+    "date": "Datum",
+    "period": "Období",
+    "currency": "Měna",
+    "months": "Počet měsíců",
+    "rows": "Počet řádků",
+    "display": "Zobrazení",
+    "all": "Všechny měny",
+    "auto": "Automaticky",
+    "table": "Tabulka",
+    "chart": "Graf",
+    "both": "Tabulka a graf",
+    "inflow": "Příjmy",
+    "outflow": "Výdaje",
+    "net": "Čistý tok",
+    "running": "Kumulativně",
+    "submitted": "Podáno",
+    "pending": "Čeká",
+    "paid": "Zaplaceno",
+    "unpaid": "Nezaplaceno",
+    "backfill_pending": "Čeká na doúčtování",
+    "bank_posting_pending": "Nezaúčtované bankovní pohyby",
+    "automation_auto_today": "Dnešní automatické zaúčtování",
+    "pending_approvals": "Doklady ke schválení",
+    "recurring_due": "Opakované faktury k vystavení",
+    "bank_unmatched": "Nespárované bankovní pohyby",
+    "overdue_invoices": "Faktury po splatnosti",
+    "height": "Výška",
+    "height_auto": "Automatická",
+    "height_compact": "Kompaktní",
+    "height_normal": "Běžná",
+    "height_tall": "Vysoká",
+    "addDivider": "Přidat nový řádek",
+    "divider": "Nový řádek",
+    "dividerHint": "Následující widgety začnou pod předchozí skupinou.",
+    "resize": "Změnit velikost widgetu",
+    "resizeWidth": "Změnit pouze šířku widgetu",
+    "resizeHeight": "Změnit pouze výšku widgetu",
+    "move": "Přesunout widget",
+    "tablePosition": "Umístění tabulky",
+    "left": "Vlevo od grafu",
+    "right": "Vpravo od grafu",
+    "above": "Nad grafem",
+    "below": "Pod grafem",
+    "overdue_payables": "Závazky po splatnosti",
+    "purchase_drafts": "Koncepty přijatých faktur",
+    "purchase_approvals_pending": "Přijaté doklady ke schválení",
+    "accounting_period_missing": "Chybějící účetní období",
+    "jmhz_unsent": "Mzdová podání k odeslání"
+  },
+  "dashboardWidgets": {
+    "widgets": {
+      "business_kpi": {
+        "title": "Výsledky za období",
+        "description": "Fakturováno, náklady a rozdíl podle měny."
+      },
+      "business_monthly": {
+        "title": "Vývoj fakturace a nákladů",
+        "description": "Měsíční přehled fakturace a nákladů."
+      },
+      "sales_summary": {
+        "title": "Vydané faktury",
+        "description": "Počty dokladů, splatnosti a průměrná doba úhrady."
+      },
+      "purchases_summary": {
+        "title": "Přijaté faktury",
+        "description": "Počty dokladů a nezaplacené závazky."
+      },
+      "receivables_aging": {
+        "title": "Stáří pohledávek",
+        "description": "Pohledávky podle stáří a měny."
+      },
+      "payables_aging": {
+        "title": "Stáří závazků",
+        "description": "Závazky podle stáří a měny."
+      },
+      "cashflow_weekly": {
+        "title": "Čisté cashflow na čtyři týdny",
+        "description": "Očekávané obchodní příjmy a výdaje."
+      },
+      "cashflow_collections": {
+        "title": "Očekávané inkaso",
+        "description": "Očekávané inkaso faktur za 30, 60 a 90 dní."
+      },
+      "receivables_due": {
+        "title": "Nejbližší splatnosti",
+        "description": "Pohledávky splatné dnes, tento týden a měsíc."
+      },
+      "invoices_overdue": {
+        "title": "Faktury po splatnosti",
+        "description": "Konkrétní neuhrazené faktury po splatnosti."
+      },
+      "invoices_upcoming": {
+        "title": "Faktury před splatností",
+        "description": "Konkrétní neuhrazené faktury před splatností."
+      },
+      "clients_top": {
+        "title": "Top odběratelé",
+        "description": "Nejvýznamnější odběratelé podle fakturace."
+      },
+      "invoices_drafts": {
+        "title": "Rozpracované faktury",
+        "description": "Rozpracované faktury a výkazy práce."
+      },
+      "invoices_approvals": {
+        "title": "Schvalování faktur",
+        "description": "Vydané faktury čekající na schválení."
+      },
+      "documents_requests": {
+        "title": "Chybějící doklady",
+        "description": "Otevřené požadavky na doplnění dokladů."
+      },
+      "actions_quick": {
+        "title": "Rychlé akce",
+        "description": "Vytvoření faktury, přijatého dokladu nebo kontaktu."
+      },
+      "actions_todo": {
+        "title": "Akce pro tebe",
+        "description": "Úkoly dostupné podle vašich oprávnění."
+      },
+      "vat_current": {
+        "title": "Aktuální DPH",
+        "description": "Orientační souhrn aktuálního období DPH."
+      },
+      "tax_deadlines": {
+        "title": "Daňové termíny",
+        "description": "Nejbližší daňové termíny firmy."
+      },
+      "tax_calendar": {
+        "title": "Daňový kalendář",
+        "description": "Rozšířený přehled termínů, podání a plateb."
+      },
+      "tax_net": {
+        "title": "Co mi zbyde",
+        "description": "Projektovaný čistý příjem OSVČ."
+      },
+      "tax_advances": {
+        "title": "Nadcházející zálohy",
+        "description": "Nadcházející zálohy na daň a pojistné."
+      },
+      "accounting_status": {
+        "title": "Stav účetního zpracování",
+        "description": "Doúčtování, banka a automatické zaúčtování."
+      },
+      "layout_divider": {
+        "title": "Nový řádek",
+        "description": "Neviditelný předěl zarovná následující widgety pod předchozí skupinu."
+      }
+    }
   }
 }

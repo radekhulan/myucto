@@ -238,19 +238,54 @@ SMTP a IMAP hesla se po uložení nikdy nevracejí do prohlížeče, rozhraní u
 
 ### 9.11.3 Co portál zobrazuje
 
-Úvodní stránka klienta je agregovaný přehled hospodaření aktuální firmy. Jsou na ní jen souhrnná čísla, **žádná jména zákazníků nebo dodavatelů ani čísla dokladů** (záměrné bezpečnostní omezení, platí i pro náhled účetní a admina). V záhlaví je název firmy, rozsah období (od 1. 1. do dneška) a poznámka, že jde o orientační přehled, ne účetní závěrku. Data se agregují živě při každém načtení stránky, nejde o cache.
+Úvodní stránka klienta je přizpůsobitelný přehled hospodaření aktuální firmy.
+Hlavička obsahuje název firmy, označení **Přehled firmy** a upozornění, že jde
+o orientační přehled, ne účetní závěrku. Vedle hlavičky je tlačítko
+**Upravit přehled**; při úpravě se tam zobrazí také uložení, zrušení a obnovení
+výchozí sestavy. Dostupné widgety a jejich obsah se řídí oprávněními a
+nastavením firmy. Například **Top odběratelé** se zobrazí jen s právem číst
+vydané faktury i klienty a ukazuje názvy odběratelů.
 
-#### KPI dlaždice
+Tlačítkem **Upravit přehled** si můžete změnit pořadí, šířku a podporovanou
+výšku karet, upravit jejich nastavení nebo některé odebrat. V katalogu
+**Přidat widget** lze nabídku vyhledat podle názvu či popisu a odebraný widget přidat znovu.
+Na širokém displeji se do jednoho řádku vejdou čtyři až šest položek. Widgety
+můžete přesouvat pomocí plovoucí překryvné lišty s úchytem nebo tlačítky pro
+posun. Lišta nabízí také nastavení a odebrání widgetu a neleží v jeho měřeném
+obsahu. Karty můžete přesouvat i tažením do prázdného místa jejich skupiny.
+Svislá ryska na pravé hraně mění pouze šířku, vodorovná ryska na spodní hraně pouze výšku
+a rohový úchyt oba rozměry. Zobrazují se jen pro podporované rozměry;
+použít můžete myš nebo klávesy se šipkami po zaměření úchytu. Výchozí výška
+nových widgetů je **Automatická**.
+Na mobilu se karty skládají pod sebe. Úpravy potvrďte tlačítkem **Uložit**,
+případně je zahoďte přes **Zrušit**.
+Tlačítko **Obnovit výchozí** vrátí výchozí sestavu portálu. Každý oddělovač
+**Nový řádek** je v editoru samostatná lišta přes celou šířku; volné místo
+v jeho skupině je cíl přesunu a oddělovač se vloží na konec skupiny před
+následující oddělovač.
 
-Karty ukazují **fakturováno / náklady / rozdíl** za pět období: **Tento měsíc**, **Minulý měsíc**, **Letos (YTD)**, **Loni do dneška** a **Posledních 12 měsíců**. Při více měnách má každá karta řádek za každou měnu zvlášť, částky se napříč měnami nesčítají.
+Widget **Top odběratelé** lze zobrazit jako tabulku, graf nebo obojí. Při
+zobrazení obou částí můžete nastavit, zda bude tabulka vlevo, vpravo, nad nebo
+pod grafem.
+
+Rozložení portálu se ukládá k vašemu uživatelskému účtu a je stejné napříč firmami. Widget, který pro vybranou firmu nebo vaše práva není dostupný, se skryje; jeho nastavení zůstane zachované.
+
+#### Výsledky za období
+
+Widgety **Výsledky za období** ukazují **fakturováno / náklady / rozdíl**.
+Výchozí sestava obsahuje pět období: **Tento měsíc**, **Minulý měsíc**,
+**Letos (YTD)**, **Loni do dneška** a **Posledních 12 měsíců**. Widget lze
+vložit vícekrát a jeho období i měnu upravit samostatně. Při zobrazení více
+měn se částky z různých měn nesčítají.
 
 #### Měsíční graf
 
-Sloupcový graf fakturace a nákladů za posledních 12 měsíců. Při více měnách je nad grafem přepínač měny (výchozí CZK, jinak první dostupná).
+Widget **Vývoj fakturace a nákladů** zobrazuje měsíční fakturaci a náklady.
+V nastavení lze zvolit 6, 12 nebo 24 měsíců a měnu.
 
 #### Cashflow
 
-Tři karty vedle sebe:
+Samostatné widgety zobrazují:
 
 - **Pohledávky** - neuhrazené vydané faktury podle stáří: nesplatné, po splatnosti 1-30, 31-60, 61-90 a 90+ dní, s počtem dokladů a součtem za měnu.
 - **Závazky** - totéž pro nezaplacené přijaté faktury.
@@ -258,15 +293,22 @@ Tři karty vedle sebe:
 
 #### DPH a daňové termíny
 
-U plátců DPH ukazuje karta **DPH** aktuální **Období**, daň na výstupu, daň na vstupu, výslednou povinnost (nebo nadměrný odpočet) a **Termín podání**. U neplátců se zobrazí „Firma není plátce DPH." Karta **Daňové termíny** vypisuje termíny v okně 35 dní dopředu, barevně podle závažnosti (viz [Výkazy DPH](41_Vykazy_DPH.md)). Bez blízkých termínů ukáže „Žádné blízké termíny."
+Widget **Aktuální DPH** je dostupný plátcům DPH a ukazuje aktuální období,
+daň na výstupu, daň na vstupu, výslednou povinnost nebo nadměrný odpočet
+a termín podání. Widget **Daňové termíny** vypisuje blížící se termíny
+(viz [Výkazy DPH](41_Vykazy_DPH.md)). Každý widget má vlastní polohu
+a zobrazuje se podle oprávnění a nastavení firmy.
 
-#### Pruh „Účetní čeká na doklady"
+#### Chybějící doklady
 
-Má-li klient otevřené požadavky, zobrazí se pod záhlavím pruh s počtem a odkazem na **Chybějící doklady**. Po termínu je červený, jinak žlutý. Zmizí, jakmile klient všechny otevřené požadavky vyřídí nebo je účetní uzavře jinak.
+Widget **Chybějící doklady** zobrazuje počet otevřených požadavků a odkaz
+na jejich seznam. Umístění lze změnit stejně jako u ostatních widgetů.
 
 #### Prázdný stav
 
-Klient bez přiřazené firmy vidí zprávu, že účet není propojen s žádnou firmou, s výzvou kontaktovat účetní (viz [§ 9.3](#93-krok-za-krokem-zalozeni-klientskeho-uctu)). Nová firma bez dokladů vidí stav „Zatím tu nejsou žádná data".
+Klient bez přiřazené firmy vidí zprávu, že účet není propojen s žádnou firmou,
+s výzvou kontaktovat účetní (viz [§ 9.3](#93-krok-za-krokem-zalozeni-klientskeho-uctu)).
+Widgety nové firmy bez odpovídajících dokladů zobrazí prázdný stav.
 
 ### 9.11.4 Rychlé akce
 

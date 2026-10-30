@@ -80,8 +80,12 @@ api.interceptors.response.use(
     // pracovní plochy obnovila při návratu (`useWindowRefresh`). Okno v iframe
     // ji pošle správci oken, hlavní dokument ji vyvolá jako událost, kterou
     // správce oken rozešle stejně.
-    if (!['get', 'head', 'options'].includes(response.config.method?.toLowerCase() ?? 'get')) {
-      const resource = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/').split('/')[1]
+    const method = response.config.method?.toLowerCase() ?? 'get'
+    const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api(?:\/v1)?\//, '/')
+    // Hromadné čtení widgetů nesmí spustit další obnovu ostatních přehledů.
+    const dashboardRead = method === 'post' && path === '/dashboard-widgets/query'
+    if (!['get', 'head', 'options'].includes(method) && !dashboardRead) {
+      const resource = path.split('/')[1]
       if (resource && /^[a-z0-9-]+$/.test(resource)) {
         const scope = getWindowSupplierScope()
         if (scope) postWindowFrameMessage({ type: 'myucto-window-mutation', id: scope.windowId, resource })
