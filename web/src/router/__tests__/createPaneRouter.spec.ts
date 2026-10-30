@@ -8,6 +8,16 @@ vi.mock('@/i18n', () => ({
 import { createPaneRouter } from '@/router/createPaneRouter'
 
 describe('createPaneRouter', () => {
+  it('předá přímý globální cíl hlavní aplikaci místo autorizace neznámé panelové routy', async () => {
+    const onGlobalNavigation = vi.fn()
+    const guard = vi.fn(() => true)
+    const router = createPaneRouter({ prepareRoutes: () => {}, guard, onGlobalNavigation })
+    await router.push('/instance-admin?tab=smtp#targets')
+    expect(onGlobalNavigation).toHaveBeenCalledWith('/instance-admin?tab=smtp#targets')
+    expect(guard).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.matched).toHaveLength(0)
+  })
+
   it('řeší stejné params a query nad paměťovou historií', () => {
     const router = createPaneRouter({
       prepareRoutes: () => {},

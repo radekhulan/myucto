@@ -235,7 +235,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles',
   'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-update',
-  'admin-isds-gateway',
+  'admin-isds-gateway', 'admin-instance',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
@@ -515,7 +515,11 @@ export async function authorizationGuard(
     return { name: 'instance-admin' }
   }
   const instanceAdminOnly = to.matched.some(r => r.meta.instanceAdminOnly)
-  if (instanceAdminOnly && !auth.isInstanceAdmin && !auth.isSuperadmin) return denyFallback(to.name, auth)
+  if (instanceAdminOnly && auth.isSuperadmin && !auth.isInstanceAdmin) {
+    // Superadmin používá běžné panely; oddělený shell patří technickému účtu.
+    return { name: to.name === 'instance-admin-profile' ? 'profile-password' : 'admin-instance', query: to.query, hash: to.hash }
+  }
+  if (instanceAdminOnly && !auth.isInstanceAdmin) return denyFallback(to.name, auth)
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
     return true

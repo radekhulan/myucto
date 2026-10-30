@@ -33,6 +33,11 @@ export function createPaneRouter(options: PaneRouterOptions): Router {
   })
 
   paneRouter.beforeEach(async (to, from) => {
+    // Přímý odkaz z obsahu iframe může mířit mimo pracovní plochu.
+    if (!to.matched.length) {
+      options.onGlobalNavigation(to.fullPath)
+      return false
+    }
     const decision = await options.guard(to, from)
     if (decision && decision !== true && typeof decision !== 'boolean') {
       let internal = false
