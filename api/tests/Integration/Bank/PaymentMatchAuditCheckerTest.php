@@ -408,6 +408,24 @@ final class PaymentMatchAuditCheckerTest extends TestCase
     }
 
     /** Popis karetní transakce (zakončený kódem země) také není jméno protistrany. */
+    /** Banka u karty uvádí v protistraně sebe. Jiná než kartová platba se hlásí dál. */
+    public function testDoesNotFlagCounterpartyForCardPayment(): void
+    {
+        $date = self::YEAR . '-03-10';
+        $card = $this->createPurchaseInvoice('KARTA-1', $this->czkId, 500.00, 1.0, 'paid', $date, 'Obchod Karta s.r.o.');
+        $cardTx = $this->createBankTx('CZK', -500.00, $date, 'Banka Příkladová');
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '1234' WHERE id = ?")->execute([$cardTx]);
+        $this->linkPaymentMatch($cardTx, $card, 500.00);
+        $transfer = $this->createPurchaseInvoice('PREVOD-1', $this->czkId, 500.00, 1.0, 'paid', $date, 'Obchod Převod s.r.o.');
+        $transferTx = $this->createBankTx('CZK', -500.00, $date, 'Banka Příkladová');
+        $this->linkPaymentMatch($transferTx, $transfer, 500.00);
+
+        $items = $this->checker->audit($this->supplierId, self::STARTS_ON, self::ENDS_ON);
+
+        self::assertNull($this->findForTx($items, $cardTx));
+        self::assertContains('counterparty_mismatch', $this->findForTx($items, $transferTx)['issues'] ?? []);
+    }
+
     public function testDoesNotFlagCounterpartyForCardTransactionDescriptor(): void
     {
         $date = self::YEAR . '-07-04';

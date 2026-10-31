@@ -19808,7 +19808,7 @@
         "card_clearing_open": "Mezičlen plateb kartou (378.x) se zůstatkem - nevypořádané platby kartou k rozvahovému dni",
         "card_payments_unmatched": "Platby kartou bez dokladu starší než lhůta z nastavení účtování karet",
         "fx_footprint_missing": "Cizoměnové řádky na devizovém účtu bez úplné měnové stopy (currency_code/amount_foreign)",
-        "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy na 324",
+        "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy",
         "paid_advances_no_payment": "Zaplacené zálohové faktury dodavatelům bez zaúčtované úhrady na 314",
         "settled_but_unpaid": "Doklady se stavem Odeslaná, ale s úhradou už v deníku (aktualizujte stav na Zaplacená)",
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
@@ -22328,7 +22328,7 @@
       "attachment_counterparty_ico": "IČO protistrany na příloze jiné",
       "attachment_variable_symbol": "VS na příloze jiný",
       "payment_header_divergence": "Údaj o zaplacení dokladu se liší od doložených úhrad. Přecenění používá úhrady doložené k rozvahovému dni.",
-      "fx_settlement_unproven": "Zůstatek dokladu nelze pro přecenění spolehlivě určit. Otevřete náhled kurzových rozdílů a opravte uvedené vazby."
+      "fx_settlement_unproven": "Zůstatek dokladu v cizí měně nejde určit a doklad zastaví krok přecenění. Otevřete doklad a opravte párování úhrady."
     },
     "open_list": "Otevřít v seznamu",
     "field": {
@@ -22381,7 +22381,7 @@
       "not_applicable": "Nevztahuje se",
       "pending": "chybí aktuální posouzení"
     },
-    "findings_count": "{count} nálezů",
+    "findings_count": "Nálezů: {count}",
     "showing_capped": "Zobrazeno {shown} z {total} nálezů",
     "capped_hint": "Seznam je zkrácený. Úplný přehled získáte exportem do CSV.",
     "loading": "Načítám nálezy…",

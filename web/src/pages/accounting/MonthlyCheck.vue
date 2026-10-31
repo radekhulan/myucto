@@ -8,12 +8,14 @@ import { closingApi, periodLockApi, type MonthlyCheckResult, type PrecheckItem }
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
+import { useAccountBalance } from '@/composables/useAccountBalance'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
+const { formatBalance } = useAccountBalance()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -375,9 +377,9 @@ async function saveLock() {
                       <template v-for="e in balanceEntries(c.key, c.value)" :key="e.code">
                         <RouterLink v-if="accountLink(e.code)" :to="accountLink(e.code)!"
                           class="font-mono text-primary-600 hover:underline" :class="{ 'text-neutral-400 hover:no-underline': Math.abs(e.amount) < 0.005 }">
-                          {{ e.code }}: {{ formatMoney(e.amount) }}
+                          {{ e.code }}: {{ formatBalance(e.amount) }}
                         </RouterLink>
-                        <span v-else class="font-mono">{{ e.code }}: {{ formatMoney(e.amount) }}</span>
+                        <span v-else class="font-mono">{{ e.code }}: {{ formatBalance(e.amount) }}</span>
                       </template>
                     </span>
                   </template>

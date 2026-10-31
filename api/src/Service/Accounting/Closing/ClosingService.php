@@ -476,6 +476,23 @@ final class ClosingService
                     'Předchozí období ' . $prev['fiscal_year'] . ' není uzavřené — uzavírej chronologicky (R5).',
                 );
             }
+            // Krok Otevření nového roku běží jen nad otevřeným následujícím obdobím. Po schválení
+            // tohoto roku by zůstal nedokončený navždy a nešel by vrátit.
+            if ($prev !== null) {
+                $prevSteps = $this->stepsMap($supplierId, (int) $prev['id']);
+                $hasOpening = $this->db->pdo()->prepare("SELECT 1 FROM journal_entries WHERE supplier_id = ? AND source_type = 'opening' AND period_id = ? AND reversed_by IS NULL LIMIT 1");
+                $hasOpening->execute([$supplierId, $periodId]);
+                if (($prevSteps['close_books']['status'] ?? null) === 'done'
+                    && ($prevSteps['open_next']['status'] ?? null) === 'pending'
+                    && $hasOpening->fetchColumn() === false) {
+                    throw new ClosingException(
+                        'previous_open_next_missing',
+                        'Rok ' . $prev['fiscal_year'] . ' nemá dokončený krok Otevření nového roku. Dokončete ho v uzávěrce roku '
+                            . $prev['fiscal_year'] . ', jinak by po uzavření tohoto roku už spustit nešel.',
+                        422,
+                    );
+                }
+            }
             // Nerozdělený výsledek na 431 blokuje uzavření knih (precheck vh_431_undistributed),
             // ale rozdělení se účtuje do TOHOTO období — a jakmile je ve stavu 'closing',
             // uživatel se k němu dostane hůř. Řekneme to rovnou na vstupu, ať to nezjistí
@@ -4205,6 +4222,8 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    // Přiznání za začátek nového roku bývá podané dřív než uzávěrka starého.
+                    'allow_closing_period' => true,
                 ]);
                 }
             }
@@ -4250,6 +4269,7 @@ final class ClosingService
                         'user_id' => $meta['user_id'] ?? null,
                         'ip' => $meta['ip'] ?? null,
                         'user_agent' => $meta['user_agent'] ?? null,
+                        'allow_closing_period' => true,
                     ]);
                 }
             }
@@ -4469,7 +4489,7 @@ final class ClosingService
             if ($period['status'] === 'approved') {
                 throw new ClosingException(
                     'invalid_status_transition',
-                    'Schválenou závěrku nelze revertovat (§17/7 ZoÚ) — nejprve zruš schválení.',
+                    'Schválenou závěrku nelze vrátit (§17/7 ZoÚ). Opravu zaúčtujte v běžném období.',
                 );
             }
             $steps = $this->stepsMap($supplierId, $periodId);
@@ -4870,6 +4890,10 @@ final class ClosingService
                 $rangeTo,
                 [...array_keys($this->cardClearing->clearingAccounts($supplierId)), ...($voucherCode !== null ? [$voucherCode] : [])],
             );
+            // Účty s vlastní kontrolou výše se tu nehlásí podruhé: otevřená záloha na 324
+            // by jinak svítila ve dvou řádcích jako dva problémy.
+            $clearingOpen = array_values(array_filter($clearingOpen, static fn (array $account): bool =>
+                !in_array(substr((string) $account['account_code'], 0, 3), ['041', '042', '111', '131', '261', '314', '324', '395'], true)));
             $checks[] = [
                 'key' => 'clearing_accounts_open',
                 'severity' => 'warning',
@@ -4950,6 +4974,7 @@ final class ClosingService
                 $evidence = $projection['evidence'];
                 $complete = $evidence['complete'];
                 if ($complete && bccomp($evidence['remaining_foreign'], '0', 2) === 0) continue;
+                if (!$complete && $this->closing->fxDocumentSettledInLedger($supplierId, (string) $it['doc_type'], (int) $it['doc_id'], (int) $it['account_id'], $rangeTo)) continue;
                 $remaining = $complete ? (float) $evidence['remaining_foreign'] : null;
                 $issues = $complete ? ($evidence['diagnostics'] ?? []) : ['fx_settlement_unproven'];
                 $docKey = $it['doc_type'] . '#' . $it['doc_id'];
@@ -4981,10 +5006,12 @@ final class ClosingService
                 ];
             }
             $fxRows = array_values($fxByDoc);
+            // Doklad bez důkazu úhrady zastaví krok přecenění, takže to musí být vidět předem.
+            $fxUnproven = array_filter($fxRows, static fn (array $row): bool => !$row['detail']['settlement_complete']);
             $checks[] = [
                 'key' => 'fx_open_items',
-                'severity' => 'info',
-                'ok' => true,
+                'severity' => $fxUnproven === [] ? 'info' : 'warning',
+                'ok' => $fxUnproven === [],
                 'value' => ['count' => count($fxRows), 'items' => $fxRows],
             ];
         }
@@ -5755,7 +5782,11 @@ final class ClosingService
      */
     private function checkPaymentMatchAudit(int $supplierId, string $rangeFrom, string $rangeTo): array
     {
-        $items = $this->paymentMatchAudit->audit($supplierId, $rangeFrom, $rangeTo);
+        $items = $this->withoutSettledAmountMismatch(
+            $supplierId,
+            $this->paymentMatchAudit->audit($supplierId, $rangeFrom, $rangeTo),
+            $rangeTo,
+        );
 
         return [
             'key' => 'payment_match_audit',
@@ -5763,6 +5794,38 @@ final class ClosingService
             'ok' => $items === [],
             'value' => ['count' => count($items), 'items' => $items],
         ];
+    }
+
+    /**
+     * Platba nižší než doklad není nesoulad, když zbytek vyrovnal jiný kanál (zápočet, poukaz,
+     * ruční zápis) a saldo dokladu je k poslednímu dni rozsahu vyrovnané. Pravdu o tom má
+     * kontrola zaplacených dokladů nad deníkem, audit párování vidí jen banku.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private function withoutSettledAmountMismatch(int $supplierId, array $items, string $rangeTo): array
+    {
+        $open = [];
+        $out = [];
+        foreach ($items as $item) {
+            if (!in_array('amount_mismatch', $item['issues'], true)) {
+                $out[] = $item;
+                continue;
+            }
+            $type = (string) $item['match_kind'];
+            $open[$type] ??= array_column($type === 'invoice'
+                ? $this->closing->paidInvoicesOpenSaldo($supplierId, $rangeTo)
+                : $this->closing->paidPurchasesOpenSaldo($supplierId, $rangeTo), 'id');
+            if (in_array((int) $item['doc_id'], $open[$type], true)) {
+                $out[] = $item;
+                continue;
+            }
+            $item['issues'] = array_values(array_diff($item['issues'], ['amount_mismatch']));
+            unset($item['detail']['amount_mismatch']);
+            if ($item['issues'] !== []) $out[] = $item;
+        }
+        return $out;
     }
 
     /** Rozsah = přesně jeden kalendářní měsíc → [rok, měsíc, 'monthly'], jinak null. */

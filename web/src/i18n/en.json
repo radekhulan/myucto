@@ -19802,7 +19802,7 @@
         "card_clearing_open": "Card payment clearing account (378.x) with a balance — unsettled card payments at the balance-sheet date",
         "card_payments_unmatched": "Card payments without a document older than the limit in the card posting settings",
         "fx_footprint_missing": "Foreign-currency lines on an FX account without a complete currency footprint (currency_code/amount_foreign)",
-        "paid_proformas_no_advance": "Paid proformas without a booked received advance on 324",
+        "paid_proformas_no_advance": "Paid proformas without a booked received advance",
         "paid_advances_no_payment": "Paid supplier advance invoices without a booked payment on 314",
         "settled_but_unpaid": "Documents in the Sent state but with a payment already in the journal (update the status to Paid)",
         "cancelled_with_entry": "Cancelled documents whose journal entry is still active (books and records contradict each other)",
@@ -22328,7 +22328,7 @@
       "attachment_counterparty_ico": "counterparty company ID on the attachment differs",
       "attachment_variable_symbol": "variable symbol on the attachment differs",
       "payment_header_divergence": "The document paid status differs from the documented payments. Revaluation uses payments evidenced as of the reporting date.",
-      "fx_settlement_unproven": "The document balance cannot be reliably determined for revaluation. Open the exchange-rate preview and correct the indicated links."
+      "fx_settlement_unproven": "The foreign currency balance of this document cannot be determined and it stops the revaluation step. Open the document and correct the payment matching."
     },
     "open_list": "Open in list",
     "field": {
@@ -22381,7 +22381,7 @@
       "completed": "complete",
       "not_applicable": "Not applicable"
     },
-    "findings_count": "{count} findings",
+    "findings_count": "Findings: {count}",
     "showing_capped": "Showing {shown} of {total} findings",
     "capped_hint": "The list is truncated. Export to CSV for the complete set.",
     "loading": "Loading findings…",

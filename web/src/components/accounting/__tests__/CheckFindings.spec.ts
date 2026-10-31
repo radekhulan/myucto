@@ -21,6 +21,21 @@ function mountFor(checkKey: string) {
   })
 }
 
+describe('CheckFindings — počet v řádku', () => {
+  it('nový výsledek kontroly přebije dříve načtený detail', async () => {
+    const { closingApi } = await import('../../../api/closing')
+    vi.mocked(closingApi.checkFindings).mockResolvedValue({ key: 'x', severity: 'warning', ok: false, value: { count: 9, findings: [] } })
+    const wrapper = mount(CheckFindings, {
+      props: { checkKey: 'x', label: 'X', periodId: 3, value: { count: 9, findings: [{ doc_id: 1 }] } },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } },
+    })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ value: { count: 0, findings: [] } })
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+})
+
 describe('CheckFindings — nález marked_paid_unposted', () => {
   it('u přijatých faktur má vlastní popisek bez GoPay', async () => {
     const wrapper = mountFor('paid_purchases_open_saldo')
