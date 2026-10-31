@@ -164,10 +164,12 @@ final class ImageToPdfConverter
             $pageH = $longMm;
             $pageW = $longMm * $wPx / max(1, $hPx);
         }
+        $pageW = round($pageW, 2);
+        $pageH = round($pageH, 2);
 
         $mpdf = new \Mpdf\Mpdf([
             'mode'          => 'utf-8',
-            'format'        => [round($pageW, 2), round($pageH, 2)],
+            'format'        => [$pageW, $pageH],
             'margin_left'   => 0,
             'margin_right'  => 0,
             'margin_top'    => 0,
@@ -182,7 +184,10 @@ final class ImageToPdfConverter
         $mpdf->SetCreator('MyÚčto.cz');
 
         $dataUri = 'data:image/jpeg;base64,' . base64_encode($jpeg);
-        $mpdf->WriteHTML('<img src="' . $dataUri . '" style="width:100%; height:100%;">');
+        // Procentní HTML výška může obrázek zmáčknout do čtverce. Umístíme ho přímo
+        // přes celou stránku v mm, bez omezení na tiskovou oblast a bez HTML layoutu.
+        $mpdf->AddPage();
+        $mpdf->Image($dataUri, 0, 0, $pageW, $pageH, 'jpg', '', true, false);
 
         return (string) $mpdf->Output('', \Mpdf\Output\Destination::STRING_RETURN);
     }

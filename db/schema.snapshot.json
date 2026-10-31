@@ -1126,7 +1126,8 @@
         "2222_vat_classification_travel_service_line26.sql",
         "2223_statement_map_349_358.sql",
         "2224_journal_period_source_index.sql",
-        "2225_purchase_settled_outside.sql"
+        "2225_purchase_settled_outside.sql",
+        "2226_journal_line_pairing.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -8015,6 +8016,25 @@
             },
             "foreign_keys": {
                 "fk_jif_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "journal_line_pairing": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "entry_id": "bigint(20) unsigned NOT NULL",
+                "line_no": "int(10) unsigned NOT NULL",
+                "pairing_symbol": "varchar(40) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, entry_id, line_no)",
+                "ix_jlp_symbol": "BTREE (supplier_id, pairing_symbol)"
+            },
+            "foreign_keys": {
+                "fk_jlp_entry": "(supplier_id, entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

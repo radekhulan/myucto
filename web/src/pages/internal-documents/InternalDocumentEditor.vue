@@ -253,7 +253,7 @@ async function load() {
             dimensions: { ...(line.dimensions ?? {}) },
           }))
           : [emptyLine('debit'), emptyLine('credit')]
-        links.value = doc.document_links.map(link => ({ ...link, label: `${docTypeLabel(link.doc_type)} #${link.doc_id}` }))
+        links.value = doc.document_links.map(link => ({ ...link, label: `${docTypeLabel(link.doc_type)} ${link.doc_title || `#${link.doc_id}`}` }))
       }))
     } else {
       const template = INTERNAL_DOCUMENT_TEMPLATES.find(tpl => tpl.key === route.query.template)

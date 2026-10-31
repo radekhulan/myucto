@@ -16,6 +16,10 @@ use MyInvoice\Repository\TaxSubmissionRepository;
  * > `tax_submissions.generated_at`).
  * To jsou kandidáti na dodatečné přiznání — podklad pro rozhodnutí účetní, nikoli tvrdý gate.
  *
+ * Má-li podání snapshot dokladů, rozhoduje jen to, co ovlivňuje DPH: částka, datum plnění, storno
+ * a řádky přiznání. Úhrada, upomínka ani `updated_at` důvodem nejsou. `updated_at` se navíc mezi
+ * letním a zimním časem čte jinak, když MariaDB nemá tabulky časových zón.
+ *
  * Zařazení do období přebírá kanonický {@see VatLedgerService} (stejná logika period membership
  * jako reálné DPHDP3), takže fronta ukazuje přesně doklady, které do podaného období patří.
  */
@@ -72,13 +76,18 @@ final class VatPostFilingChangesService
         $purchaseIds = [];
         $cashIds = [];
         $snapshots = ['sale' => [], 'purchase' => [], 'cash' => []];
+        $vatLines = ['sale' => [], 'purchase' => [], 'cash' => []];
         foreach ($this->ledger->iterateReturnRows($supplierId, $start, $end, includeDrafts: false) as $r) {
+            $id = (int) $r['invoice_id'];
             if (($r['document_kind'] ?? null) === 'cash') {
-                $cashIds[(int) $r['invoice_id']] = true; // cash_documents.id
+                $cashIds[$id] = true; // cash_documents.id
+                self::addVatLine($vatLines['cash'][$id], $r);
             } elseif ($r['source'] === 'sale') {
-                $saleIds[(int) $r['invoice_id']] = true;
+                $saleIds[$id] = true;
+                self::addVatLine($vatLines['sale'][$id], $r);
             } elseif ($r['source'] === 'purchase') {
-                $purchaseIds[(int) $r['invoice_id']] = true;
+                $purchaseIds[$id] = true;
+                self::addVatLine($vatLines['purchase'][$id], $r);
             }
         }
 
@@ -106,9 +115,9 @@ final class VatPostFilingChangesService
         }
 
         $documents = array_merge(
-            $this->changedDocuments($supplierId, 'sale', array_keys($saleIds), $generatedAt, $snapshots['sale']),
-            $this->changedDocuments($supplierId, 'purchase', array_keys($purchaseIds), $generatedAt, $snapshots['purchase']),
-            $this->changedCashDocuments($supplierId, array_keys($cashIds), $generatedAt, $snapshots['cash']),
+            $this->changedDocuments($supplierId, 'sale', array_keys($saleIds), $generatedAt, $snapshots['sale'], $vatLines['sale']),
+            $this->changedDocuments($supplierId, 'purchase', array_keys($purchaseIds), $generatedAt, $snapshots['purchase'], $vatLines['purchase']),
+            $this->changedCashDocuments($supplierId, array_keys($cashIds), $generatedAt, $snapshots['cash'], $vatLines['cash']),
         );
         // Nejnovější změny nahoře.
         usort($documents, static fn ($a, $b) => strcmp((string) $b['updated_at'], (string) $a['updated_at']));
@@ -137,6 +146,7 @@ final class VatPostFilingChangesService
         array $ids,
         string $generatedAt,
         array $snapshots,
+        array $vatLines,
     ): array
     {
         if ($ids === []) {
@@ -159,7 +169,7 @@ final class VatPostFilingChangesService
 
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            if (!$this->changedAfterFiling($row, $generatedAt, $snapshots[(int) $row['id']] ?? null)) {
+            if (!self::changedAfterFiling($row, $generatedAt, $snapshots[(int) $row['id']] ?? null, $vatLines[(int) $row['id']] ?? [])) {
                 continue;
             }
             $out[] = [
@@ -186,6 +196,7 @@ final class VatPostFilingChangesService
         array $ids,
         string $generatedAt,
         array $snapshots,
+        array $vatLines,
     ): array
     {
         if ($ids === []) {
@@ -201,7 +212,7 @@ final class VatPostFilingChangesService
 
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
-            if (!$this->changedAfterFiling($row, $generatedAt, $snapshots[(int) $row['id']] ?? null)) {
+            if (!self::changedAfterFiling($row, $generatedAt, $snapshots[(int) $row['id']] ?? null, $vatLines[(int) $row['id']] ?? [])) {
                 continue;
             }
             $out[] = [
@@ -215,17 +226,66 @@ final class VatPostFilingChangesService
         return $out;
     }
 
-    /** @param array<string,mixed>|null $snapshot */
-    private function changedAfterFiling(array $row, string $generatedAt, ?array $snapshot): bool
+    /**
+     * Součet jednoho řádku evidence do řádků přiznání dokladu. Sdílí ho snapshot podání
+     * i dnešní porovnání, aby obě strany počítaly totéž.
+     *
+     * @param array<string,array{base:float,vat:float}>|null $lines by-ref
+     * @param array<string,mixed> $row řádek {@see VatLedgerService::iterateReturnRows()}
+     */
+    public static function addVatLine(?array &$lines, array $row): void
     {
-        $updatedAt = (string) $row['updated_at'];
-        if ($snapshot === null) {
-            return $updatedAt >= $generatedAt;
+        if (($row['code'] ?? null) === null || ($row['dphdp3_line'] ?? null) === null) {
+            return;
         }
-        return $updatedAt !== (string) ($snapshot['updated_at'] ?? '')
-            || (string) $row['status'] !== (string) ($snapshot['status'] ?? '')
+        $key = $row['code'] . '|' . $row['dphdp3_line'] . '|' . round((float) ($row['vat_rate'] ?? 0.0), 2);
+        $lines[$key] = [
+            'base' => round(($lines[$key]['base'] ?? 0.0) + (float) ($row['base_czk'] ?? 0.0), 2),
+            'vat'  => round(($lines[$key]['vat'] ?? 0.0) + (float) ($row['vat_czk'] ?? 0.0), 2),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $row aktuální doklad
+     * @param array<string,mixed>|null $snapshot doklad z podání; null = v podání nebyl
+     * @param array<string,array{base:float,vat:float}> $vatLines dnešní řádky přiznání dokladu
+     */
+    public static function changedAfterFiling(array $row, string $generatedAt, ?array $snapshot, array $vatLines = []): bool
+    {
+        if ($snapshot === null) {
+            return (string) $row['updated_at'] >= $generatedAt;
+        }
+        if (self::isOutOfReturn((string) $row['status']) !== self::isOutOfReturn((string) ($snapshot['status'] ?? ''))
             || (string) $row['tax_date'] !== (string) ($snapshot['tax_date'] ?? '')
-            || round((float) $row['total'], 2) !== round((float) ($snapshot['total'] ?? 0.0), 2);
+            || round((float) $row['total'], 2) !== round((float) ($snapshot['total'] ?? 0.0), 2)) {
+            return true;
+        }
+        // Starší snapshot řádky přiznání nenese, zůstává porovnání výše.
+        return isset($snapshot['vat_lines']) && !self::sameVatLines((array) $snapshot['vat_lines'], $vatLines);
+    }
+
+    /** Koncept a storno do přiznání nepatří, ostatní stavy (vystaveno, upomínka, uhrazeno) DPH nemění. */
+    private static function isOutOfReturn(string $status): bool
+    {
+        return in_array($status, ['draft', 'cancelled'], true);
+    }
+
+    /**
+     * @param array<string,mixed> $filed
+     * @param array<string,array{base:float,vat:float}> $current
+     */
+    private static function sameVatLines(array $filed, array $current): bool
+    {
+        if (array_diff_key($filed, $current) !== [] || array_diff_key($current, $filed) !== []) {
+            return false;
+        }
+        foreach ($filed as $key => $line) {
+            if (round((float) $line['base'], 2) !== round((float) $current[$key]['base'], 2)
+                || round((float) $line['vat'], 2) !== round((float) $current[$key]['vat'], 2)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

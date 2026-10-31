@@ -69,7 +69,7 @@ final class PurchaseInvoiceScanTarget implements ScanTargetInterface
             $out[] = [
                 'id' => (int) $r['id'],
                 'direction' => ScanMatcher::DIRECTION_RECEIVED,
-                'doc_numbers' => array_values(array_filter([(string) ($r['document_no'] ?? '')])),
+                'doc_numbers' => array_values(array_unique(array_filter([(string) ($r['document_no'] ?? ''), (string) $r['vendor_invoice_number']]))),
                 'barcode' => $r['external_barcode'] !== null ? (string) $r['external_barcode'] : null,
                 'counterparty_ico' => $r['counterparty_ico'] !== null ? (string) $r['counterparty_ico'] : null,
                 'counterparty_doc_no' => (string) $r['vendor_invoice_number'],

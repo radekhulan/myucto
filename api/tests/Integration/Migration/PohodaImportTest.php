@@ -585,6 +585,36 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Doklad, jehož skupinu párovacího symbolu má POHODA vyrovnanou, je uhrazený i ve stavu,
+     * jinak by na něj chodily upomínky. Deník se nemění a opakovaný převod úhradu nezdvojí.
+     */
+    public function testClosedPairingGroupSettlesDocumentIncludingItsStatus(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withClosedPairingGroups($dir);
+        $export = PohodaExport::open($dir);
+        $pdo = $this->db->pdo();
+        foreach ([1, 2] as $run) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $issued = $this->documentId('invoices', $supplierId, SyntheticPohodaExport::PAIRED_ISSUED);
+            $purchase = $this->documentId('purchase_invoices', $supplierId, SyntheticPohodaExport::PAIRED_PURCHASE);
+
+            $invoice = $pdo->query("SELECT status, paid_total, paid_at FROM invoices WHERE id = {$issued}")->fetch(\PDO::FETCH_ASSOC);
+            self::assertSame(['paid', '1210.00', '2026-12-31'], [$invoice['status'], (string) $invoice['paid_total'], (string) $invoice['paid_at']], "běh {$run}");
+            self::assertSame(['1210.00'], $pdo->query("SELECT amount FROM invoice_payments WHERE invoice_id = {$issued} AND source = 'settlement'")->fetchAll(\PDO::FETCH_COLUMN), "běh {$run}");
+
+            $received = $pdo->query("SELECT status, settled_outside_amount FROM purchase_invoices WHERE id = {$purchase}")->fetch(\PDO::FETCH_ASSOC);
+            self::assertSame(['paid', '1210.00'], [$received['status'], (string) $received['settled_outside_amount']], "běh {$run}");
+
+            self::assertSame(4, $this->rows('journal_entries', $supplierId, "document_no IN ('" . SyntheticPohodaExport::PAIRED_ISSUED . "', '" . SyntheticPohodaExport::PAIRED_PURCHASE . "', '26IN0090', '26IN0091')"), "běh {$run}");
+            self::assertEqualsWithDelta(0.0, $this->saldoOf($supplierId, '311')['difference'], 0.001, "běh {$run}");
+            self::assertEqualsWithDelta(0.0, $this->saldoOf($supplierId, '321')['difference'], 0.001, "běh {$run}");
+        }
+    }
+
+    /**
      * Středisko z deníku je na řádcích jako dimenze Středisko a opakovaný převod ho nezdvojí.
      * Export bez středisek dimenze nezapíná.
      */

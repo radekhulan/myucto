@@ -74,6 +74,19 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         self::assertSame('invoice-detail', $fromBank['items'][0]['route']['name']);
     }
 
+    public function testDocumentTitlesShowNumberAndLeaveDeletedDocumentEmpty(): void
+    {
+        $invoiceId = $this->saleInvoice('JL0099', $this->client('Odběratel JL číslo'), 100.0);
+
+        $links = $this->links->withDocumentTitles($this->supplierId, [
+            ['doc_type' => 'invoice', 'doc_id' => $invoiceId, 'note' => 'Zápočet'],
+            ['doc_type' => 'invoice', 'doc_id' => 2147483000],
+        ]);
+
+        self::assertSame(['doc_type' => 'invoice', 'doc_id' => $invoiceId, 'note' => 'Zápočet', 'doc_title' => 'JL0099'], $links[0]);
+        self::assertNull($links[1]['doc_title']);
+    }
+
     public function testDuplicatePaymentEdgesYieldSingleItem(): void
     {
         $clientId  = $this->client('Odběratel JL dedup');

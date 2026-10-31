@@ -143,7 +143,7 @@ hlásí aplikace **Koš je prázdný**.
 
 Postup je pro účetní nebo administrátora. Klient odpovídá v klientském portálu.
 
-1. Otevřete `Firma → Chybějící doklady` (stránka **Vyžádané doklady**).
+1. Otevřete `Dokumenty → Chybějící doklady` (stránka **Vyžádané doklady**).
 2. Klikněte na **Nový požadavek**.
 3. Vyplňte povinný **Popis** (co chybí, například doklad k platbě). Volitelně
    doplňte **Částku**, **Datum (kontext)** a **Termín**.

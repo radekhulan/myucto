@@ -22,6 +22,8 @@ export interface InternalDocumentLink {
   doc_type: LinkableDocType
   doc_id: number
   note?: string | null
+  /** Číslo navázaného dokladu z API; při ukládání se neposílá. */
+  doc_title?: string | null
 }
 
 export interface InternalDocument {

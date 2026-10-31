@@ -534,6 +534,9 @@ faktura spadne do lednové [Knihy DPH](42_Kniha_DPH.md) i přiznání, ne do pro
 import ho přebírá z dokladu (datum vystavení, jinak DUZP), což není totéž co vědomé posouzení účetní, kdy jste doklad
 opravdu drželi. Jakmile na poli něco změníte, stane se z něj vědomé zadání a do výpočtu období odpočtu vstoupí.
 
+**Číslo v účetním deníku.** Nový nebo přeúčtovaný zápis přijaté faktury nese **Naše číslo**, a když chybí, **Číslo dokladu
+dodavatele**. Starší zápisy si nechávají své číslo. Kontrolní hlášení dál uvádí číslo dodavatele a Kniha DPH obě čísla.
+
 ### 23.11.6 Položky a druh výdaje
 
 U hodinových služeb lze zadat dobu jako `H:MM` a hodinovou sazbu až na šest desetinných míst, stejně jako u

@@ -295,6 +295,7 @@ final class ChartJournalImporter
             }
         }
         $ctx->report(self::STEP_JOURNAL, $total, $total);
+        $this->storePairingSymbols($ctx, $groups);
 
         $stats['debit'] = round($stats['debit'], 2);
         $stats['credit'] = round($stats['credit'], 2);
@@ -337,6 +338,40 @@ final class ChartJournalImporter
         }
         $p->set('journal', [$stats]);
         $p->finish(self::STEP_JOURNAL);
+    }
+
+    /**
+     * Párovací symboly řádků deníku, i u zápisů z dřívějšího převodu. Čísluje řádky stejně
+     * jako zápis, zápis se tím nemění. Export bez symbolů (XML) nezapisuje nic.
+     *
+     * @param array<string,list<array<string,mixed>>> $groups
+     */
+    private function storePairingSymbols(PohodaContext $ctx, array $groups): void
+    {
+        $entries = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
+        $year = $ctx->year();
+        $update = $this->db->pdo()->prepare('INSERT INTO journal_line_pairing (supplier_id, entry_id, line_no, pairing_symbol) VALUES (?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE pairing_symbol = VALUES(pairing_symbol)');
+        foreach ($groups as $groupKey => $rows) {
+            $entryId = $entries[$year . '|' . $groupKey] ?? $entries[($year - 1) . '|' . $groupKey] ?? null;
+            if ($entryId === null) {
+                continue;
+            }
+            $lineNo = 0;
+            foreach ($rows as $item) {
+                $effect = PohodaJournal::effect($item);
+                if ($effect === null) {
+                    continue;
+                }
+                foreach (['debit', 'credit'] as $side) {
+                    $lineNo++;
+                    $symbol = PohodaJournal::pairingSymbol($item, $effect[$side]);
+                    if ($symbol !== null) {
+                        $update->execute([$ctx->supplierId, (int) $entryId, $lineNo, $symbol]);
+                    }
+                }
+            }
+        }
     }
 
     /**

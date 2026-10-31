@@ -31192,7 +31192,9 @@
         "fix": "Spusťte Redis, nebo ho v konfiguraci vypněte."
       },
       "disk_space": {
-        "label": "Volné místo na disku",
+        "label": "Místo na disku",
+        "actual_label": "Volné",
+        "info_label": "Celkem",
         "impact": "Po zaplnění disku přestanou tiše vznikat zálohy, PDF i nahrané dokumenty.",
         "fix": "Uvolněte místo, nebo zvětšete svazek s daty."
       },

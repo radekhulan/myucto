@@ -1720,6 +1720,8 @@ export interface SaldoItem {
   doc_type: 'invoice' | 'purchase_invoice' | 'other_item'
   doc_id: number
   doc_no: string
+  /** Druhé číslo přijaté faktury vedle doc_no; null, když není nebo je stejné. */
+  other_doc_no?: string | null
   issue_date: string
   due_date: string
   currency_code: string

@@ -554,6 +554,7 @@ const navSections = computed<NavSection[]>(() => {
       accent: 'neutral',
       items: [
         { to: '/documents', label: t('nav.documents'), icon: ICONS.documents },
+        { to: '/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc },
         ...(auth.isSuperadmin ? [{ to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey }] : []),
         { to: '/documents/scan-attach', label: t('scan_attach.nav'), icon: ICONS.documents, permission: 'documents.upload' },
         { to: '/logbook', label: t('nav.logbook'), icon: ICONS.logbook, newTo: '/logbook?tab=trips&new=trip' },
@@ -599,6 +600,7 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_taxes'),
       accent: 'danger',
       items: [
+        // 1) DPH.
         { to: '/reports/dph',         label: t('nav.reports_dph'),         icon: ICONS.tax_dph },
         { to: '/reports/kh',          label: t('nav.reports_kh'),          icon: ICONS.tax_kh },
         { to: '/reports/dph-book',    label: t('nav.reports_dph_book'),    icon: ICONS.tax_book },
@@ -606,30 +608,31 @@ const navSections = computed<NavSection[]>(() => {
         // OSS hned za souhrnným hlášením: obojí je hlášení plnění do jiných členských
         // států, účetní je vyplňuje ve stejné části měsíce.
         ...(ossEnabled ? [{ to: '/reports/oss', label: t('nav.reports_oss'), icon: ICONS.tax_shv }] : []),
-        // Daň z příjmů je komerční modul: základ daně se počítá z výsledku
+        // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
+        // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).
+        ...(auth.hasCommercialFeatures ? [
+          { to: '/reports/vat-corrections', label: t('nav.reports_vat_corrections'), icon: ICONS.tax_dph },
+        ] : []),
+        // 2) Daň z příjmů je komerční modul: základ daně se počítá z výsledku
         // hospodaření nebo z peněžního deníku a obojí je za licencí.
         ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income },
+          { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income, dividerBefore: true },
           // Oznámení o příjmech do zahraničí a zajištění daně (§ 38da, § 38e).
           // Patří sem, ne ke mzdám: § 38da odst. 5 písm. b) vylučuje příjmy
           // podle § 6 odst. 4 a § 38e poslední větou vylučuje závislou činnost,
           // takže se mezd netýkají. Obrazovka byla dostupná jen přímou adresou.
           { to: '/reports/foreign-income', label: t('nav.reports_foreign_income'), icon: ICONS.tax_income },
         ] : []),
-        // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
-        // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).
-        ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/vat-corrections', label: t('nav.reports_vat_corrections'), icon: ICONS.tax_dph },
-        ] : []),
-        { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin },
-        { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
         ...(isOsvc && auth.hasCommercialFeatures ? [{ to: '/tax', label: t('nav.tax_optimizer'), icon: ICONS.tax_optimizer }] : []),
+        // 3) Kontroly a podklady.
+        { to: '/reports/cnb-rate-audit', label: t('nav.reports_cnb_audit'), icon: ICONS.coin, dividerBefore: true },
+        { to: '/reports/invoice-series-completeness', label: t('nav.reports_series_completeness'), icon: ICONS.logbook },
         { to: '/reports/monthly-export', label: t('nav.reports_monthly_export'), icon: ICONS.exports, permission: 'reports.export' },
-        // Úplně dole: EPO podání a archív je poslední krok měsíční agendy — výkaz se
+        // 4) Úplně dole: EPO podání a archív je poslední krok měsíční agendy — výkaz se
         // nejdřív postaví výše v sekci a teďka se podá. Komerční modul (EPO napojení),
         // proto stejné hradítko jako u ostatních placených položek téhle sekce.
         ...(auth.hasCommercialFeatures ? [
-          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive },
+          { to: '/reports/submissions', label: t('nav.reports_submissions'), icon: ICONS.tax_archive, dividerBefore: true },
         ] : []),
         // Datová schránka i pro firmu bez mezd: odesílá daňová podání a přijímá
         // doručenky a zprávy od FÚ. Ve Mzdách zůstává taky, tam patří k podáním.
@@ -644,21 +647,32 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_accounting'),
       accent: 'primary',
       items: [
+        // 1) Účetní doklady.
         { to: '/accounting/journal',        label: t('nav.accounting_journal'),  icon: ICONS.accounting, newTo: '/accounting/journal/new' },
-        { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting' },
+        { to: '/other-items', label: t('nav.other_items'), icon: ICONS.crm, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
+        // Interní doklady (ID) hned pod ostatními pohledávkami a závazky: zápočty, přeúčtování, odpisy, kurzové rozdíly.
+        { to: '/accounting/internal-documents', label: t('nav.internal_documents'), icon: ICONS.documents, permission: 'accounting' as PermissionKey, newTo: '/accounting/internal-documents/new' },
+        // 2) Automatizace a doúčtování.
+        { to: '/automation',                label: t('nav.automation'),          icon: ICONS.ai, badge: automationStore.actionable, permission: 'accounting', dividerBefore: true },
         { to: '/accounting/ai-assistant',   label: t('nav.ai_assistant'),        icon: ICONS.ai, permission: 'accounting' },
         { to: '/accounting/manual-posting-queue', label: t('nav.manual_posting_queue'), icon: ICONS.approvals, permission: 'accounting' },
         // Doúčtování nezaúčtovaných dokladů — po importu historie je to jediná cesta,
         // jak je dostat do deníku. Automatika účtování je háček na vznik dokladu, ne
         // zametač existujících, a hromadné zaúčtování ze seznamu má strop 500 dokladů.
         { to: '/accounting/posting-backfill', label: t('nav.posting_backfill'), icon: ICONS.accounting, permission: 'accounting' },
-        { to: '/accounting/general-ledger',   label: t('nav.accounting_general_ledger'),   icon: ICONS.tax_book },
+        // 3) Sestavy.
+        { to: '/accounting/general-ledger',   label: t('nav.accounting_general_ledger'),   icon: ICONS.tax_book, dividerBefore: true },
         { to: '/accounting/trial-balance',    label: t('nav.accounting_trial_balance'),    icon: ICONS.stats },
         { to: '/accounting/balance-sheet',    label: t('nav.accounting_balance_sheet'),    icon: ICONS.reports },
         { to: '/accounting/income-statement', label: t('nav.accounting_income_statement'), icon: ICONS.tax_income },
         { to: '/accounting/income-statement-by-function', label: t('nav.accounting_income_statement_by_function'), icon: ICONS.tax_income },
         ...(dimensionsEnabled ? [{ to: '/accounting/dimension-profit', label: t('nav.accounting_dimension_profit'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
         ...(nonprofitScope ? [{ to: '/accounting/nonprofit-dppo', label: t('nonprofitDppo.title'), icon: ICONS.tax_income, permission: 'accounting' as PermissionKey }] : []),
+        { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
+        // 4) Ostatní: kontroly a nastavení. Předěl nese položka bez zvláštního oprávnění, aby se nikomu neztratil.
+        { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals, dividerBefore: true },
+        { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
+        { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
         { to: '/accounting/statement-mapping', label: t('nav.accounting_statement_mapping'), icon: ICONS.codebooks, permission: 'accounting' },
         ...(nonprofitScope ? [
           { to: '/accounting/securities/debt', label: t('securitiesDebt.title'), icon: ICONS.accounting, permission: 'accounting' as PermissionKey },
@@ -666,13 +680,6 @@ const navSections = computed<NavSection[]>(() => {
         ...(conversionScope ? [
           { to: '/accounting/framework-conversion', label: t('nav.framework_conversion'), icon: ICONS.accounting, permission: 'accounting' as PermissionKey },
         ] : []),
-        { to: '/accounting/saldo',            label: t('nav.accounting_saldo'),            icon: ICONS.coin },
-        { to: '/other-items', label: t('nav.other_items'), icon: ICONS.crm, permission: 'other_items' as PermissionKey, newTo: '/other-items/new' },
-        // Interní doklady (ID) hned pod ostatními pohledávkami a závazky: zápočty, přeúčtování, odpisy, kurzové rozdíly.
-        { to: '/accounting/internal-documents', label: t('nav.internal_documents'), icon: ICONS.documents, permission: 'accounting' as PermissionKey, newTo: '/accounting/internal-documents/new' },
-        { to: '/accounting/document-completeness', label: t('nav.accounting_document_completeness'), icon: ICONS.approvals, permission: 'accounting' },
-        { to: '/accounting/monthly-check',    label: t('nav.accounting_monthly_check'),    icon: ICONS.approvals },
-        { to: '/accounting/monthly-report',   label: t('nav.accounting_monthly_report'),   icon: ICONS.reports },
         { to: '/accounting/parallel-run',     label: t('nav.accounting_parallel_run'),     icon: ICONS.approvals, permission: 'accounting' },
         // Mzdová rekapitulace zůstává ZDE záměrně: položky nejdou přetáhnout mezi
         // sekcemi (useNavOrder), takže přesun do Nástrojů by byl nevratný.
@@ -689,6 +696,7 @@ const navSections = computed<NavSection[]>(() => {
       title: t('nav.section_tools'),
       accent: 'primaryDeep',
       items: [
+        // 1) Nastavení účtování.
         { to: '/templates', label: t('nav.section_templates'), icon: ICONS.documents, permission: 'accounting.templates' },
         { to: '/accounting/setup-assistant', label: t('nav.accounting_setup_assistant'), icon: ICONS.ai, permission: 'accounting' },
         ...(dimensionsEnabled && nonprofitScope ? [{ to: '/accounting/joint-allocations', label: t('jointAllocations.title'), icon: ICONS.reports, permission: 'accounting' as PermissionKey }] : []),
@@ -697,27 +705,28 @@ const navSections = computed<NavSection[]>(() => {
         ...(auth.canRead('accounting.templates') ? [] : [{ to: '/admin/bank-rule-templates', label: t('nav.bank_rule_templates'), icon: ICONS.bank, permission: 'bank.rules' as PermissionKey }]),
         { to: '/accounting/accounts',       label: t('nav.accounting_accounts'), icon: ICONS.codebooks },
         { to: '/accounting/offsets',          label: t('nav.accounting_offsets'),          icon: ICONS.coin },
-        { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
-        { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports },
+        // 2) Daňové a inventurní přehledy.
+        { to: '/accounting/balance-inventory', label: t('nav.accounting_balance_inventory'), icon: ICONS.reports, dividerBefore: true },
         { to: '/accounting/section18-statements', label: t('nav.accounting_section18'), icon: ICONS.reports },
         { to: '/reports/related-parties', label: t('nav.reports_related_parties'), icon: ICONS.clients },
         { to: '/reports/s74b', label: t('nav.reports_s74b'), icon: ICONS.recurring },
         // Audit UI mezer 2026-07: dříve backend-only funkce zpřístupněné v menu.
         { to: '/reports/vat-coefficient', label: t('nav.reports_vat_coefficient'), icon: ICONS.tax_income },
         { to: '/reports/s46', label: t('nav.reports_s46'), icon: ICONS.coin },
-        { to: '/accounting/retention', label: t('nav.accounting_retention'), icon: ICONS.tax_archive },
-        // Nástroje — jedna položka, uvnitř záložky pro méně používané/setup funkce
-        // (archivy, kurzový režim, repo sazba, předkontace). Hromadný export je
-        // samostatná stránka v sekci Daně.
-        { to: '/utilities', label: t('nav.accounting_settings'), icon: ICONS.exports },
-        // Uzávěrka — účetní období vytažená ze záložky Nástrojů do vlastní top-level
-        // položky menu (jen podvojné účetnictví).
-        { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals },
+        // 3) Uzávěrka, období a správa. Uzávěrka: účetní období vytažená ze záložky Nástrojů
+        // do vlastní položky menu (jen podvojné účetnictví).
+        { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals, dividerBefore: true },
+        { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
         ...(nonprofitScope ? [
           { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals },
           { to: '/accounting/nonprofit-funding', label: t('nonprofitFunding.title'), icon: ICONS.approvals },
           { to: '/accounting/nonprofit-membership', label: t('nonprofitMembership.title'), icon: ICONS.approvals },
         ] : []),
+        { to: '/accounting/retention', label: t('nav.accounting_retention'), icon: ICONS.tax_archive },
+        // Nástroje — jedna položka, uvnitř záložky pro méně používané/setup funkce
+        // (archivy, kurzový režim, repo sazba, předkontace). Hromadný export je
+        // samostatná stránka v sekci Daně.
+        { to: '/utilities', label: t('nav.accounting_settings'), icon: ICONS.exports },
         // EPO podání a archív se přesunulo dolů do sekce Daně — archív podání patří
         // k výkazům, které se jím podávají, ne mezi setup nástroje.
       ],
@@ -844,7 +853,6 @@ const navSections = computed<NavSection[]>(() => {
       { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
       { to: '/eet/records',                label: t('eet.records.nav'),     icon: ICONS.cash, permission: 'eet' as PermissionKey },
       { to: '/eet/settings',               label: t('eet.nav'),             icon: ICONS.cash, permission: 'eet.settings' as PermissionKey },
-      { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
     ],
   })
 

@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\JournalSettlementException;
 use MyInvoice\Service\Accounting\JournalSettlementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
+use MyInvoice\Support\Sql\PayablePredicate;
 use PDO;
 
 /**
@@ -29,6 +30,16 @@ use PDO;
  * na syntetice i na analytice: vrácení přeplatku z počátečního stavu (ten pohyb nemá, není
  * s čím párovat) by ho jinak z nuly otevřelo.
  *
+ * Účty dokladů (311, 321, 314, 324) řídí saldo POHODY, tedy párovací symbol řádku deníku:
+ *   - pohyb se symbolem, ke kterému dokladu není (úhrada faktury z nepřevedeného roku),
+ *     dostane položku, POHODA ho ve svém saldu ukazuje stejně,
+ *   - přeplatek skupiny s dokladem dostane položku jen na svou část pohybu,
+ *   - doklad, jehož skupinu má POHODA vyrovnanou, se vyrovná i tady, bez zápisu do deníku:
+ *     přijatý doklad přes `settled_outside_amount`, vydaný evidovanou platbou `settlement`.
+ *     Záloha z dřívějších let bez řádku v deníku agendy ztratí vazbu na otevírací zápis.
+ * Symbol faktury z minulého roku (doklad bez řádku v deníku, předpis je v souhrnném
+ * počátečním stavu) položku nedostane. I tady platí, že rozdíl se nesmí zvětšit.
+ *
  * Opakovaný převod: řádek s položkou z mapy se počítá jen zbytkem částky, takže se nic
  * nezdvojí a nové vrácení dostane vlastní položku opačné strany. Položku, kterou mezitím
  * účetní stornovala, převod znovu nezaloží.
@@ -38,6 +49,10 @@ final class BalanceItemImporter
     private const STEP = DocumentLinker::STEP_PAYMENTS;
     /** Do kolika dnů se opačný řádek stejné částky bere jako vrácená platba. */
     private const RETURN_DAYS = 60;
+    /** Účty dokladů, na kterých rozhoduje párovací symbol. */
+    private const DOCUMENT_ACCOUNTS = ['311', '321', '314', '324'];
+    /** Pod touto částkou v haléřích je zbytek skupiny zaokrouhlení, ne přeplatek. */
+    private const MIN_ITEM_CENTS = 100;
 
     public function __construct(
         private readonly Connection $db,
@@ -45,6 +60,7 @@ final class BalanceItemImporter
         private readonly PartnerImporter $partners,
         private readonly JournalSettlementService $settlements,
         private readonly SaldoService $saldo,
+        private readonly PohodaSaldoPairing $pairing,
     ) {}
 
     public function run(PohodaContext $ctx): void
@@ -53,30 +69,61 @@ final class BalanceItemImporter
         if ($asOf === null || $ctx->period === null) {
             return;
         }
+        $mapped = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BALANCE_ITEM);
+        // Nejdřív vyrovnání: mění rozdíl, ze kterého se položky teprve počítají.
+        $this->closeByPohodaGroups($ctx, $asOf);
+        $accepted = [...$this->overpayments($ctx, $asOf, $mapped), ...$this->documentAccountItems($ctx, $asOf, $mapped)];
+        $this->createItems($ctx, $accepted, $mapped);
+    }
+
+    /**
+     * Zůstatky 315 a 325: co vyrovná párovací symbol, potom vrácení a párování po partnerovi.
+     *
+     * @param array<string,int|string> $mapped
+     * @return list<array<string,mixed>>
+     */
+    private function overpayments(PohodaContext $ctx, string $asOf, array $mapped): array
+    {
         $accountIds = $this->accountIds($ctx->supplierId);
         $lines = $accountIds === [] ? [] : $this->lines($ctx->supplierId, $accountIds, $asOf);
         if ($lines === []) {
-            return;
+            return [];
         }
         $p = $ctx->protocol;
-        $mapped = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_BALANCE_ITEM);
         [$covered, $foreign] = $this->allocations($ctx->supplierId, $accountIds, $mapped);
         $explained = $this->explainedMovements($ctx->supplierId);
+        $documentSymbols = ['315' => $this->documentSymbols($ctx->supplierId, '315'), '325' => $this->documentSymbols($ctx->supplierId, '325')];
 
         $open = [];
         foreach ($lines as $line) {
             $key = $line['entry_id'] . '|' . $line['line_no'];
             $movement = $line['source_type'] . '|' . $line['source_id'] . '|';
-            if (isset($foreign[$key]) || isset($explained[$movement . $line['synthetic']]) || isset($explained[$movement . '*'])) {
+            if (isset($foreign[$key])) {
                 continue;
             }
-            $open[] = $line + ['key' => $key, 'cents' => self::cents($line['amount']) - ($covered[$key] ?? 0)];
+            // Úhrada dokladu vysvětluje řádek, jen když symbol neříká něco jiného: přeplatek
+            // vedle úhrady má na 325.999 vlastní symbol.
+            $symbol = (string) ($line['pairing_symbol'] ?? '');
+            $ownSymbol = ltrim($symbol, '0') !== '' && !isset($documentSymbols[$line['synthetic']][$symbol]);
+            $isExplained = isset($explained[$movement . $line['synthetic']]) || isset($explained[$movement . '*']);
+            if (!$ownSymbol && $isExplained) {
+                continue;
+            }
+            // `quiet`: řádek pohybu s úhradou dokladu. Položku dostane, jen když rozdíl zmenší,
+            // jinak je to běžná úhrada a do protokolu nepatří.
+            $open[] = $line + ['quiet' => $isExplained] + ['key' => $key, 'cents' => self::cents($line['amount']) - ($covered[$key] ?? 0)];
+        }
+
+        $before = count($open);
+        $open = self::withoutReturns(self::withoutClosedSymbols($open));
+        if ($before > count($open)) {
+            $p->count(self::STEP, 'balance_paired', (int) (($before - count($open)) / 2));
         }
 
         $candidates = [];
         foreach (self::byPartner($open) as $partnerKey => $group) {
             if ($partnerKey === '') {
-                foreach ($group as $line) {
+                foreach (array_filter($group, static fn (array $l): bool => !$l['quiet']) as $line) {
                     $p->count(self::STEP, 'balance_unclear');
                     $p->warn(self::STEP, 'balance_item_unclear', sprintf(
                         'Pohyb %s na účtu %s (%s Kč) nemá partnera ani symbol. Ostatní položku jsme nezaložili, doplňte ji v saldokontu ručně.',
@@ -98,11 +145,283 @@ final class BalanceItemImporter
             $p->count(self::STEP, 'balance_paired', (int) (($before - count($candidates)) / 2));
         }
         $candidates = $this->withoutClosedPeriods($ctx, $candidates);
-        $accepted = $this->reducingDifference($ctx, $candidates, (int) $ctx->period['id'], $asOf);
+        return $this->reducingDifference($ctx, $candidates, (int) $ctx->period['id'], $asOf);
+    }
+
+    /**
+     * Pohyby na účtech dokladů, kterým saldo POHODY žádný doklad nepřiřazuje.
+     *
+     * @param array<string,int|string> $mapped
+     * @return list<array<string,mixed>>
+     */
+    private function documentAccountItems(PohodaContext $ctx, string $asOf, array $mapped): array
+    {
+        $accepted = [];
+        foreach (self::DOCUMENT_ACCOUNTS as $synthetic) {
+            $groups = $this->pairing->groups($ctx->supplierId, $synthetic, $asOf);
+            // Bez souhrnného řádku bez symbolu není počáteční stav, který by předpis minulého
+            // dokladu nesl: úhrada takového dokladu zůstává otevřená jako v saldu POHODY.
+            $hasLump = ($groups[''] ?? 0) !== 0;
+            unset($groups['']);
+            $block = $groups === [] ? null : $this->saldoBlock($ctx, $synthetic, $asOf);
+            if ($block === null || self::cents($block['difference']) === 0) {
+                continue;
+            }
+            $accountIds = $this->accountIds($ctx->supplierId, $synthetic);
+            $debitNormal = $block['account']['normal_side'] === 'debit';
+            [$covered, $foreign] = $this->allocations($ctx->supplierId, $accountIds, $mapped);
+            $bySymbol = [];
+            foreach ($this->lines($ctx->supplierId, $accountIds, $asOf) as $line) {
+                $key = $line['entry_id'] . '|' . $line['line_no'];
+                if (!isset($foreign[$key]) && (string) $line['pairing_symbol'] !== '') {
+                    $bySymbol[(string) $line['pairing_symbol']][] = $line + ['key' => $key, 'cents' => self::cents($line['amount']) - ($covered[$key] ?? 0), 'covered' => $covered[$key] ?? 0];
+                }
+            }
+            $documents = $this->documentSymbols($ctx->supplierId, $synthetic);
+            $known = $this->knownSymbols($ctx->supplierId);
+            $candidates = [];
+            foreach ($bySymbol as $symbol => $group) {
+                $symbol = (string) $symbol;
+                if (ltrim($symbol, '0') === '') {
+                    array_push($candidates, ...array_values(array_filter($group, static fn (array $l): bool => $l['cents'] > 0)));
+                } elseif (isset($documents[$symbol])) {
+                    $line = self::overpaidLine($group, $groups[$symbol] ?? 0, $debitNormal, array_sum(array_column($group, 'covered')));
+                    if ($line !== null) {
+                        $candidates[] = $line;
+                    }
+                } elseif (!$hasLump || !isset($known[$symbol])) {
+                    array_push($candidates, ...self::remainders($group));
+                }
+            }
+            $candidates = array_values(array_filter($candidates, static fn (array $l): bool => $l['cents'] >= self::MIN_ITEM_CENTS));
+            $candidates = $this->withoutClosedPeriods($ctx, $candidates);
+            array_push($accepted, ...self::narrowing($candidates, self::cents($block['difference']), $debitNormal));
+        }
+        return $accepted;
+    }
+
+    /**
+     * Skupina s dokladem, ve které platby převyšují předpis: položka nese přeplacenou část
+     * největšího pohybu. `$balance` je zůstatek skupiny (MD kladně) bez ohledu na položky.
+     *
+     * @param list<array<string,mixed>> $group
+     * @return array<string,mixed>|null
+     */
+    public static function overpaidLine(array $group, int $balance, bool $debitNormal, int $covered): ?array
+    {
+        $overpaid = ($debitNormal ? -$balance : $balance) - $covered;
+        if ($overpaid <= 0) {
+            return null;
+        }
+        $paymentSide = $debitNormal ? 'credit' : 'debit';
+        $lines = array_values(array_filter($group, static fn (array $l): bool => $l['side'] === $paymentSide && $l['cents'] >= $overpaid));
+        usort($lines, static fn (array $a, array $b): int => $b['cents'] <=> $a['cents']);
+        return $lines === [] ? null : ['cents' => $overpaid] + $lines[0];
+    }
+
+    /**
+     * Položky, které rozdíl nezvětší: všechny, když sedí dohromady, jinak od největší.
+     *
+     * @param list<array<string,mixed>> $candidates
+     * @return list<array<string,mixed>>
+     */
+    public static function narrowing(array $candidates, int $difference, bool $debitNormal): array
+    {
+        $signed = static fn (array $l): int => ($l['side'] === 'debit') === $debitNormal ? $l['cents'] : -$l['cents'];
+        if ($candidates === []) {
+            return [];
+        }
+        if (self::narrows($difference, array_sum(array_map($signed, $candidates)))) {
+            return $candidates;
+        }
+        usort($candidates, static fn (array $a, array $b): int => $b['cents'] <=> $a['cents']);
+        $out = [];
+        foreach ($candidates as $line) {
+            if (self::narrows($difference, $signed($line))) {
+                $difference -= $signed($line);
+                $out[] = $line;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Doklad otevřený v MyÚčtu, jehož skupinu má POHODA vyrovnanou, nebo záloha bez řádku
+     * v deníku agendy. Deník se nemění, zapíše se jen vyrovnání dokladu.
+     */
+    private function closeByPohodaGroups(PohodaContext $ctx, string $asOf): void
+    {
+        foreach (self::DOCUMENT_ACCOUNTS as $synthetic) {
+            $groups = $this->pairing->groups($ctx->supplierId, $synthetic, $asOf);
+            unset($groups['']);
+            $block = $groups === [] ? null : $this->saldoBlock($ctx, $synthetic, $asOf);
+            if ($block === null) {
+                continue;
+            }
+            $difference = self::cents($block['difference']);
+            $map = $this->documentMap($ctx->supplierId, $synthetic);
+            $items = [];
+            foreach ($block['partners'] as $partner) {
+                array_push($items, ...$partner['items']);
+            }
+            usort($items, static fn (array $a, array $b): int => abs($b['remaining_czk']) <=> abs($a['remaining_czk']));
+            foreach ($items as $item) {
+                if ($item['kind'] !== 'document' || !in_array($item['doc_type'], ['invoice', 'purchase_invoice'], true)) {
+                    continue;
+                }
+                $symbol = $map[$item['doc_type'] . '|' . $item['doc_id']] ?? null;
+                $cents = self::cents($item['remaining_czk']);
+                // Záloha z minulých let bez řádku v deníku agendy: pokud ji rozdíl potvrzuje,
+                // zůstatek účtu ji nenese. Letošní záloha bez řádku je jen dosud neuhrazený předpis.
+                $oldAdvance = $symbol === null && in_array($synthetic, ['314', '324'], true)
+                    && (string) $item['issue_date'] < (string) $ctx->period['starts_on'];
+                $closedGroup = $symbol !== null && ($groups[$symbol] ?? null) === 0;
+                // Vyrovnání položku ze součtu ubere, rozdíl se o ni zvětší.
+                if ($cents === 0 || !($oldAdvance || $closedGroup) || !self::narrows($difference, -$cents)) {
+                    continue;
+                }
+                if (!($oldAdvance ? $this->unlinkFromOpening($ctx, $item) : $this->settleDocument($ctx, $item, $asOf))) {
+                    continue;
+                }
+                $difference += $cents;
+                $ctx->protocol->count(self::STEP, 'saldo_closed_by_symbol');
+            }
+        }
+    }
+
+    /**
+     * Stará záloha je v saldokontu jen vazbou na otevírací zápis ({@see DocumentLinker}).
+     *
+     * @param array<string,mixed> $item položka saldokonta
+     */
+    private function unlinkFromOpening(PohodaContext $ctx, array $item): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "DELETE k FROM journal_entry_document_links k
+               JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
+              WHERE k.supplier_id = ? AND k.doc_type = ? AND k.doc_id = ? AND e.source_type = 'opening'"
+        );
+        $stmt->execute([$ctx->supplierId, $item['doc_type'], (int) $item['doc_id']]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * @param array<string,mixed> $item položka saldokonta
+     * @return bool false, když je zbytek v měně dokladu po zaokrouhlení nula
+     */
+    private function settleDocument(PohodaContext $ctx, array $item, string $asOf): bool
+    {
+        $remaining = abs((float) $item['remaining_czk']);
+        $amount = $item['currency_code'] === 'CZK' || (float) $item['booked_czk'] === 0.0
+            ? $remaining
+            : round($remaining * abs((float) $item['amount_foreign'] / (float) $item['booked_czk']), 2);
+        if ($amount < 0.01) {
+            return false;
+        }
+        $pdo = $this->db->pdo();
+        if ($item['doc_type'] === 'purchase_invoice') {
+            $pdo->prepare('UPDATE purchase_invoices SET settled_outside_amount = settled_outside_amount + ? WHERE supplier_id = ? AND id = ?')
+                ->execute([number_format($amount, 2, '.', ''), $ctx->supplierId, (int) $item['doc_id']]);
+            // Stav jako u úhrady z POHODY, jinak by vyrovnaný doklad zůstal mezi neuhrazenými.
+            $pdo->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?)
+                  WHERE supplier_id = ? AND id = ? AND status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument(''))
+                ->execute([$asOf, $ctx->supplierId, (int) $item['doc_id']]);
+            return true;
+        }
+        $pdo->prepare(
+            "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+             VALUES (?, ?, ?, ?, ?, 'Převzato z POHODY, skupina salda je vyrovnaná', 'settlement', ?)"
+        )->execute([$ctx->supplierId, (int) $item['doc_id'], $asOf, number_format($amount, 2, '.', ''), $item['currency_code'], $ctx->userOrNull()]);
+        // Bez stavu by na vyrovnanou fakturu dál chodily upomínky.
+        $pdo->prepare("UPDATE invoices SET paid_total = paid_total + ?, status = 'paid', paid_at = COALESCE(paid_at, ?)
+              WHERE supplier_id = ? AND id = ? AND status IN ('issued', 'sent', 'reminded')")
+            ->execute([number_format($amount, 2, '.', ''), $asOf, $ctx->supplierId, (int) $item['doc_id']]);
+        return true;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function saldoBlock(PohodaContext $ctx, string $synthetic, string $asOf): ?array
+    {
+        try {
+            return $this->saldo->build($ctx->supplierId, (int) $ctx->period['id'], $asOf, $synthetic)['accounts'][0] ?? null;
+        } catch (ReportException $e) {
+            $ctx->protocol->warn(self::STEP, 'balance_item_saldo', "Saldokonto účtu {$synthetic} nejde sestavit, položky podle párovacích symbolů jsme nezaložili: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Symboly, které na účtu nese předpis dokladu.
+     *
+     * @return array<string,true>
+     */
+    private function documentSymbols(int $supplierId, string $synthetic): array
+    {
+        $out = [];
+        foreach ($this->documentMap($supplierId, $synthetic) as $symbol) {
+            $out[$symbol] = true;
+        }
+        return $out;
+    }
+
+    /**
+     * Symbol dokladu na účtu podle jeho předpisu v deníku.
+     *
+     * @return array<string,string> `invoice|id` => symbol
+     */
+    private function documentMap(int $supplierId, string $synthetic): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.source_type, e.source_id, p.pairing_symbol
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+               JOIN journal_line_pairing p ON p.supplier_id = l.supplier_id AND p.entry_id = l.entry_id AND p.line_no = l.line_no
+              WHERE l.supplier_id = ? AND a.account_code LIKE ?
+                AND e.source_type IN ('invoice', 'purchase_invoice') AND e.source_id IS NOT NULL AND e.reversed_by IS NULL"
+        );
+        $stmt->execute([$supplierId, $synthetic . '%']);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[$row['source_type'] . '|' . $row['source_id']] = (string) $row['pairing_symbol'];
+        }
+        return $out;
+    }
+
+    /**
+     * Symboly dokladů v agendách, včetně dokladů minulého roku bez řádku v deníku.
+     *
+     * @return array<string,true>
+     */
+    private function knownSymbols(int $supplierId): array
+    {
+        $pdo = $this->db->pdo();
+        $out = [];
+        foreach ([
+            'SELECT varsymbol FROM invoices WHERE supplier_id = ? AND varsymbol IS NOT NULL',
+            'SELECT varsymbol FROM purchase_invoices WHERE supplier_id = ? AND varsymbol IS NOT NULL',
+            'SELECT payment_variable_symbol FROM purchase_invoices WHERE supplier_id = ? AND payment_variable_symbol IS NOT NULL',
+            'SELECT vendor_invoice_number FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number IS NOT NULL',
+        ] as $sql) {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $symbol) {
+                $out[trim((string) $symbol)] = true;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $accepted
+     * @param array<string,int|string> $mapped
+     */
+    private function createItems(PohodaContext $ctx, array $accepted, array $mapped): void
+    {
         if ($accepted === []) {
             return;
         }
-
+        $p = $ctx->protocol;
         $snapshots = $this->partnerSnapshots($ctx, $accepted);
         $pdo = $this->db->pdo();
         foreach ($accepted as $line) {
@@ -131,6 +450,29 @@ final class BalanceItemImporter
             $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BALANCE_ITEM, self::mapKey($line['key'], $mapped), (int) $created['item']['id'], $ctx->runId);
             $p->count(self::STEP, 'balance_items');
         }
+    }
+
+    /**
+     * Skupiny jednoho účtu a párovacího symbolu se součtem nula: POHODA je má vyrovnané.
+     * Symbol `0` a řádek bez symbolu nepárují.
+     *
+     * @param list<array<string,mixed>> $lines s klíči `account_code`, `side`, `cents`, `pairing_symbol`
+     * @return list<array<string,mixed>>
+     */
+    public static function withoutClosedSymbols(array $lines): array
+    {
+        $sums = [];
+        foreach ($lines as $line) {
+            $symbol = (string) ($line['pairing_symbol'] ?? '');
+            if (ltrim($symbol, '0') !== '') {
+                $key = $line['account_code'] . '|' . $symbol;
+                $sums[$key] = ($sums[$key] ?? 0) + ($line['side'] === 'debit' ? $line['cents'] : -$line['cents']);
+            }
+        }
+        return array_values(array_filter($lines, static function (array $line) use ($sums): bool {
+            $key = $line['account_code'] . '|' . (string) ($line['pairing_symbol'] ?? '');
+            return ($sums[$key] ?? 1) !== 0;
+        }));
     }
 
     /**
@@ -355,6 +697,9 @@ final class BalanceItemImporter
                         $accepted[] = $line;
                         continue;
                     }
+                    if ($line['quiet']) {
+                        continue;
+                    }
                     $ctx->protocol->count(self::STEP, 'balance_not_created');
                     $ctx->protocol->warn(self::STEP, 'balance_item_no_effect', sprintf(
                         'Pohyb %s na účtu %s (%s Kč): položka by rozdíl saldokonta zvětšila nebo překročila, protiváha je nejspíš v počátečním stavu nebo jiném zápisu. Zkontrolujte ho ručně.',
@@ -424,18 +769,20 @@ final class BalanceItemImporter
         return $out;
     }
 
-    /** @return list<int> účty 315 a 325 včetně analytik */
-    private function accountIds(int $supplierId): array
+    /** @return list<int> účty 315 a 325 včetně analytik, nebo zadaná syntetika */
+    private function accountIds(int $supplierId, ?string $synthetic = null): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM chart_of_accounts
-            WHERE supplier_id = ? AND (account_code LIKE '315%' OR account_code LIKE '325%')");
-        $stmt->execute([$supplierId]);
+        $patterns = $synthetic === null ? ['315%', '325%'] : [$synthetic . '%', $synthetic . '%'];
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM chart_of_accounts
+            WHERE supplier_id = ? AND (account_code LIKE ? OR account_code LIKE ?)');
+        $stmt->execute([$supplierId, ...$patterns]);
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**
-     * Řádky živých zápisů banky a pokladny na 315 a 325 bez vlastní položky a bez vazby na
-     * doklad, od nejstaršího.
+     * Řádky živých zápisů banky a pokladny na saldokontních účtech bez vlastní položky, od
+     * nejstaršího. Vazba zápisu na doklad řádek nevylučuje: pohyb hradí fakturu a řádek vedle
+     * ní bývá přeplatek. Co úhrada dokladu vysvětluje, řeší `explainedMovements` a symbol.
      *
      * @param list<int> $accountIds
      * @return list<array<string,mixed>>
@@ -443,7 +790,7 @@ final class BalanceItemImporter
     private function lines(int $supplierId, array $accountIds, string $asOf): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT l.id AS line_id, l.entry_id, l.line_no, l.side, l.amount, a.account_code, LEFT(a.account_code, 3) AS synthetic,
+            "SELECT l.id AS line_id, l.entry_id, l.line_no, l.side, l.amount, p.pairing_symbol, a.account_code, LEFT(a.account_code, 3) AS synthetic,
                     e.document_no, e.entry_date, e.source_type, e.source_id, ap.status AS period_status,
                     t.counterparty_account, t.counterparty_bank,
                     t.variable_symbol,
@@ -452,6 +799,7 @@ final class BalanceItemImporter
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
                LEFT JOIN accounting_periods ap ON ap.id = e.period_id AND ap.supplier_id = e.supplier_id
+               LEFT JOIN journal_line_pairing p ON p.supplier_id = l.supplier_id AND p.entry_id = l.entry_id AND p.line_no = l.line_no
                LEFT JOIN (bank_transactions t JOIN bank_statements s ON s.id = t.statement_id)
                       ON e.source_type = 'bank' AND t.id = e.source_id AND s.supplier_id = e.supplier_id
                LEFT JOIN cash_documents c ON e.source_type = 'cash' AND c.id = e.source_id AND c.supplier_id = e.supplier_id
@@ -461,8 +809,6 @@ final class BalanceItemImporter
                 AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND e.entry_date <= ?
                 AND NOT EXISTS (SELECT 1 FROM journal_entries o WHERE o.supplier_id = e.supplier_id AND o.reversed_by = e.id)
                 AND NOT EXISTS (SELECT 1 FROM other_items oi WHERE oi.supplier_id = e.supplier_id AND oi.journal_entry_id = e.id)
-                AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links k
-                                 WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type IN ('invoice', 'purchase_invoice'))
               ORDER BY e.entry_date, l.id"
         );
         $stmt->execute([$supplierId, $asOf]);

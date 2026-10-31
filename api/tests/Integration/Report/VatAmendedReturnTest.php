@@ -306,10 +306,17 @@ class VatAmendedReturnTest extends TestCase
         $unchanged = $this->postFiling->changes($this->supplierId, self::YEAR, 6, 'monthly');
         $this->assertSame([], $unchanged['documents'], 'snapshot nesmí označit nezměněný doklad ani ve stejné sekundě');
 
-        // Doklad změněn PO podání — posuneme updated_at za generated_at.
+        // Úhrada ani změna updated_at DPH nemění, doklad do fronty nepatří.
         $invoiceId = $this->invoiceIds[array_key_last($this->invoiceIds)];
         $this->db->pdo()
-            ->prepare('UPDATE invoices SET updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?')
+            ->prepare("UPDATE invoices SET status = 'paid', updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?")
+            ->execute([$invoiceId]);
+        $paid = $this->postFiling->changes($this->supplierId, self::YEAR, 6, 'monthly');
+        $this->assertSame([], $paid['documents'], 'úhrada ani updated_at nejsou důvodem k dodatečnému přiznání');
+
+        // Změna částky po podání do fronty patří.
+        $this->db->pdo()
+            ->prepare('UPDATE invoices SET total_with_vat = total_with_vat + 100 WHERE id = ?')
             ->execute([$invoiceId]);
 
         $changes = $this->postFiling->changes($this->supplierId, self::YEAR, 6, 'monthly');
@@ -317,6 +324,25 @@ class VatAmendedReturnTest extends TestCase
         $this->assertTrue($changes['has_filing']);
         $ids = array_map(static fn ($d) => $d['invoice_id'], $changes['documents']);
         $this->assertContains($invoiceId, $ids, 'změněný doklad musí být ve frontě');
+    }
+
+    /** Čtení času jinak o hodinu (přechod letního času bez tabulek zón) není změna dokladu. */
+    public function testPostFilingIgnoresShiftedUpdatedAtAndComparesVatLines(): void
+    {
+        $line = ['21|1|21' => ['base' => 1000.0, 'vat' => 210.0]];
+        $row = ['status' => 'paid', 'tax_date' => '2026-09-30', 'total' => '1210.00', 'updated_at' => '2026-10-13 10:00:04'];
+        $filed = ['status' => 'sent', 'tax_date' => '2026-09-30', 'total' => 1210.0, 'updated_at' => '2026-10-13 11:00:04', 'vat_lines' => $line];
+        $legacy = array_diff_key($filed, ['vat_lines' => true]);
+        $check = [VatPostFilingChangesService::class, 'changedAfterFiling'];
+
+        $this->assertFalse($check($row, '2026-10-13 10:21:49', $filed, $line));
+        $this->assertFalse($check($row, '2026-10-13 10:21:49', $legacy, []), 'starší snapshot bez řádků přiznání');
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $filed, ['21|1|12' => ['base' => 1000.0, 'vat' => 210.0]]), 'jiná sazba při stejné částce');
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $filed, ['21|1|21' => ['base' => 1000.0, 'vat' => 200.0]]), 'jiná daň');
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $filed, []), 'doklad z období zmizel');
+        $this->assertTrue($check(['status' => 'cancelled'] + $row, '2026-10-13 10:21:49', $filed, $line), 'storno');
+        $this->assertTrue($check($row, '2026-10-13 09:00:00', null), 'doklad v podání nebyl a přibyl po něm');
+        $this->assertFalse($check($row, '2026-10-13 11:00:00', null), 'doklad v podání nebyl, ale je starší');
     }
 
     /** M42: storno po podání nesmí doklad odstranit z fronty změn. */
@@ -510,7 +536,7 @@ class VatAmendedReturnTest extends TestCase
 
         // Pokladní doklad změněn PO podání.
         $this->db->pdo()
-            ->prepare('UPDATE cash_documents SET updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?')
+            ->prepare('UPDATE cash_documents SET total_amount = total_amount + 100 WHERE id = ?')
             ->execute([$cashId]);
 
         $changes = $this->postFiling->changes($this->supplierId, self::YEAR, 7, 'monthly');

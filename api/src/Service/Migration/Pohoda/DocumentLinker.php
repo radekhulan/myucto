@@ -217,6 +217,11 @@ final class DocumentLinker
                     }
                     if (!$purchase) {
                         $p->count(self::STEP_LINK, 'advance_multiple');
+                        // Deník se symboly: čerpání doplní {@see inferIssuedAdvanceDeductions()} podle symbolu zálohy.
+                        $hasPairing ??= $this->db->pdo()->query('SELECT 1 FROM journal_line_pairing WHERE supplier_id = ' . (int) $ctx->supplierId . ' LIMIT 1')->fetchColumn() !== false;
+                        if ($hasPairing) {
+                            continue;
+                        }
                         $p->warn(self::STEP_LINK, 'advance_multiple', "Doklad {$number} čerpá zálohy " . implode(', ', array_keys($advances)) . ', které MyÚčto u vydané faktury neumí navázat; čerpání zkontrolujte ručně.', ['document_no' => $number]);
                         continue;
                     }
@@ -814,6 +819,35 @@ final class DocumentLinker
             $p->count(self::STEP_PAYMENTS, 'advance_refund_matched');
         }
 
+        // Čerpání, které POHODA páruje symbolem zálohy na řádku konečné faktury.
+        $exact = $pdo->query(
+            "SELECT f.id, p.pairing_symbol, SUM(l.signed_amount) AS amount
+               FROM purchase_invoices f
+               JOIN journal_entries e ON e.supplier_id = f.supplier_id AND e.source_type = 'purchase_invoice' AND e.source_id = f.id AND e.reversed_by IS NULL
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'credit'
+               JOIN journal_line_pairing p ON p.supplier_id = l.supplier_id AND p.entry_id = l.entry_id AND p.line_no = l.line_no
+               JOIN chart_of_accounts ca ON ca.id = l.account_id LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+              WHERE f.supplier_id = {$s} AND f.document_kind = 'invoice' AND f.advance_purchase_invoice_id IS NULL
+                AND f.status NOT IN ('draft', 'cancelled') AND {$advanceAccount}
+                AND NOT EXISTS (SELECT 1 FROM purchase_advance_deductions pad WHERE pad.final_invoice_id = f.id)
+              GROUP BY f.id, p.pairing_symbol"
+        )->fetchAll(PDO::FETCH_ASSOC);
+        $deductExact = $pdo->prepare('INSERT IGNORE INTO purchase_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, created_by) VALUES (?, ?, ?, ?, ?)');
+        foreach ($exact as $f) {
+            // Víc záloh se stejným symbolem (smlouva na energie) se čerpá od nejstarší.
+            $amount = round((float) $f['amount'], 2);
+            foreach (array_keys($bySymbol[preg_replace('/\D+/', '', (string) $f['pairing_symbol']) ?? ''] ?? []) as $advanceId) {
+                if ($amount < 0.01 || $advances[$advanceId]['left'] < 0.01) {
+                    continue;
+                }
+                $take = round(min($amount, $advances[$advanceId]['left']), 2);
+                $deductExact->execute([$s, (int) $f['id'], $advanceId, number_format($take, 2, '.', ''), $ctx->userOrNull()]);
+                $advances[$advanceId]['left'] = round($advances[$advanceId]['left'] - $take, 2);
+                $amount = round($amount - $take, 2);
+                $p->count(self::STEP_PAYMENTS, 'advance_deduction_by_symbol');
+            }
+        }
+
         // Odpočet zálohy obyčejnou položkou konečné faktury.
         $finals = $pdo->query(
             "SELECT f.id, f.vendor_id, MIN(e.entry_date) AS entry_date,
@@ -861,8 +895,9 @@ final class DocumentLinker
         $s = $ctx->supplierId;
         $account = "(ca.account_code LIKE '324%' OR COALESCE(pa.account_code, '') LIKE '324%')";
         $advances = [];
+        $bySymbol = [];
         foreach ($pdo->query(
-            "SELECT a.id, a.client_id,
+            "SELECT a.id, a.client_id, a.varsymbol,
                     (SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip WHERE ip.supplier_id = a.supplier_id AND ip.invoice_id = a.id) AS paid,
                     (SELECT COALESCE(SUM(l.signed_amount), 0) FROM invoices ch
                        JOIN journal_entries e ON e.supplier_id = ch.supplier_id AND e.source_type = 'invoice' AND e.source_id = ch.id AND e.reversed_by IS NULL
@@ -875,9 +910,39 @@ final class DocumentLinker
               ORDER BY a.issue_date, a.id"
         )->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $advances[(int) $r['id']] = ['client' => (int) $r['client_id'], 'left' => round((float) $r['paid'] - (float) $r['linked'] - (float) $r['deducted'], 2)];
+            $symbol = preg_replace('/\D+/', '', (string) $r['varsymbol']) ?? '';
+            if ($symbol !== '') {
+                $bySymbol[$symbol][(int) $r['id']] = true;
+            }
         }
         if ($advances === []) {
             return;
+        }
+        // Čerpání, které POHODA páruje symbolem zálohy na řádku konečné faktury.
+        $deduct = $pdo->prepare("INSERT IGNORE INTO invoice_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, source, created_by) VALUES (?, ?, ?, ?, 'import', ?)");
+        foreach ($pdo->query(
+            "SELECT f.id, p.pairing_symbol, SUM(l.signed_amount) AS amount
+               FROM invoices f
+               JOIN journal_entries e ON e.supplier_id = f.supplier_id AND e.source_type = 'invoice' AND e.source_id = f.id AND e.reversed_by IS NULL
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'debit'
+               JOIN journal_line_pairing p ON p.supplier_id = l.supplier_id AND p.entry_id = l.entry_id AND p.line_no = l.line_no
+               JOIN chart_of_accounts ca ON ca.id = l.account_id LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+              WHERE f.supplier_id = {$s} AND f.invoice_type = 'invoice' AND f.parent_invoice_id IS NULL
+                AND f.status NOT IN ('draft', 'cancelled') AND {$account}
+                AND NOT EXISTS (SELECT 1 FROM invoice_advance_deductions iad WHERE iad.supplier_id = f.supplier_id AND iad.final_invoice_id = f.id)
+              GROUP BY f.id, p.pairing_symbol"
+        )->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            $amount = round((float) $f['amount'], 2);
+            foreach (array_keys($bySymbol[preg_replace('/\D+/', '', (string) $f['pairing_symbol']) ?? ''] ?? []) as $advanceId) {
+                if ($amount < 0.01 || $advances[$advanceId]['left'] < 0.01) {
+                    continue;
+                }
+                $take = round(min($amount, $advances[$advanceId]['left']), 2);
+                $deduct->execute([$s, (int) $f['id'], $advanceId, number_format($take, 2, '.', ''), $ctx->userOrNull()]);
+                $advances[$advanceId]['left'] = round($advances[$advanceId]['left'] - $take, 2);
+                $amount = round($amount - $take, 2);
+                $ctx->protocol->count(self::STEP_PAYMENTS, 'advance_deduction_by_symbol');
+            }
         }
         $finals = $pdo->query(
             "SELECT f.id, f.client_id, MIN(e.entry_date) AS entry_date, SUM(l.signed_amount) AS debit
@@ -891,7 +956,6 @@ final class DocumentLinker
               GROUP BY f.id, f.client_id
               ORDER BY entry_date, f.id"
         )->fetchAll(PDO::FETCH_ASSOC);
-        $deduct = $pdo->prepare("INSERT IGNORE INTO invoice_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, source, created_by) VALUES (?, ?, ?, ?, 'import', ?)");
         foreach ($finals as $f) {
             $debit = round((float) $f['debit'], 2);
             foreach ($advances as $advanceId => &$advance) {

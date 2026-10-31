@@ -45,6 +45,7 @@ final class AnonymizationPolicy
         'accounting_securities_debt_commands' => 'původní idempotentní odpovědi obsahují soukromé podklady instrumentů',
         'accounting_framework_conversion_commands'=>'original conversion command tokens',
         'property_service_lifecycle_commands' => 'původní idempotentní odpovědi nelze přehrát nad pseudonymizovanými podklady bez původního požadavku',
+        'journal_line_pairing' => 'párovací symboly z převodu jsou variabilní symboly a čísla dokladů; klon je nepotřebuje',
         'abra_flexi_connections' => 'šifrované připojení ke zdrojové účetní firmě',
         'eet_attempts' => 'podepsaná XML pokusů nesou skutečné EIČ a certifikát poplatníka; klon neodesílá',
         'ai_assistant_conversations' => 'osobní historie dotazů AI asistenta (názvy z dotazů)',

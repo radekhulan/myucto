@@ -102,6 +102,7 @@ Volitelné kroky:
 1. Otevřete `Nákup → AI import`.
 2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo na telefonu a tabletu klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. Při více souborech vznikne dávka, která se zpracuje
    postupně po jednom.
+   Nahrané obrázky se pro vytěžení a archivaci převedou do PDF se zachovaným poměrem stran, bez deformace či ořezu.
 3. Počkejte na zpracování. U každého souboru uvidíte stav, dodavatele, částku a **typ dokladu**.
 4. Případně změňte **Typ dokladu** přímo v tabulce (například účtenku placenou kartou, kterou AI zařadila jako
    *Účtenka / paragon*, chcete vést jako *Faktura*).

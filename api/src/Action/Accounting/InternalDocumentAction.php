@@ -12,6 +12,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
+use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\CsvWriter;
 use MyInvoice\Service\IpMatcher;
@@ -47,6 +48,7 @@ final class InternalDocumentAction
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly JournalLinkService $links,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -207,7 +209,11 @@ final class InternalDocumentAction
     {
         $foreign = $this->db->pdo()->inTransaction();
         try {
-            return Json::ok($response, $call(), $status);
+            $result = $call();
+            if (is_array($result) && isset($result['document_links'])) {
+                $result['document_links'] = $this->links->withDocumentTitles($this->currentSupplierId($request), $result['document_links']);
+            }
+            return Json::ok($response, $result, $status);
         } catch (InternalDocumentException $e) {
             return Json::error($response, 'internal_documents.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (ClosingException $e) {

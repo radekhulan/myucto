@@ -357,7 +357,7 @@ další se načte při posunu dolů nebo tlačítkem **Načíst další**; zápi
 zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 
 - **Datum** - datum účetního případu (datum účetního případu),
-- **Doklad** - číslo dokladu/zápisu,
+- **Doklad** - číslo dokladu/zápisu; které číslo nese přijatá faktura, popisuje [§ 23.11.5](23_Prijate_faktury.md#23115-povinna-pole),
 - **Datum dokladu** *(skryto ve výchozím zobrazení)* - datum vyhotovení, pokud se liší od data zápisu,
 - **Popis**,
 - **Zdroj** - typ a číslo zdrojového dokladu; odznak **Automaticky** se u

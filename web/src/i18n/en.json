@@ -31192,7 +31192,9 @@
         "fix": "Start Redis, or disable it in the configuration."
       },
       "disk_space": {
-        "label": "Free disk space",
+        "label": "Disk space",
+        "actual_label": "Free",
+        "info_label": "Total",
         "impact": "Once the disk fills up, backups, PDFs and uploaded documents silently stop being created.",
         "fix": "Free up space, or grow the data volume."
       },
