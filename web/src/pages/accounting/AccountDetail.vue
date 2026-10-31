@@ -196,9 +196,13 @@ const actions = computed<ActionItem[]>(() => {
   ]
 })
 
-/** Zůstatek na „správné" straně účtu — kladné = MD, záporné = Dal. */
-function balanceSide(v: number): string {
-  return v >= 0 ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit')
+/**
+ * Popisek zůstatku se stranou účtu. Server vrací zůstatek se znaménkem (kladné = MD,
+ * záporné = Dal), v kartě se strana píše slovem a částka je kladná jako v hlavní knize.
+ */
+function balanceLabel(label: string, v: number): string {
+  if (v === 0) return label
+  return `${label} · ${v > 0 ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit')}`
 }
 
 watch(accountId, () => { void load() })
@@ -296,8 +300,8 @@ onMounted(async () => {
         <!-- Souhrn účtu -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-            <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.opening') }}</div>
-            <div class="text-lg font-semibold font-mono">{{ formatMoney(report.totals.opening_balance) }}</div>
+            <div class="text-xs text-neutral-500" data-testid="opening-label">{{ balanceLabel(t('accounting.account_statement.opening'), report.totals.opening_balance) }}</div>
+            <div class="text-lg font-semibold font-mono" data-testid="opening-amount">{{ formatMoney(Math.abs(report.totals.opening_balance)) }}</div>
           </div>
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
             <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.turnover_md') }}</div>
@@ -308,10 +312,8 @@ onMounted(async () => {
             <div class="text-lg font-semibold font-mono">{{ formatMoney(report.totals.turnover_d) }}</div>
           </div>
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-            <div class="text-xs text-neutral-500">
-              {{ t('accounting.account_statement.closing') }} · {{ balanceSide(report.totals.closing_balance) }}
-            </div>
-            <div class="text-lg font-semibold font-mono">{{ formatMoney(report.totals.closing_balance) }}</div>
+            <div class="text-xs text-neutral-500" data-testid="closing-label">{{ balanceLabel(t('accounting.account_statement.closing'), report.totals.closing_balance) }}</div>
+            <div class="text-lg font-semibold font-mono" data-testid="closing-amount">{{ formatMoney(Math.abs(report.totals.closing_balance)) }}</div>
           </div>
         </div>
 
