@@ -44,24 +44,20 @@ final class VatPostFilingChangesService
         int $year,
         int $month,
         string $period = 'monthly',
-        string $formCode = 'dphdp3',
-        array $variants = ['B', 'O', 'D', 'E'],
     ): array {
         [$start, $end, $quarter] = $this->periodBounds($year, $month, $period);
 
         // Základna = poslední skutečně podané přiznání (řádné/opravné/dodatečné/opravné-dodatečné) —
         // změny po JAKÉMKOLI z nich znamenají, že podaný stav už neodpovídá dokladům. Bereme
         // všechny druhy kromě neplatných (validation_status='failed' filtruje repo).
-        // Formulář je parametr, ne konstanta: tytéž doklady stojí za přiznáním i za
-        // kontrolním hlášením, takže „co se změnilo po podání" je pro obě tvrzení stejná
-        // otázka. KH ji dřív nemělo jak položit a UI u něj nemělo z čeho nabídnout opravné.
+        // Kontrolní hlášení se porovnává s podaným XML, viz KhEvidenceService::postFilingChanges().
         $filing = $this->submissions->findLatestForPeriod(
             $supplierId,
-            $formCode,
+            'dphdp3',
             $year,
             $quarter !== null ? null : $month,
             $quarter,
-            $variants,
+            ['B', 'O', 'D', 'E'],
         );
         if ($filing === null) {
             return ['has_filing' => false, 'snapshot_available' => false, 'submission' => null, 'documents' => []];

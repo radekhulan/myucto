@@ -27737,6 +27737,18 @@
     },
     "kh": {
       "title": "Control statement (DPHKH1)",
+      "post_filing": {
+        "title": "Differences from the filed control statement",
+        "hint": "The current documents would produce a different statement from the one filed. Consider a corrective or follow-up control statement. Amounts are base / VAT.",
+        "filed": "filed",
+        "current": "today",
+        "evidence": "Open the document list of the filed statement",
+        "status": {
+          "amount_diff": "amount differs",
+          "only_submitted": "only in the filed statement",
+          "only_current": "only in current data"
+        }
+      },
       "subtitle": "EPO portal MF ČR report. Version 03.01.",
       "download_xml": "Download XML",
       "rows": "rows",

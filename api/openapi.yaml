@@ -9360,9 +9360,9 @@ paths:
           description: |
             Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3, varování k volbě typu podání,
             `cross_check` (přijaté doklady čekající na schválení, týž tvar nálezů jako
-            u DPHDP3; samovyměření je blokující) a fronta `post_filing_changes` (doklady
-            změněné po posledním podání za období — podklad pro rozhodnutí o opravném či
-            následném hlášení).
+            u DPHDP3; samovyměření je blokující) a `post_filing_changes` (řádky, kterými se
+            dnes sestavené hlášení liší od posledního podaného XML, podklad pro rozhodnutí
+            o opravném či následném hlášení).
           content:
             application/json:
               schema:

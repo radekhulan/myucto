@@ -27737,6 +27737,18 @@
     },
     "kh": {
       "title": "Kontrolní hlášení (DPHKH1)",
+      "post_filing": {
+        "title": "Rozdíly proti podanému kontrolnímu hlášení",
+        "hint": "Z aktuálních dokladů by dnes vzniklo jiné hlášení, než které bylo podáno. Zvažte opravné nebo následné kontrolní hlášení. Částky jsou základ / daň.",
+        "filed": "podáno",
+        "current": "dnes",
+        "evidence": "Otevřít soupis dokladů podaného hlášení",
+        "status": {
+          "amount_diff": "rozdíl částky",
+          "only_submitted": "jen v podaném hlášení",
+          "only_current": "jen v aktuálních datech"
+        }
+      },
       "subtitle": "Výkaz pro EPO portál MF ČR. Verze 03.01.",
       "download_xml": "Stáhnout XML",
       "rows": "řádků",

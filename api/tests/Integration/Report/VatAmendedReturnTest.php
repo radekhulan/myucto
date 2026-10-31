@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
+use MyInvoice\Service\Report\KhEvidenceService;
+use MyInvoice\Service\Report\KhSubmittedXmlReader;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Report\VatPostFilingChangesService;
@@ -257,6 +259,67 @@ class VatAmendedReturnTest extends TestCase
         } catch (PostingException $e) {
             $this->assertSame('vat_d_zjist_required', $e->errorCode, $e->getMessage());
         }
+    }
+
+    /** Fronta KH: rozhoduje podané XML, ne `updated_at`. Úhrada se neprojeví, nový doklad ano. */
+    public function testKhPostFilingComparesSubmittedXml(): void
+    {
+        $service = Bootstrap::buildContainer()->get(KhEvidenceService::class);
+        $cust = $this->client('Odběratel KH fronta', 'CZ90010045');
+        $this->sale('KH-OLD', $cust, '1', $this->d(3, 10), [[100000, 21000, 21]]);
+        $invoiceId = $this->invoiceIds[array_key_last($this->invoiceIds)];
+        $changes = fn (): array => $service->postFilingChanges(
+            $this->supplierId, self::YEAR, 3, 'monthly',
+            $this->kh->build($this->supplierId, self::YEAR, 3, 'monthly', 'radne')['xml'],
+        );
+        $this->assertFalse($changes()['has_filing']);
+
+        $radne = $this->kh->build($this->supplierId, self::YEAR, 3, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphkh1', self::YEAR, 3, null,
+            $radne['xml'], $radne['summary'], $this->userId, true, 'B',
+        );
+        $this->assertSame([], $changes()['documents']);
+
+        $this->db->pdo()
+            ->prepare("UPDATE invoices SET status = 'paid', updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?")
+            ->execute([$invoiceId]);
+        $paid = $changes();
+        $this->assertTrue($paid['snapshot_available']);
+        $this->assertSame([], $paid['documents'], 'úhrada KH nemění');
+
+        $this->sale('KH-NEW', $cust, '1', $this->d(3, 12), [[50000, 10500, 21]]);
+        $added = $changes()['documents'];
+        $this->assertCount(1, $added);
+        $this->assertSame(['A.4', 'only_current', 'KH-NEW'], [$added[0]['section'], $added[0]['status'], $added[0]['doc_number']]);
+        $this->assertNull($added[0]['filed']);
+        $this->assertSame(['base' => 50000.0, 'vat' => 10500.0], $added[0]['current']);
+    }
+
+    /** Rozdíl částky, zmizelý doklad, změna souhrnného oddílu a potvrzení výzvy. */
+    public function testKhChangedDocumentsDetectsEveryKindOfDifference(): void
+    {
+        $xml = static fn (string $rows, string $head = ''): string => '<Pisemnost><DPHKH1><VetaD dokument="KH1" d_poddp="01.10.2026"' . $head . '/>' . $rows . '</DPHKH1></Pisemnost>';
+        $a4 = static fn (string $no, int $base, int $vat): string => '<VetaA4 dic_odb="90010045" c_evid_dd="' . $no . '" dppd="01.03.2026" zakl_dane1="' . $base . '" dan1="' . $vat . '" zakl_dane2="0" dan2="0"/>';
+        $a5 = static fn (int $base, int $vat): string => '<VetaA5 zakl_dane1="' . $base . '" dan1="' . $vat . '" zakl_dane2="0" dan2="0"/>';
+
+        $filed = $xml($a4('A', 1000, 210) . $a4('GONE', 500, 105) . $a5(100, 21));
+        $this->assertSame([], KhEvidenceService::changedDocuments($filed, str_replace('01.10.2026', '31.10.2026', $filed)), 'hlavička rozdíl nedělá');
+
+        $changed = KhEvidenceService::changedDocuments($filed, $xml($a4('A', 1000, 200) . $a5(200, 42)));
+        $this->assertSame([
+            ['A.4', 'amount_diff', 'A'],
+            ['A.4', 'only_submitted', 'GONE'],
+            ['A.5', 'amount_diff', ''],
+        ], array_map(static fn (array $d): array => [$d['section'], $d['status'], $d['doc_number']], $changed));
+        $this->assertSame(['base' => 1000.0, 'vat' => 210.0], $changed[0]['filed']);
+        $this->assertSame(['base' => 1000.0, 'vat' => 200.0], $changed[0]['current']);
+        $this->assertNull($changed[1]['current']);
+        $this->assertTrue($changed[2]['is_aggregate']);
+
+        $this->assertTrue(KhSubmittedXmlReader::isConfirmation($xml('', ' vyzva_odp="P"')));
+        $this->assertFalse(KhSubmittedXmlReader::isConfirmation($xml('', ' vyzva_odp="B"')));
+        $this->assertFalse(KhSubmittedXmlReader::isConfirmation($filed));
     }
 
     /** (e) Následné (N) KH = FULL (všechny údaje znovu), khdph_forma='N'. */
