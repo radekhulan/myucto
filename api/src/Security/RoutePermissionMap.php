@@ -1094,9 +1094,12 @@ final class RoutePermissionMap
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
-        // I čtecí POST musí vyřešit efektivní roli aktivní firmy.
+        // Widgety i osobní UI preference musí vyřešit efektivní roli aktivní firmy.
+        // READ u osobní preference nepovoluje obchodní zápis; demo hlídá middleware.
         if ((in_array($method, ['GET', 'HEAD'], true) && $path === '/api/dashboard-widgets/catalog')
-            || ($method === 'POST' && $path === '/api/dashboard-widgets/query')) {
+            || ($method === 'POST' && $path === '/api/dashboard-widgets/query')
+            || (in_array($method, ['GET', 'HEAD', 'PUT', 'DELETE'], true)
+                && preg_match('#^/api/user/dashboard-layouts/(home|portal)$#D', $path) === 1)) {
             return new RoutePermission(self::PERMISSION, 'profile', AccessLevel::READ, ['dashboard']);
         }
         if (InstanceAdminRoutePolicy::isTechnicalEndpoint($method, $path)) {

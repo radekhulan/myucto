@@ -121,6 +121,20 @@ Volba se uloží v prohlížeči. Podrobnosti jsou v [§ 10.10.12](#101012-vzhle
 1. Použijte přepínač firem (spodní lišta uprostřed, v levém menu vpravo v hlavičce).
 2. Nebo stiskněte **Alt+Q** (hledání) či **Ctrl+K** (paleta příkazů) a ve skupině **Přepnout firmu** zadejte název nebo IČ.
 
+### 10.7.5 Vlastní uspořádání přehledu
+
+1. U názvu firmy klikněte na **Upravit přehled**.
+2. Stávající bloky přesuňte tažením za úchyt nebo tlačítky nahoru a dolů. Tlačítko s košem blok skryje; do přehledu ho vrátíte v části **Vrátit původní bloky**.
+3. V katalogu přidejte jednotlivé widgety nebo oddělovač. U widgetu lze nastavit šířku, výšku a dostupné volby, například období nebo měnu. Na úzké obrazovce jsou widgety pod sebou.
+4. Tlačítkem **Náhled** zkontrolujte výsledek přímo v přehledu. **Pokračovat v úpravách** otevře editor znovu.
+5. Klikněte na **Uložit**. **Zrušit** zahodí rozepsané úpravy; **Obnovit výchozí** vrátí původní sestavu.
+
+Rozložení je osobní, ukládá se u vašeho účtu a platí napříč firmami. **Akce pro tebe** a **Přehled firmy** mají vlastní nastavení. Bez uložených úprav zůstává původní sestava bloků.
+
+Katalog nabízí jen widgety dostupné podle vašich práv a nastavení aktivní firmy. Dříve přidaný widget, který dočasně není dostupný, se skryje, ale zůstává uložený. Volby měny **Automaticky** a **Všechny** ukazují měny odděleně; týdenní peněžní výhled používá konkrétní měnu.
+
+Pokud jiné okno mezitím uloží nové rozložení, aplikace vaše úpravy nepřepíše. Můžete si je ponechat rozepsané, nebo načíst aktuální uložený stav. Neplatné uložené rozložení zobrazí původní bloky a dovolí obnovu výchozího nastavení. V ukázkové verzi lze vyzkoušet náhled, ukládání a obnova jsou vypnuté.
+
 ## 10.8 Krok za krokem: Klávesové zkratky
 
 1. Otevřete uživatelské menu pod svým jménem a klikněte na **Klávesové zkratky** (stejná obrazovka je v **Profilu** jako záložka **Klávesové zkratky**).

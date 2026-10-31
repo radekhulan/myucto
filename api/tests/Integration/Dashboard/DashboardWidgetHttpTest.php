@@ -168,6 +168,44 @@ final class DashboardWidgetHttpTest extends TestCase
         $walk($body);
     }
 
+    public function testPersonalLayoutRoundTripRequiresCsrfAndIsolatesOwnersAndBoards(): void
+    {
+        $user = $this->user($this->readonlyRole, 'readonly');
+        $other = $this->user($this->readonlyRole, 'readonly');
+        foreach ([$user, $other] as $id) $this->assign($id, $this->suppliers[0]);
+        $session = $this->session($user);
+        $initial = $this->request('GET', '/api/user/dashboard-layouts/home', $session);
+        self::assertSame(200, $initial->getStatusCode(), (string) $initial->getBody());
+        self::assertSame('0', $this->json($initial)['revision']);
+        $layout = ['schemaVersion' => 2, 'items' => []];
+        $body = ['layout' => $layout, 'revision' => '0'];
+        $noCsrf = $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body, csrf: false);
+        self::assertSame(403, $noCsrf->getStatusCode());
+        self::assertSame('csrf_failed', $this->json($noCsrf)['error']['code']);
+        $saved = $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $revision = $this->json($saved)['revision'];
+        self::assertNotSame('0', $revision);
+        self::assertSame($layout, $this->json($this->request('GET', '/api/user/dashboard-layouts/home', $session))['layout']);
+        self::assertSame('0', $this->json($this->request('GET', '/api/user/dashboard-layouts/portal', $session))['revision']);
+        self::assertSame('0', $this->json($this->request('GET', '/api/user/dashboard-layouts/home', $this->session($other)))['revision']);
+        self::assertSame(409, $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body)->getStatusCode());
+        self::assertSame(422, $this->request('PUT', '/api/user/dashboard-layouts/home', $session, $body + ['user_id' => $other])->getStatusCode());
+        $reset = $this->request('DELETE', '/api/user/dashboard-layouts/home', $session, ['revision' => $revision]);
+        self::assertSame(200, $reset->getStatusCode(), (string) $reset->getBody());
+        self::assertNull($this->json($reset)['layout']);
+        self::assertNotSame('0', $this->json($reset)['revision']);
+        $tokens = new ApiTokenService($this->db, new RedisFactory($this->config));
+        $token = $tokens->generate($user, $this->suppliers[0], 'Syntetický editor rozložení', 'read_write');
+        foreach (['/api', '/api/v1'] as $prefix) {
+            foreach (['GET', 'PUT', 'DELETE'] as $method) {
+                $response = $this->request($method, $prefix . '/user/dashboard-layouts/home', body: $body, token: $token['plaintext']);
+                self::assertSame(403, $response->getStatusCode());
+                self::assertSame('token_endpoint_forbidden', $this->json($response)['error']['code']);
+            }
+        }
+    }
+
     private function supplier(string $suffix): int
     {
         $pdo = $this->db->pdo();
