@@ -52,6 +52,22 @@ final class DashboardWidgetRegistryTest extends TestCase
         self::assertSame(['id', 'type', 'options'], array_keys($widgets[0]));
     }
 
+    public function testWeeklyForecastRequiresAnExplicitCurrencyInsteadOfSilentlyChoosingCzk(): void
+    {
+        $registry = new DashboardWidgetRegistry();
+        self::assertSame('CZK', $registry->get('cashflow.weekly')['options']['currency']['default']);
+        $query = $registry->validateWidgets([['id' => 'forecast', 'type' => 'cashflow.weekly', 'options' => ['currency' => 'EUR']]]);
+        self::assertSame('EUR', $query[0]['options']->currency);
+        foreach (['auto', 'all'] as $currency) {
+            try {
+                $registry->validateWidgets([['id' => 'forecast', 'type' => 'cashflow.weekly', 'options' => ['currency' => $currency]]]);
+                self::fail('Jednoměnový výhled nesmí nabídnout automatický výběr ani součet různých měn.');
+            } catch (\InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+        }
+    }
+
     #[DataProvider('invalidQueries')]
     public function testInvalidQueriesAreRejectedBeforeProviders(mixed $widgets): void
     {

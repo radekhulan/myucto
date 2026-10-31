@@ -132,8 +132,8 @@
       "options": {
         "currency": {
           "type": "string",
-          "pattern": "^(all|auto|[A-Z]{3})$",
-          "default": "auto"
+          "pattern": "^[A-Z]{3}$",
+          "default": "CZK"
         }
       },
       "dependencies": [
