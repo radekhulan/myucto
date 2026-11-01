@@ -183,7 +183,7 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 1. V podvojném účetnictví otevřete `Účetnictví → Ostatní pohledávky a závazky`. V daňové evidenci `Daňová evidence → Ostatní pohledávky a závazky`.
 2. Klikněte na **Nová ostatní položka**. Vyplňte směr, druh, položku, protistranu, datum vzniku, splatnost a částku v Kč.
 3. V podvojném účetnictví zvolte v části **Účtování** účet pohledávky nebo závazku a protiúčet. Chybí-li volba, použije se 315 nebo 325.
-4. Klikněte na **Zaúčtovat**. Položka dostane číslo z řady OP (pohledávky) nebo OZ (závazky) a vznikne zápis. V daňové evidenci se položka potvrdí a žádný zápis nevzniká.
+4. Klikněte na **Zaúčtovat**. Položka dostane číslo z řady OP (pohledávky) nebo OZ (závazky), u druhu s vlastní řadou z řady druhu, a vznikne zápis. V daňové evidenci se položka potvrdí a žádný zápis nevzniká.
 5. Po uhrazení klikněte na **Hledat volnou platbu**, vyberte bankovní pohyb nebo pokladní doklad a přiřaďte úhradu.
 6. Opakuje-li se položka, nastavte v části **Opakování položky** četnost. Rozkládá-li se úhrada, nastavte splátkový kalendář.
 
@@ -1365,13 +1365,17 @@ nezadává; patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkaz�
 #### 52.14.14.1 Přehled
 
 Seznam ukazuje ruční položky a pod nimi položky z jiných modulů. U ruční položky
-vidíte název se směrem a druhem, protistranu, splatnost, zdroj s počtem
-připojených dokumentů, částku, **zbývá uhradit** a stav. Z řádku otevřete detail;
+vidíte číslo dokladu (koncept ho ještě nemá), název se směrem a druhem, protistranu,
+splatnost, zdroj s počtem připojených dokumentů, částku, **zbývá uhradit** a stav.
+Podle čísla dokladu jde seznam i řadit. Z řádku otevřete detail;
 rozpracovaný koncept lze také upravit nebo smazat.
 
 Filtry:
 
 - **Směr**: vše, pohledávky, nebo závazky.
+- **Druh**: vestavěné i vlastní druhy, rozdělené na závazky a pohledávky; se zvoleným
+  směrem jen jeho druhy. Výběr druhu filtruje i jeho stranu. Nabízejí se i skryté druhy,
+  aby šly dohledat jejich starší doklady.
 - **Stav**: výchozí **Otevřené** ukazuje koncepty, potvrzené a zaúčtované
   položky, u kterých ještě zbývá něco uhradit; **Vše** ukáže i uhrazené,
   stornované a zrušené.
@@ -1381,6 +1385,7 @@ Filtry:
   rok zpět až rok dopředu.
 
 Tlačítko **Nová ostatní položka** založí koncept se směrem podle aktuálního filtru.
+Tlačítko **Druhy** otevře nastavení druhů: skrytí a vlastní číselné řady ([§ 52.14.14.11](#52141411-druhy-a-ciselne-rady)).
 
 #### 52.14.14.2 Založení položky
 
@@ -1389,7 +1394,7 @@ V konceptu vyplníte:
 | Pole | Význam |
 |---|---|
 | Směr | pohledávka (vám někdo dluží) nebo závazek (dlužíte vy) |
-| Druh | nájemné, kauce, půjčka nebo splátka, pojistné, poplatek, náhrada, jiné |
+| Druh | nájemné, kauce, půjčka nebo splátka, pojistné, poplatek, náhrada, jiné, nebo vlastní druh firmy |
 | Položka | stručný název, například „Nájemné kancelář říjen" |
 | Protistrana | výběr z adresáře (u závazku dodavatelé, u pohledávky odběratelé), nebo ruční text |
 | Datum vzniku | den, kdy nárok nebo dluh vznikl; výchozí dnešek |
@@ -1400,7 +1405,8 @@ V konceptu vyplníte:
 | Poznámka | volný text k položce |
 
 Názvy druhů se mění podle směru, aby například kauce k vrácení nezněla jako
-přijatá kauce. Druh je jen popisný: neurčuje účty ani daňovou povahu. Změnou směru
+přijatá kauce. Vlastní druhy se nabízejí jen u směru, ke kterému patří, skryté druhy
+se nenabízejí vůbec. Druh neurčuje účty ani daňovou povahu; může určit číselnou řadu. Změnou směru
 se druh a zadané účty vymažou. Dokumenty připojíte až po uložení položky v jejím
 detailu. Upravovat lze jen koncept.
 
@@ -1419,8 +1425,9 @@ nájemné na nájem a zálohy na služby. Součet řádků musí přesně odpov�
 položky. Účet pohledávky nebo závazku zůstává jeden v celé částce kvůli saldu
 a párování úhrad; protiúčet nesmí být shodný s ním ani začínat 315 nebo 325.
 
-**Zaúčtovat** přidělí položce číslo z řady OP (pohledávky) nebo OZ (závazky)
-podle roku data vzniku a vytvoří zápis k datu zaúčtování:
+**Zaúčtovat** přidělí položce číslo z řady OP (pohledávky) nebo OZ (závazky),
+u druhu s vlastní řadou z řady druhu, podle roku data vzniku a vytvoří zápis
+k datu zaúčtování:
 
 | Směr | Zápis |
 |---|---|
@@ -1541,7 +1548,61 @@ zakládání, úpravy a úhrady vyžadují zápis. Zaúčtování a storno v pod
 účetnictví a každé přeúčtování potřebují navíc oprávnění zaúčtovat v deníku.
 Přiřazení bankovní platby vyžaduje přístup k bance a párování, přiřazení
 pokladního dokladu přístup k pokladně. Připojené dokumenty vidí uživatel
-s přístupem k dokumentům.
+s přístupem k dokumentům. Druhy zakládá, skrývá a přejmenovává uživatel se zápisem
+do agendy; zapnutí a vypnutí vlastní řady navíc potřebuje oprávnění upravovat
+účetnictví, stejně jako úprava číselných řad v Nástrojích.
+
+#### 52.14.14.11 Druhy a číselné řady
+
+Všechny položky jedné strany mají jinak čísla ze společné řady OP (pohledávky) nebo
+OZ (závazky). Chcete-li agendy rozlišit podle čísla, například nájemné, nároky na
+dotace a registrace, dejte druhu vlastní řadu. Platí to pro vestavěné druhy (nájemné,
+kauce, půjčka…) i pro vlastní druhy, které si firma založí.
+
+V přehledu klikněte na **Druhy**. Okno ukazuje druhy závazků a pohledávek zvlášť,
+protože každá strana čísluje svou řadou.
+
+| Akce | Co dělá |
+|---|---|
+| **Vlastní řada** | zapne druhu vlastní řadu; poprvé se zeptá na prefix, například `NJ` pro nájemné |
+| **Společná řada** | vrátí druh na OP nebo OZ; jeho řada zůstane a po opětovném zapnutí čísluje dál |
+| **Skrýt** / **Zobrazit** | skrytý druh se nenabízí novým položkám; koncept, který ho už má, si ho ponechá a opakování z něj dál vydává doklady |
+| Úprava (tužka) | přejmenuje vlastní druh; vestavěný druh se jmenuje podle překladu |
+| Smazání (koš) | jen vlastní druh bez položek a bez opakování; s ním zmizí i jeho prázdná řada |
+
+Vlastní druh založíte v dolní části okna: zvolte směr a název, případně zaškrtněte
+**Číslovat doklady vlastní řadou** a zadejte prefix. Druh se nabídne v poli **Druh**
+u položek stejného směru. Směr druhu se po založení nemění.
+
+Vlastní druh je pro aplikaci „jiná pohledávka“ nebo „jiný závazek“. Daňová evidence
+zařadí úhradu přijaté půjčky a kauce jako nedaňovou jen u vestavěného druhu
+([§ 74](74_Danova_evidence.md)), proto půjčky a kauce veďte pod vestavěným druhem
+a chcete-li je číslovat zvlášť, zapněte vlastní řadu jemu.
+
+Prefix musí být jiný než OP, OZ a prefixy ostatních druhů a nesmí ho nést čísla už
+existujících položek (například převzatých z jiného programu), jinak by dvě řady
+vydaly stejné číslo.
+
+Položka druhu s vlastní řadou dostane číslo `NJ-2026-0001`, `NJ-2026-0002`… Řada
+pokračuje i v dalším roce se stejným prefixem a tvarem čísla. Prefix, tvar čísla
+a další číslo upravíte v `Nástroje → Číselné řady`, kde je řada označená názvem druhu.
+
+Zapnutí nebo vypnutí vlastní řady platí od dalšího potvrzeného dokladu, vydaná čísla
+zůstávají. Aby agenda měla v roce souvislou řadu, přepněte ji nejlépe k začátku
+účetního období.
+
+Opakování položky si druh pamatuje, takže další doklady dostanou čísla ze stejné
+řady. Pokud číslo z řady už nese jiný doklad (například po snížení čítače nebo
+u tvaru čísla bez prefixu), potvrzení skončí hláškou a položka zůstane konceptem;
+upravte čítač nebo prefix řady.
+
+Druh **Jiná pohledávka** / **Jiný závazek** je výchozí: nabízí se vždy a čísluje
+společnou řadou. Proto i položka založená ze zůstatku zápisu v saldokontu
+([§ 60](60_Saldokonto.md)) má číslo vždy z řady OP nebo OZ.
+
+Přes API a MCP server se druhy jen čtou (`kind`, `kind_id`, `kind_name`, seznam
+druhů); nastavují se ve webovém rozhraní. Úprava konceptu, která pošle druh `other`
+bez `kind_id`, vlastní druh ponechá; zruší ho jiný vestavěný druh nebo `kind_id: null`.
 
 ### 52.14.15 Interní doklady
 

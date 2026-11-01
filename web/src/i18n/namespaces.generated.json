@@ -1189,7 +1189,8 @@
     ],
     "tools": [
       "cash",
-      "codebookTransfer"
+      "codebookTransfer",
+      "other_items"
     ],
     "admin-integrations": [
       "aiGateway",

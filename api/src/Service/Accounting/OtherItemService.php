@@ -22,6 +22,7 @@ final class OtherItemService
         private readonly PostingService $posting,
         private readonly DocumentSeriesService $series,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly OtherItemKindService $kinds,
     ) {}
 
     public function get(int $supplierId, int $id): array
@@ -37,9 +38,13 @@ final class OtherItemService
         return $this->items->list($supplierId, $filters, $page, $perPage);
     }
 
-    public function create(int $supplierId, array $input, ?int $userId): array
+    /**
+     * @param array{kind:string,kind_id:?int}|null $templateKind druh, který nese šablona opakování —
+     *                                                         výskyt ho dostane, i když druh mezitím skryli
+     */
+    public function create(int $supplierId, array $input, ?int $userId, ?array $templateKind = null): array
     {
-        $data = $this->normalize($supplierId, $input);
+        $data = $this->normalize($supplierId, $input, $templateKind);
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
@@ -73,12 +78,8 @@ final class OtherItemService
         }
         $data = $this->normalize($supplierId, $input);
         $id = $this->items->insert($supplierId, $data, $userId);
-        $number = $this->series->next(
-            $supplierId,
-            $data['side'] === 'receivable' ? 'other_receivable' : 'other_payable',
-            (int) substr((string) $data['issued_on'], 0, 4),
-        );
-        $this->items->setPosted($supplierId, $id, 'confirmed', $number, null);
+        $number = $this->nextNumber($supplierId, $data, (string) $data['issued_on']);
+        $this->setPosted($supplierId, $id, 'confirmed', $number, null);
         return $this->get($supplierId, $id);
     }
 
@@ -104,7 +105,7 @@ final class OtherItemService
             if ($existing['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Upravovat lze jen koncept.', 409);
             }
-            $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input));
+            $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input), $existing);
             $planned = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) AS total, MIN(due_on) AS first_due
                 FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?');
             $planned->execute([$supplierId, $id]);
@@ -141,7 +142,13 @@ final class OtherItemService
             && (string) $existing['accounting_on'] === (string) $existing['issued_on']) {
             $input['accounting_on'] = null;
         }
-        foreach (['side', 'kind', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
+        // Jiný vestavěný druh než `other` v těle bez kind_id je přepnutí z vlastního druhu na vestavěný.
+        // `other` bez kind_id vlastní druh nechá: tak hlavičku přeposílá klient, který kind_id nezná
+        // (vlastní druh se v `kind` ukládá jako other). Zrušit ho jde výslovným kind_id: null.
+        if (($input['kind'] ?? 'other') !== 'other' && !array_key_exists('kind_id', $input)) {
+            $input['kind_id'] = null;
+        }
+        foreach (['side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
             'currency', 'amount', 'variable_symbol', 'account_code', 'counter_account_code', 'note'] as $key) {
             if (!array_key_exists($key, $input)) {
                 $input[$key] = $existing[$key] ?? null;
@@ -198,11 +205,7 @@ final class OtherItemService
                 throw new OtherItemException('not_draft', 'Potvrdit lze jen koncept.', 409);
             }
             $doubleEntry = $this->isDoubleEntry($supplierId);
-            $number = $this->series->next(
-                $supplierId,
-                $item['side'] === 'receivable' ? 'other_receivable' : 'other_payable',
-                (int) substr((string) $item['issued_on'], 0, 4),
-            );
+            $number = $this->nextNumber($supplierId, $item, (string) $item['issued_on']);
             $entryId = null;
             if ($doubleEntry) {
                 $postingLines = $item['posting_lines'];
@@ -229,7 +232,7 @@ final class OtherItemService
                     'posted_by' => $userId,
                 ]);
             }
-            $this->items->setPosted($supplierId, $id, $doubleEntry ? 'posted' : 'confirmed', $number, $entryId);
+            $this->setPosted($supplierId, $id, $doubleEntry ? 'posted' : 'confirmed', $number, $entryId);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -810,6 +813,39 @@ final class OtherItemService
         return (bool) $stmt->fetchColumn();
     }
 
+    /**
+     * Číslo položky z řady jejího druhu: vlastní řada druhu ({@see OtherItemKindService::seriesScope}),
+     * jinak společná OP/OZ. Rok řady je rok vzniku.
+     *
+     * @param array<string,mixed> $item side, kind, kind_id
+     */
+    private function nextNumber(int $supplierId, array $item, string $issuedOn): string
+    {
+        $year = (int) substr($issuedOn, 0, 4);
+        $side = (string) $item['side'];
+        $kindId = $item['kind_id'] !== null ? (int) $item['kind_id'] : null;
+        return $this->series->next($supplierId, OtherItemKindService::seriesCode($side), $year,
+            $this->kinds->seriesScope($supplierId, $kindId, (string) $item['kind'], $side, $year));
+    }
+
+    /**
+     * Čísla všech řad ostatních položek sdílejí unikátnost `uq_other_item_doc_no`. Kolizi
+     * (čítač snížený pod vydané číslo, šablona bez prefixu) ohlásí jako opravitelnou
+     * chybu řady, ne jako chybu serveru.
+     */
+    private function setPosted(int $supplierId, int $id, string $status, string $number, ?int $entryId): void
+    {
+        try {
+            $this->items->setPosted($supplierId, $id, $status, $number, $entryId);
+        } catch (\PDOException $e) {
+            if (TransactionFailure::aborted($e) || (int) ($e->errorInfo[1] ?? 0) !== 1062) {
+                throw $e;
+            }
+            throw new OtherItemException('document_no_taken',
+                'Číslo ' . $number . ' už má jiný doklad. Upravte prefix nebo čítač řady v Nástrojích → Číselné řady.', 409);
+        }
+    }
+
     public function isDoubleEntry(int $supplierId): bool
     {
         $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
@@ -865,7 +901,11 @@ final class OtherItemService
         return $lines;
     }
 
-    private function normalize(int $supplierId, array $input): array
+    /**
+     * @param array<string,mixed>|null $stored kind a kind_id, které koncept nebo šablona už nese —
+     *                                         druh smí zůstat, i když ho mezitím skryli
+     */
+    private function normalize(int $supplierId, array $input, ?array $stored = null): array
     {
         $side = (string) ($input['side'] ?? '');
         if (!in_array($side, ['receivable', 'payable'], true)) {
@@ -874,6 +914,21 @@ final class OtherItemService
         $kind = (string) ($input['kind'] ?? 'other');
         if (!in_array($kind, self::KINDS, true)) {
             throw new OtherItemException('invalid_kind', 'Neplatný druh dokladu.');
+        }
+        $kindId = null;
+        if (isset($input['kind_id']) && $input['kind_id'] !== '' && $input['kind_id'] !== 0 && $input['kind_id'] !== '0') {
+            $kindId = filter_var($input['kind_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($kindId === false) {
+                throw new OtherItemException('invalid_kind', 'Neplatný druh dokladu.');
+            }
+            $storedKindId = isset($stored['kind_id']) ? (int) $stored['kind_id'] : null;
+            $this->kinds->assertUsable($supplierId, $kindId, $side, $kindId === $storedKindId);
+            // Vlastní druh nemá vestavěný protějšek; filtr a API podle `kind` ho vedou jako ostatní.
+            $kind = 'other';
+        } else {
+            $this->kinds->assertBuiltinUsable($supplierId, $kind, $side,
+                $stored !== null && ($stored['kind_id'] ?? null) === null && ($stored['kind'] ?? null) === $kind
+                    && ($stored['side'] ?? $side) === $side);
         }
         $title = trim((string) ($input['title'] ?? ''));
         if ($title === '' || mb_strlen($title) > 255) {
@@ -926,7 +981,7 @@ final class OtherItemService
             $counter = count($postingLines) === 1 ? $postingLines[0]['account_code'] : '';
         }
         return [
-            'side' => $side, 'kind' => $kind, 'title' => $title,
+            'side' => $side, 'kind' => $kind, 'kind_id' => $kindId, 'title' => $title,
             'partner_id' => $partnerId,
             'partner_name' => $partnerName,
             'issued_on' => $issued, 'accounting_on' => $accounting, 'due_on' => $due,

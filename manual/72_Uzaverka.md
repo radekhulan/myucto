@@ -450,11 +450,16 @@ Tabulka drží řady dokladů per účetní rok:
 | Skladové příjemky / výdejky / převodky | `stock_in` / `stock_out` / `stock_transfer` | PRI / VYD / PRE |
 | Zápočty | `offset` | ZAP |
 | Objednávky dodavatelům | `purchase_order` | OBJ |
+| Ostatní pohledávky / závazky | `other_receivable` / `other_payable` | OP / OZ |
 
 Příjmové a výdajové pokladní doklady vydávají čísla do jedné evidence, stejně jako ostatní pohledávky
 a závazky (řady `other_receivable` / `other_payable`, prefixy OP / OZ). Řady téže skupiny proto nesmí mít
 stejný prefix (v kterémkoli roce) ani výchozí prefix druhé řady, dokud ta pro daný rok nevydala číslo
 a nebyla upravena, jinak by vydaly totéž číslo.
+
+Pokladna a druh ostatní položky mohou mít vlastní řadu vedle společné řady firmy; v tabulce je označená
+názvem pokladny nebo druhu ([§ 32.11.1](32_Pokladna.md#32111-ciselnik-pokladen),
+[§ 52.14.14.11](52_Ucetni_denik.md#52141411-druhy-a-ciselne-rady)).
 
 Řádek řady pro daný rok vzniká automaticky při prvním vydání čísla (dokud rok nemá žádný doklad dané řady,
 v tabulce se nezobrazuje; zobrazí se **zatím nevydáno**). Čísla se vydávají vzestupně a mezery po smazaných nebo

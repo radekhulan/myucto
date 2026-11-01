@@ -17319,10 +17319,10 @@ paths:
         {PREFIX}, {YYYY}, {YY} a {C+} (počet C = odsazení nulami); prázdná / null vrací
         řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`. `next_number` je číslo PŘÍŠTÍHO
         vydaného dokladu — umožňuje navázat na řadu převzatou z jiného systému.
-        `register_id` > 0 míří na vlastní řadu té pokladny (jen `cash_in` / `cash_out`),
-        0 nebo vynechané na společnou řadu firmy. Prefix se nesmí shodovat s jinou řadou
-        téže skupiny se společnou unikátností čísla (pokladní řady `cash_in` / `cash_out`,
-        řady ostatních položek `other_receivable` / `other_payable`) — jinak `series_prefix_taken`.
+        `register_id` > 0 míří na vlastní řadu pokladny (`cash_in` / `cash_out`) nebo vlastního
+        druhu ostatní položky (`other_receivable` / `other_payable`), 0 nebo vynechané na
+        společnou řadu firmy. Prefix se nesmí shodovat s jinou řadou téže skupiny (pokladní
+        řady, řady ostatních položek) — jinak `series_prefix_taken`.
 
         Deníkové řady (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) jsou
         dostupné jen v podvojném účetnictví; v daňové evidenci vrátí `wrong_accounting_mode`
@@ -17342,7 +17342,7 @@ paths:
                 prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" }
                 number_format: { type: string, nullable: true, maxLength: 40, example: "{PREFIX}{CCCCC}" }
                 next_number: { type: integer, minimum: 1, maximum: 999999999 }
-                register_id: { type: integer, minimum: 0, default: 0, description: "Vlastní řada pokladny (jen cash_in/cash_out); 0 = společná řada firmy" }
+                register_id: { type: integer, minimum: 0, default: 0, description: "Vlastní řada pokladny (cash_in/cash_out) nebo druhu ostatní položky s vlastní řadou (other_receivable/other_payable); 0 = společná řada firmy" }
       responses:
         '200': { description: OK (aktuální seznam řad), content: { application/json: { schema: { type: array, items: { type: object } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -17936,13 +17936,14 @@ paths:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: query, name: side, schema: { type: string, enum: [receivable, payable] } }
         - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] } }
-        - { in: query, name: kind, schema: { type: string } }
+        - { in: query, name: kind, schema: { type: string }, description: Vestavěný druh; vrací jen položky bez vlastního druhu (kind_id null). }
+        - { in: query, name: kind_id, schema: { type: integer, minimum: 1 }, description: Vlastní druh firmy (GET /accounting/other-items/kinds); má přednost před kind a vynechá převzaté zdroje. }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: page, schema: { type: integer, minimum: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
-        - { in: query, name: sort_by, schema: { type: string, enum: [title, partner_name, due_on, amount, remaining_amount, status] }, description: Řazení ručních položek před stránkováním; převzaté zdroje zůstávají oddělené. }
+        - { in: query, name: sort_by, schema: { type: string, enum: [document_no, title, partner_name, due_on, amount, remaining_amount, status] }, description: Řazení ručních položek před stránkováním; převzaté zdroje zůstávají oddělené. }
         - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc } }
       responses:
         '200': { description: Stránkované ruční položky a oddělené převzaté zdroje, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemList' } } } }
@@ -17960,6 +17961,24 @@ paths:
         '201': { description: Koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/other-items/kinds:
+    get:
+      tags: [Accounting]
+      summary: Druhy ostatních pohledávek a závazků
+      description: |
+        Všechny druhy firmy po stranách: vestavěné (`builtin_code` = hodnota `kind`, bez názvu)
+        a za nimi vlastní druhy firmy (`name`). Položka s vlastním druhem nese `kind_id`
+        a v `kind` hodnotu `other`. Druh s `own_series` čísluje doklady vlastní řadou
+        (`other_receivable` / `other_payable` s `register_id` = `id` druhu); ostatní jedou na
+        společné řadě OP/OZ. Skrytý druh (`is_active` false) nejde zvolit pro nový koncept.
+        Výchozí druh `other` v seznamu není: nabízí se vždy a čísluje společnou řadou.
+        Nastavení druhů se mění jen ve webovém rozhraní.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+      responses:
+        '200': { description: Druhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemKind' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/accounting/other-items/{id}:
     parameters:
@@ -18014,6 +18033,7 @@ paths:
       responses:
         '200': { description: Potvrzený nebo zaúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Doklad není koncept, nebo číslo z řady už nese jiný doklad — upravte prefix nebo čítač řady (`other_items.error.not_draft|document_no_taken`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/reverse:
     post:
@@ -40501,6 +40521,9 @@ components:
       properties:
         side: { type: string, enum: [receivable, payable] }
         kind: { type: string, enum: [other, rent, loan, deposit, insurance, fee, claim], default: other }
+        kind_id:
+          type: [integer, 'null']
+          description: Vlastní druh firmy (GET /accounting/other-items/kinds) se stejnou stranou; s ním se kind uloží jako other. Skrytý druh nejde zvolit pro nový koncept, koncept si dříve zvolený druh ponechá i po jeho skrytí (platí i pro skrytý vestavěný kind). Při úpravě vlastní druh zruší jiný vestavěný kind než other bez kind_id, nebo výslovné kind_id null; kind other bez kind_id ho ponechá.
         title: { type: string, maxLength: 255 }
         partner_id: { type: [integer, 'null'] }
         partner_name: { type: [string, 'null'] }
@@ -40520,6 +40543,20 @@ components:
           description: Protiřádky kontace v CZK; součet musí přesně odpovídat amount_czk. U starých dokladů se jednořádková kontace vrací synteticky.
           items: { $ref: '#/components/schemas/OtherItemPostingLine' }
         note: { type: [string, 'null'] }
+    OtherItemKind:
+      type: object
+      required: [id, side, builtin, builtin_code, name, own_series, is_active]
+      properties:
+        id: { type: [integer, 'null'], description: Id řádku nastavení; null u vestavěného druhu ve výchozím stavu. }
+        side: { type: string, enum: [receivable, payable] }
+        builtin: { type: boolean, description: Vestavěný druh (true) nebo vlastní druh firmy. }
+        builtin_code: { type: [string, 'null'], enum: [rent, loan, deposit, insurance, fee, claim, null], description: Kód vestavěného druhu (hodnota kind položky). }
+        name: { type: [string, 'null'], maxLength: 100, description: Název vlastního druhu; null u vestavěného. }
+        own_series: { type: boolean, description: Druh čísluje doklady vlastní řadou. }
+        series_prefix: { type: [string, 'null'], description: Prefix vlastní řady druhu (i vypnuté); null, dokud ji druh neměl. }
+        is_active: { type: boolean, description: Skrytý druh nejde zvolit pro nový koncept; koncept a opakování, které ho nesou, ho ponechají. }
+        created_at: { type: [string, 'null'], format: date-time }
+        updated_at: { type: [string, 'null'], format: date-time }
     OtherItem:
       allOf:
         - { $ref: '#/components/schemas/OtherItemInput' }
@@ -40528,7 +40565,8 @@ components:
           properties:
             id: { type: integer, format: int64 }
             status: { type: string, enum: [draft, confirmed, posted, reversed, cancelled] }
-            document_no: { type: [string, 'null'] }
+            document_no: { type: [string, 'null'], description: Číslo z řady druhu s vlastní řadou, jinak ze společné řady OP/OZ. }
+            kind_name: { type: [string, 'null'], description: Název vlastního druhu (kind_id); null u vestavěného druhu. }
             amount_czk: { type: number }
             settled_outside_amount: { type: number, description: Část uhrazená mimo banku a pokladnu (zápočet, interní doklad, stav úhrady převzatý z jiného programu). Je součástí paid_amount. }
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }

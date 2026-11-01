@@ -79,6 +79,7 @@ final class ArchiveRestoreService
         'cash_registers',
         'cash_documents',
         'cash_document_vat_lines',
+        'other_item_kinds',
         'other_items',
         'other_item_schedules',
         'other_item_schedule_occurrences',
@@ -610,6 +611,10 @@ final class ArchiveRestoreService
                     $oldPartnerId = (int) $template['partner_id'];
                     $template['partner_id'] = $this->maps['clients'][$oldPartnerId]
                         ?? throw new RestoreException('snapshot_reference', 'Chybí mapování protistrany opakovaného dokladu.');
+                }
+                if (array_key_exists('kind_id', $template) && $template['kind_id'] !== null) {
+                    $template['kind_id'] = $this->maps['other_item_kinds'][(int) $template['kind_id']]
+                        ?? throw new RestoreException('snapshot_reference', 'Chybí mapování druhu opakovaného dokladu.');
                 }
                 $cols[] = $col;
                 $vals[] = json_encode($template, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);

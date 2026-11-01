@@ -2,12 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { otherItemsApi, type OtherItem, type OtherItemSide } from '@/api/otherItems'
+import { otherItemKindsApi, otherItemsApi, type OtherItem, type OtherItemKind, type OtherItemSide } from '@/api/otherItems'
+import { kindSettingLabel, otherItemKindLabel } from '@/utils/otherItemKind'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import OtherItemKindsModal from '@/components/accounting/OtherItemKindsModal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import type { SortPref } from '@/api/preferences'
@@ -26,6 +28,7 @@ const loadMoreTarget = ref<HTMLElement | null>(null)
 const sort = ref<SortPref | null>(null)
 useFillViewportHeight(listBox)
 const removingId = ref<number | null>(null)
+const showKinds = ref(false)
 const items = ref<OtherItem[]>([])
 const sources = ref<OtherItem[]>([])
 const total = ref(0)
@@ -34,6 +37,9 @@ const perPage = ref(50)
 const side = ref<'' | OtherItemSide>(route.query.side === 'receivable' || route.query.side === 'payable' ? route.query.side : '')
 const status = ref<'open' | 'all'>('open')
 const source = ref('')
+/** Filtr druhu `strana|kód` vestavěného druhu nebo `strana|custom:<id>` vlastního — druh patří vždy jedné straně. */
+const kindFilter = ref('')
+const kinds = ref<OtherItemKind[]>([])
 const search = ref('')
 const searchPending = ref(false)
 const dueFrom = ref('')
@@ -54,6 +60,26 @@ function onListScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
   if (canLoadMore.value && el.scrollHeight - el.scrollTop - el.clientHeight < 240) void load(true)
 }
+const CUSTOM_PREFIX = 'custom:'
+const BUILTIN_KINDS = ['rent', 'deposit', 'loan', 'insurance', 'fee', 'claim', 'other'] as const
+// Druhy po stranách se stejnými názvy jako v editoru; se zvoleným směrem jen jeho strana.
+// Skryté druhy se nabízejí také, aby šly dohledat jejich starší doklady.
+const kindGroups = computed(() => (side.value ? [side.value] : (['payable', 'receivable'] as OtherItemSide[])).map(groupSide => ({
+  side: groupSide,
+  options: [
+    ...BUILTIN_KINDS.map(code => ({ value: `${groupSide}|${code}`, label: t(`other_items.kind_by_side.${groupSide}.${code}`) })),
+    ...kinds.value.filter(kind => !kind.builtin && kind.side === groupSide)
+      .map(kind => ({ value: `${groupSide}|${CUSTOM_PREFIX}${kind.id}`, label: kindSettingLabel(t, kind) })),
+  ],
+})))
+const kindQuery = computed(() => {
+  if (!kindFilter.value) return {}
+  const [kindSide, kind] = kindFilter.value.split('|') as [OtherItemSide, string]
+  return {
+    side: kindSide,
+    ...(kind.startsWith(CUSTOM_PREFIX) ? { kind_id: Number(kind.slice(CUSTOM_PREFIX.length)) } : { kind }),
+  }
+})
 const visibleItems = computed(() => source.value === '' || source.value === 'manual' ? items.value : [])
 const visibleSources = computed(() => source.value === '' ? sources.value : sources.value.filter(item =>
   source.value === 'tax'
@@ -63,6 +89,7 @@ const visibleSources = computed(() => source.value === '' ? sources.value : sour
 const actions = computed<ActionItem[]>(() => [
   { key: 'new', label: t('other_items.new'), icon: 'plus', tier: 'primary', variant: 'primary',
     show: auth.canWrite('other_items'), to: { name: 'other-item-new', query: side.value ? { side: side.value } : {} } },
+  { key: 'kinds', label: t('other_items.kinds.title'), icon: 'tag', variant: 'neutral', run: () => { showKinds.value = true } },
 ])
 
 function internalSourceUrl(item: OtherItem): string | null {
@@ -103,7 +130,7 @@ async function load(append = false) {
   const nextPage = append ? page.value + 1 : 1
   try {
     const result = await otherItemsApi.list({
-      ...(side.value ? { side: side.value } : {}), status: status.value,
+      ...(side.value ? { side: side.value } : {}), status: status.value, ...kindQuery.value,
       ...(search.value.trim() ? { q: search.value.trim() } : {}),
       ...(dueFrom.value ? { from: dueFrom.value } : {}),
       ...(dueTo.value ? { to: dueTo.value } : {}),
@@ -152,7 +179,11 @@ async function removeItem(item: OtherItem) {
   }
 }
 
-watch([side, status, dueFrom, dueTo, sort], reloadFirstPage)
+// Druh druhé strany po změně směru nedává smysl.
+watch(side, () => {
+  if (side.value && kindFilter.value && !kindFilter.value.startsWith(`${side.value}|`)) kindFilter.value = ''
+})
+watch([side, status, kindFilter, dueFrom, dueTo, sort], reloadFirstPage)
 watch(search, () => {
   loadRequest++
   loadingMore.value = false
@@ -161,7 +192,19 @@ watch(search, () => {
   searchTimer = setTimeout(() => { searchPending.value = false; reloadFirstPage() }, 300)
 })
 onBeforeUnmount(() => { loadRequest++; if (searchTimer) clearTimeout(searchTimer) })
-onMounted(() => void load())
+async function loadKinds() {
+  try {
+    kinds.value = await otherItemKindsApi.list()
+  } catch {
+    kinds.value = []
+  }
+}
+// Nový nebo přejmenovaný druh se má hned objevit i ve filtru.
+function onKindsChanged() {
+  void loadKinds()
+  reloadFirstPage()
+}
+onMounted(() => { void load(); void loadKinds() })
 </script>
 
 <template>
@@ -188,6 +231,15 @@ onMounted(() => void load())
         <select v-model="status" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800">
           <option value="open">{{ t('other_items.open') }}</option>
           <option value="all">{{ t('common.all') }}</option>
+        </select>
+      </label>
+      <label class="min-w-40 flex-1 text-xs font-medium text-neutral-500">
+        {{ t('other_items.kind_label') }}
+        <select v-model="kindFilter" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm text-neutral-800">
+          <option value="">{{ t('common.all') }}</option>
+          <optgroup v-for="group in kindGroups" :key="group.side" :label="t(`other_items.side.${group.side}`)">
+            <option v-for="option in group.options" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </optgroup>
         </select>
       </label>
       <label class="min-w-40 flex-1 text-xs font-medium text-neutral-500">
@@ -222,6 +274,7 @@ onMounted(() => void load())
         <table class="w-full text-sm table-sticky-first">
           <thead class="sticky top-0 z-20 bg-neutral-50 text-xs text-neutral-500 shadow-sm">
             <tr>
+              <SortableTh :label="t('other_items.document_no')" sort-key="document_no" :sort="sort" @toggle="toggleSort" />
               <SortableTh :label="t('other_items.item')" sort-key="title" :sort="sort" @toggle="toggleSort" />
               <SortableTh :label="t('other_items.partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
               <SortableTh :label="t('other_items.due_on')" sort-key="due_on" :sort="sort" @toggle="toggleSort" />
@@ -234,10 +287,11 @@ onMounted(() => void load())
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="item in visibleItems" :key="item.id" class="hover:bg-neutral-50">
+              <td class="whitespace-nowrap px-3 py-3 font-mono text-xs">{{ item.document_no || '–' }}</td>
               <td class="px-3 py-3">
                 <RouterLink v-if="itemRoute(item)" :to="itemRoute(item)!" class="font-medium text-primary-700 hover:underline">{{ item.title }}</RouterLink>
                 <span v-else class="font-medium">{{ item.title }}</span>
-                <div class="mt-0.5 text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}</div>
+                <div class="mt-0.5 text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}</div>
               </td>
               <td class="px-3 py-3">{{ item.partner_name || t('other_items.no_partner') }}</td>
               <td class="whitespace-nowrap px-3 py-3">{{ item.due_on ? formatDate(item.due_on) : '–' }}</td>
@@ -271,7 +325,7 @@ onMounted(() => void load())
             <div>
               <RouterLink v-if="itemRoute(item)" :to="itemRoute(item)!" class="font-semibold text-primary-700">{{ item.title }}</RouterLink>
               <span v-else class="font-semibold">{{ item.title }}</span>
-              <div class="text-xs text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}</div>
+              <div class="text-xs text-neutral-500"><span v-if="item.document_no" class="font-mono">{{ item.document_no }} · </span>{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}</div>
               <span v-if="isEstimate(item)" class="mt-1 inline-block rounded bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">{{ t('other_items.forecast') }}</span>
             </div>
             <span class="rounded px-2 py-1 text-xs font-medium" :class="badgeClass(item)">{{ label('status', item.status) }}</span>
@@ -319,5 +373,6 @@ onMounted(() => void load())
         </div>
       </section>
     </template>
+    <OtherItemKindsModal v-if="showKinds" @close="showKinds = false" @changed="onKindsChanged" />
   </div>
 </template>

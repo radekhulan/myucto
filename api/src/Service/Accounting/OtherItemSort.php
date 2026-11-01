@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting;
 final class OtherItemSort
 {
     private const COLUMNS = [
+        'document_no' => 'oi.document_no',
         'title' => 'oi.title',
         'partner_name' => 'oi.partner_name',
         'due_on' => 'oi.due_on',
