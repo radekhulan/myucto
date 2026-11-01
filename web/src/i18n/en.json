@@ -40899,5 +40899,16 @@
       "smtp_managed": "The hosting operator manages this mail transport.",
       "smtp_environment_locked": "Environment variables control this mail transport."
     }
+  },
+  "workReportDisplay": {
+    "title": "Work report display",
+    "inherit": "Use company defaults",
+    "compact": "Compact report rows",
+    "columns": "Show columns:",
+    "date": "Date",
+    "hours": "Hours",
+    "rate": "Hourly rate",
+    "amount": "Amount",
+    "hint": "Applies to the invoice detail, PDF, public preview and work report approval. The description is always visible. Hiding columns does not change stored rates or the invoice amount. The material report keeps its own layout."
   }
 }

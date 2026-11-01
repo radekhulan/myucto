@@ -40899,5 +40899,16 @@
       "smtp_managed": "Poštovní transport spravuje provozovatel.",
       "smtp_environment_locked": "Poštovní transport řídí proměnné prostředí."
     }
+  },
+  "workReportDisplay": {
+    "title": "Zobrazení výkazu práce",
+    "inherit": "Použít výchozí nastavení firmy",
+    "compact": "Kompaktní řádky výkazu",
+    "columns": "Zobrazit sloupce:",
+    "date": "Datum",
+    "hours": "Hodiny",
+    "rate": "Hodinová sazba",
+    "amount": "Částka",
+    "hint": "Platí pro detail faktury, PDF, veřejný náhled a schvalování výkazu práce. Popis je vždy viditelný. Skrytí sloupců nemění uložené sazby ani částku faktury. Výkaz materiálu má vlastní podobu."
   }
 }

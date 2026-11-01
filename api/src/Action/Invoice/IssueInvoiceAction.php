@@ -204,7 +204,7 @@ final class IssueInvoiceAction
         // Faktury bez výkazu (např. fixní paušál) lze vystavit i u projektu s requires_approval.
         if (!empty($invoice['project_requires_approval'])
             && ($invoice['approval_status'] ?? 'none') !== 'approved'
-            && $this->workReports->findByInvoice($id) !== null
+            && $this->workReports->findByInvoice($id, (int) $invoice['supplier_id']) !== null
         ) {
             return Json::error(
                 $response,

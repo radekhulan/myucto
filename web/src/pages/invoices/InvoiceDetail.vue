@@ -3324,53 +3324,51 @@ useWindowRefresh(async () => {
         </header>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm table-sticky-first">
+        <table class="w-full text-sm table-sticky-first" :class="{ 'wr-compact': workReport.effective_display_options?.compact }">
           <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
             <tr>
               <th class="text-left px-5 py-2 font-medium">{{ t('invoice.wr_description') }}</th>
-              <th v-if="wrHasDates" class="text-left px-4 py-2 font-medium w-32">{{ t('invoice.wr_date') }}</th>
-              <th class="text-right px-4 py-2 font-medium w-28">{{ t('invoice.wr_hours') }}</th>
-              <th class="text-right px-4 py-2 font-medium w-32">{{ t('invoice.wr_rate') }}</th>
-              <th class="text-right px-5 py-2 font-medium w-36">{{ t('invoice.wr_total') }}</th>
+              <th v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="text-left px-4 py-2 font-medium w-32">{{ t('invoice.wr_date') }}</th>
+              <th v-if="workReport.effective_display_options?.hours !== false" class="text-right px-4 py-2 font-medium w-28">{{ t('invoice.wr_hours') }}</th>
+              <th v-if="workReport.effective_display_options?.rate !== false" class="text-right px-4 py-2 font-medium w-32">{{ t('invoice.wr_rate') }}</th>
+              <th v-if="workReport.effective_display_options?.amount !== false" class="text-right px-5 py-2 font-medium w-36">{{ t('invoice.wr_total') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="(it, i) in workReport.items" :key="i">
               <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ it.description }}</td>
-              <td v-if="wrHasDates" class="px-4 py-2 text-neutral-600 whitespace-nowrap">{{ formatDate(it.work_date) }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
-              <td class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
+              <td v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="px-4 py-2 text-neutral-600 whitespace-nowrap">{{ formatDate(it.work_date) }}</td>
+              <td v-if="workReport.effective_display_options?.hours !== false" class="px-4 py-2 text-right font-mono">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }}</td>
+              <td v-if="workReport.effective_display_options?.rate !== false" class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
+              <td v-if="workReport.effective_display_options?.amount !== false" class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
             </tr>
-            <tr class="bg-neutral-50 font-semibold">
-              <td class="px-5 py-2 text-right" :colspan="wrHasDates ? 2 : 1">{{ t('invoice.totals.total') }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
-              <td></td>
-              <td class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
+            <tr v-if="workReport.effective_display_options?.hours !== false || workReport.effective_display_options?.amount !== false" class="bg-neutral-50 font-semibold">
+              <td class="px-5 py-2 text-right" :colspan="workReport.effective_display_options?.date !== false && wrHasDates ? 2 : 1">{{ t('invoice.totals.total') }}</td>
+              <td v-if="workReport.effective_display_options?.hours !== false" class="px-4 py-2 text-right font-mono">{{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
+              <td v-if="workReport.effective_display_options?.rate !== false"></td>
+              <td v-if="workReport.effective_display_options?.amount !== false" class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
             </tr>
           </tbody>
         </table>
         </div>
 
         <!-- Mobile: stack karet -->
-        <div class="md:hidden divide-y divide-neutral-100">
+        <div class="md:hidden divide-y divide-neutral-100" :class="{ 'wr-compact': workReport.effective_display_options?.compact }">
           <div v-for="(it, i) in workReport.items" :key="`m-${i}`" class="p-3 space-y-1">
             <div class="text-sm whitespace-pre-wrap text-neutral-800">{{ it.description }}</div>
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
-              <span v-if="wrHasDates" class="font-mono">{{ formatDate(it.work_date) }}</span>
+              <span v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="font-mono">{{ formatDate(it.work_date) }}</span>
               <span v-else></span>
-              <span>
-                <span class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
-                <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
-                <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
+              <span class="inline-flex flex-wrap items-baseline gap-x-2">
+                <span v-if="workReport.effective_display_options?.hours !== false" class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
+                <span v-if="workReport.effective_display_options?.rate !== false" class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
+                <span v-if="workReport.effective_display_options?.amount !== false" class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
               </span>
             </div>
           </div>
-          <div class="bg-neutral-50 p-3 flex items-center justify-between font-semibold">
-            <span class="font-mono">Σ {{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
-            <span class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
+          <div v-if="workReport.effective_display_options?.hours !== false || workReport.effective_display_options?.amount !== false" class="bg-neutral-50 p-3 flex items-center justify-between font-semibold">
+            <span v-if="workReport.effective_display_options?.hours !== false" class="font-mono">Σ {{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
+            <span v-if="workReport.effective_display_options?.amount !== false" class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
           </div>
         </div>
       </div>
@@ -3857,3 +3855,8 @@ useWindowRefresh(async () => {
         @close="bankMatchTarget = null" @done="load" />
     </WorkspaceTeleport>
 </template>
+
+<style scoped>
+.wr-compact :is(th, td) { padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.75rem; }
+.wr-compact > div { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+</style>

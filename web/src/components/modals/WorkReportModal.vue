@@ -29,6 +29,8 @@ import { useToast } from '@/composables/useToast'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
+import type { WorkReportDisplayOptions } from '@/api/invoices'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import DurationInput from '@/components/ui/DurationInput.vue'
@@ -37,6 +39,7 @@ import { durationTotal, validateDurationInputs, workHours, workRowTotal } from '
 const { t, locale } = useI18n()
 const toast = useToast()
 const supplierStore = useSupplierStore()
+const displayOptions = ref<Partial<WorkReportDisplayOptions> | null>(null)
 
 const props = defineProps<{
   modelValue: boolean
@@ -131,6 +134,7 @@ async function load() {
       codebooksApi.units().catch(() => [] as Unit[]),
       codebooksApi.vatRates('CZ').catch(() => [] as VatRate[]),
     ])
+    displayOptions.value = wr?.display_options ?? null
     wrExistedOnLoad.value = !!wr
     projectId.value = inv.project_id ?? null
     currency.value = inv.currency || 'CZK'
@@ -290,6 +294,7 @@ async function save() {
       // 1. Uložit výkaz práce (title + sazba + řádky; i prázdné řádky → drží sazbu/title).
       await invoicesApi.saveWorkReport(props.invoiceId, {
         project_id: projectId.value,
+        display_options: displayOptions.value,
         title: wrTitle.value.trim() || t('invoice.work_report'),
         vat_rate_id: workVatRateId.value,
         items: workItemsValid.value.map((it, idx) => ({
@@ -378,6 +383,8 @@ onMounted(() => {
       <div v-if="loading" class="p-8 text-center text-neutral-500">{{ t('common.loading') }}</div>
 
       <div v-else ref="modalContent" class="space-y-6">
+        <WorkReportDisplaySettings v-model="displayOptions" inheritable
+          :defaults="supplierStore.currentSupplier?.work_report_display_options" />
         <!-- ════════ Sekce: Výkaz práce ════════ -->
         <section class="space-y-4">
           <div class="flex items-center justify-between gap-3 border-b border-neutral-200 pb-1">

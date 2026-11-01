@@ -1128,7 +1128,8 @@
         "2224_journal_period_source_index.sql",
         "2225_purchase_settled_outside.sql",
         "2226_journal_line_pairing.sql",
-        "2227_purchase_document_presence_indexes.sql"
+        "2227_purchase_document_presence_indexes.sql",
+        "2228_work_report_display_options.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26146,6 +26147,7 @@
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "vat_period": "enum('monthly','quarterly') NULL DEFAULT NULL",
                 "web": "varchar(190) NULL DEFAULT NULL",
+                "work_report_display_options": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "workplace_code": "varchar(8) NULL DEFAULT NULL",
                 "zip": "varchar(10) NOT NULL"
             },
@@ -26168,7 +26170,8 @@
                 "chk_supplier_fiscal_year_start_month": "`fiscal_year_start_month` between 1 and 12",
                 "chk_supplier_tax_accounting_decree": "`tax_accounting_decree` in ('500','501','502','503','504','325','410')",
                 "chk_supplier_tax_entity_status": "`tax_entity_status` in ('normal','liquidation','insolvency','transformation')",
-                "self_copy": "json_valid(`self_copy`)"
+                "self_copy": "json_valid(`self_copy`)",
+                "work_report_display_options": "json_valid(`work_report_display_options`)"
             }
         },
         "supplier_accounting_frameworks": {
@@ -29122,6 +29125,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "display_options": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_id": "bigint(20) unsigned NOT NULL",
                 "material_title": "varchar(190) NULL DEFAULT NULL",
@@ -29147,7 +29151,9 @@
                 "fk_wr_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_wr_vat": "(vat_rate_id) -> vat_rates (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
-            "checks": []
+            "checks": {
+                "display_options": "json_valid(`display_options`)"
+            }
         }
     },
     "triggers": {

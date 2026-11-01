@@ -3952,7 +3952,8 @@ paths:
       summary: Výkaz víceprací k faktuře
       description: |
         Vrátí výkaz včetně všech `items` (úkony s hodinami a sazbou) nebo
-        `null` pokud k faktuře žádný neexistuje.
+        `null` pokud k faktuře žádný neexistuje. `display_options` obsahuje výjimku výkazu,
+        `effective_display_options` výsledné zobrazení po započtení výchozího nastavení firmy.
       responses:
         '200':
           description: OK
@@ -3985,6 +3986,9 @@ paths:
         jsou povinné `title` a `items`. U již existujícího výkazu jsou `project_id`, `title`,
         `vat_rate_id` i `items` nepovinné a vynechaný klíč zachová uloženou hodnotu; vynechané
         `items` zachová řádky i součty, `items: []` je vymaže.
+        `display_options` mění pouze zobrazení práce v PDF a veřejných výkazech; vynechání zachová
+        výjimku, `null` obnoví dědění firmy. Objekt může obsahovat jednotlivé logické volby
+        `compact`, `date`, `hours`, `rate`, `amount`; ostatní klíče server odmítne (400).
       parameters:
         - in: query
           name: force
@@ -45765,6 +45769,7 @@ components:
     SupplierBrief:
       type: object
       properties:
+        work_report_display_options: { $ref: '#/components/schemas/WorkReportDisplayOptions' }
         id: { type: integer }
         company_name: { type: string }
         display_name: { type: [string, "null"] }
@@ -47217,9 +47222,26 @@ components:
         order_index: { type: integer }
         work_date: { type: string, format: date, description: "Datum provedení úkonu (volitelné, YYYY-MM-DD)" }
 
+    WorkReportDisplayOptions:
+      type: object
+      additionalProperties: false
+      description: Zobrazení práce, nikoli oprávnění k finančním datům faktury. Popis je vždy viditelný; skrytí částky potlačí i součet práce. Materiál má vlastní tabulku.
+      properties:
+        compact: { type: boolean, default: false }
+        date: { type: boolean, default: true }
+        hours: { type: boolean, default: true }
+        rate: { type: boolean, default: true }
+        amount: { type: boolean, default: true }
+
     WorkReport:
       type: object
       properties:
+        effective_display_options: { $ref: '#/components/schemas/WorkReportDisplayOptions' }
+        display_options:
+          oneOf:
+            - { $ref: '#/components/schemas/WorkReportDisplayOptions' }
+            - { type: "null" }
+          description: Výjimka pro tuto fakturu; null dědí živé nastavení firmy. Vynechané jednotlivé volby dědí firmu.
         id: { type: integer, format: int64 }
         invoice_id: { type: integer, format: int64 }
         project_id: { type: [integer, "null"], format: int64 }
@@ -47236,6 +47258,11 @@ components:
       type: object
       required: [title, items]
       properties:
+        display_options:
+          oneOf:
+            - { $ref: '#/components/schemas/WorkReportDisplayOptions' }
+            - { type: "null" }
+          description: Výjimka pro tuto fakturu; null dědí živé nastavení firmy. Vynechané jednotlivé volby dědí firmu.
         project_id:
           type: [integer, "null"]
           description: |
@@ -48397,6 +48424,11 @@ components:
         pdf_logo_show_name: { type: boolean, description: "Zobrazit vedle loga v PDF i název dodavatele" }
         invoice_pdf_show_issued_by: { type: boolean, default: false, description: "Tisknout na PDF faktury řádek „Vystavil\" se jménem uživatele, který doklad vystavil (migrace 2032)." }
         invoice_pdf_monochrome: { type: boolean, default: false, description: "Úsporná černobílá faktura: PDF faktury a výkazu bez plných ploch, černý text, tenké čáry; nahrazuje akcentní barvu (migrace 2033)" }
+        work_report_display_options:
+          oneOf:
+            - { $ref: '#/components/schemas/WorkReportDisplayOptions' }
+            - { type: "null" }
+          description: Výchozí zobrazení práce pro firmu; null obnoví standardní podobu se všemi sloupci.
         invoice_pdf_compact_items: { type: boolean, default: false, description: "Kompaktní řádky položek na PDF faktury: menší odsazení a písmo, rozpis balení a sériová čísla na řádku popisu; víc položek na stranu (migrace 2199)." }
         invoice_pdf_bank_in_footer: { type: boolean, default: false, description: "Bankovní spojení (číslo účtu, IBAN, BIC, banka) v patičce každé strany PDF faktury, platební panel u součtu ukáže jen QR. Uhrazeno, hotově, kartou a vratka beze změny (migrace 2200)." }
         branding_profiles_enabled: { type: boolean, description: "Zapíná volbu brandingových profilů; výchozí hodnota je false." }
@@ -48579,6 +48611,7 @@ components:
         invoice_pdf_show_base_qty: { type: boolean, default: true, description: "Na PDF faktury doplnit k řádku v balení množství v základní jednotce karty („celkem 80 ks\"). Platí jen se zapnutým skladem (migrace 1832)." }
         invoice_pdf_show_issued_by: { type: boolean, default: false, description: "Tisknout na PDF faktury řádek „Vystavil\" se jménem uživatele, který doklad vystavil; starší doklady bez zápisu tisknou autora dokladu (migrace 2032)." }
         invoice_pdf_show_line_discount: { type: boolean, default: false, description: "Na PDF faktury rozepsat slevu z ceníkové ceny: sloupce „Cena/j před slevou | Sleva | Cena/j po slevě\". Jen když má aspoň jeden řádek slevu; přirážka se nerozepisuje (migrace 2035)." }
+        work_report_display_options: { $ref: '#/components/schemas/WorkReportDisplayOptions' }
         invoice_pdf_compact_items: { type: boolean, default: false, description: "Kompaktní řádky položek na PDF faktury: menší odsazení a písmo, rozpis balení a sériová čísla na řádku popisu; víc položek na stranu (migrace 2199)." }
         invoice_pdf_bank_in_footer: { type: boolean, default: false, description: "Bankovní spojení (číslo účtu, IBAN, BIC, banka) v patičce každé strany PDF faktury, platební panel u součtu ukáže jen QR. Uhrazeno, hotově, kartou a vratka beze změny (migrace 2200)." }
         invoice_number_format:

@@ -124,15 +124,15 @@ final class TimeBillingPersistenceTest extends TestCase
     {
         $id = $this->draft();
         $repo = new WorkReportRepository($this->db);
-        $repo->saveMaterials($id, null, 'Materiál', $this->vatId, [
+        $repo->saveMaterials($id, $this->supplierId, null, 'Materiál', $this->vatId, [
             ['description' => 'Syntetický materiál', 'quantity' => 2, 'unit' => 'ks', 'unit_price' => 12.34],
         ]);
-        $repo->save($id, null, 'Práce', [
+        $repo->save($id, $this->supplierId, null, 'Práce', [
             ['description' => 'Původní hodiny', 'hours' => 0.33, 'rate' => 1000],
             ['description' => 'Jedna minuta', 'hours' => 0.02, 'duration_minutes' => 1, 'rate' => 1000],
             ['description' => 'Přesná sazba', 'hours' => 0.33, 'duration_minutes' => 20, 'rate' => 333.333333],
         ], $this->vatId);
-        $first = $repo->findByInvoice($id);
+        $first = $repo->findByInvoice($id, $this->supplierId);
         self::assertNotNull($first);
         self::assertNull($first['items'][0]['duration_minutes']);
         self::assertSame(0.33, $first['items'][0]['hours']);
@@ -141,8 +141,8 @@ final class TimeBillingPersistenceTest extends TestCase
         self::assertSame(111.11, $first['items'][2]['total_amount']);
         self::assertSame(457.78, $first['total_amount']);
         self::assertSame(24.68, $first['material_total']);
-        $repo->save($id, null, 'Práce', $first['items'], $this->vatId);
-        $again = $repo->findByInvoice($id);
+        $repo->save($id, $this->supplierId, null, 'Práce', $first['items'], $this->vatId);
+        $again = $repo->findByInvoice($id, $this->supplierId);
         self::assertSame($first['total_amount'], $again['total_amount']);
         self::assertSame($first['materials'], $again['materials']);
         self::assertSame([null, 1, 20], array_column($again['items'], 'duration_minutes'));

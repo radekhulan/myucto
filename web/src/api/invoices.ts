@@ -1224,7 +1224,17 @@ export interface WorkReportMaterial {
   order_index: number
 }
 
+export interface WorkReportDisplayOptions {
+  compact: boolean
+  date: boolean
+  hours: boolean
+  rate: boolean
+  amount: boolean
+}
+
 export interface WorkReport {
+  display_options?: Partial<WorkReportDisplayOptions> | null
+  effective_display_options?: WorkReportDisplayOptions
   id: number
   invoice_id: number
   project_id: number | null
@@ -1241,6 +1251,7 @@ export interface WorkReport {
 }
 
 export interface WorkReportPayload {
+  display_options?: Partial<WorkReportDisplayOptions> | null
   project_id: number | null
   title: string
   vat_rate_id?: number | null
