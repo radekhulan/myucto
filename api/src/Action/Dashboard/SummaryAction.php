@@ -57,6 +57,52 @@ final class SummaryAction
             $this->revenueByYear($pdo, $supplierId, $isVatPayer));
     }
 
+    /** Dílčí poskytovatelé sdílejí původní výpočty bez sestavení celého souhrnu. */
+    public function widgetMetric(string $metric, int $supplierId, bool $includeProjects = true, ?string $currency = null): array|int
+    {
+        $pdo = $this->db->pdo();
+        $currencyIds = null;
+        if ($currency !== null && in_array($metric, ['sales', 'purchases'], true)) {
+            $stmt = $pdo->prepare('SELECT id FROM currencies WHERE supplier_id=? AND code=? ORDER BY id');
+            $stmt->execute([$supplierId, $currency]);
+            $currencyIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        }
+        return match ($metric) {
+            'sales' => $this->revenueStatistics($pdo, (int) date('Y'), (int) date('Y') - 1, $supplierId, $this->fetchIsVatPayer($pdo, $supplierId), $currencyIds)
+                + $this->salesStatistics($pdo, (int) date('Y'), $supplierId, $currencyIds),
+            'purchases' => $this->purchaseStatistics($pdo, (int) date('Y'), $supplierId, $this->fetchIsVatPayer($pdo, $supplierId), $currencyIds),
+            'overdue' => $this->overdue($pdo, $supplierId),
+            'upcoming' => $this->unpaidUpcoming($pdo, $supplierId),
+            'drafts' => $this->draftInvoices($pdo, $supplierId, $includeProjects),
+            'approvals' => $this->pendingApprovals($pdo, $supplierId),
+            'collections' => $this->cashflowForecast($pdo, $supplierId),
+            'due' => $this->dueBuckets($pdo, $supplierId),
+            'backfill' => $this->accountingBackfillPending($pdo, $supplierId),
+            'bank_posting' => $this->bankPostingPending($pdo, $supplierId),
+            'automation' => $this->automationAutoToday($pdo, $supplierId),
+            default => throw new \InvalidArgumentException('Neznámá metrika přehledu.'),
+        };
+    }
+
+    /** Celkové počty odpovídají přesně omezeným seznamům, nikoli jejich limitu. */
+    public function widgetInvoiceCount(string $kind, int $supplierId): int
+    {
+        $predicate = match ($kind) {
+            'overdue' => "i.status IN ('issued','sent','reminded') AND i.due_date "
+                . $this->overduePolicy->comparisonOperator() . ' CURDATE() AND '
+                . $this->receivableDocTypeSql() . ' AND ' . $this->outstandingReceivableSql(),
+            'upcoming' => "i.status IN ('issued','sent','reminded') AND i.due_date>=CURDATE()
+                AND i.invoice_type IN ('invoice','credit_note','tax_document') AND " . $this->outstandingReceivableSql(),
+            'drafts' => "i.status='draft' AND i.invoice_type<>'tax_document'
+                AND (i.issue_date>=DATE_SUB(CURDATE(),INTERVAL 2 MONTH)
+                    OR (i.issue_date IS NULL AND i.created_at>=DATE_SUB(CURDATE(),INTERVAL 2 MONTH)))",
+            default => throw new \InvalidArgumentException('Neznámý seznam faktur.'),
+        };
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoices i WHERE i.supplier_id=? AND ' . $predicate);
+        $stmt->execute([$supplierId]);
+        return (int) $stmt->fetchColumn();
+    }
+
     public function __invoke(Request $request, Response $response): Response
     {
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
@@ -438,7 +484,15 @@ final class SummaryAction
 
     private function kpi(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer): array
     {
-        $overdueOperator = $this->overduePolicy->comparisonOperator();
+        return $this->revenueStatistics($pdo, $year, $prevYear, $sid, $isVatPayer)
+            + $this->salesStatistics($pdo, $year, $sid)
+            + $this->purchaseStatistics($pdo, $year, $sid, $isVatPayer);
+    }
+
+    /** Obrat a meziroční srovnání sdílí původní přehled i dílčí poskytovatel prodeje. */
+    private function revenueStatistics(\PDO $pdo, int $year, int $prevYear, int $sid, bool $isVatPayer, ?array $currencyIds = null): array
+    {
+        $currencyCondition = $currencyIds === null ? '' : ' AND i.currency_id IN (' . implode(',', $currencyIds ?: [0]) . ')';
         $rev = $this->revenueCol($isVatPayer);
         // Tentýž obrat ještě jednou, přepočtený na CZK — z něj se sečte `total_czk` (viz níže).
         // Jde o DALŠÍ SLOUPCE téhož dotazu, ne druhý průchod tabulkou.
@@ -480,7 +534,7 @@ final class SummaryAction
                                             THEN i.project_id END) AS prev_year_project_count
                   FROM invoices i
                   JOIN currencies cur ON cur.id = i.currency_id
-                 WHERE i.supplier_id = ?
+                 WHERE i.supplier_id = ? {$currencyCondition}
                    -- prevYear a year jsou po sobě jdoucí → půlotevřený rozsah = YEAR IN (year, prevYear)
                    AND i.effective_tax_date >= ? AND i.effective_tax_date < ?
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
@@ -528,10 +582,34 @@ final class SummaryAction
             ];
         }
 
+        return [
+            'per_currency'        => array_values($perCurrency),
+            // Obrat napříč VŠEMI měnami, přepočtený kurzem dokladu. Per-měnové řady jsou
+            // pro čtení správně (euro se nesčítá s korunou), ale nedají se porovnat s jiným
+            // účetnictvím, které vede jedno CZK číslo — a cizoměnná faktura z nich při
+            // pohledu na CZK řadu prostě zmizí. UI tenhle součet ukazuje jen u víc měn,
+            // u jednoměnového dodavatele by jen zdvojil to, co už na stránce je.
+            'total_czk'           => [
+                'currency_count' => count($perCurrency),
+                'this_year'      => round($czkThisYear, 2),
+                'prev_year'      => round($czkPrevYear, 2),
+                'prev_year_ytd'  => round($czkPrevYearYtd, 2),
+                'change_pct'     => $czkPrevYearYtd > 0
+                    ? round((($czkThisYear - $czkPrevYearYtd) / $czkPrevYearYtd) * 100, 1)
+                    : null,
+            ],
+        ];
+    }
+
+    /** Stejné počty a doba úhrady jako původní souhrn, bez načítání přijatých dokladů. */
+    private function salesStatistics(\PDO $pdo, int $year, int $sid, ?array $currencyIds = null): array
+    {
+        $currencyCondition = $currencyIds === null ? '' : ' AND currency_id IN (' . implode(',', $currencyIds ?: [0]) . ')';
+        $overdueOperator = $this->overduePolicy->comparisonOperator();
         // Počet vystavených YTD — proformy se nezapočítávají (nejde o finální daňový doklad).
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM invoices
-              WHERE supplier_id = ?
+              WHERE supplier_id = ? {$currencyCondition}
                 AND effective_tax_date >= ? AND effective_tax_date < ?
                 AND status NOT IN ('draft', 'cancelled')
                 AND invoice_type IN ('invoice', 'credit_note', 'tax_document')"
@@ -544,7 +622,7 @@ final class SummaryAction
             "SELECT cur.code AS currency, COUNT(*) AS cnt, SUM(i.amount_to_pay - i.paid_total) AS total
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.supplier_id = ?
+              WHERE i.supplier_id = ? {$currencyCondition}
                 AND i.status IN ('issued','sent','reminded') AND i.due_date {$overdueOperator} CURDATE()
                 AND " . $this->receivableDocTypeSql() . "
                 AND " . $this->outstandingReceivableSql() . "
@@ -562,7 +640,7 @@ final class SummaryAction
         // Průměrná doba úhrady (paid_at - issue_date) ve dnech, pro letošní zaplacené
         $stmt = $pdo->prepare(
             "SELECT AVG(DATEDIFF(paid_at, issue_date)) FROM invoices
-              WHERE supplier_id = ? AND status = 'paid' AND paid_at IS NOT NULL
+              WHERE supplier_id = ? {$currencyCondition} AND status = 'paid' AND paid_at IS NOT NULL
                 AND effective_tax_date >= ? AND effective_tax_date < ?"
         );
         $stmt->execute([$sid, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1)]);
@@ -575,7 +653,7 @@ final class SummaryAction
         $stmt = $pdo->prepare(
             "SELECT status, COUNT(*) AS cnt
                FROM invoices
-              WHERE supplier_id = ?
+              WHERE supplier_id = ? {$currencyCondition}
                 AND effective_tax_date >= ? AND effective_tax_date < ?
                 AND invoice_type = 'invoice'
               GROUP BY status"
@@ -586,6 +664,15 @@ final class SummaryAction
             $statusCounts[$r['status']] = (int) $r['cnt'];
         }
 
+        return ['issued_count_ytd' => $issuedCount, 'overdue_count' => $overdueTotalCount,
+            'overdue_per_currency' => $overduePerCurrency, 'avg_payment_days' => $avgPaymentDays,
+            'status_counts_ytd' => $statusCounts];
+    }
+
+    /** Původní nákladové a závazkové agregáty dashboardu, oddělené od vydaných dokladů. */
+    private function purchaseStatistics(\PDO $pdo, int $year, int $sid, bool $isVatPayer, ?array $currencyIds = null): array
+    {
+        $currencyCondition = $currencyIds === null ? '' : ' AND currency_id IN (' . implode(',', $currencyIds ?: [0]) . ')';
         // Přijaté faktury YTD — náklady (net pro plátce), počet, nezaplacené, po splatnosti
         $costCol = $this->costCol($isVatPayer);
         $stmt = $pdo->prepare(
@@ -593,7 +680,7 @@ final class SummaryAction
                     COALESCE(SUM(" . CzkAmountExpr::amount($costCol, 'pi') . "), 0) AS costs_czk
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
-              WHERE pi.supplier_id = ?
+              WHERE pi.supplier_id = ? {$currencyCondition}
                 AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "
                 AND pi.effective_cost_date >= ? AND pi.effective_cost_date < ?"
         );
@@ -606,7 +693,7 @@ final class SummaryAction
                     * " . CzkAmountExpr::rate('pi') . "), 0) AS unpaid_czk
                FROM purchase_invoices pi
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
-              WHERE pi.supplier_id = ?
+              WHERE pi.supplier_id = ? {$currencyCondition}
                 AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
                 . PayablePredicate::excludeFullySettled()
         );
@@ -617,42 +704,16 @@ final class SummaryAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) AS cnt
                FROM purchase_invoices pi
-              WHERE pi.supplier_id = ?
+              WHERE pi.supplier_id = ? {$currencyCondition}
                 AND pi.status IN ('received', 'booked')" . PayablePredicate::excludeAdvanceVatDocument()
                 . PayablePredicate::excludeFullySettled() . "
                 AND pi.due_date {$overdueOperator} CURDATE()"
         );
         $stmt->execute([$sid]);
         $piOverdueCount = (int) $stmt->fetchColumn();
-
-        return [
-            'per_currency'        => array_values($perCurrency),
-            // Obrat napříč VŠEMI měnami, přepočtený kurzem dokladu. Per-měnové řady jsou
-            // pro čtení správně (euro se nesčítá s korunou), ale nedají se porovnat s jiným
-            // účetnictvím, které vede jedno CZK číslo — a cizoměnná faktura z nich při
-            // pohledu na CZK řadu prostě zmizí. UI tenhle součet ukazuje jen u víc měn,
-            // u jednoměnového dodavatele by jen zdvojil to, co už na stránce je.
-            'total_czk'           => [
-                'currency_count' => count($perCurrency),
-                'this_year'      => round($czkThisYear, 2),
-                'prev_year'      => round($czkPrevYear, 2),
-                'prev_year_ytd'  => round($czkPrevYearYtd, 2),
-                'change_pct'     => $czkPrevYearYtd > 0
-                    ? round((($czkThisYear - $czkPrevYearYtd) / $czkPrevYearYtd) * 100, 1)
-                    : null,
-            ],
-            'issued_count_ytd'    => $issuedCount,
-            'overdue_count'       => $overdueTotalCount,
-            'overdue_per_currency'=> $overduePerCurrency,
-            'avg_payment_days'    => $avgPaymentDays,
-            'status_counts_ytd'   => $statusCounts,
-            // Přijaté faktury YTD
-            'purchase_count_ytd'  => (int) $piRow['cnt'],
-            'purchase_costs_ytd'  => round((float) $piRow['costs_czk'], 2),
-            'purchase_unpaid_count' => (int) $piUnpaid['cnt'],
-            'purchase_unpaid_total' => round((float) $piUnpaid['unpaid_czk'], 2),
-            'purchase_overdue_count' => $piOverdueCount,
-        ];
+        return ['purchase_count_ytd' => (int) $piRow['cnt'], 'purchase_costs_ytd' => round((float) $piRow['costs_czk'], 2),
+            'purchase_unpaid_count' => (int) $piUnpaid['cnt'], 'purchase_unpaid_total' => round((float) $piUnpaid['unpaid_czk'], 2),
+            'purchase_overdue_count' => $piOverdueCount];
     }
 
     /**
@@ -790,16 +851,17 @@ final class SummaryAction
      * Vrací firmu + zakázku (projekt) + tlačítko Výkaz vede na editaci dokladu.
      * @return list<array<string,mixed>>
      */
-    private function draftInvoices(\PDO $pdo, int $sid): array
+    private function draftInvoices(\PDO $pdo, int $sid, bool $includeProjects = true): array
     {
+        $projectColumns = $includeProjects ? 'i.project_id, p.name AS project_name' : 'NULL AS project_id, NULL AS project_name';
+        $projectJoin = $includeProjects ? 'LEFT JOIN projects p ON p.id = i.project_id' : '';
         $sql = "SELECT i.id, i.varsymbol, i.invoice_type, i.client_id, cur.code AS currency,
-                       i.issue_date, i.total_with_vat, i.project_id,
-                       c.company_name AS client_company_name,
-                       p.name AS project_name
+                       i.issue_date, i.total_with_vat, {$projectColumns},
+                       c.company_name AS client_company_name
                   FROM invoices i
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
-             LEFT JOIN projects p ON p.id = i.project_id
+             {$projectJoin}
                  WHERE i.supplier_id = ?
                    AND i.status = 'draft'
                    -- Koncept daňového dokladu k přijaté platbě (#89) sem nepatří —

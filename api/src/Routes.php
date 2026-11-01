@@ -3269,6 +3269,10 @@ final class Routes
         $app->get ('/api/dashboard/summary',          SummaryAction::class);
         $app->get ('/api/dashboard/purchase-summary', PurchaseSummaryAction::class);
 
+        // Čtecí poskytovatelé widgetů; oprávnění jednotlivých dat určuje registr.
+        $app->get('/api/dashboard-widgets/catalog', \MyInvoice\Action\Dashboard\DashboardCatalogAction::class);
+        $app->post('/api/dashboard-widgets/query', \MyInvoice\Action\Dashboard\DashboardWidgetQueryAction::class);
+
         // Admin (M6)
         // Technická správa má vlastní úzké akce; neotevírá obecnou administraci.
         $app->get('/api/instance-admin/status', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'status']);

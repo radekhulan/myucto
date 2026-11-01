@@ -40927,5 +40927,101 @@
       "smtp_managed": "Poštovní transport spravuje provozovatel.",
       "smtp_environment_locked": "Poštovní transport řídí proměnné prostředí."
     }
+  },
+  "dashboardWidgets": {
+    "widgets": {
+      "business_kpi": {
+        "title": "Výsledky za období",
+        "description": "Fakturováno, náklady a rozdíl podle měny."
+      },
+      "business_monthly": {
+        "title": "Vývoj fakturace a nákladů",
+        "description": "Měsíční přehled fakturace a nákladů."
+      },
+      "sales_summary": {
+        "title": "Vydané faktury",
+        "description": "Počty dokladů, splatnosti a průměrná doba úhrady."
+      },
+      "purchases_summary": {
+        "title": "Přijaté faktury",
+        "description": "Počty dokladů a nezaplacené závazky."
+      },
+      "receivables_aging": {
+        "title": "Stáří pohledávek",
+        "description": "Pohledávky podle stáří a měny."
+      },
+      "payables_aging": {
+        "title": "Stáří závazků",
+        "description": "Závazky podle stáří a měny."
+      },
+      "cashflow_weekly": {
+        "title": "Čisté cashflow na čtyři týdny",
+        "description": "Očekávané obchodní příjmy a výdaje."
+      },
+      "cashflow_collections": {
+        "title": "Očekávané inkaso",
+        "description": "Očekávané inkaso faktur za 30, 60 a 90 dní."
+      },
+      "receivables_due": {
+        "title": "Nejbližší splatnosti",
+        "description": "Pohledávky splatné dnes, tento týden a měsíc."
+      },
+      "invoices_overdue": {
+        "title": "Faktury po splatnosti",
+        "description": "Konkrétní neuhrazené faktury po splatnosti."
+      },
+      "invoices_upcoming": {
+        "title": "Faktury před splatností",
+        "description": "Konkrétní neuhrazené faktury před splatností."
+      },
+      "clients_top": {
+        "title": "Top odběratelé",
+        "description": "Nejvýznamnější odběratelé podle fakturace."
+      },
+      "invoices_drafts": {
+        "title": "Rozpracované faktury",
+        "description": "Rozpracované faktury a výkazy práce."
+      },
+      "invoices_approvals": {
+        "title": "Schvalování faktur",
+        "description": "Vydané faktury čekající na schválení."
+      },
+      "documents_requests": {
+        "title": "Chybějící doklady",
+        "description": "Otevřené požadavky na doplnění dokladů."
+      },
+      "actions_quick": {
+        "title": "Rychlé akce",
+        "description": "Vytvoření faktury, přijatého dokladu nebo kontaktu."
+      },
+      "actions_todo": {
+        "title": "Akce pro tebe",
+        "description": "Úkoly dostupné podle vašich oprávnění."
+      },
+      "vat_current": {
+        "title": "Aktuální DPH",
+        "description": "Orientační souhrn aktuálního období DPH."
+      },
+      "tax_deadlines": {
+        "title": "Daňové termíny",
+        "description": "Nejbližší daňové termíny firmy."
+      },
+      "tax_calendar": {
+        "title": "Daňový kalendář",
+        "description": "Rozšířený přehled termínů, podání a plateb."
+      },
+      "tax_net": {
+        "title": "Co mi zbyde",
+        "description": "Projektovaný čistý příjem OSVČ."
+      },
+      "tax_advances": {
+        "title": "Nadcházející zálohy",
+        "description": "Nadcházející zálohy na daň a pojistné."
+      },
+      "accounting_status": {
+        "title": "Stav účetního zpracování",
+        "description": "Doúčtování, banka a automatické zaúčtování."
+      }
+    }
   }
 }

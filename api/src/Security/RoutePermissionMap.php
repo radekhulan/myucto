@@ -1095,6 +1095,11 @@ final class RoutePermissionMap
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
+        // I čtecí POST musí vyřešit efektivní roli aktivní firmy.
+        if ((in_array($method, ['GET', 'HEAD'], true) && $path === '/api/dashboard-widgets/catalog')
+            || ($method === 'POST' && $path === '/api/dashboard-widgets/query')) {
+            return new RoutePermission(self::PERMISSION, 'profile', AccessLevel::READ, ['dashboard']);
+        }
         if (InstanceAdminRoutePolicy::isTechnicalEndpoint($method, $path)) {
             return new RoutePermission(self::INSTANCE_ADMIN);
         }

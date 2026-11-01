@@ -68,6 +68,7 @@
     "creditas_bank",
     "cron_jobs",
     "dashboard",
+    "dashboardWidgets",
     "databox",
     "diagnostics",
     "dimensions",
