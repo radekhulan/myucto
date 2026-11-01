@@ -90,10 +90,11 @@ describe('purchase invoice list loading', () => {
 
   it('renders both selectors and shows a clearable empty result', async () => {
     const { wrapper } = await open({ year: '2099' }, true)
-    const group = wrapper.get('fieldset[data-test="document-sources-filters"]')
-    expect(group.get('legend').text()).toBe('purchase_invoice.filters.document_sources')
-    const visual = group.get('[data-test="has_visual_document-filter"]')
-    const structured = group.get('[data-test="has_structured_source-filter"]')
+    expect(wrapper.find('[data-test="document-sources-filters"]').exists()).toBe(false)
+    const visual = wrapper.get('[data-test="has_visual_document-filter"]')
+    const structured = wrapper.get('[data-test="has_structured_source-filter"]')
+    expect(visual.get('option').text()).toBe('purchase_invoice.filters.has_visual_document_all')
+    expect(structured.get('option').text()).toBe('purchase_invoice.filters.has_structured_source_all')
     expect(visual.findAll('option').map(o => o.element.value)).toEqual(['', '1', '0'])
     expect(structured.findAll('option').map(o => o.element.value)).toEqual(['', '1', '0'])
     await visual.setValue('0')
