@@ -49100,6 +49100,8 @@ components:
         vat_deduction: { type: string, enum: [full, none, proportional, reduced] }
         vat_deduction_percent: { type: number, format: float }
         tax_deductible: { type: boolean }
+        reverse_charge: { type: boolean, description: "Přenesená daňová povinnost, stejná hodnota jako v detailu dokladu." }
+        prices_include_vat: { type: boolean, description: "Ceny položek jsou zadané včetně DPH, stejná hodnota jako v detailu dokladu." }
         extraction_warning: { type: [string, "null"] }
         currency_symbol: { type: string }
         vendor_company_name: { type: string }

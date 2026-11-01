@@ -1081,6 +1081,7 @@ final class PurchaseInvoiceRepository
                        pi.payment_ordered_at,
                        pi.status, pi.booked_at, pi.paid_at, pi.cancelled_at, pi.approval_status,
                        pi.extraction_warning, pi.vat_deduction, pi.vat_deduction_percent, pi.tax_deductible,
+                       pi.reverse_charge, pi.prices_include_vat,
                        ec.label AS expense_category_label, ec.code AS expense_category_code,
                        pi.project_id, prj.name AS project_name,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
