@@ -251,6 +251,8 @@ export interface PayrollTakeoverManualEntry {
   source_reference: string
   locked: boolean
   lock_reason: string | null
+  /** Podané hlášení zamklo jen úhrny, ze kterých vyšlo; zbytek měsíce jde doplnit. */
+  partial_lock_reason?: string | null
 }
 
 interface PayrollTakeoverImportRequest {

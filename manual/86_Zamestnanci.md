@@ -96,11 +96,12 @@ dolů:
 má stav **Aktivní** a v checklistu nástupu jsou registrace splněné.
 
 > [!TIP]
-> Víc lidí najednou doplníte tlačítky nad seznamem: **Doplnit výchozí zákonné
-> údaje**, **Podepsaná prohlášení hromadně**, **Zdravotní pojišťovny hromadně**
-> a **Doplnit místo výkonu práce**.
-> Skončené dohody ukončíte najednou tlačítkem **Ukončit skončené dohody**
-> ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)).
+> Víc lidí najednou doplníte v nabídce **Další funkce** nad seznamem: **Doplnit
+> výchozí zákonné údaje**, **Podepsaná prohlášení hromadně**, **Zdravotní
+> pojišťovny hromadně** a **Doplnit místo výkonu práce**.
+> Skončené dohody ukončíte najednou akcí **Ukončit skončené dohody**
+> ([§ 86.9.1](#8691-hromadne-ukonceni-skoncenych-dohod)). Když nějaké čekají,
+> je přímo nad seznamem s jejich počtem, jinak v **Další funkce**.
 
 ## 86.4 Krok za krokem: zákonná evidence osoby
 
@@ -321,7 +322,7 @@ skončené dohody** nad seznamem zaměstnanců. Číslo v závorce je počet vzt
 které aplikace navrhuje ukončit. Tlačítko vidí jen uživatel s právem měnit
 pracovní vztahy. Nic se neděje samo, vždy rozhodujete vy.
 
-1. Klikněte na **Ukončit skončené dohody**. Otevře se náhled ve třech skupinách:
+1. Klikněte na **Ukončit skončené dohody** (nad seznamem, nebo v **Další funkce**). Otevře se náhled ve třech skupinách:
    - **Uplynul sjednaný konec**: aktivní nebo přerušený vztah (jakéhokoli druhu),
      jehož sjednaný konec už uplynul. Navržené datum ukončení je sjednaný konec.
    - **Dohody bez aktivity**: aktivní DPP nebo DPČ bez sjednaného konce, která

@@ -292,8 +292,7 @@ final class JmhzPreparationSnapshotBuilder
                 if ($deferredType === null) {
                     $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
                 }
-                $averageRequired = $scenarioKey === null
-                    || $this->scenarioRequiresAttribute($scenarioKey, '10345');
+                $averageRequired = $this->averageRequiredForScenario($scenarioKey);
                 $workSummary = is_array($entry['time_month'] ?? null)
                     ? ($entry['time_month']['jmhz_work_summary'] ?? null)
                     : null;
@@ -1042,6 +1041,40 @@ final class JmhzPreparationSnapshotBuilder
         }
 
         return $average;
+    }
+
+    /**
+     * Požaduje hlášení u tohoto vztahu průměrný hodinový výdělek (10345)?
+     *
+     * Rozhoduje scénář vztahu: například formulář `cinnostKS` (scénář 3,
+     * společník nebo jednatel) pole vůbec nemá. Předběžná kontrola před během
+     * se ptá tady, aby nežádala nic, co zmrazení hlášení nevyžaduje. Vztah,
+     * jehož scénář určit nejde, se bere jako povinný.
+     *
+     * @param array<string,mixed> $entry vztah ze snímku vstupů
+     */
+    public function averageEarningRequired(array $entry, string $periodStart): bool
+    {
+        $term = $entry['term'] ?? null;
+        $employment = $entry['employment'] ?? null;
+        if (!is_array($term) || array_is_list($term) || !is_array($employment)) {
+            return true;
+        }
+        $selection = $this->scenarioSelector()->resolve(
+            is_string($term['activity_code'] ?? null) ? $term['activity_code'] : null,
+            is_string($term['jmhz_relationship_detail_code'] ?? null)
+                ? $term['jmhz_relationship_detail_code']
+                : null,
+            self::deferredIncomeType($entry, $employment, $periodStart) === null ? null : 'scenario_8',
+        );
+        $scenarioKey = $selection['supported'] ? ($selection['evidence']['scenario_key'] ?? null) : null;
+
+        return $this->averageRequiredForScenario(is_string($scenarioKey) ? $scenarioKey : null);
+    }
+
+    private function averageRequiredForScenario(?string $scenarioKey): bool
+    {
+        return $scenarioKey === null || $this->scenarioRequiresAttribute($scenarioKey, '10345');
     }
 
     private function scenarioRequiresAttribute(string $scenarioKey, string $attributeId): bool

@@ -38,6 +38,7 @@ import {
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
+  type InboxPollResult,
   type OutboxSubmission,
   type ReceiptBatchResult,
   type ReceiptCandidate,
@@ -369,6 +370,21 @@ async function setInboxRead(message: InboxMessage, read: boolean) {
   }
 }
 
+const inboxMarkingAllRead = ref(false)
+
+async function markAllInboxRead() {
+  inboxMarkingAllRead.value = true
+  try {
+    const count = await dataBoxApi.markAllInboxRead({ ...inboxBrowseParams(), environment: environment.value })
+    toast.success(t('databox.inboxBrowse.markedAllRead', { count }))
+    await reloadInbox()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    inboxMarkingAllRead.value = false
+  }
+}
+
 /** Otevření zprávy ji označí jako přečtenou; navigaci to nesmí zdržet ani zastavit. */
 function openInboxMessage(message: InboxMessage) {
   if (inboxSupportsCategories.value && !message.read_at) {
@@ -589,6 +605,29 @@ function acceptanceTone(state: AcceptanceState): string {
     // neutrální šeď, ne varovná barva. Není to porucha, je to fakt.
     default: return 'bg-neutral-100 text-neutral-600'
   }
+}
+
+/** Dodáním splněná povinnost: úřad se nevyjádří a nikdo na něj nečeká. */
+function settledByDelivery(row: OutboxSubmission): boolean {
+  return row.settles_on_delivery === true
+    && row.dispatch_state === 'delivered'
+    && row.acceptance_state === 'unknown'
+}
+
+function outboxAcceptanceLabel(row: OutboxSubmission): string {
+  if (settledByDelivery(row)) return t('databox.acceptance.settled_by_delivery')
+  if (row.settles_on_delivery === true && row.acceptance_state === 'unknown') {
+    return t('databox.acceptance.no_authority_result')
+  }
+  return t(`databox.acceptance.${row.acceptance_state}`)
+}
+
+function outboxAcceptanceTone(row: OutboxSubmission): string {
+  return acceptanceTone(settledByDelivery(row) ? 'accepted' : row.acceptance_state)
+}
+
+function scrollToReceiptsBatch() {
+  document.querySelector('[data-test="outbox-receipts-batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 /**
@@ -1226,11 +1265,13 @@ async function forgetMobileCredential() {
   }
 }
 
-async function finishInboxPoll(result: { stored: number; failed: number; error?: string | null }) {
+async function finishInboxPoll(result: InboxPollResult) {
+  const attached = result.receipts?.attached ?? 0
+  const receipts = attached > 0 ? ` ${t('databox.outbox.receiptsBatch.done', { attached })}` : ''
   if (result.failed > 0 || result.error) {
-    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }))
+    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }) + receipts)
   } else {
-    toast.success(t('databox.inbox.polled', { count: result.stored }))
+    toast.success(t('databox.inbox.polled', { count: result.stored }) + receipts)
   }
   inboxAcknowledged.value = false
   resetInboxAuth()
@@ -2111,6 +2152,19 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
       </div>
 
       <div class="flex flex-wrap gap-2">
+        <button
+          v-if="receiptsAwaiting.length"
+          type="button"
+          class="whitespace-nowrap"
+          :class="btnFilled('primary')"
+          data-test="outbox-receipts-batch-jump"
+          @click="scrollToReceiptsBatch"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
+          </svg>
+          {{ t('databox.outbox.receiptsBatch.title') }} ({{ receiptsAwaiting.length }})
+        </button>
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="openReceiptPicker(null)">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
@@ -2180,15 +2234,22 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
             <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="dispatchTone(row.dispatch_state)">
               {{ t(`databox.dispatch.${row.dispatch_state}`) }}
             </span>
-            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="acceptanceTone(row.acceptance_state)">
-              {{ t(`databox.acceptance.${row.acceptance_state}`) }}
+            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="outboxAcceptanceTone(row)" data-test="outbox-acceptance">
+              {{ outboxAcceptanceLabel(row) }}
             </span>
           </div>
         </div>
 
         <!-- Věta, podle které se dá jednat -->
         <p
-          v-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
+          v-if="settledByDelivery(row)"
+          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
+          data-test="outbox-settled-by-delivery"
+        >
+          {{ t('databox.outbox.settledByDelivery') }}
+        </p>
+        <p
+          v-else-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
           class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
         >
           {{ t('databox.outbox.deliveredNotProcessed') }}
@@ -2930,6 +2991,18 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                     <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
                   </svg>
                   {{ t('databox.inbox.privacy.hiddenList') }}
+                </button>
+                <button
+                  type="button"
+                  :class="[btnOutline('success'), 'whitespace-nowrap']"
+                  :disabled="loading || inboxMarkingAllRead || !(inboxFacets?.unread ?? 0)"
+                  data-test="inbox-mark-all-read"
+                  @click="markAllInboxRead"
+                >
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+                  </svg>
+                  {{ t('databox.inboxBrowse.markAllRead') }}
                 </button>
               </div>
             </template>

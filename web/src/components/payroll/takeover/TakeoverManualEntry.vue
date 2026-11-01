@@ -290,6 +290,11 @@ onMounted(async () => {
           class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
           data-test="takeover-manual-locked"
         >{{ entry.lock_reason }}</p>
+        <p
+          v-else-if="entry.partial_lock_reason"
+          class="mt-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-700"
+          data-test="takeover-manual-partial-lock"
+        >{{ t('payroll.takeover_manual.partial_lock', { reason: entry.partial_lock_reason }) }}</p>
 
         <div class="mt-3 overflow-x-auto">
           <table class="min-w-full text-xs">

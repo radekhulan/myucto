@@ -65,6 +65,21 @@ final readonly class PayrollOpeningBalanceService
     ];
 
     /**
+     * Sloupce rozpisu, které podané hlášení z počátečního stavu nebere.
+     *
+     * Zdravotní pojistné se v hlášení vykazuje za měsíc z jeho výpočtu a do
+     * výpočtu pozdějších měsíců kumulace nevstupuje. Doplnit ho tedy jde i po
+     * podání; základ sociálního pojištění a daňové úhrny ne, ty podané hlášení
+     * ovlivnily (roční strop, daňová kumulace).
+     */
+    private const COLUMNS_OUTSIDE_FILED_REPORTS = [
+        'health_assessment_base_minor_units',
+        'health_employee_contribution_minor_units',
+        'health_employer_contribution_minor_units',
+        'health_minimum_top_up_minor_units',
+    ];
+
+    /**
      * Pole kumulace, která se NEZADÁVAJÍ — plynou z rozpisu samotného.
      * Počet uzavřených měsíců je počet řádků, ne částka.
      *
@@ -149,6 +164,65 @@ final readonly class PayrollOpeningBalanceService
             'year_closed' => sprintf('Mzdový rok %d je uzavřený.', $year),
             default => throw new \LogicException('Neznámý důvod zámku počátečních stavů.'),
         };
+    }
+
+    /**
+     * Zamyká počáteční stav tahle KONKRÉTNÍ změna? `null` = smí se uložit.
+     *
+     * Podané hlášení zamyká jen to, co z počátečního stavu převzalo. Vydaný roční
+     * doklad a uzavřený rok jsou otiskem celého roku a zamykají všechno.
+     *
+     * @param list<array<string,mixed>> $months normalizovaný nový rozpis
+     */
+    public function lockReasonForChange(int $supplierId, int $employeeId, int $year, array $months): ?string
+    {
+        $lock = $this->accumulators->openingLock($supplierId, $employeeId, $year);
+        if ($lock === null) {
+            return null;
+        }
+        if ($lock['kind'] === 'submission') {
+            $stored = $this->current($supplierId, $employeeId, $year)['months'];
+            if (self::reportedColumns($stored) == self::reportedColumns($months)) {
+                return null;
+            }
+        }
+
+        return $this->lockReason($supplierId, $employeeId, $year);
+    }
+
+    /** Lze u zamčeného roku měnit aspoň údaje mimo podaná hlášení? */
+    public function lockAllowsUnreportedChanges(int $supplierId, int $employeeId, int $year): bool
+    {
+        return ($this->accumulators->openingLock($supplierId, $employeeId, $year)['kind'] ?? null) === 'submission';
+    }
+
+    /**
+     * Rozpis bez sloupců mimo podaná hlášení, nezadaný sloupec je nula.
+     *
+     * @param list<array<string,mixed>> $months
+     * @return array<int,array<string,int>>
+     */
+    public static function reportedColumns(array $months): array
+    {
+        $columns = [];
+        foreach (self::monthColumns() as $map) {
+            foreach (array_keys($map) as $column) {
+                if (!in_array($column, self::COLUMNS_OUTSIDE_FILED_REPORTS, true)) {
+                    $columns[] = $column;
+                }
+            }
+        }
+        $rows = [];
+        foreach ($months as $month) {
+            $row = [];
+            foreach ($columns as $column) {
+                $row[$column] = (int) ($month[$column] ?? 0);
+            }
+            $rows[(int) ($month['month'] ?? 0)] = $row;
+        }
+        ksort($rows, SORT_NUMERIC);
+
+        return $rows;
     }
 
     /**
@@ -320,7 +394,7 @@ final readonly class PayrollOpeningBalanceService
         $sourceReference = trim($sourceReference);
         $entered = $months;
         $months = self::normalizedMonths($months);
-        $lockReason = $this->lockReason($supplierId, $employeeId, $year);
+        $lockReason = $this->lockReasonForChange($supplierId, $employeeId, $year, array_values($months));
         if ($lockReason !== null) {
             throw new \DomainException($lockReason);
         }

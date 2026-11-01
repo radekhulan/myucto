@@ -90,6 +90,7 @@ export interface TakeoverJmhzFormDifference {
 
 export type TakeoverInvariantCode =
   | 'takeover_totals_without_employment'
+  | 'takeover_manual_totals_incomplete'
   | 'takeover_relation_missing'
   | 'takeover_totals_mismatch'
   | 'takeover_source_rows_skipped'

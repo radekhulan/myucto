@@ -755,6 +755,22 @@ final class XmlzamCooperationFlowTest extends TestCase
         return $revisionId;
     }
 
+    /** Protokol ČSSZ ani vlastní odeslané hlášení požadavkem exekutora nejsou. */
+    public function testCandidatesLeaveOutRecognizedMessagesAndOwnSentOnes(): void
+    {
+        [$requestInboxId] = $this->source('<?xml version="1.0" encoding="UTF-8"?><synthetic-request/>', 'abc1234');
+        [$protocolInboxId] = $this->source('<?xml version="1.0" encoding="UTF-8"?><synthetic-protocol/>', 'def5678');
+        [$sentInboxId] = $this->source('<?xml version="1.0" encoding="UTF-8"?><synthetic-sent/>', 'ghi9012');
+        $this->pdo->prepare("UPDATE submission_inbox_messages SET classification = 'cssz_protocol' WHERE id = ?")
+            ->execute([$protocolInboxId]);
+        $this->pdo->prepare("UPDATE submission_inbox_messages SET direction = 'sent' WHERE id = ?")
+            ->execute([$sentInboxId]);
+
+        $candidates = $this->flow->candidates($this->supplierId, 'test');
+
+        self::assertSame([$requestInboxId], array_column($candidates, 'inbox_message_id'));
+    }
+
     /** @return array{0:int,1:int} */
     private function source(string $xml, string $senderBoxId): array
     {

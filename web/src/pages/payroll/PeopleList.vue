@@ -511,6 +511,58 @@ async function removePerson() {
   }
 }
 
+// Hromadné úpravy se nedělají každý měsíc, proto jsou v „Další funkce". Skončené
+// dohody k ukončení jsou ale úkol, který čeká, a ten se schovávat nesmí.
+const peopleBulkActions = computed<ActionItem[]>(() => [
+  {
+    key: 'bulk-closure',
+    label: bulkClosureCount.value
+      ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount.value })
+      : t('payroll.bulk_closure.open'),
+    icon: 'archive',
+    tier: bulkClosureCount.value ? 'secondary' : 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => { bulkClosureOpen.value = true },
+  },
+  {
+    key: 'statutory-bulk',
+    label: t('payroll.people.statutory_bulk_action'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canCreatePerson.value,
+    run: () => { statutoryBulkOpen.value = true },
+  },
+  {
+    key: 'declaration-sign-bulk',
+    label: t('payroll.people.declaration_sign_bulk_action'),
+    icon: 'check',
+    tier: 'overflow',
+    variant: 'success',
+    show: canCreatePerson.value,
+    run: () => { declarationSignBulkOpen.value = true },
+  },
+  {
+    key: 'health-insurer-bulk',
+    label: t('payroll.health_insurer_bulk.open'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canQuickEditPerson.value,
+    run: () => { healthInsurerBulkOpen.value = true },
+  },
+  {
+    key: 'workplace-bulk',
+    label: t('payroll.people.workplace_bulk_action'),
+    icon: 'pin',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => { workplaceBulkOpen.value = true },
+  },
+])
+
 const personActions = computed<ActionItem[]>(() => [
   {
     key: 'add-employment',
@@ -1734,61 +1786,6 @@ onMounted(async () => {
           </label>
         </div>
         <div class="flex min-w-0 flex-wrap gap-2 lg:justify-end">
-          <button
-            v-if="canCreatePerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="statutory-bulk-open"
-            @click="statutoryBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
-            {{ t('payroll.people.statutory_bulk_action') }}
-          </button>
-          <button
-            v-if="canCreatePerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('success')"
-            data-test="declaration-sign-bulk-open"
-            @click="declarationSignBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
-            {{ t('payroll.people.declaration_sign_bulk_action') }}
-          </button>
-          <button
-            v-if="canQuickEditPerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="health-insurer-bulk-open"
-            @click="healthInsurerBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
-            {{ t('payroll.health_insurer_bulk.open') }}
-          </button>
-          <button
-            v-if="canWriteEmployment"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="workplace-bulk-open"
-            @click="workplaceBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.pin" /></svg>
-            {{ t('payroll.people.workplace_bulk_action') }}
-          </button>
-          <button
-            v-if="canWriteEmployment"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="bulk-closure-open"
-            @click="bulkClosureOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.archive" /></svg>
-            {{ bulkClosureCount ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount }) : t('payroll.bulk_closure.open') }}
-          </button>
           <RouterLink
             :to="{ name: 'payroll-quick-inputs' }"
             class="whitespace-nowrap"
@@ -1798,6 +1795,7 @@ onMounted(async () => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
             {{ t('payroll.people.quick_inputs') }}
           </RouterLink>
+          <ActionBar :actions="peopleBulkActions" :more-label="t('payroll.people.more_functions')" />
         </div>
       </div>
     </section>
