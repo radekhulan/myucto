@@ -2561,6 +2561,9 @@
       "opening_only_hint": "Počáteční stav měsíc má, převzatá mzda ne. Bez ní nevznikne evidenční list důchodového pojištění za rok přechodu.",
       "takeover_only_title": "Převzatá mzda bez počátečního stavu",
       "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne - roční zúčtování ani vyúčtování daně s ním nepočítají.",
+      "jmhz_form_incomplete_title": "Ručně převzaté mzdě chybí údaje z přijatého hlášení JMHZ",
+      "jmhz_form_incomplete_hint": "Převzatá mzda má v těchto veličinách nulu, ČSSZ má z hlášení správná čísla. Doplňte převzatou mzdu tlačítkem Doplnit z přijatých hlášení v ručním zadání. Opravné hlášení kvůli tomu nepodávejte, leda by nula byla opravdu správná.",
+      "jmhz_form_incomplete_person": "{name}: převzaté mzdě za {period} chybí údaje z přijatého hlášení",
       "jmhz_form_title": "Hlášení JMHZ podané s jinými údaji, než má konečná mzda",
       "invariants_title": "Převod porušil kontrolu převzetí",
       "invariants_hint": "Každé porušení je chyba převodu, ne upozornění: převzaté mzdy pak nesedí na zdroj nebo na vztahy v MyÚčtu. Opravte data a převod zopakujte, nebo rozdíl vědomě přijměte.",
@@ -2589,6 +2592,12 @@
       }
     },
     "takeover_manual": {
+      "prefill": "Doplnit z přijatých hlášení",
+      "prefill_hint": "Doplní prázdná pole z importovaných přijatých hlášení JMHZ. Vyplněná čísla nechá být a nic neukládá.",
+      "prefill_done": "Doplněno z hlášení, řádků: {count}. Zkontrolujte čísla a uložte.",
+      "prefill_derived": "Hlášení je nenese, proto jsou dopočítané: {fields}.",
+      "prefill_missing": "Bez přijatého hlášení zůstaly měsíce: {months}.",
+      "prefill_failed": "Přijatá hlášení se nepodařilo načíst.",
       "partial_lock": "{reason} Doplnit ale můžete údaje, které hlášení z převzatých úhrnů nevzalo: dny účasti, odvody, zdravotní pojištění a čistou mzdu.",
       "title": "Ruční zadání převzatých mezd",
       "hint": "Pro měsíce, které vedl předchozí program a ze kterých nemáte export ani hlášení. Každý měsíc zadejte jednou, po pracovních vztazích a v korunách - uložení naplní počáteční stavy (roční zúčtování, vyúčtování daně, potvrzení o příjmech) i převzaté mzdy (evidenční list důchodového pojištění).",

@@ -329,6 +329,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/people/[0-9]+$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/check$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/manual/[0-9]+$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/manual/[0-9]+/filed-forms$#', 'payroll.reports', AccessLevel::READ],
         ['PUT', '#^/api/payroll/takeover-wages/[0-9]{4}/manual/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Žádosti o daňový bonus (§ 35d odst. 5 a 9). Náhled je mzdová sestava;
         // stažení XML navíc prochází `reports.export` kontrolou v Action, protože

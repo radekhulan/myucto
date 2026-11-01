@@ -1259,6 +1259,10 @@ final class Routes
                 '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
                 [PayrollTakeoverWageAction::class, 'manualForm'],
             );
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}/filed-forms',
+                [PayrollTakeoverWageAction::class, 'manualFiledForms'],
+            );
             $g->put(
                 '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
                 [PayrollTakeoverWageAction::class, 'manualSave'],
