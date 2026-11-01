@@ -200,7 +200,7 @@ final class DocumentSeriesService
                 'Prefix řady musí být 1–10 znaků A–Z/0–9 (zadáno "' . $prefix . '").',
             );
         }
-        $this->assertPrefixFree($supplierId, $prefix, $seriesCode, $registerId);
+        $this->assertPrefixFree($supplierId, $prefix, $seriesCode, $fiscalYear, $registerId);
         $this->series->ensure(
             $supplierId,
             $seriesCode,
@@ -254,7 +254,7 @@ final class DocumentSeriesService
         // dokladu při ukládání (u ostatních položek až jako chyba databáze). Ruční
         // editaci prefixu v Nástrojích proto hlídáme tady, ne až v databázi.
         if (isset($patch['prefix'])) {
-            $this->assertPrefixFree($supplierId, $patch['prefix'], $seriesCode, $registerId);
+            $this->assertPrefixFree($supplierId, $patch['prefix'], $seriesCode, $fiscalYear, $registerId);
         }
 
         return $this->series->upsert(
@@ -272,29 +272,50 @@ final class DocumentSeriesService
      * ani firemní (register_id = 0), ani vlastní řada jiné pokladny.
      * Kontroluje se přes obě řady skupiny (PPD i VPD, OP i OZ), protože sdílejí jednu
      * unikátnost čísla. Řady mimo skupiny se nekontrolují.
+     *
+     * Řádek firemní řady vzniká až s prvním dokladem roku (lazy `ensure()` ve {@see next()})
+     * a dostane výchozí prefix. Ten si proto firemní řada drží i bez řádku: vlastní řada si
+     * vestavěné prefixy skupiny (PPD/VPD, OP/OZ) nevezme nikdy, jiná firemní řada skupiny
+     * ne v roce, kdy jejich řada ještě nemá řádek.
      */
-    private function assertPrefixFree(int $supplierId, string $prefix, string $seriesCode, int $registerId): void
+    private function assertPrefixFree(int $supplierId, string $prefix, string $seriesCode, int $fiscalYear, int $registerId): void
     {
         $label = self::prefixGroup($seriesCode);
         if ($label === null) {
             return;
         }
         $group = self::PREFIX_GROUPS[$label];
-        // Vestavěné prefixy (PPD/VPD, OP/OZ) si drží firemní řada — i když její řádek pro
-        // daný rok ještě nevznikl (zakládá se lazy), vlastní řada si je vzít nesmí, jinak by
-        // kolize nastala až při prvním firemním dokladu.
+        $rows = $this->series->list($supplierId);
         if ($registerId > 0) {
             foreach ($group as $companyCode) {
                 if (strcasecmp(self::DEFAULT_PREFIXES[$companyCode], $prefix) === 0) {
                     throw new ClosingException(
                         'series_prefix_taken',
-                        'Prefix "' . $prefix . '" patří společné řadě firmy — vlastní řada potřebuje jiný.',
+                        'Prefix "' . $prefix . '" patří společné řadě firmy — vlastní řada pokladny potřebuje jiný.',
                     );
                 }
             }
         }
 
-        foreach ($this->series->list($supplierId) as $row) {
+        $companyRowThisYear = [];
+        foreach ($rows as $row) {
+            if ((int) $row['register_id'] === 0 && (int) $row['fiscal_year'] === $fiscalYear) {
+                $companyRowThisYear[(string) $row['series_code']] = true;
+            }
+        }
+        foreach ($group as $companyCode) {
+            if ($companyCode === $seriesCode || isset($companyRowThisYear[$companyCode])) {
+                continue;
+            }
+            if ($registerId === 0 && strcasecmp(self::DEFAULT_PREFIXES[$companyCode], $prefix) === 0) {
+                throw new ClosingException(
+                    'series_prefix_taken',
+                    'Prefix "' . $prefix . '" dostane při prvním dokladu roku jiná ' . $label . ' — zvolte jiný.',
+                );
+            }
+        }
+
+        foreach ($rows as $row) {
             if (!in_array((string) $row['series_code'], $group, true)) {
                 continue;
             }

@@ -199,6 +199,33 @@ final class DocumentSeriesTest extends TestCase
         self::assertSame('OZA-2098-0001', $this->series->next($this->supplierId, 'other_payable', self::YEAR));
     }
 
+    /**
+     * Řádek firemní řady vzniká až s prvním číslem roku (nebo úpravou v Nástrojích) a dostane
+     * výchozí prefix. Dokud ho druhá řada skupiny pro ten rok nemá, její výchozí prefix (OZ,
+     * VPD) si vzít nejde, jinak by kolize přišla až s jejím prvním dokladem. Řádek z jiného
+     * roku nestačí; vlastní řada pokladny se na řádky firemních řad neptá.
+     */
+    public function testCompanySeriesMayNotTakeDefaultPrefixOfSeriesWithoutRowYet(): void
+    {
+        $this->series->ensureSeriesRow($this->supplierId, 'other_payable', self::YEAR + 1, 'ZAV');
+        foreach ([['other_receivable', 'OZ'], ['cash_in', 'VPD']] as [$code, $prefix]) {
+            try {
+                $this->series->updateSeries($this->supplierId, $code, self::YEAR, ['prefix' => $prefix]);
+                self::fail('Prefix ' . $prefix . ' dostane druhá řada skupiny při prvním dokladu roku.');
+            } catch (ClosingException $e) {
+                self::assertSame('series_prefix_taken', $e->errorCode);
+            }
+        }
+        $register = $this->createCashRegister();
+        $this->series->ensureSeriesRow($this->supplierId, 'cash_in', self::YEAR, 'PPD2', null, $register);
+
+        // Jakmile má druhá řada pro rok řádek s jiným prefixem (a OZ nedrží žádná řada), výchozí prefix je volný.
+        $this->series->ensureSeriesRow($this->supplierId, 'other_payable', self::YEAR, 'ZAV');
+        $this->series->updateSeries($this->supplierId, 'other_receivable', self::YEAR, ['prefix' => 'OZ']);
+        self::assertSame('OZ-2098-0001', $this->series->next($this->supplierId, 'other_receivable', self::YEAR));
+        self::assertSame('ZAV-2098-0001', $this->series->next($this->supplierId, 'other_payable', self::YEAR));
+    }
+
     public function testI16SeriesAreTenantScoped(): void
     {
         self::assertSame('UZ-2098-0001', $this->series->next($this->supplierId, 'closing', self::YEAR));
@@ -265,6 +292,13 @@ final class DocumentSeriesTest extends TestCase
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private function createCashRegister(): int
+    {
+        $this->db->pdo()->prepare("INSERT INTO cash_registers (supplier_id, name, account_code) VALUES (?, 'Syntetická pokladna', '211')")
+            ->execute([$this->supplierId]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
 
     /**
      * @param array<string,mixed> $body
