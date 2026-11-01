@@ -24218,7 +24218,6 @@
     "statement_delete_confirm": "Opravdu smazat tento avízo-výpis včetně jeho transakcí?",
     "statement_deleted": "Výpis smazán.",
     "statement_delete_failed": "Smazání výpisu selhalo.",
-    "evidence_statement": "Zdrojový výpis {name} ({count} pohybů)",
     "statement_delete_evidence": "Smazat zdrojový výpis",
     "statement_delete_evidence_hint": "Smaže tento zdrojový výpis měsíčního výpisu API i s jeho vlastními pohyby, například duplicitu z opakovaného stažení. Zaúčtované pohyby se stornují a měsíční výpis se přepočítá.",
     "statement_delete_evidence_confirm": "Opravdu smazat tento zdrojový výpis včetně jeho pohybů? Jejich zaúčtování se stornuje a měsíční výpis se přepočítá.",

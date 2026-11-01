@@ -500,13 +500,6 @@ const statementActions = computed<ActionItem[]>(() => {
       tier: 'overflow' as const,
       run: () => { void downloadStatementFile(bankApi.pdfUrl(pdf.id), pdf.pdf_name ?? 'vypis.pdf') },
     })),
-    ...(s.evidence_statements ?? []).map(source => ({
-      key: `evidence_statement_${source.id}`,
-      label: t('bank.evidence_statement', { name: source.file_name ?? String(source.id), count: source.transaction_count }),
-      icon: 'eye' as const,
-      tier: 'overflow' as const,
-      run: () => { void router.push({ name: 'bank-detail', params: { id: source.id } }) },
-    })),
     {
       key: 'pdf_upload',
       label: t('bank.pdf_upload'),

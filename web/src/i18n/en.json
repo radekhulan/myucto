@@ -24218,7 +24218,6 @@
     "statement_delete_confirm": "Really delete this e-mail-notice statement including its transactions?",
     "statement_deleted": "Statement deleted.",
     "statement_delete_failed": "Statement delete failed.",
-    "evidence_statement": "Source statement {name} ({count} transactions)",
     "statement_delete_evidence": "Delete source statement",
     "statement_delete_evidence_hint": "Deletes this source statement of the monthly API statement together with its own transactions, for example a duplicate from a repeated download. Posted transactions are reversed and the monthly statement is recalculated.",
     "statement_delete_evidence_confirm": "Really delete this source statement including its transactions? Their postings will be reversed and the monthly statement recalculated.",
