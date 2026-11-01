@@ -182,8 +182,8 @@ function mountPage(employmentCardStub: unknown = true) {
     global: {
       stubs: {
         ActionBar: {
-          props: ['actions'],
-          template: '<div data-test="person-actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          props: ['actions', 'moreLabel'],
+          template: '<div data-test="person-actions"><span v-if="moreLabel" data-test="action-more-label">{{ moreLabel }}</span><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" :data-tier="action.tier" @click="action.run && action.run()">{{ action.label }}</button></div>',
         },
         RouterLink: {
           name: 'RouterLink',
@@ -293,6 +293,17 @@ describe('PeopleList toolbar and shared employee creation', () => {
     const buttons = wrapper.get('[data-test="quick-inputs-link"]').element.parentElement!
     expect(buttons.classList.contains('flex-wrap')).toBe(true)
     expect(buttons.classList.contains('min-w-0')).toBe(true)
+  })
+
+  it('hromadné úpravy schová do Další funkce a na liště nechá měsíční zadání', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="quick-inputs-link"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="action-more-label"]').exists()).toBe(true)
+    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'bulk-closure']) {
+      expect(wrapper.get(`[data-test="action-${key}"]`).attributes('data-tier')).toBe('overflow')
+    }
   })
 
   /*

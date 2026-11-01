@@ -143,7 +143,7 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 **Výchozí zákonná evidence** (daňová rezidence, příslušnost k pojištění):
 
 1. U blokace na kartě běhu klikněte na **Doplnit výchozí údaje (N osob)**.
-   Totéž je v `Mzdy → Zaměstnanci` pod **Doplnit výchozí zákonné údaje**;
+   Totéž je v `Mzdy → Zaměstnanci → Další funkce` pod **Doplnit výchozí zákonné údaje**;
    tam zvolíte měsíc, od kterého údaje platí.
 2. Projděte náhled: komu se údaje doplní, kdo je vyřazený a proč, kdo nemá
    zdravotní pojišťovnu a kdo nemá prohlášení poplatníka. Náhled nic
@@ -158,7 +158,7 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 
 **Zdravotní pojišťovny:**
 
-1. V `Mzdy → Zaměstnanci` klikněte na **Zdravotní pojišťovny hromadně**
+1. V `Mzdy → Zaměstnanci → Další funkce` klikněte na **Zdravotní pojišťovny hromadně**
    (výsledek importu hlášení na akci odkáže sám).
 2. U každé osoby vyberte pojišťovnu a měsíc, od kterého platí. **Doplnit
    prázdné** vyplní stejnou pojišťovnu všem, kdo ji zatím nemají.

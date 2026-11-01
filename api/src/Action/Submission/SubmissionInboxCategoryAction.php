@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Repository\Submission\SubmissionInboxListQuery;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionInboxCategoryService;
 use MyInvoice\Service\Submission\SubmissionInboxService;
@@ -151,6 +152,26 @@ final class SubmissionInboxCategoryAction
             }
 
             return Json::ok($response, ['item' => $this->inbox->findById($supplierId, $messageId)]);
+        });
+    }
+
+    /** Všechny nepřečtené zprávy podle filtru seznamu (query jako u výpisu). */
+    public function markAllRead(Request $request, Response $response): Response
+    {
+        return $this->run($request, $response, AccessLevel::WRITE, function (int $supplierId) use ($request, $response): Response {
+            $params = $request->getQueryParams();
+            $environment = (string) ($params['environment'] ?? 'production');
+            if (!in_array($environment, ['production', 'test'], true)) {
+                return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+            }
+            try {
+                $query = SubmissionInboxListQuery::fromQuery($params);
+            } catch (\InvalidArgumentException $e) {
+                return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+            }
+            $updated = $this->inbox->markAllRead($supplierId, $environment, $query, $this->userId($request));
+
+            return Json::ok($response, ['updated' => $updated]);
         });
     }
 

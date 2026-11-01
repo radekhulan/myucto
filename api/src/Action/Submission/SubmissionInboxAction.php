@@ -15,12 +15,12 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport;
-use MyInvoice\Service\Submission\Channel\Isds\IsdsChannel;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
+use MyInvoice\Service\Submission\SubmissionInboxPollFlow;
 use MyInvoice\Service\Submission\SubmissionInboxService;
 use MyInvoice\Service\Submission\SubmissionInboxPrivacyService;
 use MyInvoice\Service\Submission\IsdsMobileCredentialService;
@@ -39,6 +39,7 @@ final class SubmissionInboxAction
 {
     public function __construct(
         private readonly SubmissionInboxService $inbox,
+        private readonly SubmissionInboxPollFlow $pollFlow,
         private readonly SubmissionCredentialService $credentials,
         private readonly DirectIsdsInboxTransport $directTransport,
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
@@ -132,13 +133,7 @@ final class SubmissionInboxAction
 
         try {
             $context = $this->credentials->unlock($supplierId, $environment);
-            $result = $this->inbox->pollWithChannel(
-                $context,
-                'isds',
-                new IsdsChannel($this->directTransport),
-                500,
-                $this->userId($request),
-            );
+            $result = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -181,13 +176,7 @@ final class SubmissionInboxAction
             ),
         );
         try {
-            $result = $this->inbox->pollWithChannel(
-                $context,
-                'isds',
-                new IsdsChannel($this->directTransport),
-                500,
-                $this->userId($request),
-            );
+            $result = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -258,13 +247,7 @@ final class SubmissionInboxAction
                 ]);
             }
             try {
-                $pollResult = $this->inbox->pollWithChannel(
-                    $context,
-                    'isds',
-                    new IsdsChannel($this->directTransport),
-                    500,
-                    $this->userId($request),
-                );
+                $pollResult = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
             } finally {
                 $this->mobileKey->logout($context);
             }
@@ -326,13 +309,7 @@ final class SubmissionInboxAction
                 (string) ($body['environment'] ?? 'production'),
             );
             try {
-                $result = $this->inbox->pollWithChannel(
-                    $context,
-                    'isds',
-                    new IsdsChannel($this->directTransport),
-                    500,
-                    $this->userId($request),
-                );
+                $result = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
             } finally {
                 $this->sms->logout($context);
             }
@@ -342,7 +319,7 @@ final class SubmissionInboxAction
         return $this->pollResult($response, $result);
     }
 
-    /** @param array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string} $result */
+    /** @param array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string,receipts:array{attached:int,pending:int,failed:int}|null} $result */
     private function pollResult(Response $response, array $result): Response
     {
         if ($result['error'] !== null && $result['fetched'] === 0) {

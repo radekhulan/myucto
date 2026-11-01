@@ -2567,6 +2567,7 @@
       "invariants_source": "(převod {source}, {at})",
       "invariant_codes": {
         "takeover_totals_without_employment": "Převzaté mzdy bez pracovního vztahu",
+        "takeover_manual_totals_incomplete": "Ručně převzatý měsíc bez dnů účasti nebo pojistného",
         "takeover_relation_missing": "Vztah s výplatou ve zdroji chybí v MyÚčtu",
         "takeover_totals_mismatch": "Součty po osobě a měsíci nesedí na zdroj",
         "takeover_source_rows_skipped": "Mzdy zdroje, které se nepřevzaly",
@@ -2588,6 +2589,7 @@
       }
     },
     "takeover_manual": {
+      "partial_lock": "{reason} Doplnit ale můžete údaje, které hlášení z převzatých úhrnů nevzalo: dny účasti, odvody, zdravotní pojištění a čistou mzdu.",
       "title": "Ruční zadání převzatých mezd",
       "hint": "Pro měsíce, které vedl předchozí program a ze kterých nemáte export ani hlášení. Každý měsíc zadejte jednou, po pracovních vztazích a v korunách - uložení naplní počáteční stavy (roční zúčtování, vyúčtování daně, potvrzení o příjmech) i převzaté mzdy (evidenční list důchodového pojištění).",
       "employee": "Zaměstnanec",
@@ -5763,6 +5765,7 @@
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
       "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
+      "more_functions": "Další funkce",
       "no_results_title": "Žádný zaměstnanec neodpovídá filtru",
       "no_results_description": "Upravte hledaný text nebo zvolte jiné zobrazení.",
       "filters": {
@@ -31639,6 +31642,8 @@
     },
     "acceptance": {
       "unknown": "Vyřízení úřadem: zatím nevíme",
+      "settled_by_delivery": "Splněno doručením",
+      "no_authority_result": "Úřad výsledek neposílá",
       "accepted": "Zpracováno úřadem",
       "rejected": "Odmítnuto úřadem"
     },
@@ -31694,6 +31699,7 @@
       "resolvedNotSent": "Zpráva v odeslaných není - podání neodešlo a můžete ho bezpečně zařadit znovu.",
       "resolveInconclusive": "Na datovou schránku se nepodařilo dovolat, takže dál nevíme, jestli zpráva odešla. Zkuste to prosím znovu později.",
       "deliveredNotProcessed": "Doručenka potvrzuje, že zpráva dorazila do schránky úřadu. Neznamená to, že úřad podání zpracoval a přijal - případné vady vám úřad oznámí samostatnou zprávou.",
+      "settledByDelivery": "Doručením je povinnost splněná a nemusíte už nic potvrzovat. Úřad výsledek zpracování neposílá, případnou vadu by oznámil samostatnou zprávou.",
       "markSent": "Označit jako odesláno ručně",
       "markSentConfirm": "Zapsat odeslání",
       "messageIdLabel": "ID zprávy z datové schránky",
@@ -31873,6 +31879,8 @@
       "unread": "Nepřečteno",
       "markRead": "Přečteno",
       "markUnread": "Nepřečteno",
+      "markAllRead": "Označit vše za přečtené",
+      "markedAllRead": "Označeno za přečtené: {count}",
       "reassign": "Přeřadit",
       "system": {
         "tax_office": "Finanční a celní správa",

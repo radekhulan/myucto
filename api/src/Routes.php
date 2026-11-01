@@ -3899,6 +3899,7 @@ final class Routes
         $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);
         // Kategorie zpráv, pravidla zařazení, ruční přeřazení a stav přečtení.
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/category', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'assign']);
+        $app->post   ('/api/submissions/inbox/read-all', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markAllRead']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/read', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markRead']);
         $app->get    ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'overview']);
         $app->post   ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'createCategory']);

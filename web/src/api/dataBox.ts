@@ -181,6 +181,8 @@ export interface OutboxSubmission {
   last_error_message: string | null
   row_version: number
   created_at: string
+  /** Úřad výsledek zpracování neposílá, povinnost splňuje samo dodání do schránky. */
+  settles_on_delivery?: boolean
   /**
    * Smí zrušená zpráva zmizet nadobro? Server ji doplňuje JEN u zrušených
    * řádků — jinde je `undefined`, protože se tam mazat nedá vůbec.
@@ -591,6 +593,8 @@ export interface InboxPollResult {
   failed: number
   unclassified: number
   error?: string | null
+  /** Doručenky odeslaných zpráv stažené ve stejné relaci; `null`, když se nestáhly. */
+  receipts?: { attached: number; pending: number; failed: number } | null
 }
 
 export interface MobileKeyInboxStart {
@@ -1003,6 +1007,8 @@ export const dataBoxApi = {
       apply_to_sender: applyToSender,
     }).then(r => r.data.item),
 
+  markAllInboxRead: (params: Record<string, unknown>) =>
+    api.post<{ updated: number }>('/submissions/inbox/read-all', null, { params }).then(r => r.data.updated),
   markInboxRead: (id: number, read: boolean) =>
     api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/read`, { read }).then(r => r.data.item),
 

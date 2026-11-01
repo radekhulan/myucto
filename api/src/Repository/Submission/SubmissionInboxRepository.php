@@ -591,6 +591,29 @@ final class SubmissionInboxRepository
         return $stmt->rowCount() > 0 || $this->findById($supplierId, $id) !== null;
     }
 
+    /**
+     * Označí za přečtené všechny nepřečtené zprávy, které odpovídají filtru seznamu.
+     * Filtr „přečtené / nepřečtené" se nepoužije: týká se vždy jen nepřečtených.
+     *
+     * @return int počet změněných zpráv
+     */
+    public function markAllRead(int $supplierId, string $environment, SubmissionInboxListQuery $query, ?int $userId): int
+    {
+        $this->assertAvailable();
+        if (!$this->supportsCategories()) {
+            throw new \DomainException('Stav přečtení není v databázi k dispozici (chybí migrace 1982).');
+        }
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, 'read');
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . ' m' . self::ENVELOPE_JOIN
+            . ' SET m.read_at = UTC_TIMESTAMP(), m.read_by = ?'
+            . $where . ' AND m.read_at IS NULL',
+        );
+        $stmt->execute([$userId, ...$params]);
+
+        return $stmt->rowCount();
+    }
+
     /** @return array<string,mixed>|null */
     public function findById(int $supplierId, int $id): ?array
     {

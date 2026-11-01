@@ -2567,6 +2567,7 @@
       "invariants_source": "(transfer {source}, {at})",
       "invariant_codes": {
         "takeover_totals_without_employment": "Taken-over wages without an employment",
+        "takeover_manual_totals_incomplete": "Manually taken-over month without insurance days or contributions",
         "takeover_relation_missing": "Paid employment from the source is missing in MyÚčto",
         "takeover_totals_mismatch": "Totals per person and month do not match the source",
         "takeover_source_rows_skipped": "Source payslips that were not taken over",
@@ -2588,6 +2589,7 @@
       }
     },
     "takeover_manual": {
+      "partial_lock": "{reason} You can still fill in what the report did not take from the taken-over totals: insurance days, contributions, health insurance and net wage.",
       "title": "Manual entry of taken-over wages",
       "hint": "For months processed by the previous program for which you have no export or report. Enter each month once, per employment and in crowns — saving fills both the opening balances (annual settlement, tax statement, income certificate) and the taken-over wages (pension insurance record sheet).",
       "employee": "Employee",
@@ -5763,6 +5765,7 @@
       "statutory_bulk_action": "Fill in default statutory data",
       "declaration_sign_bulk_action": "Signed declarations in bulk",
       "workplace_bulk_action": "Fill in place of work",
+      "more_functions": "More functions",
       "no_results_title": "No employee matches the filter",
       "no_results_description": "Change the search text or choose another view.",
       "filters": {
@@ -31639,6 +31642,8 @@
     },
     "acceptance": {
       "unknown": "Processing by the authority: not known yet",
+      "settled_by_delivery": "Fulfilled by delivery",
+      "no_authority_result": "The authority sends no result",
       "accepted": "Processed by the authority",
       "rejected": "Rejected by the authority"
     },
@@ -31694,6 +31699,7 @@
       "resolvedNotSent": "The message is not among sent messages — nothing was sent and you can safely queue it again.",
       "resolveInconclusive": "The data box could not be reached, so we still do not know whether the message was sent. Please try again later.",
       "deliveredNotProcessed": "The delivery receipt confirms the message reached the authority’s mailbox. It does not mean the authority has processed and accepted the filing — any defects will be notified in a separate message.",
+      "settledByDelivery": "Delivery fulfils the obligation and there is nothing left to confirm. The authority sends no processing result; any defect would be notified in a separate message.",
       "markSent": "Mark as sent manually",
       "markSentConfirm": "Record the dispatch",
       "messageIdLabel": "Data box message ID",
@@ -31873,6 +31879,8 @@
       "unread": "Unread",
       "markRead": "Read",
       "markUnread": "Unread",
+      "markAllRead": "Mark all as read",
+      "markedAllRead": "Marked as read: {count}",
       "reassign": "Move",
       "system": {
         "tax_office": "Tax and customs administration",
