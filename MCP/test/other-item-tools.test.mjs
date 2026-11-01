@@ -95,10 +95,12 @@ test('čtecí nástroje volají konkrétní cesty a mapují hledání na q', asy
   const routes = [
     ['list_other_items', { side: 'payable', status: 'open', query: 'nájem', page: 2 }, '/accounting/other-items',
       { side: 'payable', status: 'open', page: 2, q: 'nájem' }],
+    ['list_other_items', { kind_id: 5, sort_by: 'document_no' }, '/accounting/other-items', { kind_id: 5, sort_by: 'document_no' }],
     ['get_other_item', { id: 12 }, '/accounting/other-items/12', null],
     ['list_other_item_allocations', { id: 12 }, '/accounting/other-items/12/allocations', null],
     ['other_item_payment_candidates', { id: 12, query: 'nájem', limit: 10 }, '/accounting/other-items/12/payment-candidates',
       { limit: 10, q: 'nájem' }],
+    ['list_other_item_kinds', {}, '/accounting/other-items/kinds', null],
     ['list_other_item_schedules', {}, '/accounting/other-items/schedules', null],
     ['get_other_item_schedule', { id: 3 }, '/accounting/other-items/schedules/3', null],
     ['get_other_item_installments', { item_id: 12 }, '/accounting/other-items/12/installments', null],
@@ -202,6 +204,19 @@ test('úprava konceptu složí celý doklad a jediný protiřádek přepočte', 
       posting_lines: [{ account_code: '221', amount: 13500.5 }],
     },
   }]);
+});
+
+test('úprava konceptu s vlastním druhem ho drží, vestavěný druh ho zruší', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ kind: 'other', kind_id: '5' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem klubovny' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.kind_id, 5);
+
+  await tool('update_other_item').run(client, { id: 12, kind: 'other' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.kind_id, 5);
+
+  await tool('update_other_item').run(client, { id: 12, kind: 'rent' }, 'update_other_item');
+  assert.equal(writes(client)[2].body.kind, 'rent');
+  assert.equal(writes(client)[2].body.kind_id, null);
 });
 
 test('úprava s více protiřádky změnu částky bez nové kontace odmítne', async () => {

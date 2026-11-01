@@ -20,10 +20,10 @@ use MyInvoice\Repository\DocumentSeriesRepository;
  * systému): `number_format` se stejnými placeholdery jako u faktur, NULL =
  * vestavěný `{PREFIX}-{YYYY}-{CCCC}` (tedy `UZ-2026-0001` jako dosud).
  *
- * `$registerId` rozlišuje řadu pokladny od společné řady firmy (L-3, migrace 1506):
- * 0 = společná řada (výchozí a jediná, pokud si to firma nepřepne), >0 = vlastní řada
- * pokladny s tímhle id. Používá se jen u `cash_in`/`cash_out`; ostatní řady jsou vždy
- * firemní, protože jiný doklad než pokladní k pokladně nepatří.
+ * `$registerId` rozlišuje vlastní řadu od společné řady firmy: 0 = společná řada
+ * (výchozí a jediná, pokud si to firma nepřepne), >0 = vlastní řada. U `cash_in`/`cash_out`
+ * je to id pokladny (L-3, migrace 1506), u `other_receivable`/`other_payable` id vlastního
+ * druhu ostatní položky (migrace 2228). Ostatní řady jsou vždy firemní.
  */
 final class DocumentSeriesService
 {
@@ -250,8 +250,8 @@ final class DocumentSeriesService
         }
 
         // Řady jedné skupiny (pokladní, ostatní položky) se potkávají v jedné tabulce
-        // dokladů: všechny začínají od jedničky, takže shodný prefix = duplicitní číslo
-        // dokladu při ukládání (u ostatních položek až jako chyba databáze). Ruční
+        // dokladů: firemní řada a vlastní řada pokladny nebo druhu obě začínají od
+        // jedničky, takže shodný prefix = duplicitní číslo dokladu při ukládání. Ruční
         // editaci prefixu v Nástrojích proto hlídáme tady, ne až v databázi.
         if (isset($patch['prefix'])) {
             $this->assertPrefixFree($supplierId, $patch['prefix'], $seriesCode, $fiscalYear, $registerId);
@@ -269,7 +269,7 @@ final class DocumentSeriesService
 
     /**
      * Prefix řady ze skupiny {@see PREFIX_GROUPS} nesmí držet jiná řada téže skupiny —
-     * ani firemní (register_id = 0), ani vlastní řada jiné pokladny.
+     * ani firemní (register_id = 0), ani vlastní řada jiné pokladny nebo druhu.
      * Kontroluje se přes obě řady skupiny (PPD i VPD, OP i OZ), protože sdílejí jednu
      * unikátnost čísla. Řady mimo skupiny se nekontrolují.
      *
@@ -291,7 +291,7 @@ final class DocumentSeriesService
                 if (strcasecmp(self::DEFAULT_PREFIXES[$companyCode], $prefix) === 0) {
                     throw new ClosingException(
                         'series_prefix_taken',
-                        'Prefix "' . $prefix . '" patří společné řadě firmy — vlastní řada pokladny potřebuje jiný.',
+                        'Prefix "' . $prefix . '" patří společné řadě firmy — vlastní řada potřebuje jiný.',
                     );
                 }
             }
@@ -339,6 +339,54 @@ final class DocumentSeriesService
             }
         }
         return null;
+    }
+
+    /**
+     * Vlastní řada (pokladny nebo druhu ostatní položky) pro rok: má-li řádek, nic nemění;
+     * jinak ho založí s prefixem a šablonou z nejnovějšího roku téže řady. Prefix i šablona
+     * se přes roky nemění — účetní řadu zná a řada převzatá z jiného systému
+     * (`{YY}{PREFIX}{CCCCC}`) by v lednu jinak tiše přešla na vestavěný tvar.
+     *
+     * Lazy `ensure()` v {@see next()} zná jen výchozí prefix firemní řady, takže by pro rok
+     * bez řádku vyrobil kolizní řadu; proto volající tohle volá před každým výdejem čísla.
+     * Vrací false, když řada nemá žádný rok — prefix pak musí zvolit volající.
+     */
+    public function ensureOwnSeriesYear(int $supplierId, string $seriesCode, int $registerId, int $fiscalYear): bool
+    {
+        if ($registerId <= 0) {
+            throw new \LogicException('ensureOwnSeriesYear je jen pro vlastní řadu (register_id > 0).');
+        }
+        $latest = null;
+        // list() řadí roky sestupně, první shoda je nejnovější rok řady.
+        foreach ($this->series->list($supplierId) as $row) {
+            if ((string) $row['series_code'] !== $seriesCode || (int) $row['register_id'] !== $registerId) {
+                continue;
+            }
+            if ((int) $row['fiscal_year'] === $fiscalYear) {
+                return true;
+            }
+            $latest ??= $row;
+        }
+        if ($latest === null) {
+            return false;
+        }
+        // `ensure` semantika, ne `updateSeries`: čítač se smí nastavit jen při skutečném
+        // zakládání řádku, jinak ho souběžné vystavení vrátí na 1.
+        $this->ensureSeriesRow($supplierId, $seriesCode, $fiscalYear, (string) $latest['prefix'],
+            $latest['number_format'] !== null ? (string) $latest['number_format'] : null, $registerId);
+        return true;
+    }
+
+    /**
+     * Smaže vlastní řadu (všechny roky) — volá se při mazání nepoužitého druhu ostatní
+     * položky, aby v Nástrojích nezůstala řada, ze které už nikdo nevydá číslo.
+     */
+    public function deleteOwnSeries(int $supplierId, string $seriesCode, int $registerId): void
+    {
+        if ($registerId <= 0) {
+            throw new \LogicException('Společnou řadu firmy nelze smazat.');
+        }
+        $this->series->deleteScope($supplierId, $seriesCode, $registerId);
     }
 
     /**

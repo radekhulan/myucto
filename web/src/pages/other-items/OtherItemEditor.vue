@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import type { Client } from '@/api/clients'
-import { otherItemsApi, type OtherItemPayload, type OtherItemPostingLine, type OtherItemSide } from '@/api/otherItems'
+import { otherItemKindsApi, otherItemsApi, type OtherItemKind, type OtherItemPayload, type OtherItemPostingLine, type OtherItemSide } from '@/api/otherItems'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { appIsoDate } from '@/utils/date'
@@ -31,6 +31,9 @@ const saving = ref(false)
 const splitPosting = ref(false)
 const postingLines = ref<OtherItemPostingLine[]>([])
 const accounts = ref<ChartAccount[]>([])
+const kinds = ref<OtherItemKind[]>([])
+/** Druh, který koncept nese z uložení — zůstává ve výběru, i když ho mezitím skryli. */
+const storedKind = ref<string | null>(null)
 const today = appIsoDate()
 const form = reactive({
   side: (route.query.side === 'receivable' ? 'receivable' : 'payable') as OtherItemSide,
@@ -48,7 +51,18 @@ const form = reactive({
   note: '',
 })
 
-const kindChoices = ['rent', 'deposit', 'loan', 'insurance', 'fee', 'claim', 'other'] as const
+const BUILTIN_KINDS = ['rent', 'deposit', 'loan', 'insurance', 'fee', 'claim'] as const
+// Vlastní druh se ve výběru odliší předponou, vestavěné druhy zůstávají kódem.
+const CUSTOM_PREFIX = 'custom:'
+// Skrytý druh se nenabízí; koncept, který ho už nese, ho ve výběru vidí dál.
+const offered = (kind: OtherItemKind | undefined, value: string) => !kind || kind.is_active || value === storedKind.value
+const kindChoices = computed(() => [
+  ...BUILTIN_KINDS.filter(code => offered(
+    kinds.value.find(kind => kind.builtin && kind.side === form.side && kind.builtin_code === code), code)),
+  'other',
+])
+const customKindChoices = computed(() => kinds.value.filter(kind =>
+  !kind.builtin && kind.side === form.side && offered(kind, `${CUSTOM_PREFIX}${kind.id}`)))
 const accountChoices = computed(() => accounts.value.filter(a => a.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const balanceAccountChoices = computed(() => accountChoices.value.filter(a =>
   a.account_type === (form.side === 'receivable' ? 'asset' : 'liability'),
@@ -84,13 +98,15 @@ async function load() {
   try {
     const requests: Promise<unknown>[] = []
     if (isDoubleEntry.value) requests.push(accountingApi.listAccounts().then(value => { accounts.value = value }))
+    requests.push(otherItemKindsApi.list().then(value => { kinds.value = value }))
     if (isEdit.value) requests.push(otherItemsApi.get(editId.value).then(item => {
       if (item.status !== 'draft') {
         void router.replace({ name: 'other-item-detail', params: { id: editId.value } })
         return
       }
       form.side = item.side
-      form.kind = item.kind
+      form.kind = item.kind_id ? `${CUSTOM_PREFIX}${item.kind_id}` : item.kind
+      storedKind.value = form.kind
       form.title = item.title
       form.partner_id = item.partner_id ?? null
       form.partner_name = item.partner_name || ''
@@ -135,9 +151,11 @@ async function save() {
     toast.error(t('other_items.posting_lines_invalid'))
     return
   }
+  const customKindId = form.kind.startsWith(CUSTOM_PREFIX) ? Number(form.kind.slice(CUSTOM_PREFIX.length)) : null
   const payload: OtherItemPayload = {
     side: form.side,
-    kind: form.kind,
+    kind: customKindId ? 'other' : form.kind,
+    kind_id: customKindId,
     title: form.title.trim(),
     partner_id: form.partner_id,
     partner_name: form.partner_name.trim() || null,
@@ -193,6 +211,9 @@ onMounted(load)
           <label class="text-sm font-medium">{{ t('other_items.kind_label') }}
             <select v-model="form.kind" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
               <option v-for="kind in kindChoices" :key="kind" :value="kind">{{ t(`other_items.kind_by_side.${form.side}.${kind}`) }}</option>
+              <optgroup v-if="customKindChoices.length" :label="t('other_items.kinds.custom_group')">
+                <option v-for="kind in customKindChoices" :key="`${CUSTOM_PREFIX}${kind.id}`" :value="`${CUSTOM_PREFIX}${kind.id}`">{{ kind.name }}</option>
+              </optgroup>
             </select>
           </label>
           <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.item') }}

@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { kindSettingLabel } from '@/utils/otherItemKind'
 
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
@@ -37,8 +38,9 @@ const canWrite = computed(() => auth.canWrite('accounting'))
 type SeriesEdit = { prefix: string; number_format: string; next_number: string }
 const edits = reactive<Record<string, SeriesEdit>>({})
 
-// Klíč musí nést i pokladnu: vlastní řada pokladny (register_id > 0) je samostatný
-// řádek vedle společné řady firmy, jinak by se editace obou slily do jedné.
+// Klíč musí nést i vlastníka řady: vlastní řada pokladny nebo druhu ostatní položky
+// (register_id > 0) je samostatný řádek vedle společné řady firmy, jinak by se editace
+// obou slily do jedné.
 const seriesKey = (s: DocumentSeries) => `${s.series_code}-${s.fiscal_year}-${s.register_id ?? 0}`
 
 function fillEdit(s: DocumentSeries) {
@@ -68,6 +70,17 @@ const series = computed<DocumentSeries[]>(() => {
 
 /** Řada zatím nevydala číslo — uloží se až se změnou (řádek vznikne lazy na serveru). */
 const isNew = (s: DocumentSeries) => s.id === undefined
+
+/** Komu patří vlastní řada: pokladně, nebo druhu ostatní položky (vestavěnému i vlastnímu). */
+function registerLabel(s: DocumentSeries): string {
+  if (!s.series_code.startsWith('other_')) return s.register_name || t('cash.register')
+  if (!s.kind_name && !s.kind_builtin_code) return t('accounting.closing.series.other_item_kind')
+  return kindSettingLabel(t, {
+    side: s.series_code === 'other_receivable' ? 'receivable' : 'payable',
+    builtin_code: s.kind_builtin_code ?? null,
+    name: s.kind_name ?? null,
+  })
+}
 
 watch(series, rows => {
   for (const s of rows) if (!edits[seriesKey(s)]) fillEdit(s)
@@ -190,7 +203,7 @@ async function saveAll() {
             <td class="px-3 py-2">
               {{ t(`accounting.closing.series.codes.${s.series_code}`) }}
               <span v-if="(s.register_id ?? 0) > 0" class="ml-2 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 whitespace-nowrap">
-                {{ s.register_name || t('cash.register') }}
+                {{ registerLabel(s) }}
               </span>
               <span v-if="isNew(s)" class="ml-2 text-xs text-neutral-400 whitespace-nowrap">{{ t('accounting.closing.series.not_issued') }}</span>
             </td>

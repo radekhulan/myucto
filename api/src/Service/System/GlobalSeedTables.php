@@ -252,6 +252,8 @@ final class GlobalSeedTables
         'supplier_accounting_modes', 'supplier_accounting_frameworks',
         'accounting_periods', 'entity_category_history',
         'accounting_account_definition_history', 'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
+        // Vlastní druhy ostatních položek nesou vlastní číselné řady, které reset ponechává.
+        'other_item_kinds',
         'accounting_fixed_exchange_rates',
         'auto_posting_policy', 'expense_classification_rules', 'revenue_classification_rules', 'posting_rules',
         'journal_entry_templates', 'journal_entry_template_lines',

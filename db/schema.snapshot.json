@@ -1128,7 +1128,8 @@
         "2224_journal_period_source_index.sql",
         "2225_purchase_settled_outside.sql",
         "2226_journal_line_pairing.sql",
-        "2227_purchase_document_presence_indexes.sql"
+        "2227_purchase_document_presence_indexes.sql",
+        "2228_other_item_kinds.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10147,6 +10148,36 @@
                 "chk_other_installment_amount": "`amount` > 0"
             }
         },
+        "other_item_kinds": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "builtin_code": "varchar(20) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "name": "varchar(100) NULL DEFAULT NULL",
+                "own_series": "tinyint(1) NOT NULL DEFAULT 0",
+                "side": "enum('receivable','payable') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_item_kind_user": "BTREE (created_by)",
+                "uq_other_item_kind_builtin": "UNIQUE BTREE (supplier_id, side, builtin_code)",
+                "uq_other_item_kind_name": "UNIQUE BTREE (supplier_id, side, name)"
+            },
+            "foreign_keys": {
+                "fk_other_item_kind_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_item_kind_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_other_item_kind_type": "`builtin_code` is null <> (`name` is null)"
+            }
+        },
         "other_item_posting_lines": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -10250,6 +10281,7 @@
                 "issued_on": "date NOT NULL",
                 "journal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "kind": "varchar(64) NOT NULL DEFAULT 'other'",
+                "kind_id": "int(10) unsigned NULL DEFAULT NULL",
                 "note": "text NULL DEFAULT NULL",
                 "partner_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "partner_name": "varchar(190) NULL DEFAULT NULL",
@@ -10272,6 +10304,7 @@
                 "fk_other_item_partner": "BTREE (partner_id)",
                 "fk_other_item_reversal": "BTREE (reversal_entry_id)",
                 "fk_other_item_updated_by": "BTREE (updated_by)",
+                "idx_other_item_kind": "BTREE (kind_id, supplier_id)",
                 "idx_other_item_open": "BTREE (supplier_id, side, status, due_on)",
                 "idx_other_item_partner": "BTREE (supplier_id, partner_id, status)",
                 "idx_other_item_source": "BTREE (supplier_id, deleted_at, issued_on)",
@@ -10281,6 +10314,7 @@
             "foreign_keys": {
                 "fk_other_item_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_item_entry": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_kind": "(kind_id) -> other_item_kinds (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_item_partner": "(partner_id) -> clients (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_item_reversal": "(reversal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_item_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",

@@ -10,6 +10,7 @@ use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Service\Accounting\InternalDocumentService;
+use MyInvoice\Service\Accounting\OtherItemKindService;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Document\DocumentTextExtractor;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -69,6 +70,7 @@ final class AccountingAssistantService
         private readonly ChartOfAccountsRepository $chart,
         private readonly VatStatusService $vat,
         private readonly AiInternalDocumentValidator $internalDocuments,
+        private readonly OtherItemKindService $otherItemKinds,
     ) {}
 
     /** @return array{available:bool, reason:?string, provider:?string, model:?string, supports_files:bool, models:list<string>} */
@@ -778,7 +780,8 @@ final class AccountingAssistantService
      */
     private function normalizeOtherItems(int $supplierId, mixed $raw, string $today): array
     {
-        return AiOtherItemNormalizer::normalize($raw, $this->chartNames($supplierId), $today, $this->partnersByIco($supplierId, $raw));
+        return AiOtherItemNormalizer::normalize($raw, $this->chartNames($supplierId), $today,
+            $this->partnersByIco($supplierId, $raw), $this->otherItemKinds->hiddenBuiltinKinds($supplierId));
     }
 
     /**

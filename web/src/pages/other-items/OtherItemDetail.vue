@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { otherItemsApi, type OtherItem, type OtherItemAllocation, type OtherItemPaymentCandidate, type OtherItemPostingLine } from '@/api/otherItems'
+import { otherItemKindLabel } from '@/utils/otherItemKind'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -314,7 +315,7 @@ onMounted(load)
             <h1 class="text-2xl font-semibold">{{ item.title }}</h1>
             <span class="rounded bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">{{ statusLabel(item.status) }}</span>
           </div>
-          <p class="mt-0.5 text-sm text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}<span v-if="item.partner_name"> · {{ item.partner_name }}</span></p>
+          <p class="mt-0.5 text-sm text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}<span v-if="item.partner_name"> · {{ item.partner_name }}</span></p>
           <a href="#other-item-plans" class="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary-700 hover:underline">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
             {{ t('other_items.plans.schedule_title') }} · {{ t('other_items.plans.installments_title') }}
@@ -328,7 +329,7 @@ onMounted(load)
           <h2 class="mb-3 font-semibold">{{ t('other_items.details') }}</h2>
           <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
             <div><dt class="text-neutral-500">{{ t('other_items.partner') }}</dt><dd>{{ item.partner_name || t('other_items.no_partner') }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.kind_label') }}</dt><dd>{{ t(`other_items.kind_by_side.${item.side}.${item.kind}`) }}</dd></div>
+            <div><dt class="text-neutral-500">{{ t('other_items.kind_label') }}</dt><dd>{{ otherItemKindLabel(t, item) }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.issued_on') }}</dt><dd>{{ item.issued_on ? formatDate(item.issued_on) : '–' }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd>{{ item.due_on ? formatDate(item.due_on) : '–' }}</dd></div>
             <div v-if="isDoubleEntry"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd>{{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</dd></div>

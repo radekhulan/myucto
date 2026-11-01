@@ -952,7 +952,7 @@ potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuj
 
 | Co | Nástroje |
 |---|---|
-| Čtení | `list_other_items`, `get_other_item`, `list_other_item_allocations`, `other_item_payment_candidates`, `list_other_item_schedules`, `get_other_item_schedule`, `get_other_item_installments` |
+| Čtení | `list_other_items`, `get_other_item`, `list_other_item_kinds`, `list_other_item_allocations`, `other_item_payment_candidates`, `list_other_item_schedules`, `get_other_item_schedule`, `get_other_item_installments` |
 | Koncept | `create_other_item`, `update_other_item`, `delete_other_item` |
 | Splátkový kalendář | `set_other_item_installments`, `clear_other_item_installments` |
 | Opakování | `create_other_item_schedule`, `set_other_item_schedule_status` |

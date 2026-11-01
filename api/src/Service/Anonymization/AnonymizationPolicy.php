@@ -431,6 +431,7 @@ final class AnonymizationPolicy
         'odometer_readings' => ['note' => 'text', 'source' => 'keep'],
         'offset_agreements' => ['document_no' => 'keep', 'note' => 'text'],
         'other_items' => ['account_code' => 'keep', 'counter_account_code' => 'keep', 'currency' => 'keep', 'document_no' => 'keep', 'kind' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'title' => 'text', 'variable_symbol' => 'symbol'],
+        'other_item_kinds' => ['builtin_code' => 'keep', 'name' => 'text'],
         'other_item_posting_lines' => ['account_code' => 'keep'],
         'other_item_schedules' => ['template_json' => 'json'],
         'oss_filing_evidence' => ['adjusted_period' => 'keep', 'completeness_json' => 'json', 'consumption_country' => 'keep', 'customer_name' => 'party_name', 'invoice_snapshot_json' => 'json', 'payments_json' => 'json', 'place_evidence_json' => 'json', 'return_currency' => 'keep', 'supply_description' => 'text', 'supply_unit' => 'keep', 'taxable_currency' => 'keep', 'vat_rate_type' => 'keep'],
