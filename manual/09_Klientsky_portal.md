@@ -76,6 +76,12 @@ Provede superadmin.
 
 Heslo, 2FA a profil (nabídka pod jménem vpravo nahoře) fungují pro klienta stejně jako pro ostatní role (viz [§ 96.3](96_Nastaveni.md#965-krok-za-krokem-muj-profil)). Klient si po prvním přihlášení může nastavit vlastní 2FA, pokud to instalace vyžaduje.
 
+Na **Přehledu firmy** můžete tlačítkem **Upravit přehled** přesunout nebo skrýt
+stávající bloky a přidat jednotlivé widgety. Používá stejný editor jako hlavní
+přehled; postup a pravidla osobního ukládání popisuje
+[Vlastní uspořádání přehledu](10_Prehled.md#1075-vlastni-usporadani-prehledu).
+Úprava rozložení nemění oprávnění k datům ani dokladům.
+
 ## 9.4 Krok za krokem: Předání dokladů účetní
 
 Provede klient. Hodí se pro účtenky, faktury a další doklady, které nechce přepisovat.
