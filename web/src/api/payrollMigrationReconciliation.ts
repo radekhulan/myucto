@@ -242,6 +242,12 @@ export interface PayrollTakeoverManualEmployment {
   months: number[]
 }
 
+/** Návrh ručního zadání z přijatých hlášení JMHZ; server nic neukládá. */
+export interface PayrollTakeoverFiledFormSuggestion {
+  rows: (PayrollTakeoverManualRow & { derived: string[] })[]
+  missing_months: number[]
+}
+
 export interface PayrollTakeoverManualEntry {
   year: number
   employee_id: number
@@ -290,6 +296,10 @@ export const payrollTakeoverWagesApi = {
     api.get<{ entry: PayrollTakeoverManualEntry }>(
       `/payroll/takeover-wages/${year}/manual/${employeeId}`,
     ).then(response => response.data.entry),
+  manualFiledForms: (year: number, employeeId: number) =>
+    api.get<{ suggestion: PayrollTakeoverFiledFormSuggestion }>(
+      `/payroll/takeover-wages/${year}/manual/${employeeId}/filed-forms`,
+    ).then(response => response.data.suggestion),
   manualSave: (
     year: number,
     employeeId: number,

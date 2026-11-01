@@ -86,6 +86,8 @@ export interface TakeoverJmhzFormDifference {
   submission_type: string | null
   submitted_at: string | null
   differences: TakeoverJmhzFormMetricDifference[]
+  /** Ručně převzatému měsíci jen chybí čísla: doplnit mzdu, ne podávat opravné hlášení. */
+  takeover_incomplete?: boolean
 }
 
 export type TakeoverInvariantCode =

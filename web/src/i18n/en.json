@@ -2561,6 +2561,9 @@
       "opening_only_hint": "The opening balance has the month, the taken-over wages do not. Without them the pension insurance record sheet for the transition year cannot be produced.",
       "takeover_only_title": "Taken-over wages without an opening balance",
       "takeover_only_hint": "The taken-over wages have the month, the opening balance does not — the annual settlement and the tax statement do not count it.",
+      "jmhz_form_incomplete_title": "Manually taken-over wage lacks figures from the accepted JMHZ report",
+      "jmhz_form_incomplete_hint": "The taken-over wage has zero for these figures while ČSSZ has the correct numbers from the report. Complete the wage with Fill from accepted reports in the manual entry. Do not file a corrective report because of this, unless the zero really is correct.",
+      "jmhz_form_incomplete_person": "{name}: the taken-over wage for {period} lacks figures from the accepted report",
       "jmhz_form_title": "JMHZ report filed with different figures than the final wage",
       "invariants_title": "The transfer violated the takeover check",
       "invariants_hint": "Each violation is a transfer error, not a warning: the taken-over wages then do not match the source or the employments in MyÚčto. Fix the data and repeat the transfer, or accept the difference deliberately.",
@@ -2589,6 +2592,12 @@
       }
     },
     "takeover_manual": {
+      "prefill": "Fill from accepted reports",
+      "prefill_hint": "Fills empty fields from imported accepted JMHZ reports. It leaves entered figures alone and saves nothing.",
+      "prefill_done": "Filled from reports, rows: {count}. Check the figures and save.",
+      "prefill_derived": "The report does not carry these, so they are derived: {fields}.",
+      "prefill_missing": "Months without an accepted report: {months}.",
+      "prefill_failed": "The accepted reports could not be loaded.",
       "partial_lock": "{reason} You can still fill in what the report did not take from the taken-over totals: insurance days, contributions, health insurance and net wage.",
       "title": "Manual entry of taken-over wages",
       "hint": "For months processed by the previous program for which you have no export or report. Enter each month once, per employment and in crowns — saving fills both the opening balances (annual settlement, tax statement, income certificate) and the taken-over wages (pension insurance record sheet).",
