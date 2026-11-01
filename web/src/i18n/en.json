@@ -22742,13 +22742,16 @@
       "free_hint": "Return without an original invoice: enter the unit manually, it is received back into stock."
     },
     "item_account": {
-      "show": "Line accounts",
-      "hide": "Hide line accounts",
-      "open": "Show line account",
-      "close": "Hide line account",
       "hint": "Account of individual lines: a revenue account, or a balance sheet account for rebilling (except receivable, payable, tax and cash accounts). Empty = product account, its category, a revenue rule, otherwise the invoice posting template.",
       "label": "Line account",
       "placeholder": "by product / document"
+    },
+    "item_details": {
+      "open": "Show line details",
+      "close": "Hide line details",
+      "vat_classification": "VAT classification",
+      "vat_classification_auto": "Automatic, based on the rate",
+      "vat_classification_hint": "Code for the VAT return, the control statement and the EC sales list. It is derived automatically from the rate and unit of measure, and derived again after they change. Choose it only where the derivation is not enough, for example a supply of goods to the EU with the unit \"ks\" or a sale of fixed assets."
     },
     "title": "Issued invoices",
     "col_order_number": "Order no.",

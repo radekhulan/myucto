@@ -21494,7 +21494,7 @@
     "client": "Klient",
     "project": "Zakázka",
     "catalog_item": "Zdroj položky",
-    "vat_classification": "Klasifikace DPH",
+    "vat_classification": "Členění DPH",
     "vat_classification_auto": "Automaticky podle sazby",
     "vat_classification_hint": "Kód pro přiznání k DPH a kontrolní/souhrnné hlášení. Automaticky se odvodí ze sazby a měrné jednotky - vyplňte jen tam, kde odvození nestačí (např. dodání zboží do EU u jednotky „ks\" nebo prodej dlouhodobého majetku). Volba se přenese na každou vygenerovanou fakturu.",
     "catalog_manual": "Ručně zadaná položka",
@@ -22742,13 +22742,16 @@
       "free_hint": "Vratka bez původní faktury: kus zadejte ručně, naskladní se jako vrácený."
     },
     "item_account": {
-      "show": "Účty položek",
-      "hide": "Skrýt účty položek",
-      "open": "Zobrazit účet položky",
-      "close": "Skrýt účet položky",
       "hint": "Účet jednotlivých položek: výnosový, u přefakturace i rozvahový (kromě saldokontních, daňových a peněžních účtů). Prázdné pole = účet produktu, jeho kategorie, pravidlo výnosů, jinak předkontace faktury.",
       "label": "Účet položky",
       "placeholder": "podle produktu / dokladu"
+    },
+    "item_details": {
+      "open": "Zobrazit podrobnosti položky",
+      "close": "Skrýt podrobnosti položky",
+      "vat_classification": "Členění DPH",
+      "vat_classification_auto": "Automaticky podle sazby",
+      "vat_classification_hint": "Kód pro přiznání k DPH a kontrolní a souhrnné hlášení. Automaticky se odvodí ze sazby a měrné jednotky a po jejich změně se odvodí znovu. Vyberte ho jen tam, kde odvození nestačí, například u dodání zboží do EU s jednotkou „ks\" nebo u prodeje dlouhodobého majetku."
     },
     "title": "Vydané faktury",
     "col_order_number": "Objednávka",

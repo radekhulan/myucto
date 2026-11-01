@@ -3074,7 +3074,9 @@ paths:
         jinak zůstane uložený kód. (4) `issue_date` bez `due_date` zachová uloženou lhůtu splatnosti
         (rozdíl `due_date` a `issue_date` ve dnech). (5) `discount_percent` bez `items` přegeneruje
         slevové řádky z uložených položek. (6) Kurz se znovu stahuje jen tehdy, když se skutečně
-        změní `currency_id`, `issue_date` nebo `tax_date` oproti uloženým hodnotám.
+        změní `currency_id`, `issue_date` nebo `tax_date` oproti uloženým hodnotám. (7) Poslaný
+        `vat_classification_code` položky, který se liší od uloženého, je účetní změna: neprojde
+        režimem `notes_only` ani zámkem podaného období DPH. Vynechaný kód se odvodí ze sazby a jednotky.
       requestBody:
         required: true
         content:
