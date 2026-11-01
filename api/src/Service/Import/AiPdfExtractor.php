@@ -963,6 +963,16 @@ final class AiPdfExtractor
             ]);
         }
 
+        // Náhradní datum vystavení (dnešek) není údaj z dokladu, DUZP se z něj neodvozuje.
+        if ($rcClassification !== '23' && ($data[self::ISSUE_DATE_FALLBACK] ?? false) !== true) {
+            $data['tax_date'] = ImportedTaxDatePolicy::resolve(
+                $data['tax_date'] ?? null,
+                $data['delivery_date'] ?? null,
+                $data['issue_date'] ?? null,
+                $documentKind,
+            );
+        }
+
         // Platební účet dodavatele pro „Zaplatit pomocí QR" — z AI pole `payment`.
         // Volný řetězec (účet i IBAN) rozparsujeme na strukturu. Repository nastaví
         // source/checked_at jen pokud je účet skutečně použitelný.
