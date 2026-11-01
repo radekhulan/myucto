@@ -18,6 +18,9 @@ use Psr\Log\LoggerInterface;
  */
 final class StatementImporter
 {
+    /** Podíl už evidovaných pohybů PDF, od kterého je založení výpisu jisté zdvojení. */
+    private const PDF_OVERLAP_REJECT_RATIO = 0.8;
+
     public function __construct(
         private readonly Connection $db,
         private readonly GpcParser $parser,
@@ -241,6 +244,19 @@ final class StatementImporter
      */
     public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null, ?int $supplierId = null, ?array $ignoreDecision = null): array
     {
+        $alreadyRecorded = $this->statementAlreadyCoveringPdf($parsed, $currencyId, $supplierId);
+        if ($alreadyRecorded !== null) {
+            return [
+                'statement_id' => $alreadyRecorded,
+                'transactions' => 0,
+                'matched' => 0,
+                'duplicate' => true,
+                'ignored_transferred' => 0,
+                'parsed_transactions' => count($parsed['transactions']),
+                'skipped_duplicates' => count($parsed['transactions']),
+                'warnings' => [],
+            ];
+        }
         // Denní výpis („výpis při pohybu") se v přehledu nezobrazuje samostatně —
         // skládá se do měsíčního výpisu účtu stejně jako pohyby ze strojového feedu.
         // Projekci umí jen scoped cesta (zámek + transakce), a ta potřebuje jednoznačný
@@ -254,6 +270,80 @@ final class StatementImporter
             }
         }
         return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf', false, null, [], $supplierId);
+    }
+
+    /**
+     * Má účet pohyby z tohoto PDF už v evidenci? Otisk pohybu tu nepomůže: PDF, GPC i feed
+     * nesou různou referenci i popis, takže znovu vygenerované PDF téhož měsíce založilo
+     * všechny pohyby podruhé a automat je znovu zaúčtoval. Porovnává se proto datum a částka.
+     *
+     * Vrací výpis, kde se pohyby zobrazují. Překryv z větší části se odmítne, doplnit jen
+     * chybějící pohyby z PDF neumíme a založit všechny by zdvojilo ty existující.
+     * Denní výpisy mají vlastní skládání do měsíce a tudy nejdou.
+     *
+     * @param array{header:array,transactions:list<array>} $parsed
+     */
+    private function statementAlreadyCoveringPdf(array $parsed, ?int $currencyId, ?int $supplierId): ?int
+    {
+        $transactions = $parsed['transactions'];
+        if ($transactions === [] || ($parsed['header']['period_kind'] ?? 'period') === 'day') {
+            return null;
+        }
+        $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
+        $owner = $supplierId ?? (int) (($currencyId !== null
+            ? $this->loadCurrencyById($currencyId)
+            : $this->lookupRegisteredOwner($accountNumber))['supplier_id'] ?? 0);
+        if ($owner <= 0 || $accountNumber === '') {
+            return null;
+        }
+        $dates = array_column($transactions, 'posted_at');
+        $query = $this->db->pdo()->prepare(
+            "SELECT bt.id, bt.posted_at, bt.amount, bs.account_number
+               FROM bank_statements bs
+               JOIN bank_transactions bt ON bt.statement_id = bs.id
+              WHERE bs.supplier_id = ? AND bs.source IN ('gpc', 'bank_api', 'pdf', 'import')
+                AND bt.source = 'statement' AND bt.posted_at BETWEEN ? AND ?"
+        );
+        $query->execute([$owner, min($dates), max($dates)]);
+        $pool = [];
+        foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (AccountNumberNormalizer::equals($accountNumber, (string) $row['account_number'])) {
+                $pool[$row['posted_at'] . '|' . number_format((float) $row['amount'], 2, '.', '')][] = (int) $row['id'];
+            }
+        }
+        $firstId = null;
+        $covered = 0;
+        foreach ($transactions as $tx) {
+            $key = $tx['posted_at'] . '|' . number_format((float) $tx['amount'], 2, '.', '');
+            if (($pool[$key] ?? []) !== []) {
+                $firstId ??= $pool[$key][0];
+                array_shift($pool[$key]);
+                $covered++;
+            }
+        }
+        if ($covered < count($transactions)) {
+            if ($covered / count($transactions) >= self::PDF_OVERLAP_REJECT_RATIO) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Výpis se překrývá s pohyby, které už v evidenci jsou (%d z %d). Nic se nezaložilo, chybějící pohyby prověřte ve výpisu účtu.',
+                    $covered,
+                    count($transactions),
+                ));
+            }
+            return null;
+        }
+        $month = $this->db->pdo()->prepare(
+            'SELECT m.statement_id FROM bank_transaction_imports bti
+               JOIN bank_api_months m ON m.statement_id = bti.statement_id
+              WHERE bti.bank_transaction_id = ? LIMIT 1'
+        );
+        $month->execute([$firstId]);
+        $statement = $month->fetchColumn();
+        if ($statement === false) {
+            $own = $this->db->pdo()->prepare('SELECT statement_id FROM bank_transactions WHERE id = ?');
+            $own->execute([$firstId]);
+            $statement = $own->fetchColumn();
+        }
+        return (int) $statement;
     }
 
     /**
