@@ -27,7 +27,11 @@ const props = defineProps<{
 }>()
 
 /** Počet připojených dokumentů ven — nadřazená sekce podle něj pozná, že něco obsahuje. */
-const emit = defineEmits<{ (e: 'count', n: number): void }>()
+const emit = defineEmits<{
+  (e: 'count', n: number): void
+  /** Načtené dokumenty pro rodiče, který je chce zobrazit, aby je nestahoval podruhé. */
+  (e: 'docs', docs: DocItem[]): void
+}>()
 
 const section = ref<{ open: boolean } | null>(null)
 
@@ -93,6 +97,7 @@ async function load() {
   try {
     docs.value = await documentsApi.byEntity(props.entityType, props.entityId)
     emit('count', docs.value.length)
+    emit('docs', docs.value)
   } finally {
     loading.value = false
   }

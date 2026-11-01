@@ -30,6 +30,11 @@ vi.mock('@/components/purchase/PdfDropzone.vue', () => ({ default: { template: '
 vi.mock('@/components/purchase/ExtractionReviewModal.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/dimensions/DimensionFields.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/dimensions/DimensionChips.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
 
 import IncomingDocuments from '../IncomingDocuments.vue'
 
@@ -43,7 +48,10 @@ function submission(id: number, status: PurchaseInvoiceSubmission['status'] = 's
 
 async function mountPage(items: PurchaseInvoiceSubmission[]) {
   m.list.mockResolvedValueOnce({ items })
-  const wrapper = shallowMount(IncomingDocuments)
+  // Stub bez slotu by schoval celý detail dokladu; tady jde o něj, ne o rozložení.
+  const wrapper = shallowMount(IncomingDocuments, {
+    global: { stubs: { DocumentPreviewSplit: { template: '<div><slot /></div>' } } },
+  })
   await flushPromises()
   return wrapper
 }

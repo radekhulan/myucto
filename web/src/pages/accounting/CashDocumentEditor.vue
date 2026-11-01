@@ -23,11 +23,17 @@ import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { eetApi, type EetCreditNoteRefundInfo } from '@/api/eet'
+import { documentsApi, type DocItem } from '@/api/documents'
+import { useAuthStore } from '@/stores/auth'
+import { useSidePreview } from '@/composables/useSidePreview'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 // Firma → Dimenze — dimenze hlavičky pokladního dokladu.
 const docDims = useDocumentDimensions('cash-documents')
 const pageId = useId()
@@ -61,6 +67,12 @@ const loadedStatus = ref<CashDocumentStatus | null>(null)
 const isDraft = computed(() => !isEdit.value || loadedStatus.value === 'draft')
 // Plnění formuláře z API nesmí spustit reset-watchery určené pro ruční přepnutí.
 const hydrating = ref(false)
+
+// Originál dokladu: první příloha, kterou prohlížeč umí zobrazit. Nový doklad přílohy
+// ještě mít nemůže, vazba vzniká až na uloženém dokladu.
+const preview = useSidePreview('cash_documents')
+const linkedDocs = ref<DocItem[]>([])
+const original = computed(() => linkedDocs.value.find(d => d.doc_type === 'pdf' || d.doc_type === 'image') ?? null)
 
 const form = reactive({
   register_id: '' as number | '',
@@ -722,13 +734,21 @@ async function startNextDocument(): Promise<void> {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-4">
+  <DocumentPreviewSplit :ctrl="preview" :show="!!original && preview.open.value"
+    :src="original ? documentsApi.previewUrl(original.id) : null" :file-name="original?.title" :doc-type="original?.doc_type">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ isEdit ? t('cash.edit_document') : t('cash.new_document') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ form.doc_type === 'in' ? t('cash.type.in') : t('cash.type.out') }}</p>
       </div>
-      <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
+      <div class="flex flex-wrap items-center gap-3">
+        <button v-if="original" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
+          :aria-pressed="preview.open.value" @click="preview.toggle()">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+          {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+        </button>
+        <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
+      </div>
     </div>
 
     <datalist :id="`${pageId}-cash-partners`">
@@ -1047,5 +1067,8 @@ async function startNextDocument(): Promise<void> {
         </div>
       </div>
     </div>
-  </div>
+
+    <LinkedDocumentsPanel v-if="isEdit && auth.canRead('documents')" class="mt-4 block" entity-type="cash_document"
+      :entity-id="editId" uploadable :title="t('linked_documents.title')" @docs="linkedDocs = $event" />
+  </DocumentPreviewSplit>
 </template>

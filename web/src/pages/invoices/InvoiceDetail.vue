@@ -4,7 +4,7 @@ import { useWindowTitle } from '@/composables/useWindowTitle'
 import { eshopApi } from '@/api/eshop'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -204,11 +204,6 @@ const pdfHistoryOpen = ref(false)
 // jen ve vlastním page_key, aby si prodej a nákup nešahaly do stavu.
 const importedPdfPreview = useSidePreview('invoices')
 const importedPdfPreviewOpen = importedPdfPreview.open
-// Nad prahem (viz useSidePreview) jde náhled do sloupce vpravo, pod prahem zůstává
-// pod dokladem. Bez zdrojového PDF se sloupec nevykreslí vůbec.
-const importedPdfSideBySide = computed(
-  () => !!invoice.value?.imported_pdf_path && importedPdfPreviewOpen.value && importedPdfPreview.wide.value,
-)
 const importedPdfInlineUrl = computed(
   () => (invoice.value ? `${invoicesApi.importedPdfUrl(invoice.value.id, true)}#view=FitH` : ''),
 )
@@ -2108,11 +2103,9 @@ useWindowRefresh(async () => {
     {{ error }}
   </div>
 
-  <!-- Nad prahem (useSidePreview) jde náhled zdrojového PDF do sloupce vpravo, jinak
-       zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
-       celou šířku - proto je vnější div v ostatních případech jen průhledný obal. -->
-  <div v-else-if="invoice" :class="importedPdfSideBySide ? 'flex items-start gap-4' : ''">
-    <div class="max-w-5xl space-y-4 min-w-0" :class="importedPdfSideBySide ? 'flex-1' : ''">
+  <div v-else-if="invoice">
+    <DocumentPreviewSplit :ctrl="importedPdfPreview" :show="!!invoice.imported_pdf_path && importedPdfPreviewOpen"
+      :src="importedPdfInlineUrl" :file-name="invoice.imported_pdf_original_name" form-class="space-y-4" narrow-class="max-w-5xl">
       <div class="flex items-center gap-2">
         <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
           :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
@@ -3637,16 +3630,6 @@ useWindowRefresh(async () => {
             </a>
           </div>
         </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a některé prohlížeče blokují embed). Nad prahem
-             se tenhle blok nevykresluje — náhled je vedle dokladu (DocumentSidePreview). -->
-        <div v-if="importedPdfPreviewOpen && !importedPdfSideBySide" class="bg-neutral-100 border-t border-neutral-200">
-          <iframe
-            :src="importedPdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="invoice.imported_pdf_original_name || 'PDF'"
-          ></iframe>
-        </div>
       </div>
 
       <!-- Historie PDF -->
@@ -3837,13 +3820,7 @@ useWindowRefresh(async () => {
         @saved="load" />
 
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="invoice" :entity-id="invoice.id" />
-    </div>
-    <DocumentSidePreview
-      v-if="importedPdfSideBySide"
-      :src="importedPdfInlineUrl"
-      :file-name="invoice.imported_pdf_original_name"
-      @close="importedPdfPreview.close()"
-    />
+    </DocumentPreviewSplit>
     <WorkspaceTeleport>
       <RuleFormModal v-if="postingRuleOpen && invoice"
         :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.payment_varsymbol || invoice.varsymbol || null }"

@@ -203,6 +203,7 @@ V rozbaleném detailu je sekce **Přílohy** pro sken účtenky, paragonu nebo p
 - **Nahrát sken**: vybrané soubory (PDF nebo obrázek) se uloží do modulu Dokumenty a rovnou se k dokladu připojí.
 - **Připojit dokument**: připojí soubor, který už v Dokumentech je (vyhledání podle názvu nebo obsahu).
 - U každé přílohy je **náhled** (otevře soubor v nové záložce), stažení a **odpojení**. Odpojení soubor nemaže, jen zruší vazbu; soubor zůstává v Dokumentech.
+- **Zobrazit originál**: ukáže první přílohu ve formátu PDF nebo obrázek přímo vedle detailu dokladu. Stejné tlačítko a sekci **Přílohy** má i formulář úprav rozpracovaného dokladu; nový doklad přílohu dostane až po uložení. Umístění vpravo nebo pod formulářem přepnete v hlavičce náhledu, šířku změníte tažením rozhraní nebo šipkami na klávesnici a aplikace si volbu pamatuje (podrobně viz [§ 23.11.4](23_Prijate_faktury.md#23114-nahrani-dokladu-drag-and-drop-isdoc-a-limity)).
 
 Obráceně lze pokladní doklad připojit i z detailu dokumentu v sekci **Souvisí s** (hledá se podle čísla dokladu, partnera nebo popisu). Připojit jde jen doklad téže firmy. Při smazání pokladního dokladu se jeho vazby na přílohy zruší, soubory samotné zůstanou v Dokumentech. Sekce se zobrazuje uživatelům s přístupem k modulu Dokumenty; nahrávat a připojovat mohou ti, kdo mají práva nahrát a přesunout dokument.
 

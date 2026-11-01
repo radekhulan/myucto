@@ -1,70 +1,97 @@
 import { onMounted, ref, type Ref } from 'vue'
 import { ensurePrefsLoaded, getPagePrefs, patchPagePrefs } from '@/composables/useUserPrefs'
-import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
-
-export { SIDE_PREVIEW_MEDIA_QUERY } from '@/composables/useSidePreviewWide'
 
 /**
- * Náhled originálu dokladu vedle obsahu místo pod ním.
+ * Stav náhledu originálu dokladu: otevřeno/zavřeno, umístění a šířka.
  *
- * PROČ PRÁH `2xl` (1536 px) A NE `xl` (1280 px):
- * mřížky polí uvnitř detailu i editoru se lámou podle ŠÍŘKY OKNA (`sm:grid-cols-2`,
- * `md:grid-cols-3`), ne podle šířky svého kontejneru. Zúžení sloupce s dokladem jim tedy
- * nijak nepomůže — tříslupcový řádek polí zůstane tříslupcový a jen se zmáčkne.
- * Při 1280 px zbude po odečtení bočního menu (`lg:w-60`, 240 px), odsazení stránky
- * (`px-8`, 64 px), mezery a použitelného náhledu (min. 22 rem) na doklad ~570 px — pod tím,
- * s čím `md:` mřížky počítají. Od 1536 px výš zbývá ~720 px a rozložení drží.
- * Pod prahem se nic nemění: náhled se rozbalí pod dokladem jako dosud.
- *
- * Náhled se vykresluje jen jednou — buď vedle, nebo pod dokladem. Proto to řídí
- * media query v JS a ne dvojice `2xl:hidden` / `hidden 2xl:block`: ta by v DOM nechala
- * dva `<iframe>`y a prohlížeč by PDF stáhl dvakrát.
+ * Volba se ukládá přes `user_preferences` (`table.<pageKey>`), takže platí pro uživatele
+ * napříč zařízeními. Rozložení na obrazovce řeší `DocumentPreviewSplit`, tady je jen stav.
  */
 /** Klíč lepkavého přepínače uvnitř `user_preferences` → `payload.flags`. */
 export const SIDE_PREVIEW_FLAG = 'preview_open'
 
+export type SidePreviewPlacement = 'side' | 'below'
+
 export interface SidePreviewCtrl {
   /** Chce uživatel náhled vidět? Lepkavé — drží se i po přechodu na další doklad. */
   open: Ref<boolean>
-  /** Je okno dost široké na náhled vedle dokladu? */
-  wide: Ref<boolean>
+  placement: Ref<SidePreviewPlacement>
+  /** Šířka náhledu v procentech šířky rozložení; `null` = výchozí. */
+  width: Ref<number | null>
   setOpen: (next: boolean) => void
   toggle: () => void
   close: () => void
+  /** Otevře náhled jen pro tento doklad, uloženou volbu nemění. */
+  openTemporarily: () => void
+  setPlacement: (next: SidePreviewPlacement) => void
+  setWidth: (percent: number | null) => void
+}
+
+function validWidth(value: unknown): number | null {
+  return typeof value === 'number' && value > 0 && value < 100 ? value : null
 }
 
 /**
  * @param pageKey klíč z `SavedFilterAction::PAGE_KEYS` (BE jiný nepřijme) — volba se
  *                pamatuje per agenda, aby si přijaté a vydané doklady nešahaly do stavu.
+ * @param flagKey přepínač otevření; umístění a šířka se ukládají pod stejným základem,
+ *                aby si okno kontroly vytěžení a detail dokladu nepřepisovaly rozložení.
  */
 export function useSidePreview(
   pageKey: string,
   flagKey: string = SIDE_PREVIEW_FLAG,
-  options: { defaultOpen?: boolean; query?: string } = {},
+  options: { defaultOpen?: boolean } = {},
 ): SidePreviewCtrl {
   const prefs = getPagePrefs(pageKey)
   const open = ref(options.defaultOpen ?? false)
-  const wide = useSidePreviewWide(options.query)
+  const placement = ref<SidePreviewPlacement>('side')
+  const width = ref<number | null>(null)
+  const optionBase = flagKey.replace(/_open$/, '')
+  const placementKey = `${optionBase}_placement`
+  const widthKey = `${optionBase}_width`
+  let openDecided = false
 
   onMounted(async () => {
     // Lepkavá volba se čte až po ensurePrefsLoaded(), takže se náhled může otevřít
     // o tik později než první vykreslení. Bez uložené volby platí `defaultOpen`.
     await ensurePrefsLoaded()
     const stored = prefs.value.flags?.[flagKey]
-    if (typeof stored === 'boolean') open.value = stored
+    if (typeof stored === 'boolean' && !openDecided) open.value = stored
+    if (prefs.value.options?.[placementKey] === 'below') placement.value = 'below'
+    width.value = validWidth(prefs.value.options?.[widthKey])
   })
 
   function setOpen(next: boolean): void {
+    openDecided = true
     if (open.value === next) return
     open.value = next
     patchPagePrefs(pageKey, { flags: { ...(prefs.value.flags ?? {}), [flagKey]: next } })
   }
 
+  function patchOption(key: string, value: unknown): void {
+    patchPagePrefs(pageKey, { options: { ...(prefs.value.options ?? {}), [key]: value } })
+  }
+
   return {
     open,
-    wide,
+    placement,
+    width,
     setOpen,
     toggle: () => setOpen(!open.value),
     close: () => setOpen(false),
+    openTemporarily: () => {
+      openDecided = true
+      open.value = true
+    },
+    setPlacement: (next) => {
+      if (placement.value === next) return
+      placement.value = next
+      patchOption(placementKey, next)
+    },
+    setWidth: (percent) => {
+      if (width.value === percent) return
+      width.value = percent
+      patchOption(widthKey, percent)
+    },
   }
 }
