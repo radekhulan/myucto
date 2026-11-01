@@ -1,0 +1,41 @@
+{# Společná tabulka práce pro přílohu faktury i samostatný schvalovací výkaz. #}
+{% set wr_display = work_report.effective_display_options|default({compact: false, date: true, hours: true, rate: true, amount: true}) %}
+{% set wr_has_dates = wr_display.date and (work_report.items|filter(it => it.work_date)|length) > 0 %}
+{% set hours_dec = (work_report.items|filter(it => it.hours != it.hours|round(0))|length) > 0 ? 2 : 0 %}
+{% set rate_dec = (work_report.items|filter(it => it.rate != it.rate|round(0))|length) > 0 ? 2 : 0 %}
+{% set total_dec = (work_report.items|filter(it => it.total_amount != it.total_amount|round(0))|length) > 0 ? 2 : 0 %}
+{% set date_width = wr_display.compact ? 11 : 12 %}
+{% set hours_width = wr_display.compact ? 10 : 13 %}
+{% set rate_width = wr_display.compact ? 16 : 14 %}
+{% set amount_width = wr_display.compact ? 15 : 18 %}
+{% set description_width = 100 - (wr_has_dates ? date_width : 0) - (wr_display.hours ? hours_width : 0) - (wr_display.rate ? rate_width : 0) - (wr_display.amount ? amount_width : 0) %}
+<table class="items{% if wr_display.compact %} items-compact{% endif %}">
+  <thead>
+    <tr>
+      <th style="width:{{ description_width }}%">{{ t('Popis', 'Description') }}</th>
+      {% if wr_has_dates %}<th class="nowrap" style="width:{{ date_width }}%">{{ t('Datum', 'Date') }}</th>{% endif %}
+      {% if wr_display.hours %}<th class="num nowrap" style="width:{{ hours_width }}%">{{ t('Hodiny', 'Hours') }}</th>{% endif %}
+      {% if wr_display.rate %}<th class="num nowrap" style="width:{{ rate_width }}%">{{ t('Sazba', 'Rate') }}</th>{% endif %}
+      {% if wr_display.amount %}<th class="num nowrap" style="width:{{ amount_width }}%">{{ t('Celkem', 'Total') }}</th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for it in work_report.items %}
+    <tr>
+      <td>{{ it.description|nl2br }}</td>
+      {% if wr_has_dates %}<td class="nowrap">{% if it.work_date %}{{ it.work_date|date(date_format) }}{% endif %}</td>{% endif %}
+      {% if wr_display.hours %}<td class="num nowrap">{% if it.duration_display is defined and it.duration_display is not null %}{{ it.duration_display }}{% else %}{{ it.hours|number_format(hours_dec, decimal_sep, thousand_sep) }}{% endif %}</td>{% endif %}
+      {% if wr_display.rate %}<td class="num nowrap">{{ it.rate|number_format(it.rate_decimals|default(rate_dec), decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>{% endif %}
+      {% if wr_display.amount %}<td class="num nowrap">{{ it.total_amount|number_format(total_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>{% endif %}
+    </tr>
+    {% endfor %}
+    {% if wr_display.hours or wr_display.amount %}
+    <tr class="wr-total">
+      <td style="text-align:right;" {% if wr_has_dates %}colspan="2"{% endif %}>{{ t('Celkem', 'Total') }}</td>
+      {% if wr_display.hours %}<td class="num nowrap">{% if work_report.total_duration_display is defined and work_report.total_duration_display is not null %}{{ work_report.total_duration_display }}{% else %}{{ work_report.total_hours|number_format(hours_dec, decimal_sep, thousand_sep) }}{% endif %} h</td>{% endif %}
+      {% if wr_display.rate %}<td></td>{% endif %}
+      {% if wr_display.amount %}<td class="num nowrap">{{ work_report.total_amount|number_format(total_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>{% endif %}
+    </tr>
+    {% endif %}
+  </tbody>
+</table>

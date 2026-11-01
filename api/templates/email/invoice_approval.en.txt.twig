@@ -11,9 +11,9 @@
 please find attached a work report{% if invoice.project_name %} for project "{{ invoice.project_name }}"{% endif %}{% if invoice.client_company_name %} on behalf of {{ invoice.client_company_name }}{% endif %} awaiting your approval.
 
 {% if work_report %}Report:        {{ work_report.title }}
-{% if work_report.total_hours > 0 %}Total hours:   {{ work_report.total_hours|number_format(2, '.', ',') }} h
+{% if (work_report.effective_display_options.hours ?? true) and work_report.total_hours > 0 %}Total hours:   {{ work_report.total_hours|number_format(2, '.', ',') }} h
 {% endif %}{% if work_report.material_total > 0 %}{{ work_report.material_title|default('Material') }}:      {{ work_report.material_total|number_format(2, '.', ',') }} {{ invoice.currency }}
-{% endif %}Amount:        {{ (work_report.total_amount + work_report.material_total)|number_format(2, '.', ',') }} {{ invoice.currency }}
+{% endif %}{% if work_report.effective_display_options.amount ?? true %}Amount:        {{ (work_report.total_amount + work_report.material_total)|number_format(2, '.', ',') }} {{ invoice.currency }}{% endif %}
 {% endif %}
 
 Once approved, we will send the invoice immediately — everything is automated,

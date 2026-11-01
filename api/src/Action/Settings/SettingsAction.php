@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Settings;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Infrastructure\Config\Config;
@@ -716,7 +717,7 @@ final class SettingsAction
             // Ceníková cena a sleva u položky na PDF faktury (migrace 2035), výchozí vypnuto.
             'invoice_pdf_show_line_discount',
             // Kompaktní řádky položek na PDF faktury (migrace 2199), výchozí vypnuto.
-            'invoice_pdf_compact_items',
+            'invoice_pdf_compact_items', 'work_report_display_options',
             // Bankovní spojení v patičce PDF faktury, u součtu jen QR (migrace 2200), výchozí vypnuto.
             'invoice_pdf_bank_in_footer',
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
@@ -1190,6 +1191,14 @@ final class SettingsAction
                 $body['self_copy'] = $clean === [] ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
             }
         }
+        if (array_key_exists('work_report_display_options', $body)) {
+            try {
+                $options = WorkReportDisplayOptions::validate($body['work_report_display_options']);
+                $body['work_report_display_options'] = $options === null ? null : json_encode((object) $options, JSON_THROW_ON_ERROR);
+            } catch (\InvalidArgumentException $e) {
+                return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+            }
+        }
         $paymentQrBody = [];
         foreach (SupplierPaymentQrSettingsRepository::FIELDS as $field) {
             if (!array_key_exists($field, $body)) continue;
@@ -1357,6 +1366,7 @@ final class SettingsAction
                 || array_key_exists('invoice_pdf_monochrome', $body)
                 || array_key_exists('invoice_pdf_show_line_discount', $body)
                 || array_key_exists('invoice_pdf_compact_items', $body)
+                || array_key_exists('work_report_display_options', $body)
                 || array_key_exists('invoice_pdf_bank_in_footer', $body)
             ) {
                 $this->pdf->invalidateDraftsBySupplier($id);
@@ -1683,6 +1693,7 @@ final class SettingsAction
         // Ceníková cena a sleva u položky na PDF faktury (migrace 2035), výchozí vypnuto.
         $row['invoice_pdf_show_line_discount'] = (bool) ($row['invoice_pdf_show_line_discount'] ?? false);
         // Kompaktní řádky položek na PDF faktury (migrace 2199), výchozí vypnuto.
+        $row['work_report_display_options'] = WorkReportDisplayOptions::resolve($row['work_report_display_options'] ?? null);
         $row['invoice_pdf_compact_items'] = (bool) ($row['invoice_pdf_compact_items'] ?? false);
         // Bankovní spojení v patičce PDF faktury (migrace 2200), výchozí vypnuto.
         $row['invoice_pdf_bank_in_footer'] = (bool) ($row['invoice_pdf_bank_in_footer'] ?? false);

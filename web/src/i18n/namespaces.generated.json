@@ -173,6 +173,7 @@
     "validation",
     "vat_classifications",
     "vendor",
+    "workReportDisplay",
     "workReportTracking"
   ],
   "routes": {
@@ -212,6 +213,9 @@
       "app",
       "errors"
     ],
+    "approval": [
+      "workReportDisplay"
+    ],
     "work-report-tracking": [
       "workReportTracking"
     ],
@@ -231,7 +235,8 @@
       "dashboard",
       "errors",
       "taxReturn",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay"
     ],
     "portal-mcp": [
       "client_mcp",
@@ -309,7 +314,8 @@
       "other_items",
       "payment_method",
       "project",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay"
     ],
     "invoice-ai-import": [
       "aiGateway",
@@ -330,7 +336,8 @@
       "refundInvoice",
       "settings",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay"
     ],
     "invoice-detail": [
       "accrual_period",
@@ -355,7 +362,8 @@
       "settings",
       "smtp_logs",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay"
     ],
     "invoice-edit": [
       "accrual_period",
@@ -372,7 +380,8 @@
       "refundInvoice",
       "settings",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay"
     ],
     "invoices-export": [
       "aiGateway",
@@ -1107,7 +1116,8 @@
       "refundInvoice",
       "settings",
       "stock",
-      "users"
+      "users",
+      "workReportDisplay"
     ],
     "accounting-activation": [
       "activation"

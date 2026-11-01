@@ -31,6 +31,7 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
                 branding_profiles_enabled INTEGER NOT NULL,
                 email_branding_enabled INTEGER NOT NULL,
                 email_accent_color TEXT NULL,
+                work_report_display_options TEXT NULL,
                 logo_path TEXT NULL
             )'
         );
@@ -43,6 +44,7 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
         // Prázdná tabulka místo mocku — WorkReportRepository je final, a k výkazu
         // se tenhle test stejně nevyjadřuje; stačí, že dotaz projde a vrátí null.
         $pdo->exec('CREATE TABLE work_reports (id INTEGER PRIMARY KEY, invoice_id INTEGER)');
+        $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
         if ($extraSupplierSql !== '') {
             $pdo->exec($extraSupplierSql);
         }

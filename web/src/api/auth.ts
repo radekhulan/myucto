@@ -61,6 +61,7 @@ export interface SupplierBrief {
   /** Vyúčtování s výsledkem k vyplacení (migrace 1937): editor povolí zápornou fakturu. */
   allow_refund_invoices: boolean
   /** Rozpis slevy z ceníkové ceny na PDF (migrace 2035); editor podle ní ukáže u řádku pole „Sleva %". */
+  work_report_display_options?: import('./invoices').WorkReportDisplayOptions
   invoice_pdf_show_line_discount?: boolean
   /** Výchozí „netisknout odběratele" na zjednodušeném dokladu (migrace 2037). */
   simplified_hide_customer_default?: boolean

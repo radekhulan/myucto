@@ -106,16 +106,16 @@ final class WorkReportMaterialsRepositoryTest extends TestCase
     {
         $inv = $this->draftInvoice();
 
-        $this->repo->save($inv, null, 'Práce 6/2026', [
+        $this->repo->save($inv, $this->supplierId, null, 'Práce 6/2026', [
             ['description' => 'Programování', 'hours' => 10, 'rate' => 1500, 'order_index' => 0],
         ], $this->vat21);
 
-        $this->repo->saveMaterials($inv, null, 'Materiál', $this->vat12, [
+        $this->repo->saveMaterials($inv, $this->supplierId, null, 'Materiál', $this->vat12, [
             ['description' => 'Kabel UTP', 'quantity' => 50, 'unit' => 'm', 'unit_price' => 12.50, 'order_index' => 0],
             ['description' => 'Konektor RJ45', 'quantity' => 20, 'unit' => 'ks', 'unit_price' => 5, 'order_index' => 1],
         ]);
 
-        $wr = $this->repo->findByInvoice($inv);
+        $wr = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertNotNull($wr);
 
         // Práce zůstala netknutá.
@@ -139,11 +139,11 @@ final class WorkReportMaterialsRepositoryTest extends TestCase
         $inv = $this->draftInvoice();
 
         // Materiál přijde dřív než práce → řádka work_reports musí vzniknout.
-        $this->repo->saveMaterials($inv, null, 'Jen materiál', $this->vat12, [
+        $this->repo->saveMaterials($inv, $this->supplierId, null, 'Jen materiál', $this->vat12, [
             ['description' => 'Barva', 'quantity' => 3, 'unit' => 'ks', 'unit_price' => 200, 'order_index' => 0],
         ]);
 
-        $wr = $this->repo->findByInvoice($inv);
+        $wr = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertNotNull($wr);
         self::assertSame(600.0, $wr['material_total']);
         self::assertSame(0.0, $wr['total_hours']);
@@ -155,25 +155,25 @@ final class WorkReportMaterialsRepositoryTest extends TestCase
     {
         $inv = $this->draftInvoice();
 
-        $this->repo->save($inv, null, 'Práce', [
+        $this->repo->save($inv, $this->supplierId, null, 'Práce', [
             ['description' => 'Konzultace', 'hours' => 2, 'rate' => 1000, 'order_index' => 0],
         ], $this->vat21);
-        $this->repo->saveMaterials($inv, null, 'Materiál', $this->vat12, [
+        $this->repo->saveMaterials($inv, $this->supplierId, null, 'Materiál', $this->vat12, [
             ['description' => 'Šroub', 'quantity' => 100, 'unit' => 'ks', 'unit_price' => 1.5, 'order_index' => 0],
         ]);
 
         // Přeuložení práce nesmí smazat materiál.
-        $this->repo->save($inv, null, 'Práce v2', [
+        $this->repo->save($inv, $this->supplierId, null, 'Práce v2', [
             ['description' => 'Konzultace', 'hours' => 3, 'rate' => 1000, 'order_index' => 0],
         ], $this->vat12);
-        $wr = $this->repo->findByInvoice($inv);
+        $wr = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertSame(3000.0, $wr['total_amount']);
         self::assertSame($this->vat12, $wr['vat_rate_id']);
         self::assertSame(150.0, $wr['material_total'], 'Materiál přežil přeuložení práce');
 
         // Přeuložení materiálu nesmí smazat práci.
-        $this->repo->saveMaterials($inv, null, 'Materiál v2', $this->vat21, []);
-        $wr = $this->repo->findByInvoice($inv);
+        $this->repo->saveMaterials($inv, $this->supplierId, null, 'Materiál v2', $this->vat21, []);
+        $wr = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertSame(3000.0, $wr['total_amount'], 'Práce přežila přeuložení materiálu');
         self::assertSame(0.0, $wr['material_total'], 'Prázdný materiál → total 0');
         self::assertCount(0, $wr['materials']);
@@ -184,30 +184,30 @@ final class WorkReportMaterialsRepositoryTest extends TestCase
     {
         $inv = $this->draftInvoice();
 
-        $this->repo->save($inv, null, 'Přesné minuty', [
+        $this->repo->save($inv, $this->supplierId, null, 'Přesné minuty', [
             ['description' => 'Minuta A', 'hours' => 1 / 60, 'duration_minutes' => 1, 'rate' => 0.9],
             ['description' => 'Minuta B', 'hours' => 1 / 60, 'duration_minutes' => 1, 'rate' => 0.9],
         ]);
 
-        $exact = $this->repo->findByInvoice($inv);
+        $exact = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertSame(0.04, $exact['total_amount']);
         self::assertSame([0.02, 0.02], array_column($exact['items'], 'total_amount'));
 
-        $this->repo->save($inv, null, 'Legacy hodiny', [
+        $this->repo->save($inv, $this->supplierId, null, 'Legacy hodiny', [
             ['description' => 'Legacy A', 'hours' => 0.5, 'duration_minutes' => null, 'rate' => 0.03],
             ['description' => 'Legacy B', 'hours' => 0.5, 'duration_minutes' => null, 'rate' => 0.03],
         ]);
 
-        $legacy = $this->repo->findByInvoice($inv);
+        $legacy = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertSame(0.03, $legacy['total_amount']);
         self::assertSame([0.02, 0.02], array_column($legacy['items'], 'total_amount'));
 
-        $this->repo->save($inv, null, 'Smíšené řádky', [
+        $this->repo->save($inv, $this->supplierId, null, 'Smíšené řádky', [
             ['description' => 'Přesná minuta', 'hours' => 1 / 60, 'duration_minutes' => 1, 'rate' => 0.9],
             ['description' => 'Legacy půlhodina', 'hours' => 0.5, 'duration_minutes' => null, 'rate' => 0.03],
         ]);
 
-        $mixed = $this->repo->findByInvoice($inv);
+        $mixed = $this->repo->findByInvoice($inv, $this->supplierId);
         self::assertSame(0.04, $mixed['total_amount']);
     }
 }

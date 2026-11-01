@@ -57,7 +57,7 @@ final class DeleteWorkReportAction
         if ($invoice['status'] !== 'draft' && !($canEditIssued && $isForce)) {
             return Json::error($response, 'not_editable', 'Výkaz lze smazat pouze v draftu (vystavenou s oprávněním: ?force=1).', 409);
         }
-        $this->repo->deleteByInvoice($invoiceId);
+        $this->repo->deleteByInvoice($invoiceId, SupplierGuard::currentId($request));
         $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

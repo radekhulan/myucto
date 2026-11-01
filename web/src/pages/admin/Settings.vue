@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -659,6 +660,7 @@ async function saveSupplier() {
       invoice_pdf_show_base_qty: supplier.value.invoice_pdf_show_base_qty ?? true,
       invoice_pdf_show_line_discount: supplier.value.invoice_pdf_show_line_discount ?? false,
       invoice_pdf_compact_items: supplier.value.invoice_pdf_compact_items ?? false,
+      work_report_display_options: supplier.value.work_report_display_options,
       invoice_pdf_bank_in_footer: supplier.value.invoice_pdf_bank_in_footer ?? false,
       // Tax settings (EPO výkazy DPH/KH)
       // Účetní režim posíláme jen když ho uživatel opravdu přepnul. Server na
@@ -1239,6 +1241,9 @@ async function confirmTaxRepDelete() {
               <span class="font-medium">{{ t('settings.invoice_pdf_compact_items') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.invoice_pdf_compact_items_hint') }}</p>
+          </div>
+          <div class="md:col-span-2">
+            <WorkReportDisplaySettings v-model="supplier.work_report_display_options" />
           </div>
           <div class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">

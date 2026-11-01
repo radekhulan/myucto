@@ -97,7 +97,7 @@ final class SaveWorkReportMaterialsAction
         }
 
         // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (materials = jeho řádky).
-        $stored = $this->repo->findByInvoice($invoiceId);
+        $stored = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
 
         $materialTitle = trim((string) (array_key_exists('material_title', $body)
             ? $body['material_title']
@@ -144,8 +144,8 @@ final class SaveWorkReportMaterialsAction
             }
         }
 
-        $wrId = $this->repo->saveMaterials($invoiceId, $projectId, $materialTitle, $materialVatRateId, $materials);
-        $wr = $this->repo->findByInvoice($invoiceId);
+        $wrId = $this->repo->saveMaterials($invoiceId, SupplierGuard::currentId($request), $projectId, $materialTitle, $materialVatRateId, $materials);
+        $wr = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

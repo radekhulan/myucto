@@ -9,11 +9,6 @@
 </head>
 <body>
 
-{% set wr_has_dates = (work_report.items|filter(it => it.work_date)|length) > 0 %}
-{# Desetinná místa per sloupec: skryj „,00" jen když jsou VŠECHNY hodnoty ve sloupci celé. #}
-{% set hours_dec = (work_report.items|filter(it => it.hours != it.hours|round(0))|length) > 0 ? 2 : 0 %}
-{% set rate_dec  = (work_report.items|filter(it => it.rate != it.rate|round(0))|length) > 0 ? 2 : 0 %}
-{% set total_dec = (work_report.items|filter(it => it.total_amount != it.total_amount|round(0))|length) > 0 ? 2 : 0 %}
 
 <table class="head">
   <tr>
@@ -53,34 +48,7 @@
   </div>
 </div>
 
-<table class="items">
-  <thead>
-    <tr>
-      <th style="width:{% if wr_has_dates %}43%{% else %}55%{% endif %}">{{ t('Popis', 'Description') }}</th>
-      {% if wr_has_dates %}<th class="nowrap" style="width:12%">{{ t('Datum', 'Date') }}</th>{% endif %}
-      <th class="num nowrap" style="width:13%">{{ t('Hodiny', 'Hours') }}</th>
-      <th class="num nowrap" style="width:14%">{{ t('Sazba', 'Rate') }}</th>
-      <th class="num nowrap" style="width:18%">{{ t('Celkem', 'Total') }}</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for it in work_report.items %}
-    <tr>
-      <td>{{ it.description|nl2br }}</td>
-      {% if wr_has_dates %}<td class="nowrap">{% if it.work_date %}{{ it.work_date|date(date_format) }}{% endif %}</td>{% endif %}
-      <td class="num nowrap">{% if it.duration_display is defined and it.duration_display is not null %}{{ it.duration_display }}{% else %}{{ it.hours|number_format(hours_dec, decimal_sep, thousand_sep) }}{% endif %}</td>
-      <td class="num nowrap">{{ it.rate|number_format(it.rate_decimals|default(rate_dec), decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
-      <td class="num nowrap">{{ it.total_amount|number_format(total_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
-    </tr>
-    {% endfor %}
-    <tr class="wr-total">
-      <td style="text-align:right;" {% if wr_has_dates %}colspan="2"{% endif %}>{{ t('Celkem', 'Total') }}</td>
-      <td class="num nowrap">{% if work_report.total_duration_display is defined and work_report.total_duration_display is not null %}{{ work_report.total_duration_display }}{% else %}{{ work_report.total_hours|number_format(hours_dec, decimal_sep, thousand_sep) }}{% endif %} h</td>
-      <td></td>
-      <td class="num nowrap">{{ work_report.total_amount|number_format(total_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
-    </tr>
-  </tbody>
-</table>
+{% include 'work_report_items.twig' %}
 
 {% if work_report.material_total > 0 and work_report.materials|length > 0 %}
 {% set qty_dec  = (work_report.materials|filter(m => m.quantity != m.quantity|round(0))|length) > 0 ? 3 : 0 %}
