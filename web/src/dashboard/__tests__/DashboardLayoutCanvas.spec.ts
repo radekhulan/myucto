@@ -19,10 +19,11 @@ describe('layout canvas keeps original content', () => {
   it('preserves component instances while reordering and omits self-hidden sections without empty boxes', async () => {
     const mounted = vi.fn()
     const component = defineComponent({ setup() { mounted(); return () => h('section', { class: 'original' }, 'Current content') } })
-    const model = state([item('sales'), item('hidden'), item('purchases')])
+    const visible = ref([item('sales'), item('hidden'), item('purchases')])
+    const model = { board: 'home', visible } as unknown as DashboardLayoutState
     const wrapper = mount(DashboardLayoutCanvas, { props: { state: model }, slots: { sales: () => h(component), hidden: () => [], purchases: '<section class="costs" />' } })
     expect(wrapper.element.children).toHaveLength(2)
-    model.visible.value = [item('purchases'), item('hidden'), item('sales')]
+    visible.value = [item('purchases'), item('hidden'), item('sales')]
     await wrapper.vm.$nextTick()
     expect([...wrapper.element.children].map(child => child.className)).toEqual(['costs', 'original'])
     expect(mounted).toHaveBeenCalledTimes(1)
