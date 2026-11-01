@@ -124,9 +124,9 @@ Volba se uloží v prohlížeči. Podrobnosti jsou v [§ 10.10.12](#101012-vzhle
 ### 10.7.5 Vlastní uspořádání přehledu
 
 1. U názvu firmy klikněte na **Upravit přehled**.
-2. Stávající bloky přesuňte tažením za úchyt nebo tlačítky nahoru a dolů. Tlačítko s košem blok skryje; do přehledu ho vrátíte v části **Vrátit původní bloky**.
-3. V katalogu přidejte jednotlivé widgety nebo oddělovač. U widgetu lze nastavit šířku, výšku a dostupné volby, například období nebo měnu. Na úzké obrazovce jsou widgety pod sebou.
-4. Tlačítkem **Náhled** zkontrolujte výsledek přímo v přehledu. **Pokračovat v úpravách** otevře editor znovu.
+2. Stávající bloky přesuňte tažením za úchyt nebo tlačítky nahoru a dolů. Tlačítko s košem blok skryje; do přehledu ho vrátíte v části **Vrátit skryté výchozí bloky**.
+3. V katalogu přidejte jednotlivé widgety nebo tlačítkem **Přidat nový řádek** oddělte další řadu. U widgetu lze nastavit šířku, výšku a dostupné volby, například období nebo měnu. Na úzké obrazovce jsou widgety pod sebou.
+4. Tlačítkem **Náhled v přehledu** zkontrolujte výsledek přímo v přehledu. **Pokračovat v úpravě** otevře editor znovu.
 5. Klikněte na **Uložit**. **Zrušit** zahodí rozepsané úpravy; **Obnovit výchozí** vrátí původní sestavu.
 
 Rozložení je osobní, ukládá se u vašeho účtu a platí napříč firmami. **Akce pro tebe** a **Přehled firmy** mají vlastní nastavení. Bez uložených úprav zůstává původní sestava bloků.

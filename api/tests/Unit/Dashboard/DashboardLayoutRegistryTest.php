@@ -47,6 +47,7 @@ final class DashboardLayoutRegistryTest extends TestCase
         yield 'scalar' => [null];
         yield 'unknown field' => [['schemaVersion' => 2, 'items' => [], 'user_id' => 1]];
         yield 'old schema' => [['schemaVersion' => 1, 'items' => []]];
+        yield 'overflowing JSON number' => [['schemaVersion' => 2, 'items' => [array_replace(self::widget('business.kpi'), ['options' => ['currency' => INF]])]]];
         foreach ([['type', 'unknown'], ['span', 0], ['span', 13], ['span', '6'], ['height', 'huge'], ['kind', 'unknown'], ['id', '../bad'], ['options', ['currency' => null]], ['options', ['unexpected' => true]]] as $i => [$key, $value]) {
             yield 'invalid field ' . $i => [['schemaVersion' => 2, 'items' => [array_replace(self::widget('business.kpi'), [$key => $value])]]];
         }

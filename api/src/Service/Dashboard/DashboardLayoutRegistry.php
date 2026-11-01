@@ -29,9 +29,14 @@ final class DashboardLayoutRegistry
     public function validate(string $board, mixed $layout): array
     {
         DashboardWidgetRegistry::assertBoard($board);
+        try {
+            $bytes = strlen(json_encode($layout, JSON_THROW_ON_ERROR));
+        } catch (\JsonException) {
+            throw new \InvalidArgumentException('Rozložení nelze převést na JSON.');
+        }
         if (!is_array($layout) || count($layout) !== 2 || array_diff(array_keys($layout), ['schemaVersion', 'items']) !== []
             || $layout['schemaVersion'] !== 2 || !is_array($layout['items']) || !array_is_list($layout['items'])
-            || count($layout['items']) > self::MAX_ITEMS || strlen(json_encode($layout, JSON_THROW_ON_ERROR)) > self::MAX_BYTES) {
+            || count($layout['items']) > self::MAX_ITEMS || $bytes > self::MAX_BYTES) {
             throw new \InvalidArgumentException('Neplatná struktura nebo velikost rozložení.');
         }
         $ids = $sections = $normalized = [];
