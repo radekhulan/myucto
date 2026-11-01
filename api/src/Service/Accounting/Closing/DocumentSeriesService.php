@@ -57,6 +57,16 @@ final class DocumentSeriesService
      */
     public const DOUBLE_ENTRY_ONLY_SERIES = ['closing', 'opening', 'fx', 'transfer', 'manual', 'offset'];
 
+    /**
+     * Řady, které vydávají čísla do jedné tabulky dokladů s jednou unikátností čísla
+     * (`uq_cashdoc_supplier_number`, `uq_other_item_doc_no`). Všechny začínají od jedničky,
+     * takže dvě řady skupiny se stejným prefixem vydají totéž číslo dokladu.
+     */
+    public const PREFIX_GROUPS = [
+        'pokladní řada' => ['cash_in', 'cash_out'],
+        'řada ostatních položek' => ['other_receivable', 'other_payable'],
+    ];
+
     /** Vestavěná šablona = dosavadní chování (`UZ-2026-0001`). */
     public const DEFAULT_TEMPLATE = '{PREFIX}-{YYYY}-{CCCC}';
 
@@ -190,9 +200,7 @@ final class DocumentSeriesService
                 'Prefix řady musí být 1–10 znaků A–Z/0–9 (zadáno "' . $prefix . '").',
             );
         }
-        if (in_array($seriesCode, ['cash_in', 'cash_out'], true)) {
-            $this->assertCashPrefixFree($supplierId, $prefix, $seriesCode, $registerId);
-        }
+        $this->assertPrefixFree($supplierId, $prefix, $seriesCode, $fiscalYear, $registerId);
         $this->series->ensure(
             $supplierId,
             $seriesCode,
@@ -241,12 +249,12 @@ final class DocumentSeriesService
             throw new ClosingException('validation_failed', 'Není co měnit — zadej prefix, number_format nebo next_number.');
         }
 
-        // Pokladní řady se navzájem potkávají v jedné tabulce dokladů: firemní PPD
-        // a vlastní řada pokladny obě začínají od jedničky, takže shodný prefix =
-        // duplicitní číslo dokladu (uq_cashdoc_supplier_number) při ukládání. Ruční
+        // Řady jedné skupiny (pokladní, ostatní položky) se potkávají v jedné tabulce
+        // dokladů: všechny začínají od jedničky, takže shodný prefix = duplicitní číslo
+        // dokladu při ukládání (u ostatních položek až jako chyba databáze). Ruční
         // editaci prefixu v Nástrojích proto hlídáme tady, ne až v databázi.
-        if (isset($patch['prefix']) && in_array($seriesCode, ['cash_in', 'cash_out'], true)) {
-            $this->assertCashPrefixFree($supplierId, $patch['prefix'], $seriesCode, $registerId);
+        if (isset($patch['prefix'])) {
+            $this->assertPrefixFree($supplierId, $patch['prefix'], $seriesCode, $fiscalYear, $registerId);
         }
 
         return $this->series->upsert(
@@ -260,17 +268,26 @@ final class DocumentSeriesService
     }
 
     /**
-     * Prefix pokladní řady nesmí držet jiná pokladní řada firmy — ani ta firemní
-     * (register_id = 0), ani jiné pokladny. Kontroluje se přes obě řady (PPD i VPD),
-     * protože příjmový a výdajový doklad sdílejí jednu unikátnost čísla.
+     * Prefix řady ze skupiny {@see PREFIX_GROUPS} nesmí držet jiná řada téže skupiny —
+     * ani firemní (register_id = 0), ani vlastní řada jiné pokladny.
+     * Kontroluje se přes obě řady skupiny (PPD i VPD, OP i OZ), protože sdílejí jednu
+     * unikátnost čísla. Řady mimo skupiny se nekontrolují.
+     *
+     * Řádek firemní řady vzniká až s prvním dokladem roku (lazy `ensure()` ve {@see next()})
+     * a dostane výchozí prefix. Ten si proto firemní řada drží i bez řádku: vlastní řada si
+     * vestavěné prefixy skupiny (PPD/VPD, OP/OZ) nevezme nikdy, jiná firemní řada skupiny
+     * ne v roce, kdy jejich řada ještě nemá řádek.
      */
-    private function assertCashPrefixFree(int $supplierId, string $prefix, string $seriesCode, int $registerId): void
+    private function assertPrefixFree(int $supplierId, string $prefix, string $seriesCode, int $fiscalYear, int $registerId): void
     {
-        // Vestavěné PPD/VPD si drží firemní řada — i když její řádek pro daný rok ještě
-        // nevznikl (zakládá se lazy), pokladna si je vzít nesmí, jinak by kolize nastala
-        // až při prvním firemním dokladu.
+        $label = self::prefixGroup($seriesCode);
+        if ($label === null) {
+            return;
+        }
+        $group = self::PREFIX_GROUPS[$label];
+        $rows = $this->series->list($supplierId);
         if ($registerId > 0) {
-            foreach (['cash_in', 'cash_out'] as $companyCode) {
+            foreach ($group as $companyCode) {
                 if (strcasecmp(self::DEFAULT_PREFIXES[$companyCode], $prefix) === 0) {
                     throw new ClosingException(
                         'series_prefix_taken',
@@ -280,8 +297,26 @@ final class DocumentSeriesService
             }
         }
 
-        foreach ($this->series->list($supplierId) as $row) {
-            if (!in_array((string) $row['series_code'], ['cash_in', 'cash_out'], true)) {
+        $companyRowThisYear = [];
+        foreach ($rows as $row) {
+            if ((int) $row['register_id'] === 0 && (int) $row['fiscal_year'] === $fiscalYear) {
+                $companyRowThisYear[(string) $row['series_code']] = true;
+            }
+        }
+        foreach ($group as $companyCode) {
+            if ($companyCode === $seriesCode || isset($companyRowThisYear[$companyCode])) {
+                continue;
+            }
+            if ($registerId === 0 && strcasecmp(self::DEFAULT_PREFIXES[$companyCode], $prefix) === 0) {
+                throw new ClosingException(
+                    'series_prefix_taken',
+                    'Prefix "' . $prefix . '" dostane při prvním dokladu roku jiná ' . $label . ' — zvolte jiný.',
+                );
+            }
+        }
+
+        foreach ($rows as $row) {
+            if (!in_array((string) $row['series_code'], $group, true)) {
                 continue;
             }
             $sameScope = (int) $row['register_id'] === $registerId && (string) $row['series_code'] === $seriesCode;
@@ -290,9 +325,20 @@ final class DocumentSeriesService
             }
             throw new ClosingException(
                 'series_prefix_taken',
-                'Prefix "' . $prefix . '" už používá jiná pokladní řada — dvě řady se stejným prefixem by vydaly totéž číslo dokladu.',
+                'Prefix "' . $prefix . '" už používá jiná ' . $label . ' — dvě řady se stejným prefixem by vydaly totéž číslo dokladu.',
             );
         }
+    }
+
+    /** Skupina řady z {@see PREFIX_GROUPS} (klíč = název do hlášky); null = řada mimo skupiny. */
+    private static function prefixGroup(string $seriesCode): ?string
+    {
+        foreach (self::PREFIX_GROUPS as $label => $group) {
+            if (in_array($seriesCode, $group, true)) {
+                return $label;
+            }
+        }
+        return null;
     }
 
     /**
