@@ -65,6 +65,29 @@ beforeEach(() => {
   m.khPreview.mockResolvedValue(khResult())
 })
 
+describe('rozdíly proti podanému KH', () => {
+  it('ukáže rozdíl s částkami a bez rozdílu sekci skryje', async () => {
+    const empty = mount(KhReport, options)
+    await flushPromises()
+    expect(empty.find('[data-testid="kh-post-filing"]').exists()).toBe(false)
+    empty.unmount()
+
+    m.khPreview.mockResolvedValue({ ...khResult(), post_filing_changes: {
+      has_filing: true, snapshot_available: true, submission: { id: 1, generated_at: '2026-10-13 11:15:45', form_variant: 'B' },
+      documents: [{ section: 'A.2', status: 'only_current', doc_number: 'INV-1', is_aggregate: false, filed: null, current: { base: 100, vat: 21 } }],
+    } })
+    const wrapper = mount(KhReport, options)
+    await flushPromises()
+    const box = wrapper.get('[data-testid="kh-post-filing"]').text()
+    expect(box).toContain('A.2')
+    expect(box).toContain('INV-1')
+    expect(box).toContain('reports.kh.post_filing.status.only_current')
+    expect(box).not.toContain('reports.kh.post_filing.filed')
+    expect(wrapper.get('[data-testid="kh-post-filing-evidence"]').attributes('href')).toBe('/reports/submissions/1/kh-evidence')
+    wrapper.unmount()
+  })
+})
+
 describe('links from VAT reports to the book', () => {
   it('otevře doklady z blokujícího nálezu, vysvětleného posunu i informativního nálezu', async () => {
     m.canRead.mockReturnValue(true)

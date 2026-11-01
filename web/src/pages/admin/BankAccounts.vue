@@ -192,11 +192,12 @@ watch(() => currencyDraft.bank_code, (code) => {
 })
 const imapDraft = reactive<Partial<BankEmailImapSettings> & { password?: string }>(defaultImapDraft())
 const regexFieldDefinitions = [
-  { key: 'variable_symbol', required: true },
   { key: 'amount', required: true },
   { key: 'currency', required: true },
   { key: 'posted_at', required: true },
   { key: 'recipient_account', required: true },
+  { key: 'direction', required: false },
+  { key: 'variable_symbol', required: false },
   { key: 'counterparty_account', required: false },
   { key: 'counterparty_name', required: false },
   { key: 'constant_symbol', required: false },
@@ -1816,12 +1817,6 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 </tbody>
               </table>
             </div>
-          </section>
-
-          <section>
-            <h4 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('bank_accounts.normalizer_config') }}</h4>
-            <textarea v-model="providerDraft.normalizer_config_json" rows="4"
-              class="w-full p-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono"></textarea>
           </section>
 
           <div class="flex justify-end gap-2 pt-1">

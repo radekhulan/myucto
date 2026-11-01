@@ -23,7 +23,7 @@ final class PaymentMatchAuditBatchTest extends TestCase
         $this->pdo->createFunction('CONCAT', static fn (...$parts): string => implode('', $parts));
         foreach ([
             'bank_statements (id INTEGER PRIMARY KEY, currency TEXT)',
-            'bank_transactions (id INTEGER PRIMARY KEY, statement_id INTEGER, posted_at TEXT, amount NUMERIC, currency TEXT, counterparty_name TEXT, matched_invoice_id INTEGER, match_status TEXT)',
+            'bank_transactions (id INTEGER PRIMARY KEY, statement_id INTEGER, posted_at TEXT, amount NUMERIC, currency TEXT, counterparty_name TEXT, matched_invoice_id INTEGER, match_status TEXT, card_last4 TEXT)',
             'invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, varsymbol TEXT, exchange_rate NUMERIC, amount_to_pay NUMERIC, status TEXT, currency_id INTEGER, client_id INTEGER)',
             'purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, varsymbol TEXT, vendor_invoice_number TEXT, exchange_rate NUMERIC, amount_to_pay NUMERIC, status TEXT, currency_id INTEGER, vendor_id INTEGER)',
             'currencies (id INTEGER PRIMARY KEY, code TEXT)',
@@ -124,7 +124,7 @@ final class PaymentMatchAuditBatchTest extends TestCase
     private function addIssued(int $id, int $supplierId): void
     {
         $this->pdo->prepare("INSERT INTO invoices VALUES (?, ?, ?, 1, 100, 'paid', 1, 1)")->execute([$id, $supplierId, 'TEST-I' . $id]);
-        $this->pdo->prepare("INSERT INTO bank_transactions VALUES (?, 1, '2099-01-01', 100, 'CZK', '', ?, 'manual')")->execute([$id, $id]);
+        $this->pdo->prepare("INSERT INTO bank_transactions VALUES (?, 1, '2099-01-01', 100, 'CZK', '', ?, 'manual', NULL)")->execute([$id, $id]);
     }
 }
 

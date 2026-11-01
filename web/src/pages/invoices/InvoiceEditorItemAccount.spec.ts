@@ -55,22 +55,48 @@ async function mountEditor(accountingMode: string) {
 
 const item = (extra: Record<string, unknown> = {}) => ({ description: 'Licence', quantity: 1, unit: 'ks', unit_price_without_vat: 100, vat_rate_id: 0, ...extra })
 
-describe('InvoiceEditor účet položky', () => {
-  it('šipka otevře a zavře účet jen u své položky', async () => {
+describe('InvoiceEditor účet a členění DPH položky', () => {
+  it('šipka otevře a zavře účet i členění DPH jen u své položky', async () => {
     const { wrapper, vm } = await mountEditor('double_entry')
     vm.form.items = [item(), item({ description: 'Servis' })]
     await nextTick()
     expect(wrapper.findAll('[data-test="invoice-item-account"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-test="invoice-item-vat-classification"]')).toHaveLength(0)
 
-    const toggles = wrapper.findAll('[data-test="item-account-toggle"]')
+    const toggles = wrapper.findAll('[data-test="item-details-toggle"]')
     expect(toggles).toHaveLength(2)
     await toggles[0].trigger('click')
     expect(wrapper.findAll('[data-test="invoice-item-account"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-test="invoice-item-vat-classification"]')).toHaveLength(1)
     expect(toggles[0].attributes('aria-expanded')).toBe('true')
     expect(toggles[1].attributes('aria-expanded')).toBe('false')
 
     await toggles[0].trigger('click')
     expect(wrapper.findAll('[data-test="invoice-item-account"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-test="invoice-item-vat-classification"]')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('volba členění se pošle, odvozený kód po změně sazby zanikne', async () => {
+    const { wrapper, vm } = await mountEditor('double_entry')
+    const editor = vm as unknown as {
+      itemVatPayload: (it: unknown) => Record<string, unknown>
+      setItemVatCode: (it: unknown, value: string) => void
+    }
+    vm.form.items = [item({ vat_rate_id: 1, vat_classification_code: '1' }), item({ description: 'Nová' })]
+    vm.hydrateAssetSelections()
+    const [loaded, fresh] = vm.form.items
+
+    expect(editor.itemVatPayload(loaded)).toEqual({ vat_classification_code: '1' })
+    expect(editor.itemVatPayload(fresh)).toEqual({})
+
+    loaded.vat_rate_id = 2
+    expect(editor.itemVatPayload(loaded)).toEqual({})
+
+    editor.setItemVatCode(fresh, '20')
+    expect(editor.itemVatPayload(fresh)).toEqual({ vat_classification_code: '20' })
+    editor.setItemVatCode(fresh, '')
+    expect(editor.itemVatPayload(fresh)).toEqual({ vat_classification_code: null })
     wrapper.unmount()
   })
 
@@ -83,17 +109,35 @@ describe('InvoiceEditor účet položky', () => {
     wrapper.unmount()
   })
 
-  it('prodej majetku ani daňová evidence šipku nenabízí', async () => {
-    const { wrapper, vm } = await mountEditor('double_entry')
-    vm.form.items = [item({ asset_id: 5 })]
+  it('prodej majetku a daňová evidence mají pod šipkou jen členění DPH', async () => {
+    for (const { mode, row } of [
+      { mode: 'double_entry', row: item({ asset_id: 5 }) },
+      { mode: 'tax_records', row: item() },
+    ]) {
+      const { wrapper, vm } = await mountEditor(mode)
+      vm.form.items = [row]
+      await nextTick()
+      await wrapper.get('[data-test="item-details-toggle"]').trigger('click')
+      expect(wrapper.find('[data-test="invoice-item-account"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="invoice-item-vat-classification"]').exists()).toBe(true)
+      wrapper.unmount()
+    }
+  })
+
+  it('neplátce v daňové evidenci šipku nemá, OSS položka členění nenabízí', async () => {
+    const { wrapper, vm } = await mountEditor('tax_records')
+    useSupplierStore().availableSuppliers = [{ id: 1, accounting_mode: 'tax_records', is_vat_payer: false } as never]
+    vm.form.items = [item()]
     await nextTick()
-    expect(wrapper.find('[data-test="item-account-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="item-details-toggle"]').exists()).toBe(false)
     wrapper.unmount()
 
-    const taxRecords = await mountEditor('tax_records')
-    taxRecords.vm.form.items = [item()]
+    const oss = await mountEditor('double_entry')
+    oss.vm.form.items = [item({ oss_applicable: true })]
     await nextTick()
-    expect(taxRecords.wrapper.find('[data-test="item-account-toggle"]').exists()).toBe(false)
-    taxRecords.wrapper.unmount()
+    await oss.wrapper.get('[data-test="item-details-toggle"]').trigger('click')
+    expect(oss.wrapper.find('[data-test="invoice-item-account"]').exists()).toBe(true)
+    expect(oss.wrapper.find('[data-test="invoice-item-vat-classification"]').exists()).toBe(false)
+    oss.wrapper.unmount()
   })
 })

@@ -83,8 +83,11 @@ final class StatementPdfAttachTest extends TestCase
     private function cleanup(): void
     {
         $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE bti FROM bank_transaction_imports bti JOIN bank_statements bs ON bs.id = bti.statement_id WHERE bs.account_number = ?')->execute([$this->account]);
+        $pdo->prepare('DELETE e FROM bank_api_evidence_months e JOIN bank_statements bs ON bs.id = e.evidence_statement_id WHERE bs.account_number = ?')->execute([$this->account]);
         $pdo->prepare('DELETE bti FROM bank_transaction_imports bti JOIN bank_statements bs ON bs.id = bti.original_statement_id WHERE bs.file_name LIKE ?')->execute(['%' . self::FILE_MARKER . '%']);
-        $pdo->prepare('DELETE FROM bank_statements WHERE file_name LIKE ?')->execute(['%' . self::FILE_MARKER . '%']);
+        $pdo->prepare('DELETE m FROM bank_api_months m JOIN bank_statements bs ON bs.id = m.statement_id WHERE m.month_start >= ? AND bs.account_number = ?')->execute(['2099-01-01', $this->account]);
+        $pdo->prepare('DELETE FROM bank_statements WHERE file_name LIKE ? OR (account_number = ? AND file_name LIKE ?)')->execute(['%' . self::FILE_MARKER . '%', $this->account, 'API-2099-%']);
         $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ? AND label = ?')
             ->execute([$this->supplierId, self::FILE_MARKER]);
         $this->statementIds = [];
@@ -357,6 +360,149 @@ final class StatementPdfAttachTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('balance_pdf_unverified');
         (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($this->supplierId, $id);
+    }
+
+    /** Nejmenší PDF s textovou vrstvou: registr parserů před parsováním čte text. */
+    private static function minimalPdf(): string
+    {
+        $stream = 'BT /F1 12 Tf 10 100 Td (vypis) Tj ET';
+        $objects = [
+            '<</Type/Catalog/Pages 2 0 R>>',
+            '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+            '<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>',
+            '<</Length ' . strlen($stream) . ">>stream\n{$stream}\nendstream",
+            '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>',
+        ];
+        $pdf = "%PDF-1.4\n";
+        $offsets = [];
+        foreach ($objects as $i => $object) {
+            $offsets[] = strlen($pdf);
+            $pdf .= ($i + 1) . " 0 obj\n{$object}\nendobj\n";
+        }
+        $xref = strlen($pdf);
+        $pdf .= 'xref' . "\n0 " . (count($objects) + 1) . "\n0000000000 65535 f \n";
+        foreach ($offsets as $offset) {
+            $pdf .= sprintf("%010d 00000 n \n", $offset);
+        }
+        return $pdf . 'trailer<</Size ' . (count($objects) + 1) . "/Root 1 0 R>>\nstartxref\n{$xref}\n%%EOF\n";
+    }
+
+    /** Měsíc z bankovního feedu s připraveným PDF výpisem, který je doložený zůstatkem z června. */
+    private function apiMonthWithPdf(float $prev, float $curr): int
+    {
+        $pdo = $this->db->pdo();
+        $anchor = $this->insertGpcStatement([], date: '2099-06-30');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = 100 WHERE id = ?')->execute([$anchor]);
+        $id = $this->insertGpcStatement([['2099-07-02', 10]]);
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api', credit_total = 10, debit_total = 0 WHERE id = ?")->execute([$id]);
+        $parsed = $this->parsedPdf([['2099-07-02', 10]]);
+        $parsed['header'] += ['prev_balance' => $prev, 'curr_balance' => $curr];
+        (new ReflectionMethod($this->action, 'attachParsedPdf'))
+            ->invoke($this->action, $id, $parsed, '%PDF-x', 'vypis.pdf', hash('sha256', self::FILE_MARKER . $id));
+        return $id;
+    }
+
+    public function testParsedPdfOnApiMonthConfirmsCalculatedBalance(): void
+    {
+        $id = $this->apiMonthWithPdf(100, 110);
+        $result = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $id);
+
+        self::assertSame('confirmed', $result['status']);
+        self::assertEquals(110, $result['closing']);
+        self::assertEquals(110, $result['confirmed_closing']);
+        self::assertEquals(0, $result['difference']);
+    }
+
+    public function testParsedPdfOnApiMonthShowsDifferenceInsteadOfUnavailable(): void
+    {
+        $id = $this->apiMonthWithPdf(100, 125);
+        $result = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $id);
+
+        self::assertSame('mismatch', $result['status']);
+        self::assertEquals(15, $result['difference']);
+    }
+
+    /**
+     * Měsíc, u kterého PDF visí už z doby před zápisem zůstatků: zobrazení výpisu ho musí
+     * spravit samo, na produkci takové výpisy jsou a znovu je nikdo nahrávat nemusí.
+     */
+    public function testAlreadyAttachedPdfIsHealedWithoutReimport(): void
+    {
+        $pdo = $this->db->pdo();
+        $anchor = $this->insertGpcStatement([], date: '2099-06-30');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = 100 WHERE id = ?')->execute([$anchor]);
+        $id = $this->insertGpcStatement([['2099-07-02', 10]]);
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api', credit_total = 10, debit_total = 0, pdf_content = ?, pdf_hash = ? WHERE id = ?")
+            ->execute([self::minimalPdf(), hash('sha256', self::FILE_MARKER . 'heal'), $id]);
+
+        $service = new \MyInvoice\Service\Bank\StatementBalanceService($this->db);
+        self::assertSame('unavailable', $service->summary($this->supplierId, $id)['status']);
+
+        $header = $this->parsedPdf([['2099-07-02', 10]]);
+        $header['header'] += ['prev_balance' => 100.0, 'curr_balance' => 110.0];
+        $stub = new class ($header) implements \MyInvoice\Service\Bank\Pdf\BankStatementPdfParserInterface {
+            public function __construct(private readonly array $result) {}
+            public function key(): string { return 'stub'; }
+            public function supports(string $text): bool { return true; }
+            public function parse(string $pdfBytes, string $text): array { return $this->result; }
+        };
+        $action = (new \ReflectionClass(BankStatementAction::class))->newInstanceWithoutConstructor();
+        (new \ReflectionProperty(BankStatementAction::class, 'db'))->setValue($action, $this->db);
+        (new \ReflectionProperty(BankStatementAction::class, 'pdfParsers'))
+            ->setValue($action, new \MyInvoice\Service\Bank\Pdf\BankStatementPdfParserRegistry([$stub]));
+        (new ReflectionMethod($action, 'healPdfBalances'))->invoke($action, [$id]);
+
+        $result = $service->summary($this->supplierId, $id);
+        self::assertSame('confirmed', $result['status']);
+        self::assertEquals(110, $result['confirmed_closing']);
+    }
+
+    /**
+     * GPC nahrané po PDF: dokud nepokrývá stejné pohyby, drží měsíc zůstatky z PDF. Jakmile
+     * je pokryje, je dokladem měsíce a platí jeho zůstatky.
+     */
+    public function testGpcUploadedAfterPdfTakesOverOnlyWithSameMovements(): void
+    {
+        $id = $this->apiMonthWithPdf(100, 110);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO bank_api_months (statement_id, supplier_id, account_key, currency, month_start) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$id, $this->supplierId, '2250/' . str_pad($this->account, 16, '0', STR_PAD_LEFT), 'CZK', '2099-07-01']);
+        $gpc = $this->insertGpcStatement([], date: '2099-07-30');
+        $pdo->prepare("UPDATE bank_statements SET prev_balance = 100, curr_balance = 112, file_content = 'gpc' WHERE id = ?")->execute([$gpc]);
+        $pdo->prepare('INSERT INTO bank_api_evidence_months (evidence_statement_id, monthly_statement_id, supplier_id) VALUES (?, ?, ?)')
+            ->execute([$gpc, $id, $this->supplierId]);
+        $months = new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo);
+        $state = static fn (): array => $pdo->query('SELECT source, curr_balance FROM bank_statements WHERE id = ' . $id)->fetch(PDO::FETCH_ASSOC);
+
+        $months->refreshMonths([$id], $this->supplierId);
+        self::assertSame('bank_api', $state()['source']);
+        self::assertEquals(110, $state()['curr_balance']);
+
+        $tx = (int) $pdo->query('SELECT id FROM bank_transactions WHERE statement_id = ' . $id)->fetchColumn();
+        $pdo->prepare('INSERT INTO bank_transaction_imports (statement_id, bank_transaction_id, import_fingerprint, supplier_id, original_statement_id) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$gpc, $tx, hash('sha256', self::FILE_MARKER . $tx), $this->supplierId, $id]);
+        $months->refreshMonths([$id], $this->supplierId);
+        self::assertSame('gpc', $state()['source']);
+        self::assertEquals(112, $state()['curr_balance']);
+    }
+
+    public function testPdfBalancesSurviveFeedRefreshAndAnchorNextMonth(): void
+    {
+        $id = $this->apiMonthWithPdf(100, 110);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO bank_api_months (statement_id, supplier_id, account_key, currency, month_start) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$id, $this->supplierId, '2250/' . str_pad($this->account, 16, '0', STR_PAD_LEFT), 'CZK', '2099-07-01']);
+        (new \MyInvoice\Service\Bank\BankApiMonthlyStatements($pdo))->refreshMonths([$id], $this->supplierId);
+
+        $row = $pdo->query('SELECT prev_balance, curr_balance FROM bank_statements WHERE id = ' . $id)->fetch(PDO::FETCH_ASSOC);
+        self::assertEquals(100, $row['prev_balance']);
+        self::assertEquals(110, $row['curr_balance']);
+
+        $next = $this->insertGpcStatement([['2099-08-03', 5]], statementNumber: '008', date: '2099-08-31');
+        $pdo->prepare("UPDATE bank_statements SET source = 'bank_api' WHERE id = ?")->execute([$next]);
+        $result = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($this->supplierId, $next);
+        self::assertEquals(110, $result['opening']);
+        self::assertEquals(115, $result['closing']);
     }
 
     /** Prázdný měsíc (banka pošle výpis bez pohybů) — přiložit taky. */

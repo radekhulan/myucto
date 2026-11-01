@@ -19808,7 +19808,7 @@
         "card_clearing_open": "Mezičlen plateb kartou (378.x) se zůstatkem - nevypořádané platby kartou k rozvahovému dni",
         "card_payments_unmatched": "Platby kartou bez dokladu starší než lhůta z nastavení účtování karet",
         "fx_footprint_missing": "Cizoměnové řádky na devizovém účtu bez úplné měnové stopy (currency_code/amount_foreign)",
-        "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy na 324",
+        "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy",
         "paid_advances_no_payment": "Zaplacené zálohové faktury dodavatelům bez zaúčtované úhrady na 314",
         "settled_but_unpaid": "Doklady se stavem Odeslaná, ale s úhradou už v deníku (aktualizujte stav na Zaplacená)",
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
@@ -21494,7 +21494,7 @@
     "client": "Klient",
     "project": "Zakázka",
     "catalog_item": "Zdroj položky",
-    "vat_classification": "Klasifikace DPH",
+    "vat_classification": "Členění DPH",
     "vat_classification_auto": "Automaticky podle sazby",
     "vat_classification_hint": "Kód pro přiznání k DPH a kontrolní/souhrnné hlášení. Automaticky se odvodí ze sazby a měrné jednotky - vyplňte jen tam, kde odvození nestačí (např. dodání zboží do EU u jednotky „ks\" nebo prodej dlouhodobého majetku). Volba se přenese na každou vygenerovanou fakturu.",
     "catalog_manual": "Ručně zadaná položka",
@@ -22328,7 +22328,7 @@
       "attachment_counterparty_ico": "IČO protistrany na příloze jiné",
       "attachment_variable_symbol": "VS na příloze jiný",
       "payment_header_divergence": "Údaj o zaplacení dokladu se liší od doložených úhrad. Přecenění používá úhrady doložené k rozvahovému dni.",
-      "fx_settlement_unproven": "Zůstatek dokladu nelze pro přecenění spolehlivě určit. Otevřete náhled kurzových rozdílů a opravte uvedené vazby."
+      "fx_settlement_unproven": "Zůstatek dokladu v cizí měně nejde určit a doklad zastaví krok přecenění. Otevřete doklad a opravte párování úhrady."
     },
     "open_list": "Otevřít v seznamu",
     "field": {
@@ -22381,7 +22381,7 @@
       "not_applicable": "Nevztahuje se",
       "pending": "chybí aktuální posouzení"
     },
-    "findings_count": "{count} nálezů",
+    "findings_count": "Nálezů: {count}",
     "showing_capped": "Zobrazeno {shown} z {total} nálezů",
     "capped_hint": "Seznam je zkrácený. Úplný přehled získáte exportem do CSV.",
     "loading": "Načítám nálezy…",
@@ -22742,13 +22742,16 @@
       "free_hint": "Vratka bez původní faktury: kus zadejte ručně, naskladní se jako vrácený."
     },
     "item_account": {
-      "show": "Účty položek",
-      "hide": "Skrýt účty položek",
-      "open": "Zobrazit účet položky",
-      "close": "Skrýt účet položky",
       "hint": "Účet jednotlivých položek: výnosový, u přefakturace i rozvahový (kromě saldokontních, daňových a peněžních účtů). Prázdné pole = účet produktu, jeho kategorie, pravidlo výnosů, jinak předkontace faktury.",
       "label": "Účet položky",
       "placeholder": "podle produktu / dokladu"
+    },
+    "item_details": {
+      "open": "Zobrazit podrobnosti položky",
+      "close": "Skrýt podrobnosti položky",
+      "vat_classification": "Členění DPH",
+      "vat_classification_auto": "Automaticky podle sazby",
+      "vat_classification_hint": "Kód pro přiznání k DPH a kontrolní a souhrnné hlášení. Automaticky se odvodí ze sazby a měrné jednotky a po jejich změně se odvodí znovu. Vyberte ho jen tam, kde odvození nestačí, například u dodání zboží do EU s jednotkou „ks\" nebo u prodeje dlouhodobého majetku."
     },
     "title": "Vydané faktury",
     "col_order_number": "Objednávka",
@@ -25465,9 +25468,9 @@
     "th_regex": "Regex",
     "field_required": "povinné",
     "field_optional": "volitelné",
-    "normalizer_config": "Normalizer config",
     "normalizer_invalid": "Normalizer config musí být validní JSON objekt.",
     "save_provider": "Uložit provider",
+    "field_direction": "Směr platby",
     "field_variable_symbol": "Variabilní symbol",
     "field_amount": "Částka",
     "field_currency": "Měna",
@@ -27737,6 +27740,18 @@
     },
     "kh": {
       "title": "Kontrolní hlášení (DPHKH1)",
+      "post_filing": {
+        "title": "Rozdíly proti podanému kontrolnímu hlášení",
+        "hint": "Z aktuálních dokladů by dnes vzniklo jiné hlášení, než které bylo podáno. Zvažte opravné nebo následné kontrolní hlášení. Částky jsou základ / daň.",
+        "filed": "podáno",
+        "current": "dnes",
+        "evidence": "Otevřít soupis dokladů podaného hlášení",
+        "status": {
+          "amount_diff": "rozdíl částky",
+          "only_submitted": "jen v podaném hlášení",
+          "only_current": "jen v aktuálních datech"
+        }
+      },
       "subtitle": "Výkaz pro EPO portál MF ČR. Verze 03.01.",
       "download_xml": "Stáhnout XML",
       "rows": "řádků",

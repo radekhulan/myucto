@@ -128,7 +128,7 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         // (dvojtečka v popisku odliší tyto řádky od úvodní věty bez dvojtečky).
         $fromAccount = preg_match('/Z\s+uctu:\s*(?<value>\d[\d\-]*\/\d{4})/iu', $foldedText, $m) === 1 ? trim($m['value']) : '';
         $toAccount = preg_match('/Na\s+ucet:\s*(?<value>\d[\d\-]*\/\d{4})/iu', $foldedText, $m) === 1 ? trim($m['value']) : '';
-        $outgoing = preg_match('/odchoz|výdej|vydej|výdaj|vydaj|debet|odepsán|odepsan|outgoing/u', mb_strtolower((string) ($data['direction'] ?? ''), 'UTF-8')) === 1;
+        $outgoing = $this->isOutgoingDirection((string) ($data['direction'] ?? ''));
         $ownLineAccount = $outgoing ? $fromAccount : $toAccount;
         $counterpartyLineAccount = $outgoing ? $toAccount : $fromAccount;
         if (trim((string) ($data['recipient_account'] ?? '')) === '' && $ownLineAccount !== '') {

@@ -26,6 +26,10 @@ namespace MyInvoice\Support\Sql;
  * nepočítá: částky nese rozpad a {@see settledSql()} je přičítá zvlášť. Bez toho by se
  * zápis navázaný na jediný doklad a zároveň rozepsaný započetl dvakrát.
  *
+ * Totéž platí pro zápis, který k témuž dokladu eviduje zápočet (`invoice_settlements`
+ * s `journal_entry_id`): částku už nese kanál zápočtů v saldokontu i v K3. Vazba je pak
+ * jen odkaz a počítat ji znamená hlásit doklad jako přeplacený.
+ *
  * Volají ji `ClosingRepository` (K3) a `SaldoRepository` (otevřené položky), obojí přes
  * {@see settledSql()}.
  */
@@ -128,9 +132,20 @@ final class LinkedManualSettlementSql
                           AND own.doc_type = dl.doc_type AND own.doc_id = dl.doc_id{$lock}
                    )";
         $allocated = JournalSettlementAllocationSql::noAllocationSql('dl.supplier_id', 'dl.entry_id', 'dl.doc_type', $currentRead);
+        // Vydaná faktura má zápočet v saldu přes evidovanou platbu, bez ní ho žádný kanál nečte.
+        $settlementPayment = $docType === 'invoice'
+            ? " JOIN invoice_payments sip ON sip.id = stl.invoice_payment_id AND sip.supplier_id = stl.supplier_id
+                                                AND sip.source = 'settlement'"
+            : '';
+        $noSettlement = "NOT EXISTS (
+                       SELECT 1 FROM invoice_settlements stl{$settlementPayment}
+                        WHERE stl.journal_entry_id = dl.entry_id AND stl.supplier_id = dl.supplier_id
+                          AND stl.doc_type = dl.doc_type AND stl.doc_id = dl.doc_id{$lock}
+                   )";
         $tail = $members ? 'ORDER BY dl.doc_id, e.id, l.line_no, l.id' : "AND {$unique}
                    AND {$ownPosting}
                    AND {$allocated}
+                   AND {$noSettlement}
                  GROUP BY dl.doc_id";
         $effective = $lifecycle ? '' : " AND e.entry_date <= {$asOfExpr}
                    AND (e.reversed_by IS NULL OR rev.entry_date > {$asOfExpr})";

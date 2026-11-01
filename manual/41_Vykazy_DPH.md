@@ -114,6 +114,8 @@ Typ opravy záleží na tom, zda ještě běží lhůta pro podání.
 
 ### 41.5.2 Následné kontrolní hlášení a odpověď na výzvu
 
+Je-li hlášení za období už podané, stránka porovná jeho XML s hlášením sestaveným z dnešních dokladů. Liší-li se, ukáže sekci **Rozdíly proti podanému kontrolnímu hlášení** s oddílem, číslem dokladu a částkami. Souhrnné oddíly A.5 a B.3 se porovnávají jako celek, bez jednotlivých dokladů, ty najdete v soupisu podaného hlášení, kam vede odkaz ze sekce. Úhrada ani jiná úprava bez dopadu na hlášení rozdíl nevyvolá.
+
 1. Otevřete `Daně → Kontrolní hlášení` a zvolte opravované období.
 2. V poli **Typ podání** zvolte **Následné (§ 101f/2 - po lhůtě)**.
 3. Vyplňte **Datum zjištění**. Reagujete-li na výzvu správce daně, vyplňte i **Č.j. výzvy**.

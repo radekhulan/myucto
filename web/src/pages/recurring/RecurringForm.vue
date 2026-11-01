@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
+import { ICONS } from '@/components/ui/buttonStyles'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { recurringApi, type RecurringTemplate, type RecurringTemplatePayload, type Frequency, type OssRateType, type OssSupplyType } from '@/api/recurring'
@@ -176,7 +177,27 @@ type FormItem = {
 // generátor je přenese na každou vygenerovanou fakturu.
 const docDims = useDocumentDimensions('recurring-templates')
 const resultAccounts = useResultAccounts()
-const showItemAccounts = ref(false)
+// Účet a členění DPH položky jsou za šipkou u řádku stejně jako ve vydané a přijaté faktuře.
+const itemDetailsOpen = reactive(new Set<object>())
+function itemVatEditable(it: { oss_applicable?: boolean }): boolean {
+  return supplierIsVatPayer.value && !it.oss_applicable
+}
+function itemDetailsAvailable(it: { oss_applicable?: boolean }): boolean {
+  return resultAccounts.available.value || itemVatEditable(it)
+}
+function itemDetailsFilled(it: { revenue_account_code?: string | null, vat_classification_code?: string | null }): boolean {
+  return !!it.revenue_account_code || !!it.vat_classification_code
+}
+function toggleItemDetails(it: object) {
+  if (itemDetailsOpen.has(it)) itemDetailsOpen.delete(it)
+  else itemDetailsOpen.add(it)
+}
+// Vyplněný řádek se po načtení otevře sám, rozhodnutí účetní nesmí zůstat schované.
+function openFilledItemDetails() {
+  for (const it of form.value.items) {
+    if (itemDetailsFilled(it)) itemDetailsOpen.add(it)
+  }
+}
 
 const form = ref<{
   client_id: number | null
@@ -790,6 +811,7 @@ onMounted(async () => {
           warehouse_id: it.warehouse_id ?? null,
           revenue_account_code: it.revenue_account_code ?? null,
         }))
+        openFilledItemDetails()
         if (inv.client_id) await loadProjectsForClient(inv.client_id)
       } catch {
         // ignore — proceed with empty form
@@ -858,7 +880,7 @@ onMounted(async () => {
         })),
       })
       loadedCategoryLabel.value = tpl.revenue_category_label ?? null
-      showItemAccounts.value = form.value.items.some(it => it.revenue_account_code)
+      openFilledItemDetails()
       await docDims.load(tpl.id, form.value.items)
       if (tpl.client_id) await loadProjectsForClient(tpl.client_id)
     }
@@ -1227,11 +1249,6 @@ async function submit() {
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('recurring.items') }}</h3>
           <div class="flex flex-wrap items-center justify-end gap-2">
-          <button v-if="resultAccounts.available.value" type="button" class="cursor-pointer text-xs hover:underline whitespace-nowrap mr-1"
-            :class="showItemAccounts ? 'text-danger-600' : 'text-primary-700'"
-            :title="t('invoice.item_account.hint')" @click="showItemAccounts = !showItemAccounts">
-            {{ showItemAccounts ? t('invoice.item_account.hide') : t('invoice.item_account.show') }}
-          </button>
           <button type="button" @click="addTextItem" data-test="recurring-add-text-row" :title="t('invoice.text_row_hint')"
             class="cursor-pointer inline-flex items-center justify-center h-8 px-3 border border-neutral-300 bg-surface hover:bg-neutral-50 text-neutral-700 text-sm font-medium rounded-md whitespace-nowrap">
             {{ t('invoice.add_text_row') }}
@@ -1297,7 +1314,7 @@ async function submit() {
               <th class="text-left" style="width:8%">{{ t('invoice.items_table.unit') }}</th>
               <th class="text-right" style="width:15%">{{ unitPriceHeaderLabel }}</th>
               <th v-if="supplierIsVatPayer" class="text-left" style="width:14%">{{ t('invoice.items_table.vat') ?? 'DPH' }}</th>
-              <th :style="ossAvailable || hasOssItem ? 'width:96px' : 'width:30px'"></th>
+              <th :style="ossAvailable || hasOssItem ? 'width:130px' : 'width:64px'"></th>
             </tr>
           </thead>
           <tbody>
@@ -1336,11 +1353,6 @@ async function submit() {
                   :open="docDims.isItemOpen(it)" :filled="docDims.itemHasDims(it)" :disabled="!docDims.canEdit.value"
                   @toggle="docDims.toggleItem(it)" />
                 </div>
-                <label v-if="showItemAccounts && resultAccounts.available.value" class="mt-1.5 flex items-start gap-2 text-xs text-neutral-500">
-                  <span class="whitespace-nowrap pt-2">{{ t('invoice.item_account.label') }}</span>
-                  <ChartAccountSelect v-model="it.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
-                    class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
-                </label>
                 <p v-if="priceListEnabled && it.price_list_item_id" class="mt-1 text-xs text-neutral-500">
                   {{ catalogResolving === idx ? t('common.loading') : t('recurring.catalog_snapshot', { currency: it.catalog_source_currency_code ?? '—', price: it.catalog_source_unit_price ?? '—' }) }}
                   <button v-if="it.catalog_policy === 'review_required'" type="button" class="ml-2 text-primary-700 hover:underline" @click="applyCatalogItem(it, idx, true)">
@@ -1369,15 +1381,6 @@ async function submit() {
                     {{ vatRates.find(r => r.id === it.vat_rate_id) ? vatRateLabel(vatRates.find(r => r.id === it.vat_rate_id)!) : '—' }}
                   </option>
                 </select>
-                <!-- Klasifikace DPH se drží u sazby: obojí rozhoduje o řádku přiznání. -->
-                <select v-if="!it.oss_applicable" v-model="it.vat_classification_code"
-                  :title="t('recurring.vat_classification_hint')"
-                  class="mt-1 w-full h-7 px-1 border border-neutral-300 rounded bg-surface text-xs">
-                  <option :value="null">{{ t('recurring.vat_classification_auto') }}</option>
-                  <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vatClassificationLabel(vc) }}</option>
-                  <option v-if="it.vat_classification_code && !vatClassifications.some(vc => vc.code === it.vat_classification_code)"
-                    :value="it.vat_classification_code">{{ it.vat_classification_code }}</option>
-                </select>
               </td>
               <td class="py-1.5 text-right">
                 <div class="flex items-center justify-end gap-2 whitespace-nowrap">
@@ -1387,13 +1390,46 @@ async function submit() {
                       @change="onOssApplicableChange(it)" />
                     <span>{{ t('invoice.oss.enabled') }}</span>
                   </label>
+                  <button v-if="itemDetailsAvailable(it)" type="button" data-test="item-details-toggle"
+                    :title="itemDetailsOpen.has(it) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                    :aria-label="itemDetailsOpen.has(it) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                    :aria-expanded="itemDetailsOpen.has(it)"
+                    class="shrink-0 w-7 h-7 inline-flex items-center justify-center rounded border"
+                    :class="itemDetailsFilled(it)
+                      ? 'border-primary-300 bg-primary-50 text-primary-700'
+                      : itemDetailsOpen.has(it) ? 'border-neutral-300 bg-neutral-100 text-neutral-700' : 'border-transparent text-neutral-400 hover:text-neutral-700 hover:border-neutral-300'"
+                    @click="toggleItemDetails(it)">
+                    <svg class="w-4 h-4 transition-transform" :class="itemDetailsOpen.has(it) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+                  </button>
                   <button type="button" @click="removeItem(idx)" class="cursor-pointer text-danger-500 hover:text-danger-700 text-lg">×</button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!isTextItem(it) && itemDetailsAvailable(it) && itemDetailsOpen.has(it)" data-test="item-details-row"
+              :class="['border-t-0!', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
+              <td :colspan="supplierIsVatPayer ? 6 : 5" class="pb-2">
+                <div class="flex flex-wrap items-start gap-x-4 gap-y-2">
+                  <label v-if="resultAccounts.available.value" :title="t('invoice.item_account.hint')" class="flex items-start gap-2 text-xs text-neutral-500">
+                    <span class="whitespace-nowrap pt-2">{{ t('invoice.item_account.label') }}</span>
+                    <ChartAccountSelect v-model="it.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
+                      class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
+                  </label>
+                  <label v-if="itemVatEditable(it)" :title="t('recurring.vat_classification_hint')" class="flex items-center gap-2 text-xs text-neutral-500">
+                    <span class="whitespace-nowrap">{{ t('recurring.vat_classification') }}</span>
+                    <select v-model="it.vat_classification_code" data-test="recurring-item-vat-classification"
+                      class="w-72 max-w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm text-neutral-900">
+                      <option :value="null">{{ t('recurring.vat_classification_auto') }}</option>
+                      <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vatClassificationLabel(vc) }}</option>
+                      <option v-if="it.vat_classification_code && !vatClassifications.some(vc => vc.code === it.vat_classification_code)"
+                        :value="it.vat_classification_code">{{ it.vat_classification_code }}</option>
+                    </select>
+                  </label>
                 </div>
               </td>
             </tr>
             <!-- OSS pod-řádek — stejná pole jako na řádku faktury; „oprava období" tu není,
                  protože to je vlastnost konkrétního dokladu, ne předpisu. -->
-            <tr v-if="docDims.enabled.value && !isTextItem(it) && docDims.isItemOpen(it)" :class="['border-t-0!', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
+            <tr v-if="docDims.enabled.value && !isTextItem(it) && docDims.isItemOpen(it)":class="['border-t-0!', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
               <td :colspan="supplierIsVatPayer ? 6 : 5" class="pb-2">
                 <div class="flex items-center gap-2">
                   <span class="shrink-0 text-xs text-neutral-500">{{ t('dimensions.items_title') }}</span>
@@ -1444,7 +1480,18 @@ async function submit() {
           <div v-for="(it, idx) in form.items" :key="`m-${idx}`" :class="['py-3 space-y-2', itemHasBothNegative(it) ? 'bg-danger-50' : '']">
             <div class="flex items-center justify-between text-xs text-neutral-500">
               <span class="font-mono">#{{ idx + 1 }}</span>
-              <button type="button" @click="removeItem(idx)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
+              <div class="flex items-center gap-2">
+                <button v-if="!isTextItem(it) && itemDetailsAvailable(it)" type="button" data-test="item-details-toggle-mobile"
+                  :title="itemDetailsOpen.has(it) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                  :aria-label="itemDetailsOpen.has(it) ? t('invoice.item_details.close') : t('invoice.item_details.open')"
+                  :aria-expanded="itemDetailsOpen.has(it)"
+                  class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border rounded"
+                  :class="itemDetailsFilled(it) ? 'border-primary-300 bg-primary-50 text-primary-700' : 'border-neutral-300 hover:bg-neutral-50'"
+                  @click="toggleItemDetails(it)">
+                  <svg class="w-4 h-4 transition-transform" :class="itemDetailsOpen.has(it) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+                </button>
+                <button type="button" @click="removeItem(idx)" class="cursor-pointer w-8 h-8 inline-flex items-center justify-center border border-danger-500/40 text-danger-500 hover:bg-danger-50 rounded text-lg leading-none">×</button>
+              </div>
             </div>
             <div v-if="isTextItem(it)" data-test="recurring-text-row-mobile">
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.text_row') }}</label>
@@ -1483,7 +1530,7 @@ async function submit() {
             <div>
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.description') }}</label>
               <input v-model="it.description" type="text" data-row-input="rec-item" :disabled="priceListEnabled && !!it.price_list_item_id && it.description_source === 'catalog'" class="w-full h-10 px-3 border border-neutral-300 rounded bg-surface text-sm disabled:bg-neutral-100" />
-              <label v-if="showItemAccounts && resultAccounts.available.value" class="mt-1.5 block text-xs font-medium text-neutral-600">
+              <label v-if="itemDetailsOpen.has(it) && resultAccounts.available.value" class="mt-1.5 block text-xs font-medium text-neutral-600">
                 <span class="mb-1 block">{{ t('invoice.item_account.label') }}</span>
                 <ChartAccountSelect v-model="it.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
                   compact :placeholder="t('invoice.item_account.placeholder')" />
@@ -1524,7 +1571,7 @@ async function submit() {
                 </select>
               </div>
             </div>
-            <div v-if="supplierIsVatPayer && !it.oss_applicable">
+            <div v-if="itemVatEditable(it) && itemDetailsOpen.has(it)">
               <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('recurring.vat_classification') }}</label>
               <select v-model="it.vat_classification_code" class="w-full h-10 px-2 border border-neutral-300 rounded bg-surface text-sm">
                 <option :value="null">{{ t('recurring.vat_classification_auto') }}</option>

@@ -491,12 +491,16 @@ final class PostingService
             $lockedUntil = $batchContext?->lockedUntil($this->db) ?? $this->lockedUntilForUpdate($supplierId);
             $dateLocked = $lockedUntil !== null && $entryDate <= $lockedUntil;
             $taxNeutralRewrite = $dateLocked && !empty($meta['tax_neutral_rewrite']);
-            if ($dateLocked && !$taxNeutralRewrite) {
+            // Druhá výjimka: zápis kroku uzávěrky. DPH za prosinec bývá podané dřív, než se
+            // uzavírá rok, a zámek k 31. 12. by pak zastavil každý závěrkový zápis. DPH se počítá
+            // z dokladů, ne z deníku, takže ho tyto zápisy nemění. Flag nastavuje jen ClosingService.
+            $closingStepInLock = $dateLocked && $allowClosing;
+            if ($dateLocked && !$taxNeutralRewrite && !$closingStepInLock) {
                 throw new PostingException(
                     'date_locked',
                     'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
                         . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
-                        . 'Zámek posuň v nastavení účetnictví (jen admin).',
+                        . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
                 );
             }
 
@@ -584,7 +588,7 @@ final class PostingService
                     $lockedUntil,
                     $allowClosing,
                     isset($meta['expected_row_version']) ? (int) $meta['expected_row_version'] : null,
-                    $taxNeutralRewrite,
+                    $taxNeutralRewrite || $closingStepInLock,
                 );
                 $auditPayload = [
                     'source_type' => $sourceType,
@@ -920,7 +924,8 @@ final class PostingService
         }
         $periodOpen = in_array($period['status'], $allowedStatuses, true);
 
-        if ($periodOpen && $lockedUntil !== null && $reversalDate <= $lockedUntil) {
+        // Storno závěrkového zápisu smí do zamčeného data ze stejného důvodu jako zápis sám.
+        if ($periodOpen && $lockedUntil !== null && $reversalDate <= $lockedUntil && empty($meta['allow_closing_period'])) {
             if ($explicitDate !== null) {
                 throw new PostingException(
                     'date_locked',

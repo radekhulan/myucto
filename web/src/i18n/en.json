@@ -19802,7 +19802,7 @@
         "card_clearing_open": "Card payment clearing account (378.x) with a balance — unsettled card payments at the balance-sheet date",
         "card_payments_unmatched": "Card payments without a document older than the limit in the card posting settings",
         "fx_footprint_missing": "Foreign-currency lines on an FX account without a complete currency footprint (currency_code/amount_foreign)",
-        "paid_proformas_no_advance": "Paid proformas without a booked received advance on 324",
+        "paid_proformas_no_advance": "Paid proformas without a booked received advance",
         "paid_advances_no_payment": "Paid supplier advance invoices without a booked payment on 314",
         "settled_but_unpaid": "Documents in the Sent state but with a payment already in the journal (update the status to Paid)",
         "cancelled_with_entry": "Cancelled documents whose journal entry is still active (books and records contradict each other)",
@@ -22328,7 +22328,7 @@
       "attachment_counterparty_ico": "counterparty company ID on the attachment differs",
       "attachment_variable_symbol": "variable symbol on the attachment differs",
       "payment_header_divergence": "The document paid status differs from the documented payments. Revaluation uses payments evidenced as of the reporting date.",
-      "fx_settlement_unproven": "The document balance cannot be reliably determined for revaluation. Open the exchange-rate preview and correct the indicated links."
+      "fx_settlement_unproven": "The foreign currency balance of this document cannot be determined and it stops the revaluation step. Open the document and correct the payment matching."
     },
     "open_list": "Open in list",
     "field": {
@@ -22381,7 +22381,7 @@
       "completed": "complete",
       "not_applicable": "Not applicable"
     },
-    "findings_count": "{count} findings",
+    "findings_count": "Findings: {count}",
     "showing_capped": "Showing {shown} of {total} findings",
     "capped_hint": "The list is truncated. Export to CSV for the complete set.",
     "loading": "Loading findings…",
@@ -22742,13 +22742,16 @@
       "free_hint": "Return without an original invoice: enter the unit manually, it is received back into stock."
     },
     "item_account": {
-      "show": "Line accounts",
-      "hide": "Hide line accounts",
-      "open": "Show line account",
-      "close": "Hide line account",
       "hint": "Account of individual lines: a revenue account, or a balance sheet account for rebilling (except receivable, payable, tax and cash accounts). Empty = product account, its category, a revenue rule, otherwise the invoice posting template.",
       "label": "Line account",
       "placeholder": "by product / document"
+    },
+    "item_details": {
+      "open": "Show line details",
+      "close": "Hide line details",
+      "vat_classification": "VAT classification",
+      "vat_classification_auto": "Automatic, based on the rate",
+      "vat_classification_hint": "Code for the VAT return, the control statement and the EC sales list. It is derived automatically from the rate and unit of measure, and derived again after they change. Choose it only where the derivation is not enough, for example a supply of goods to the EU with the unit \"ks\" or a sale of fixed assets."
     },
     "title": "Issued invoices",
     "col_order_number": "Order no.",
@@ -25465,9 +25468,9 @@
     "th_regex": "Regex",
     "field_required": "required",
     "field_optional": "optional",
-    "normalizer_config": "Normalizer config",
     "normalizer_invalid": "Normalizer config must be a valid JSON object.",
     "save_provider": "Save provider",
+    "field_direction": "Payment direction",
     "field_variable_symbol": "Variable symbol",
     "field_amount": "Amount",
     "field_currency": "Currency",
@@ -27737,6 +27740,18 @@
     },
     "kh": {
       "title": "Control statement (DPHKH1)",
+      "post_filing": {
+        "title": "Differences from the filed control statement",
+        "hint": "The current documents would produce a different statement from the one filed. Consider a corrective or follow-up control statement. Amounts are base / VAT.",
+        "filed": "filed",
+        "current": "today",
+        "evidence": "Open the document list of the filed statement",
+        "status": {
+          "amount_diff": "amount differs",
+          "only_submitted": "only in the filed statement",
+          "only_current": "only in current data"
+        }
+      },
       "subtitle": "EPO portal MF ČR report. Version 03.01.",
       "download_xml": "Download XML",
       "rows": "rows",

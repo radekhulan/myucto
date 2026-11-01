@@ -39,7 +39,9 @@ export function formatMoney(value: number | null | undefined, currency: string =
   // sloupci (účetní deník, banka) odlomilo „Kč" na druhý řádek a částka se
   // rozpadla na dva řádky. Odpovídá to i české typografii — číslo a jednotka
   // k sobě patří. Oddělovač tisíců z Intl(cs-CZ) je nezlomitelný už sám o sobě.
-  return `${formatter.format(value)} ${symbol}`
+  // Částka, která se zaokrouhlí na nulu, nesmí nést znaménko: Intl jinak vypíše „-0,00".
+  const shown = Number(value.toFixed(dec)) === 0 ? 0 : value
+  return `${formatter.format(shown)} ${symbol}`
 }
 
 /**
