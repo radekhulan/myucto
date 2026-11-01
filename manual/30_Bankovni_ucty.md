@@ -544,8 +544,10 @@ Whitelist může obsahovat víc položek oddělených mezerou, čárkou nebo st�
 
 Doménový tvar použijte u bank, které rozesílají avíza z několika adres. Odesílatel je ale jen první filtr, skutečnou ochranu dělá **Vyžadovat ověření autenticity** u IMAP účtu a povinné mapování cílového účtu avíza na váš bankovní účet.
 
-Povinná vytěžená pole: `variable_symbol`, `amount`, `currency`, `posted_at`, `recipient_account`. Volitelná pole:
+Povinná vytěžená pole: `amount`, `currency`, `posted_at`, `recipient_account`. Volitelná pole:
 
+- `direction` (směr platby, viz níže)
+- `variable_symbol` (avízo bez něj se zaeviduje, jen se nespáruje podle VS)
 - `counterparty_account`
 - `counterparty_name`
 - `constant_symbol`
@@ -553,7 +555,9 @@ Povinná vytěžená pole: `variable_symbol`, `amount`, `currency`, `posted_at`,
 - `bank_ref`
 - `balance` (disponibilní zůstatek účtu z avíza - zobrazí se v detailu měsíčního avízo-výpisu a promítne se do přehledu **Stavy na účtech**)
 
-Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56`, datum například `01. 06. 2026 10:15`.
+Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56` i mezery mezi tisíci, datum například `01. 06. 2026 10:15`.
+
+Částka se bere se znaménkem z avíza. Avízo bez znaménka určí směr polem `direction`: výdej znamená zachycený text obsahující například `odchozí`, `odešla`, `výdaj`, `debet`, `odepsáno` nebo `platba kartou`, jakýkoli jiný text příjem. U avíza, které je vždy výdejem, stačí vzor zachytit slovo z jeho věty, například `(?<value>platbu\s+kartou)`. Když vzor v avízu nic nenajde, zůstane znaménko z částky.
 
 ### 30.11.13 Příklad regex provideru pro Raiffeisenbank
 
