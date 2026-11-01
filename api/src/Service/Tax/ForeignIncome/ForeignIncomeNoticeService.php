@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\ForeignIncome;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
+use MyInvoice\Service\Tax\Return\TaxRepresentationService;
 
 /**
  * Sestaví oznámení o příjmech plynoucích do zahraničí (DPSHL1, § 38da ZDP)
@@ -40,6 +41,7 @@ final class ForeignIncomeNoticeService
     public function __construct(
         private readonly Connection $db,
         private readonly ForeignIncomeXmlBuilder $xmlBuilder,
+        private readonly TaxRepresentationService $representation,
     ) {}
 
     /**
@@ -92,6 +94,11 @@ final class ForeignIncomeNoticeService
             );
         }
         $supplier = EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
+        $representationDate = (string) ($meta['representation_date'] ?? '');
+        $meta['representation'] = $this->representation->at(
+            $supplierId,
+            preg_match('/^\d{4}-\d{2}-\d{2}$/', $representationDate) === 1 ? $representationDate : date('Y-m-d'),
+        );
 
         if ($formCode === self::FORM_INCOME_NOTICE) {
             $notice = $this->incomeNoticeFrom($payload);
