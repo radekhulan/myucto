@@ -174,6 +174,31 @@ final class DocumentSeriesTest extends TestCase
         }
     }
 
+    /**
+     * Pohledávky (OP) i závazky (OZ) číslují do jedné tabulky s jednou unikátností čísla
+     * (`uq_other_item_doc_no`). Stejný prefix obou řad by druhý potvrzený doklad shodil
+     * na chybě databáze, proto ho ruční úprava řady odmítne stejně jako u pokladny.
+     */
+    public function testOtherItemSeriesMayNotShareAPrefix(): void
+    {
+        $this->series->ensureSeriesRow($this->supplierId, 'other_receivable', self::YEAR, 'OP');
+        $this->series->ensureSeriesRow($this->supplierId, 'other_payable', self::YEAR, 'OZ');
+
+        foreach ([['other_payable', 'OP'], ['other_receivable', 'OZ']] as [$code, $prefix]) {
+            try {
+                $this->series->updateSeries($this->supplierId, $code, self::YEAR, ['prefix' => $prefix]);
+                self::fail('Prefix ' . $prefix . ' už drží druhá řada ostatních položek.');
+            } catch (ClosingException $e) {
+                self::assertSame('series_prefix_taken', $e->errorCode);
+            }
+        }
+
+        // Jiný prefix projde a pokladní skupina je na ostatních položkách nezávislá.
+        $this->series->updateSeries($this->supplierId, 'other_payable', self::YEAR, ['prefix' => 'OZA']);
+        $this->series->updateSeries($this->supplierId, 'cash_in', self::YEAR, ['prefix' => 'OP']);
+        self::assertSame('OZA-2098-0001', $this->series->next($this->supplierId, 'other_payable', self::YEAR));
+    }
+
     public function testI16SeriesAreTenantScoped(): void
     {
         self::assertSame('UZ-2098-0001', $this->series->next($this->supplierId, 'closing', self::YEAR));

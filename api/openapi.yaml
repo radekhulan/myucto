@@ -17320,14 +17320,16 @@ paths:
         řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`. `next_number` je číslo PŘÍŠTÍHO
         vydaného dokladu — umožňuje navázat na řadu převzatou z jiného systému.
         `register_id` > 0 míří na vlastní řadu té pokladny (jen `cash_in` / `cash_out`),
-        0 nebo vynechané na společnou řadu firmy.
+        0 nebo vynechané na společnou řadu firmy. Prefix se nesmí shodovat s jinou řadou
+        téže skupiny se společnou unikátností čísla (pokladní řady `cash_in` / `cash_out`,
+        řady ostatních položek `other_receivable` / `other_payable`) — jinak `series_prefix_taken`.
 
         Deníkové řady (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) jsou
         dostupné jen v podvojném účetnictví; v daňové evidenci vrátí `wrong_accounting_mode`
         (403). Pokladní, skladové a objednávkové řady editují oba režimy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order] } }
+        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order, other_receivable, other_payable] } }
         - { in: path, name: year, required: true, schema: { type: integer } }
       requestBody:
         required: true
