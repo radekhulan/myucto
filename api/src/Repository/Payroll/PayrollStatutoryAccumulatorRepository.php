@@ -1164,6 +1164,41 @@ final class PayrollStatutoryAccumulatorRepository
         if (is_string($period) && $period !== '') {
             return ['kind' => 'submission', 'reference' => substr($period, 0, 7)];
         }
+        // Měsíční hlášení vazbu na revizi nenese, běh zná jeho povinnost
+        // (`payroll_run:<id>:…`). Bez toho by zámek po podání JMHZ nezabral.
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT obligation.period_start
+               FROM payroll_obligations obligation
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = obligation.supplier_id
+                AND submission.environment = obligation.environment
+                AND submission.obligation_id = obligation.id
+               JOIN payroll_runs run
+                 ON run.supplier_id = obligation.supplier_id
+                AND run.id = CAST(SUBSTRING_INDEX(SUBSTRING_INDEX(obligation.subject_reference, ':', 2), ':', -1) AS UNSIGNED)
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+               JOIN payroll_run_persons person
+                 ON person.supplier_id = revision.supplier_id
+                AND person.revision_id = revision.id
+                AND person.employee_id = ?
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = 'production'
+                AND obligation.agenda_code = 'JMHZ25'
+                AND obligation.subject_type = 'payroll_run'
+                AND obligation.period_start BETWEEN ? AND ?
+                AND submission.submitted_at IS NOT NULL
+                AND submission.status <> 'cancelled_in_time'
+              ORDER BY obligation.period_start, submission.id
+              LIMIT 1"
+        );
+        $stmt->execute([$employeeId, $supplierId, $from, $to]);
+        $period = $stmt->fetchColumn();
+        if (is_string($period) && $period !== '') {
+            return ['kind' => 'submission', 'reference' => substr($period, 0, 7)];
+        }
 
         if ($this->db->hasTable('payroll_annual_document_revisions')) {
             $stmt = $this->db->pdo()->prepare(

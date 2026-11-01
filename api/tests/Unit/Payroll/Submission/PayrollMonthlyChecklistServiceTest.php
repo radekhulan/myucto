@@ -551,6 +551,22 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertTrue($this->onlyItem($service, 'submission')['done']);
     }
 
+    /** JMHZ podané přes VREP nemá odchozí zprávu; sloupec nesmí tvrdit datovou schránku. */
+    public function testFiledJmhzShowsTheChannelItActuallyWentThrough(): void
+    {
+        $row = $this->submissionRow(
+            agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+            latestSubmissionStatus: 'accepted',
+            obligationStatus: 'fulfilled',
+        );
+        $row['latest_submission']['channel'] = 'vrep_apep';
+
+        $item = $this->onlyItem($this->service(submissionRows: [$row]), 'submission');
+
+        self::assertStringContainsString('VREP', (string) $item['channel']['label']);
+        self::assertStringNotContainsString('datová schránka', (string) $item['channel']['label']);
+    }
+
     /**
      * Odeslaný přehled VZP: dřív u něj svítila věta „firma nemá nastavenou
      * odesílací bránu ani datovou schránku", přestože zpráva právě odešla

@@ -67,6 +67,91 @@ final class PayrollOpeningBalanceServiceTest extends TestCase
         }
     }
 
+    /**
+     * Podané JMHZ zamkne, co z počátečního stavu vzalo: základ SP a daň. Zdravotní
+     * pojistné jde doplnit dál. Podání nese běh jen přes povinnost, ne `source_revision_id`.
+     */
+    public function testFiledMonthlyReportLocksReportedTotalsButNotHealthInsurance(): void
+    {
+        $months = [$this->month(1, 4000000, 900000)];
+        $this->service->save($this->supplierId, $this->employeeId, 2026, $months, 'Rekapitulace', null);
+        $this->fileMonthlyReport('2026-08-01');
+
+        self::assertNotNull($this->service->lockReason($this->supplierId, $this->employeeId, 2026));
+
+        $saved = $this->service->save(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            [array_replace($months[0], [
+                'health_assessment_base_minor_units' => 2240000,
+                'health_employee_contribution_minor_units' => 261900,
+            ])],
+            'Rekapitulace',
+            null,
+        );
+        self::assertSame(261900, $saved['months'][0]['health_employee_contribution_minor_units']);
+
+        $this->expectException(\DomainException::class);
+        $this->service->save(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            [$this->month(1, 5000000, 900000)],
+            'Rekapitulace',
+            null,
+        );
+    }
+
+    private function fileMonthlyReport(string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $userId = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $pdo->prepare(
+            "INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no)
+             VALUES (?, ?, '2026-09-10', 'approved', 1)"
+        )->execute([$this->supplierId, $periodStart]);
+        $runId = (int) $pdo->lastInsertId();
+        $json = '{"people":[]}';
+        $pdo->prepare(
+            "INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash,
+                 result_snapshot_json, result_snapshot_hash, idempotency_key_hash,
+                 approved_by, approved_at)
+             VALUES (?, ?, 1, 'regular', 'approved', 'payroll-run-input.v2', ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())"
+        )->execute([
+            $this->supplierId, $runId, str_repeat('a', 64), $json, hash('sha256', $json),
+            $json, hash('sha256', $json), hash('sha256', 'opening-lock-' . $runId, true), $userId,
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_run_persons (supplier_id, revision_id, employee_id, result_json, result_hash, status)
+             VALUES (?, ?, ?, ?, ?, 'calculated')"
+        )->execute([$this->supplierId, $revisionId, $this->employeeId, '{}', hash('sha256', '{}')]);
+        $pdo->prepare(
+            "INSERT INTO payroll_obligations
+                (supplier_id, environment, agenda_code, subject_type, subject_reference, period_start, period_end,
+                 obligation_kind, preferred_channel, status, source_event_type, source_event_reference,
+                 source_event_hash, request_fingerprint, idempotency_key_hash)
+             VALUES (?, 'production', 'JMHZ25', 'payroll_run', ?, ?, LAST_DAY(?), 'regular', 'vrep_apep', 'submitted',
+                     'jmhz_preparation_snapshot', 'jmhz_preparation:1', ?, ?, ?)"
+        )->execute([
+            $this->supplierId, 'payroll_run:' . $runId . ':office:1', $periodStart, $periodStart,
+            str_repeat('b', 64), str_repeat('c', 64), hash('sha256', 'opening-lock-obligation-' . $runId, true),
+        ]);
+        $obligationId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO payroll_submissions
+                (supplier_id, environment, obligation_id, submission_kind, channel, status,
+                 source_revision_id, source_snapshot_hash, request_fingerprint, idempotency_key_hash, submitted_at)
+             VALUES (?, 'production', ?, 'regular', 'vrep_apep', 'submitted', NULL, ?, ?, ?, UTC_TIMESTAMP())"
+        )->execute([
+            $this->supplierId, $obligationId, str_repeat('d', 64), str_repeat('e', 64),
+            hash('sha256', 'opening-lock-submission-' . $runId, true),
+        ]);
+    }
+
     public function testMonthlyTotalsBecomeTheYearlyOpeningAndUnblockTheRun(): void
     {
         $saved = $this->service->save(
