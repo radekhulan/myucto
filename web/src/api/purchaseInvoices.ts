@@ -737,6 +737,8 @@ export interface PurchaseInvoicePayload {
 }
 
 export interface PurchaseListFilters {
+  has_visual_document?: '0' | '1'
+  has_structured_source?: '0' | '1'
   include_vat_classification?: boolean
   include_journal_notes?: boolean
   include_document_tags?: boolean
@@ -873,6 +875,8 @@ export const purchaseInvoicesApi = {
     }
     if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
     if (filters.booked)      params['filter[booked]']      = filters.booked
+    if (filters.has_visual_document !== undefined) params['filter[has_visual_document]'] = filters.has_visual_document
+    if (filters.has_structured_source !== undefined) params['filter[has_structured_source]'] = filters.has_structured_source
     if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page

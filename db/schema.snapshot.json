@@ -1127,7 +1127,8 @@
         "2223_statement_map_349_358.sql",
         "2224_journal_period_source_index.sql",
         "2225_purchase_settled_outside.sql",
-        "2226_journal_line_pairing.sql"
+        "2226_journal_line_pairing.sql",
+        "2227_purchase_document_presence_indexes.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -5210,6 +5211,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (document_id, entity_type, entity_id)",
                 "idx_dl_entity": "BTREE (entity_type, entity_id)",
+                "idx_dl_supplier_entity_document": "BTREE (supplier_id, entity_type, entity_id, document_id)",
                 "idx_document_links_supplier_document": "BTREE (supplier_id, document_id)"
             },
             "foreign_keys": {
@@ -22695,6 +22697,8 @@
                 "idx_pi_supplier_external_barcode": "BTREE (supplier_id, external_barcode)",
                 "idx_pi_supplier_issue": "BTREE (supplier_id, issue_date)",
                 "idx_pi_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
+                "idx_pi_supplier_pdf_issue": "BTREE (supplier_id, pdf_path, issue_date)",
+                "idx_pi_supplier_source_issue": "BTREE (supplier_id, source_format, source_path, issue_date)",
                 "idx_pi_supplier_status_effcost": "BTREE (supplier_id, status, effective_cost_date)",
                 "idx_pi_supplier_vendor_no_key": "BTREE (supplier_id, vendor_invoice_number_match_key)",
                 "idx_pi_supplier_vs_key": "BTREE (supplier_id, varsymbol_match_key)",

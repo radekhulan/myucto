@@ -109,6 +109,8 @@ const approvalFilter = ref<'' | 'pending' | 'approved' | 'rejected'>('')
 const paymentOrderedFilter = ref<'' | '1' | '0'>('')
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
+const structuredSourceFilter = ref<'' | '1' | '0'>('')
+const visualDocumentFilter = ref<'' | '1' | '0'>('')
 const currencyFilter = ref('')
 const vendorFilter = ref<number | ''>('')
 const vendors = ref<Client[]>([])
@@ -138,6 +140,8 @@ const activeFilterCount = computed(() => {
   if (approvalFilter.value) n++
   if (paymentOrderedFilter.value) n++
   if (bookedFilter.value) n++
+  if (structuredSourceFilter.value) n++
+  if (visualDocumentFilter.value) n++
   if (importBatchFilter.value) n++
   return n
 })
@@ -184,6 +188,8 @@ const filterChips = computed<FilterChip[]>(() => {
   if (bookedFilter.value) {
     chips.push({ key: 'booked', value: t(bookedFilter.value === '1' ? 'common.booked_badge' : 'common.unbooked_badge') })
   }
+  if (visualDocumentFilter.value) chips.push({ key: 'has_visual_document', value: `${t('purchase_invoice.filters.has_visual_document')}: ${t('purchase_invoice.filters.document_' + (visualDocumentFilter.value === '1' ? 'present' : 'missing'))}` })
+  if (structuredSourceFilter.value) chips.push({ key: 'has_structured_source', value: `${t('purchase_invoice.filters.has_structured_source')}: ${t('purchase_invoice.filters.document_' + (structuredSourceFilter.value === '1' ? 'present' : 'missing'))}` })
   if (importBatchFilter.value) chips.push({ key: 'importBatch', value: t('purchase_invoice.filters.import_batch') })
   return chips
 })
@@ -206,6 +212,8 @@ function clearFilter(key: string) {
     case 'approval': approvalFilter.value = ''; break
     case 'paymentOrdered': paymentOrderedFilter.value = ''; break
     case 'booked': bookedFilter.value = ''; break
+    case 'has_structured_source': structuredSourceFilter.value = ''; break
+    case 'has_visual_document': visualDocumentFilter.value = ''; break
     case 'importBatch': importBatchFilter.value = ''; break
   }
 }
@@ -498,6 +506,8 @@ function loadFiltersFromQuery(q: typeof route.query) {
     ? q.approval_status : ''
   paymentOrderedFilter.value = q.payment_ordered === '1' ? '1' : (q.payment_ordered === '0' ? '0' : '')
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
+  structuredSourceFilter.value = q.has_structured_source === '1' ? '1' : (q.has_structured_source === '0' ? '0' : '')
+  visualDocumentFilter.value = q.has_visual_document === '1' ? '1' : (q.has_visual_document === '0' ? '0' : '')
   statusFilter.value = typeof q.status === 'string' ? (q.status as PurchaseInvoiceStatus) : ''
   kindFilter.value   = typeof q.kind === 'string' ? (q.kind as PurchaseDocumentKind) : ''
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
@@ -539,6 +549,8 @@ function buildQuery(): Record<string, string> {
   if (approvalFilter.value) q.approval_status = approvalFilter.value
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
   if (bookedFilter.value) q.booked = bookedFilter.value
+  if (structuredSourceFilter.value) q.has_structured_source = structuredSourceFilter.value
+  if (visualDocumentFilter.value) q.has_visual_document = visualDocumentFilter.value
   if (importBatchFilter.value) q.import_batch = importBatchFilter.value
   if (search.value) q.q = search.value
   return q
@@ -559,7 +571,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter,
+       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter, structuredSourceFilter, visualDocumentFilter,
        currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
   syncFiltersToUrl()
   load()
@@ -590,6 +602,8 @@ watch(() => route.query, (newQ) => {
     approvalFilter.value = ''
     paymentOrderedFilter.value = ''
     bookedFilter.value = ''
+    structuredSourceFilter.value = ''
+    visualDocumentFilter.value = ''
     currencyFilter.value = ''
     vendorFilter.value = ''
     projectFilter.value = ''
@@ -727,6 +741,8 @@ function listParams(): PurchaseListParams {
     approval_status: approvalFilter.value || undefined,
     payment_ordered: paymentOrderedFilter.value || undefined,
     booked:        bookedFilter.value  || undefined,
+    has_structured_source: structuredSourceFilter.value || undefined,
+    has_visual_document: visualDocumentFilter.value || undefined,
     import_batch_id: importBatchFilter.value || undefined,
     q:             search.value       || undefined,
     per_page: 50,
@@ -1318,6 +1334,35 @@ useWindowRefresh(refreshLoadedPages,
           <option value="1">{{ t('purchase_invoice.filters.payment_ordered_yes') }}</option>
           <option value="0">{{ t('purchase_invoice.filters.payment_ordered_no') }}</option>
         </select>
+        <fieldset data-test="document-sources-filters"
+          class="relative min-w-0 max-w-full rounded-md border border-neutral-200 px-2 pt-2.5 pb-1">
+          <legend class="sr-only">{{ t('purchase_invoice.filters.document_sources') }}</legend>
+          <span aria-hidden="true" class="pointer-events-none absolute -top-2 left-2 bg-surface px-1 text-xs leading-4 font-medium text-neutral-500">
+            {{ t('purchase_invoice.filters.document_sources') }}
+          </span>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <label class="flex flex-wrap items-center gap-1.5 text-sm text-neutral-700"
+              :title="t('purchase_invoice.filters.has_visual_document_hint')">
+              {{ t('purchase_invoice.filters.has_visual_document') }}
+              <select v-model="visualDocumentFilter" data-test="has_visual_document-filter"
+                class="h-[calc(2.25rem-2px)] px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="">{{ t('purchase_invoice.filters.document_all') }}</option>
+                <option value="1">{{ t('purchase_invoice.filters.document_present') }}</option>
+                <option value="0">{{ t('purchase_invoice.filters.document_missing') }}</option>
+              </select>
+            </label>
+            <label class="flex flex-wrap items-center gap-1.5 text-sm text-neutral-700"
+              :title="t('purchase_invoice.filters.has_structured_source_hint')">
+              {{ t('purchase_invoice.filters.has_structured_source') }}
+              <select v-model="structuredSourceFilter" data-test="has_structured_source-filter"
+                class="h-[calc(2.25rem-2px)] px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option value="">{{ t('purchase_invoice.filters.document_all') }}</option>
+                <option value="1">{{ t('purchase_invoice.filters.document_present') }}</option>
+                <option value="0">{{ t('purchase_invoice.filters.document_missing') }}</option>
+              </select>
+            </label>
+          </div>
+        </fieldset>
         <select v-if="isDoubleEntry" v-model="bookedFilter"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('common.booked_filter_all')">
@@ -1358,7 +1403,7 @@ useWindowRefresh(refreshLoadedPages,
     </div>
 
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState v-if="search || statusFilter || kindFilter" variant="filtered"
+      <EmptyState v-if="search || activeFilterCount" variant="filtered"
         :title="t('purchase_invoice.empty_filtered')"
         :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
       <EmptyState v-else icon="inbox"

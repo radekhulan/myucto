@@ -36,6 +36,28 @@ Oproti vystaveným fakturám se liší takto:
 | po přijetí a uhrazení | Zaúčtovat doklady do deníku | detail faktury nebo seznam, postup v [§ 23.7](#237-krok-za-krokem-zauctovat-fakturu) |
 | po uzávěrce měsíce | Předat doklady účetní | [Export přijatých](24_Export_prijatych.md) |
 
+### Filtry podkladů
+
+V **Filtrech** seznamu přijatých faktur jsou ve společné skupině **Podklady dokladu** dva nezávislé výběry:
+
+| Filtr | Co kontroluje |
+|---|---|
+| **PDF / sken** | Uložené PDF či nahranou fotku, včetně dostupných PDF a obrázků v připojených Dokumentech. |
+| **ISDOC / XML** | Archivovaný zdroj importu: ISDOC, ISDOCX, Pohoda XML nebo iDoklad/Fakturoid JSON. |
+
+Oba nabízejí **Vše**, **Přiložen** a **Chybí**. Lze je kombinovat s rokem,
+dodavatelem a dalšími filtry a uložit do pohledu. Například **PDF / sken: Chybí**
+a **ISDOC / XML: Přiložen** vyhledá importované faktury bez vizuálního podkladu.
+
+Filtry kontrolují přítomnost podkladu v aplikaci, nikoli jeho obsah nebo pravost;
+připojeným PDF může být i smlouva či dodací list. Neověřují fyzickou dostupnost
+souboru na disku. Dokumenty v koši nebo bez oprávnění k zobrazení se nezapočítávají.
+Bez práva číst Dokumenty se vizuální podklad počítá jen z vlastního archivu faktury.
+Vlastní tiskové PDF vytvořené myÚčtem ani soubory v externím archivu se nepočítají.
+PDF ve zdrojovém archivu patří pouze mezi vizuální podklady; libovolné XML
+připojené v Dokumentech nenahrazuje strukturovaný zdroj importu.
+Přílohy jsou volitelné a **Chybí** neznamená chybu účetního dokladu.
+
 ## 23.2 Než začnete
 
 - **Dodavatel v adresáři.** Můžete ho vybrat ze seznamu, nebo založit přímo ve formuláři

@@ -8559,6 +8559,25 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
+          name: filter[has_visual_document]
+          description: >
+            1 = přiložené PDF / sken, 0 = chybí; vynechání neomezuje výběr.
+            Počítá uložené PDF faktury (také source_format=pdf) a aktivní připojené
+            PDF/obrázky dostupné uživateli. Dokumenty vyžadují právo documents:read
+            a procházejí stejnou kontrolou viditelnosti jako seznam příloh.
+            Bez tohoto práva se počítá jen vlastní archiv faktury.
+            Vlastní tiskový výstup ani externí archiv se nezapočítávají.
+            Přítomnost neověřuje obsah, pravost ani fyzickou dostupnost souboru.
+          schema: { type: string, enum: ['0', '1'] }
+        - in: query
+          name: filter[has_structured_source]
+          description: >
+            1 = archivovaný strukturovaný zdroj importu, 0 = chybí; vynechání neomezuje
+            výběr. Vyžaduje neprázdné source_path a source_format isdoc, isdocx,
+            pohoda_xml, idoklad_json nebo fakturoid_json. PDF ani libovolné XML
+            v připojených Dokumentech nestačí. Oba filtry se kombinují podmínkou AND.
+          schema: { type: string, enum: ['0', '1'] }
+        - in: query
           name: filter[status]
           schema: { type: string, enum: [draft, received, booked, paid, cancelled] }
         - in: query
@@ -8634,6 +8653,8 @@ paths:
           name: per_page
           schema: { type: integer, default: 50, maximum: 200 }
       responses:
+        '422':
+          description: Neplatná hodnota filtru (has_visual_document a has_structured_source přijímají pouze 0 nebo 1).
         '200':
           description: OK
           content:

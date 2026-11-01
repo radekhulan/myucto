@@ -827,10 +827,11 @@ final class PurchaseInvoiceRepository
      * Filtry:
      *   supplier_id (povinné — tenant scope)
      *   q, status, document_kind, vendor_id, year, month, date_from, date_to, currency, unpaid_only, overdue,
+     *   has_visual_document, has_structured_source (0|1; vynechání = bez omezení),
      *   unpaid_as_of (YYYY-MM-DD — neuhrazeno K DATU X, ne dnešní status; stejný zdroj
      *   pravdy o úhradě jako SaldoRepository::fetchOpenPurchases, viz komentář u filtru)
      */
-    public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0): array
+    public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0, ?DocumentViewerContext $documentViewer = null): array
     {
         $supplierId = (int) ($filters['supplier_id'] ?? 0);
         if ($supplierId === 0) {
@@ -839,6 +840,34 @@ final class PurchaseInvoiceRepository
 
         $where = ['pi.supplier_id = ?'];
         $params = [$supplierId];
+
+        // Přítomnost podkladu, nikoli kontrola obsahu či fyzického souboru.
+        // NULL viewer znamená bez přístupu k DMS; samotné companyOnly nestačí.
+        if (isset($filters['has_visual_document'])) {
+            $visual = "((pi.pdf_path IS NOT NULL AND pi.pdf_path <> '')
+                OR (pi.source_path IS NOT NULL AND pi.source_path <> '' AND pi.source_format IS NOT NULL AND pi.source_format = 'pdf'))";
+            if ($documentViewer !== null) {
+                [$visibility, $visibilityParams] = DocumentVisibility::clause($documentViewer, 'd');
+                $visual = "({$visual} OR EXISTS (
+                    SELECT 1 FROM document_links dl
+                    JOIN documents d ON d.supplier_id = dl.supplier_id AND d.id = dl.document_id
+                    WHERE dl.supplier_id = ? AND dl.supplier_id = pi.supplier_id
+                      AND dl.entity_type = 'purchase_invoice' AND dl.entity_id = pi.id
+                      AND d.deleted_at IS NULL
+                      AND (d.mime_type = 'application/pdf' OR d.mime_type LIKE 'image/%')
+                      {$visibility}
+                ))";
+                array_push($params, $supplierId, ...$visibilityParams);
+            }
+            $where[] = (string) $filters['has_visual_document'] === '1' ? $visual : "NOT {$visual}";
+        }
+        if (isset($filters['has_structured_source'])) {
+            // PDF ve source slotu ani libovolné XML v Dokumentech nejsou strukturovaný zdroj importu.
+            $structured = "(pi.source_path IS NOT NULL AND pi.source_path <> ''
+                AND pi.source_format IS NOT NULL
+                AND pi.source_format IN ('isdoc', 'isdocx', 'pohoda_xml', 'idoklad_json', 'fakturoid_json'))";
+            $where[] = (string) $filters['has_structured_source'] === '1' ? $structured : "NOT {$structured}";
+        }
 
         if (!empty($filters['status'])) {
             $statuses = is_array($filters['status']) ? $filters['status'] : [$filters['status']];
