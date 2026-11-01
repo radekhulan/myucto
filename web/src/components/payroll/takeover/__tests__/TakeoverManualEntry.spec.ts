@@ -27,7 +27,7 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }),
 }))
 
 import TakeoverManualEntry from '@/components/payroll/takeover/TakeoverManualEntry.vue'

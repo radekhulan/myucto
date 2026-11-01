@@ -48,7 +48,7 @@ vi.mock('@/api/eshop', () => ({ eshopApi: {
 } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn() }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
 
 import ProductAssemblies from '../ProductAssemblies.vue'
 
@@ -97,7 +97,7 @@ describe('product assembly tracking', () => {
       await wrapper.find('input[inputmode="decimal"]').setValue('2')
       await nextTick()
       for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(true)
-      const serials = wrapper.findAll('input[autocomplete="off"]')
+      const serials = wrapper.findAll('input[autocomplete="off"]:not([type="text"][inputmode="numeric"])')
       expect(serials).toHaveLength(2)
       await serials[0].setValue('PRODUCT-1')
       await serials[1].setValue('PRODUCT-2')

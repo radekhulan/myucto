@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -126,7 +127,7 @@ const SELECT = 'h-9 w-full px-2 border border-neutral-300 rounded-md text-sm bg-
             </label>
             <label class="block text-sm font-medium text-neutral-700">
               {{ t('payment_cards.clearing.effective_from') }}
-              <input v-model="form.effective_from" type="date" :class="SELECT" class="mt-1" :disabled="!canConfigure" />
+              <DateInput v-model="form.effective_from" :class="SELECT" class="mt-1" :disabled="!canConfigure" />
             </label>
           </div>
           <p class="md:col-span-2 xl:col-span-3 -mt-2 text-xs text-neutral-500">

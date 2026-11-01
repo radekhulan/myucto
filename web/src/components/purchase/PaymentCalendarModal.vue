@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 /**
  * Platební kalendář (issue #140): z tohoto dokladu (první platba) založí další platby
  * se stejným číslem, každou se svou splatností a částkou. Platby se předvyplní měsíčně
@@ -80,7 +81,7 @@ async function save() {
     <div class="space-y-2 max-h-80 overflow-y-auto">
       <div v-for="(r, i) in rows" :key="i" class="flex items-center gap-2" data-test="payment-calendar-row">
         <span class="w-6 text-xs text-neutral-400 text-right">{{ i + 2 }}.</span>
-        <input v-model="r.due_date" type="date" :aria-label="t('purchase_invoice.payment_calendar.due_date')"
+        <DateInput v-model="r.due_date" :aria-label="t('purchase_invoice.payment_calendar.due_date')"
           class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         <input v-model.number="r.amount" type="number" step="0.01" min="0" :aria-label="t('purchase_invoice.payment_calendar.amount')"
           class="w-full min-w-0 h-9 px-2 border border-neutral-300 rounded-md text-sm text-right bg-surface" />

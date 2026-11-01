@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -544,7 +545,7 @@ onBeforeUnmount(() => {
           </div>
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('eshop.price_matrix.on_date') }}
-            <input v-model="onDate" data-test="matrix-on-date" type="date" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2">
+            <DateInput v-model="onDate" data-test="matrix-on-date" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface px-3 py-2" />
           </label>
           <label class="block text-sm font-medium text-neutral-700">
             {{ t('eshop.price_matrix.deviation_threshold') }}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
@@ -162,15 +163,13 @@ onMounted(loadPreview)
         </label>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.declaration_sign_bulk.signed_on') }}</span>
-          <input
+          <DateInput
             v-model="signedOn"
-            type="date"
             :max="today"
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             data-test="declaration-sign-bulk-signed-on"
             :disabled="loading || applying"
-            @change="loadPreview"
-          >
+            @change="loadPreview" />
         </label>
         <button type="button" class="whitespace-nowrap" :class="btnOutline('neutral')" :disabled="loading || applying || !inputValid" @click="loadPreview">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
