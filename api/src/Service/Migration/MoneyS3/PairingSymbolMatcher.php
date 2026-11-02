@@ -360,7 +360,7 @@ final class PairingSymbolMatcher
         return $out;
     }
 
-    /** Číslice symbolu bez úvodních nul („VFZ026010" i „26010" => „26010"). */
+    /** Číslice symbolu bez úvodních nul („ZV025212" i „25212" => „25212"). */
     private static function symbolKey(string $symbol): string
     {
         return ltrim((string) preg_replace('/\D+/', '', $symbol), '0');

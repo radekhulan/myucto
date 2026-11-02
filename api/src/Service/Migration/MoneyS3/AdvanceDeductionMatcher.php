@@ -55,7 +55,7 @@ use PDO;
  * vydané faktury často pod symbolem jen jedné ze záloh („MD 311 / D 324" záporně za všechny
  * zálohy partnera), proto odkazem na zálohu je u vydané strany i párovací symbol řádku
  * (`ParSym`), shodný s číslem proformy nebo s číslicemi jejího variabilního symbolu
- * („26010" k „ZF26010") - funguje i u partnera bez IČO. Konečná faktura s vazbou na proformu
+ * („25212" k „ZV25212") - funguje i u partnera bez IČO. Konečná faktura s vazbou na proformu
  * (`parent_invoice_id`) se páruje jen v části, kterou saldokonto vazbě nepřiřadí (strana
  * čerpání nad částkou navázané proformy, {@see AdvanceDeductionService::importState()}),
  * a se svou proformou už ne; v cizí měně (strana čerpání se pak nepočítá) se nepáruje.
@@ -903,7 +903,7 @@ final class AdvanceDeductionMatcher
         return new AdvanceDeductionService($db, new AdvanceDeductionRepository($db), new SaldoRepository($db));
     }
 
-    /** Číslice symbolu bez úvodních nul („ZF026010" i „26010" => „26010"). */
+    /** Číslice symbolu bez úvodních nul („ZV025212" i „25212" => „25212"). */
     private static function symbolDigits(string $symbol): string
     {
         return ltrim(preg_replace('/\D+/', '', $symbol) ?? '', '0');
