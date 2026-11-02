@@ -1567,7 +1567,7 @@ final class ReportXlsxExporter
         $this->headerRow($sheet, $head, ['Kód', $typeName !== '' ? $typeName : 'Hodnota', 'Odpovědná osoba', 'Výnosy', 'Náklady', 'Výsledek']);
         $r = $head + 1;
         foreach ($data['rows'] ?? [] as $row) {
-            $sheet->setCellValueExplicit([1, $r], empty($row['semantic_key']) ? (string) $row['code'] : '', DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([1, $r], (string) $row['code'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([2, $r], str_repeat('    ', (int) $row['depth']) . (string) $row['name'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([3, $r], (string) ($row['responsible_user_name'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValue([4, $r], (float) $row['total']['revenue']);

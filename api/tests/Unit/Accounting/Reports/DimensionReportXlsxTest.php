@@ -73,6 +73,48 @@ final class DimensionReportXlsxTest extends TestCase
         self::assertEqualsWithDelta(193.0, $companies->getCell('D6')->getValue(), 0.001);
     }
 
+    /**
+     * Sloupec „Kód" je data pro strojové zpracování exportu: i u systémové hodnoty
+     * zůstává uložený kód (stejně jako před skrytím interních kódů v UI). Jen lidský
+     * nadpis sloupce v listu po účtech ukazuje systémovou hodnotu názvem.
+     */
+    public function testDimensionProfitKeepsStoredCodeOfSystemValue(): void
+    {
+        $zero = ['revenue' => 0.0, 'cost' => 0.0, 'result' => 0.0];
+        $ss = $this->load((new ReportXlsxExporter())->dimensionProfit([
+            'entity' => self::ENTITY,
+            'type' => ['name' => 'Činnost'],
+            'from' => '2094-01-01',
+            'to' => '2094-12-31',
+            'supplier_ids' => [1],
+            'restricted' => true,
+            'rows' => [
+                ['code' => 'economic', 'name' => 'Hospodářská činnost', 'semantic_key' => 'economic', 'depth' => 0, 'has_children' => false, 'total' => $zero],
+                ['code' => 'P', 'name' => 'Projekt', 'semantic_key' => null, 'depth' => 0, 'has_children' => false, 'total' => $zero],
+            ],
+            'totals' => $zero,
+            'matrix' => [
+                'columns' => [
+                    ['key' => '1', 'value_id' => 1, 'code' => 'economic', 'name' => 'Hospodářská činnost', 'semantic_key' => 'economic'],
+                    ['key' => '2', 'value_id' => 2, 'code' => 'P', 'name' => 'Projekt', 'semantic_key' => null],
+                ],
+                'rows' => [],
+                'results' => [0.0, 0.0],
+                'total_result' => 0.0,
+            ],
+        ]));
+
+        $tree = $ss->getSheet(0);
+        self::assertSame('economic', $tree->getCell('A7')->getValue());
+        self::assertSame('Hospodářská činnost', $tree->getCell('B7')->getValue());
+        self::assertSame('P', $tree->getCell('A8')->getValue());
+
+        $matrix = $ss->getSheetByName('Po účtech');
+        self::assertNotNull($matrix);
+        self::assertSame('Hospodářská činnost', $matrix->getCell('C3')->getValue());
+        self::assertSame('P Projekt', $matrix->getCell('D3')->getValue());
+    }
+
     public function testCashFlowAndDimensionLineOnFilteredStatement(): void
     {
         $group = ['total' => 0.0, 'accounts' => []];
