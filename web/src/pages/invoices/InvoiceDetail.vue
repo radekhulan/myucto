@@ -245,6 +245,11 @@ const signingProfiles = ref<SigningProfile[]>([])
 const signatureSelectionLoading = ref(false)
 const signatureSelectionSaving = ref<PdfSignatureDocumentEntityType | null>(null)
 const wrHasDates = computed(() => !!workReport.value?.items.some(i => !!i.work_date))
+/** Viditelné sloupce výkazu; bez uložených voleb vše jako dřív. */
+const wrShow = computed(() => {
+  const options = workReport.value?.effective_display_options
+  return { hours: options?.hours !== false, rate: options?.rate !== false, amount: options?.amount !== false }
+})
 const hasPdfSigningProfiles = computed(() => signingProfiles.value.some(
   profile => profile.is_active && profile.allowed_usages.includes('pdf'),
 ))
@@ -3352,10 +3357,12 @@ useWindowRefresh(async () => {
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
               <span v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="font-mono">{{ formatDate(it.work_date) }}</span>
               <span v-else></span>
-              <span class="inline-flex flex-wrap items-baseline gap-x-2">
-                <span v-if="workReport.effective_display_options?.hours !== false" class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
-                <span v-if="workReport.effective_display_options?.rate !== false" class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
-                <span v-if="workReport.effective_display_options?.amount !== false" class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
+              <span>
+                <span v-if="wrShow.hours" class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
+                <span v-if="wrShow.hours && wrShow.rate" class="text-neutral-400 mx-1.5">·</span>
+                <span v-if="wrShow.rate" class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
+                <span v-if="wrShow.amount && (wrShow.hours || wrShow.rate)" class="text-neutral-400 mx-1.5">·</span>
+                <span v-if="wrShow.amount" class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
               </span>
             </div>
           </div>
