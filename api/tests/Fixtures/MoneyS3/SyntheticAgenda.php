@@ -43,6 +43,7 @@ final class SyntheticAgenda
     public const SECOND_VENDOR_ICO = '22334459';
     public const ADVANCE_VENDOR_ICO = '33445567';
     public const SECOND_ADVANCE_VENDOR_ICO = '44556675';
+    public const ADVANCE_CUSTOMER_ICO = '55667783';
     public const VERSION = '26.600';
 
     private const JOURNAL_FIELDS = [
@@ -1202,6 +1203,92 @@ final class SyntheticAgenda
             $bank('BV25111', '2025-04-10', '7700011', 'Dodavatel Epsilon a.s.', 33),
             $bank('BV25112', '2025-05-10', '7700011', 'Dodavatel Epsilon a.s.', 34),
             $bank('BV25113', '2025-06-10', '7700011', 'Dodavatel Epsilon a.s.', 35),
+        ]);
+        return $files;
+    }
+
+    /**
+     * Agenda s čerpáním přijatých záloh (proformy na 324), které Money vede bez vazby na
+     * všechny zálohy. Převádí se od roku 2025:
+     *   - Odběratel Zeta zaplatil proformy ZV25201 (1 000 Kč, BP25201) a ZV25202 (2 000 Kč,
+     *     BP25202). Konečná FV25201 odečítá obě jedním řádkem „MD 311 / D 324" se zápornou
+     *     částkou -3 000 pod symbolem první proformy; položka odpočtu odkazuje jen na ZV25201,
+     *     takže faktura dostane vazbu na ZV25201 a ZV25202 zůstane bez čerpání,
+     *   - Odběratel Éta (bez IČO) zaplatil ZV25211 (500 Kč) a ZV25212 (800 Kč). Konečná
+     *     FV25211 odečítá řádkem „MD 324 / D 311" 800 Kč s párovacím symbolem 25212 (číslice
+     *     čísla proformy ZV25212), ne nejstarší zálohu.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithIssuedAdvanceDeductions(): array
+    {
+        $files = self::files();
+        $journalFields = array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20]]);
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $n = 400;
+        $line = static function (string $zdroj, string $doklad, string $datum, string $popis, string $md, string $d, float $castka, string $sym, string $ico) use (&$n): array {
+            $row = ['Cislo' => $n++, 'Zdroj' => $zdroj, 'Doklad' => $doklad, 'Datum' => $datum, 'Popis' => $popis, 'UcMD' => $md, 'UcD' => $d,
+                'Castka' => $castka, 'ParSym' => $sym, 'ParICO' => $ico];
+            return $zdroj === 'FV' ? $row + ['DatPlnDPH' => $datum] : $row;
+        };
+        $zeta = self::ADVANCE_CUSTOMER_ICO;
+        $append('ROK.002/UcDenik.DAT', $journalFields, [
+            $line('BK', 'BP25201', '2025-03-05', 'Úhrada zálohové faktury ZV25201', '221001', '324000', 1000.0, '25201', $zeta),
+            $line('BK', 'BP25202', '2025-03-06', 'Úhrada zálohové faktury ZV25202', '221001', '324000', 2000.0, '25202', $zeta),
+            $line('FV', 'FV25201', '2025-04-10', 'Montáž', '311000', '602000', 4000.0, '2025210', $zeta),
+            $line('FV', 'FV25201', '2025-04-10', 'Montáž - DPH', '311000', '343200', 840.0, '2025210', $zeta),
+            $line('FV', 'FV25201', '2025-04-10', 'Odpočet záloh', '311000', '324000', -3000.0, '25201', $zeta),
+            $line('BK', 'BP25211', '2025-05-02', 'Úhrada zálohové faktury', '221001', '324000', 500.0, '25211', ''),
+            $line('BK', 'BP25212', '2025-05-03', 'Úhrada zálohové faktury', '221001', '324000', 800.0, '25212', ''),
+            $line('FV', 'FV25211', '2025-06-01', 'Servis', '311000', '602000', 1000.0, '2025221', ''),
+            $line('FV', 'FV25211', '2025-06-01', 'Servis - DPH', '311000', '343200', 210.0, '2025221', ''),
+            $line('FV', 'FV25211', '2025-06-01', 'Odpočet zálohy', '324000', '311000', 800.0, '25212', ''),
+        ]);
+        $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '324000', 'Nazev' => 'Přijaté zálohy']]);
+        $customer = static fn (string $ico, string $name): array => [
+            'O_ICO' => $ico, 'O_DIC' => $ico !== '' ? 'CZ' . $ico : '', 'O_Nazev' => $name,
+            'O_Ulice' => 'Ukázková 9', 'O_Mesto' => 'Olomouc', 'O_Psc' => '779 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+        ];
+        $proforma = static fn (array $partner, int $cislo, string $no, string $date, float $amount, string $bank): array => $partner + [
+            'Cislo' => $cislo, 'Druh' => 'Z', 'Doklad' => $no, 'VarSymbol' => substr($no, 2),
+            'Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date,
+            'Zaklad_0' => $amount, 'CelkemSDPH' => $amount, 'Uhrazeno' => $date, 'UDoklad' => $bank, 'Popis' => 'Záloha',
+        ];
+        $final = static fn (array $partner, int $cislo, string $no, string $sym, string $date, float $base, string $popis): array => $partner + [
+            'Cislo' => $cislo, 'Druh' => 'N', 'Doklad' => $no, 'VarSymbol' => $sym,
+            'Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date,
+            'Zaklad_2' => $base, 'DPH_2' => round($base * 0.21, 2), 'CelkemSDPH' => round($base * 1.21, 2), 'Popis' => $popis,
+        ];
+        $z = $customer($zeta, 'Odběratel Zeta s.r.o.');
+        $e = $customer('', 'Odběratelka Éta');
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4]]), [
+            $proforma($z, 201, 'ZV25201', '2025-03-01', 1000.0, 'BP25201'),
+            $proforma($z, 202, 'ZV25202', '2025-03-02', 2000.0, 'BP25202'),
+            $final($z, 203, 'FV25201', '2025210', '2025-04-10', 4000.0, 'Montáž'),
+            $proforma($e, 211, 'ZV25211', '2025-05-01', 500.0, 'BP25211'),
+            $proforma($e, 212, 'ZV25212', '2025-05-02', 800.0, 'BP25212'),
+            $final($e, 213, 'FV25211', '2025221', '2025-06-01', 1000.0, 'Servis'),
+        ]);
+        $files['ROK.002/VFaktPol.DAT'] = Ms3FixtureWriter::table([
+            ['Cislo', 'L', 4], ['Popis', 'C', 60], ['Cena', 'E', 10], ['PocetMJ', 'E', 10], ['Zaloha', 'B', 1], ['CisloZaFak', 'L', 4], ['RokZaFak', 'C', 3],
+        ], [
+            ['Cislo' => 203, 'Popis' => 'Montáž', 'Cena' => 4000.0, 'PocetMJ' => 1.0],
+            ['Cislo' => 203, 'Popis' => 'Odpočet zálohy ZV25201', 'Cena' => -3000.0, 'PocetMJ' => 1.0, 'Zaloha' => 1, 'CisloZaFak' => 201],
+        ]);
+        $bank = static fn (string $no, string $date, float $amount, string $vs, string $name, int $vypis): array => [
+            'Doklad' => $no, 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => $date, 'DatPlat' => $date, 'Celkem' => $amount,
+            'VarSym' => $vs, 'AdNazev' => $name, 'Popis' => 'Úhrada zálohy', 'Vypis' => $vypis,
+        ];
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [
+            $bank('BP25201', '2025-03-05', 1000.0, '25201', 'Odběratel Zeta s.r.o.', 41),
+            $bank('BP25202', '2025-03-06', 2000.0, '25202', 'Odběratel Zeta s.r.o.', 42),
+            $bank('BP25211', '2025-05-02', 500.0, '25211', 'Odběratelka Éta', 43),
+            $bank('BP25212', '2025-05-03', 800.0, '25212', 'Odběratelka Éta', 44),
         ]);
         return $files;
     }

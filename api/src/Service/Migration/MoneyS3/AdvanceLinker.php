@@ -32,7 +32,7 @@ use PDO;
  * k záloze téhož partnera. Vrácení zálohy příchozí platbou se spáruje se zálohou
  * ({@see matchAdvanceRefunds()}). Čerpání, které Money vede bez odkazu na zálohu (řádek
  * konečné faktury na zálohovém účtu s vlastním symbolem faktury), spáruje podle saldokonta
- * {@see AdvanceDeductionMatcher}.
+ * {@see AdvanceDeductionMatcher} - poskytnuté zálohy na 314 i přijaté proformy na 324.
  *
  * Existující vazby převod nepřepisuje a opakovaný převod nic nezdvojí.
  */
@@ -125,11 +125,19 @@ final class AdvanceLinker
                     }
                 }
             }
-            $issued ? $this->linkIssued($ctx, $deductions, $ddkp) : $this->linkPurchase($ctx, $deductions, $ddkp, $legacy);
+            if ($issued) {
+                $this->linkIssued($ctx, $deductions, $ddkp);
+                $issuedRefs = array_map(static fn (array $advances): array => array_keys($advances), $deductions);
+            } else {
+                $this->linkPurchase($ctx, $deductions, $ddkp, $legacy);
+            }
         }
         $this->matchAdvanceRefunds($ctx);
         $this->repointCancelledAdvanceRefunds($ctx);
         (new AdvanceDeductionMatcher($this->db, $this->map))->match($ctx, $dirs);
+        // Vydaná faktura s víc zálohami vazbu na doklad nedostane; čerpání proforem páruje
+        // saldokonto 324 (odkazy položek odpočtu mají přednost).
+        AdvanceDeductionMatcher::issued($this->db, $this->map)->match($ctx, $dirs, $issuedRefs ?? []);
     }
 
     /**

@@ -48,10 +48,21 @@ use PDO;
  * nevzniklo převodem (sloupec `source` mimo `import`, nebo čerpání mimo mapu převodu), se
  * z párování vyřadí celé. Čerpání, které převod založil a uživatel smazal, se znovu nezaloží
  * a jeho faktura ani záloha se dál nepárují. Opakovaný převod nic nezdvojí.
+ *
+ * Stejně se páruje čerpání přijatých záloh na 324 ({@see issued()}): zálohou je otevřená
+ * proforma saldokonta 324 (datum první přijaté úhrady), čerpáním debet převzaté vydané
+ * konečné faktury na 324 a výsledkem `invoice_advance_deductions`. Money vede odpočet
+ * vydané faktury často pod symbolem jen jedné ze záloh („MD 311 / D 324" záporně za všechny
+ * zálohy partnera), proto odkazem na zálohu je u vydané strany i párovací symbol řádku
+ * (`ParSym`), shodný s číslem proformy nebo s číslicemi jejího variabilního symbolu
+ * („26010" k „ZF26010") - funguje i u partnera bez IČO. Konečná faktura s vazbou na proformu
+ * (`parent_invoice_id`) se páruje jen v části, kterou saldokonto vazbě nepřiřadí (strana
+ * čerpání nad částkou navázané proformy, {@see AdvanceDeductionService::importState()}),
+ * a se svou proformou už ne; v cizí měně (strana čerpání se pak nepočítá) se nepáruje.
+ * Dobropisy vydaných faktur saldokonto 324 nevede, opravné doklady se proto nepárují.
  */
 final class AdvanceDeductionMatcher
 {
-    private const ACCOUNT = '314';
     private const EPSILON = 0.005;
     /** Haléřové zbytky (zaokrouhlení DDKP a vyúčtování v Money) FIFO s cizí zálohou nepáruje. */
     private const MIN_FIFO = 1.0;
@@ -64,14 +75,30 @@ final class AdvanceDeductionMatcher
     private const CARRY_YEARS = 1;
 
     private ?bool $hasSource = null;
+    private readonly bool $issuedSide;
+    private readonly string $account;
 
+    /** @param 'purchase_invoice'|'invoice' $docType poskytnuté zálohy (314), nebo přijaté zálohy (324) */
     public function __construct(
         private readonly Connection $db,
         private readonly ?MoneyS3ImportRepository $map = null,
-    ) {}
+        private readonly string $docType = 'purchase_invoice',
+    ) {
+        $this->account = AdvanceDeductionService::accountForDocType($docType);
+        $this->issuedSide = $docType === 'invoice';
+    }
 
-    /** @param list<string> $dirs adresáře let, jejichž doklady převod zná */
-    public function match(ImportContext $ctx, array $dirs): void
+    /** Párování čerpání přijatých záloh (proformy na 324) vydanými konečnými fakturami. */
+    public static function issued(Connection $db, ?MoneyS3ImportRepository $map = null): self
+    {
+        return new self($db, $map, 'invoice');
+    }
+
+    /**
+     * @param list<string> $dirs adresáře let, jejichž doklady převod zná
+     * @param array<int,list<int>> $knownRefs konečná faktura => zálohy, které uvádí položka odpočtu dokladu Money
+     */
+    public function match(ImportContext $ctx, array $dirs, array $knownRefs = []): void
     {
         $years = [];
         foreach ($dirs as $dir) {
@@ -96,18 +123,23 @@ final class AdvanceDeductionMatcher
         $deductions = array_values(array_filter($this->deductions($ctx->supplierId, $accountId, $from), static fn (array $d): bool => !isset($blocked[$d['id']])));
         // Volný odpočet faktury určuje služba čerpání (SSOT i pro ruční čerpání); převod jí
         // nepřidělí víc, než zapíše, jinak by opakovaný běh rozděloval zbytek znovu.
-        $state = $deductions === [] ? [] : self::service($this->db)->importState($ctx->supplierId, 'purchase_invoice', array_column($deductions, 'id'));
+        $state = $deductions === [] ? [] : self::service($this->db)->importState($ctx->supplierId, $this->docType, array_column($deductions, 'id'));
         foreach ($deductions as $i => $d) {
             $s = $state[$d['id']] ?? null;
-            if ($s !== null && $s['posted'] && $s['deductible'] >= self::EPSILON) {
+            $counted = $s !== null && $s['posted'] && $s['deductible'] >= self::EPSILON;
+            if ($counted) {
                 $deductions[$i]['amount'] = round(min($d['amount'], max(0.0, $s['unassigned'])), 2);
+            } elseif (($d['skip'] ?? []) !== []) {
+                // Fakturu s vazbou na proformu, jejíž stranu čerpání služba nespočítá (cizí
+                // měna), saldokonto přiřadí celou proformě - zbytek se určit nedá.
+                $deductions[$i]['amount'] = 0.0;
             }
         }
         $deductions = array_values(array_filter($deductions, static fn (array $d): bool => $d['amount'] >= 0.01));
         if ($deductions === []) {
             return;
         }
-        $finals =array_fill_keys(array_column($deductions, 'id'), true);
+        $finals = array_fill_keys(array_column($deductions, 'id'), true);
         $corrections = array_values(array_filter(
             $this->corrections($ctx->supplierId, $pool),
             static fn (array $c): bool => isset($finals[$c['final']]) && !isset($blocked[$c['id']]),
@@ -129,13 +161,14 @@ final class AdvanceDeductionMatcher
         }
         $refIds = $this->referencedAdvances($ctx, $refs, $advances);
         foreach ($deductions as $i => $d) {
-            $deductions[$i]['refs'] = $refIds[$d['id']] ?? [];
+            $deductions[$i]['refs'] = array_values(array_unique(array_merge($knownRefs[$d['id']] ?? [], $refIds[$d['id']] ?? [])));
         }
         $result = self::allocate($opening, $advances, $deductions, $corrections);
         $written = $this->write($ctx, $result['deductions'], $mapped);
 
         // Souhrn do počtů kroku: zprávy kroku úhrad se u velké agendy ořezávají.
         $p = $ctx->protocol;
+        $prefix = $this->issuedSide ? 'issued_' : '';
         $dates = array_column($deductions, 'date', 'id');
         $locked = 0;
         foreach ($written as $finalId) {
@@ -145,14 +178,15 @@ final class AdvanceDeductionMatcher
         }
         if ($locked > 0) {
             // Čerpání mění saldokonto uzavřeného roku zpětně (deník ne) - účetní o tom ví.
-            $p->setCount(DocumentLinker::STEP_PAYMENTS, 'advance_deductions_closed_period', $locked);
+            $p->setCount(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deductions_closed_period', $locked);
         }
-        $p->setCount(DocumentLinker::STEP_PAYMENTS, 'advance_deductions_opening_amount', round($result['opening_consumed'], 2));
+        $p->setCount(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deductions_opening_amount', round($result['opening_consumed'], 2));
         if ($result['unmatched'] !== []) {
-            $p->setCount(DocumentLinker::STEP_PAYMENTS, 'advance_deductions_unmatched', count($result['unmatched']));
-            $p->setCount(DocumentLinker::STEP_PAYMENTS, 'advance_deductions_unmatched_amount', round(array_sum($result['unmatched']), 2));
-            $p->set('advance_deductions_unmatched', array_slice(array_map(
-                static fn (int $id, float $amount): array => ['purchase_invoice_id' => $id, 'amount' => $amount],
+            $idKey = $this->issuedSide ? 'invoice_id' : 'purchase_invoice_id';
+            $p->setCount(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deductions_unmatched', count($result['unmatched']));
+            $p->setCount(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deductions_unmatched_amount', round(array_sum($result['unmatched']), 2));
+            $p->set($prefix . 'advance_deductions_unmatched', array_slice(array_map(
+                static fn (int $id, float $amount): array => [$idKey => $id, 'amount' => $amount],
                 array_keys($result['unmatched']), $result['unmatched'],
             ), 0, ImportProtocol::LIST_LIMIT));
         }
@@ -163,7 +197,7 @@ final class AdvanceDeductionMatcher
      *
      * @param array<string,float> $opening partner => zálohy z doby před převodem
      * @param list<array{id:int,partner:string,date:string,open:float,fifo?:bool}> $advances otevřené zálohy (`fifo` = smí do FIFO, tj. korunová)
-     * @param list<array{id:int,partner:string,date:string,amount:float,refs?:list<int>,fifo?:bool}> $deductions nespárovaná čerpání
+     * @param list<array{id:int,partner:string,date:string,amount:float,refs?:list<int>,fifo?:bool,skip?:list<int>}> $deductions nespárovaná čerpání (`skip` = zálohy, které čerpání nesmí dostat)
      * @param list<array{id:int,final:int,amount:float}> $corrections opravný doklad konečné faktury a jeho debet na 314
      * @return array{deductions:array<int,array<int,float>>,unmatched:array<int,float>,opening_consumed:float,opening_left:array<string,float>}
      */
@@ -193,9 +227,15 @@ final class AdvanceDeductionMatcher
             $need[$finalId] = round($need[$finalId] - $amount, 2);
             $out[$finalId][$advanceId] = round(($out[$finalId][$advanceId] ?? 0.0) + $amount, 2);
         };
-        $take = static function (int $finalId, int $advanceId, float $amount) use (&$left, $add): void {
+        $skip = [];
+        foreach ($deductions as $d) {
+            foreach ($d['skip'] ?? [] as $advanceId) {
+                $skip[$d['id']][$advanceId] = true;
+            }
+        }
+        $take = static function (int $finalId, int $advanceId, float $amount) use (&$left, $add, $skip): void {
             $amount = round(min($amount, $left[$advanceId]), 2);
-            if ($amount < 0.01 || $finalId === $advanceId) {
+            if ($amount < 0.01 || $finalId === $advanceId || isset($skip[$finalId][$advanceId])) {
                 return;
             }
             $left[$advanceId] = round($left[$advanceId] - $amount, 2);
@@ -288,26 +328,40 @@ final class AdvanceDeductionMatcher
         return $out;
     }
 
+    /** Klíč mapy převodu pro čerpání poskytnuté zálohy (314). */
     public static function mapKey(int $finalId, int $advanceId): string
     {
         return 'pad|' . $finalId . '|' . $advanceId;
+    }
+
+    /** Klíč mapy převodu pro čerpání přijaté zálohy (324). */
+    public static function issuedMapKey(int $finalId, int $advanceId): string
+    {
+        return 'iad|' . $finalId . '|' . $advanceId;
+    }
+
+    private function key(int $finalId, int $advanceId): string
+    {
+        return $this->issuedSide ? self::issuedMapKey($finalId, $advanceId) : self::mapKey($finalId, $advanceId);
     }
 
     /** Sloupec `source` (čerpání zadané převodem / uživatelem v saldokontu) - jen pokud ho schéma má. */
     public function hasSourceColumn(): bool
     {
         if ($this->hasSource === null) {
-            $stmt = $this->db->pdo()->query(
+            $stmt = $this->db->pdo()->prepare(
                 "SELECT COUNT(*) FROM information_schema.columns
-                  WHERE table_schema = DATABASE() AND table_name = 'purchase_advance_deductions' AND column_name = 'source'"
+                  WHERE table_schema = DATABASE() AND table_name = ? AND column_name = 'source'"
             );
+            $stmt->execute([AdvanceDeductionRepository::table($this->docType)]);
             $this->hasSource = (int) $stmt->fetchColumn() > 0;
         }
         return $this->hasSource;
     }
 
     /**
-     * Otevřené položky saldokonta 314 přijatých dokladů firmy (doklad => otevřeno).
+     * Otevřené položky saldokonta zálohového účtu (314 přijatých dokladů, 324 vydaných)
+     * firmy (doklad => otevřeno).
      *
      * @return array<int,float>
      */
@@ -320,9 +374,14 @@ final class AdvanceDeductionMatcher
     private function accountId(int $supplierId): ?int
     {
         $stmt = $this->db->pdo()->prepare('SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ? ORDER BY is_synthetic DESC, id LIMIT 1');
-        $stmt->execute([$supplierId, self::ACCOUNT]);
+        $stmt->execute([$supplierId, $this->account]);
         $id = $stmt->fetchColumn();
         return $id === false ? null : (int) $id;
+    }
+
+    private function docTable(): string
+    {
+        return $this->issuedSide ? 'invoices' : 'purchase_invoices';
     }
 
     /**
@@ -337,12 +396,13 @@ final class AdvanceDeductionMatcher
     private function blocked(int $supplierId, array $mapped): array
     {
         $source = $this->hasSourceColumn() ? 'source' : "'import'";
-        $stmt = $this->db->pdo()->prepare("SELECT final_invoice_id, advance_invoice_id, {$source} FROM purchase_advance_deductions WHERE supplier_id = ?");
+        $table = AdvanceDeductionRepository::table($this->docType);
+        $stmt = $this->db->pdo()->prepare("SELECT final_invoice_id, advance_invoice_id, {$source} FROM {$table} WHERE supplier_id = ?");
         $stmt->execute([$supplierId]);
         $out = [];
         $live = [];
         foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$final, $advance, $src]) {
-            $key = self::mapKey((int) $final, (int) $advance);
+            $key = $this->key((int) $final, (int) $advance);
             $live[$key] = true;
             if ($src !== 'import' || !isset($mapped[$key])) {
                 $out[(int) $final] = true;
@@ -350,8 +410,10 @@ final class AdvanceDeductionMatcher
             }
         }
         $removed = [];
+        $prefix = $this->issuedSide ? 'iad|' : 'pad|';
         foreach ($mapped as $key => $_) {
-            if (!isset($live[$key])) {
+            // Mapa vede čerpání obou stran pod jedním druhem; druhá strana sem nepatří.
+            if (!isset($live[$key]) && str_starts_with((string) $key, $prefix)) {
                 $parts = explode('|', (string) $key);
                 $removed[(int) ($parts[1] ?? 0)] = (int) ($parts[2] ?? 0);
             }
@@ -360,7 +422,7 @@ final class AdvanceDeductionMatcher
             $ids = array_unique(array_merge(array_keys($removed), array_values($removed)));
             $exists = [];
             foreach (array_chunk($ids, 500) as $chunk) {
-                $q = $this->db->pdo()->prepare('SELECT id FROM purchase_invoices WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')');
+                $q = $this->db->pdo()->prepare('SELECT id FROM ' . $this->docTable() . ' WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')');
                 $q->execute([$supplierId, ...$chunk]);
                 foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
                     $exists[(int) $id] = true;
@@ -377,19 +439,20 @@ final class AdvanceDeductionMatcher
     }
 
     /**
-     * Otevřené položky saldokonta 314 přijatých dokladů s otevřenou částkou přesně podle
-     * saldokonta (SSOT {@see SaldoRepository::openItems()}).
+     * Otevřené položky saldokonta zálohového účtu dokladů téže strany s otevřenou částkou
+     * přesně podle saldokonta (SSOT {@see SaldoRepository::openItems()}).
      *
      * @return array<int,float> doklad => otevřeno
      */
     private function openItems(int $supplierId, int $accountId): array
     {
         $open = [];
-        foreach ((new SaldoRepository($this->db))->openItems($supplierId, $accountId, self::FAR_FUTURE, self::ACCOUNT) as $item) {
-            if (($item['doc_type'] ?? '') !== 'purchase_invoice') {
+        foreach ((new SaldoRepository($this->db))->openItems($supplierId, $accountId, self::FAR_FUTURE, $this->account) as $item) {
+            if (($item['doc_type'] ?? '') !== $this->docType) {
                 continue;
             }
-            $remaining = SaldoRepository::settlementAmounts((float) $item['booked_signed'], (float) $item['paid_ratio'])['remaining'];
+            // Přijatá záloha je na 324 dal - saldokonto ji vede se záporným znaménkem.
+            $remaining = ($this->issuedSide ? -1 : 1) * SaldoRepository::settlementAmounts((float) $item['booked_signed'], (float) $item['paid_ratio'])['remaining'];
             if ($remaining >= 0.01) {
                 $open[(int) $item['doc_id']] = $remaining;
             }
@@ -403,12 +466,36 @@ final class AdvanceDeductionMatcher
      * první úhrady (banka, pokladna), u zálohy placené konečnou fakturou den jejího zápisu,
      * u neuhrazené den vystavení.
      *
+     * Přijaté zálohy (324) jsou otevřené proformy převzaté převodem, datem je den první
+     * evidované úhrady, jinak den vystavení.
+     *
      * @param array<int,float> $pool
-     * @return list<array{id:int,partner:string,date:string,open:float,fifo:bool}>
+     * @return list<array{id:int,partner:string,date:string,open:float,fifo:bool,symbol?:string}>
      */
     private function advances(int $supplierId, array $pool): array
     {
         $out = [];
+        if ($this->issuedSide) {
+            foreach (array_chunk(array_keys($pool), 500) as $chunk) {
+                $stmt = $this->db->pdo()->prepare(
+                    "SELECT p.id, p.client_id, c.ic, p.issue_date, p.varsymbol, cur.code AS currency,
+                            (SELECT MIN(ip.paid_on) FROM invoice_payments ip WHERE ip.supplier_id = p.supplier_id AND ip.invoice_id = p.id) AS paid_on
+                       FROM invoices p
+                       JOIN clients c ON c.id = p.client_id
+                       JOIN currencies cur ON cur.id = p.currency_id
+                      WHERE p.supplier_id = ? AND p.id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
+                        AND p.invoice_type = 'proforma' AND p.total_with_vat >= 0
+                        AND " . TakenOverRecord::documentSql('invoice', 'p')
+                );
+                $stmt->execute([$supplierId, ...$chunk]);
+                while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                    $out[] = ['id' => (int) $r['id'], 'partner' => self::partner($r['ic'], (int) $r['client_id']),
+                        'date' => (string) ($r['paid_on'] ?? $r['issue_date']), 'open' => $pool[(int) $r['id']],
+                        'fifo' => $r['currency'] === 'CZK', 'symbol' => (string) $r['varsymbol']];
+                }
+            }
+            return $out;
+        }
         foreach (array_chunk(array_keys($pool), 500) as $chunk) {
             $stmt = $this->db->pdo()->prepare(
                 'SELECT p.id, p.vendor_id, c.ic, p.issue_date, p.document_kind, cur.code AS currency,
@@ -451,6 +538,9 @@ final class AdvanceDeductionMatcher
     private function corrections(int $supplierId, array $pool): array
     {
         $out = [];
+        if ($this->issuedSide) {
+            return $out; // saldokonto 324 vede jen proformy, opravný doklad v něm otevřený není
+        }
         foreach (array_chunk(array_keys($pool), 500) as $chunk) {
             $stmt = $this->db->pdo()->prepare(
                 "SELECT p.id, COALESCE(IF(p.document_kind = 'credit_note', p.parent_purchase_invoice_id, NULL),
@@ -471,33 +561,52 @@ final class AdvanceDeductionMatcher
     }
 
     /**
-     * Kredity převzatých konečných faktur na 314 od prvního převáděného roku, snížené
-     * o evidované čerpání faktury. Faktura s vazbou na zálohu se nebere (saldokonto jí
-     * přičítá celý kredit). Zápisy faktury (vlastní i skupina zaúčtování) bere stejně jako
-     * saldokonto ({@see SaldoRepository::advanceDeductionEntriesSql()}).
+     * Strana čerpání převzatých konečných faktur na zálohovém účtu (přijatá faktura kredit
+     * 314, vydaná debet 324) od prvního převáděného roku, snížená o evidované čerpání
+     * faktury. Přijatá faktura s vazbou na zálohu se nebere (saldokonto jí přičítá celý
+     * kredit); vydaná s vazbou na proformu ano, se `skip` = navázaná proforma - kolik strany
+     * zbývá mimo vazbu, určí {@see match()} podle služby čerpání. Zápisy faktury (vlastní
+     * i skupina zaúčtování) bere stejně jako saldokonto
+     * ({@see SaldoRepository::advanceDeductionEntriesSql()}).
      *
-     * @return list<array{id:int,partner:string,date:string,amount:float,fifo:bool}>
+     * @return list<array{id:int,partner:string,date:string,amount:float,fifo:bool,skip?:list<int>}>
      */
     private function deductions(int $supplierId, int $accountId, string $from): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT d.id, d.vendor_id, c.ic, cur.code AS currency, e.id AS entry_id, e.entry_date, l.account_id, l.side, l.signed_amount,
-                    (SELECT COALESCE(SUM(pad.amount), 0) FROM purchase_advance_deductions pad
-                      WHERE pad.supplier_id = d.supplier_id AND pad.final_invoice_id = d.id) AS deducted
-               FROM (" . DocumentPostingGroup::entriesSql('purchase_invoice', $supplierId) . ") de
-               JOIN purchase_invoices d ON d.id = de.doc_id AND d.supplier_id = {$supplierId}
-               JOIN journal_entries e ON e.supplier_id = d.supplier_id AND e.id = de.entry_id
-               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
-               JOIN clients c ON c.id = d.vendor_id
-               JOIN currencies cur ON cur.id = d.currency_id
-              WHERE d.document_kind = 'invoice' AND d.status NOT IN ('draft', 'cancelled')
-                AND d.advance_purchase_invoice_id IS NULL
-                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND e.entry_date >= ?
-                AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
-                AND " . TakenOverRecord::documentSql('purchase_invoice', 'd') . '
-              ORDER BY d.id, e.id, l.id'
-        );
+        $table = AdvanceDeductionRepository::table($this->docType);
+        $sql = $this->issuedSide
+            ? "SELECT d.id, d.client_id AS partner_id, c.ic, cur.code AS currency, e.id AS entry_id, e.entry_date, l.account_id, l.side, l.signed_amount,
+                      (SELECT lp.id FROM invoices lp WHERE lp.supplier_id = d.supplier_id AND lp.id = d.parent_invoice_id AND lp.invoice_type = 'proforma') AS linked,
+                      (SELECT COALESCE(SUM(t.amount), 0) FROM {$table} t WHERE t.supplier_id = d.supplier_id AND t.final_invoice_id = d.id) AS deducted
+                 FROM (" . DocumentPostingGroup::entriesSql('invoice', $supplierId) . ") de
+                 JOIN invoices d ON d.id = de.doc_id AND d.supplier_id = {$supplierId}
+                 JOIN journal_entries e ON e.supplier_id = d.supplier_id AND e.id = de.entry_id
+                 JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                 JOIN chart_of_accounts ca ON ca.id = l.account_id
+                 JOIN clients c ON c.id = d.client_id
+                 JOIN currencies cur ON cur.id = d.currency_id
+                WHERE d.invoice_type = 'invoice' AND d.status NOT IN ('draft', 'cancelled')
+                  AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND e.entry_date >= ?
+                  AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
+                  AND " . TakenOverRecord::documentSql('invoice', 'd') . '
+                ORDER BY d.id, e.id, l.id'
+            : "SELECT d.id, d.vendor_id AS partner_id, c.ic, cur.code AS currency, e.id AS entry_id, e.entry_date, l.account_id, l.side, l.signed_amount,
+                      NULL AS linked,
+                      (SELECT COALESCE(SUM(t.amount), 0) FROM {$table} t WHERE t.supplier_id = d.supplier_id AND t.final_invoice_id = d.id) AS deducted
+                 FROM (" . DocumentPostingGroup::entriesSql('purchase_invoice', $supplierId) . ") de
+                 JOIN purchase_invoices d ON d.id = de.doc_id AND d.supplier_id = {$supplierId}
+                 JOIN journal_entries e ON e.supplier_id = d.supplier_id AND e.id = de.entry_id
+                 JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                 JOIN chart_of_accounts ca ON ca.id = l.account_id
+                 JOIN clients c ON c.id = d.vendor_id
+                 JOIN currencies cur ON cur.id = d.currency_id
+                WHERE d.document_kind = 'invoice' AND d.status NOT IN ('draft', 'cancelled')
+                  AND d.advance_purchase_invoice_id IS NULL
+                  AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND e.entry_date >= ?
+                  AND (ca.id = {$accountId} OR ca.parent_id = {$accountId})
+                  AND " . TakenOverRecord::documentSql('purchase_invoice', 'd') . '
+                ORDER BY d.id, e.id, l.id';
+        $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$from]);
         $docs = [];
         while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -505,39 +614,41 @@ final class AdvanceDeductionMatcher
             $docs[$id]['row'] ??= $r;
             $docs[$id]['entries'][(int) $r['entry_id']][] = $r;
         }
+        $side = AdvanceDeductionRepository::deductionSide($this->docType);
         $out = [];
         foreach ($docs as $id => $doc) {
-            $credit = 0.0;
+            $total = 0.0;
             $date = null;
             foreach ($doc['entries'] as $lines) {
-                // Kredit, ke kterému má tentýž zápis stejně velký debet na jiné analytice,
-                // je přeúčtování uvnitř zálohového účtu, ne čerpání (zrcadlo položky zálohy
-                // placené v konečné faktuře v saldokontu).
-                $debits = [];
+                // Strana čerpání, ke které má tentýž zápis stejně velkou opačnou stranu na jiné
+                // analytice, je přeúčtování uvnitř zálohového účtu, ne čerpání (zrcadlo položky
+                // zálohy placené v konečné faktuře v saldokontu).
+                $opposite = [];
                 foreach ($lines as $l) {
-                    if ($l['side'] === 'debit') {
-                        $debits[] = [(int) $l['account_id'], round((float) $l['signed_amount'], 2)];
+                    if ($l['side'] !== $side) {
+                        $opposite[] = [(int) $l['account_id'], round((float) $l['signed_amount'], 2)];
                     }
                 }
                 foreach ($lines as $l) {
-                    if ($l['side'] !== 'credit') {
+                    if ($l['side'] !== $side) {
                         continue;
                     }
                     $amount = round((float) $l['signed_amount'], 2);
-                    foreach ($debits as $i => [$debitAccount, $debitAmount]) {
-                        if ($debitAccount !== (int) $l['account_id'] && abs($debitAmount - $amount) < self::EPSILON) {
-                            unset($debits[$i]);
+                    foreach ($opposite as $i => [$oppositeAccount, $oppositeAmount]) {
+                        if ($oppositeAccount !== (int) $l['account_id'] && abs($oppositeAmount - $amount) < self::EPSILON) {
+                            unset($opposite[$i]);
                             continue 2;
                         }
                     }
-                    $credit += $amount;
+                    $total += $amount;
                     $date = $date === null || (string) $l['entry_date'] < $date ? (string) $l['entry_date'] : $date;
                 }
             }
-            $amount = round($credit - (float) $doc['row']['deducted'], 2);
+            $amount = round($total - (float) $doc['row']['deducted'], 2);
             if ($amount >= 0.01 && $date !== null) {
-                $out[] = ['id' => $id, 'partner' => self::partner($doc['row']['ic'], (int) $doc['row']['vendor_id']), 'date' => $date,
-                    'amount' => $amount, 'fifo' => $doc['row']['currency'] === 'CZK'];
+                $out[] = ['id' => $id, 'partner' => self::partner($doc['row']['ic'], (int) $doc['row']['partner_id']), 'date' => $date,
+                    'amount' => $amount, 'fifo' => $doc['row']['currency'] === 'CZK']
+                    + ($doc['row']['linked'] !== null ? ['skip' => [(int) $doc['row']['linked']]] : []);
             }
         }
         return $out;
@@ -546,12 +657,16 @@ final class AdvanceDeductionMatcher
     /**
      * Zálohy navázané na otevírací zápis (doklady počátečního stavu) po partnerech, s částkou
      * jako v saldokontu ({@see SaldoRepository} - doklad v Kč, bez daně, pokud k němu DDKP
-     * převedený není), bez ohledu na to, zda jsou dnes otevřené.
+     * převedený není), bez ohledu na to, zda jsou dnes otevřené. Saldokonto 324 doklady
+     * počátečního stavu nevede.
      *
      * @return array<string,float>
      */
     private function openingDocuments(int $supplierId, int $accountId): array
     {
+        if ($this->issuedSide) {
+            return [];
+        }
         $stmt = $this->db->pdo()->prepare(
             "SELECT c.ic, d.vendor_id,
                     CASE WHEN d.exchange_rate IS NULL OR cur.code = 'CZK' THEN d.total_with_vat ELSE ROUND(d.total_with_vat * d.exchange_rate, 2) END AS booked,
@@ -586,10 +701,11 @@ final class AdvanceDeductionMatcher
      *
      * Počáteční stavy (`XP`) Money vede bez IČO i bez symbolu. Nesou-li IČO, platí; jinak se
      * zálohy partnera k začátku roku dopočtou z deníku let před převodem ({@see carriedAdvances()}).
+     * Zálohu přidává strana zálohového účtu, kterou ji partner platí (314 má dáti, 324 dal).
      *
      * @param list<string> $dirs adresáře převáděných let
      * @param list<string> $olderDirs adresáře let před prvním převáděným rokem
-     * @return array{0:array<string,float>,1:array<int,list<array{year:int,no:string}>>}
+     * @return array{0:array<string,float>,1:array<int,list<array{year:int,no:string,symbol?:bool}>>}
      */
     private function moneyJournal(ImportContext $ctx, string $firstDir, array $dirs, array $olderDirs): array
     {
@@ -597,38 +713,49 @@ final class AdvanceDeductionMatcher
         $refs = [];
         $older = array_fill_keys($olderDirs, true);
         $history = [];
-        foreach ($ctx->backup->rowsAcrossYears('UcDenik', ['Zdroj', 'Doklad', 'Datum', 'UcMD', 'UcD', 'Castka', 'ParICO', 'Popis'], array_merge($dirs, $olderDirs)) as $r) {
-            $md = str_starts_with(trim((string) ($r['UcMD'] ?? '')), self::ACCOUNT);
-            $dal = str_starts_with(trim((string) ($r['UcD'] ?? '')), self::ACCOUNT);
+        $documents = $this->issuedSide ? $ctx->issuedInvoices : $ctx->purchaseInvoices;
+        $fields = ['Zdroj', 'Doklad', 'Datum', 'UcMD', 'UcD', 'Castka', 'ParICO', 'Popis', ...($this->issuedSide ? ['ParSym'] : [])];
+        foreach ($ctx->backup->rowsAcrossYears('UcDenik', $fields, array_merge($dirs, $olderDirs)) as $r) {
+            $md = str_starts_with(trim((string) ($r['UcMD'] ?? '')), $this->account);
+            $dal = str_starts_with(trim((string) ($r['UcD'] ?? '')), $this->account);
             if (!$md && !$dal) {
                 continue;
             }
+            $sign = ($md !== $this->issuedSide) ? 1 : -1;
             if (Ms3Journal::isOpening($r)) {
                 if ($r['__dir'] === $firstDir && $md !== $dal) {
                     $partner = self::partner($r['ParICO'] ?? null, 0);
-                    $opening[$partner] = round(($opening[$partner] ?? 0.0) + ($md ? 1 : -1) * (float) ($r['Castka'] ?? 0), 2);
+                    $opening[$partner] = round(($opening[$partner] ?? 0.0) + $sign * (float) ($r['Castka'] ?? 0), 2);
                 }
                 continue;
             }
             if (isset($older[$r['__dir']])) {
-                // Přeúčtování mezi analytikami 314 v jednom řádku zálohu nemění.
+                // Přeúčtování mezi analytikami zálohového účtu v jednom řádku zálohu nemění.
                 $partner = self::partner($r['ParICO'] ?? null, 0);
                 if ($md !== $dal && $partner !== '' && !Ms3Journal::isYearEndClosing($r)) {
-                    $history[$partner][] = ['date' => (string) ($r['Datum'] ?? ''), 'amount' => ($md ? 1 : -1) * (float) ($r['Castka'] ?? 0)];
+                    $history[$partner][] = ['date' => (string) ($r['Datum'] ?? ''), 'amount' => $sign * (float) ($r['Castka'] ?? 0)];
                 }
                 continue;
             }
             $year = $ctx->yearOf($r);
-            $docId = $year !== null ? ($ctx->purchaseInvoices[$year . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null) : null;
-            $popis = (string) ($r['Popis'] ?? '');
-            if ($docId === null || preg_match_all('/\b[A-Z]{1,5}\d{5,}[A-Z]?\b/u', $popis, $m) < 1) {
+            $docId = $year !== null ? ($documents[$year . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null) : null;
+            if ($docId === null) {
                 continue;
             }
-            // Daňový doklad („daň. dokl. DPP230003") rozhoduje: Money v témže textu někdy uvádí
-            // číslo jiné zálohy, než ke které odečítaný DDKP patří.
-            $numbers = preg_match('/da[nň]\.?\s*dokl\.?\s*([A-Z]{1,5}\d{5,}[A-Z]?)/u', $popis, $t) === 1 ? [$t[1]] : [];
-            foreach (array_unique(array_merge($numbers, $m[0])) as $no) {
-                $refs[(int) $docId][] = ['year' => $year, 'no' => $no];
+            $popis = (string) ($r['Popis'] ?? '');
+            if (preg_match_all('/\b[A-Z]{1,5}\d{5,}[A-Z]?\b/u', $popis, $m) >= 1) {
+                // Daňový doklad („daň. dokl. DPP230003") rozhoduje: Money v témže textu někdy uvádí
+                // číslo jiné zálohy, než ke které odečítaný DDKP patří.
+                $numbers = preg_match('/da[nň]\.?\s*dokl\.?\s*([A-Z]{1,5}\d{5,}[A-Z]?)/u', $popis, $t) === 1 ? [$t[1]] : [];
+                foreach (array_unique(array_merge($numbers, $m[0])) as $no) {
+                    $refs[(int) $docId][] = ['year' => $year, 'no' => $no];
+                }
+            }
+            // Vydaná faktura odečítá zálohy často pod párovacím symbolem jedné z nich; číslo
+            // v textu má přednost.
+            $symbol = $this->issuedSide ? trim((string) ($r['ParSym'] ?? '')) : '';
+            if ($symbol !== '') {
+                $refs[(int) $docId][] = ['year' => $year, 'no' => $symbol, 'symbol' => true];
             }
         }
         unset($opening['']);
@@ -641,10 +768,11 @@ final class AdvanceDeductionMatcher
     /**
      * Čísla dokladů z textu deníku => otevřené zálohy: záloha nebo DDKP téhož či minulého
      * roku (DDKP zálohy se převede na její rodičovskou zálohu), případně záloha uhrazená
-     * bankovním dokladem s tím číslem.
+     * bankovním dokladem s tím číslem. Párovací symbol vydané faktury odkazuje i na proformu,
+     * jejíž variabilní symbol má stejné číslice (Money symbol vede bez prefixu řady).
      *
-     * @param array<int,list<array{year:int,no:string}>> $refs
-     * @param list<array{id:int,partner:string,date:string,open:float}> $advances
+     * @param array<int,list<array{year:int,no:string,symbol?:bool}>> $refs
+     * @param list<array{id:int,partner:string,date:string,open:float,symbol?:string}> $advances
      * @return array<int,list<int>>
      */
     private function referencedAdvances(ImportContext $ctx, array $refs, array $advances): array
@@ -653,6 +781,15 @@ final class AdvanceDeductionMatcher
             return [];
         }
         $pool = array_fill_keys(array_column($advances, 'id'), true);
+        $bySymbol = [];
+        foreach ($advances as $a) {
+            $digits = self::symbolDigits($a['symbol'] ?? '');
+            if ($digits !== '') {
+                $bySymbol[$digits][] = $a['id'];
+            }
+        }
+        $documents = $this->issuedSide ? $ctx->issuedInvoices : $ctx->purchaseInvoices;
+        $docColumn = $this->issuedSide ? 'invoice_id' : 'purchase_invoice_id';
         $bankByDoc = [];
         foreach ($ctx->bankTransactions as $key => $id) {
             $parts = explode('|', (string) $key, 3);
@@ -660,7 +797,7 @@ final class AdvanceDeductionMatcher
         }
         $paidBy = [];
         foreach (array_chunk(array_keys($pool), 500) as $chunk) {
-            $stmt = $this->db->pdo()->prepare('SELECT bank_transaction_id, purchase_invoice_id FROM payment_matches WHERE supplier_id = ? AND purchase_invoice_id IN ('
+            $stmt = $this->db->pdo()->prepare("SELECT bank_transaction_id, {$docColumn} FROM payment_matches WHERE supplier_id = ? AND {$docColumn} IN ("
                 . implode(',', array_fill(0, count($chunk), '?')) . ')');
             $stmt->execute([$ctx->supplierId, ...$chunk]);
             foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$tx, $doc]) {
@@ -668,19 +805,26 @@ final class AdvanceDeductionMatcher
             }
         }
         $parents = [];
-        $stmt = $this->db->pdo()->prepare("SELECT id, parent_purchase_invoice_id FROM purchase_invoices
-            WHERE supplier_id = ? AND document_kind = 'tax_document' AND parent_purchase_invoice_id IS NOT NULL");
+        $stmt = $this->db->pdo()->prepare($this->issuedSide
+            ? "SELECT id, parent_invoice_id FROM invoices
+                WHERE supplier_id = ? AND invoice_type = 'tax_document' AND parent_invoice_id IS NOT NULL"
+            : "SELECT id, parent_purchase_invoice_id FROM purchase_invoices
+                WHERE supplier_id = ? AND document_kind = 'tax_document' AND parent_purchase_invoice_id IS NOT NULL");
         $stmt->execute([$ctx->supplierId]);
         foreach ($stmt->fetchAll(PDO::FETCH_NUM) as [$id, $parent]) {
             $parents[(int) $id] = (int) $parent;
         }
         $out = [];
         foreach ($refs as $finalId => $list) {
-            foreach ($list as ['year' => $year, 'no' => $no]) {
+            foreach ($list as $ref) {
+                ['year' => $year, 'no' => $no] = $ref;
                 foreach ([$year, $year - 1] as $y) {
                     $ids = [];
-                    if (isset($ctx->purchaseInvoices[$y . '|' . $no])) {
-                        $ids[] = (int) $ctx->purchaseInvoices[$y . '|' . $no];
+                    if (isset($documents[$y . '|' . $no])) {
+                        $ids[] = (int) $documents[$y . '|' . $no];
+                    }
+                    if (($ref['symbol'] ?? false) && $ids === []) {
+                        $ids = $bySymbol[self::symbolDigits($no)] ?? [];
                     }
                     foreach ($bankByDoc[$y . '|' . $no] ?? [] as $tx) {
                         foreach ($paidBy[$tx] ?? [] as $doc => $_) {
@@ -715,8 +859,9 @@ final class AdvanceDeductionMatcher
     {
         $pdo = $this->db->pdo();
         $service = self::service($this->db);
-        $find = $pdo->prepare('SELECT id FROM purchase_advance_deductions WHERE supplier_id = ? AND final_invoice_id = ? AND advance_invoice_id = ?');
+        $find = $pdo->prepare('SELECT id FROM ' . AdvanceDeductionRepository::table($this->docType) . ' WHERE supplier_id = ? AND final_invoice_id = ? AND advance_invoice_id = ?');
         $userId = $ctx->userId > 0 ? $ctx->userId : null;
+        $prefix = $this->issuedSide ? 'issued_' : '';
         $written = [];
         $own = !$pdo->inTransaction();
         if ($own) {
@@ -725,18 +870,18 @@ final class AdvanceDeductionMatcher
         try {
             foreach ($deductions as $finalId => $advances) {
                 foreach ($advances as $advanceId => $amount) {
-                    $key = self::mapKey($finalId, $advanceId);
+                    $key = $this->key($finalId, $advanceId);
                     if (isset($mapped[$key]) || $amount < 0.01) {
                         continue;
                     }
-                    if ($service->recordImported($ctx->supplierId, 'purchase_invoice', $finalId, $advanceId, $amount, $userId) < 0.01) {
+                    if ($service->recordImported($ctx->supplierId, $this->docType, $finalId, $advanceId, $amount, $userId) < 0.01) {
                         // Dvojici už spojuje jiné čerpání, nebo faktura nemá volný odpočet; nepřepisuje se.
-                        $ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, 'advance_deduction_pair_exists');
+                        $ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deduction_pair_exists');
                         continue;
                     }
                     $find->execute([$ctx->supplierId, $finalId, $advanceId]);
                     $this->map?->put($ctx->supplierId, MoneyS3ImportRepository::KIND_ADVANCE_DEDUCTION, $key, (int) $find->fetchColumn(), $ctx->runId);
-                    $ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, 'advance_deductions_matched');
+                    $ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deductions_matched');
                     $written[] = $finalId;
                 }
             }
@@ -756,6 +901,12 @@ final class AdvanceDeductionMatcher
     public static function service(Connection $db): AdvanceDeductionService
     {
         return new AdvanceDeductionService($db, new AdvanceDeductionRepository($db), new SaldoRepository($db));
+    }
+
+    /** Číslice symbolu bez úvodních nul („ZF026010" i „26010" => „26010"). */
+    private static function symbolDigits(string $symbol): string
+    {
+        return ltrim(preg_replace('/\D+/', '', $symbol) ?? '', '0');
     }
 
     private static function partner(mixed $ico, int $vendorId): string
