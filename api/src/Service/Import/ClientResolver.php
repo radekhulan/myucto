@@ -100,7 +100,7 @@ final class ClientResolver
         // založené před opravou BUG 2/FR 2 mohly mít IČO uložené bez úvodní nuly.
         if ($ic !== null) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id FROM clients WHERE supplier_id = ? AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ?" . $preferName
+                'SELECT id FROM clients WHERE supplier_id = ? AND ' . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . ' = ?' . $preferName
             );
             $stmt->execute([$supplierId, $ic, $companyName]);
             $existing = $stmt->fetchColumn();
