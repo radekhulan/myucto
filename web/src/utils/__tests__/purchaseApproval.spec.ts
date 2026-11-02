@@ -29,6 +29,16 @@ describe('approvalErrorMessage', () => {
     expect(approvalErrorMessage(err, t)).toBe('purchase_approval.no_approver:{"name":"Provoz"}')
   })
 
+  it('approval_no_approver se seznamem hodnot skládá popisek stejně jako zbytek aplikace', () => {
+    const err = noApprover({ dimension_values: [
+      { code: 'STR01', name: 'Brno' },
+      { code: 'unit:12', name: 'Jednotka 1', semantic_key: 'unit:12' },
+      { code: 'Praha', name: 'Praha' },
+      { code: '', name: 'Ostrava' },
+    ] })
+    expect(approvalErrorMessage(err, t)).toBe('purchase_approval.no_approver:{"name":"STR01 Brno, Jednotka 1, Praha, Ostrava"}')
+  })
+
   it('approval_no_approver bez jména spadne na obecnou hlášku', () => {
     expect(approvalErrorMessage(noApprover({}), t)).toBe('purchase_approval.no_approver_generic')
   })

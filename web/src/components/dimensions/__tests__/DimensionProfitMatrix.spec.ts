@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import DimensionProfitMatrix from '../DimensionProfitMatrix.vue'
 import type { DimensionProfitMatrix as Matrix } from '@/api/dimensions'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: (key: string) => key === 'dimensions.system_values.activity.economic' }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => v.toFixed(2) }))
 
 const matrix: Matrix = {
@@ -41,6 +41,13 @@ describe('DimensionProfitMatrix', () => {
     expect(foot.map(td => td.text())).toEqual(['dimensions.profit_result', '200.00', '-7.00', '193.00'])
     expect(foot[2].classes()).toContain('text-danger-600')
     expect(foot[1].classes()).not.toContain('text-danger-600')
+  })
+
+  it('systémová hodnota má ve sloupci jen přeložený název bez interního kódu', () => {
+    const w = mount(DimensionProfitMatrix, {
+      props: { systemKey: 'activity', matrix: { ...matrix, columns: [{ key: '8', value_id: 8, code: 'economic', name: 'Hospodářská činnost', semantic_key: 'economic' }, matrix.columns[1]] } },
+    })
+    expect(w.findAll('thead th').map(th => th.text())[1]).toBe('dimensions.system_values.activity.economic')
   })
 
   it('bez výnosů skupinu výnosů nevykreslí', () => {

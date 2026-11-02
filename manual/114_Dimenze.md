@@ -164,7 +164,7 @@ Podrobnosti v [§ 114.11.10](#1141110-pravidla-dimenzi-podle-uctu).
 2. Vyberte typ dimenze a období, přepněte záložku (**Výsledovka**, **Peněžní tok**).
 3. Tlačítkem **Export XLSX** stáhnete aktivní záložku, výsledovku také jako PDF.
 
-**Filtr ve výkazech:** **Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi (typ, hodnota, volitelně včetně podřízených).
+**Filtr ve výkazech:** **Výsledovka**, **Rozvaha**, **Obratová předvaha** a **Hlavní kniha** mají filtr na dimenzi (typ, hodnota, volitelně včetně podřízených). Tlačítkem **Přidat dimenzi** zkombinujete víc dimenzí, například projekt a středisko.
 
 **Jak poznáte, že je hotovo:** vidíte výnosy, náklady a zisk po hodnotách a řádek **Celkem**.
 
@@ -335,7 +335,8 @@ ruční úpravu řádků přepíše.
 
 Účetní deník má ve filtrech výběr dimenze: typ, hodnotu a volbu **včetně
 podřízených**. Deník pak ukáže celé zápisy, u kterých aspoň jeden řádek nese
-vybranou hodnotu (nebo hodnotu pod ní). U Střediska se počítají i řádky, které
+vybranou hodnotu (nebo hodnotu pod ní). Při výběru víc dimenzí (tlačítko
+**Přidat dimenzi**) musí všechny vybrané dimenze nést tentýž řádek zápisu. U Střediska se počítají i řádky, které
 nesou jen kód navázaného střediska, stejně jako v sestavách. Filtr se ukládá do
 adresy stránky i do uložených pohledů a platí i pro export deníku do PDF a XLSX.
 
@@ -743,6 +744,18 @@ středisko A a 40 % B se do výsledovky střediska A započte šedesáti procent
 Kontrolní vazby předvahy na celý deník proto s filtrem nemusí sedět. Export do
 PDF i XLSX nese v hlavičce řádek **Dimenze** s vybranou hodnotou.
 
+Tlačítkem **Přidat dimenzi** přidáte do filtru další řádek s typem a hodnotou,
+nejvýše deset hodnot z nejvýše čtyř různých typů dimenzí. Hodnoty různých typů musí platit zároveň na témže řádku deníku:
+filtr Projekt = akce a Středisko = dotace ukáže jen náklady akce hrazené
+z dotace, ne ostatní náklady akce ani jiné náklady dotace. U dvou hodnot
+stejného typu stačí kterákoli z nich (projekt A nebo B). Volba **včetně
+podřízených** platí pro všechny vybrané hodnoty. Řádek s rozpadem se započte
+součinem dílů: náklad rozdělený 60 % na akci a celý z dotace dá 60 %, rozpad
+50 % na akci a 50 % z dotace dá čtvrtinu, zaokrouhlenou na haléře. Proto
+u řádků s rozpadem v obou dimenzích nemusí součet přes všechny kombinace
+hodnot sedět na haléř. Výkazy po dimenzi a peněžní tok po dimenzi pracují dál
+s jedním typem a jednou hodnotou.
+
 Rozvaha po dimenzi dává smysl u projektu nebo zakázky, jejíž doklady nesou
 hodnotu na všech řádcích (dimenze z hlavičky dokladu). Vyrovnaná je jen tehdy,
 když hodnotu nesou obě strany zápisů. Úhrada faktury projektu v bance bez
@@ -866,6 +879,12 @@ automaticky nevybírá hlavní činnost ani předmět daně.
 Označení **Systémová dimenze** znamená, že typ nelze odstranit ani vypnout.
 Označení **Vestavěná hodnota** označuje pevný význam, který nelze přejmenovat,
 přesunout, vyřadit ani smazat. Odpovědnou osobu a poznámky lze upravit.
+Kód vestavěné hodnoty je interní označení jejího významu, proto se ve výběrech,
+štítcích seznamů, sestavách a jejich exportech ukazuje jen její název. Kód
+zůstává v API a v profilu firmy. Hlavní a hospodářská činnost a hodnoty
+předběžného daňového zařazení mají ve výběrech a sestavách název v jazyce
+aplikace; štítky seznamů a exporty je uvádějí česky. Název systémového typu je
+údaj firmy a zobrazuje se tak, jak je uložený.
 Název a význam použité systémové
 hodnoty, její kód a zařazení do stromu zůstávají zachované i v otevřeném období.
 Pro nový význam je nutná nová hodnota. Provozní poznámky a odpovědnou osobu lze

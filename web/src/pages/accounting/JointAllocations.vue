@@ -12,8 +12,9 @@ import { journalEntryLink, journalSourceLink } from '@/utils/journalSourceLink'
 import DateInput from '@/components/ui/DateInput.vue'
 import JointAllocationKeyEditor from '@/components/accounting/JointAllocationKeyEditor.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { dimensionValueName } from '@/utils/dimensionValueLabel'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const supplier = useSupplierStore()
 const canWrite = computed(() => auth.canWrite('accounting'))
@@ -47,10 +48,18 @@ const chosen = computed(() => versions.value.find(v => Number(v.id) === keyVersi
 const selectedRows = computed(() => rows.value.filter(row => selected.value.includes(row.id)))
 const effective = computed(() => !!chosen.value && targetDate.value >= chosen.value.valid_from && targetDate.value < chosen.value.valid_to)
 const canPreview = computed(() => !busy.value && effective.value && selected.value.length > 0)
-const valueName = (id: number) => catalog.value?.values.find(value => value.id === id)?.name ?? t('jointAllocations.missingValue')
+const valueName = (id: number) => {
+  const value = catalog.value?.values.find(row => row.id === id)
+  return value
+    ? dimensionValueName({ t, te }, value, catalog.value?.types.find(type => type.id === value.type_id)?.system_key, catalog.value?.values.filter(row => row.type_id === value.type_id))
+    : t('jointAllocations.missingValue')
+}
 const typeName = (id: number) => catalog.value?.types.find(type => type.id === id)?.name ?? t('jointAllocations.additionalAxes')
 const tuple = (cell: JointCell) => [...jointAxes.map(axis => valueName(cell[axis])), ...Object.values(cell.additional_dimensions ?? {}).map(valueName)].join(' · ')
-const dimensionsLabel = (dimensions: Record<number, number> | [], frozen?: JointPreview) => Object.values(dimensions).map(id => frozen?.semantic_values[id]?.name ?? valueName(id)).join(' · ')
+const dimensionsLabel = (dimensions: Record<number, number> | [], frozen?: JointPreview) => Object.values(dimensions).map(id => {
+  const value = frozen?.semantic_values[id]
+  return value ? dimensionValueName({ t, te }, value, value.system_key) : valueName(id)
+}).join(' · ')
 const sourceLabel = (source: JointCandidate) => [source.document_no || source.entry_description || t('jointAllocations.journalEntry'), source.account_code, source.account_name].join(' · ')
 const money = (amount: string, currency = 'CZK', red: boolean | 0 | 1 = false) => formatMoney(Number(amount) * (red ? -1 : 1), currency)
 

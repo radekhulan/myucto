@@ -22,7 +22,7 @@ export interface Fx504Preview {
   accounting_decree: '504'; snapshot_hash: string; positions: Fx504Position[]; complete: boolean
   totals: { loss: string; gain: string }; required_types: number[]
   dimension_types: { id: number; name: string; is_active: boolean | 0 | 1; system_key: string | null }[]
-  dimension_values: { id: number; type_id: number; name: string; code: string; is_active: boolean | 0 | 1 }[]
+  dimension_values: { id: number; type_id: number; name: string; code: string; semantic_key?: string | null; is_active: boolean | 0 | 1 }[]
   case_decisions: Fx504CaseDecision[]; case_source_cells: Fx504SourceCell[]; case_unresolved: Fx504SourceCell[]; case_locked_cell_keys: string[]; case_findings: { code: string; entry_id?: number; line_id?: number; step_id?: number }[]
   account_decisions: Fx504Map<Fx504AccountDecision>; saved_decisions: Fx504Map<Fx504Decision>
   rate_info: { currency: string; rate: string; rate_date: string; fallback_used: boolean }[]

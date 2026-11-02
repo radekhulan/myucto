@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
+import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
@@ -2277,6 +2279,7 @@ const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat && sup
 // ─── WORK REPORT ────────────────────────────────────────────────
 const wrOpen = ref(false)
 const wrTitle = ref('')
+const wrDisplayOptions = ref<Partial<WorkReportDisplayOptions> | null>(null)
 const wrItems = ref<WorkReportItem[]>([])
 const wrVatRateId = ref<number | null>(null)
 
@@ -2295,6 +2298,7 @@ async function loadWorkReport() {
   if (!invoiceId.value) return
   const wr = await invoicesApi.getWorkReport(invoiceId.value)
   if (wr) {
+    wrDisplayOptions.value = wr.display_options ?? null
     wrTitle.value = wr.title
     wrItems.value = wr.items.map(i => ({ ...i }))
     // Neplátce DPH: vždy 0% „Osvobozeno" (defaultVatRateId()), ať se do položek faktury
@@ -2848,6 +2852,7 @@ async function submit() {
         await invoicesApi.saveWorkReport(saved.id, {
           project_id: saved.project_id,
           title: wrTitle.value,
+          display_options: wrDisplayOptions.value,
           vat_rate_id: wrVatRateId.value,
           items: wrItemsValid.value.map((it, i) => ({
             description: it.description,
@@ -3422,23 +3427,6 @@ useWindowTitle(
                   @update:model-value="(v) => onTrackingChange(item, v)" />
                 <ItemAccrualFields v-if="showAccrual" :description="item.description"
                   v-model:from="item.accrual_from" v-model:to="item.accrual_to" />
-                <label v-if="itemAccountEditable(item) && itemDetailsOpen.has(item)" :title="t('invoice.item_account.hint')"
-                  class="mt-1.5 flex items-start gap-2 text-xs text-neutral-500" data-test="invoice-item-account">
-                  <span class="whitespace-nowrap pt-2">{{ t('invoice.item_account.label') }}</span>
-                  <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
-                    class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
-                </label>
-                <label v-if="itemVatEditable(item) && itemDetailsOpen.has(item)" :title="t('invoice.item_details.vat_classification_hint')"
-                  class="mt-1.5 flex items-center gap-2 text-xs text-neutral-500">
-                  <span class="whitespace-nowrap">{{ t('invoice.item_details.vat_classification') }}</span>
-                  <select :value="itemVatCode(item) ?? ''" data-test="invoice-item-vat-classification"
-                    class="w-56 max-w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm text-neutral-900"
-                    @change="setItemVatCode(item, ($event.target as HTMLSelectElement).value)">
-                    <option value="">{{ t('invoice.item_details.vat_classification_auto') }}</option>
-                    <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vc.code }} - {{ vc.label.length > 50 ? vc.label.slice(0, 50) + '…' : vc.label }}</option>
-                    <option v-if="itemVatCode(item) && !vatClassifications.some(vc => vc.code === itemVatCode(item))" :value="itemVatCode(item) ?? ''">{{ itemVatCode(item) }}</option>
-                  </select>
-                </label>
                 <div v-if="stockRowBaseQtyText(item) || stockRowPriceBadge(item)" data-test="stock-row-meta"
                   class="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
                   <span v-if="stockRowBaseQtyText(item)" class="font-mono text-neutral-500 whitespace-nowrap">{{ stockRowBaseQtyText(item) }}</span>
@@ -3508,6 +3496,31 @@ useWindowTitle(
                     <svg class="w-4 h-4 transition-transform" :class="itemDetailsOpen.has(item) ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
                   </button>
                   <button type="button" @click="removeItem(i)" class="text-danger-500 hover:text-danger-600 text-lg leading-none">×</button>
+                </div>
+              </td>
+            </tr>
+            <tr v-if="!isTextItem(item) && itemDetailsOpen.has(item) && (itemAccountEditable(item) || itemVatEditable(item))"
+              :class="['border-t-0!', itemHasBothNegative(item) ? 'bg-danger-50' : '']" data-test="invoice-item-details-row">
+              <td></td>
+              <td :colspan="(supplierIsVatPayer ? 7 : 6) + lineDiscountCols" class="px-3 pb-2">
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-neutral-500">
+                  <label v-if="itemAccountEditable(item)" :title="t('invoice.item_account.hint')"
+                    class="flex items-center gap-2" data-test="invoice-item-account">
+                    <span class="whitespace-nowrap">{{ t('invoice.item_account.label') }}</span>
+                    <ChartAccountSelect v-model="item.revenue_account_code" :accounts="resultAccounts.issuedItemAccounts.value"
+                      class="w-56 max-w-full" compact :placeholder="t('invoice.item_account.placeholder')" />
+                  </label>
+                  <label v-if="itemVatEditable(item)" :title="t('invoice.item_details.vat_classification_hint')"
+                    class="flex items-center gap-2">
+                    <span class="whitespace-nowrap">{{ t('invoice.item_details.vat_classification') }}</span>
+                    <select :value="itemVatCode(item) ?? ''" data-test="invoice-item-vat-classification"
+                      class="w-56 max-w-full h-8 px-1 border border-neutral-300 rounded bg-surface text-sm text-neutral-900"
+                      @change="setItemVatCode(item, ($event.target as HTMLSelectElement).value)">
+                      <option value="">{{ t('invoice.item_details.vat_classification_auto') }}</option>
+                      <option v-for="vc in vatClassifications" :key="vc.id" :value="vc.code">{{ vc.code }} - {{ vc.label.length > 50 ? vc.label.slice(0, 50) + '…' : vc.label }}</option>
+                      <option v-if="itemVatCode(item) && !vatClassifications.some(vc => vc.code === itemVatCode(item))" :value="itemVatCode(item) ?? ''">{{ itemVatCode(item) }}</option>
+                    </select>
+                  </label>
                 </div>
               </td>
             </tr>
@@ -4085,6 +4098,8 @@ useWindowTitle(
           </div>
         </header>
         <div v-if="wrOpen" class="p-5 space-y-3">
+          <WorkReportDisplaySettings v-model="wrDisplayOptions" inheritable
+            :defaults="supplierStore.currentSupplier?.work_report_display_options" />
           <div class="flex flex-col sm:flex-row gap-2">
             <input v-model="wrTitle" type="text" :placeholder="t('invoice.wr_title')"
               class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm" />

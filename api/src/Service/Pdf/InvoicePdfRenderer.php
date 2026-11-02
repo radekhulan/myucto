@@ -97,6 +97,7 @@ final class InvoicePdfRenderer
             @filemtime(Bootstrap::rootDir() . '/styles/invoice.css') ?: 0,
             @filemtime(Bootstrap::rootDir() . '/' . PdfBranding::MONOCHROME_CSS) ?: 0,
             @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/invoice.twig') ?: 0,
+            @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/work_report_items.twig') ?: 0,
             @filemtime(__DIR__ . '/TimeBillingPdfPresenter.php') ?: 0,
             @filemtime(__FILE__) ?: 0,
         );
@@ -394,7 +395,7 @@ final class InvoicePdfRenderer
             $lineDiscountColumns = true;
         }
         $workReport = $includeWorkReport
-            ? $this->workReports->findByInvoice((int) $invoice['id'])
+            ? $this->workReports->findByInvoice((int) $invoice['id'], (int) ($invoice['supplier_id'] ?? 0))
             : null;
         if ($workReport !== null) {
             $workReport = TimeBillingPdfPresenter::workReport($workReport);

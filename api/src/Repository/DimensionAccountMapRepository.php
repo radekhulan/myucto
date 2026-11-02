@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
@@ -125,7 +126,7 @@ final class DimensionAccountMapRepository
     {
         $date = AccountDefinitionRepository::date($date ?? date('Y-m-d'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT DISTINCT m.analytic_account_id AS account_id, identity_a.account_code, identity_s.account_code AS synthetic_code, v.code AS value_code
+            "SELECT DISTINCT m.analytic_account_id AS account_id, identity_a.account_code, identity_s.account_code AS synthetic_code, v.code AS value_code, v.name AS value_name, v.semantic_key AS value_semantic_key
                FROM dimension_account_map m
                JOIN chart_of_accounts identity_s ON identity_s.id=m.synthetic_account_id AND identity_s.supplier_id=m.supplier_id
                JOIN chart_of_accounts identity_a ON identity_a.id=m.analytic_account_id AND identity_a.supplier_id=m.supplier_id
@@ -142,7 +143,8 @@ final class DimensionAccountMapRepository
         return array_map(static fn (array $r): array => [
             'account_id' => (int) $r['account_id'],
             'account_code' => (string) $r['account_code'],
-            'name' => $r['value_code'] . ': ' . $r['synthetic_code'] . ' → ' . $r['account_code'],
+            'name' => DimensionValueLabel::short(['code' => $r['value_code'], 'name' => $r['value_name'], 'semantic_key' => $r['value_semantic_key']])
+                . ': ' . $r['synthetic_code'] . ' → ' . $r['account_code'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 

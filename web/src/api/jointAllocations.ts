@@ -70,7 +70,7 @@ export interface JointPreview {
   target_date: string
   key: Omit<JointVersion, 'cell_ids'>
   exact_cells: Record<number, ExactSourceCells> | []
-  semantic_values: Record<number, { name: string; code: string }>
+  semantic_values: Record<number, { name: string; code: string; system_key?: string | null; semantic_key?: string | null }>
   plan: { sources: { source_line_id: number; compensation: JointTarget; targets: JointTarget[] }[] }
 }
 export interface JointBatch {

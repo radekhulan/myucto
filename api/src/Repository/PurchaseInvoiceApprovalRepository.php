@@ -21,7 +21,7 @@ final class PurchaseInvoiceApprovalRepository
     private const ROW_SELECT = "SELECT a.id, a.supplier_id, a.purchase_invoice_id, a.dimension_value_id, a.approver_user_id,
                 a.round, a.status, a.amount_czk, a.token_expires_at, a.requested_at, a.requested_by,
                 a.decided_at, a.decided_via, a.comment, a.reminders_sent, a.last_reminder_at,
-                v.code AS dimension_value_code, v.name AS dimension_value_name,
+                v.code AS dimension_value_code, v.name AS dimension_value_name, v.semantic_key AS dimension_value_semantic_key,
                 t.id AS dimension_type_id, t.name AS dimension_type_name,
                 u.name AS approver_name, u.email AS approver_email,
                 pi.varsymbol AS invoice_varsymbol, pi.vendor_invoice_number AS invoice_vendor_number,

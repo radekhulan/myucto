@@ -35907,6 +35907,10 @@
     "filter_none": "— no filter —",
     "filter_value": "Value",
     "filter_descendants": "including children",
+    "filter_add": "Add dimension",
+    "filter_add_hint": "Select a value in the previous row first.",
+    "filter_remove": "Remove dimension from filter",
+    "filter_combined_hint": "Different dimensions must all apply to the same line; for the same dimension any of the values is enough.",
     "filter_active_note": "The report is filtered by a dimension: it contains only lines of that value (a split line only by its share), so the checks against the whole journal may not match.",
     "panel_title": "Dimensions",
     "header_title": "Document dimensions",
@@ -36006,7 +36010,18 @@
     "builtin_hint": "Builtin meanings cannot be renamed, moved, retired or deleted. You can edit responsibility and notes.",
     "builtin_badge": "Builtin value",
     "system_custom_hint": "Custom activity kinds can be retired from new use. Historical assignments remain unchanged.",
-    "system_assignment_hint": "Choose the activity and preliminary tax classification for the actual case. The system does not assume main activity or taxable status."
+    "system_assignment_hint": "Choose the activity and preliminary tax classification for the actual case. The system does not assume main activity or taxable status.",
+    "system_values": {
+      "activity": {
+        "main": "Main activity",
+        "economic": "Economic activity"
+      },
+      "tax_regime": {
+        "subject": "Subject to tax",
+        "out_of_scope": "Outside tax scope",
+        "exempt": "Exempt"
+      }
+    }
   },
   "stereo_nx": {
     "partner_countries": {
@@ -39269,11 +39284,6 @@
     "classificationReviewTitle": "Accounting classification verified by the server",
     "classificationUnknownValue": "value no. {id} (name not loaded)",
     "classificationOriginExplicit": "chosen explicitly",
-    "classificationSemantic_main": "main activity",
-    "classificationSemantic_economic": "economic activity",
-    "classificationSemantic_subject": "taxable",
-    "classificationSemantic_out_of_scope": "outside the scope of tax",
-    "classificationSemantic_exempt": "exempt from tax",
     "classificationProofMissing": "The server did not return a verified accounting classification in the preview. Request the preview again before confirming.",
     "classificationTaxAdvisory": "The tax regime is a preliminary accounting label. It does not mean an exemption or a confirmed assessment (J6), and public benefit status is not derived from it.",
     "issueAck": "I checked the member, the period, the amount, the accounts and the legal profile. I understand that confirming creates an accounting entry.",
@@ -40987,5 +40997,16 @@
       "smtp_managed": "The hosting operator manages this mail transport.",
       "smtp_environment_locked": "Environment variables control this mail transport."
     }
+  },
+  "workReportDisplay": {
+    "title": "Work report display",
+    "inherit": "Use company defaults",
+    "compact": "Compact report rows",
+    "columns": "Show columns:",
+    "date": "Date",
+    "hours": "Hours",
+    "rate": "Hourly rate",
+    "amount": "Amount",
+    "hint": "Applies to the invoice detail, PDF, public preview and work report approval. The description is always visible. Hiding columns does not change stored rates or the invoice amount. The material report keeps its own layout."
   }
 }

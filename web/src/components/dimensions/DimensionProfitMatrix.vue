@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { DimensionProfitMatrix } from '@/api/dimensions'
 import { formatMoney } from '@/composables/useFormat'
+import { dimensionValueLabel } from '@/utils/dimensionValueLabel'
 
 /**
  * Výsledovka po dimenzi v rozpadu po účtech: řádky = syntetické účty (výnosy, pak
@@ -13,13 +14,16 @@ const props = defineProps<{
   matrix: DimensionProfitMatrix
   /** Daňová evidence: řádky jsou příjmy a výdaje peněžního deníku, ne účty. */
   cashJournal?: boolean
+  /** `system_key` typu sestavy, podle něj se překládají vestavěné hodnoty. */
+  systemKey?: string | null
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const hasAmount = (value: number) => Math.round(Math.abs(value) * 100) !== 0
 const visibleColumns = computed(() => props.matrix.columns.map((col, index) => ({ ...col, index }))
   .filter(col => props.matrix.rows.some(row => hasAmount(row.cells[col.index] ?? 0))))
 const visibleRows = computed(() => props.matrix.rows.filter(row => visibleColumns.value.some(col => hasAmount(row.cells[col.index] ?? 0))))
+const valueColumns = computed(() => props.matrix.columns.filter(col => col.value_id !== null))
 
 const sections = computed(() => {
   const revenue = visibleRows.value.filter(r => r.account_type === 'revenue')
@@ -31,7 +35,7 @@ const sections = computed(() => {
 })
 
 function columnLabel(col: DimensionProfitMatrix['columns'][number]): string {
-  return col.value_id === null ? t('dimensions.profit_unassigned') : (col.code === col.name ? col.code : `${col.code} ${col.name ?? ''}`.trim())
+  return col.value_id === null ? t('dimensions.profit_unassigned') : dimensionValueLabel({ t, te }, col, props.systemKey, ' ', valueColumns.value)
 }
 
 function money(v: number) {

@@ -552,7 +552,7 @@ final class PurchaseBankRematchingTest extends TestCase
         self::assertIsResource($process);
         fclose($pipes[0]);
         try {
-            self::assertSame("READY\n", fgets($pipes[1]));
+            self::assertSame('READY', rtrim((string) fgets($pipes[1]), "\r\n"));
             $result = $this->retry();
             $out = stream_get_contents($pipes[1]);
             $err = stream_get_contents($pipes[2]);

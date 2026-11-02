@@ -15,6 +15,7 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -67,8 +68,14 @@ final class SaveWorkReportAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $displayOptions = array_key_exists('display_options', $body)
+                ? WorkReportDisplayOptions::validate($body['display_options']) : null;
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
         // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (items = jeho řádky).
-        $stored = $this->repo->findByInvoice($invoiceId);
+        $stored = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         // project_id je volitelné — faktura nemusí mít zakázku, výkaz pak také ne.
         $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id'] : ($stored['project_id'] ?? null);
         $projectId = ($projectIdRaw !== null && $projectIdRaw !== '' && (int) $projectIdRaw > 0)
@@ -137,8 +144,11 @@ final class SaveWorkReportAction
             }
         }
 
-        $id = $this->repo->save($invoiceId, $projectId, $title, $items, $vatRateId);
-        $wr = $this->repo->findByInvoice($invoiceId);
+        $id = $this->repo->save($invoiceId, SupplierGuard::currentId($request), $projectId, $title, $items, $vatRateId);
+        if (array_key_exists('display_options', $body)) {
+            $this->repo->saveDisplayOptions($invoiceId, $displayOptions, SupplierGuard::currentId($request));
+        }
+        $wr = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

@@ -319,13 +319,14 @@ export interface DimensionProfitRow {
   has_children: boolean
   own: DimensionProfitAmounts
   total: DimensionProfitAmounts
+  semantic_key?: string | null
   responsible_user_id?: number | null
   responsible_user_name?: string | null
 }
 
 /** Rozpad po syntetických účtech: řádky = účty, sloupce = kořeny sestavy (+ bez hodnoty). */
 export interface DimensionProfitMatrix {
-  columns: { key: string; value_id: number | null; code: string; name: string | null }[]
+  columns: { key: string; value_id: number | null; code: string; name: string | null; semantic_key?: string | null }[]
   rows: { code: string; name: string; account_type: 'revenue' | 'expense'; cells: number[]; total: number }[]
   results: number[]
   total_result: number

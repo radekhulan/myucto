@@ -49,6 +49,12 @@ final class AnonymizationPolicyCoverageTest extends TestCase
         self::assertStringContainsString('brand_new_table', $problems);
     }
 
+    public function testBooleanWorkReportDisplayOptionsArePreserved(): void
+    {
+        self::assertSame('keep', AnonymizationPolicy::COLUMNS['supplier']['work_report_display_options']);
+        self::assertSame('keep', AnonymizationPolicy::COLUMNS['work_reports']['display_options']);
+    }
+
     public function testGeneratedAndEnumColumnsAreNotTextColumns(): void
     {
         self::assertFalse(AnonymizationPolicyAudit::isTextColumn("enum('a','b') NOT NULL"));

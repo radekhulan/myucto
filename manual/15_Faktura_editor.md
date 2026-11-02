@@ -863,6 +863,32 @@ množství fakturační položky. Pro přesné minutové účtování použijte 
 +--------------------------------------------------+
 ```
 
+**Zobrazení výkazu práce.** Ve výkazu v editoru faktury i v samostatném okně
+**Výkaz** najdete volbu **Zobrazení výkazu práce**. Standardně přebírá nastavení firmy.
+Po vypnutí **Použít výchozí nastavení firmy** nastavíte výjimku jen pro tuto fakturu:
+
+- **Kompaktní řádky výkazu** zmenší písmo a odsazení tabulky stejně jako kompaktní položky faktury.
+- Sloupce **Datum**, **Hodiny**, **Hodinová sazba** a **Částka** můžete zapínat samostatně.
+  Popis činnosti zůstává vždy viditelný. Datum se tiskne jen tehdy, když je alespoň u jedné práce vyplněné.
+- Vypnutí **Částky** skryje také peněžní součet práce; vypnutí **Hodin** skryje součet času.
+  Pro výkaz pouze s popisem, datem a časem vypněte sazbu a částku.
+
+Nastavení platí pro zobrazení práce v detailu faktury, přílohu faktury v PDF, samostatný schvalovací výkaz,
+veřejný sledovací náhled i schvalovací stránku a rekapitulaci práce ve schvalovacím e-mailu.
+Pokud některý otevřený výkaz skrývá hodiny nebo částku, veřejný náhled nezobrazuje
+odpovídající společný součet napříč výkazy. Výkaz materiálu si ponechává vlastní tabulku.
+Editor nadále ukazuje uložené údaje; skrytí výstupních sloupců nemění sazby, cenu práce
+ani částku faktury a nenahrazuje oprávnění k finančním datům.
+
+Pokud skrytí částky schová součet ve schvalovacím e-mailu, řádek materiálu v něm zůstává;
+u výkazu jen s materiálem zůstává i součet k vyúčtování. Schvalovací stránka ukáže částku
+u jednotlivých řádků práce jen u výkazu, u kterého je podoba změněná proti standardní.
+
+Výchozí podobu nastavuje správce v **Firma → Nastavení** u voleb vzhledu PDF.
+Změna výchozího nastavení se projeví u konceptů faktur bez vlastní výjimky. Výkazy už
+vystavených faktur si ponechají dosavadní podobu i po přegenerování PDF; chcete-li ji
+změnit, nastavte výjimku přímo ve výkazu. Zaškrtnutí dědění ve výkazu jeho výjimku zruší.
+
 **Smazání výkazu.** V editoru klikněte na ikonu odpojit (řetěz). Položka faktury zůstane, ale
 ztratí detailní rozpis.
 

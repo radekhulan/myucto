@@ -24,6 +24,7 @@ use MyInvoice\Service\Accounting\JournalLineComparison;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\AssetRepository;
@@ -371,7 +372,7 @@ final class ClosingService
                             $share = $part === null ? '' : ' ('
                                 . rtrim(rtrim(number_format(100 * $part / $row['allocation_amount'], 4, '.', ''), '0'), '.') . ' %)';
                             $row['dimension_labels'][] = $types[$typeId]['name'] . ': '
-                                . $values[$valueId]['code'] . ' ' . $values[$valueId]['name'] . $share;
+                                . DimensionValueLabel::full($values[$valueId]) . $share;
                         }
                     }
                 }

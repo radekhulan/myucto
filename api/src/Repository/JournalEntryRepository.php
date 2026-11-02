@@ -1894,7 +1894,7 @@ final class JournalEntryRepository
         // Hodnota dimenze (včetně podřízených): zápis projde, nese-li ji aspoň jeden
         // jeho řádek. Sémantiku řádku sdílí se sestavami přes DimensionFilter.
         if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
-            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je');
+            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je', $supplierId);
             $where[] = $dimSql;
             array_push($params, ...$dimParams);
         }

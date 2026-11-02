@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Accounting\ManualJournalEntryException;
 use MyInvoice\Service\Accounting\ManualJournalEntryService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -43,7 +44,7 @@ final class AiInternalDocumentValidator
     /**
      * Aktivní hodnoty dimenzí pro zadání modelu. Prázdné, když firma dimenze nepoužívá.
      *
-     * @return array<int,string> id hodnoty => „Typ: kód název"
+     * @return array<int,string> id hodnoty => „Typ: kód název", systémová hodnota „Typ: název"
      */
     public function dimensionChoices(int $supplierId): array
     {
@@ -54,16 +55,25 @@ final class AiInternalDocumentValidator
         foreach ($this->dimensionRepo->listTypes($supplierId, false) as $t) {
             $types[(int) $t['id']] = (string) $t['name'];
         }
-        $out = [];
+        $chosen = [];
+        $byType = [];
         foreach ($this->dimensionRepo->listValues($supplierId, null, false) as $v) {
             if (!isset($types[(int) $v['type_id']])) {
                 continue;
             }
-            $code = trim((string) ($v['code'] ?? ''));
-            $out[(int) $v['id']] = $types[(int) $v['type_id']] . ': ' . ($code !== '' ? $code . ' ' : '') . (string) $v['name'];
-            if (count($out) >= self::MAX_PROMPT_DIMENSION_VALUES) {
+            $chosen[(int) $v['id']] = (int) $v['type_id'];
+            $byType[(int) $v['type_id']][(int) $v['id']] = $v;
+            if (count($chosen) >= self::MAX_PROMPT_DIMENSION_VALUES) {
                 break;
             }
+        }
+        $labels = [];
+        foreach ($byType as $values) {
+            $labels += DimensionValueLabel::fullAll($values);
+        }
+        $out = [];
+        foreach ($chosen as $id => $typeId) {
+            $out[$id] = $types[$typeId] . ': ' . $labels[$id];
         }
         return $out;
     }

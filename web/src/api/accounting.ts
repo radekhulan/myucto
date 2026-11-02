@@ -567,8 +567,11 @@ export interface JournalFilters {
   amount_to?: number
   /** Jen zápisy s nálezem noční kontroly integrity deníku (JournalIntegrityService). */
   integrity?: 'amount_mismatch'
-  /** Hodnota dimenze; zápis projde, nese-li ji (nebo podřízenou) aspoň jeden řádek. */
-  dimension_value_id?: number
+  /**
+   * Hodnoty dimenzí oddělené čárkou; zápis projde, nese-li je (nebo podřízené) aspoň jeden
+   * jeho řádek. Různé typy musí platit na témže řádku, u stejného typu stačí kterákoli.
+   */
+  dimension_value_id?: number | string
   /** false = jen hodnota sama, bez podřízených (výchozí je celá větev). */
   dimension_descendants?: boolean
   page?: number
@@ -929,8 +932,11 @@ export interface LedgerReportParams {
    * účetní by k rozvahovému dni neviděla žádné zůstatky.
    */
   after_closing?: 0 | 1
-  /** Filtr na hodnotu dimenze (Firma → Dimenze); bere jen řádky deníku s touto hodnotou. */
-  dimension_value_id?: number
+  /**
+   * Filtr na hodnoty dimenzí (Firma → Dimenze), víc hodnot oddělených čárkou; bere jen řádky
+   * deníku, které nesou všechny vybrané typy (u stejného typu kteroukoli z hodnot).
+   */
+  dimension_value_id?: number | string
   /** 0 = jen hodnota sama, bez podřízených (výchozí je celá větev). */
   dimension_descendants?: 0 | 1
 }
@@ -1381,8 +1387,8 @@ export interface StatementParams {
   period_id: number
   as_of?: string
   scope?: StatementScope
-  /** Filtr výsledovky i rozvahy na hodnotu dimenze (řádek s rozpadem jen svým dílem). */
-  dimension_value_id?: number
+  /** Filtr výsledovky i rozvahy na hodnoty dimenzí oddělené čárkou (řádek s rozpadem jen svým dílem). */
+  dimension_value_id?: number | string
   dimension_descendants?: 0 | 1
   /** Sloupcový pohled po účtech (aktiva vedle pasiv, náklady vedle výnosů). */
   columns?: 0 | 1
