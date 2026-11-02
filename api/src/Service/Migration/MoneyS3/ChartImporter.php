@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\MoneyS3;
 
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 
@@ -25,6 +26,7 @@ final class ChartImporter
     public function __construct(
         private readonly ChartOfAccountsRepository $accounts,
         private readonly ChartOfAccountsSeeder $seeder,
+        private readonly MoneyS3ImportRepository $map,
     ) {}
 
     public function run(ImportContext $ctx, ?string $seedDate = null): void
@@ -62,6 +64,10 @@ final class ChartImporter
             }
         }
 
+        // Firma převedená dřív se účtuje dál v MyÚčtu: daňovou uznatelnost účtů, které už má,
+        // mohla účetní upravit (v Money bývá „nedaňový" typ i u běžného nákladu), opakovaný
+        // převod ji proto nepřepisuje. Nové účty ji dostanou z Money.
+        $alreadyConverted = $this->map->hasAny($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY);
         $map = $this->accounts->codeToIdMap($ctx->supplierId);
         $ctx->accountIds = [];
         foreach ($map as $code => $row) {
@@ -77,8 +83,8 @@ final class ChartImporter
             }
             if (isset($ctx->accountIds[$target])) {
                 $p->count(self::STEP, 'existing');
-                // Opravný převod nastavení účtů, které mohla účetní mezitím změnit, nepřepisuje.
-                if (!$ctx->options->relinkOnly) {
+                // Opravný ani opakovaný převod nastavení účtů, které mohla účetní mezitím změnit, nepřepisuje.
+                if (!$ctx->options->relinkOnly && !$alreadyConverted) {
                     $this->alignDeductibility($ctx, $target, $deductibility[$moneyCode] ?? null);
                 }
                 continue;
