@@ -6,6 +6,7 @@ const instant = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:
 const cursor = { type: 'string', minLength: 1, maxLength: 2048, pattern: '^[A-Za-z0-9_-]+$' };
 const limit = { type: 'integer', minimum: 1, maximum: 100 };
 const read = (name, title, properties, required, run) => ({
+  api: false, apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
   name, title,
   description: 'Kurátorované čtení členského subledgeru bez jmen, členských čísel, podkladových textů, interních požadavků a idempotency metadat. Zachovejte null u neprokázané úhrady; výsledek neopravňuje k finanční mutaci.',
   inputSchema: { type: 'object', properties, required, additionalProperties: false },

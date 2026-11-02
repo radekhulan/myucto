@@ -4,7 +4,8 @@ const id = (description) => ({ type: 'integer', minimum: 1, description });
 const date = { type: 'string', format: 'date', description: 'Povinné skutečné účetní datum.' };
 const page = { after_id: { type: 'integer', minimum: 0, description: 'next_after_id ze stejné firmy a stejných filtrů.' }, limit: { type: 'integer', minimum: 1, maximum: 100 } };
 const scope = { unit_id: id('ID jednotky stejné firmy.'), service_id: id('ID služby stejné firmy.') };
-const read = (name, title, description, properties, required, run) => ({ name, title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, write: false, run });
+const read = (name, title, description, properties, required, run) => ({
+  api: false, apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).', name, title, description, inputSchema: { type: 'object', properties, required, additionalProperties: false }, write: false, run });
 export const PROPERTY_ACCOUNTING_READ_TOOLS = [
   read('list_property_service_lifecycles', 'Účetní lifecycle služeb SVJ', 'Ověřené účetní případy služeb a jejich aktuální stav. Neurčené částky zůstávají null, pending a incomplete nejsou nula. Historický known_at není podporován. Kurzor patří stejné firmě a filtrům; neautorizuje účetní operaci.', { ...page, ...scope }, [],
     (c, a, tool) => c.get('/property/catalog/service-lifecycles', { after_id: a.after_id, limit: a.limit, unit_id: a.unit_id, service_id: a.service_id }, tool)),

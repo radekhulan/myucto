@@ -2,6 +2,7 @@ import { seg } from './tool-shared.mjs';
 const id = { type: 'integer', minimum: 1 };
 const page = { after_id: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 100 } };
 const read = (name, title, description, properties, required, run) => ({
+  api: false, apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
   name, title, description,
   inputSchema: { type: 'object', properties, required, additionalProperties: false },
   write: false, run,
