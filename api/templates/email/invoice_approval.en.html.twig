@@ -37,16 +37,14 @@
           <td style="padding:4px 0;color:#7A748C;">{{ work_report.material_title|default('Material') }}</td>
           <td style="padding:4px 0;font-family:monospace;font-weight:600;">{{ work_report.material_total|number_format(2, '.', ',') }} {{ invoice.currency }}</td>
         </tr>
-        {% endif %}
-        {% if work_report.effective_display_options.amount ?? true %}
+        {% endif %}{# Skrytá částka práce skryje součet jen tam, kde by ji prozradil; materiál zůstává vidět. #}{% if (work_report.effective_display_options.amount ?? true) or work_report.total_amount == 0 %}
         <tr>
           <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #E5E0F4;">Amount</td>
           <td style="padding:8px 0 0;border-top:1px solid #E5E0F4;font-size:18px;font-weight:700;color:{{ accent }};font-family:monospace;">
             {{ (work_report.total_amount + work_report.material_total)|number_format(2, '.', ',') }} {{ invoice.currency }}
           </td>
         </tr>
-        {% endif %}
-        {% endif %}
+{% endif %}        {% endif %}
       </table>
     </td>
   </tr>

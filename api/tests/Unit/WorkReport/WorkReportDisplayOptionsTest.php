@@ -127,6 +127,37 @@ final class WorkReportDisplayOptionsTest extends TestCase
         }
     }
 
+    /** BEZ OPRAVY PADÁ: skrytá částka práce skryla i součet výkazu, který obsahuje jen materiál. */
+    public function testApprovalEmailKeepsMaterialTotalsWhenWorkAmountsAreHidden(): void
+    {
+        $twig = new Environment(new FilesystemLoader(dirname(__DIR__, 3) . '/templates/email'));
+        foreach (['cs', 'en'] as $locale) {
+            $totalLabel = $locale === 'cs' ? 'K vyúčtování' : 'Amount';
+            $separator = $locale === 'cs' ? ',' : '.';
+            foreach (['html', 'txt'] as $format) {
+                $template = 'invoice_approval.' . $locale . '.' . $format . '.twig';
+
+                $materialOnly = $this->context(['amount' => false]);
+                $materialOnly['work_report'] = array_replace($materialOnly['work_report'], [
+                    'items' => [], 'total_hours' => 0.0, 'total_amount' => 0.0,
+                    'material_title' => 'Spotřební materiál', 'material_total' => 500.0,
+                ]);
+                $html = $twig->render($template, $materialOnly);
+                self::assertStringContainsString('Spotřební materiál', $html, $template);
+                self::assertStringContainsString($totalLabel, $html, $template);
+                self::assertStringContainsString('500' . $separator . '00', $html, $template);
+
+                $mixed = $this->context(['amount' => false]);
+                $mixed['work_report']['material_total'] = 300.0;
+                $mixed['work_report']['material_title'] = 'Spotřební materiál';
+                $html = $twig->render($template, $mixed);
+                self::assertStringContainsString('300' . $separator . '00', $html, $template);
+                self::assertStringNotContainsString('2468', $html, $template);
+                self::assertStringNotContainsString('2' . ($locale === 'cs' ? ' ' : ',') . '768', $html, $template);
+            }
+        }
+    }
+
     private function twig(): Environment
     {
         $twig = new Environment(new FilesystemLoader(dirname(__DIR__, 3) . '/templates/invoice'));
