@@ -14961,7 +14961,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Export rozvahy nebo výsledovky po účtech (PDF / XLSX)
-      description: XLSX má tvar obrazovky, tedy sloupce `columns.*.lines`; PDF je soupis se zůstatky MD a Dal.
+      description: XLSX i PDF (na šířku) mají tvar obrazovky, tedy sloupce `columns.*.lines`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - $ref: '#/components/parameters/DimensionValueId'
@@ -14971,8 +14971,8 @@ paths:
         - { in: query, name: part, schema: { type: string, enum: [balance, profit_loss], default: balance } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
         - { in: query, name: unit, schema: { type: string, enum: [czk, thousands], default: czk } }
-        - { in: query, name: hide_zero, description: "XLSX: 0 = ukázat i nulové účty", schema: { type: integer, enum: [0, 1], default: 1 } }
-        - { in: query, name: analytics, description: "XLSX: 0 = jen syntetiky", schema: { type: integer, enum: [0, 1], default: 1 } }
+        - { in: query, name: hide_zero, description: "0 = ukázat i nulové účty", schema: { type: integer, enum: [0, 1], default: 1 } }
+        - { in: query, name: analytics, description: "0 = jen syntetiky", schema: { type: integer, enum: [0, 1], default: 1 } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NotFound' }

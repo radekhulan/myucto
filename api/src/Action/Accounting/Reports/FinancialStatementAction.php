@@ -276,7 +276,7 @@ final class FinancialStatementAction
         }
 
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $format === 'xlsx' ? $this->columnOptions($request) : null);
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $this->columnOptions($request));
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit]),
@@ -305,7 +305,7 @@ final class FinancialStatementAction
     }
 
     /**
-     * Přepínače sloupcového pohledu, stejné pro obrazovku i XLSX.
+     * Přepínače sloupcového pohledu, stejné pro obrazovku, XLSX i PDF.
      *
      * @return array{hide_zero:bool, analytics:bool}
      */
