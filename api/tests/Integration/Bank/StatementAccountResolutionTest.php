@@ -570,6 +570,34 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertSame(200.0, (float) $months['2099-07']);
     }
 
+    /**
+     * Ranní stažení z API nese stav z okamžiku stažení. Pohyb, který přišel později téhož dne
+     * až s dalším stažením, do něj patří: měsíc ukáže zůstatek konce dne, ne ranní stav.
+     */
+    #[\PHPUnit\Framework\Attributes\TestWith([true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false])]
+    public function testMonthClosingUsesDayEndBalanceInsteadOfMorningDownload(bool $projectionFirst): void
+    {
+        $account = self::ACCOUNT;
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $pdo = $this->db->pdo();
+        $this->insertStatement('gpc', $account, '2250', '2099-06-30', 1000.0, 'dayend-anchor');
+        if ($projectionFirst) $projection = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'dayend-projection');
+        $morning = $this->insertBankStatementWithBalances('bank_api', $account, '2250', '2099-07-31', 1000.0, 1000.0, null, null, 'dayend-morning');
+        if (!$projectionFirst) $projection = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'dayend-projection');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = NULL WHERE id = ?')->execute([$projection]);
+        $nextDay = $this->insertBankStatementWithBalances('bank_api', $account, '2250', '2099-08-01', 1000.0, 900.0, null, null, 'dayend-next');
+        $pdo->prepare("UPDATE bank_statements SET imported_at = CONCAT(statement_date, ' 00:05:00') WHERE id IN (?, ?)")->execute([$morning, $nextDay]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-31', -100, 'CZK')")->execute([$nextDay]);
+
+        $response = $this->action->accountBalances($this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'account' => $account]]), new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($body['accounts'], null, 'id');
+        $months = array_column($accounts[$currencyId]['months'], 'balance', 'month');
+        self::assertSame(900.0, (float) $months['2099-07']);
+        self::assertSame(900.0, (float) $months['2099-08']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     public function testLinkedApiMovementAppearsInGpcListFiltersAndSuggestions(): void
