@@ -13392,6 +13392,10 @@ paths:
                     type: integer
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
     post:
       tags:
       - Accounting
@@ -28555,7 +28559,7 @@ paths:
           type: string
           format: date
         required: true
-      - $ref: '#/components/parameters/DimensionValueId'
+      - $ref: '#/components/parameters/DimensionSingleValueId'
       - $ref: '#/components/parameters/DimensionDescendants'
       - in: query
         name: scope
@@ -28595,7 +28599,7 @@ paths:
           type: string
           format: date
         required: true
-      - $ref: '#/components/parameters/DimensionValueId'
+      - $ref: '#/components/parameters/DimensionSingleValueId'
       - $ref: '#/components/parameters/DimensionDescendants'
       - in: query
         name: scope
@@ -34368,9 +34372,23 @@ components:
       name: dimension_value_id
       required: false
       description: |
-        Filtr na hodnotu dimenze (Firma → Dimenze). Sestava vezme jen řádky deníku
-        s touto hodnotou (výchozí včetně podřízených hodnot), ne protistranu zápisu.
-      schema: { type: integer }
+        Filtr na hodnoty dimenzí (Firma → Dimenze): jedno id hodnoty, nebo nejvýše 10 id
+        oddělených čárkou (`12,34`). Sestava vezme jen řádky deníku s vybranou hodnotou
+        (výchozí včetně podřízených hodnot), ne protistranu zápisu. Hodnoty různých typů
+        musí platit zároveň na témže řádku (např. projekt a středisko), u hodnot stejného
+        typu stačí kterákoli. Řádek s rozpadem se započte součinem dílů vybraných hodnot.
+        Hodnoty smí patřit nejvýše ke 4 různým typům dimenzí. Neplatný seznam nebo víc
+        typů vrací 422 `dimension_value_invalid`.
+      schema: { type: string, pattern: '^[1-9][0-9]{0,9}(,[1-9][0-9]{0,9}){0,9}$', example: '12,34' }
+
+    DimensionSingleValueId:
+      in: query
+      name: dimension_value_id
+      required: false
+      description: |
+        Hodnota dimenze (Firma → Dimenze), výchozí včetně podřízených hodnot. Peněžní tok
+        po dimenzi se počítá za jednu hodnotu; seznam hodnot vrací 422 `dimension_value_invalid`.
+      schema: { type: integer, minimum: 1 }
 
     DimensionDescendants:
       in: query
@@ -51496,6 +51514,7 @@ components:
             - value_id
             - value_ids
             - label
+            - criteria
             properties:
               type_id:
                 type: integer
@@ -51509,6 +51528,10 @@ components:
                 type:
                 - string
                 - 'null'
+              criteria:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportDimensionCriterion'
           - type: 'null'
         profit:
           type: number
@@ -54920,6 +54943,34 @@ components:
               items:
                 $ref: '#/components/schemas/StatementUnmappedAccount'
     ReportDimensionFilter:
+      type: object
+      description: |
+        Použitý filtr dimenzí. `type_id`, `value_id` a `value_ids` popisují první podmínku,
+        `criteria` všechny (jedna na typ dimenze); `label` je popis celého filtru.
+      required:
+      - type_id
+      - value_id
+      - value_ids
+      - label
+      - criteria
+      properties:
+        type_id:
+          type: integer
+        value_id:
+          type: integer
+        value_ids:
+          type: array
+          items:
+            type: integer
+        label:
+          type:
+          - string
+          - 'null'
+        criteria:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportDimensionCriterion'
+    ReportDimensionCriterion:
       type: object
       required:
       - type_id

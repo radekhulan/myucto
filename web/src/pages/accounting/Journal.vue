@@ -44,7 +44,8 @@ import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useDimensions } from '@/composables/useDimensions'
 
@@ -97,7 +98,7 @@ const filters = reactive({
   // ukázat jen JEDEN zápis a u víc nálezů skončí na nefiltrovaném deníku.
   integrity: '' as '' | 'amount_mismatch',
   // Hodnota dimenze (Firma → Dimenze) včetně podřízených, stejně jako u sestav.
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 
@@ -167,7 +168,7 @@ async function load(reset = true): Promise<boolean> {
       amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
       amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
       integrity: filters.integrity || undefined,
-      dimension_value_id: filters.dimension_value_id ?? undefined,
+      dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
       dimension_descendants: filters.dimension_descendants,
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
@@ -233,15 +234,15 @@ function resetFilters() {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
-  filters.dimension_value_id = null
+  filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = ''
   applyFilters()
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   applyFilters()
 }
 function onDimensionDescendants(value: boolean) {
@@ -265,8 +266,8 @@ function buildQuery(): Record<string, string> {
   if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
   if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
   if (filters.integrity) q.integrity = filters.integrity
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = String(filters.dimension_value_id)
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = '0'
   }
   return q
@@ -313,8 +314,7 @@ function hydrateFilters(q: Record<string, unknown>) {
   filters.amount_from = numberValue('amount_from')
   filters.amount_to = numberValue('amount_to')
   filters.integrity = value('integrity') === 'amount_mismatch' ? 'amount_mismatch' : ''
-  const dimensionValueId = numberValue('dimension_value_id')
-  filters.dimension_value_id = dimensionValueId !== '' && dimensionValueId > 0 ? dimensionValueId : null
+  filters.dimension_value_ids = parseDimensionValueIds(value('dimension_value_id'))
   filters.dimension_descendants = value('dimension_descendants') !== '0'
 }
 
@@ -349,7 +349,7 @@ const activeFilterCount = computed(() => {
   if (filters.account_from || filters.account_to) n++
   if (filters.amount_from !== '' || filters.amount_to !== '') n++
   if (filters.integrity) n++
-  if (filters.dimension_value_id) n++
+  if (filters.dimension_value_ids.length > 0) n++
   return n
 })
 
@@ -380,12 +380,19 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
   }
   if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
-  if (filters.dimension_value_id) {
-    const value = dims.valueById.value.get(filters.dimension_value_id)
+  if (filters.dimension_value_ids.length > 0) {
+    const ids = filters.dimension_value_ids
+    const first = dims.valueById.value.get(ids[0])
+    const typeName = (id: number) => {
+      const value = dims.valueById.value.get(id)
+      return value ? dims.typeById.value.get(value.type_id)?.name : undefined
+    }
     chips.push({
       key: 'dimension',
-      label: (value && dims.typeById.value.get(value.type_id)?.name) || t('dimensions.filter_value'),
-      value: dims.valueLabel(filters.dimension_value_id)
+      label: (ids.length === 1 && first && typeName(ids[0])) || t('dimensions.filter_type'),
+      value: (ids.length === 1
+        ? dims.valueLabel(ids[0])
+        : ids.map(id => [typeName(id), dims.valueLabel(id)].filter(Boolean).join(': ')).join(' · '))
         + (filters.dimension_descendants ? '' : ` (${t('accounting.journal.filter_dimension_only_value')})`),
     })
   }
@@ -405,7 +412,7 @@ function clearFilter(key: string) {
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
     case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
     case 'integrity': filters.integrity = ''; break
-    case 'dimension': filters.dimension_value_id = null; filters.dimension_descendants = true; break
+    case 'dimension': filters.dimension_value_ids = []; filters.dimension_descendants = true; break
   }
   applyFilters()
 }
@@ -551,8 +558,8 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.amount_from !== '') q.amount_from = filters.amount_from
   if (filters.amount_to !== '') q.amount_to = filters.amount_to
   if (filters.integrity) q.integrity = filters.integrity
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = filters.dimension_value_id
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = 0
   }
   return q
@@ -795,7 +802,7 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
-  filters.dimension_value_id = null
+  filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = entryId
@@ -1054,9 +1061,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         </div>
       </div>
       <!-- Hodnota dimenze: jen u firmy se zapnutými dimenzemi (komponenta se jinak nevykreslí). -->
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />

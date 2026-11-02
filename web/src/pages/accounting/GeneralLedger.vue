@@ -26,7 +26,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { allAccountingPeriodsRange, findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 
 const { t } = useI18n()
@@ -50,12 +51,12 @@ const filters = reactive({
   client: '',
   item: '',
   // Filtr na hodnotu dimenze (Firma → Dimenze) — bere jen řádky deníku s hodnotou.
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   load()
 }
 
@@ -76,8 +77,8 @@ function queryParams() {
     vendor: filters.vendor || undefined,
     client: filters.client || undefined,
     item: filters.item || undefined,
-    ...(filters.dimension_value_id
-      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+    ...(filters.dimension_value_ids.length > 0
+      ? { dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids), dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
       : {}),
   }
 }
@@ -86,7 +87,7 @@ function resetFilters() {
   filters.vendor = ''
   filters.client = ''
   filters.item = ''
-  filters.dimension_value_id = null
+  filters.dimension_value_ids = []
   load()
 }
 
@@ -376,8 +377,8 @@ function buildQuery(includeAfterClosing = false): Record<string, string> {
   if (filters.vendor) q.vendor = filters.vendor
   if (filters.client) q.client = filters.client
   if (filters.item) q.item = filters.item
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = String(filters.dimension_value_id)
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = '0'
   }
   return q
@@ -392,8 +393,7 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.vendor = q.vendor ?? ''
   filters.client = q.client ?? ''
   filters.item = q.item ?? ''
-  const valueId = Number(q.dimension_value_id)
-  filters.dimension_value_id = Number.isSafeInteger(valueId) && valueId > 0 ? valueId : null
+  filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
   filters.dimension_descendants = q.dimension_descendants !== '0'
   load()
 }
@@ -496,8 +496,7 @@ onMounted(async () => {
   filters.period_id = periodId
   if (typeof q.from === 'string' && q.from) filters.from = q.from
   if (typeof q.to === 'string' && q.to) filters.to = q.to
-  const valueId = Number(q.dimension_value_id)
-  if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+  filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
   filters.dimension_descendants = q.dimension_descendants !== '0'
   if (periodId === '') {
     const allRange = allAccountingPeriodsRange(periods.value)
@@ -632,16 +631,16 @@ onMounted(async () => {
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
       </div>
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
       <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.general_ledger.reset_filters') }}</button>
       </div>
     </div>
 
     <DimensionReportLinks current="ledger" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
-      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+      :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants" />
 
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}
