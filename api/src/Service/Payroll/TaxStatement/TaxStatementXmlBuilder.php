@@ -29,6 +29,13 @@ use MyInvoice\Service\Report\EpoPayerBlockBuilder;
  * část II.; rozdíl proti původnímu vyúčtování jde do sl. 10 (u DPSVD2 do sl. 9).
  * Rozdíl aplikace nepočítá — musela by k tomu znát původní podání jako celek,
  * ne jen aktuální stav mezd.
+ *
+ * ## Zástupce
+ *
+ * `$meta['representation']` (výstup `TaxRepresentationService::at()`) naplní
+ * `zast_*` a `opr_*` ve `VetaP` stejnou cestou jako DPH, DPPO, DPFO a hlášení
+ * nerezidentů. Upozornění na kódy mimo 4b a 4c se tu nevrací: lhůtu vyúčtování
+ * neprodlužuje žádný zástupce, ani daňový poradce.
  */
 final class TaxStatementXmlBuilder
 {
@@ -41,7 +48,7 @@ final class TaxStatementXmlBuilder
     /**
      * @param array<string,mixed> $supplier Řádek z
      *        {@see \MyInvoice\Service\Report\EpoSupplierBlockBuilder::loadSupplier()}.
-     * @param array{verze_sw?:string,verze_pis?:string,d_zjist?:string} $meta
+     * @param array{verze_sw?:string,verze_pis?:string,d_zjist?:string,representation?:array<string,mixed>} $meta
      * @return array{xml:string,warnings:list<string>}
      */
     public function buildDependentActivity(
@@ -104,7 +111,7 @@ final class TaxStatementXmlBuilder
 
         // ── VetaP — plátce daně ─────────────────────────────────────────────
         $vetaP = $dom->createElement('VetaP');
-        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true);
+        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true, representation: (array) ($meta['representation'] ?? []));
         $root->appendChild($vetaP);
 
         // ── VetaO — část I. po měsících ─────────────────────────────────────
@@ -184,7 +191,7 @@ final class TaxStatementXmlBuilder
 
     /**
      * @param array<string,mixed> $supplier
-     * @param array{verze_sw?:string,verze_pis?:string,d_zjist?:string} $meta
+     * @param array{verze_sw?:string,verze_pis?:string,d_zjist?:string,representation?:array<string,mixed>} $meta
      * @return array{xml:string,warnings:list<string>}
      */
     public function buildWithholdingTax(
@@ -223,7 +230,7 @@ final class TaxStatementXmlBuilder
         $root->appendChild($vetaD);
 
         $vetaP = $dom->createElement('VetaP');
-        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true);
+        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true, representation: (array) ($meta['representation'] ?? []));
         $root->appendChild($vetaP);
 
         foreach ($statement->months as $month => $row) {

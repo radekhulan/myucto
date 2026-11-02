@@ -14138,6 +14138,13 @@
     "book_title": "Cash book",
     "new_document": "New cash document",
     "edit_document": "Edit cash document",
+    "original": {
+      "pick": "Attach original",
+      "remove": "Remove original",
+      "pending_hint": "The file is uploaded to Documents and attached to the document after saving",
+      "unsupported": "The original must be a PDF or an image",
+      "attach_failed": "The document is saved, but the original could not be attached. Upload it from the document edit or detail."
+    },
     "save_draft": "Save as draft",
     "post_document": "Post",
     "post_and_next": "Post and next",
@@ -18344,12 +18351,12 @@
     },
     "balance_inventory": {
       "title": "Balance sheet account inventory",
-      "subtitle": "Inventory list of balance-sheet accounts (classes 0–4) with the closing balance at the balance sheet date, documentation and signature space (Czech Accounting Act §29–30).",
+      "subtitle": "List of balance sheet accounts (classes 0–4) by analytic account with the closing balance at the balance sheet date, supporting documents and signatures (§29–30 of the Accounting Act).",
       "empty": "There are no balance-sheet accounts with a balance or movement at the balance sheet date.",
       "filter_period": "Period",
       "export_pdf": "Export PDF",
       "export_xlsx": "Export XLSX",
-      "as_of_hint": "Balance sheet date: {date}. The \"Actual state\" and \"Difference\" columns are filled in by hand after the physical inventory count — they are included in the export (PDF/XLSX).",
+      "as_of_hint": "Balance sheet date: {date}. The export (PDF/XLSX) is the filled-in protocol with the saved counted balance, difference, note and signature lines. Uncounted accounts stay blank for manual completion.",
       "draft_warning": "There are {n} unposted drafts in the period — they are not included in the balances.",
       "sign_hint": "Book value and actual state are stated on the account's normal side — for liability, contra-asset and equity accounts that means a positive number. Accounts with no fixed side (±, e.g. 343 or 431) are stated signed: positive on debit, negative on credit.",
       "col_account": "Account",
@@ -18381,7 +18388,19 @@
       "save_complete": "Save and complete",
       "saved": "Inventory saved.",
       "saved_completed": "Inventory completed.",
-      "completed_blocked": "Cannot complete — {count} unresolved differences. Resolve them (confirm or fix) before completing."
+      "completed_blocked": "Cannot complete — {count} unresolved differences. Resolve them (confirm or fix) before completing.",
+      "rolled_up_hint": "For some synthetic accounts the protocol is saved as a summary. Clear the counted balance and save to split the account into analytic accounts.",
+      "confirm_zero": "Confirm zero accounts",
+      "open_items": {
+        "title": "List of open items",
+        "hint": "Support for the inventory of clearing accounts as of {date}. Without a selection it shows 261, 335, 395 and the clearing accounts from the chart.",
+        "codes_ph": "Accounts, e.g. 261, 335, 395",
+        "show": "Show",
+        "empty": "The selected accounts have no movement as of this date.",
+        "col_count": "Items",
+        "col_check": "Check",
+        "truncated": "Only part of the items is shown, the account has {total}. The full list is in the export."
+      }
     },
     "offsets": {
       "title": "Offsets",
@@ -18638,7 +18657,7 @@
     },
     "account_statement": {
       "title": "Account statement",
-      "subtitle": "Chronological listing of entries on the account with a running balance.",
+      "subtitle": "Chronological statement of entries on the account with a running balance. The balance is signed by account type, an unusual side is shown in red.",
       "empty": "No movements in the selected range.",
       "filter_from": "From",
       "filter_to": "To",
@@ -18706,6 +18725,22 @@
         "reversed": "reversed",
         "close": "Close",
         "empty": "No open items at this date."
+      },
+      "mode_inventory": "Account inventory",
+      "filter_counter": "Counter account",
+      "counter_all": "All counter accounts",
+      "counter_none": "no counter account",
+      "counter_totals_title": "Totals by counter account",
+      "counter_totals_hint": "A compound entry is split in proportion to the opposite lines. Click a row to filter the statement.",
+      "counter_total": "Total = account turnover",
+      "counter_filter_note": "Counter account filter {account}: share of debit turnover {md}, credit {d}. The balance in the rows is the balance of the whole account.",
+      "inventory": {
+        "subtitle": "Book and counted balance of the account and its analytic accounts from the inventory protocol.",
+        "as_of": "Inventory as of the balance sheet date {date}",
+        "open_protocol": "Open protocol",
+        "not_applicable": "Income statement accounts are not subject to inventory. They close to account 710, turnovers are in the account statement.",
+        "no_rows": "The account has no movement in the period.",
+        "no_period": "No accounting period exists for this date."
       }
     },
     "section18": {
@@ -18786,7 +18821,7 @@
       "tab_statement": "Statement",
       "tab_accounts_balance": "Account 702 (by accounts)",
       "tab_accounts_income": "Account 710 (by accounts)",
-      "note_before_closing": "Account balances before closing the books, without the closing entry. Click an account to open its statement.",
+      "note_before_closing": "Account balances before closing the books, without the closing entry. Click an account to open its inventory.",
       "closed_note": "The year is closed; balances match the content of accounts 702 and 710.",
       "show_analytics": "Show analytical accounts",
       "col_account": "Account",
@@ -18847,7 +18882,23 @@
         "src_dppo": "Corporate tax preview",
         "src_dppo_adjustments": "Corporate tax base adjustments",
         "src_advances": "Advances"
-      }
+      },
+      "hide_zero": "Hide zero accounts",
+      "col_ps": "Opening balance",
+      "col_month": "Turnover {month}",
+      "col_ytd": "Turnover from {date}",
+      "col_ks": "Closing balance",
+      "side_assets": "Assets",
+      "side_liabilities": "Liabilities",
+      "side_expenses": "Expenses",
+      "side_revenues": "Revenues",
+      "total_assets": "Total assets",
+      "total_liabilities": "Total liabilities",
+      "total_liabilities_result": "Liabilities including profit or loss",
+      "total_expenses": "Total expenses",
+      "total_revenues": "Total revenues",
+      "open_inventory": "Open account inventory",
+      "sign_hint": "Sign by account type: assets and expenses debit − credit, liabilities and revenues credit − debit. For every account, opening balance + turnover from the start of the period = closing balance. An unusual side is in red; accumulated depreciation is negative in assets and is not unusual."
     },
     "income_statement": {
       "title": "Income statement",
@@ -19401,7 +19452,8 @@
         "accruals": "Accruals and deferrals (381–385)",
         "statement_notes": "Notes to the financial statements (§ 18/1/c)",
         "cash_flow": "Cash flow statement (§ 18/2)",
-        "equity_changes": "Statement of changes in equity (§ 18/2)"
+        "equity_changes": "Statement of changes in equity (§ 18/2)",
+        "open_items": "List of open items (261, 335, 395 and clearing accounts)"
       },
       "edit_notes": "Fill in the notes",
       "notes_incomplete_hint": "The notes to the financial statements can be completed in the editor — filled-in sections are included the next time the package is generated."
@@ -22566,6 +22618,13 @@
     "preview_side_title": "Original preview",
     "preview_side_close": "Close preview",
     "preview_side_empty": "The document has no original attached.",
+    "preview_side_show": "Show original",
+    "preview_side_hide": "Hide original",
+    "preview_placement": "Preview placement",
+    "preview_place_side": "Preview on the right",
+    "preview_place_below": "Preview below the form",
+    "preview_resize": "Original preview width",
+    "preview_resize_hint": "Drag with the mouse or use the arrow keys. Enter or double-click restores the default width.",
     "of": "of",
     "from": "From",
     "to": "To",

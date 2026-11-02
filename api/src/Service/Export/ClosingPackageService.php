@@ -60,6 +60,8 @@ use ZipArchive;
  *   Inventarizace-majetku/dlouhodoby-majetek-<rok>.pdf(.xlsx) + drobny-majetek-<rok>.pdf(.xlsx)
  *   Inventarizace-majetku/karty/karta-<N>.pdf (inventární karta na majetek, §29–30 ZoÚ)
  *   Saldokonta-nad-1-rok/saldo-nad-1-rok-<rok>.pdf(.xlsx)
+ *   Inventarizace-uctu/inventarizace-uctu-<rok>.pdf(.xlsx) (vyplněný protokol s podpisy)
+ *   Inventarizace-uctu/otevrene-polozky-<rok>.pdf(.xlsx) (261, 335, 395 a zúčtovací účty)
  *   Casova-rozliseni/casove-rozliseni-<rok>.pdf(.xlsx)
  *   Priloha-k-zaverce/priloha-<rok>.pdf + .txt (§ 18/1/c ZoÚ)
  *   README.txt
@@ -74,7 +76,7 @@ final class ClosingPackageService
         'balance_sheet', 'income_statement', 'general_ledger',
         'trial_balance', 'journal', 'balance_inventory', 'dph_book', 'income_tax', 'income_tax_report', 'income_tax_advances',
         'asset_inventory', 'saldo_over_1y', 'accruals', 'statement_notes',
-        'cash_flow', 'equity_changes',
+        'cash_flow', 'equity_changes', 'open_items',
     ];
 
     /**
@@ -98,7 +100,7 @@ final class ClosingPackageService
     private const XLSX_CAPABLE = [
         'balance_sheet', 'income_statement', 'general_ledger', 'trial_balance', 'journal',
         'balance_inventory', 'asset_inventory', 'saldo_over_1y', 'accruals',
-        'cash_flow', 'equity_changes',
+        'cash_flow', 'equity_changes', 'open_items',
     ];
 
     public function __construct(
@@ -141,6 +143,8 @@ final class ClosingPackageService
         private readonly \MyInvoice\Service\Pdf\CashFlowPdfRenderer $cashFlowPdf,
         private readonly \MyInvoice\Service\Accounting\Reports\EquityChangesStatementService $equityService,
         private readonly \MyInvoice\Service\Pdf\EquityChangesPdfRenderer $equityPdf,
+        private readonly \MyInvoice\Service\Accounting\Reports\OpenItemsService $openItems,
+        private readonly \MyInvoice\Service\Pdf\OpenItemsListPdfRenderer $openItemsPdf,
     ) {}
 
     /** Verze generátoru balíčku (manifest.json, EP-6). */
@@ -237,6 +241,7 @@ final class ClosingPackageService
             'statement_notes'   => 1,
             'cash_flow'         => $is504 ? 0 : 1,
             'equity_changes'    => $is504 ? 0 : 1,
+            'open_items'        => 1,
         ];
     }
 
@@ -472,8 +477,34 @@ final class ClosingPackageService
                         $out = $this->xlsx->balanceInventory($data);
                         $put(sprintf('Inventarizace-uctu/inventarizace-uctu-%d.xlsx', $fiscalYear), $out['bytes']);
                     }
+                    // Balíček s nedokončeným protokolem nesmí vypadat hotově.
+                    $inventory = $data['inventory'];
+                    if (!$inventory['can_close']) {
+                        $warnings[] = 'Inventarizace rozvahových účtů není dokončená: nevyřešených účtů ' . (int) $inventory['unresolved_count'] . '.';
+                    }
                 } catch (\Throwable $e) { $warnings[] = 'Inventarizace rozvahových účtů: ' . $e->getMessage(); }
                 $bump('Inventarizace rozvahových účtů');
+            }
+
+            // 5c) Soupis otevřených položek k rozvahovému dni jako podklad inventarizace
+            //     průběžných účtů. Doplňkový: firma takové účty mít nemusí.
+            if (in_array('open_items', $parts, true)) {
+                $this->ensureNotCancelled($jobId, $zip, $absPath);
+                try {
+                    $data = $this->openItems->listing($supplierId, $endsOn, [], 100000);
+                    if ($data['accounts'] !== []) {
+                        $put(sprintf('Inventarizace-uctu/otevrene-polozky-%d.pdf', $fiscalYear), $this->openItemsPdf->render($data));
+                        $added++; $summary['open_items'] = 1;
+                        if ($includeXlsx) {
+                            $out = $this->xlsx->openItemsList($data);
+                            $put(sprintf('Inventarizace-uctu/otevrene-polozky-%d.xlsx', $fiscalYear), $out['bytes']);
+                        }
+                        if ((int) $data['totals']['unmatched'] > 0) {
+                            $warnings[] = 'Soupis otevřených položek: součet nesedí na zůstatek u ' . (int) $data['totals']['unmatched'] . ' účtů.';
+                        }
+                    }
+                } catch (\Throwable $e) { $warnings[] = 'Soupis otevřených položek: ' . $e->getMessage(); }
+                $bump('Soupis otevřených položek');
             }
 
             // 6) Kniha DPH — per kalendářní měsíc období.
@@ -1018,7 +1049,8 @@ final class ClosingPackageService
             'general_ledger' => 'Hlavní kniha (PDF)',
             'trial_balance' => 'Obratová předvaha (PDF)',
             'journal' => 'Účetní deník (PDF)',
-            'balance_inventory' => 'Inventarizace rozvahových účtů (PDF, §29–30 ZoÚ)',
+            'balance_inventory' => 'Inventarizace rozvahových účtů, vyplněný protokol (PDF, §29–30 ZoÚ)',
+            'open_items' => 'Soupis otevřených položek k rozvahovému dni (PDF)',
             'dph_book' => 'Kniha DPH (PDF, počet měsíců)',
             'income_tax' => 'Přiznání k dani z příjmů (XML)',
             'income_tax_report' => 'Sestava přiznání k dani z příjmů (PDF, pracovní, není podáním; bez části XML i XML)',

@@ -46,7 +46,7 @@ final class MatchCandidateProvider
         );
         $rows = $incoming
             ? $this->issuedPool($supplierId, $posted)
-            : $this->purchasePool($supplierId, $posted, $purchaseId);
+            : ($purchaseId === null ? $this->purchasePool($supplierId, $posted) : $this->purchaseReadyPool($supplierId, $posted, $purchaseId));
         $txCard = isset($tx['card_last4']) && \MyInvoice\Service\Bank\Card\CardNumberMask::isValidLast4((string) $tx['card_last4'])
             ? (string) $tx['card_last4']
             : null;
@@ -68,7 +68,7 @@ final class MatchCandidateProvider
                     ->issuedViolation($supplierId, (int) $row['id'], $amount) !== null) {
                 continue;
             }
-            $candidate = $this->singleCandidate($tx, $row, $amount, $currency, $posted, $accountMap, $incoming);
+            $candidate = $this->singleCandidate($tx, $row, $amount, $currency, $posted, $accountMap, $incoming, $purchaseId !== null);
             if ($candidate !== null) $base[] = $candidate;
         }
 
@@ -206,7 +206,47 @@ final class MatchCandidateProvider
      *
      * @return list<array<string,mixed>>
      */
-    private function purchasePool(int $supplierId, string $posted, ?int $purchaseId = null): array
+    private function purchasePool(int $supplierId, string $posted): array
+    {
+        $branch = static fn (string $statusCondition): string =>
+            "SELECT 'purchase_invoice' AS candidate_type, p.id, p.vendor_id AS client_id,
+                    COALESCE(NULLIF(p.vendor_invoice_number,''), p.varsymbol) AS ref,
+                    p.amount_to_pay,
+                    (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
+                    p.document_kind AS invoice_type, p.status, p.exchange_rate,
+                    p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4,
+                    p.advance_purchase_invoice_id,
+                    fin.final_ref
+               FROM purchase_invoices p
+               JOIN currencies cur ON cur.id = p.currency_id
+               JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
+               -- Konečná faktura, která zálohu vyúčtovává: platba pod JEJÍM VS je u neuhrazené
+               -- zálohy platbou zálohy (AdvanceFinalMatchGuard ji na fakturu nepustí).
+               LEFT JOIN (SELECT f.advance_purchase_invoice_id AS advance_id,
+                                 MIN(COALESCE(NULLIF(f.vendor_invoice_number, ''), f.varsymbol)) AS final_ref
+                            FROM purchase_invoices f
+                           WHERE f.supplier_id = ? AND f.advance_purchase_invoice_id IS NOT NULL
+                             AND f.status <> 'cancelled'
+                           GROUP BY f.advance_purchase_invoice_id) fin ON fin.advance_id = p.id
+              WHERE p.supplier_id = ?
+                AND {$statusCondition}
+                AND p.document_kind IN ('invoice','advance')
+                AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)";
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM (' . $branch("p.status IN ('received','booked')") . ' UNION ALL '
+            // Záloha uhrazená jen evidenčně (stav paid bez jakékoli úhrady), kterou
+            // vyúčtovává konečná faktura: platba k ní pořád patří.
+            . $branch("p.document_kind = 'advance' AND p.status = 'paid' AND fin.advance_id IS NOT NULL
+                       AND ABS(" . PurchaseSettledExpr::settled('p') . ') < 0.005')
+            . ') pool ORDER BY ABS(DATEDIFF(due_date, ?)), id DESC LIMIT 300'
+        );
+        $window = [$posted, self::FALLBACK_DAY_WINDOW, $posted, self::FALLBACK_DAY_WINDOW];
+        $stmt->execute([$supplierId, $supplierId, ...$window, $supplierId, $supplierId, ...$window, $posted]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /** Rozšířený výběr jen pro návrh konkrétního nově přijatého dokladu. */
+    private function purchaseReadyPool(int $supplierId, string $posted, ?int $purchaseId = null): array
     {
         // Omezení na doklad používá pouze návrh po přijetí, nikdy automatické rozhodnutí.
         // Jinak by 300 novějších faktur dokázalo právě přijímaný doklad vytlačit z návrhů.
@@ -252,7 +292,7 @@ final class MatchCandidateProvider
     }
 
     /** @param array<string,mixed> $tx @param array<string,mixed> $row @param array<string,mixed>|null $map */
-    private function singleCandidate(array $tx, array $row, float $amount, string $txCurrency, string $posted, ?array $map, bool $incoming): ?array
+    private function singleCandidate(array $tx, array $row, float $amount, string $txCurrency, string $posted, ?array $map, bool $incoming, bool $purchaseReady = false): ?array
     {
         $remaining = round((float) $row['amount_to_pay'] - (float) ($row['paid_total'] ?? 0.0), 2);
         if ($remaining <= 0.0) return null;
@@ -293,7 +333,7 @@ final class MatchCandidateProvider
             $signals['name_fuzzy'] = MatchScorer::W_NAME_FUZZY;
         }
         $dateDistance = $this->dayDistance($posted, (string) ($row['due_date'] ?? $row['issue_date'] ?? $posted));
-        if (!$incoming) $dateDistance = min($dateDistance, $this->dayDistance($posted, (string) $row['issue_date']));
+        if ($purchaseReady && !$incoming) $dateDistance = min($dateDistance, $this->dayDistance($posted, (string) $row['issue_date']));
         if ($dateDistance <= 5) $signals['due_proximity'] = MatchScorer::W_DUE_PROXIMITY;
         $overpayment = $amount - $converted;
         if ($overpayment > $tol && ($vsExact || $promoted)) $flags[] = 'overpayment';

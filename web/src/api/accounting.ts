@@ -1047,6 +1047,60 @@ export interface BalanceInventoryRow {
   resolved?: boolean
   /** Skutečný stav odvozen z účetního u uzavřeného období (uzávěrka už zůstatky ověřila). */
   back_filled?: boolean
+  /** Syntetika, pod kterou účet patří; null = účet je sám syntetika. */
+  parent_id?: number | null
+  parent_code?: string | null
+  parent_name?: string | null
+  parent_normal_side?: NormalSide | null
+  /** Protokol uložený ještě za syntetiku: řádek je součet analytik. */
+  rolled_up?: boolean
+  book_display?: number
+  counted_display?: number | null
+  difference_display?: number | null
+}
+
+export interface AccountInventoryReport {
+  account: { id: number; code: string; name: string; type: AccountType; normal_side: NormalSide | null }
+  /** Výsledkový účet se neinventarizuje. */
+  inventoriable: boolean
+  period: ReportPeriod | null
+  as_of: string | null
+  inventory: BalanceInventoryHeader | null
+  rows: BalanceInventoryRow[]
+}
+
+export interface OpenItemsListAccount {
+  account: OpenItemsReport['account']
+  items: OpenItemLine[]
+  total: number
+  line_count: number
+  open_count: number
+  open_md: number
+  open_d: number
+  open_total: number
+  open_total_signed: number
+  balance: number
+  balance_signed: number
+  balance_unusual: boolean
+  difference: number
+  matches: boolean
+  truncated: boolean
+}
+
+export interface OpenItemsListReport {
+  as_of: string
+  accounts: OpenItemsListAccount[]
+  totals: { open_count: number; open_md: number; open_d: number; unmatched: number }
+}
+
+/** Součet účtu podle protiúčtu; složený zápis se dělí poměrem řádků protistrany. */
+export interface AccountCounterTotal {
+  account_id: number | null
+  account_code: string | null
+  name: string | null
+  parent_id: number | null
+  md: number
+  d: number
 }
 
 /** EP-6: hlavička uložené inventarizace rozvahových účtů. */
@@ -1168,7 +1222,11 @@ export interface AccountStatementItem {
   source_id: number | null
   side: JournalSide
   amount: number
+  /** Běžící zůstatek MD − D. */
   balance: number
+  /** Zůstatek se znaménkem podle typu účtu. */
+  balance_signed: number
+  balance_unusual: boolean
   /** Účet ŘÁDKU — u syntetiky je opis složený z jejích analytik. */
   account_id: number
   account_code: string
@@ -1208,7 +1266,10 @@ export interface OpenItemLine {
   is_red_storno?: boolean
   open_amount: number
   open_balance: number
+  open_balance_signed: number
   balance: number
+  balance_signed: number
+  balance_unusual: boolean
   account_id: number
   account_code: string
   account_name: string
@@ -1240,7 +1301,10 @@ export interface OpenItemsReport {
   open_md: number
   open_d: number
   open_total: number
+  open_total_signed: number
   balance: number
+  balance_signed: number
+  balance_unusual: boolean
   difference: number
 }
 
@@ -1290,15 +1354,24 @@ export interface AccountStatementReport {
     name: string
     type: AccountType
     normal_side: NormalSide | null
+    balance_sign: 1 | -1
   }
   opening_balance: number
+  opening_balance_signed: number
+  opening_balance_unusual: boolean
   items: AccountStatementItem[]
   total: number
   page: number
   per_page: number
   closing_balance: number
+  closing_balance_signed: number
+  closing_balance_unusual: boolean
   turnover_md: number
   turnover_d: number
+  /** Jen na první stránce (na dalších null): součty stránkování nemění. */
+  counter_totals: AccountCounterTotal[] | null
+  /** Vybraný protiúčet: podíl na obratu účtu, ne součet zobrazených řádků. Jen na první stránce. */
+  counter_filter: { account_id: number; account_code: string; name: string; md: number; d: number } | null
 }
 
 export type StatementScope = 'auto' | 'full' | 'small' | 'micro'
@@ -1311,6 +1384,10 @@ export interface StatementParams {
   /** Filtr výsledovky i rozvahy na hodnotu dimenze (řádek s rozpadem jen svým dílem). */
   dimension_value_id?: number
   dimension_descendants?: 0 | 1
+  /** Sloupcový pohled po účtech (aktiva vedle pasiv, náklady vedle výnosů). */
+  columns?: 0 | 1
+  hide_zero?: 0 | 1
+  analytics?: 0 | 1
   /** Průběžné časové rozlišení mimo deník (381/384 k rozvahovému dni), jen pohled výkazu. */
   accrual_spread?: 0 | 1
 }
@@ -1636,6 +1713,56 @@ export interface StatementAccountLine {
 
 export type StatementAccountSectionKey = 'operating' | 'financial' | 'unassigned' | 'tax' | 'transfer'
 
+/** Se znaménkem podle typu účtu: PS + ytd = ks. */
+export interface StatementColumnAmounts {
+  ps: number
+  month: number
+  ytd: number
+  ks: number
+}
+
+export interface StatementColumnAccount extends StatementColumnAmounts {
+  kind: 'synthetic' | 'analytic'
+  account_id: number
+  account_code: string
+  name: string
+  account_type: string
+  normal_side: NormalSide | null
+  ps_unusual: boolean
+  ks_unusual: boolean
+  is_zero: boolean
+}
+
+export interface StatementColumnClass extends StatementColumnAmounts {
+  kind: 'class'
+  class: string
+}
+
+export type StatementColumnCell = StatementColumnAccount | StatementColumnClass
+
+export type StatementColumnLine =
+  | { kind: 'cells'; left: StatementColumnCell | null; right: StatementColumnCell | null }
+  | { kind: 'section'; key: StatementAccountSectionKey }
+  | { kind: 'total'; key: 'balance' | 'balance_with_result' | 'section'; section?: StatementAccountSectionKey; left: StatementColumnAmounts; right: StatementColumnAmounts }
+  | { kind: 'result'; key: string; amounts: StatementColumnAmounts }
+
+export interface StatementColumnPart {
+  lines: StatementColumnLine[]
+  left_total: StatementColumnAmounts
+  right_total: StatementColumnAmounts
+  result: StatementColumnAmounts
+}
+
+export interface StatementAccountColumns {
+  as_of: string
+  month_from: string
+  ytd_from: string
+  hide_zero: boolean
+  analytics: boolean
+  balance: StatementColumnPart
+  profit_loss: StatementColumnPart
+}
+
 export interface StatementAccountsReport {
   version_code: string
   as_of: string
@@ -1671,6 +1798,7 @@ export interface StatementAccountsReport {
     technical_residual: number
     unassigned_count: number
   }
+  columns?: StatementAccountColumns
 }
 
 /** Nezaúčtovaná uzávěrková operace z projekce náhledu DPPO (ClosingProjectionCalculator). */
@@ -2554,7 +2682,11 @@ export const accountingApi = {
     api.get<BalanceInventoryReport>(`/accounting/periods/${periodId}/closing/inventory`).then(r => r.data),
   saveClosingInventory: (periodId: number, payload: BalanceInventorySavePayload) =>
     api.post<BalanceInventorySaveResult>(`/accounting/periods/${periodId}/closing/inventory`, payload).then(r => r.data),
-  getAccountStatement: (accountId: number, params: { from: string; to: string; page?: number; per_page?: number }) =>
+  getAccountInventory: (accountId: number, asOf: string) =>
+    api.get<AccountInventoryReport>(`/accounting/reports/balance-inventory/account/${accountId}`, { params: { as_of: asOf } }).then(r => r.data),
+  getOpenItemsList: (params: { as_of: string; codes?: string }) =>
+    api.get<OpenItemsListReport>('/accounting/reports/open-items-list', { params }).then(r => r.data),
+  getAccountStatement: (accountId: number, params: { from: string; to: string; page?: number; per_page?: number; counter_account_id?: number }) =>
     api.get<AccountStatementReport>(`/accounting/reports/account-statement/${accountId}`, { params }).then(r => r.data),
   getOpenItems: (accountId: number, params: { as_of: string; only_open: 0 | 1; page?: number; per_page?: number }) =>
     api.get<OpenItemsReport>(`/accounting/open-items/${accountId}`, { params }).then(r => r.data),

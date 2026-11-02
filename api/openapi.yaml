@@ -8135,51 +8135,6 @@ paths:
         '404': { description: "Příkaz nenalezen" }
         '422': { description: "Export selhal" }
 
-  /api/v1/purchase-invoices/{id}/bank-matching:
-    parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
-    get:
-      tags: [Purchase invoices]
-      summary: Bankovní úhrady a návrhy přijatého dokladu
-      description: Čtení bez vedlejších zápisů. Vyžaduje čtení banky i přijatých dokladů stejné firmy.
-      responses:
-        '200':
-          description: Navázané pohyby, dostupné návrhy a výsledek posledního dohledání.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PurchaseBankMatching' }
-        '403': { description: Chybí oprávnění číst banku nebo doklad. }
-        '404': { description: Doklad nebyl nalezen ve vybrané firmě. }
-
-  /api/v1/purchase-invoices/{id}/bank-matching/retry:
-    parameters:
-      - $ref: '#/components/parameters/SupplierIdHeader'
-      - in: path
-        name: id
-        required: true
-        schema: { type: integer, format: int64 }
-    post:
-      tags: [Purchase invoices]
-      summary: Opakovat dohledání bankovní platby přijatého dokladu
-      description: |
-        Interní operace přihlášené relace; bearer token nesmí zapisovat.
-        Vyžaduje bank.match (zápis), čtení banky a přijatých dokladů; klient navíc
-        purchase_invoices.transition (zápis). Nevytváří nové bankovní pohyby.
-        Výběr nad 200 kandidátů ani uzamčené období se automaticky nepárují.
-        Selhání hledání zachová přijatý doklad; výsledek je v last_attempt.outcome.
-      responses:
-        '200':
-          description: Výsledek hledání včetně navázaných pohybů a návrhů.
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/PurchaseBankMatching' }
-        '403': { description: Chybí oprávnění nebo token_write_forbidden. }
-        '404': { description: Doklad nebyl nalezen ve vybrané firmě. }
-
   /api/v1/purchase-invoices/{id}/payment-qr:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -14632,6 +14587,7 @@ paths:
         - { in: path, name: accountId, required: true, schema: { type: integer } }
         - { in: query, name: from, required: true, schema: { type: string, format: date } }
         - { in: query, name: to, required: true, schema: { type: string, format: date } }
+        - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, default: 50, maximum: 200 } }
         - { in: query, name: after_closing, description: "1 = zahrnout technické uzavírací a otevírací zápisy", schema: { type: integer, enum: [0, 1], default: 0 } }
@@ -14647,6 +14603,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: accountId, required: true, schema: { type: integer } }
+        - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
         - { in: query, name: from, required: true, schema: { type: string, format: date } }
         - { in: query, name: to, required: true, schema: { type: string, format: date } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
@@ -14654,6 +14611,35 @@ paths:
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/open-items-list:
+    get:
+      tags: [Accounting]
+      summary: Soupis otevřených položek více účtů k datu (podklad inventarizace)
+      description: |
+        Bez `codes` vrátí účty 261, 335, 395 a zúčtovací účty z osnovy. Účet bez pohybu se vynechá.
+        U každého účtu platí `open_total` = `balance`; jinak je `matches` false a `difference` ukazuje rozdíl.
+        Položky účtu jsou omezené na 200, `truncated` hlásí zkrácení; celý soupis je v exportu.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: as_of, required: true, schema: { type: string, format: date } }
+        - { in: query, name: codes, description: "Kódy účtů oddělené čárkou (nejvýš 50). Nahrazují výchozí seznam.", schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OpenItemsListReport' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/open-items-list/export:
+    get:
+      tags: [Accounting]
+      summary: Export soupisu otevřených položek (PDF / XLSX)
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: as_of, required: true, schema: { type: string, format: date } }
+        - { in: query, name: codes, schema: { type: string } }
+        - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
+      responses:
+        '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/open-items/{accountId}:
@@ -14936,6 +14922,27 @@ paths:
         schema:
           type: string
           format: date
+      - in: query
+        name: columns
+        description: 1 = přidat sloupcový pohled `columns` (aktiva vedle pasiv, náklady vedle výnosů). Rámec 504 ho nemá.
+        schema:
+          type: integer
+          enum: [0, 1]
+          default: 0
+      - in: query
+        name: hide_zero
+        description: 0 = ve sloupcích ukázat i účty, které mají ve všech čtyřech sloupcích nulu.
+        schema:
+          type: integer
+          enum: [0, 1]
+          default: 1
+      - in: query
+        name: analytics
+        description: 0 = ve sloupcích jen syntetiky.
+        schema:
+          type: integer
+          enum: [0, 1]
+          default: 1
       responses:
         '200':
           description: OK
@@ -14954,6 +14961,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Export rozvahy nebo výsledovky po účtech (PDF / XLSX)
+      description: XLSX i PDF (na šířku) mají tvar obrazovky, tedy sloupce `columns.*.lines`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - $ref: '#/components/parameters/DimensionValueId'
@@ -14963,6 +14971,8 @@ paths:
         - { in: query, name: part, schema: { type: string, enum: [balance, profit_loss], default: balance } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
         - { in: query, name: unit, schema: { type: string, enum: [czk, thousands], default: czk } }
+        - { in: query, name: hide_zero, description: "0 = ukázat i nulové účty", schema: { type: integer, enum: [0, 1], default: 1 } }
+        - { in: query, name: analytics, description: "0 = jen syntetiky", schema: { type: integer, enum: [0, 1], default: 1 } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -15351,7 +15361,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Inventarizace rozvahových účtů (§29–30 ZoÚ)
-      description: Soupis účtů tříd 0–4 s koncovým zůstatkem k rozvahovému dni období.
+      description: Soupis účtů tříd 0–4 po analytikách s koncovým zůstatkem k rozvahovému dni období.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
@@ -15364,13 +15374,29 @@ paths:
   /api/v1/accounting/reports/balance-inventory/export:
     get:
       tags: [Accounting]
-      summary: Export inventarizace rozvahových účtů (PDF / XLSX)
+      summary: Export vyplněného protokolu inventarizace (PDF / XLSX)
+      description: Uložený skutečný stav, rozdíl, poznámka, odpovědná osoba a podpisy. Nenapočítané účty zůstanou prázdné.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: period_id, required: true, schema: { type: integer } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/reports/balance-inventory/account/{accountId}:
+    get:
+      tags: [Accounting]
+      summary: Inventura jednoho účtu z protokolu období, do kterého datum spadá
+      description: Řádek účtu nebo řádky jeho analytik. Výsledkový účet se neinventarizuje, `inventoriable` je pak false a `rows` prázdné.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: accountId, required: true, schema: { type: integer } }
+        - { in: query, name: as_of, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AccountInventoryReport' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -46158,6 +46184,112 @@ components:
                 type: number
               d:
                 type: number
+    StatementColumnAmounts:
+      type: object
+      description: Se znaménkem podle typu účtu (aktiva a náklady MD − D, pasiva a výnosy D − MD). Platí ps + ytd = ks.
+      required: [ps, month, ytd, ks]
+      properties:
+        ps:
+          type: number
+          description: Počáteční stav.
+        month:
+          type: number
+          description: Obrat měsíce, do kterého spadá as_of.
+        ytd:
+          type: number
+          description: Obrat od začátku období.
+        ks:
+          type: number
+          description: Konečný stav.
+    StatementColumnCell:
+      allOf:
+      - $ref: '#/components/schemas/StatementColumnAmounts'
+      - type: object
+        required: [kind]
+        properties:
+          kind:
+            type: string
+            enum: [class, synthetic, analytic]
+          class:
+            type: string
+          account_id:
+            type: integer
+          account_code:
+            type: string
+          name:
+            type: string
+          account_type:
+            type: string
+          normal_side:
+            anyOf:
+            - $ref: '#/components/schemas/NormalSide'
+            - type: 'null'
+          ps_unusual:
+            type: boolean
+            description: Počáteční stav je na neobvyklé straně podle normal_side.
+          ks_unusual:
+            type: boolean
+          is_zero:
+            type: boolean
+            description: Všechny čtyři sloupce jsou nulové.
+    StatementColumnPart:
+      type: object
+      required: [lines, left_total, right_total, result]
+      properties:
+        lines:
+          type: array
+          description: Řádky sestavy. `cells` nese levou a pravou stranu, `section` skupinu výsledovky, `total` součty stran a `result` výsledek hospodaření.
+          items:
+            type: object
+            required: [kind]
+            properties:
+              kind:
+                type: string
+                enum: [cells, section, total, result]
+              key:
+                type: string
+              section:
+                type: string
+              left:
+                description: U `cells` buňka nebo null, u `total` součet.
+                anyOf:
+                - $ref: '#/components/schemas/StatementColumnCell'
+                - $ref: '#/components/schemas/StatementColumnAmounts'
+                - type: 'null'
+              right:
+                anyOf:
+                - $ref: '#/components/schemas/StatementColumnCell'
+                - $ref: '#/components/schemas/StatementColumnAmounts'
+                - type: 'null'
+              amounts:
+                $ref: '#/components/schemas/StatementColumnAmounts'
+        left_total:
+          $ref: '#/components/schemas/StatementColumnAmounts'
+        right_total:
+          $ref: '#/components/schemas/StatementColumnAmounts'
+        result:
+          $ref: '#/components/schemas/StatementColumnAmounts'
+    StatementAccountColumns:
+      type: object
+      required: [as_of, month_from, ytd_from, hide_zero, analytics, balance, profit_loss]
+      properties:
+        as_of:
+          type: string
+          format: date
+        month_from:
+          type: string
+          format: date
+        ytd_from:
+          type: string
+          format: date
+        hide_zero:
+          type: boolean
+        analytics:
+          type: boolean
+        balance:
+          $ref: '#/components/schemas/StatementColumnPart'
+        profit_loss:
+          $ref: '#/components/schemas/StatementColumnPart'
     StatementAccountsReport:
       type: object
       required:
@@ -46184,6 +46316,8 @@ components:
         closed:
           type: boolean
           description: Období je uzavřené; zůstatky jsou i tak před uzávěrkovým zápisem.
+        columns:
+          $ref: '#/components/schemas/StatementAccountColumns'
         dimension:
           anyOf:
           - $ref: '#/components/schemas/ReportDimensionFilter'
@@ -49606,45 +49740,6 @@ components:
                       type_id: { type: integer }
                       type_name: { type: string }
                       account_codes: { type: array, items: { type: string } }
-
-    PurchaseBankMatching:
-      type: object
-      required: [matches, suggestions, last_attempt]
-      properties:
-        matches:
-          type: array
-          items:
-            $ref: '#/components/schemas/PurchaseBankMatchedPayment'
-        suggestions:
-          type: array
-          items:
-            allOf:
-              - $ref: '#/components/schemas/PurchaseBankMatchedPayment'
-              - type: object
-                required: [bank_transaction_id, candidate_index, candidate]
-                properties:
-                  id: { type: integer, description: ID návrhu pro stávající operace accept/reject. }
-                  bank_transaction_id: { type: integer }
-                  candidate_index: { type: integer, minimum: 0 }
-                  reason: { type: string }
-                  candidate: { type: object, description: Kandidát stávajícího bankovního návrhu vztahující se pouze k tomuto dokladu. }
-        last_attempt:
-          type: object
-          nullable: true
-          properties:
-            outcome: { type: string, enum: [searched, ineligible, limited, failed, locked] }
-            matched_count: { type: integer, minimum: 0 }
-            checked_at: { type: string, format: date-time }
-    PurchaseBankMatchedPayment:
-      type: object
-      required: [id, statement_id, posted_at, amount, currency, description]
-      properties:
-        id: { type: integer }
-        statement_id: { type: integer }
-        posted_at: { type: string, format: date }
-        amount: { type: number }
-        currency: { type: string, nullable: true }
-        description: { type: string, nullable: true }
 
     PurchaseInvoiceBankPayment:
       type: object
@@ -54482,6 +54577,106 @@ components:
           $ref: '#/components/schemas/BalanceInventoryHeader'
         row_version:
           type: number
+    AccountInventoryReport:
+      type: object
+      required: [account, inventoriable, period, as_of, inventory, rows]
+      properties:
+        account:
+          type: object
+          required: [id, code, name, type, normal_side]
+          properties:
+            id:
+              type: integer
+            code:
+              type: string
+            name:
+              type: string
+            type:
+              $ref: '#/components/schemas/AccountType'
+            normal_side:
+              anyOf:
+              - $ref: '#/components/schemas/NormalSide'
+              - type: 'null'
+        inventoriable:
+          type: boolean
+          description: Výsledkový účet se neinventarizuje.
+        period:
+          anyOf:
+          - $ref: '#/components/schemas/ReportPeriod'
+          - type: 'null'
+        as_of:
+          type:
+          - string
+          - 'null'
+          description: Rozvahový den období.
+        inventory:
+          anyOf:
+          - $ref: '#/components/schemas/BalanceInventoryHeader'
+          - type: 'null'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceInventoryRow'
+    OpenItemsListReport:
+      type: object
+      required: [as_of, entity, accounts, totals]
+      properties:
+        as_of:
+          type: string
+          format: date
+        entity:
+          type: object
+        accounts:
+          type: array
+          items:
+            type: object
+            required: [account, items, total, line_count, open_count, open_md, open_d, open_total, open_total_signed, balance, balance_signed, balance_unusual, difference, matches, truncated]
+            properties:
+              account:
+                type: object
+              items:
+                type: array
+                items:
+                  type: object
+              total:
+                type: integer
+              line_count:
+                type: integer
+              open_count:
+                type: integer
+              open_md:
+                type: number
+              open_d:
+                type: number
+              open_total:
+                type: number
+              open_total_signed:
+                type: number
+              balance:
+                type: number
+              balance_signed:
+                type: number
+              balance_unusual:
+                type: boolean
+              difference:
+                type: number
+              matches:
+                type: boolean
+                description: Součet otevřených částek sedí na zůstatek účtu.
+              truncated:
+                type: boolean
+        totals:
+          type: object
+          required: [open_count, open_md, open_d, unmatched]
+          properties:
+            open_count:
+              type: integer
+            open_md:
+              type: number
+            open_d:
+              type: number
+            unmatched:
+              type: integer
     BalanceInventoryRow:
       type: object
       required:
@@ -54494,6 +54689,37 @@ components:
       - ks_d
       - documentation_hint
       properties:
+        parent_id:
+          type:
+          - integer
+          - 'null'
+          description: Syntetika, pod kterou účet patří; null = účet je sám syntetika.
+        parent_code:
+          type:
+          - string
+          - 'null'
+        parent_name:
+          type:
+          - string
+          - 'null'
+        parent_normal_side:
+          anyOf:
+          - $ref: '#/components/schemas/NormalSide'
+          - type: 'null'
+        rolled_up:
+          type: boolean
+          description: Protokol uložený ještě za syntetiku, řádek je součet analytik.
+        book_display:
+          type: number
+          description: Účetní stav na normální straně účtu, jak ho ukazuje protokol.
+        counted_display:
+          type:
+          - number
+          - 'null'
+        difference_display:
+          type:
+          - number
+          - 'null'
         account_id:
           type: integer
         account_code:
@@ -59787,8 +60013,19 @@ components:
               anyOf:
               - $ref: '#/components/schemas/NormalSide'
               - type: 'null'
+            balance_sign:
+              type: integer
+              enum: [1, -1]
+              description: Znaménko zůstatku podle typu účtu; 1 = MD − D (A, N), −1 = D − MD (P, V).
         opening_balance:
           type: number
+          description: MD − D.
+        opening_balance_signed:
+          type: number
+          description: Se znaménkem podle typu účtu.
+        opening_balance_unusual:
+          type: boolean
+          description: Zůstatek je na neobvyklé straně podle normal_side.
         items:
           type: array
           items:
@@ -59801,10 +60038,59 @@ components:
           type: integer
         closing_balance:
           type: number
+        closing_balance_signed:
+          type: number
+        closing_balance_unusual:
+          type: boolean
         turnover_md:
           type: number
         turnover_d:
           type: number
+        counter_totals:
+          description: Obraty podle protiúčtu, Σ = obrat účtu. Složený zápis se dělí poměrem řádků protistrany. Jen na první stránce, jinak null.
+          type:
+          - array
+          - 'null'
+          items:
+            type: object
+            required: [account_id, account_code, name, parent_id, md, d]
+            properties:
+              account_id:
+                type:
+                - integer
+                - 'null'
+              account_code:
+                type:
+                - string
+                - 'null'
+              name:
+                type:
+                - string
+                - 'null'
+              parent_id:
+                type:
+                - integer
+                - 'null'
+              md:
+                type: number
+              d:
+                type: number
+        counter_filter:
+          description: Vybraný protiúčet a jeho podíl na obratu. Jen na první stránce.
+          type:
+          - object
+          - 'null'
+          properties:
+            account_id:
+              type: integer
+            account_code:
+              type: string
+            name:
+              type: string
+            md:
+              type: number
+            d:
+              type: number
 
     AccountStatementItem:
       type: object
@@ -59863,6 +60149,14 @@ components:
           type: number
         balance:
           type: number
+          description: Běžící zůstatek MD − D.
+        balance_signed:
+          type: number
+          description: Běžící zůstatek se znaménkem podle typu účtu.
+        balance_unusual:
+          type: boolean
+        is_red_storno:
+          type: boolean
         account_id:
           type: integer
         account_code:

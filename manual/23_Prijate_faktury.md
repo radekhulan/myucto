@@ -152,6 +152,8 @@ upravit bez administrátorského zásahu.
 4. Patří-li doklad jiné vaší firmě, klikněte na **Přesunout do …** u navržené firmy, nebo na **Přesunout do jiné firmy** a firmu vyberte.
 5. Pro více dokladů najednou je zaškrtněte a použijte hromadnou akci, například **Vytěžit označené**.
 
+Originál vybraného dokladu je vedle údajů o dokladu. Tlačítkem **Skrýt originál** ho schováte; umístění a šířku nastavíte stejně jako v editoru faktury (viz [§ 23.11.4](#23114-nahrani-dokladu-drag-and-drop-isdoc-a-limity)).
+
 **Jak poznáte, že je hotovo:** z dokladu vznikl koncept přijaté faktury a originál se přesunul do archivu
 (složka **Příchozí doklady / Archiv / rok / měsíc**).
 
@@ -507,8 +509,18 @@ HEIC) aplikace před archivací převede na PDF. Z `.isdocx` se vedle strojovéh
 zdroje (ISDOC, ISDOCX) zůstává náhled sbalený, data jsou tam přesná. U konceptu vytěženého AI z prostého PDF (nebo fotky)
 editor náhled otevře rovnou, ať máte originál na očích při kontrole vytěžených hodnot (sazba DPH, plátcovství dodavatele
 apod.). Jakmile doklad jednou potvrdíte (přejde z konceptu dál), náhled se při dalším otevření editoru nevnucuje. Panel
-můžete kdykoli sbalit nebo otevřít tlačítkem nad ním. Na široké obrazovce se v detailu i editoru otevře vpravo vedle dokladu
-a při posouvání formuláře zůstává viditelný. Na užší obrazovce zůstane pod formulářem.
+můžete kdykoli sbalit nebo otevřít tlačítkem nad ním.
+
+Náhled je v detailu i editoru vpravo vedle dokladu a při posouvání formuláře zůstává viditelný. Vejde se i na 16" notebook;
+když je místa málo (úzké okno, rozdělená pracovní plocha), přesune se sám pod formulář.
+
+- **Vpravo / pod formulářem:** umístění přepnete ikonami v hlavičce náhledu.
+- **Šířka:** táhněte myší svislé rozhraní mezi formulářem a náhledem. Na klávesnici se na rozhraní dostanete tabulátorem a
+  měníte ho šipkami vlevo a vpravo, se Shiftem po větších krocích. **Home** a **End** ho posunou na krajní polohu, **Enter**
+  nebo dvojklik vrátí výchozí šířku. Formulář i náhled si drží minimální šířku, aby zůstaly použitelné.
+
+Otevření, umístění i šířku si aplikace pamatuje u vašeho uživatele, a to zvlášť pro přijaté doklady, vydané doklady, pokladnu,
+frontu příchozích dokladů a okno kontroly vytěžení.
 
 Limity:
 

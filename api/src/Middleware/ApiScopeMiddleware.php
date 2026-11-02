@@ -169,6 +169,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * @var list<string>
      */
     private const BEARER_SESSION_ONLY = [
+        '#^/api/purchase-invoices/[0-9]+/bank-matching(?:/retry)?$#',
         '#^/api/accounting/periods/[0-9]+/nonprofit-tax/drafts?(/|$)#',
         '#^/api/accounting/nonprofit-dppo(/|$)#',
         '#^/api/accounting/nonprofit-membership(/|$)#',
@@ -201,7 +202,6 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * @var list<string>
      */
     private const BEARER_READ_ONLY = [
-        '#^/api/purchase-invoices/[0-9]+/bank-matching/retry$#',
         '#^/api/property(/|$)#',
         // Účetní mutace, které historicky leží mimo /api/accounting. Široký
         // allowlist faktur a banky je nesmí omylem zpřístupnit read_write PAT.

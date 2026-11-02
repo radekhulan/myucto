@@ -11,7 +11,8 @@ Kapitolu otevřete, když:
 - se blíží uzavření účetního období a kontrola uzávěrky hlásí nedokončenou inventarizaci,
 - potřebujete soupis zůstatků rozvahových účtů k rozvahovému dni pro fyzickou nebo dokladovou inventuru,
 - potřebujete doložit, jak byl vypořádán rozdíl mezi účetním a skutečným stavem,
-- potřebujete vytisknout inventurní soupis s místem pro podpis (§ 29 a 30 zákona o účetnictví).
+- potřebujete vytisknout vyplněný inventarizační protokol s podpisy (§ 29 a 30 zákona o účetnictví),
+- potřebujete soupis otevřených položek průběžných účtů 261, 335, 395 a dalších.
 
 Inventarizace účtů převádí konečné zůstatky rozvahových účtů na pracovní protokol, do kterého účetní doplní
 skutečný stav a vypořádání rozdílu.
@@ -28,10 +29,11 @@ skutečný stav a vypořádání rozdílu.
 1. Otevřete `Nástroje → Inventarizace účtů`.
 2. V poli **Období** zvolte účetní období. Sestava se vždy sestavuje k poslednímu dni celého vybraného období; libovolné Od/Do se nepoužívá.
 3. Vyplňte hlavičku **Inventarizačního protokolu**: **Odpovědná osoba**, **Datum inventury**, **Odkaz na protokol** (číslo jednací nebo odkaz na podepsaný protokol) a poznámku.
-4. U každého účtu doplňte do sloupce **Skutečný stav** hodnotu z nezávislého podkladu. Sloupec **Rozdíl** se počítá živě. Sloupec **Způsob doložení** nabízí doporučený podklad.
+4. U každého účtu doplňte do sloupce **Skutečný stav** hodnotu z nezávislého podkladu. Účet s analytikami se počítá po analytikách, řádek syntetiky nad nimi je jen součet. Sloupec **Rozdíl** se počítá živě. Sloupec **Způsob doložení** nabízí doporučený podklad. Účty s nulovým zůstatkem doplníte najednou tlačítkem **Potvrdit nulové účty**.
 5. U účtu s rozdílem napište do pole **Poznámka k rozdílu**, čím je rozdíl doložen nebo vypořádán. Pak rozdíl potvrďte zaškrtnutím **Vyřešeno**. Samotné zaškrtnutí nic nezaúčtuje; opravu proveďte průkazným zdrojovým nebo ručním zápisem.
 6. Klikněte na **Uložit** (protokol zůstane rozpracovaný), nebo na **Uložit a dokončit**, jakmile nezůstal žádný nevyřešený účet.
-7. Chcete-li soupis vytisknout, klikněte na **Export PDF** nebo **Export XLSX**.
+7. Protokol vytisknete tlačítkem **Export PDF** nebo **Export XLSX**.
+8. V bloku **Soupis otevřených položek** zkontrolujte průběžné účty. Kód účtu vede do jeho otevřených položek.
 
 **Jak poznáte, že je hotovo:** Protokol má stav **Dokončeno**, aplikace ohlásila **Inventarizace dokončena** a kontrola uzávěrky už neblokuje uzavření knih.
 
@@ -50,6 +52,8 @@ skutečný stav a vypořádání rozdílu.
 | V období jsou nezaúčtované koncepty | Koncepty se do zůstatků nepočítají | Zaúčtujte je, jinak soupis neodpovídá úplnému stavu knih. |
 | Uzavřené období má skutečný stav doplněný sám | Jde o starší uzavřené období bez uloženého protokolu | Viz [§ 69.5.1](#6951-pravidla-sestavy-a-protokolu). Nejde o důkaz fyzické inventury. |
 | Kontrola uzávěrky stále blokuje | Inventarizace není dokončená nebo je nevyřešený rozdíl | Dokončete protokol ([§ 69.3](#693-krok-za-krokem-provest-inventarizaci)). |
+| Syntetika s analytikami má jediný řádek | Protokol je za ni uložený souhrnně | Skutečný stav vymažte, zrušte **Vyřešeno** a uložte. Účet se rozpadne na analytiky. |
+| Soupis otevřených položek hlásí rozdíl | Součet otevřených částek nesedí na zůstatek účtu | Otevřete účet kliknutím na kód a zkontrolujte okruhy. |
 
 ## 69.5 Podrobnosti a pravidla
 
@@ -59,7 +63,13 @@ skutečný stav a vypořádání rozdílu.
 období. Z deníku bere jen zaúčtované řádky a vylučuje vlastní závěrkový převod knih.
 
 Zahrnuty jsou účty typu **aktiva**, **pasiva** a **vlastní kapitál**, tedy rozvahové účty tříd 0 až 4.
-Nákladové, výnosové, podrozvahové a uzávěrkové účty se vynechají. Analytiky se seskupují pod syntetiku.
+Nákladové, výnosové, podrozvahové a uzávěrkové účty se vynechají. Každý účet s pohybem má vlastní řádek,
+analytiky se řadí pod součtový řádek své syntetiky. Skutečný stav, rozdíl a poznámka se vedou za každou
+analytiku zvlášť a nenapočítaná analytika blokuje dokončení stejně jako jiný účet. Součet syntetiky ukáže
+skutečný stav a rozdíl, až když jsou napočítané všechny její analytiky.
+
+Protokol uložený ještě za syntetiku zůstává souhrnný, aby dokončená inventarizace nezačala hlásit nevyřešené
+řádky. Na analytiky ho převedete podle [§ 69.4](#694-kdyz-neco-nejde).
 
 Pro každý účet platí:
 
@@ -111,9 +121,23 @@ vede do opisu za celé období.
 
 ### 69.5.3 Export
 
-**Export PDF** a **Export XLSX** vyexportují účetní soupis konečných zůstatků MD a Dal, doporučený podklad
-a prázdná pole pro ruční doplnění skutečného stavu a rozdílu. Nejde o tisk uložených editovatelných hodnot
-protokolu z obrazovky; ty zůstávají uložené v uzávěrkové evidenci aplikace.
+**Export PDF** a **Export XLSX** vyexportují vyplněný protokol: hlavičku s odpovědnou osobou, datem inventury
+a označením protokolu, u každého účtu konečný zůstatek MD a Dal, stranu, uložený skutečný stav, rozdíl, stav
+vyřešení, poznámku a způsob doložení, součty syntetik a místo pro podpisy. Skutečný stav a rozdíl jsou orientované
+stejně jako na obrazovce. Nenapočítaný účet má pole prázdná k ručnímu doplnění. Exportuje se uložený stav, před
+exportem proto protokol uložte. Protokol staršího uzavřeného období s doplněným stavem nese upozornění, že nejde
+o doklad o provedené inventuře.
+
+Stejný protokol je v [uzávěrkovém balíčku](72_Uzaverka.md#729-krok-za-krokem-uzaverkovy-balicek). Nedokončená
+inventarizace je tam uvedená v upozorněních.
+
+### 69.5.4 Soupis otevřených položek
+
+Soupis ukazuje k rozvahovému dni otevřené položky vybraných účtů včetně analytik a kontroluje, že součet otevřených
+částek odpovídá zůstatku účtu. Bez zadání obsahuje účty 261, 335, 395 a zúčtovací účty z osnovy; zadáním kódů výběr
+nahradíte. Účet bez pohybu se vynechá. Na obrazovce je u účtu nejvýš 200 položek, export obsahuje všechny. Spárované
+řádky vyrovnaného okruhu otevřené nejsou, viz
+[otevřené položky v opisu účtu](55_Hlavni_kniha.md#5585-opis-uctu).
 
 > [!WARNING]
 > Aplikace nenahrazuje inventuru. Připraví a hlídá účetní část. Fyzickou inventuru, existenci majetku,

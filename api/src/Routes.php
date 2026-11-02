@@ -2882,6 +2882,8 @@ final class Routes
             $g->get('/reports/trial-balance/export',              [TrialBalanceAction::class, 'export']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}',        [AccountStatementAction::class, 'get']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}/export', [AccountStatementAction::class, 'export']);
+            $g->get('/reports/open-items-list',                   [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'listing']);
+            $g->get('/reports/open-items-list/export',            [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'exportListing']);
             // Otevřené položky a párování řádků deníku (okruhy) na libovolném účtu.
             $g->post  ('/open-items/pairings/delete',                         [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'delete']);
             $g->get   ('/open-items/pairings/{id:[0-9]+}',                    [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'pairing']);
@@ -2960,6 +2962,7 @@ final class Routes
             // k rozvahovému dni + doložení + prostor pro podpis (REAL_data_followup_UX.md T2).
             $g->get('/reports/balance-inventory',                 [BalanceInventoryAction::class, 'get']);
             $g->get('/reports/balance-inventory/export',          [BalanceInventoryAction::class, 'export']);
+            $g->get('/reports/balance-inventory/account/{accountId:[0-9]+}', [BalanceInventoryAction::class, 'account']);
             // § 18 odst. 2 ZoÚ — přehled o peněžních tocích a o změnách vlastního kapitálu.
             // U velké a střední ÚJ (a u každé s povinným auditem) jsou povinnou součástí
             // závěrky stejně jako rozvaha a výsledovka.

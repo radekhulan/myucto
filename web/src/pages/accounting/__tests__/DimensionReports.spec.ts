@@ -43,7 +43,7 @@ vi.mock('vue-router', async (importOriginal) => ({
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.replace }),
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v) }))
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from '@/pages/payroll/employmentLifecycleUi'
@@ -689,10 +690,10 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                   <span class="whitespace-nowrap rounded-full px-2 py-1 text-xs font-medium" :class="operationClass(record.operation)">{{ t(`payroll_imports.registration.operations.${record.operation}`) }}</span>
                   <label v-if="recordAcceptsReceivedOn(record)" class="mt-1 block max-w-[11rem]">
                     <span class="block text-[11px] font-medium text-neutral-700">{{ t(record.benefit?.needs_received_on ? 'payroll_imports.registration.benefit.received_on_required' : 'payroll_imports.registration.benefit.received_on') }}</span>
-                    <input type="date" class="mt-0.5 h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100" data-testid="registration-received-on"
-                      :value="receivedOnValue(record)" :disabled="!canWrite || busy !== null"
+                    <DateInput class="mt-0.5 h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100" data-testid="registration-received-on"
+                      :model-value="receivedOnValue(record)" :disabled="!canWrite || busy !== null"
                       :aria-label="t('payroll_imports.registration.benefit.received_on_for', { name: record.person.full_name })"
-                      @change="chooseReceivedOn(record, ($event.target as HTMLInputElement).value)">
+                      @change="chooseReceivedOn(record, $event)" />
                   </label>
                 </td>
                 <td class="max-w-md px-3 py-2">
@@ -748,10 +749,10 @@ function historyRows(history: RegistrationHistory): { key: string; label: string
                 <p v-if="isBenefitRecord(record) && benefitPeriod(record)" class="mt-2 text-xs text-neutral-600">{{ benefitPeriod(record) }}</p>
                 <label v-if="recordAcceptsReceivedOn(record)" class="mt-2 block">
                   <span class="block text-xs font-medium text-neutral-700">{{ t(record.benefit?.needs_received_on ? 'payroll_imports.registration.benefit.received_on_required' : 'payroll_imports.registration.benefit.received_on') }}</span>
-                  <input type="date" class="mt-0.5 h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100"
-                    :value="receivedOnValue(record)" :disabled="!canWrite || busy !== null"
+                  <DateInput class="mt-0.5 h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100"
+                    :model-value="receivedOnValue(record)" :disabled="!canWrite || busy !== null"
                     :aria-label="t('payroll_imports.registration.benefit.received_on_for', { name: record.person.full_name })"
-                    @change="chooseReceivedOn(record, ($event.target as HTMLInputElement).value)">
+                    @change="chooseReceivedOn(record, $event)" />
                 </label>
                 <select v-if="needsPairSelect(record)" :class="SELECT_CLASS" class="mt-2" :value="pairValue(record)" :disabled="!canWrite || busy !== null"
                   :aria-label="t('payroll_imports.registration.pair.for', { name: record.person.full_name })"

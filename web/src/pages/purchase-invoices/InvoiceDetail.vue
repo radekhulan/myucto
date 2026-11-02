@@ -4,7 +4,7 @@ import { useWindowTitle } from '@/composables/useWindowTitle'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
@@ -148,9 +148,6 @@ function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: num
 // lepkavá (user_preferences), aby při procházení dokladů nemusel klikat u každého znovu.
 const pdfPreview = useSidePreview('purchase_invoices')
 const pdfPreviewOpen = pdfPreview.open
-// Nad prahem (viz useSidePreview) jde náhled do sloupce vpravo, pod prahem zůstává pod
-// dokladem. Bez archivovaného PDF se sloupec nevykreslí vůbec a doklad má celou šířku.
-const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen.value && pdfPreview.wide.value)
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
 const reviewOpen = ref(false)
@@ -1023,11 +1020,9 @@ useWindowRefresh(async () => {
     <div class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
   </div>
 
-  <!-- Nad prahem (useSidePreview) jde náhled originálu do sloupce vpravo, jinak
-       zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
-       celou šířku - proto je vnější div v ostatních případech jen průhledný obal. -->
-  <div v-else-if="invoice" :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
-    <div class="max-w-5xl space-y-4 min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
+  <div v-else-if="invoice">
+    <DocumentPreviewSplit :ctrl="pdfPreview" :show="!!invoice.pdf_path && pdfPreviewOpen" :src="pdfInlineUrl"
+      :file-name="invoice.pdf_original_name" form-class="space-y-4" narrow-class="max-w-5xl">
       <div class="flex items-center gap-2">
         <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
           :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
@@ -1990,24 +1985,12 @@ useWindowRefresh(async () => {
             </button>
           </div>
         </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a Edge/IE blokují embed). Nad prahem se
-             tenhle blok nevykresluje — náhled je vedle dokladu (DocumentSidePreview). -->
-        <div v-if="pdfPreviewOpen && !pdfSideBySide" class="bg-neutral-100">
-          <iframe
-            :src="pdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="invoice.pdf_original_name || 'PDF'"
-          ></iframe>
-        </div>
       </div>
       <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
         <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
         <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
       </div>
-
-
 
       <!-- ═══ Poznámky (jen pokud existují) ═══ -->
       <div v-if="invoice.note_above_items || invoice.note_below_items" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -2130,13 +2113,7 @@ useWindowRefresh(async () => {
 
       <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
         @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />
-    </div>
-    <DocumentSidePreview
-      v-if="pdfSideBySide"
-      :src="pdfInlineUrl"
-      :file-name="invoice.pdf_original_name"
-      @close="pdfPreview.close()"
-    />
+    </DocumentPreviewSplit>
   </div>
     <PostingPreviewModal
       v-if="invoice"

@@ -3149,6 +3149,7 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_bma_user": "BTREE (created_by)",
                 "idx_bma_supplier_created": "BTREE (supplier_id, decision, created_at)",
+                "idx_bma_supplier_purchase_suggestion": "BTREE (supplier_id, purchase_invoice_id, suggestion_id)",
                 "idx_bma_tx": "BTREE (bank_transaction_id)"
             },
             "foreign_keys": {
@@ -22373,6 +22374,27 @@
                 "chk_pad_amount": "`amount` > 0"
             }
         },
+        "purchase_bank_matching_attempts": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "purchase_invoice_id": "bigint(20) unsigned NOT NULL",
+                "result_json": "longtext NOT NULL COLLATE utf8mb4_bin",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (purchase_invoice_id)",
+                "idx_pbma_supplier_purchase": "BTREE (supplier_id, purchase_invoice_id)"
+            },
+            "foreign_keys": {
+                "fk_pbma_purchase": "(purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_pbma_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "result_json": "json_valid(`result_json`)"
+            }
+        },
         "purchase_invoice_approvals": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -22624,7 +22646,6 @@
                 "advance_purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "amount_to_pay": "decimal(12,2) NULL DEFAULT NULL STORED GENERATED AS (`total_with_vat` - `advance_paid_amount`)",
                 "approval_status": "enum('none','pending','approved','rejected') NOT NULL DEFAULT 'none'",
-                "bank_matching_result": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "booked_at": "timestamp NULL DEFAULT NULL",
                 "booked_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "cancelled_at": "timestamp NULL DEFAULT NULL",
@@ -22762,7 +22783,6 @@
                 "fk_pi_vendor": "(vendor_id) -> clients (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "bank_matching_result": "json_valid(`bank_matching_result`)",
                 "chk_pi_card_last4": "`card_last4` is null or `card_last4` regexp '^[0-9]{4}$'",
                 "chk_purchase_settled_outside": "`settled_outside_amount` >= 0",
                 "extraction_review": "json_valid(`extraction_review`)",

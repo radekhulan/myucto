@@ -593,7 +593,7 @@ onMounted(async () => {
               <div v-for="(allocation, ai) in row.tracking_allocations" :key="ai" class="grid grid-cols-1 sm:grid-cols-7 gap-2 mb-2">
                 <input v-if="row.tracking_mode === 'serial'" v-model="allocation.serial_number" :disabled="readOnly" :placeholder="t('stock.tracking.serial_number')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
                 <input v-else v-model="allocation.lot_code" :disabled="readOnly" :placeholder="t('stock.tracking.lot_code')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
-                <input v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" type="date" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <DateInput v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input v-model="allocation.quantity" type="number" step="0.001" min="0.001" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono" />
                 <select v-model="allocation.unit_code" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
                   <option value="">{{ t('stock.tracking.base_unit', { unit: row.option?.secondary ?? '' }) }}</option>

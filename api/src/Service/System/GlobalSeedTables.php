@@ -530,7 +530,7 @@ final class GlobalSeedTables
         'purchase_invoice_approvals', 'purchase_invoice_inbox_dismissed',
         'purchase_invoice_items', 'purchase_invoice_submission_dimensions', 'purchase_invoice_submissions',
         'purchase_invoice_vat_allocations',
-        'purchase_invoices', 'purchase_order_invoice_links', 'purchase_order_lines', 'purchase_orders',
+        'purchase_bank_matching_attempts', 'purchase_invoices', 'purchase_order_invoice_links', 'purchase_order_lines', 'purchase_orders',
         'rate_limit_counters',
         'recurring_invoice_template_items', 'recurring_invoice_templates',
         'retention_holds',

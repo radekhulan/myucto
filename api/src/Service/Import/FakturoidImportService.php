@@ -104,6 +104,9 @@ final class FakturoidImportService
 
     private const MAX_REPORTED_PROBLEMS = 500;
 
+    /** @var list<int> Doklady dokončené tímto během importu. */
+    private array $bankMatchingIds = [];
+
     public function run(int $jobId): void
     {
         $job = $this->loadJob($jobId);
@@ -164,6 +167,10 @@ final class FakturoidImportService
             $this->storeReport($jobId);
             $this->jobs->appendLog($jobId, 'FAIL: ' . $e->getMessage());
             $this->jobs->markFailed($jobId, $e->getMessage());
+        } finally {
+            $ids = $this->bankMatchingIds;
+            $this->bankMatchingIds = [];
+            if ($ids !== []) $this->bankMatching?->afterImport((int) $job['supplier_id'], $ids, (int) $job['created_by'] ?: null);
         }
     }
 
@@ -674,7 +681,7 @@ final class FakturoidImportService
               WHERE id = ? AND supplier_id = ? AND status = 'draft'"
         );
         $update->execute([$state['paid_at'] ?? $fallbackPaidAt, $purchaseId, $supplierId]);
-        if ($update->rowCount() > 0) $this->bankMatching?->afterReady($supplierId, $purchaseId, $userId);
+        if ($update->rowCount() > 0) $this->bankMatchingIds[] = $purchaseId;
     }
 
     private function importExpenses(int $jobId, int $supplierId, int $userId, bool $dryRun, ?string $bookmarkSince, bool $downloadAttachments = false): void

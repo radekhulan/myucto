@@ -40,9 +40,9 @@ Cesta: `Účetnictví → Výkaz zisku a ztráty`. Výkaz je dostupný jen pro p
 ## 58.4 Krok za krokem: výsledovka po účtech
 
 1. Otevřete `Účetnictví → Výkaz zisku a ztráty` a zvolte záložku **Účet 710 (po účtech)**.
-2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**.
+2. Projděte skupiny **Provozní činnost**, **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku hospodaření společníkům**. Náklady jsou vlevo, výnosy vpravo na jednom řádku.
 3. Zkontrolujte mezisoučty **Provozní výsledek hospodaření**, **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a **po zdanění**.
-4. Klikněte na účet. Otevře se jeho opis.
+4. Klikněte na účet. Otevře se inventura účtu, odtud vede jeho opis.
 5. Je-li ve skupině **Účty nezařazené ve výkazu** nějaký účet, zařaďte ho výjimkou mapování ([Rozvaha](57_Rozvaha.md#574-krok-za-krokem-zarazeni-uctu-do-jineho-radku)).
 6. Klikněte na **Export PDF** nebo **Export XLSX**.
 
@@ -191,8 +191,12 @@ období do data sestavení, rozdělené do skupin **Provozní činnost**,
 **Finanční činnost**, **Daň z příjmů** a **Převod podílu na výsledku
 hospodaření společníkům**. Skupinu určuje stejná mapa jako výkaz (včetně
 výjimek firmy), takže účet je vždy ve skupině, do které ho výkaz započte.
-Náklady jsou ve sloupci **Náklady (MD)**, výnosy ve sloupci **Výnosy (D)**,
-každá skupina končí svým výsledkem.
+Náklady jsou vlevo a výnosy vpravo na jednom řádku. Každá strana má sloupce
+**Počáteční stav**, **Obrat** měsíce, **Obrat od** začátku období a **Konečný stav**,
+se znaménkem podle typu účtu: náklady `MD − Dal`, výnosy `Dal − MD`. Výnos s převahou
+MD a náklad s převahou Dal jsou proto záporné a červené. Každá skupina končí součtem
+nákladů a výnosů. Přepínač **Skrýt nulové účty** funguje jako
+u [rozvahy po účtech](57_Rozvaha.md#5778-rozvaha-po-uctech).
 
 Pod skupinami následují mezisoučty **Provozní výsledek hospodaření**,
 **Finanční výsledek hospodaření**, **Výsledek hospodaření před zdaněním** a
@@ -206,8 +210,10 @@ výkazu**. Výsledek hospodaření ho zahrnuje, výkaz ne, proto stránka nad
 tabulkou upozorní a účet je třeba zařadit výjimkou mapování
 ([Mapování účtů](57_Rozvaha.md#5777-mapovani-uctu-pro-konkretni-firmu)).
 
-Kliknutím na účet se otevře jeho opis. Export PDF a XLSX z této záložky
-vytvoří výsledovku po účtech v jednotce zvolené přepínačem **Kč / tis. Kč**.
+Kliknutím na účet se otevře záložka **Inventura účtu**. Výsledkové účty se
+neinventarizují, stránka to řekne a vede do opisu. Export XLSX i PDF z této záložky má
+stejný tvar jako obrazovka v jednotce zvolené přepínačem **Kč / tis. Kč**. PDF se tiskne
+na šířku stránky.
 
 #### 58.7.6.1 Odhad do konce roku (nezaúčtováno)
 

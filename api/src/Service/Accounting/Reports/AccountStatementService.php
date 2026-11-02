@@ -7,13 +7,15 @@ namespace MyInvoice\Service\Accounting\Reports;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
+use MyInvoice\Service\Accounting\AccountBalanceSign;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
  * Opis účtu (Epic F2): stránkovaný výpis pohybů účtu (vč. analytik pod
- * syntetikou) s běžícím zůstatkem. PS k `from` dle okna R6; balance = kladné = MD.
+ * syntetikou) s běžícím zůstatkem. PS k `from` dle okna R6; balance = kladné = MD,
+ * `*_signed` = se znaménkem podle typu účtu ({@see AccountBalanceSign}).
  * Řazení entry_date, entry_id, line_no (deterministické) — running_delta počítá
- * window funkce nad celým rozsahem, takže stránkování zůstatky nemění.
+ * window funkce nad celým rozsahem, takže stránkování ani filtr protiúčtu zůstatky nemění.
  */
 final class AccountStatementService
 {
@@ -27,12 +29,21 @@ final class AccountStatementService
     /**
      * @return array<string,mixed> struktura dle spec §2.6
      */
-    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false): array
+    public function build(int $supplierId, int $accountId, string $from, string $to, int $page, int $perPage, bool $afterClosing = false, ?int $counterAccountId = null): array
     {
         $account = $this->accounts->findById($supplierId, $accountId, $to);
         if ($account === null) {
             throw new ReportException('account_not_found', 'Účet #' . $accountId . ' neexistuje.', 404);
         }
+        $counterAccount = null;
+        if ($counterAccountId !== null) {
+            $counterAccount = $this->accounts->findById($supplierId, $counterAccountId, $to);
+            if ($counterAccount === null) {
+                throw new ReportException('account_not_found', 'Protiúčet #' . $counterAccountId . ' neexistuje.', 404);
+            }
+        }
+        $type = (string) $account['account_type'];
+        $normalSide = $account['normal_side'] !== null ? (string) $account['normal_side'] : null;
 
         $period = $this->periods->findForDate($supplierId, $from);
         $periodStart = $period !== null ? (string) $period['starts_on'] : $from;
@@ -42,14 +53,15 @@ final class AccountStatementService
         $excludeClosing = !$afterClosing;
 
         $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing);
-        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing);
+        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId);
 
         $page = max(1, $page);
         $perPage = max(1, $perPage);
-        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing);
+        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing, $counterAccountId);
 
         $items = [];
         foreach ($lines as $l) {
+            $balance = round($opening + (float) $l['running_delta'], 2);
             $items[] = [
                 'entry_id'    => (int) $l['entry_id'],
                 'entry_date'  => (string) $l['entry_date'],
@@ -58,8 +70,11 @@ final class AccountStatementService
                 'source_type' => (string) $l['source_type'],
                 'source_id'   => $l['source_id'],
                 'side'        => (string) $l['side'],
+                'is_red_storno' => $l['is_red_storno'],
                 'amount'      => JournalLineAmount::signed($l),
-                'balance'     => round($opening + (float) $l['running_delta'], 2),
+                'balance'     => $balance,
+                'balance_signed'  => AccountBalanceSign::signed($balance, $type),
+                'balance_unusual' => AccountBalanceSign::isUnusual($balance, $normalSide),
                 // Účet ŘÁDKU — u syntetiky je opis složený z analytik, bez tohohle
                 // sloupce nešlo poznat, na které z nich pohyb visí.
                 'account_id'   => (int) $l['line_account_id'],
@@ -86,23 +101,92 @@ final class AccountStatementService
         $items = $this->context->enrich($supplierId, $items);
 
         $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
+        // Součty jdou přes všechny pohyby účtu a stránkováním se nemění, stačí první stránka.
+        $counterTotals = $page === 1
+            ? self::reconcileCounterTotals($this->ledger->accountCounterTotals($supplierId, $accountId, $from, $to, $excludeClosing), $turnovers)
+            : null;
+        $closing = round($opening + $turnovers['md'] - $turnovers['d'], 2);
 
         return [
             'account' => [
-                'id'          => (int) $account['id'],
-                'code'        => (string) $account['account_code'],
-                'name'        => (string) $account['name'],
-                'type'        => (string) $account['account_type'],
-                'normal_side' => $account['normal_side'],
+                'id'           => (int) $account['id'],
+                'code'         => (string) $account['account_code'],
+                'name'         => (string) $account['name'],
+                'type'         => $type,
+                'normal_side'  => $account['normal_side'],
+                'balance_sign' => AccountBalanceSign::factor($type),
             ],
             'opening_balance' => $opening,
+            'opening_balance_signed'  => AccountBalanceSign::signed($opening, $type),
+            'opening_balance_unusual' => AccountBalanceSign::isUnusual($opening, $normalSide),
             'items'           => $items,
             'total'           => $total,
             'page'            => $page,
             'per_page'        => $perPage,
-            'closing_balance' => round($opening + $turnovers['md'] - $turnovers['d'], 2),
+            'closing_balance' => $closing,
+            'closing_balance_signed'  => AccountBalanceSign::signed($closing, $type),
+            'closing_balance_unusual' => AccountBalanceSign::isUnusual($closing, $normalSide),
             'turnover_md'     => $turnovers['md'],
             'turnover_d'      => $turnovers['d'],
+            'counter_totals'  => $counterTotals,
+            'counter_filter'  => $counterAccount === null || $counterTotals === null ? null : self::counterFilter($counterAccount, $counterTotals),
+        ];
+    }
+
+    /**
+     * Součty podle protiúčtu na haléře. Poměrné dělení složeného zápisu může po zaokrouhlení
+     * řádků odskočit od obratu o haléř; zbytek se přičte k řádku s největší částkou, aby
+     * Σ protiúčtů == obrat účtu.
+     *
+     * @param list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}> $rows
+     * @param array{md:float, d:float} $turnovers
+     * @return list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}>
+     */
+    public static function reconcileCounterTotals(array $rows, array $turnovers): array
+    {
+        foreach (['md', 'd'] as $side) {
+            $sum = 0;
+            $largest = null;
+            foreach ($rows as $i => $row) {
+                $rows[$i][$side] = round($row[$side], 2);
+                $sum += (int) round($rows[$i][$side] * 100);
+                if ($largest === null || abs($rows[$i][$side]) > abs($rows[$largest][$side])) {
+                    $largest = $i;
+                }
+            }
+            $residue = (int) round($turnovers[$side] * 100) - $sum;
+            if ($residue !== 0 && $largest !== null) {
+                $rows[$largest][$side] = round($rows[$largest][$side] + $residue / 100, 2);
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * Součet filtrovaného protiúčtu včetně jeho analytik. Jde o podíl na obratu, ne o součet
+     * zobrazených řádků: řádek složeného zápisu se ukáže celý, do protiúčtu patří jen jeho díl.
+     *
+     * @param array<string,mixed> $counterAccount
+     * @param list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}> $totals
+     * @return array{account_id:int, account_code:string, name:string, md:float, d:float}
+     */
+    private static function counterFilter(array $counterAccount, array $totals): array
+    {
+        $id = (int) $counterAccount['id'];
+        $md = 0.0;
+        $d = 0.0;
+        foreach ($totals as $row) {
+            if ($row['account_id'] === $id || $row['parent_id'] === $id) {
+                $md += $row['md'];
+                $d += $row['d'];
+            }
+        }
+        return [
+            'account_id'   => $id,
+            'account_code' => (string) $counterAccount['account_code'],
+            'name'         => (string) $counterAccount['name'],
+            'md'           => round($md, 2),
+            'd'            => round($d, 2),
         ];
     }
 }

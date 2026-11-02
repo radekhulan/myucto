@@ -89,6 +89,19 @@ final class BankPaymentCandidatesAction
             if ($this->search->payments($supplierId, $type, $document, '', 1, $transactionId)['items'] === []) {
                 throw new \DomainException('Bankovní pohyb již není volnou úhradou tohoto dokladu.', 409);
             }
+            if ($type === 'purchase_invoice') {
+                $proposal = $pdo->prepare("SELECT 1 FROM bank_match_audit a JOIN bank_match_suggestions s ON s.id = a.suggestion_id
+                    WHERE a.supplier_id = ? AND a.purchase_invoice_id = ? AND s.bank_transaction_id = ? AND s.status = 'pending'
+                    AND JSON_SEARCH(s.candidates_json, 'one', 'purchase_ready', NULL, '$[*].origin') IS NOT NULL LIMIT 1");
+                $proposal->execute([$supplierId, (int) $document['id'], $transactionId]);
+                if ($proposal->fetchColumn() !== false) {
+                    $tx = (new \MyInvoice\Service\Bank\BankTransactionContext($this->db))->find($transactionId, true);
+                    if ((new \MyInvoice\Service\Bank\PurchaseBankMatchingPeriodGuard($this->db))->datesLocked($supplierId,
+                        [$document['issue_date'], $document['effective_cost_date'] ?? $document['issue_date'], substr((string) $tx['posted_at'], 0, 10)])) {
+                        throw new \DomainException('Období dokladu nebo platby je uzamčené.', 409);
+                    }
+                }
+            }
             $input = [$type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id' => (int) $document['id']];
             if (!empty($body['force_advance_final'])) {
                 $input['force_advance_final'] = true;

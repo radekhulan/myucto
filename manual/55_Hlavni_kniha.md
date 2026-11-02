@@ -168,8 +168,25 @@ sloupec **Analytika** s odkazem na kartu příslušného účtu.
 
 Pohyby jsou řazené podle data, ID zápisu a čísla řádku. Sloupec **Zůstatek**
 je běžící saldo `PS + MD − Dal` počítané nad celým rozsahem, takže navazuje
-správně i na dalších stránkách. Výchozí stránka má 50 řádků. Kladný zůstatek
-znamená MD, záporný Dal.
+správně i na dalších stránkách. Výchozí stránka má 50 řádků.
+
+Zůstatek v opisu je se znaménkem podle typu účtu: aktiva a náklady `MD − Dal`,
+pasiva, vlastní kapitál a výnosy `Dal − MD`. Běžný zůstatek je tak kladný. Stranu
+zůstatku ukazuje popisek karty. Neobvyklá strana podle účtové osnovy je červeně,
+například pohledávka v kreditu. Oprávky mají typ aktiva, proto jsou záporné, ale
+neobvyklé nejsou. Účty bez určené strany (261, 343, 395, 431) neobvyklou stranu
+nemají.
+
+**Filtr a součty podle protiúčtu.** Blok **Součty podle protiúčtu** rozděluje obrat
+MD a Dal na jednotlivé protiúčty a jeho součet se rovná obratu účtu. Složený zápis
+se dělí poměrem řádků protistrany: 311 MD 1 210 má protiúčty 602 za 1 000 a 343 za
+210. Výběrem v poli **Protiúčet** nebo kliknutím na řádek bloku opis vyfiltrujete.
+Řádek složeného zápisu se ukáže celý, sloupec **Zůstatek** dál ukazuje zůstatek
+celého účtu a filtr platí i pro export. Výběr syntetiky zahrne její analytiky.
+
+Záložka **Inventura účtu** ukazuje účetní a skutečný stav účtu a jeho analytik
+z [inventarizačního protokolu](69_Inventarizace_rozvahovych_uctu.md) k rozvahovému
+dni. Vedou na ni odkazy z rozvahy a výsledovky po účtech.
 
 Doklad v opisu vede podle zdroje na vydanou fakturu, přijatou fakturu, bankovní
 výpis, pokladní doklad, kartu majetku nebo na vyrovnaný doklad zápočtu; bez

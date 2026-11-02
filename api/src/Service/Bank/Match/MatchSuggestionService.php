@@ -171,6 +171,7 @@ final class MatchSuggestionService
         $stmt->execute([$supplierId, (int) $tx['id']]);
         $existing = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($existing && $existing['status'] !== 'pending') return;
+        $proposed = $candidates[0];
         $previous = $existing ? json_decode($existing['candidates_json'], true, 512, JSON_THROW_ON_ERROR) : [];
         // Potvrzení používá index z otevřeného detailu. Nový doklad proto nesmí
         // přerovnat již nabídnuté kandidáty a pod stejným indexem podsunout jiný cíl.
@@ -181,7 +182,8 @@ final class MatchSuggestionService
         }
         unset($candidate);
         $candidates = array_merge($previous, $candidates);
-        $this->upsertPending($supplierId, (int) $tx['id'], 'single', 'amount_date_requires_review', $candidates, null);
+        $suggestionId = $this->upsertPending($supplierId, (int) $tx['id'], 'single', 'amount_date_requires_review', $candidates, null);
+        $this->audit($supplierId, (int) $tx['id'], 'suggest', $proposed, null, $suggestionId, null);
     }
 
     /** @return list<array<string,mixed>> */

@@ -20,6 +20,7 @@ final class PurchaseBankMatchingAction
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
+        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response, 'Doporučení banky je dostupné jen z přihlášené relace.');
         $retry = $request->getMethod() === 'POST';
         if (!RequestAuthorization::allows($request, 'bank', AccessLevel::READ)
             || !RequestAuthorization::allows($request, 'purchase_invoices', AccessLevel::READ)
@@ -32,7 +33,6 @@ final class PurchaseBankMatchingAction
             return Json::error($response, 'not_found', 'Doklad nebyl nalezen.', 404);
         }
         if ($retry) {
-            if (!RequestAuthorization::isSessionAuth($request)) return Json::error($response, 'token_write_forbidden', 'Opakování párování je dostupné jen z přihlášené relace.', 403);
             $userId = (int) (($request->getAttribute(AuthMiddleware::ATTR_USER) ?? [])['id'] ?? 0);
             if ($userId <= 0) return Json::error($response, 'forbidden', 'Chybí přihlášený uživatel.', 403);
             $result = $this->matching->retry($supplierId,$id,$userId);

@@ -2948,12 +2948,14 @@ export const TOOLS = [
       from: date('Počátek rozsahu.'),
       to: date('Konec rozsahu.'),
       after_closing: bool('Stav po uzávěrkových operacích.'),
+      counter_account_id: int('Jen řádky s tímto protiúčtem nebo jeho analytikou; zůstatek zůstává za celý účet.'),
       ...PAGING,
     }, ['account_id', 'from', 'to']),
     write: false,
     run: (c, a, tool) => c.get(`/accounting/reports/account-statement/${seg(a.account_id)}`, {
       from: a.from, to: a.to, page: a.page, per_page: a.per_page,
       after_closing: a.after_closing ? 1 : undefined,
+      counter_account_id: a.counter_account_id,
     }, tool),
   },
   {

@@ -132,7 +132,9 @@ potřebují: mají hlášení z vytěžení, nebo jim chybí dimenze povinná po
 okno jen oznámí, že není co kontrolovat.
 
 Vedle formuláře (na užší obrazovce pod ním) okno ukazuje **Náhled originálu** právě kontrolovaného dokladu, takže vytěžené údaje
-porovnáte s PDF bez přepínání; tlačítkem **Skrýt PDF** / **Zobrazit PDF** v patičce ho schováte nebo znovu zobrazíte.
+porovnáte s PDF bez přepínání; tlačítkem **Skrýt PDF** / **Zobrazit PDF** v patičce ho schováte nebo znovu zobrazíte. V hlavičce
+náhledu přepnete umístění vpravo nebo pod formulář a šířku změníte tažením rozhraní nebo šipkami na klávesnici. Volbu si aplikace
+pamatuje.
 
 1. Nahoře zkontrolujte dodavatele, číslo dokladu, datum, stav a částku. Odkaz **Otevřít doklad** otevře editor.
 2. Projděte ostatní části hlášení (reverse charge, nesouhlasící součty apod.). U každé, kterou jste ověřili, klikněte na **Vyřešeno**.

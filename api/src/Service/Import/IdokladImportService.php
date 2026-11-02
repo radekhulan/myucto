@@ -121,6 +121,9 @@ final class IdokladImportService
      *   - include_receipts: bool (default true) — přijaté účtenky/paragony
      *   - dry_run: bool (default false)
      */
+    /** @var list<int> Doklady dokončené tímto během importu. */
+    private array $bankMatchingIds = [];
+
     public function run(int $jobId): void
     {
         // Reload job uvnitř transakce — race-safe markRunning
@@ -200,6 +203,10 @@ final class IdokladImportService
             $this->logger->error('iDoklad import failed', ['job_id' => $jobId, 'error' => $e->getMessage()]);
             $this->jobs->appendLog($jobId, 'FAIL: ' . $e->getMessage());
             $this->jobs->markFailed($jobId, $e->getMessage());
+        } finally {
+            $ids = $this->bankMatchingIds;
+            $this->bankMatchingIds = [];
+            if ($ids !== []) $this->bankMatching?->afterImport((int) $job['supplier_id'], $ids, (int) $job['created_by'] ?: null);
         }
     }
 
@@ -600,7 +607,7 @@ final class IdokladImportService
               WHERE id = ? AND supplier_id = ? AND status = 'draft'"
         );
         $update->execute([$state['paid_at'] ?? $fallbackPaidAt, $purchaseId, $supplierId]);
-        if ($update->rowCount() > 0) $this->bankMatching?->afterReady($supplierId, $purchaseId, $userId);
+        if ($update->rowCount() > 0) $this->bankMatchingIds[] = $purchaseId;
     }
 
     /**

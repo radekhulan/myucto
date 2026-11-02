@@ -46,10 +46,16 @@
         border-bottom: 0.5pt solid #333;
     }
     .num { text-align: right; }
-    .col-account { width: 15mm; }
-    .col-name { width: 48mm; }
-    .col-blank { width: 26mm; background-color: #fafafa; }
-    .col-hint { width: 48mm; }
+    .col-account { width: 16mm; }
+    .col-name { width: 46mm; }
+    .col-side { width: 9mm; text-align: center; }
+    .col-blank { width: 22mm; background-color: #fafafa; }
+    .col-resolved { width: 10mm; text-align: center; }
+    .col-note { width: 34mm; }
+    .col-hint { width: 40mm; }
+    .row-synthetic { font-weight: bold; background-color: #f4f4f5; }
+    .indent { padding-left: 4mm; }
+    .protocol-note { font-size: 8pt; margin-bottom: 3mm; }
     .sign-table { width: 100%; border-collapse: collapse; margin-top: 12mm; }
     .sign-cell { width: 50%; font-size: 8pt; color: #555; padding-top: 8mm; border-top: 0.3pt solid #999; }
 </style>
@@ -69,16 +75,25 @@
             <div class="header-sub">Fiskální rok {{ period.fiscal_year }} · Sestaveno: {{ entity.prepared_at }}</div>
         </td>
         <td style="width:28%;">
-            <div class="header-meta">Datum provedení inventarizace:</div>
-            <div class="header-meta">&nbsp;</div>
-            <div class="header-meta">Inventarizační komise:</div>
+            <div class="header-meta">Datum provedení inventarizace: {{ inventory.inventory_date ? inventory.inventory_date|cz_date : '' }}</div>
+            <div class="header-meta">Odpovědná osoba: {{ inventory.responsible_person }}</div>
+            <div class="header-meta">Protokol: {{ inventory.protocol_ref }}</div>
+            {% if inventory %}<div class="header-meta">Stav: {{ inventory.completed ? 'dokončeno' : 'rozpracováno' }}</div>{% endif %}
         </td>
     </tr>
 </table>
 
 <div class="legal-note">
-    {{ legal_note|default('Inventarizace majetku a závazků dle §29–30 zákona č. 563/1991 Sb., o účetnictví — soupis rozvahových účtů (třídy 0–4) s konečným zůstatkem k rozvahovému dni, odsouhlasením na skutečný stav a způsobem doložení. Sloupce „Skutečný stav" a „Rozdíl" se doplňují ručně na základě provedené fyzické/dokladové inventury.') }}
+    {{ legal_note|default('Inventarizace majetku a závazků dle §29–30 zákona č. 563/1991 Sb., o účetnictví: soupis rozvahových účtů (třídy 0–4) s konečným zůstatkem k rozvahovému dni, odsouhlasením na skutečný stav a způsobem doložení. Prázdné sloupce „Skutečný stav" a „Rozdíl" se doplňují ručně na základě provedené fyzické/dokladové inventury.') }}
+    {% if inventory %}Účetní zůstatky jsou v KZ MD a KZ D. Skutečný stav a rozdíl jsou na normální straně účtu; účet se stranou ± znaménkově (kladně MD, záporně Dal).{% endif %}
 </div>
+
+{% if inventory.note %}
+    <div class="protocol-note">Poznámka: {{ inventory.note }}</div>
+{% endif %}
+{% if inventory.back_filled %}
+    <div class="draft-warning">Skutečný stav je doplněn z účetních zůstatků uzavřeného období, nejde o doklad o provedené inventuře.</div>
+{% endif %}
 
 {% if draft_count > 0 %}
     <div class="draft-warning">V období je {{ draft_count }} nezaúčtovaných konceptů — nejsou zahrnuty do zůstatků.</div>
@@ -94,33 +109,41 @@
         <tr>
             <th class="thl col-account">Účet</th>
             <th class="thl col-name">Název</th>
+            <th class="col-side">Strana</th>
             <th>KZ MD</th>
             <th>KZ D</th>
             <th class="col-blank">Skutečný stav</th>
             <th class="col-blank">Rozdíl</th>
+            <th class="col-resolved">Vyřešeno</th>
+            <th class="thl col-note">Poznámka</th>
             <th class="thl col-hint">Způsob doložení</th>
         </tr>
     </thead>
     <tbody>
-        {% for row in rows %}
-            <tr>
-                <td>{{ row.account_code }}</td>
+        {% for row in protocol_rows ?? rows %}
+            <tr class="{{ row.kind == 'synthetic' ? 'row-synthetic' : '' }}">
+                <td class="{{ row.kind == 'analytic' ? 'indent' : '' }}">{{ row.account_code }}</td>
                 <td>{{ row.name|slice(0, 46) }}</td>
+                <td class="col-side">{% if row.normal_side is defined %}{{ row.normal_side == 'debit' ? 'MD' : (row.normal_side == 'credit' ? 'Dal' : '±') }}{% endif %}</td>
                 <td class="num">{{ row.ks_md|cz_money }}</td>
                 <td class="num">{{ row.ks_d|cz_money }}</td>
-                <td class="col-blank">&nbsp;</td>
-                <td class="col-blank">&nbsp;</td>
+                <td class="col-blank num">{{ row.counted_display is not null ? row.counted_display|cz_money : '' }}&nbsp;</td>
+                <td class="col-blank num">{{ row.difference_display is not null ? row.difference_display|cz_money : '' }}&nbsp;</td>
+                <td class="col-resolved">{% if row.resolved is defined %}{{ row.resolved ? 'ano' : 'ne' }}{% endif %}</td>
+                <td>{{ row.item_note }}</td>
                 <td>{{ row.documentation_hint }}</td>
             </tr>
         {% endfor %}
     </tbody>
     <tfoot>
         <tr>
-            <td colspan="2">CELKEM ({{ count }} účtů)</td>
+            <td colspan="3">CELKEM ({{ count }} účtů)</td>
             <td class="num">{{ totals.ks_md|cz_money }}</td>
             <td class="num">{{ totals.ks_d|cz_money }}</td>
             <td class="col-blank"></td>
             <td class="col-blank"></td>
+            <td></td>
+            <td></td>
             <td></td>
         </tr>
     </tfoot>
@@ -129,7 +152,7 @@
 <table class="sign-table">
     <tr>
         <td class="sign-cell">Inventarizaci provedl (datum, podpis)</td>
-        <td class="sign-cell">Schválil — odpovědná osoba (datum, podpis)</td>
+        <td class="sign-cell">Schválil, odpovědná osoba{{ inventory.responsible_person ? ' ' ~ inventory.responsible_person : '' }} (datum, podpis)</td>
     </tr>
 </table>
 {% endif %}

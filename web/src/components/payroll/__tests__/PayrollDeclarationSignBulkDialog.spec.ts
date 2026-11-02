@@ -24,6 +24,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   }),
 }))
 
+import DateInput from '@/components/ui/DateInput.vue'
 import PayrollDeclarationSignBulkDialog from '@/components/payroll/PayrollDeclarationSignBulkDialog.vue'
 
 const MOUNT = { global: { stubs: { teleport: true } } }
@@ -113,8 +114,9 @@ describe('PayrollDeclarationSignBulkDialog', () => {
 
     await wrapper.get('[data-test="declaration-sign-bulk-year"]').setValue('2025')
     await wrapper.get('[data-test="declaration-sign-bulk-year"]').trigger('change')
+    await flushPromises()
     await wrapper.get('[data-test="declaration-sign-bulk-signed-on"]').setValue('2025-02-01')
-    await wrapper.get('[data-test="declaration-sign-bulk-signed-on"]').trigger('change')
+    wrapper.findComponent(DateInput).vm.$emit('change', '2025-02-01')
     await flushPromises()
 
     expect(m.declarationSignBulkPreview).toHaveBeenLastCalledWith({

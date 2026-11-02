@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\AccountBalanceSign;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use PDO;
 
@@ -19,10 +21,12 @@ use PDO;
  * inventarizace je vázaná na rozvahový den = konec účetního období, ne na libovolný
  * dílčí rozsah jako F2 sestavy.
  *
- * V1 = generovaný soupis účetních zůstatků (KZ MD/D) + `documentation_hint` (typový návrh
- * způsobu doložení dle prefixu účtu) + prázdné sloupce „skutečný stav" a „rozdíl" pro ruční
- * doplnění na vytištěné/exportované sestavě. Žádná perzistence inventurních hodnot —
- * to je follow-up (viz REAL_data_followup_UX.md T2).
+ * Soupis jde PO ANALYTIKÁCH: řádek má každý účet s pohybem a skutečný stav, rozdíl
+ * a poznámka se vedou zvlášť za každou analytiku. Syntetika je jen součet (`protocol_rows`).
+ * Inventarizace uložená ještě za syntetiku zůstává souhrnná, dokud ji účetní nevymaže
+ * ({@see self::effectiveRows()}), jinak by se dokončený protokol sám rozpadl na nevyřešené řádky.
+ *
+ * Znaménko protokolu: {@see AccountBalanceSign::inventoryFactor()}.
  */
 final class BalanceInventoryService
 {
@@ -30,6 +34,7 @@ final class BalanceInventoryService
         private readonly Connection $db,
         private readonly LedgerReportRepository $ledger,
         private readonly AccountingPeriodRepository $periods,
+        private readonly ChartOfAccountsRepository $accounts,
     ) {}
 
     /**
@@ -46,7 +51,7 @@ final class BalanceInventoryService
 
         // excludeClosing=true: inventarizace k rozvahovému dni bere zůstatky PŘED uzavřením
         // knih (UZ zápisy převádějící rozvahové účty na 702 by je jinak vynulovaly).
-        $raw = $this->ledger->trialBalanceRows($supplierId, $from, $to, $from, false, [], true);
+        $raw = $this->ledger->trialBalanceRows($supplierId, $from, $to, $from, true, [], true);
 
         $rows = [];
         $totals = ['ks_md' => 0, 'ks_d' => 0];
@@ -69,6 +74,10 @@ final class BalanceInventoryService
                 'name'               => (string) $r['name'],
                 'account_type'       => $type,
                 'normal_side'        => $r['normal_side'] !== null ? (string) $r['normal_side'] : null,
+                'parent_id'          => $r['parent_id'],
+                'parent_code'        => $r['parent_code'] !== null ? (string) $r['parent_code'] : null,
+                'parent_name'        => $r['parent_name'] !== null ? (string) $r['parent_name'] : null,
+                'parent_normal_side' => $r['parent_normal_side'] !== null ? (string) $r['parent_normal_side'] : null,
                 'ks_md'              => $ksMd / 100,
                 'ks_d'               => $ksD / 100,
                 'documentation_hint' => $this->documentationHint((string) $r['account_code']),
@@ -119,7 +128,7 @@ final class BalanceInventoryService
         $rows = [];
         $unresolved = 0;
         $backFilledAny = false;
-        foreach ($report['rows'] as $row) {
+        foreach (self::effectiveRows($report['rows'], $saved) as $row) {
             $accountId = (int) $row['account_id'];
             $book = round((float) $row['ks_md'] - (float) $row['ks_d'], 2);
             $s = $saved[$accountId] ?? null;
@@ -137,6 +146,7 @@ final class BalanceInventoryService
             if (!$resolved) {
                 $unresolved++;
             }
+            $factor = AccountBalanceSign::inventoryFactor($row['normal_side']);
             $rows[] = $row + [
                 'book_balance'    => $book,
                 'counted_balance' => $counted,
@@ -145,10 +155,20 @@ final class BalanceInventoryService
                 'item_note'       => $s !== null ? ($s['note'] !== null ? (string) $s['note'] : null) : null,
                 'resolved'        => $resolved,
                 'back_filled'     => $backFilled,
+                // Hodnoty protokolu tak, jak je účetní vidí na obrazovce a podepisuje.
+                'book_display'       => AccountBalanceSign::clean($book * $factor),
+                'counted_display'    => $counted === null ? null : AccountBalanceSign::clean($counted * $factor),
+                'difference_display' => $difference === null ? null : AccountBalanceSign::clean($difference * $factor),
             ];
         }
 
         $report['rows'] = $rows;
+        $report['count'] = count($rows);
+        $report['totals'] = [
+            'ks_md' => round(array_sum(array_column($rows, 'ks_md')), 2),
+            'ks_d'  => round(array_sum(array_column($rows, 'ks_d')), 2),
+        ];
+        $report['protocol_rows'] = self::protocolRows($rows);
         // Bez uložené hlavičky u uzavřeného období prezentujeme inventuru jako
         // dokončenou (back-fill), aby stránka nehlásila uzavřený rok jako rozpracovaný.
         $report['inventory'] = $header ?? [
@@ -184,6 +204,8 @@ final class BalanceInventoryService
     public function saveInventory(int $supplierId, int $periodId, array $header, array $itemsByAccount, ?int $userId): array
     {
         $report = $this->build($supplierId, $periodId);
+        // Před přepisem položek: souhrnně uložená syntetika musí přežít i další uložení.
+        $rows = self::effectiveRows($report['rows'], $this->loadItems($supplierId, $periodId));
         $pdo = $this->db->pdo();
 
         // Hlavička — upsert (uq supplier_id, period_id).
@@ -226,7 +248,7 @@ final class BalanceInventoryService
 
         $itemCount = 0;
         $unresolved = 0;
-        foreach ($report['rows'] as $row) {
+        foreach ($rows as $row) {
             $accountId = (int) $row['account_id'];
             $book = round((float) $row['ks_md'] - (float) $row['ks_d'], 2);
             $in = $itemsByAccount[$accountId] ?? [];
@@ -285,7 +307,7 @@ final class BalanceInventoryService
             $report = $this->build($supplierId, $periodId);
             $saved = $this->loadItems($supplierId, $periodId);
             $mergedRows = [];
-            foreach ($report['rows'] as $row) {
+            foreach (self::effectiveRows($report['rows'], $saved) as $row) {
                 $accountId = (int) $row['account_id'];
                 $book = round((float) $row['ks_md'] - (float) $row['ks_d'], 2);
                 $s = $saved[$accountId] ?? null;
@@ -312,6 +334,159 @@ final class BalanceInventoryService
             'unresolved_count' => $unresolved,
             'ok'               => $completed && $unresolved === 0,
         ];
+    }
+
+    /**
+     * Inventura jednoho účtu pro proklik z výkazů a opisu: řádek účtu nebo řádky jeho analytik
+     * z protokolu období, do kterého datum spadá. Výsledkový účet se neinventarizuje
+     * (`inventoriable` = false), proklik ale musí vést někam srozumitelně.
+     *
+     * @return array<string,mixed>
+     */
+    public function accountInventory(int $supplierId, int $accountId, string $date): array
+    {
+        $account = $this->accounts->findById($supplierId, $accountId, $date);
+        if ($account === null) {
+            throw new ReportException('account_not_found', 'Účet #' . $accountId . ' neexistuje.', 404);
+        }
+        $out = [
+            'account' => [
+                'id'          => (int) $account['id'],
+                'code'        => (string) $account['account_code'],
+                'name'        => (string) $account['name'],
+                'type'        => (string) $account['account_type'],
+                'normal_side' => $account['normal_side'],
+            ],
+            'inventoriable' => in_array((string) $account['account_type'], ['asset', 'liability', 'equity'], true),
+            'period'        => null,
+            'as_of'         => null,
+            'inventory'     => null,
+            'rows'          => [],
+        ];
+        $period = $this->periods->findForDate($supplierId, $date);
+        if (!$out['inventoriable'] || $period === null) {
+            return $out;
+        }
+        $report = $this->buildWithSaved($supplierId, (int) $period['id']);
+        $rows = array_values(array_filter($report['rows'], static fn (array $r): bool => (int) $r['account_id'] === $accountId
+            || (int) ($r['parent_id'] ?? 0) === $accountId));
+        return [
+            'period'    => $report['period'],
+            'as_of'     => $report['as_of'],
+            'inventory' => $report['inventory'],
+            'rows'      => $rows,
+        ] + $out;
+    }
+
+    /**
+     * Řádky protokolu pro export: nad účty jedné syntetiky s analytikami je součtový řádek.
+     * Součet skutečného stavu a rozdílu vzniká, až když jsou napočítané všechny analytiky,
+     * jinak by rozdíl částečně napočítané syntetiky vypadal jako skutečný.
+     *
+     * @param list<array<string,mixed>> $rows řádky z {@see self::buildWithSaved()}
+     * @return list<array<string,mixed>> `kind`: synthetic | analytic | account
+     */
+    public static function protocolRows(array $rows): array
+    {
+        $groups = [];
+        foreach ($rows as $row) {
+            $groups[(int) ($row['parent_id'] ?? 0) ?: (int) $row['account_id']][] = $row;
+        }
+        $out = [];
+        foreach ($groups as $group) {
+            $child = array_values(array_filter($group, static fn (array $r): bool => ($r['parent_id'] ?? null) !== null));
+            if ($child !== []) {
+                $factor = AccountBalanceSign::inventoryFactor($child[0]['parent_normal_side']);
+                $allCounted = array_filter($group, static fn (array $r): bool => $r['counted_balance'] === null) === [];
+                $out[] = [
+                    'kind'         => 'synthetic',
+                    'account_id'   => (int) $child[0]['parent_id'],
+                    'account_code' => (string) $child[0]['parent_code'],
+                    'name'         => (string) $child[0]['parent_name'],
+                    'normal_side'  => $child[0]['parent_normal_side'],
+                    'ks_md'        => round(array_sum(array_column($group, 'ks_md')), 2),
+                    'ks_d'         => round(array_sum(array_column($group, 'ks_d')), 2),
+                    'book_display' => AccountBalanceSign::clean(array_sum(array_column($group, 'book_balance')) * $factor),
+                    'counted_display'    => $allCounted ? AccountBalanceSign::clean(array_sum(array_column($group, 'counted_balance')) * $factor) : null,
+                    'difference_display' => $allCounted ? AccountBalanceSign::clean(array_sum(array_column($group, 'difference')) * $factor) : null,
+                    'resolved'     => array_filter($group, static fn (array $r): bool => !$r['resolved']) === [],
+                    'item_note'    => null,
+                    'documentation_hint' => '',
+                ];
+            }
+            foreach ($group as $row) {
+                $out[] = ['kind' => ($row['parent_id'] ?? null) !== null ? 'analytic' : 'account'] + $row;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Řádky inventarizace po zohlednění uloženého protokolu. Syntetika, která má uložený
+     * skutečný stav nebo potvrzení a žádná z jejích analytik uloženou položku nemá, pochází
+     * z protokolu vedeného za syntetiku: zůstane jako jeden řádek se součtem analytik
+     * (`rolled_up`). Po vymazání skutečného stavu a uložení se rozpadne na analytiky.
+     *
+     * @param list<array<string,mixed>> $rows řádky z {@see self::build()}
+     * @param array<int, array{counted_balance:?string, resolution:string, note:?string}> $saved
+     * @return list<array<string,mixed>>
+     */
+    private static function effectiveRows(array $rows, array $saved): array
+    {
+        $children = [];
+        foreach ($rows as $row) {
+            if ($row['parent_id'] !== null) {
+                $children[(int) $row['parent_id']][] = (int) $row['account_id'];
+            }
+        }
+        $rolled = [];
+        foreach ($children as $parentId => $ids) {
+            $item = $saved[$parentId] ?? null;
+            if ($item === null || ($item['counted_balance'] === null && $item['resolution'] !== 'resolved')) {
+                continue;
+            }
+            if (array_intersect($ids, array_keys($saved)) === []) {
+                $rolled[$parentId] = 0;
+            }
+        }
+        if ($rolled === []) {
+            return $rows;
+        }
+        foreach ($rows as $row) {
+            $parentId = (int) ($row['parent_id'] ?? 0) ?: (int) $row['account_id'];
+            if (isset($rolled[$parentId])) {
+                $rolled[$parentId] += self::cents($row['ks_md']) - self::cents($row['ks_d']);
+            }
+        }
+        $out = [];
+        $emitted = [];
+        foreach ($rows as $row) {
+            $parentId = (int) ($row['parent_id'] ?? 0) ?: (int) $row['account_id'];
+            if (!isset($rolled[$parentId])) {
+                $out[] = $row;
+                continue;
+            }
+            if (isset($emitted[$parentId])) {
+                continue;
+            }
+            $emitted[$parentId] = true;
+            $delta = $rolled[$parentId];
+            $isChild = $row['parent_id'] !== null;
+            $out[] = [
+                'account_id'   => $parentId,
+                'account_code' => $isChild ? (string) $row['parent_code'] : (string) $row['account_code'],
+                'name'         => $isChild ? (string) $row['parent_name'] : (string) $row['name'],
+                'normal_side'  => $isChild ? $row['parent_normal_side'] : $row['normal_side'],
+                'parent_id'    => null,
+                'parent_code'  => null,
+                'parent_name'  => null,
+                'parent_normal_side' => null,
+                'ks_md'        => ($delta > 0 ? $delta : 0) / 100,
+                'ks_d'         => ($delta < 0 ? -$delta : 0) / 100,
+                'rolled_up'    => true,
+            ] + $row;
+        }
+        return $out;
     }
 
     /**

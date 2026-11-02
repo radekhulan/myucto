@@ -107,6 +107,24 @@ final class TaxRepresentationService
     }
 
     /**
+     * Zástupce pro podání, jehož XML se vytváří teď: ke dni `representation_date`
+     * z `$meta`, je-li to datum ve tvaru Y-m-d, jinak k dnešku. Sdílí ho hlášení
+     * nerezidentů, vyúčtování daně ze závislé činnosti i žádosti o daňový bonus.
+     *
+     * @param array<string,mixed> $meta
+     * @return array<string,mixed> stejný tvar jako {@see at()}
+     */
+    public function atSubmissionDate(int $supplierId, array $meta): array
+    {
+        $date = (string) ($meta['representation_date'] ?? '');
+
+        return $this->at(
+            $supplierId,
+            preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 ? $date : date('Y-m-d'),
+        );
+    }
+
+    /**
      * Statická varianta {@see at()} pro kontexty bez DI kontejneru (bin skripty,
      * dry-run ověřovací nástroje) — stejná SQL sémantika, jeden zdroj pravdy.
      *

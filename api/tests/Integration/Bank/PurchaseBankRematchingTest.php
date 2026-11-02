@@ -92,7 +92,7 @@ final class PurchaseBankRematchingTest extends TestCase
         $this->pdo->exec("UPDATE purchase_invoices SET document_kind='receipt', status='paid' WHERE id={$this->invoice}");
         $this->pdo->exec("UPDATE bank_transactions SET variable_symbol='9999' WHERE id={$this->transaction}");
         $tx = $this->pdo->query("SELECT * FROM bank_transactions WHERE id={$this->transaction}")->fetch(PDO::FETCH_ASSOC);
-        $candidates = $this->container->get(MatchCandidateProvider::class)->candidatesFor($this->supplier,$tx);
+        $candidates = $this->container->get(MatchCandidateProvider::class)->candidatesFor($this->supplier,$tx,$this->invoice);
         self::assertContains($this->invoice, array_column($candidates,'purchase_invoice_id'));
         self::assertSame(0, $this->paymentCount());
     }
@@ -113,7 +113,7 @@ final class PurchaseBankRematchingTest extends TestCase
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('paidImporters')]
-    public function testPaidImportSchedulesMatchingAfterCommit(string $importer): void
+    public function testPaidImportWaitsForImportCompletionAndCommit(string $importer): void
     {
         $this->pdo->exec("UPDATE purchase_invoices SET status='draft' WHERE id={$this->invoice}");
         $method = new \ReflectionMethod($importer, 'applyPurchasePaymentState');
@@ -121,6 +121,14 @@ final class PurchaseBankRematchingTest extends TestCase
             ['status' => 'paid', 'paid_at' => '2099-06-15'], '2099-06-15', $this->user);
         self::assertSame(0, $this->paymentCount());
         $this->commitFixture();
+        self::assertSame(0, $this->paymentCount(), 'Importní smyčka nesmí spouštět dohledání.');
+        $jobs = $this->container->get(\MyInvoice\Repository\ImportJobRepository::class);
+        $jobId = $jobs->create($this->supplier, str_contains($importer, 'Fakturoid') ? 'fakturoid' : 'idoklad', [
+            'include_clients' => false, 'include_issued' => false, 'include_received' => false,
+            'include_receipts' => false, 'include_bank_accounts' => false, 'include_bank_transactions' => false,
+        ], $this->user);
+        $this->container->get($importer)->run($jobId);
+        self::assertSame('completed', $jobs->find($jobId, $this->supplier)['status']);
         self::assertSame(1, $this->paymentCount(), json_encode($this->read()));
     }
 
@@ -132,7 +140,7 @@ final class PurchaseBankRematchingTest extends TestCase
 
     private function cleanup(): void
     {
-        foreach (['bank_match_audit','bank_counterparty_map','payment_matches','bank_match_suggestions','bank_statements','purchase_invoices','invoices','clients'] as $table) {
+        foreach (['import_jobs','tax_submissions','tax_evidence_closings','bank_match_audit','bank_counterparty_map','payment_matches','bank_match_suggestions','bank_statements','purchase_invoices','invoices','clients'] as $table) {
             $this->pdo->prepare("DELETE FROM {$table} WHERE supplier_id=?")->execute([$this->supplier]);
         }
         $this->pdo->prepare('DELETE FROM users WHERE id=?')->execute([$this->user]);
@@ -434,7 +442,7 @@ final class PurchaseBankRematchingTest extends TestCase
     public function testCandidateSearchUsesIndexWithLargeHistory(): void
     {
         $this->pdo->prepare("INSERT INTO bank_transactions (statement_id,posted_at,amount,currency,variable_symbol)
-            SELECT ?, '2080-01-01',-9999,'CZK','00008888' FROM seq_1_to_3000")->execute([$this->statement]);
+            SELECT ?, '2080-01-01',-9999,'CZK','00008888' FROM seq_1_to_100000")->execute([$this->statement]);
         $service = $this->container->get(PurchaseBankMatching::class);
         $document = (new \ReflectionMethod($service,'document'))->invoke($service,$this->supplier,$this->invoice);
         [$sql,$params] = (new \ReflectionMethod($service,'candidateQuery'))->invoke($service,$this->supplier,$document);
@@ -448,6 +456,45 @@ final class PurchaseBankRematchingTest extends TestCase
         }
         self::assertSame('searched',$this->retry()['outcome']);
         self::assertSame(1,$this->paymentCount());
+    }
+
+    public function testDetailUsesIndexedStoredSuggestionsWithLargeBankHistory(): void
+    {
+        $this->pdo->exec("UPDATE bank_transactions SET variable_symbol=NULL WHERE id={$this->transaction}");
+        $this->retry();
+        $this->pdo->prepare("INSERT INTO bank_transactions (statement_id,posted_at,amount,currency,variable_symbol)
+            SELECT ?, '2080-01-01',-9999,'CZK','00008888' FROM seq_1_to_100000")->execute([$this->statement]);
+        $service = $this->container->get(PurchaseBankMatching::class);
+        [$sql,$params] = (new \ReflectionMethod($service,'suggestionQuery'))->invoke($service,$this->supplier,$this->invoice);
+        $explain = $this->pdo->prepare('EXPLAIN '.$sql);
+        $explain->execute($params);
+        $plans = $explain->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($plans as $plan) {
+            if (in_array($plan['table'], ['bank_match_audit','s','bt','bs'], true)) {
+                self::assertNotSame('ALL', $plan['type'], json_encode($plan));
+                self::assertNotNull($plan['key'], json_encode($plan));
+                self::assertLessThan(100, (int) $plan['rows'], json_encode($plan));
+            }
+        }
+        self::assertCount(1, $this->read()['suggestions']);
+        self::assertSame(0, $this->paymentCount());
+    }
+
+    public function testFiledPeriodAlsoBlocksConfirmationOfExistingSuggestion(): void
+    {
+        $this->pdo->exec("UPDATE bank_transactions SET variable_symbol=NULL WHERE id={$this->transaction}");
+        $this->retry();
+        $suggestion = $this->read()['suggestions'][0];
+        $this->filePeriod();
+        $this->commitFixture();
+        try {
+            $this->container->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class)
+                ->accept((int) $suggestion['id'], $this->supplier, $this->user, (int) $suggestion['candidate_index']);
+            self::fail('Podané období nelze změnit potvrzením návrhu.');
+        } catch (\MyInvoice\Service\Bank\Match\MatchSuggestionException $e) {
+            self::assertSame('period_locked', $e->errorCode);
+        }
+        self::assertSame(0, $this->paymentCount());
     }
 
     public function testMatchingFailureDoesNotUndoAcceptedDocument(): void
@@ -494,12 +541,38 @@ final class PurchaseBankRematchingTest extends TestCase
         self::assertSame(1,$this->paymentCount());
     }
 
+    public function testReceivingWaitsForUncommittedBankImportInsteadOfMissingItsPayment(): void
+    {
+        $this->pdo->prepare('DELETE FROM bank_transactions WHERE id=?')->execute([$this->transaction]);
+        $this->commitFixture();
+        $pipes = [];
+        $process = proc_open([PHP_BINARY, dirname(__DIR__,2).'/Support/purchase-bank-rematching-worker.php',
+            'late_bank',(string)$this->supplier,(string)$this->invoice,(string)$this->user,(string)$this->transaction,(string)$this->statement],
+            [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,dirname(__DIR__,3));
+        self::assertIsResource($process);
+        fclose($pipes[0]);
+        try {
+            self::assertSame("READY\n", fgets($pipes[1]));
+            $result = $this->retry();
+            $out = stream_get_contents($pipes[1]);
+            $err = stream_get_contents($pipes[2]);
+            self::assertSame(0,proc_close($process),$out.$err);
+            $process = null;
+            self::assertSame(1,$result['matched_count']);
+            self::assertSame(1,$this->paymentCount());
+        } finally {
+            foreach (array_slice($pipes,1) as $pipe) if (is_resource($pipe)) fclose($pipe);
+            if (is_resource($process)) { proc_terminate($process); proc_close($process); }
+        }
+    }
+
     public function testEndpointRequiresBankReadAndRetryRejectsBearer(): void
     {
         $action = $this->container->get(\MyInvoice\Action\PurchaseInvoice\PurchaseBankMatchingAction::class);
         $factory = new \Slim\Psr7\Factory\ServerRequestFactory();
         $request = $factory->createServerRequest('GET','/api/purchase-invoices/'.$this->invoice.'/bank-matching')
             ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID,$this->supplier)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD,'session')
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER,['id'=>$this->user,'role'=>'admin'])
             ->withAttribute('auth.effective_role',new \MyInvoice\Security\EffectiveRole(1,'TEST','staff',true,['purchase_invoices'=>1]));
         self::assertSame(403,$action($request,new \Slim\Psr7\Response(),['id'=>$this->invoice])->getStatusCode());
@@ -508,7 +581,120 @@ final class PurchaseBankRematchingTest extends TestCase
         $request = $request->withMethod('POST')->withAttribute('auth.effective_role',new \MyInvoice\Security\EffectiveRole(1,'TEST','superadmin',true,[],'superadmin'))
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD,'bearer');
         self::assertSame(403,$action($request,new \Slim\Psr7\Response(),['id'=>$this->invoice])->getStatusCode());
+        self::assertSame(403,$action($request->withMethod('GET'),new \Slim\Psr7\Response(),['id'=>$this->invoice])->getStatusCode());
         self::assertSame(0,$this->paymentCount());
+    }
+
+    public static function legacyBankImportCases(): iterable
+    {
+        yield 'receipt' => ['receipt', 'received', false, 0.0, false];
+        yield 'paid without payment' => ['invoice', 'paid', false, 0.0, false];
+        yield 'rounding and issue proximity' => ['invoice', 'received', false, 0.49, true];
+        yield 'assigned cash register' => ['invoice', 'received', true, 0.0, true];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('legacyBankImportCases')]
+    public function testOrdinaryBankImportKeepsOriginalCandidatesAndScoring(string $kind, string $status, bool $cash, float $rounding, bool $expected): void
+    {
+        $register = null;
+        if ($cash) {
+            $this->pdo->prepare("INSERT INTO cash_registers (supplier_id,name) VALUES (?,'TEST cash preference')")->execute([$this->supplier]);
+            $register = (int) $this->pdo->lastInsertId();
+        }
+        $this->pdo->prepare("UPDATE purchase_invoices SET document_kind=?, status=?, cash_register_id=?, rounding=?, due_date='2099-07-15' WHERE id=?")
+            ->execute([$kind, $status, $register, $rounding, $this->invoice]);
+        $this->pdo->exec("UPDATE bank_transactions SET variable_symbol=NULL WHERE id={$this->transaction}");
+        $tx = $this->pdo->query("SELECT * FROM bank_transactions WHERE id={$this->transaction}")->fetch(PDO::FETCH_ASSOC);
+        $candidates = $this->container->get(MatchCandidateProvider::class)->candidatesFor($this->supplier, $tx);
+        self::assertCount($expected ? 1 : 0, $candidates);
+        if ($expected) {
+            self::assertSame(812.34, $candidates[0]['display']['amount']);
+            self::assertArrayNotHasKey('due_proximity', $candidates[0]['signals']);
+            self::assertSame(0.4, $candidates[0]['score']);
+        }
+        self::assertSame(0, $this->paymentCount());
+    }
+
+    public function testDiagnosticSearchDoesNotTouchInvoiceModificationTime(): void
+    {
+        $this->pdo->exec("UPDATE bank_transactions SET variable_symbol=NULL, amount=-9999 WHERE id={$this->transaction}");
+        $this->pdo->exec("UPDATE purchase_invoices SET updated_at='2090-01-01 00:00:00' WHERE id={$this->invoice}");
+        $this->retry();
+        self::assertSame('2090-01-01 00:00:00', $this->pdo->query("SELECT updated_at FROM purchase_invoices WHERE id={$this->invoice}")->fetchColumn());
+        self::assertSame('searched', $this->read()['last_attempt']['outcome']);
+    }
+
+    public function testForeignDocumentCannotOverwriteDiagnosticAttempt(): void
+    {
+        $this->pdo->exec("UPDATE bank_transactions SET variable_symbol=NULL, amount=-9999 WHERE id={$this->transaction}");
+        $this->retry();
+        $before = $this->read()['last_attempt'];
+        $this->container->get(PurchaseBankMatching::class)->retry($this->supplier + 100000, $this->invoice, $this->user);
+        self::assertSame($before, $this->read()['last_attempt']);
+    }
+
+    public function testAllStatementsActuallyMatchedAreRecounted(): void
+    {
+        $this->pdo->prepare("INSERT INTO bank_statements (supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date)
+            VALUES (?,'second-synthetic.json',?,?,'0100','CZK','2099-06-15')")
+            ->execute([$this->supplier,hash('sha256','second-'.$this->supplier),$this->account]);
+        $second = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO bank_transactions (statement_id,posted_at,amount,currency,variable_symbol)
+            VALUES (?,'2099-06-15',-812.34,'CZK','20990001')")->execute([$second]);
+        $secondTx = (int) $this->pdo->lastInsertId();
+        $matcher = $this->createMock(\MyInvoice\Service\Bank\StatementMatcher::class);
+        $matcher->expects(self::exactly(2))->method('matchForPurchase')->willReturnCallback(function (int $supplier, int $invoice, array $tx) use ($secondTx): array {
+            if ((int) $tx['id'] !== $secondTx) return ['status' => 'unmatched'];
+            $this->pdo->prepare("UPDATE bank_transactions SET match_status='auto_exact' WHERE id=?")->execute([$secondTx]);
+            return ['status' => 'auto_exact'];
+        });
+        $service = new PurchaseBankMatching($this->container->get(Connection::class), $matcher,
+            $this->container->get(\MyInvoice\Security\PermissionResolver::class),
+            $this->container->get(\MyInvoice\Security\PermissionChecker::class), new \Psr\Log\NullLogger());
+        self::assertSame(1, $service->retry($this->supplier,$this->invoice,$this->user)['matched_count']);
+        self::assertSame(1, (int) $this->pdo->query("SELECT matched_count FROM bank_statements WHERE id={$second}")->fetchColumn());
+        self::assertSame(0, (int) $this->pdo->query("SELECT matched_count FROM bank_statements WHERE id={$this->statement}")->fetchColumn());
+    }
+
+    public function testFiledPeriodBlocksOriginalDialogConfirmationOfNewProposal(): void
+    {
+        $this->pdo->exec("UPDATE bank_transactions SET variable_symbol=NULL WHERE id={$this->transaction}");
+        $this->retry();
+        self::assertCount(1, $this->read()['suggestions']);
+        $this->filePeriod();
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST','/api/bank-transactions/'.$this->transaction.'/match-document')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID,$this->supplier)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD,'session')
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER,['id'=>$this->user,'role'=>'admin'])
+            ->withAttribute('auth.effective_role',new \MyInvoice\Security\EffectiveRole(1,'TEST','superadmin',true,[],'superadmin'))
+            ->withParsedBody(['purchase_invoice_id'=>$this->invoice]);
+        $response = $this->container->get(\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class)
+            ->match($request,new \Slim\Psr7\Response(),['id'=>$this->transaction]);
+        self::assertSame(409,$response->getStatusCode(),(string)$response->getBody());
+        self::assertSame(0,$this->paymentCount());
+    }
+
+    public function testFinalTaxEvidenceYearPreventsRematching(): void
+    {
+        $this->pdo->prepare("INSERT INTO tax_evidence_closings (supplier_id,year,status,checklist,source_snapshot,source_hash,row_version,finalized_at,finalized_by)
+            VALUES (?,2099,'final','{}','{}',?,1,NOW(),?)")->execute([$this->supplier,hash('sha256','{}'),$this->user]);
+        self::assertSame('locked', $this->retry()['outcome']);
+        self::assertSame(0, $this->paymentCount());
+    }
+
+    public function testFiledVatPeriodPreventsRematching(): void
+    {
+        $this->filePeriod();
+        self::assertSame('locked', $this->retry()['outcome']);
+        self::assertSame(0, $this->paymentCount());
+    }
+
+    private function filePeriod(): void
+    {
+        $this->pdo->prepare("INSERT INTO tax_submissions (supplier_id,form_code,period_year,period_month,form_variant,
+            xml_content,xml_size_bytes,xml_sha256,validation_status,status,submitted_at,summary_json)
+            VALUES (?,'dphdp3',2099,6,'B','<test/>',7,?,'passed','submitted',NOW(),'{}')")
+            ->execute([$this->supplier,hash('sha256','synthetic')]);
     }
 
     private function paymentCount(): int

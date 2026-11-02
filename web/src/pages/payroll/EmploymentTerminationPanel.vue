@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -504,13 +505,13 @@ onMounted(() => void load())
             </label>
             <label :class="FIELD">
               {{ t('payroll.people.termination.work_injury.paid_on_label') }}
-              <input v-model="workInjuryPaidOn" type="date" :min="data.employment.end_date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-work-injury-paid-on">
+              <DateInput v-model="workInjuryPaidOn" :min="data.employment.end_date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-work-injury-paid-on" />
               <span :class="HINT">{{ t('payroll.people.termination.work_injury.paid_on_hint') }}</span>
             </label>
           </template>
           <label :class="FIELD">
             {{ t('payroll.people.termination.severance.other_income_label') }}
-            <input v-model="otherIncomeFrom" type="date" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-other-income-from">
+            <DateInput v-model="otherIncomeFrom" :class="INPUT" :disabled="!canWrite || busy" data-test="termination-other-income-from" />
             <span :class="HINT">{{ t('payroll.people.termination.severance.other_income_hint') }}</span>
           </label>
           <label v-if="otherIncomeFrom !== ''" class="flex items-start gap-2 text-xs text-neutral-700 sm:col-span-2">

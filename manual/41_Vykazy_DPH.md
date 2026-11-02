@@ -315,7 +315,7 @@ U OSVČ se údaje o podnikateli zadávají v části **Osobní údaje podnikatel
 
 #### Zastoupení a podepisující osoba
 
-Podává-li za firmu podání někdo jiný než jednatel nebo podnikatel sám, zapište ho v `Nastavení → Daně a účetnictví → Zastoupení a podepisující osoba`. Zástupce se pak vyplní jako podepisující osoba (`zast_*`) do přiznání DPH, kontrolního a souhrnného hlášení i do přiznání k dani z příjmů. Zastoupení se eviduje v čase a ukládá se hned, bez tlačítka Uložit. Podání dostane zástupce platného ke dni, kdy XML vytváříte, finalizované přiznání k dani z příjmů zástupce platného ke dni finalizace.
+Podává-li za firmu podání někdo jiný než jednatel nebo podnikatel sám, zapište ho v `Nastavení → Daně a účetnictví → Zastoupení a podepisující osoba`. Zástupce se pak vyplní jako podepisující osoba (`zast_*`) do přiznání DPH, kontrolního a souhrnného hlášení, do přiznání k dani z příjmů, do oznámení a hlášení o příjmech do zahraničí (§ 38da a § 38e), do vyúčtování daně ze závislé činnosti a srážkové daně i do žádostí o poukázání daňového bonusu. Zastoupení se eviduje v čase a ukládá se hned, bez tlačítka Uložit. Podání dostane zástupce platného ke dni, kdy XML vytváříte, finalizované přiznání k dani z příjmů zástupce platného ke dni finalizace.
 
 <!-- cols: 34 22 44 -->
 | Pole | XML atribut | Popis |

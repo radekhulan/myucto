@@ -105,7 +105,9 @@ Pravidla skóre a hledání jsou v [§ 29.13.8](#29138-rucni-parovani-pravidla-a
 Po přijetí faktury, účtenky nebo zálohové faktury aplikace ihned dohledá už načtené
 volné odchozí pohyby stejné firmy. Koncept hledání nespouští. Není potřeba čekat
 na další synchronizaci banky. Stejné hledání proběhne u importu, který vytvoří
-rovnou přijatý či evidenčně zaplacený doklad.
+rovnou přijatý či evidenčně zaplacený doklad. U hromadného importu z Fakturoidu
+nebo iDokladu se dohledání spustí až po dokončení importní úlohy. Běžný import
+bankovního výpisu používá původní pravidla výběru a skórování kandidátů.
 
 Jednoznačná shoda se propojí podle stávajících pravidel. Nejisté shody, například
 samotná částka a blízké datum, čekají na potvrzení. Počet čekajících návrhů je

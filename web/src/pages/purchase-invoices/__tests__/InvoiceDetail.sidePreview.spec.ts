@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import type { PurchaseInvoice } from '@/api/purchaseInvoices'
 
-// Náhled originálu vedle dokladu místo pod ním (useSidePreview + DocumentSidePreview).
-// Práh je v JS (media query), ne v `2xl:` třídách — jinak by v DOM byly dva <iframe>y
-// a prohlížeč by PDF stáhl dvakrát. Proto se dá i testovat.
+// Náhled originálu vedle dokladu místo pod ním (useSidePreview + DocumentPreviewSplit).
+// O rozložení rozhoduje změřená šířka v JS, ne CSS třídy — jinak by v DOM byly dva
+// <iframe>y a prohlížeč by PDF stáhl dvakrát. Proto se dá i testovat.
 
 const m = vi.hoisted(() => {
   const store: { flags: Record<string, boolean> | null } = { flags: null }
@@ -87,19 +87,11 @@ vi.mock('@/api/stock', () => ({
 
 import InvoiceDetail from '@/pages/purchase-invoices/InvoiceDetail.vue'
 import { SIDE_PREVIEW_FLAG } from '@/composables/useSidePreview'
+import { stubSplitWidth } from '@/components/documents/__tests__/previewSplitTestUtils'
 
-/** Okno nad / pod prahem. jsdom vlastní matchMedia hlásí vždy `matches: false`. */
-function stubViewport(matches: boolean): void {
-  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
-    matches,
-    media: '',
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }))
+/** Rozložení, do kterého se náhled vedle dokladu vejde / nevejde. */
+function stubViewport(fits: boolean): void {
+  stubSplitWidth(fits ? 976 : 700)
 }
 
 function makeInvoice(overrides: Partial<PurchaseInvoice> = {}): PurchaseInvoice {
@@ -163,7 +155,7 @@ const stubs = {
   StockReceiptModal: true,
 }
 
-const SIDE = '[data-test="document-side-preview"]'
+const SIDE = '[data-test="document-preview-splitter"]'
 
 async function mountDetail() {
   const wrapper = mount(InvoiceDetail, { global: { stubs } })
@@ -182,6 +174,7 @@ describe('InvoiceDetail.vue — náhled originálu vedle dokladu', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -190,11 +183,10 @@ describe('InvoiceDetail.vue — náhled originálu vedle dokladu', () => {
     m.get.mockResolvedValue(makeInvoice())
     const wrapper = await mountDetail()
 
-    const side = wrapper.find(SIDE)
-    expect(side.exists()).toBe(true)
+    expect(wrapper.find(SIDE).exists()).toBe(true)
     // Právě jeden iframe, a to ten v bočním sloupci — jinak by se PDF stahovalo dvakrát.
     expect(wrapper.findAll('iframe')).toHaveLength(1)
-    expect(side.find('iframe').attributes('src')).toContain('inline=1')
+    expect(wrapper.get('[data-side-preview] iframe').attributes('src')).toContain('inline=1')
   })
 
   it('pod prahem boční sloupec není a náhled zůstává rozbalený pod dokladem', async () => {

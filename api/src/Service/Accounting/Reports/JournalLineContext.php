@@ -78,8 +78,10 @@ final class JournalLineContext
     }
 
     /**
-     * Protiúčty řádku: účty opačné strany téhož zápisu (bez účtu řádku samého);
-     * když žádné nejsou, ostatní účty zápisu.
+     * Protiúčty řádku: účty opačné ÚČINNÉ strany téhož zápisu (bez účtu řádku samého);
+     * když žádné nejsou, ostatní účty zápisu. Účinná strana odpovídá filtru a součtům
+     * v {@see \MyInvoice\Repository\LedgerReportRepository::accountCounterTotals()},
+     * jinak by řádek ukazoval jiný protiúčet, než podle kterého se dá vyfiltrovat.
      *
      * @param list<array{line_no:int, account_code:string, side:string}> $lines
      * @param array<string,mixed> $item
@@ -87,6 +89,7 @@ final class JournalLineContext
     private function counterAccounts(array $lines, array $item): ?string
     {
         $own = (string) ($item['account_code'] ?? '');
+        $ownSide = !empty($item['is_red_storno']) ? ($item['side'] === 'debit' ? 'credit' : 'debit') : $item['side'];
         $opposite = [];
         $other = [];
         foreach ($lines as $l) {
@@ -94,7 +97,7 @@ final class JournalLineContext
                 continue;
             }
             $other[$l['account_code']] = true;
-            if ($l['side'] !== $item['side']) {
+            if ($l['side'] !== $ownSide) {
                 $opposite[$l['account_code']] = true;
             }
         }
@@ -109,7 +112,7 @@ final class JournalLineContext
 
     /**
      * @param list<int> $entryIds
-     * @return array<int,list<array{line_no:int, account_code:string, side:string}>>
+     * @return array<int,list<array{line_no:int, account_code:string, side:string}>> side = účinná strana
      */
     private function entryLines(int $supplierId, array $entryIds): array
     {
@@ -117,7 +120,10 @@ final class JournalLineContext
         foreach (array_chunk($entryIds, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
             $stmt = $this->db->pdo()->prepare(
-                "SELECT l.entry_id, l.line_no, l.side, ca.account_code
+                "SELECT l.entry_id, l.line_no, ca.account_code,
+                        CASE WHEN l.is_red_storno = 1
+                             THEN (CASE WHEN l.side = 'debit' THEN 'credit' ELSE 'debit' END)
+                             ELSE l.side END AS side
                    FROM journal_entry_lines l
                    JOIN chart_of_accounts ca ON ca.id = l.account_id
                   WHERE l.supplier_id = ? AND l.entry_id IN ({$in})"

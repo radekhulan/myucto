@@ -60,7 +60,7 @@ import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import PurchaseForceModeDialog from '@/components/purchase/PurchaseForceModeDialog.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -70,7 +70,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
 import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { appIsoDate } from '@/utils/date'
-import { useSidePreviewWide } from '@/composables/useSidePreviewWide'
+import { useSidePreview } from '@/composables/useSidePreview'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
@@ -402,12 +402,12 @@ watch(
 
 // PDF state
 const existingPdf = ref<{ path: string; hash: string; size: number; name: string; uploadedAt: string } | null>(null)
-// Výchozí stav: zavřeno. FR5 (audit 2026-08) — u konceptu z AI extrakce (source_format
-// mimo isdoc/isdocx) ho `populate()` přepne na otevřeno, ať má uživatel originál rovnou
-// na očích při kontrole vytěžených dat (viz komentář u `structuredSource` v populate()).
-const pdfPreviewOpen = ref(false)
-const pdfPreviewWide = useSidePreviewWide()
-const pdfSideBySide = computed(() => !!existingPdf.value && !!invoiceId.value && pdfPreviewOpen.value && pdfPreviewWide.value)
+// Výchozí stav: zavřeno, sdílená volba s detailem dokladu. FR5 (audit 2026-08) — u konceptu
+// z AI extrakce (source_format mimo isdoc/isdocx) ho `populate()` otevře, ať má uživatel
+// originál rovnou na očích při kontrole vytěžených dat (viz komentář u `structuredSource`
+// v populate()). Stejně tak předaný doklad z fronty; uloženou volbu to nemění.
+const pdfPreview = useSidePreview('purchase_invoices')
+const pdfPreviewOpen = pdfPreview.open
 const pdfInlineUrl = computed(() => invoiceId.value
   ? `${purchaseInvoicesApi.pdfUrl(invoiceId.value, true)}#view=FitH`
   : '')
@@ -420,7 +420,6 @@ const dropzoneVisible = ref(true)
 // žádný server round-trip není potřeba. URL musíme po výměně/zrušení uvolnit (revoke),
 // jinak by blob zůstal viset v paměti.
 const pendingPdfUrl = ref<string | null>(null)
-const pendingPdfPreviewOpen = ref(false)
 const pendingPdfFile = ref<File | null>(null)
 const canSubmitDocuments = computed(() =>
   auth.isClientRole && auth.canWrite('documents.submit'),
@@ -433,12 +432,29 @@ function setPendingPdfUrl(file: File | null) {
     URL.revokeObjectURL(pendingPdfUrl.value)
     pendingPdfUrl.value = null
   }
-  pendingPdfPreviewOpen.value = false
   if (file) pendingPdfUrl.value = URL.createObjectURL(file)
 }
-// Pro náhled obrázku (JPG/PNG/…) použijeme <img>, pro PDF <iframe> s PDF viewerem.
 const pendingPdfIsImage = computed(() => !!pendingPdfFile.value?.type.startsWith('image/'))
 onBeforeUnmount(() => setPendingPdfUrl(null))
+
+// Co náhled ukazuje: předaný doklad z fronty, uložený originál, nebo soubor v paměti.
+const originalPreview = computed<{ src: string; name: string; docType: string } | null>(() => {
+  const handedOver = submission.value
+  if (handedOver && submissionCanPreviewInline.value) {
+    return {
+      src: purchaseInvoiceSubmissionsApi.previewUrl(handedOver.id),
+      name: handedOver.original_name,
+      docType: handedOver.doc_type ?? 'pdf',
+    }
+  }
+  if (existingPdf.value && invoiceId.value) {
+    return { src: pdfInlineUrl.value, name: existingPdf.value.name, docType: 'pdf' }
+  }
+  if (pendingPdfUrl.value && pendingPdfFile.value) {
+    return { src: pendingPdfUrl.value, name: pendingPdfFile.value.name, docType: pendingPdfIsImage.value ? 'image' : 'pdf' }
+  }
+  return null
+})
 
 // Diagnostické varování z AI extrakce (např. mezisoučty čteny jako items).
 // Backend sets via PurchaseInvoiceRepository::setExtractionWarning po sanity-check.
@@ -616,6 +632,7 @@ async function loadSubmissionOrigin(): Promise<void> {
       return
     }
     submission.value = item
+    if (submissionCanPreviewInline.value) pdfPreview.openTemporarily()
     if (item.document_kind_hint && item.document_kind_hint !== 'other') {
       form.value.document_kind = item.document_kind_hint
     }
@@ -931,7 +948,7 @@ function populate(inv: PurchaseInvoice) {
     // uživatel ho už jednou zkontroloval, nemá smysl mu náhled vnucovat při každém otevření.
     const structuredSource = inv.source_format === 'isdoc' || inv.source_format === 'isdocx'
     if (inv.status === 'draft' && !structuredSource) {
-      pdfPreviewOpen.value = true
+      pdfPreview.openTemporarily()
     }
   }
 }
@@ -1695,8 +1712,8 @@ useWindowTitle(
 </script>
 
 <template>
-  <div :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
-  <div class="space-y-4 max-w-5xl min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
+  <DocumentPreviewSplit :ctrl="pdfPreview" :show="!!originalPreview && pdfPreviewOpen" :src="originalPreview?.src ?? null"
+    :file-name="originalPreview?.name" :doc-type="originalPreview?.docType" form-class="space-y-4" narrow-class="max-w-5xl">
     <header class="flex items-center justify-between">
       <h1 class="text-xl font-semibold">
         {{ isEdit ? t('purchase_invoice.title_edit') : t('purchase_invoice.title_new') }}
@@ -1750,30 +1767,28 @@ useWindowTitle(
             <p class="text-xs text-neutral-500 mt-1">{{ t('purchase_submissions.editor_origin_hint') }}</p>
             <p v-if="submission.note" class="text-sm text-neutral-600 mt-2">{{ submission.note }}</p>
           </div>
-          <a
-            :href="purchaseInvoiceSubmissionsApi.downloadUrl(submission.id)"
-            target="_blank"
-            rel="noopener"
-            class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
-          >
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
-            {{ t('purchase_submissions.download') }}
-          </a>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="submissionCanPreviewInline"
+              type="button"
+              class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+              @click="pdfPreview.toggle()"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="pdfPreviewOpen ? ICONS.eyeOff : ICONS.eye" /></svg>
+              {{ pdfPreviewOpen ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+            </button>
+            <a
+              :href="purchaseInvoiceSubmissionsApi.downloadUrl(submission.id)"
+              target="_blank"
+              rel="noopener"
+              class="cursor-pointer whitespace-nowrap px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
+              {{ t('purchase_submissions.download') }}
+            </a>
+          </div>
         </div>
-        <iframe
-          v-if="submissionCanPreviewInline && submission.doc_type === 'pdf'"
-          :src="purchaseInvoiceSubmissionsApi.previewUrl(submission.id)"
-          class="w-full h-[65vh] min-h-[420px] border-0"
-          :title="submission.original_name"
-        />
-        <div v-else-if="submissionCanPreviewInline" class="bg-neutral-50 p-4 flex justify-center">
-          <img
-            :src="purchaseInvoiceSubmissionsApi.previewUrl(submission.id)"
-            :alt="submission.original_name"
-            class="max-h-[65vh] object-contain"
-          />
-        </div>
-        <div v-else class="bg-neutral-50 px-4 py-8 text-sm text-neutral-500 text-center">
+        <div v-if="!submissionCanPreviewInline" class="bg-neutral-50 px-4 py-8 text-sm text-neutral-500 text-center">
           {{ t('purchase_submissions.no_inline_preview') }}
         </div>
       </section>
@@ -1808,14 +1823,14 @@ useWindowTitle(
             <button
               v-if="pendingPdfUrl"
               type="button"
-              @click="pendingPdfPreviewOpen = !pendingPdfPreviewOpen"
+              @click="pdfPreview.toggle()"
               class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
               </svg>
-              {{ pendingPdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
+              {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
             </button>
             <a
               v-if="pendingPdfUrl"
@@ -1856,28 +1871,10 @@ useWindowTitle(
               : t('purchase_submissions.editor_handoff_action') }}
           </button>
         </div>
-        <!-- Inline náhled ze souboru v paměti (blob: URL) — faktura ještě není na serveru.
-             Obrázek přes <img>, PDF přes <embed> (NE <iframe> ani #view= fragment — Chrome
-             odmítá blob PDF v iframu / s fragmentem jako „local resource"). Když ani <embed>
-             nevykreslí, je tu tlačítko „Otevřít" pro zobrazení v nové záložce. -->
-        <div v-if="pendingPdfPreviewOpen && pendingPdfUrl" class="bg-neutral-100 border-t border-success-500/30">
-          <img
-            v-if="pendingPdfIsImage"
-            :src="pendingPdfUrl"
-            :alt="pendingPdfFile?.name || 'preview'"
-            class="w-full max-h-[80vh] object-contain mx-auto"
-          />
-          <embed
-            v-else
-            :src="pendingPdfUrl"
-            type="application/pdf"
-            class="w-full h-[80vh] border-0"
-            :title="pendingPdfFile?.name || 'PDF'"
-          />
-        </div>
       </div>
 
-      <!-- Existující PDF na detail/edit (s inline preview, stejný pattern jako InvoiceDetail.vue) -->
+      <!-- Existující PDF na detail/edit, náhled kreslí DocumentPreviewSplit -->
+
       <div v-if="existingPdf" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
           <div class="flex items-center gap-3">
@@ -1924,15 +1921,6 @@ useWindowTitle(
               {{ t('common.delete') }}
             </button>
           </div>
-        </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a Edge/IE blokují embed). -->
-        <div v-if="pdfPreviewOpen && invoiceId && !pdfSideBySide" class="bg-neutral-100">
-          <iframe
-            :src="pdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="existingPdf.name || 'PDF'"
-          ></iframe>
         </div>
       </div>
 
@@ -2969,12 +2957,5 @@ useWindowTitle(
       :description-options="form.items.map(it => it.description)"
       @close="expenseRuleTemplateOpen = false"
       @saved="expenseRuleTemplateOpen = false" />
-  </div>
-  <DocumentSidePreview
-    v-if="pdfSideBySide"
-    :src="pdfInlineUrl"
-    :file-name="existingPdf?.name"
-    @close="pdfPreviewOpen = false"
-  />
-  </div>
+  </DocumentPreviewSplit>
 </template>

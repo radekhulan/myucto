@@ -3838,8 +3838,6 @@ final class PurchaseInvoiceRepository
 
     private function castInvoice(array $row): array
     {
-        // Bankovní diagnostika patří jen endpointu chráněnému právem bank.read.
-        unset($row['bank_matching_result']);
         foreach (['id', 'supplier_id', 'vendor_id', 'currency_id', 'payment_currency_id',
                   'created_by', 'pdf_size_bytes', 'source_size_bytes', 'expense_category_id',
                   'advance_purchase_invoice_id', 'advance_link_suggested_id',

@@ -47,6 +47,7 @@ vi.mock('@/components/ui/Modal.vue', () => ({
 vi.mock('@/components/purchase/ExtractionWarningText.vue', () => ({ default: { template: '<div />' } }))
 
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
+import { stubSplitWidth } from '@/components/documents/__tests__/previewSplitTestUtils'
 
 function invoice(id: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -71,17 +72,8 @@ function invoice(id: number, overrides: Record<string, unknown> = {}) {
   }
 }
 
-function stubViewport(matches: boolean): void {
-  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
-    matches,
-    media: '',
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }))
+function stubViewport(fits: boolean): void {
+  stubSplitWidth(fits ? 1200 : 700)
 }
 
 async function mountModal(ids: number[]) {
@@ -104,7 +96,7 @@ describe('ExtractionReviewModal — náhled originálu', () => {
     }
   })
   afterEach(() => {
-    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
     document.body.innerHTML = ''
   })
 
@@ -114,7 +106,7 @@ describe('ExtractionReviewModal — náhled originálu', () => {
     expect(wrapper.find('.modal').attributes('data-width')).toBe('max-w-[112rem]')
     const panel = wrapper.find('[data-test="document-side-preview"]')
     expect(panel.exists()).toBe(true)
-    expect(panel.classes()).toContain('sticky')
+    expect(wrapper.find('[data-test="document-preview-splitter"]').element.parentElement!.classList).toContain('sticky')
     // Panel v modálu nesmí nést značku, podle které Modal odsazuje backdrop.
     expect(panel.attributes('data-side-preview')).toBeUndefined()
     expect(wrapper.find('iframe').attributes('src')).toBe('/api/purchase-invoices/1/pdf?inline=1#view=FitH')
@@ -126,14 +118,23 @@ describe('ExtractionReviewModal — náhled originálu', () => {
     wrapper.unmount()
   })
 
-  it('na úzkém okně ukáže PDF pod formulářem v původní šířce okna', async () => {
+  it('na úzkém okně ukáže PDF pod formulářem', async () => {
     stubViewport(false)
     const wrapper = await mountModal([1])
-    expect(wrapper.find('.modal').attributes('data-width')).toBe('max-w-5xl')
     const panel = wrapper.find('[data-test="document-side-preview"]')
     expect(panel.exists()).toBe(true)
     expect(panel.classes()).toContain('w-full')
-    expect(panel.classes()).not.toContain('sticky')
+    expect(wrapper.find('[data-test="document-preview-splitter"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('volba náhledu pod formulářem vrátí okno na běžnou šířku', async () => {
+    stubViewport(true)
+    const wrapper = await mountModal([1])
+    await wrapper.find('[data-test="document-preview-placement-below"]').trigger('click')
+    expect(wrapper.find('.modal').attributes('data-width')).toBe('max-w-5xl')
+    expect(wrapper.find('[data-test="document-side-preview"]').exists()).toBe(true)
+    expect(m.patchPagePrefs).toHaveBeenCalledWith('purchase_invoices', { options: { review_preview_placement: 'below' } })
     wrapper.unmount()
   })
 

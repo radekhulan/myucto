@@ -15,6 +15,11 @@ final class PurchaseBankMatchingPeriodGuard
     /** @param list<string> $dates */
     public function datesLocked(int $supplierId, array $dates): bool
     {
+        $filed = new \MyInvoice\Service\Vat\FiledVatPeriodLookup(new \MyInvoice\Repository\TaxSubmissionRepository($this->db));
+        foreach (array_unique($dates) as $date) {
+            if (\MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock::isFinal($this->db, $supplierId, (int) substr($date, 0, 4))
+                || $filed->describe($supplierId, $date, false) !== null) return true;
+        }
         $stmt = $this->db->pdo()->prepare("SELECT starts_on, ends_on FROM accounting_periods
             WHERE supplier_id = ? AND status IN ('closing','closed','approved')");
         $stmt->execute([$supplierId]);

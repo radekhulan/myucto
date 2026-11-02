@@ -801,11 +801,15 @@
     "accounting-cash-new": [
       "cash",
       "dimensions",
+      "documents",
+      "linked_documents",
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
       "cash",
       "dimensions",
+      "documents",
+      "linked_documents",
       "purchase_invoice"
     ],
     "accounting-cash-book": [
