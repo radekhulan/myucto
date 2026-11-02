@@ -43,7 +43,8 @@ vi.mock('vue-router', async (importOriginal) => ({
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.replace }),
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
+const economicKey = 'dimensions.system_values.activity.economic'
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => (key === economicKey ? 'Economic activity' : key), te: (key: string) => key === economicKey, locale: { value: 'cs' } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number) => String(v) }))
 
@@ -123,6 +124,22 @@ describe('Výkazy po dimenzi', () => {
     await w.find('[data-test="dimension-export-pdf"]').trigger('click')
     await flushPromises()
     expect(m.exportProfit).toHaveBeenCalledWith(expect.objectContaining({ type_id: 1 }), 'pdf')
+  })
+
+  it('vestavěnou hodnotu ukáže přeloženým názvem bez interního kódu', async () => {
+    m.profit.mockResolvedValue({
+      ...profitReport,
+      type: { id: 1, name: 'Činnost', system_key: 'activity' },
+      rows: [{ ...profitReport.rows[0], code: 'economic', name: 'Hospodářská činnost', semantic_key: 'economic' }],
+    })
+    const w = mount(DimensionProfit, { global: { stubs } })
+    await flushPromises()
+    const table = w.find('[data-test="profit-table"]')
+    expect(table.text()).toContain('Economic activity')
+    expect(table.text()).not.toContain('economic')
+    expect(table.text()).not.toContain('Hospodářská činnost')
+    expect(w.find('[data-test="profit-comparison"]').text()).toContain('Economic activity')
+    expect(w.find('[data-test="profit-comparison"]').text()).not.toContain('economic')
   })
 
   it('skryje nulové hodnoty a zachová aktivní nadřazenou větev', async () => {

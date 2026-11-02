@@ -8,10 +8,11 @@ import { fx504Api, type Fx504AccountDecision, type Fx504Decision, type Fx504Posi
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { dimensionValueLabel, dimensionValueName } from '@/utils/dimensionValueLabel'
 
 const props = defineProps<{ supplierId: number; periodId: number; rowVersion: number; endsOn: string; canWrite: boolean; canRevert: boolean }>()
 const emit = defineEmits<{ updated: [] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const supplier = useSupplierStore()
 const preview = ref<Fx504Preview | null>(null)
 const accounts = ref<Record<string, Fx504AccountDecision>>({})
@@ -63,9 +64,10 @@ const valid = computed(() => {
 function dimensionsLabel(position: Fx504Position): string { return dimensionMapLabel(position.dimensions) }
 function dimensionMapLabel(dimensions: Fx504Map<number>): string {
   return Object.entries(dimensions).map(([type, value]) => {
-    const name = preview.value?.dimension_types.find(row => row.id === Number(type))?.name ?? type
-    return `${name}: ${preview.value?.dimension_values.find(row => row.id === value)?.name ?? value}`
-  }).join(' Â· ') || t('fx504.no_dimensions')
+    const dimensionType = preview.value?.dimension_types.find(row => row.id === Number(type))
+    const dimensionValue = preview.value?.dimension_values.find(row => row.id === value)
+    return `${dimensionType?.name ?? type}: ${dimensionValue ? dimensionValueName({ t, te }, dimensionValue, dimensionType?.system_key) : value}`
+  }).join(' · ') || t('fx504.no_dimensions')
 }
 function addCell(position: Fx504Position) {
   if (!canEdit.value) return
@@ -173,7 +175,7 @@ onBeforeUnmount(() => { ++generation })
       <Fx504CaseEditor :cells="preview.case_source_cells" :decisions="preview.case_decisions" :unresolved="preview.case_unresolved" :locked="preview.case_locked_cell_keys" :disabled="!canEdit" @change="caseChange" />
       <p v-if="!preview.positions.length" class="text-sm text-neutral-500">{{ t('fx504.empty') }}</p>
       <article v-for="position in preview.positions" :key="position.key" class="rounded-lg border border-neutral-200 p-4 space-y-3">
-        <h3 class="font-semibold">{{ position.account_code }} Â· {{ position.currency_code }}</h3>
+        <h3 class="font-semibold">{{ position.account_code }} · {{ position.currency_code }}</h3>
         <p class="text-sm">{{ dimensionsLabel(position) }}</p>
         <div class="flex flex-wrap gap-4 text-sm">
           <span>{{ t('fx504.foreign') }}: {{ position.foreign_balance }} {{ position.currency_code }}</span>
@@ -195,7 +197,7 @@ onBeforeUnmount(() => { ++generation })
           <div v-for="(cell, index) in decisions[position.key]!.cells" :key="index" class="flex flex-wrap items-end gap-2">
             <label class="text-sm">{{ t('fx504.amount') }}<input v-model="cell.amount" inputmode="decimal" class="block w-32 h-9 rounded border border-neutral-300 px-2" /></label>
             <label v-for="typeId in missingTypes(position)" :key="typeId" class="text-sm">{{ preview.dimension_types.find(type => type.id === typeId)?.name }}
-              <select v-model="cell.dimensions[String(typeId)]" class="block h-9 rounded border border-neutral-300 px-2"><option :value="undefined">{{ t('fx504.choose') }}</option><option v-for="value in preview.dimension_values.filter(row => row.type_id === typeId && row.is_active)" :key="value.id" :value="value.id">{{ value.code }} Â· {{ value.name }}</option></select>
+              <select v-model="cell.dimensions[String(typeId)]" class="block h-9 rounded border border-neutral-300 px-2"><option :value="undefined">{{ t('fx504.choose') }}</option><option v-for="value in preview.dimension_values.filter(row => row.type_id === typeId && row.is_active)" :key="value.id" :value="value.id">{{ dimensionValueLabel({ t, te }, value, preview.dimension_types.find(type => type.id === typeId)?.system_key) }}</option></select>
             </label>
             <button type="button" :class="btnOutline('danger')" @click="decisions[position.key]!.cells.splice(index, 1)"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.trash" /></svg>{{ t('fx504.remove_cell') }}</button>
           </div>

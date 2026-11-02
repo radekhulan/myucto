@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
+
 final class DimensionAnalyticsTables
 {
     /** @return array{title:string,subtitle:string,headers:list<string>,rows:list<list<string|float>>,totals:list<string|float>,filename:string} */
@@ -15,7 +17,7 @@ final class DimensionAnalyticsTables
         foreach ($data['rows'] as $row) {
             if ($row['depth'] !== 0) continue;
             $key = (string) $row['value_id'];
-            $values[$key] = $row['code'] === $row['name'] ? $row['name'] : $row['code'] . ' ' . $row['name'];
+            $values[$key] = $row['code'] === $row['name'] ? $row['name'] : DimensionValueLabel::full($row);
         }
         $values['unassigned'] = 'Bez hodnoty';
         if ($valueId !== 'total' && !array_key_exists($valueId, $values)) {

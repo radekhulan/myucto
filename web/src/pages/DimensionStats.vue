@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Chart, BarController, BarElement, CategoryScale, LinearScale, LineController, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { dimensionsApi, type DimensionAnalyticsAmounts, type DimensionAnalyticsReport, type DimensionProfitAmounts } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
+import { dimensionValueLabel } from '@/utils/dimensionValueLabel'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { useChartColors } from '@/composables/useTheme'
@@ -14,7 +15,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 
 Chart.register(BarController, BarElement, CategoryScale, LinearScale, LineController, LineElement, PointElement, Tooltip, Legend)
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const dims = useDimensions()
@@ -53,7 +54,7 @@ const pct = (value: number | null) => value === null ? '-' : `${new Intl.NumberF
 const comparisons = computed(() => {
   if (!report.value) return []
   const rows = report.value.rows.filter(row => row.depth === 0).map(row => ({
-    key: String(row.value_id), label: row.code === row.name ? row.name : `${row.code} ${row.name}`, amounts: report.value!.value_totals[String(row.value_id)] ?? zeroAmounts,
+    key: String(row.value_id), label: dimensionValueLabel({ t, te }, row, report.value!.type.system_key, ' '), amounts: report.value!.value_totals[String(row.value_id)] ?? zeroAmounts,
   }))
   rows.push({ key: '', label: t('dimensions.profit_unassigned'), amounts: report.value.unassigned })
   return rows

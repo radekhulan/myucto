@@ -49,7 +49,8 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canRead: () => true, canWrite: () => true, isCompanyAdminRole: true, get hasCommercialFeatures() { return m.commercial } }),
 }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.toastSuccess, error: m.toastError }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
+const builtinKey = 'dimensions.system_values.activity.main'
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => (key === builtinKey ? 'Hlavní činnost' : key), te: (key: string) => key === builtinKey, locale: { value: 'cs' } }) }))
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
@@ -89,7 +90,7 @@ describe('Dimensions.vue', () => {
   it('protects builtin meaning but keeps responsibility editable', async () => {
     const data = overview()
     data.types[0] = { ...data.types[0], system_key: 'activity' }
-    data.values = [{ ...data.values[0], semantic_key: 'main' }]
+    data.values = [{ ...data.values[0], code: 'main', name: 'Hlavni cinnost z DB', semantic_key: 'main' }]
     m.overview.mockResolvedValue(data)
     const wrapper = mount(Dimensions, { global: { stubs: { teleport: true } } })
     await flushPromises()
@@ -97,14 +98,18 @@ describe('Dimensions.vue', () => {
     expect(wrapper.get('[data-test="dimension-type-active"] button').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="dimension-type-delete"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-test="dimension-value-new"]').exists()).toBe(false)
-    const row = wrapper.get('[data-test="dimension-value-VYROBA"]')
+    const row = wrapper.get('[data-test="dimension-value-main"]')
     expect(row.text()).toContain('dimensions.builtin_badge')
+    expect(row.text()).toContain('Hlavní činnost')
     expect(row.text()).not.toContain('main')
+    expect(row.text()).not.toContain('z DB')
     expect(row.get('[data-test="dimension-value-active"] button').attributes('disabled')).toBeDefined()
     expect(row.get('[data-test="dimension-value-delete"]').attributes('disabled')).toBeDefined()
     await row.get('button[title="common.edit"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-test="dimension-value-name"]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-test="dimension-value-name"]').element as HTMLInputElement).value).toBe('Hlavní činnost')
+    expect(wrapper.find('[data-test="dimension-value-code"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="dimension-value-parent"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test="dimension-value-responsible"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-test="dimension-value-responsible"]').setValue('3')

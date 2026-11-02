@@ -51549,6 +51549,11 @@ components:
           $ref: '#/components/schemas/DimensionProfitAmounts'
         total:
           $ref: '#/components/schemas/DimensionProfitAmounts'
+        semantic_key:
+          type:
+          - string
+          - 'null'
+          description: Význam systémové hodnoty; její kód je interní a nezobrazuje se.
         responsible_user_id:
           type:
           - number
@@ -51587,6 +51592,11 @@ components:
                 type:
                 - string
                 - 'null'
+              semantic_key:
+                type:
+                - string
+                - 'null'
+                description: Význam systémové hodnoty; její kód je interní a nezobrazuje se.
         rows:
           type: array
           items:

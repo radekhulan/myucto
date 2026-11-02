@@ -12,6 +12,7 @@ import type { LegalOverview } from '@/api/nonprofitDppoTypes'
 import { membershipApi, type MemberRevision, type MembershipConfirmBody, type MembershipIssueRequest, type MembershipPreview } from '@/api/nonprofitMembership'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { appIsoDate } from '@/utils/date'
+import { dimensionValueName } from '@/utils/dimensionValueLabel'
 import { amountDecimal, formatCents, isIsoDate, revisionAt, titleKeyPattern } from './membershipFormat'
 import MembershipConfirmBar from './MembershipConfirmBar.vue'
 import { useGuardedCommit } from './useGuardedCommit'
@@ -22,7 +23,7 @@ const props = defineProps<{
   history: MemberRevision[]; periods: AccountingPeriod[]
 }>()
 const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean] }>()
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 
 const inputForm = ref<HTMLFormElement | null>(null)
 
@@ -69,7 +70,7 @@ function axisOptions(key: keyof typeof standardSemantic) {
   const allowed = standardSemantic[key]
   const values = overview.values
     .filter(v => v.type_id === types[0]!.id && v.is_active && v.supplier_id === props.supplier && (!allowed || allowed.includes(v.semantic_key ?? '')))
-    .map(v => ({ value: v.id, label: v.name || v.code }))
+    .map(v => ({ value: v.id, label: dimensionValueName({ t, te }, v, key) }))
   return values.length ? values : null
 }
 const activityOptions = computed(() => axisOptions('activity') ?? [])
@@ -243,17 +244,20 @@ const classificationMatchesRequest = computed(() => {
     && c.activity_kind.value_id === request.activity_kind_value_id
     && c.tax_regime.value_id === request.tax_regime_value_id
 })
-const valueLabel = (typeId: number, valueId: number) =>
-  classOverview.value?.values.find(v => v.id === valueId && v.type_id === typeId)?.name
-  ?? t('nonprofitMembership.classificationUnknownValue', { id: valueId })
+const valueLabel = (typeId: number, valueId: number) => {
+  const value = classOverview.value?.values.find(v => v.id === valueId && v.type_id === typeId)
+  return value
+    ? dimensionValueName({ t, te }, value, classOverview.value?.types.find(type => type.id === typeId)?.system_key)
+    : t('nonprofitMembership.classificationUnknownValue', { id: valueId })
+}
 const originLabel = (origin: string) => (origin === 'explicit' ? t('nonprofitMembership.classificationOriginExplicit') : origin)
 const classificationRows = computed(() => {
   const c = proofClassification.value
   if (!c) return []
   return [
-    { key: 'activity', label: t('nonprofitMembership.classificationActivity'), value: valueLabel(c.activity.type_id, c.activity.value_id), note: t(`nonprofitMembership.classificationSemantic_${c.activity.semantic_key}`), origin: originLabel(c.activity.origin.origin) },
+    { key: 'activity', label: t('nonprofitMembership.classificationActivity'), value: valueLabel(c.activity.type_id, c.activity.value_id), note: null, origin: originLabel(c.activity.origin.origin) },
     { key: 'activity-kind', label: t('nonprofitMembership.classificationKind'), value: valueLabel(c.activity_kind.type_id, c.activity_kind.value_id), note: c.activity_kind.code, origin: originLabel(c.activity_kind.origin.origin) },
-    { key: 'tax-regime', label: t('nonprofitMembership.classificationTaxRegime'), value: valueLabel(c.tax_regime.type_id, c.tax_regime.value_id), note: t(`nonprofitMembership.classificationSemantic_${c.tax_regime.semantic_key}`), origin: originLabel(c.tax_regime.origin.origin) },
+    { key: 'tax-regime', label: t('nonprofitMembership.classificationTaxRegime'), value: valueLabel(c.tax_regime.type_id, c.tax_regime.value_id), note: null, origin: originLabel(c.tax_regime.origin.origin) },
   ]
 })
 
@@ -355,7 +359,7 @@ const actions = computed<ActionItem[]>(() => [
           <div v-for="row in classificationRows" :key="row.key" :data-row="row.key">
             <dt class="text-sm text-neutral-500">{{ row.label }}</dt>
             <dd data-part="value">{{ row.value }}</dd>
-            <dd class="text-sm text-neutral-500" data-part="note">{{ row.note }} · {{ row.origin }}</dd>
+            <dd class="text-sm text-neutral-500" data-part="note"><template v-if="row.note">{{ row.note }} · </template>{{ row.origin }}</dd>
           </div>
         </dl>
         <p v-else class="text-sm text-warning-700" data-section="classification-proof-missing">{{ t('nonprofitMembership.classificationProofMissing') }}</p>
