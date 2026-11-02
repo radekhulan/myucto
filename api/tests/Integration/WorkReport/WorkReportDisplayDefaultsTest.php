@@ -60,6 +60,36 @@ final class WorkReportDisplayDefaultsTest extends TestCase
         }
     }
 
+    /** BEZ OPRAVY PADÁ: uložení formuláře s výchozí podobou zapsalo firmě bez nastavení výslovnou hodnotu. */
+    public function testSavingDefaultOptionsKeepsCompanyWithoutSetting(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $pdo = $container->get(Connection::class)->pdo();
+        $settings = $container->get(SettingsAction::class);
+        $pdo->beginTransaction();
+        try {
+            $supplier = $this->createIsolatedSupplier($pdo, 1);
+            $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/settings/supplier')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin']);
+            $stored = static function () use ($pdo, $supplier): mixed {
+                $stmt = $pdo->prepare('SELECT work_report_display_options FROM supplier WHERE id = ?');
+                $stmt->execute([$supplier]);
+                return $stmt->fetchColumn();
+            };
+            foreach ([WorkReportDisplayOptions::DEFAULTS, ['compact' => false, 'amount' => true]] as $options) {
+                $response = $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => $options]), new Response());
+                self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+                self::assertNull($stored());
+            }
+            $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => ['compact' => true]]), new Response());
+            self::assertSame(['compact' => true], json_decode((string) $stored(), true));
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        }
+    }
+
     /**
      * BEZ OPRAVY PADÁ: výkaz vystavené faktury dědil výchozí podobu firmy živě, takže po
      * její změně by znovu vygenerované PDF vystaveného dokladu zpětně změnilo sloupce.

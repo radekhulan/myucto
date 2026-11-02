@@ -1198,6 +1198,10 @@ final class SettingsAction
         if (array_key_exists('work_report_display_options', $body)) {
             try {
                 $options = WorkReportDisplayOptions::validate($body['work_report_display_options']);
+                // Firma nemá odkud dědit: výchozí podoba se ukládá jako NULL, ne jako výslovná hodnota.
+                if ($options !== null && WorkReportDisplayOptions::resolve(null, $options) === WorkReportDisplayOptions::DEFAULTS) {
+                    $options = null;
+                }
                 $body['work_report_display_options'] = $options === null ? null : json_encode((object) $options, JSON_THROW_ON_ERROR);
             } catch (\InvalidArgumentException $e) {
                 return Json::error($response, 'validation_failed', $e->getMessage(), 400);
