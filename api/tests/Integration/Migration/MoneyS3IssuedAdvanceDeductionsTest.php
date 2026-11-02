@@ -47,6 +47,38 @@ final class MoneyS3IssuedAdvanceDeductionsTest extends MoneyS3ImportTestCase
         self::assertSame(0.0, $saldo['difference'], json_encode($saldo));
     }
 
+    public function testAdvancePaymentGoesToProformaNotToFullyCoveredFinalInvoice(): void
+    {
+        // BP25221 nese symbol proformy ZV25221; konečná FV25221 (k úhradě nula) ji jen čerpá.
+        self::assertSame([['ZV25221', '1210.00']], $this->matchesOf('BP25221'));
+        self::assertSame([['FV25221', 'ZV25221', '1210.00']], $this->deductionsOf('FV25221'));
+        self::assertSame([], array_values(array_filter($this->openOn324(''), static fn (string $i): bool => str_contains($i, '25221'))));
+    }
+
+    public function testRelinkMovesAdvancePaymentFromCoveredFinalInvoiceToProforma(): void
+    {
+        $sid = $this->supplierId;
+        $pdo = $this->db->pdo();
+        // Firma převedená dřívější verzí: úhradu zálohy dostala (párováním převodu) konečná faktura.
+        $final = $this->doc('FV25221');
+        $advance = $this->doc('ZV25221');
+        $tx = (int) $pdo->query("SELECT t.id FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                                  WHERE s.supplier_id = {$sid} AND t.source_ref = 'BP25221'")->fetchColumn();
+        $pdo->prepare('UPDATE payment_matches SET invoice_id = ? WHERE supplier_id = ? AND bank_transaction_id = ?')->execute([$final, $sid, $tx]);
+        $pdo->prepare('UPDATE invoice_payments SET invoice_id = ? WHERE supplier_id = ? AND bank_transaction_id = ?')->execute([$final, $sid, $tx]);
+        $pdo->prepare("DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'payment' AND money_key = ?")->execute([$sid, "ps|{$tx}|invoice|{$final}"]);
+        $pdo->prepare("UPDATE money_s3_import_map SET money_key = ? WHERE supplier_id = ? AND kind = 'payment' AND money_key = ?")
+            ->execute(["ps|{$tx}|invoice|{$final}", $sid, "ps|{$tx}|invoice|{$advance}"]);
+        $pdo->prepare('DELETE FROM invoice_advance_deductions WHERE supplier_id = ? AND final_invoice_id = ?')->execute([$sid, $final]);
+        $pdo->prepare("DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'advance_deduction'")->execute([$sid]);
+        self::assertSame([['FV25221', '1210.00']], $this->matchesOf('BP25221'));
+
+        $repair = $this->convert(true);
+        self::assertFalse($repair->hasErrors(), $this->explain($repair));
+        self::assertSame([['ZV25221', '1210.00']], $this->matchesOf('BP25221'));
+        self::assertSame([['FV25221', 'ZV25221', '1210.00']], $this->deductionsOf('FV25221'));
+    }
+
     public function testRelinkChangesNothingAndKeepsUserDecisions(): void
     {
         $before = $this->state();
@@ -74,7 +106,7 @@ final class MoneyS3IssuedAdvanceDeductionsTest extends MoneyS3ImportTestCase
         $pdo->prepare("DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'advance_deduction'")->execute([$sid]);
         $repair = $this->convert(true);
         self::assertFalse($repair->hasErrors(), $this->explain($repair));
-        self::assertSame([['FV25201', 'ZV25202', '2000.00'], ['FV25211', 'ZV25212', '800.00']], $this->deductions());
+        self::assertSame([['FV25201', 'ZV25202', '2000.00'], ['FV25211', 'ZV25212', '800.00'], ['FV25221', 'ZV25221', '1210.00']], $this->deductions());
     }
 
     private function convert(bool $relink): ImportProtocol
@@ -93,6 +125,19 @@ final class MoneyS3IssuedAdvanceDeductionsTest extends MoneyS3ImportTestCase
               WHERE iad.supplier_id = ? ORDER BY f.varsymbol, a.varsymbol'
         );
         $stmt->execute([$this->supplierId]);
+        return $stmt->fetchAll(PDO::FETCH_NUM);
+    }
+
+    /** @return list<array{0:string,1:string}> doklad, částka párování pohybu */
+    private function matchesOf(string $bankDoc): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.varsymbol, pm.amount FROM payment_matches pm
+               JOIN bank_transactions t ON t.id = pm.bank_transaction_id
+               JOIN invoices i ON i.id = pm.invoice_id
+              WHERE pm.supplier_id = ? AND t.source_ref = ? ORDER BY i.varsymbol'
+        );
+        $stmt->execute([$this->supplierId, $bankDoc]);
         return $stmt->fetchAll(PDO::FETCH_NUM);
     }
 

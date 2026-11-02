@@ -1216,7 +1216,11 @@ final class SyntheticAgenda
      *     takže faktura dostane vazbu na ZV25201 a ZV25202 zůstane bez čerpání,
      *   - Odběratel Éta (bez IČO) zaplatil ZV25211 (500 Kč) a ZV25212 (800 Kč). Konečná
      *     FV25211 odečítá řádkem „MD 324 / D 311" 800 Kč s párovacím symbolem 25212 (číslice
-     *     čísla proformy ZV25212), ne nejstarší zálohu.
+     *     čísla proformy ZV25212), ne nejstarší zálohu,
+     *   - Odběratel Théta (bez IČO) zaplatil proformu ZV25221 (1 210 Kč, BP25221) bez odkazu
+     *     na úhradu v proformě. Konečná FV25221 (k úhradě nula) ji čerpá celou řádkem
+     *     „MD 324 / D 311" pod symbolem 25221, takže úhrada i čerpání sdílejí skupinu symbolu
+     *     na 324 a konečná faktura v ní nemá vlastní předpis.
      *
      * @return array<string,string>
      */
@@ -1247,6 +1251,10 @@ final class SyntheticAgenda
             $line('FV', 'FV25211', '2025-06-01', 'Servis', '311000', '602000', 1000.0, '2025221', ''),
             $line('FV', 'FV25211', '2025-06-01', 'Servis - DPH', '311000', '343200', 210.0, '2025221', ''),
             $line('FV', 'FV25211', '2025-06-01', 'Odpočet zálohy', '324000', '311000', 800.0, '25212', ''),
+            $line('BK', 'BP25221', '2025-07-02', 'Úhrada zálohové faktury', '221001', '324000', 1210.0, '25221', ''),
+            $line('FV', 'FV25221', '2025-07-15', 'Dodávka', '311000', '602000', 1000.0, '25221', ''),
+            $line('FV', 'FV25221', '2025-07-15', 'Dodávka - DPH', '311000', '343200', 210.0, '25221', ''),
+            $line('FV', 'FV25221', '2025-07-15', 'Odpočet zálohy', '324000', '311000', 1210.0, '25221', ''),
         ]);
         $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '324000', 'Nazev' => 'Přijaté zálohy']]);
         $customer = static fn (string $ico, string $name): array => [
@@ -1266,6 +1274,7 @@ final class SyntheticAgenda
         ];
         $z = $customer($zeta, 'Odběratel Zeta s.r.o.');
         $e = $customer('', 'Odběratelka Éta');
+        $t = $customer('', 'Odběratel Théta');
         $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4]]), [
             $proforma($z, 201, 'ZV25201', '2025-03-01', 1000.0, 'BP25201'),
             $proforma($z, 202, 'ZV25202', '2025-03-02', 2000.0, 'BP25202'),
@@ -1273,12 +1282,16 @@ final class SyntheticAgenda
             $proforma($e, 211, 'ZV25211', '2025-05-01', 500.0, 'BP25211'),
             $proforma($e, 212, 'ZV25212', '2025-05-02', 800.0, 'BP25212'),
             $final($e, 213, 'FV25211', '2025221', '2025-06-01', 1000.0, 'Servis'),
+            $proforma($t, 221, 'ZV25221', '2025-07-01', 1210.0, ''),
+            ['CelkemSDPH' => 0.0] + $final($t, 223, 'FV25221', '25221', '2025-07-15', 1000.0, 'Dodávka'),
         ]);
         $files['ROK.002/VFaktPol.DAT'] = Ms3FixtureWriter::table([
             ['Cislo', 'L', 4], ['Popis', 'C', 60], ['Cena', 'E', 10], ['PocetMJ', 'E', 10], ['Zaloha', 'B', 1], ['CisloZaFak', 'L', 4], ['RokZaFak', 'C', 3],
         ], [
             ['Cislo' => 203, 'Popis' => 'Montáž', 'Cena' => 4000.0, 'PocetMJ' => 1.0],
             ['Cislo' => 203, 'Popis' => 'Odpočet zálohy ZV25201', 'Cena' => -3000.0, 'PocetMJ' => 1.0, 'Zaloha' => 1, 'CisloZaFak' => 201],
+            ['Cislo' => 223, 'Popis' => 'Dodávka', 'Cena' => 1000.0, 'PocetMJ' => 1.0],
+            ['Cislo' => 223, 'Popis' => 'Odpočet zálohy', 'Cena' => -1210.0, 'PocetMJ' => 1.0, 'Zaloha' => 1],
         ]);
         $bank = static fn (string $no, string $date, float $amount, string $vs, string $name, int $vypis): array => [
             'Doklad' => $no, 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => $date, 'DatPlat' => $date, 'Celkem' => $amount,
@@ -1289,6 +1302,7 @@ final class SyntheticAgenda
             $bank('BP25202', '2025-03-06', 2000.0, '25202', 'Odběratel Zeta s.r.o.', 42),
             $bank('BP25211', '2025-05-02', 500.0, '25211', 'Odběratelka Éta', 43),
             $bank('BP25212', '2025-05-03', 800.0, '25212', 'Odběratelka Éta', 44),
+            $bank('BP25221', '2025-07-02', 1210.0, '25221', 'Odběratel Théta', 45),
         ]);
         return $files;
     }
