@@ -249,6 +249,52 @@ final class DimensionMultiFilterTest extends TestCase
         self::assertCount(3, $found['items'], 'Textové středisko splní podmínku na témže řádku i v deníku.');
     }
 
+    /**
+     * Druh „středisko" smí mít víc typů firmy (createType hlídá jen kód), a hodnoty
+     * každého z nich nesou kód navázaného střediska. Filtr přes dva takové typy tak
+     * nemá podmínku bez textových středisek, podle které by deník hledal po indexu,
+     * a jde jinou větví {@see DimensionFilter::entrySql()}. I ta musí vybrat přesně
+     * zápisy, jejichž řádky sestavy započtou ({@see DimensionFilter::lineSource()}).
+     */
+    public function testJournalFilterWhenEveryCriterionCarriesCostCentreText(): void
+    {
+        $center = $this->value($this->centerType, 'MF-CC-S');
+        $secondType = (int) $this->dimensions->createType($this->supplierId, ['code' => 'mf_cc2', 'name' => 'Druhé středisko', 'kind' => 'cost_center'])['id'];
+        $project = $this->value($secondType, 'MF-CC-P');
+
+        $filter = $this->dimensions->filters($this->supplierId, [$center, $project]);
+        self::assertCount(2, $filter->criteria());
+        foreach ($filter->criteria() as $criterion) {
+            self::assertNotSame([], $criterion->costCenterCodes, 'Obě podmínky nesou textové středisko.');
+        }
+
+        // středisko textem, akce dimenzí
+        $byCenterText = $this->post([['521', 'debit', 30.00, ['cost_center' => 'MF-CC-S', 'dimensions' => [$secondType => $project]]], ['331', 'credit', 30.00]]);
+        // středisko dimenzí, akce textem
+        $byProjectText = $this->post([['518', 'debit', 20.00, ['cost_center' => 'MF-CC-P', 'dimensions' => [$this->centerType => $center]]], ['321', 'credit', 20.00]]);
+        // jen středisko textem, akce chybí
+        $centerOnly = $this->post([['521', 'debit', 7.00, ['cost_center' => 'MF-CC-S']], ['331', 'credit', 7.00]]);
+        // středisko a akce na různých řádcích téhož zápisu
+        $apart = $this->post([
+            ['521', 'debit', 5.00, ['cost_center' => 'MF-CC-S']],
+            ['331', 'credit', 5.00, ['dimensions' => [$secondType => $project]]],
+        ]);
+
+        $found = $this->journal->paginate($this->supplierId, ['dimension' => $filter], 50, 0);
+        $ids = array_map(static fn (array $r): int => (int) $r['id'], $found['items']);
+        sort($ids);
+        $expected = [$byCenterText, $byProjectText];
+        sort($expected);
+        self::assertSame($expected, $ids);
+        self::assertNotContains($centerOnly, $ids);
+        self::assertNotContains($apart, $ids);
+
+        $tb = array_column($this->trialBalance->build($this->supplierId, $this->periodId, null, null, false, false, $filter)['rows'], null, 'account_code');
+        self::assertEqualsWithDelta(30.00, $tb['521']['turnover_md'], 0.001);
+        self::assertEqualsWithDelta(20.00, $tb['518']['turnover_md'], 0.001);
+        self::assertArrayNotHasKey('331', $tb);
+    }
+
     public function testFilterRejectsMoreDimensionTypesThanTheProductCanHold(): void
     {
         $types = $this->dimensions->ensureDefaultTypes($this->supplierId);

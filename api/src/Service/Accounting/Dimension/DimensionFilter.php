@@ -206,8 +206,9 @@ final class DimensionFilter
             }
         }
         if ($driverIndex === null) {
-            // Všechny podmínky nesou textová střediska (neobvyklé): ta nemají index,
-            // řádky se ověří jen v zápisech, které projdou podmínkami jednotlivě.
+            // Všechny podmínky nesou textová střediska (filtr přes dva typy druhu
+            // „středisko"): ta nemají index, řádky se ověří jen v zápisech, které
+            // projdou podmínkami jednotlivě.
             $where = [];
             $params = [];
             $lineConditions = [];
