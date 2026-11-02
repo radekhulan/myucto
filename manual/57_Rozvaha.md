@@ -346,9 +346,8 @@ stavech nebo v uzávěrce minulého roku. Při filtru dimenze obsahují rozvahov
 lišit může; stránka to pak ukáže jen jako upozornění a za výsledek dimenze
 platí výsledovka.
 
-Export XLSX z této záložky má stejný tvar jako obrazovka včetně přepínačů, jednotky
-**Kč / tis. Kč** a červeně označené neobvyklé strany. Export PDF je soupis po třídách
-se zůstatky MD a Dal.
+Export XLSX i PDF z této záložky má stejný tvar jako obrazovka včetně přepínačů, jednotky
+**Kč / tis. Kč** a červeně označené neobvyklé strany. PDF se tiskne na šířku stránky.
 
 ## 57.8 Související kapitoly
 

@@ -357,7 +357,7 @@ final class FinancialStatementService
      * a VH ho zahrnuje, výkaz VZZ ho ale nemá, proto ho kontroly vypíšou.
      *
      * S `$columns` přidá klíč `columns` ({@see StatementAccountColumns}). Je to jen pro
-     * obrazovku a XLSX: chce navíc dotaz na obraty měsíce, který souhrny nad více firmami
+     * obrazovku, XLSX a PDF: chce navíc dotaz na obraty měsíce, který souhrny nad více firmami
      * neplatí. Rámec 504 má vlastní pohled a sloupce nemá.
      *
      * @param array{hide_zero:bool, analytics:bool}|null $columns

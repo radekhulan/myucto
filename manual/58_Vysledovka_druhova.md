@@ -211,9 +211,9 @@ tabulkou upozorní a účet je třeba zařadit výjimkou mapování
 ([Mapování účtů](57_Rozvaha.md#5777-mapovani-uctu-pro-konkretni-firmu)).
 
 Kliknutím na účet se otevře záložka **Inventura účtu**. Výsledkové účty se
-neinventarizují, stránka to řekne a vede do opisu. Export XLSX z této záložky má
-stejný tvar jako obrazovka v jednotce zvolené přepínačem **Kč / tis. Kč**. Export PDF je
-soupis po skupinách se sloupci náklady a výnosy.
+neinventarizují, stránka to řekne a vede do opisu. Export XLSX i PDF z této záložky má
+stejný tvar jako obrazovka v jednotce zvolené přepínačem **Kč / tis. Kč**. PDF se tiskne
+na šířku stránky.
 
 #### 58.7.6.1 Odhad do konce roku (nezaúčtováno)
 
