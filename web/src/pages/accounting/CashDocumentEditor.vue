@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
@@ -68,11 +68,73 @@ const isDraft = computed(() => !isEdit.value || loadedStatus.value === 'draft')
 // Plnění formuláře z API nesmí spustit reset-watchery určené pro ruční přepnutí.
 const hydrating = ref(false)
 
-// Originál dokladu: první příloha, kterou prohlížeč umí zobrazit. Nový doklad přílohy
-// ještě mít nemůže, vazba vzniká až na uloženém dokladu.
+// Originál dokladu: první příloha, kterou prohlížeč umí zobrazit. Nový doklad vazbu
+// mít nemůže, proto drží vybraný sken jen v paměti prohlížeče (blob: URL) a do modulu
+// Dokumenty ho nahraje a připojí až po uložení dokladu, stejně jako přílohy ručního
+// zápisu nebo PDF nové přijaté faktury. Zrušení formuláře na serveru nic nenechá.
 const preview = useSidePreview('cash_documents')
 const linkedDocs = ref<DocItem[]>([])
 const original = computed(() => linkedDocs.value.find(d => d.doc_type === 'pdf' || d.doc_type === 'image') ?? null)
+const canAttachOriginal = computed(() =>
+  auth.canRead('documents') && auth.canWrite('documents.upload') && auth.canWrite('documents.move'))
+const pendingOriginal = ref<File | null>(null)
+const pendingOriginalUrl = ref<string | null>(null)
+const originalInput = ref<HTMLInputElement | null>(null)
+
+function setPendingOriginal(file: File | null) {
+  if (pendingOriginalUrl.value) URL.revokeObjectURL(pendingOriginalUrl.value)
+  pendingOriginalUrl.value = file ? URL.createObjectURL(file) : null
+  pendingOriginal.value = file
+}
+function onPickOriginal(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  if (!file) return
+  if (file.type !== 'application/pdf' && !file.type.startsWith('image/')) {
+    toast.error(t('cash.original.unsupported'))
+    return
+  }
+  setPendingOriginal(file)
+  preview.openTemporarily()
+}
+onBeforeUnmount(() => setPendingOriginal(null))
+
+const previewSource = computed<{ src: string; name: string; docType: string } | null>(() => {
+  if (original.value) {
+    return { src: documentsApi.previewUrl(original.value.id), name: original.value.title, docType: original.value.doc_type }
+  }
+  if (pendingOriginal.value && pendingOriginalUrl.value) {
+    return {
+      src: pendingOriginalUrl.value,
+      name: pendingOriginal.value.name,
+      docType: pendingOriginal.value.type.startsWith('image/') ? 'image' : 'pdf',
+    }
+  }
+  return null
+})
+
+/**
+ * Nahraje originál vybraný před prvním uložením a připojí ho k vytvořenému dokladu.
+ * Doklad už je uložený, takže chyba ho nevrací, jen upozorní. Když se soubor nahraje,
+ * ale vazba selže, nahraný dokument se smaže, ať v Dokumentech nezůstane sirotek.
+ * Upload i vazba běží v kontextu aktivní firmy a server vazbu na doklad cizí firmy odmítne.
+ */
+async function attachPendingOriginal(cashDocumentId: number): Promise<void> {
+  const file = pendingOriginal.value
+  if (!file) return
+  setPendingOriginal(null)
+  let uploadedIds: number[] = []
+  try {
+    const r = await documentsApi.upload([file], { zipMode: 'keep' })
+    uploadedIds = r.root_ids ?? []
+    if (uploadedIds.length === 0) throw new Error('upload_failed')
+    for (const id of uploadedIds) await documentsApi.addLink(id, 'cash_document', cashDocumentId)
+  } catch {
+    await Promise.allSettled(uploadedIds.map(id => documentsApi.remove(id)))
+    toast.warning(t('cash.original.attach_failed'))
+  }
+}
 
 const form = reactive({
   register_id: '' as number | '',
@@ -681,6 +743,7 @@ async function save(post = true, next = false) {
       const res = await cashApi.createDocument(payload)
       // Zaúčtovaný doklad dostane dimenze přerazítkováním (mění se jen analytika).
       await docDims.save(res.id)
+      await attachPendingOriginal(res.id)
       toast.success(post ? t('cash.new_document') + ' ' + (res.doc_number ?? '') : t('common.saved'))
       for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
       if (next) {
@@ -734,15 +797,27 @@ async function startNextDocument(): Promise<void> {
 </script>
 
 <template>
-  <DocumentPreviewSplit :ctrl="preview" :show="!!original && preview.open.value"
-    :src="original ? documentsApi.previewUrl(original.id) : null" :file-name="original?.title" :doc-type="original?.doc_type">
+  <DocumentPreviewSplit :ctrl="preview" :show="!!previewSource && preview.open.value"
+    :src="previewSource?.src ?? null" :file-name="previewSource?.name" :doc-type="previewSource?.docType">
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ isEdit ? t('cash.edit_document') : t('cash.new_document') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ form.doc_type === 'in' ? t('cash.type.in') : t('cash.type.out') }}</p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <button v-if="original" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
+        <template v-if="!isEdit && canAttachOriginal">
+          <input ref="originalInput" type="file" accept="application/pdf,image/*" class="hidden" data-test="cash-original-file" @change="onPickOriginal" />
+          <span v-if="pendingOriginal" class="text-sm text-neutral-600 truncate max-w-[16rem]" :title="t('cash.original.pending_hint')" data-test="cash-original-name">{{ pendingOriginal.name }}</span>
+          <button v-if="pendingOriginal" type="button" :class="[btnOutline('danger'), 'whitespace-nowrap']" data-test="cash-original-remove" @click="setPendingOriginal(null)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('cash.original.remove') }}
+          </button>
+          <button v-else type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-test="cash-original-pick" @click="originalInput?.click()">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('cash.original.pick') }}
+          </button>
+        </template>
+        <button v-if="previewSource" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
           :aria-pressed="preview.open.value" @click="preview.toggle()">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
           {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
