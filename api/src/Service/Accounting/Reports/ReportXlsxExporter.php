@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
@@ -1429,7 +1430,7 @@ final class ReportXlsxExporter
         $this->headerRow($sheet, $head, ['Kód', $typeName !== '' ? $typeName : 'Hodnota', 'Odpovědná osoba', 'Výnosy', 'Náklady', 'Výsledek']);
         $r = $head + 1;
         foreach ($data['rows'] ?? [] as $row) {
-            $sheet->setCellValueExplicit([1, $r], (string) $row['code'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([1, $r], empty($row['semantic_key']) ? (string) $row['code'] : '', DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([2, $r], str_repeat('    ', (int) $row['depth']) . (string) $row['name'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([3, $r], (string) ($row['responsible_user_name'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValue([4, $r], (float) $row['total']['revenue']);
@@ -1462,7 +1463,7 @@ final class ReportXlsxExporter
             $ms->getStyle('A1')->getFont()->setBold(true)->setSize(14);
             $headers = ['Účet', 'Název'];
             foreach ($matrix['columns'] ?? [] as $col) {
-                $headers[] = $col['value_id'] === null ? 'Bez hodnoty' : trim((string) $col['code'] . ' ' . (string) $col['name']);
+                $headers[] = $col['value_id'] === null ? 'Bez hodnoty' : DimensionValueLabel::full($col);
             }
             $headers[] = 'Celkem';
             $cols = count($headers);

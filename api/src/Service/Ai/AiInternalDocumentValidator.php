@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Accounting\ManualJournalEntryException;
 use MyInvoice\Service\Accounting\ManualJournalEntryService;
 use MyInvoice\Service\Accounting\PostingException;
@@ -43,7 +44,7 @@ final class AiInternalDocumentValidator
     /**
      * Aktivní hodnoty dimenzí pro zadání modelu. Prázdné, když firma dimenze nepoužívá.
      *
-     * @return array<int,string> id hodnoty => „Typ: kód název"
+     * @return array<int,string> id hodnoty => „Typ: kód název", systémová hodnota „Typ: název"
      */
     public function dimensionChoices(int $supplierId): array
     {
@@ -59,8 +60,7 @@ final class AiInternalDocumentValidator
             if (!isset($types[(int) $v['type_id']])) {
                 continue;
             }
-            $code = trim((string) ($v['code'] ?? ''));
-            $out[(int) $v['id']] = $types[(int) $v['type_id']] . ': ' . ($code !== '' ? $code . ' ' : '') . (string) $v['name'];
+            $out[(int) $v['id']] = $types[(int) $v['type_id']] . ': ' . DimensionValueLabel::full($v);
             if (count($out) >= self::MAX_PROMPT_DIMENSION_VALUES) {
                 break;
             }

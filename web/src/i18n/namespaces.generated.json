@@ -734,6 +734,12 @@
     "accounting-dimension-profit": [
       "dimensions"
     ],
+    "accounting-joint-allocations": [
+      "dimensions"
+    ],
+    "accounting-nonprofit-membership": [
+      "dimensions"
+    ],
     "accounting-nonprofit-tax": [
       "nonprofitTaxJ6"
     ],

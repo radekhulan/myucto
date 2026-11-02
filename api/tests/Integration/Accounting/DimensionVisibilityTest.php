@@ -135,6 +135,26 @@ final class DimensionVisibilityTest extends TestCase
         self::assertSame([$entryId => ['Středisko: BRNO']], $summary->forJournalEntries($supplier, [$entryId]));
     }
 
+    public function testSeznamDokladuUkazujeSystemovouHodnotuNazvemBezInternihoKodu(): void
+    {
+        $supplier = $this->supplier('Systémové dimenze s.r.o.');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id, code, name, kind, system_key) VALUES (?, 'activity', 'Činnost', 'custom', 'activity')")
+            ->execute([$supplier]);
+        $typeId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO dimension_values (type_id, supplier_id, code, name, semantic_key) VALUES (?, ?, 'economic', 'Hospodářská činnost', 'economic')")
+            ->execute([$typeId, $supplier]);
+        $valueId = (int) $pdo->lastInsertId();
+        $this->repo->setEnabled($supplier, true);
+        $docId = 800002;
+        $pdo->prepare(
+            "INSERT INTO document_dimensions (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id)
+             VALUES (?, 'invoice', ?, 0, ?, ?)"
+        )->execute([$supplier, $docId, $typeId, $valueId]);
+
+        self::assertSame([$docId => ['Činnost: Hospodářská činnost']], (new DimensionListSummaryRepository($this->db))->forDocuments($supplier, 'invoice', [$docId]));
+    }
+
     public function testVolitelneDimenzeVeFakturachVyzadujiUcetniPravo(): void
     {
         $supplier = $this->supplier('Omezený přístup s.r.o.');

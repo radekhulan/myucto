@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { dimensionsApi, type DimensionOverview, type DimensionType, type DimensionValue } from '@/api/dimensions'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { dimensionValueLabel, dimensionValueName } from '@/utils/dimensionValueLabel'
 
 /**
  * Číselník dimenzí firmy (Firma → Dimenze) sdílený všemi výběry na stránce.
@@ -28,7 +29,7 @@ export interface DimensionOption {
 export function useDimensions() {
   const supplier = useSupplierStore()
   const auth = useAuthStore()
-  const { t } = useI18n()
+  const { t, te } = useI18n()
 
   /** Sekce je zapnutá a uživatel smí číst účetnictví — jinak se nic neukazuje. */
   const enabled = computed(() => auth.hasCommercialFeatures && supplier.currentSupplier?.dimensions_enabled === true && auth.canRead('accounting'))
@@ -72,7 +73,7 @@ export function useDimensions() {
       seen.add(parentId)
       const parent = valueById.value.get(parentId)
       if (!parent) break
-      out.unshift(parent.name)
+      out.unshift(nameOf(parent))
       parentId = parent.parent_id
     }
     return out
@@ -100,8 +101,12 @@ export function useDimensions() {
     return out
   }
 
+  function nameOf(value: DimensionValue): string {
+    return dimensionValueName({ t, te }, value, typeById.value.get(value.type_id)?.system_key)
+  }
+
   function labelOf(value: DimensionValue): string {
-    return value.code === value.name ? value.name : `${value.code} – ${value.name}`
+    return dimensionValueLabel({ t, te }, value, typeById.value.get(value.type_id)?.system_key)
   }
 
   /**
@@ -145,6 +150,7 @@ export function useDimensions() {
     treeOf,
     options,
     pathOf,
+    nameOf,
     labelOf,
     valueLabel,
   }

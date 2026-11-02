@@ -866,6 +866,12 @@ automaticky nevybírá hlavní činnost ani předmět daně.
 Označení **Systémová dimenze** znamená, že typ nelze odstranit ani vypnout.
 Označení **Vestavěná hodnota** označuje pevný význam, který nelze přejmenovat,
 přesunout, vyřadit ani smazat. Odpovědnou osobu a poznámky lze upravit.
+Kód vestavěné hodnoty je interní označení jejího významu, proto se ve výběrech,
+štítcích seznamů, sestavách a jejich exportech ukazuje jen její název. Kód
+zůstává v API a v profilu firmy. Hlavní a hospodářská činnost a hodnoty
+předběžného daňového zařazení mají ve výběrech a sestavách název v jazyce
+aplikace; štítky seznamů a exporty je uvádějí česky. Název systémového typu je
+údaj firmy a zobrazuje se tak, jak je uložený.
 Název a význam použité systémové
 hodnoty, její kód a zařazení do stromu zůstávají zachované i v otevřeném období.
 Pro nový význam je nutná nová hodnota. Provozní poznámky a odpovědnou osobu lze

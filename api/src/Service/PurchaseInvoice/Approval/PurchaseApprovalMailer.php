@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\PurchaseInvoice\Approval;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Mail\Mailer;
 use MyInvoice\Service\Mail\SupplierEmailContext;
 use MyInvoice\Service\Tenant\TenantUrlResolver;
@@ -68,7 +69,7 @@ final class PurchaseApprovalMailer implements PurchaseApprovalNotifier
                 'total_with_vat' => (float) ($row['invoice_total_with_vat'] ?? 0),
                 'amount_czk' => (float) ($row['amount_czk'] ?? 0),
                 'dimension_type' => (string) ($row['dimension_type_name'] ?? ''),
-                'dimension_value' => trim((string) ($row['dimension_value_code'] ?? '') . ' ' . (string) ($row['dimension_value_name'] ?? '')),
+                'dimension_value' => DimensionValueLabel::full(['code' => $row['dimension_value_code'] ?? '', 'name' => $row['dimension_value_name'] ?? '', 'semantic_key' => $row['dimension_value_semantic_key'] ?? null]),
                 'valid_until' => $row['token_expires_at'] ?? null,
                 'approval_url' => $this->tenantUrls->urlFor($supplierId, 'public_links', '/purchase-approval/' . $token),
                 'inbox_url' => rtrim($this->tenantUrls->canonicalBaseUrl(), '/') . '/purchase-approvals',

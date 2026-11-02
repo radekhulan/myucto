@@ -35946,7 +35946,18 @@
     "builtin_hint": "Vestavěný význam nelze přejmenovat, přesunout, vyřadit ani smazat. Odpovědnou osobu a poznámky lze upravit.",
     "system_badge": "Systémová dimenze",
     "system_custom_hint": "Vlastní druh činnosti lze vyřadit z nového použití. Historická přiřazení zůstanou zachována.",
-    "builtin_badge": "Vestavěná hodnota"
+    "builtin_badge": "Vestavěná hodnota",
+    "system_values": {
+      "activity": {
+        "main": "Hlavní činnost",
+        "economic": "Hospodářská činnost"
+      },
+      "tax_regime": {
+        "subject": "Předmět daně",
+        "out_of_scope": "Mimo předmět daně",
+        "exempt": "Osvobozeno"
+      }
+    }
   },
   "stereo_nx": {
     "partner_countries": {
@@ -38894,11 +38905,6 @@
     "classificationReviewTitle": "Účetní členění ověřené serverem",
     "classificationUnknownValue": "hodnota č. {id} (název není načten)",
     "classificationOriginExplicit": "zvoleno výslovně",
-    "classificationSemantic_main": "hlavní činnost",
-    "classificationSemantic_economic": "hospodářská činnost",
-    "classificationSemantic_subject": "předmět daně",
-    "classificationSemantic_out_of_scope": "mimo předmět daně",
-    "classificationSemantic_exempt": "osvobozeno od daně",
     "classificationProofMissing": "Server v náhledu nevrátil ověřené účetní členění. Před potvrzením si náhled znovu vyžádejte.",
     "classificationTaxAdvisory": "Daňový režim je předběžný účetní štítek. Neznamená osvobození ani potvrzené posouzení (J6) a veřejná prospěšnost se z něj neodvozuje.",
     "issueAck": "Zkontroloval(a) jsem člena, období, částku, účty a právní profil. Vím, že potvrzením vznikne účetní zápis.",

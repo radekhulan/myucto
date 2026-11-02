@@ -1212,7 +1212,7 @@ final class DimensionService
             $valueId,
             $ids,
             array_values($this->repo->costCenterCodes($supplierId, $ids)),
-            trim(($type !== null ? $type['name'] . ': ' : '') . $value['code'] . ' ' . $value['name'])
+            trim(($type !== null ? $type['name'] . ': ' : '') . DimensionValueLabel::full($value))
                 . ($withDescendants && count($ids) > 1 ? ' (vč. podřízených)' : ''),
         );
     }
