@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { api } from './client'
 import { apiErrorCode, apiErrorMessage } from './errors'
+import { dimensionValuePlainLabel } from '@/utils/dimensionValueLabel'
 
 /** Souhrnný stav schvalování dokladu (sloupec `purchase_invoices.approval_status`). */
 export type PurchaseApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected'
@@ -172,7 +173,10 @@ export function isApprovalNoApprover(err: unknown): boolean {
 export function approvalNoApproverDimension(err: any): string {
   const e = err?.response?.data?.error ?? {}
   if (Array.isArray(e.dimension_values) && e.dimension_values.length > 0) {
-    return e.dimension_values.map((v: { code?: string; name?: string }) => [v.code, v.name].filter(Boolean).join(' ')).join(', ')
+    return e.dimension_values
+      .map((v: { code?: string; name?: string | null; semantic_key?: string | null }) => dimensionValuePlainLabel({ code: v.code ?? '', name: v.name ?? null, semantic_key: v.semantic_key }))
+      .filter(Boolean)
+      .join(', ')
   }
   const value = e.dimension_value ?? e.dimension ?? null
   const name = (typeof value === 'object' && value ? (value.name ?? value.code) : null)
