@@ -15,6 +15,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
+use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\OperationalSettingsAccess;
 use MyInvoice\Security\RequestAuthorization;
@@ -152,6 +153,7 @@ final class SettingsAction
         private readonly EpoStepUpService $stepUp,
         private readonly AccountingFrameworkService $accountingFramework,
         private readonly AccountingDecreeService $accountingDecree,
+        private readonly WorkReportRepository $workReports,
     ) {}
 
     /**
@@ -1191,6 +1193,8 @@ final class SettingsAction
                 $body['self_copy'] = $clean === [] ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
             }
         }
+        $pinWorkReportDisplay = false;
+        $currentWorkReportDisplay = null;
         if (array_key_exists('work_report_display_options', $body)) {
             try {
                 $options = WorkReportDisplayOptions::validate($body['work_report_display_options']);
@@ -1198,6 +1202,12 @@ final class SettingsAction
             } catch (\InvalidArgumentException $e) {
                 return Json::error($response, 'validation_failed', $e->getMessage(), 400);
             }
+            $stmt = $this->db->pdo()->prepare('SELECT work_report_display_options FROM supplier WHERE id = ?');
+            $stmt->execute([$id]);
+            $currentWorkReportDisplay = $stmt->fetchColumn();
+            // Vystavené doklady si podobu výkazu ponechají; jen mění-li se výsledné zobrazení.
+            $pinWorkReportDisplay = WorkReportDisplayOptions::resolve($currentWorkReportDisplay ?: null)
+                !== WorkReportDisplayOptions::resolve($body['work_report_display_options']);
         }
         $paymentQrBody = [];
         foreach (SupplierPaymentQrSettingsRepository::FIELDS as $field) {
@@ -1279,6 +1289,10 @@ final class SettingsAction
                         'Firma už má použitá účetní období jiného tvaru. Začátek účetního roku se nastavuje předem; '
                             . 'změna účetního roku se řeší přechodným obdobím na stránce Účetní období.', 409);
                 }
+            }
+            if ($pinWorkReportDisplay) {
+                // Před změnou výchozí podoby, aby ji vystavené výkazy nepřevzaly zpětně.
+                $this->workReports->pinIssuedDisplayOptions($id, $currentWorkReportDisplay ?: null);
             }
             if (!empty($sets)) {
                 $params[] = $id;

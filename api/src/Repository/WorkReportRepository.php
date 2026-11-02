@@ -408,6 +408,28 @@ final class WorkReportRepository
         )->execute([$options === null ? null : json_encode((object) $options, JSON_THROW_ON_ERROR), $supplierId, $invoiceId]);
     }
 
+    /**
+     * Výkazy vystavených faktur bez vlastní volby dědí výchozí nastavení firmy živě.
+     * Před jeho změnou se jim proto zapíše dosavadní podoba, jinak by znovu vygenerované
+     * PDF, veřejný výkaz i e-mail vystaveného dokladu zpětně změnily vzhled. Koncept
+     * zůstává navázaný na firmu a novou podobu převezme.
+     *
+     * @return int počet výkazů, kterým se podoba zapsala
+     */
+    public function pinIssuedDisplayOptions(int $supplierId, mixed $currentDefaults): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE work_reports wr JOIN invoices i ON i.id = wr.invoice_id
+                SET wr.display_options = ?
+              WHERE i.supplier_id = ? AND i.status <> 'draft' AND wr.display_options IS NULL"
+        );
+        $stmt->execute([
+            json_encode(WorkReportDisplayOptions::resolve($currentDefaults), JSON_THROW_ON_ERROR),
+            $supplierId,
+        ]);
+        return $stmt->rowCount();
+    }
+
     public function deleteByInvoice(int $invoiceId, int $supplierId): bool
     {
         $pdo = $this->db->pdo();
