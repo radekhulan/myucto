@@ -56,6 +56,7 @@ const stubs = {
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
   DimensionPicker: { name: 'DimensionPicker', props: ['typeId', 'modelValue'], template: '<div data-test="picker" />' },
   DimensionReportFilter: { name: 'DimensionReportFilter', props: ['valueId', 'descendants'], template: '<div data-test="report-filter" />' },
+  DimensionReportFilters: { name: 'DimensionReportFilters', props: ['valueIds', 'descendants'], template: '<div data-test="report-filters" />' },
   EmptyState: { template: '<div data-test="empty" />' },
 }
 
@@ -220,7 +221,7 @@ describe('Výkazy po dimenzi', () => {
 describe('Propojení účetních sestav', () => {
   it('předá z předvahy hodnotu dimenze i do výsledovky a ostatních sestav', async () => {
     const w = mount(DimensionReportLinks, {
-      props: { current: 'trial', from: '2094-01-01', to: '2094-12-31', valueId: 9, descendants: false },
+      props: { current: 'trial', from: '2094-01-01', to: '2094-12-31', valueIds: [9], descendants: false },
       global: { stubs },
     })
     await flushPromises()
@@ -232,6 +233,17 @@ describe('Propojení účetních sestav', () => {
     expect(links.find(link => link.name === 'accounting-balance-sheet').query).toEqual({
       from: '2094-01-01', to: '2094-12-31', dimension_value_id: '9', dimension_descendants: '0',
     })
+  })
+
+  it('filtr na víc hodnot předá ostatním sestavám celý, výsledovku po dimenzi vynechá', async () => {
+    const w = mount(DimensionReportLinks, {
+      props: { current: 'trial', from: '2094-01-01', to: '2094-12-31', valueIds: [9, 4], descendants: true },
+      global: { stubs },
+    })
+    await flushPromises()
+    const links = w.findAll('a[data-to]').map(link => JSON.parse(link.attributes('data-to') ?? '{}'))
+    expect(links.map(link => link.name)).toEqual(['accounting-balance-sheet', 'accounting-general-ledger'])
+    expect(links[0].query).toEqual({ from: '2094-01-01', to: '2094-12-31', dimension_value_id: '9,4', dimension_descendants: '1' })
   })
 })
 

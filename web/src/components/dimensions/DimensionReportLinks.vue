@@ -4,12 +4,13 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useDimensions } from '@/composables/useDimensions'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { dimensionValueIdsParam } from '@/utils/dimensionFilter'
 
 const props = defineProps<{
   current: 'profit' | 'balance' | 'trial' | 'ledger'
   from: string
   to: string
-  valueId: number | null
+  valueIds: number[]
   descendants?: boolean
 }>()
 
@@ -17,24 +18,26 @@ const { t } = useI18n()
 const dims = useDimensions()
 onMounted(() => { void dims.load().catch(() => {}) })
 
-const typeId = computed(() => props.valueId ? dims.valueById.value.get(props.valueId)?.type_id : null)
+// Výsledovka po dimenzi je po jednom typu: odkaz nese hodnotu jen u filtru na jedinou hodnotu.
+const singleValueId = computed(() => props.valueIds.length === 1 ? props.valueIds[0] : null)
+const typeId = computed(() => singleValueId.value ? dims.valueById.value.get(singleValueId.value)?.type_id : null)
 const query = computed(() => ({
   from: props.from,
   to: props.to,
-  ...(props.valueId ? {
-    dimension_value_id: String(props.valueId),
+  ...(props.valueIds.length > 0 ? {
+    dimension_value_id: dimensionValueIdsParam(props.valueIds) as string,
     dimension_descendants: props.descendants === false ? '0' : '1',
   } : {}),
 }))
 const links = computed(() => [
   { key: 'profit', name: 'accounting-dimension-profit', label: t('dimensions.reports_title'), query: {
     from: props.from, to: props.to,
-    ...(typeId.value ? { type_id: String(typeId.value), value_id: String(props.valueId) } : {}),
+    ...(typeId.value ? { type_id: String(typeId.value), value_id: String(singleValueId.value) } : {}),
   } },
   { key: 'balance', name: 'accounting-balance-sheet', label: t('accounting.balance_sheet.title'), query: query.value },
   { key: 'trial', name: 'accounting-trial-balance', label: t('accounting.trial_balance.title'), query: query.value },
   { key: 'ledger', name: 'accounting-general-ledger', label: t('accounting.general_ledger.title'), query: query.value },
-].filter(link => link.key !== props.current && (link.key !== 'profit' || !props.valueId || typeId.value)))
+].filter(link => link.key !== props.current && (link.key !== 'profit' || props.valueIds.length === 0 || typeId.value)))
 </script>
 
 <template>

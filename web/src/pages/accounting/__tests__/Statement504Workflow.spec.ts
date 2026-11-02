@@ -23,7 +23,7 @@ import IncomeStatement from '../IncomeStatement.vue'
 const base = { accounting_framework: 'cz_504', version_code: 'vyhl504-2002/2016', as_of: '2099-06-30', scope: 'full',
   period: { id: 1, fiscal_year: 2099, starts_on: '2098-07-01', ends_on: '2099-06-30' },
   entity: { name: 'Synthetic association', ico: '', address: '', prepared_at: '' } }
-const stubs = { ActivationBanner: true, DimensionReportFilter: true, DimensionReportLinks: true, DateInput: true, EmptyState: true, YearEndTaxEstimate: true }
+const stubs = { ActivationBanner: true, DimensionReportFilter: true, DimensionReportFilters: true, DimensionReportLinks: true, DateInput: true, EmptyState: true, YearEndTaxEstimate: true }
 
 beforeEach(() => {
   m.balance.mockResolvedValue({ ...base, statement_type: 'balance_sheet',

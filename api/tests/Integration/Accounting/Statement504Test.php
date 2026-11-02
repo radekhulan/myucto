@@ -203,6 +203,34 @@ final class Statement504Test extends TestCase
         }
     }
 
+    public function testActivityCombinedWithAnotherDimensionFiltersTheSameLine(): void
+    {
+        $this->pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_project','Synthetic project','custom')")->execute([$this->supplier]);
+        $type = (int) $this->pdo->lastInsertId();
+        $projects = [];
+        foreach (['a', 'b'] as $code) {
+            $this->pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')
+                ->execute([$type, $this->supplier, $code, 'Synthetic ' . $code]);
+            $projects[$code] = (int) $this->pdo->lastInsertId();
+        }
+        foreach ([[100, 'main', 'a'], [40, 'economic', 'a'], [7, 'main', 'b']] as [$amount, $activity, $project]) {
+            $entry = $this->post('2099-01-01', '518', '221', $amount, $activity);
+            $this->pdo->prepare("INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id)
+                SELECT supplier_id, id, ?, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                ->execute([$type, $projects[$project], $entry]);
+        }
+        $main = $this->activity['values']['main'];
+        // Projekt jako první podmínka: činnost se musí najít i mezi dalšími podmínkami filtru.
+        $filter = \MyInvoice\Service\Accounting\Dimension\DimensionFilter::all([
+            new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($type, $projects['a'], [$projects['a']]),
+            new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($this->activity['id'], $main, [$main]),
+        ]);
+        $rows = array_column($this->statements->incomeStatement($this->supplier, $this->period, '2099-06-30', 'full', $filter)['rows'], null, 'row_code');
+        self::assertSame(100.0, $rows['UT.8']['total']);
+        self::assertSame(100.0, $rows['UT.8']['main']);
+        self::assertSame(0.0, $rows['UT.8']['economic']);
+    }
+
     public function testReceivableAndOwnerCreditAreNeverCompensated(): void
     {
         $this->post('2099-01-01', '315', '379', 10000);

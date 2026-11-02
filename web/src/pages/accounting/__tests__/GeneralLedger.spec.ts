@@ -213,7 +213,7 @@ describe('GeneralLedger period navigation', () => {
     })
     await flushPromises()
     expect(m.getGeneralLedger).toHaveBeenCalledWith(expect.objectContaining({
-      all_periods: 1, from: '2026-10-01', to: '2027-03-31', dimension_value_id: 9,
+      all_periods: 1, from: '2026-10-01', to: '2027-03-31', dimension_value_id: '9',
     }))
     expect(m.replace).toHaveBeenCalledWith({ query: expect.objectContaining({ all_periods: '1' }) })
     wrapper.unmount()

@@ -1217,6 +1217,45 @@ final class DimensionService
         );
     }
 
+    /**
+     * Filtr sestav na víc hodnot: hodnoty stejného typu se sčítají (stačí kterákoli),
+     * různé typy musí platit zároveň ({@see DimensionFilter::all()}).
+     *
+     * @param non-empty-list<int> $valueIds
+     */
+    public function filters(int $supplierId, array $valueIds, bool $withDescendants = true): DimensionFilter
+    {
+        $byType = [];
+        foreach (array_values(array_unique($valueIds)) as $valueId) {
+            $filter = $this->filter($supplierId, $valueId, $withDescendants);
+            $byType[$filter->typeId][] = $filter;
+        }
+        $criteria = [];
+        foreach ($byType as $filters) {
+            $first = $filters[0];
+            if (count($filters) === 1) {
+                $criteria[] = $first;
+                continue;
+            }
+            $type = $this->repo->findType($supplierId, $first->typeId);
+            $prefix = $type !== null ? $type['name'] . ': ' : '';
+            $criteria[] = new DimensionFilter(
+                $first->typeId,
+                $first->valueId,
+                array_values(array_unique(array_merge(...array_map(static fn (DimensionFilter $f): array => $f->valueIds, $filters)))),
+                array_values(array_unique(array_merge(...array_map(static fn (DimensionFilter $f): array => $f->costCenterCodes, $filters)))),
+                $prefix . implode(', ', array_map(
+                    static fn (DimensionFilter $f): string => $prefix !== '' && str_starts_with((string) $f->label, $prefix) ? substr((string) $f->label, strlen($prefix)) : (string) $f->label,
+                    $filters,
+                )),
+            );
+        }
+        if (count($criteria) > DimensionFilter::MAX_TYPES) {
+            throw new DimensionException('dimension_value_invalid', 'Filtr může kombinovat nejvýše ' . DimensionFilter::MAX_TYPES . ' typy dimenzí.');
+        }
+        return DimensionFilter::all($criteria);
+    }
+
     // ── skupina firem ────────────────────────────────────────────────────────
 
     /**
