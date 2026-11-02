@@ -60,12 +60,18 @@ final class DimensionListSummaryRepository
     /** @param list<array<string,mixed>> $rows @return array<int,list<string>> */
     private function summarize(array $rows): array
     {
-        $unique = [];
+        $grouped = [];
         foreach ($rows as $row) {
-            $id = (int) $row['owner_id'];
-            $label = (string) $row['type_name'] . ': '
-                . DimensionValueLabel::short(['code' => $row['value_code'], 'name' => $row['value_name'], 'semantic_key' => $row['value_semantic_key']]);
-            $unique[$id][$label] = true;
+            $grouped[(int) $row['owner_id']][(string) $row['type_name']][(string) $row['value_code']]
+                = ['code' => $row['value_code'], 'name' => $row['value_name'], 'semantic_key' => $row['value_semantic_key']];
+        }
+        $unique = [];
+        foreach ($grouped as $id => $types) {
+            foreach ($types as $typeName => $values) {
+                foreach (DimensionValueLabel::shortAll($values) as $label) {
+                    $unique[$id][$typeName . ': ' . $label] = true;
+                }
+            }
         }
         $result = [];
         foreach ($unique as $id => $labels) {

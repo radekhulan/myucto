@@ -23,6 +23,7 @@ const hasAmount = (value: number) => Math.round(Math.abs(value) * 100) !== 0
 const visibleColumns = computed(() => props.matrix.columns.map((col, index) => ({ ...col, index }))
   .filter(col => props.matrix.rows.some(row => hasAmount(row.cells[col.index] ?? 0))))
 const visibleRows = computed(() => props.matrix.rows.filter(row => visibleColumns.value.some(col => hasAmount(row.cells[col.index] ?? 0))))
+const valueColumns = computed(() => props.matrix.columns.filter(col => col.value_id !== null))
 
 const sections = computed(() => {
   const revenue = visibleRows.value.filter(r => r.account_type === 'revenue')
@@ -34,7 +35,7 @@ const sections = computed(() => {
 })
 
 function columnLabel(col: DimensionProfitMatrix['columns'][number]): string {
-  return col.value_id === null ? t('dimensions.profit_unassigned') : dimensionValueLabel({ t, te }, col, props.systemKey, ' ')
+  return col.value_id === null ? t('dimensions.profit_unassigned') : dimensionValueLabel({ t, te }, col, props.systemKey, ' ', valueColumns.value)
 }
 
 function money(v: number) {

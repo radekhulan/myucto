@@ -272,7 +272,7 @@ function money(v: number) {
 }
 
 function rowLabel(row: DimensionProfitRow): string {
-  return dimensionValueLabel({ t, te }, row, profitReport.value?.type.system_key, ' ')
+  return dimensionValueLabel({ t, te }, row, profitReport.value?.type.system_key, ' ', profitReport.value?.rows)
 }
 </script>
 
@@ -426,7 +426,7 @@ function rowLabel(row: DimensionProfitRow): string {
                     </button>
                     <span v-else class="w-5" />
                     <span v-if="!row.semantic_key" class="font-mono text-xs text-neutral-500">{{ row.code }}</span>
-                    <span v-if="row.semantic_key || row.name !== row.code" class="truncate">{{ dimensionValueName({ t, te }, row, profitReport.type.system_key) }}</span>
+                    <span v-if="row.semantic_key || row.name !== row.code" class="truncate">{{ dimensionValueName({ t, te }, row, profitReport.type.system_key, profitReport.rows) }}</span>
                   </div>
                 </td>
                 <td v-if="otherReports.length" class="px-4 py-2">

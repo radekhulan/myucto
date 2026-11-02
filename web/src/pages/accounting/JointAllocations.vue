@@ -50,7 +50,9 @@ const effective = computed(() => !!chosen.value && targetDate.value >= chosen.va
 const canPreview = computed(() => !busy.value && effective.value && selected.value.length > 0)
 const valueName = (id: number) => {
   const value = catalog.value?.values.find(row => row.id === id)
-  return value ? dimensionValueName({ t, te }, value, catalog.value?.types.find(type => type.id === value.type_id)?.system_key) : t('jointAllocations.missingValue')
+  return value
+    ? dimensionValueName({ t, te }, value, catalog.value?.types.find(type => type.id === value.type_id)?.system_key, catalog.value?.values.filter(row => row.type_id === value.type_id))
+    : t('jointAllocations.missingValue')
 }
 const typeName = (id: number) => catalog.value?.types.find(type => type.id === id)?.name ?? t('jointAllocations.additionalAxes')
 const tuple = (cell: JointCell) => [...jointAxes.map(axis => valueName(cell[axis])), ...Object.values(cell.additional_dimensions ?? {}).map(valueName)].join(' · ')

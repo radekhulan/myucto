@@ -115,6 +115,38 @@ final class DimensionReportXlsxTest extends TestCase
         self::assertSame('P Projekt', $matrix->getCell('D3')->getValue());
     }
 
+    public function testDimensionProfitMatrixHeadersOfSameNamedUnitsStayDistinct(): void
+    {
+        $zero = ['revenue' => 0.0, 'cost' => 0.0, 'result' => 0.0];
+        $ss = $this->load((new ReportXlsxExporter())->dimensionProfit([
+            'entity' => self::ENTITY,
+            'type' => ['name' => 'Jednotka'],
+            'from' => '2094-01-01',
+            'to' => '2094-12-31',
+            'supplier_ids' => [1],
+            'restricted' => false,
+            'rows' => [],
+            'unassigned' => $zero,
+            'totals' => $zero,
+            'matrix' => [
+                'columns' => [
+                    ['key' => '1', 'value_id' => 1, 'code' => 'unit:12', 'name' => 'Jednotka 1', 'semantic_key' => 'unit:12'],
+                    ['key' => '2', 'value_id' => 2, 'code' => 'unit:15', 'name' => 'Jednotka 1', 'semantic_key' => 'unit:15'],
+                    ['key' => '', 'value_id' => null, 'code' => '', 'name' => null, 'semantic_key' => null],
+                ],
+                'rows' => [],
+                'results' => [0.0, 0.0, 0.0],
+                'total_result' => 0.0,
+            ],
+        ]));
+
+        $matrix = $ss->getSheetByName('Po účtech');
+        self::assertNotNull($matrix);
+        self::assertSame('Jednotka 1 (unit:12)', $matrix->getCell('C3')->getValue());
+        self::assertSame('Jednotka 1 (unit:15)', $matrix->getCell('D3')->getValue());
+        self::assertSame('Bez hodnoty', $matrix->getCell('E3')->getValue());
+    }
+
     public function testCashFlowAndDimensionLineOnFilteredStatement(): void
     {
         $group = ['total' => 0.0, 'accounts' => []];

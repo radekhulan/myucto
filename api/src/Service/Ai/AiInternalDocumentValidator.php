@@ -55,15 +55,25 @@ final class AiInternalDocumentValidator
         foreach ($this->dimensionRepo->listTypes($supplierId, false) as $t) {
             $types[(int) $t['id']] = (string) $t['name'];
         }
-        $out = [];
+        $chosen = [];
+        $byType = [];
         foreach ($this->dimensionRepo->listValues($supplierId, null, false) as $v) {
             if (!isset($types[(int) $v['type_id']])) {
                 continue;
             }
-            $out[(int) $v['id']] = $types[(int) $v['type_id']] . ': ' . DimensionValueLabel::full($v);
-            if (count($out) >= self::MAX_PROMPT_DIMENSION_VALUES) {
+            $chosen[(int) $v['id']] = (int) $v['type_id'];
+            $byType[(int) $v['type_id']][(int) $v['id']] = $v;
+            if (count($chosen) >= self::MAX_PROMPT_DIMENSION_VALUES) {
                 break;
             }
+        }
+        $labels = [];
+        foreach ($byType as $values) {
+            $labels += DimensionValueLabel::fullAll($values);
+        }
+        $out = [];
+        foreach ($chosen as $id => $typeId) {
+            $out[$id] = $types[$typeId] . ': ' . $labels[$id];
         }
         return $out;
     }

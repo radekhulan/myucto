@@ -21,6 +21,7 @@ const keys = computed(() => props.versions.filter((v, i, list) => list.findIndex
 const customTypes = computed(() => props.types.filter(type => type.is_active && !jointAxes.includes(type.system_key as typeof jointAxes[number])))
 const axisTypes = computed(() => jointAxes.map(axis => ({ axis, type: props.types.find(type => type.system_key === axis) })))
 const choices = (typeId?: number) => props.values.filter(value => value.type_id === typeId && value.is_active)
+const siblings = (typeId?: number) => props.values.filter(value => value.type_id === typeId)
 function addCell() {
   const cell = emptyCell()
   cell.additional_dimensions = Object.fromEntries(additional.value.map(id => [id, 0]))
@@ -72,7 +73,7 @@ function formatCents(cents: string) {
 }
 function valueName(id: number) {
   const value = props.values.find(row => row.id === id)
-  return value ? dimensionValueName({ t, te }, value, props.types.find(type => type.id === value.type_id)?.system_key) : t('jointAllocations.missingValue')
+  return value ? dimensionValueName({ t, te }, value, props.types.find(type => type.id === value.type_id)?.system_key, siblings(value.type_id)) : t('jointAllocations.missingValue')
 }
 function resetProposal() {
   proposalSeq++
@@ -154,14 +155,14 @@ defineExpose({ copy, validate })
       <label v-for="axis in axisTypes" :key="axis.axis" class="flex flex-col gap-1 text-sm">{{ axis.type?.name ?? t(`jointAllocations.axes.${axis.axis}`) }}
         <select v-model="cell[axis.axis]" required :disabled="busy" class="h-9 rounded border border-neutral-300 bg-surface px-2">
           <option :value="0" disabled>{{ t('jointAllocations.choose') }}</option>
-          <option v-for="value in choices(axis.type?.id)" :key="value.id" :value="value.id">{{ dimensionValueName({ t, te }, value, axis.type?.system_key) }}</option>
+          <option v-for="value in choices(axis.type?.id)" :key="value.id" :value="value.id">{{ dimensionValueName({ t, te }, value, axis.type?.system_key, siblings(axis.type?.id)) }}</option>
         </select>
       </label>
       <template v-if="cell.additional_dimensions">
         <label v-for="typeId in additional" :key="typeId" class="flex flex-col gap-1 text-sm">{{ types.find(type => type.id === typeId)?.name }}
           <select v-model="cell.additional_dimensions[typeId]" required :disabled="busy" class="h-9 rounded border border-neutral-300 bg-surface px-2">
             <option :value="0" disabled>{{ t('jointAllocations.choose') }}</option>
-            <option v-for="value in choices(typeId)" :key="value.id" :value="value.id">{{ dimensionValueName({ t, te }, value, types.find(type => type.id === typeId)?.system_key) }}</option>
+            <option v-for="value in choices(typeId)" :key="value.id" :value="value.id">{{ dimensionValueName({ t, te }, value, types.find(type => type.id === typeId)?.system_key, siblings(typeId)) }}</option>
           </select>
         </label>
       </template>

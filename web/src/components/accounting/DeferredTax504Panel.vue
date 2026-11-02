@@ -29,8 +29,11 @@ function empty(): DeferredTax504Decision {
 function cellLabel(cell: Record<number, number> | undefined) {
   return Object.values(cell ?? {}).map((id) => {
     const value = dimensions.value?.values.find(row => row.id === id)
-    return value ? dimensionValueName({ t, te }, value, dimensions.value?.types.find(type => type.id === value.type_id)?.system_key) : `#${id}`
+    return value ? dimensionValueName({ t, te }, value, dimensions.value?.types.find(type => type.id === value.type_id)?.system_key, siblings(value.type_id)) : `#${id}`
   }).join(' · ')
+}
+function siblings(typeId: number) {
+  return dimensions.value?.values.filter(row => row.type_id === typeId)
 }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T }
 function add(group: 'opening_titles' | 'titles') {
@@ -133,7 +136,7 @@ async function post() {
                 <label class="block text-sm">{{ t('accounting.deferred504.recoverability') }}<textarea v-model="row.recoverability_evidence" :required="Number(row.recognized_difference) > 0" maxlength="2000" rows="2" class="block w-full border border-neutral-300 rounded-md p-2" /></label>
               </template>
               <div class="flex flex-wrap gap-3">
-                <label v-for="type in types" :key="type.id" class="text-sm">{{ type.name }}<select :value="row.dimensions[type.id] ?? ''" :required="type.system_key === 'activity'" class="block h-9 border border-neutral-300 rounded-md px-2 bg-surface" @change="setDimension(row, type.id, ($event.target as HTMLSelectElement).value)"><option value="">{{ t('accounting.deferred504.choose') }}</option><option v-for="value in dimensions?.values.filter(value => value.type_id === type.id && (value.is_active || row.dimensions[type.id] === value.id))" :key="value.id" :value="value.id">{{ dimensionValueName({ t, te }, value, type.system_key) }}</option></select></label>
+                <label v-for="type in types" :key="type.id" class="text-sm">{{ type.name }}<select :value="row.dimensions[type.id] ?? ''" :required="type.system_key === 'activity'" class="block h-9 border border-neutral-300 rounded-md px-2 bg-surface" @change="setDimension(row, type.id, ($event.target as HTMLSelectElement).value)"><option value="">{{ t('accounting.deferred504.choose') }}</option><option v-for="value in dimensions?.values.filter(value => value.type_id === type.id && (value.is_active || row.dimensions[type.id] === value.id))" :key="value.id" :value="value.id">{{ dimensionValueName({ t, te }, value, type.system_key, siblings(type.id)) }}</option></select></label>
               </div>
               <label class="flex gap-2 text-sm"><input v-model="row.temporary_confirmed" type="checkbox" required />{{ t('accounting.deferred504.temporary') }}</label>
               <button type="button" :class="btnOutline('danger')" @click="decision[group]?.splice(index, 1)"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.trash" /></svg>{{ t('accounting.deferred504.remove') }}</button>

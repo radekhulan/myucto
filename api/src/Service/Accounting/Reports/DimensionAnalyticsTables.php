@@ -13,11 +13,15 @@ final class DimensionAnalyticsTables
     {
         $year = (int) $data['year'];
         $typeName = (string) $data['type']['name'];
-        $values = [];
+        $roots = [];
         foreach ($data['rows'] as $row) {
             if ($row['depth'] !== 0) continue;
-            $key = (string) $row['value_id'];
-            $values[$key] = $row['code'] === $row['name'] ? $row['name'] : DimensionValueLabel::full($row);
+            $roots[(string) $row['value_id']] = $row;
+        }
+        $labels = DimensionValueLabel::fullAll($roots);
+        $values = [];
+        foreach ($roots as $key => $row) {
+            $values[(string) $key] = $row['code'] === $row['name'] && empty($row['semantic_key']) ? $row['name'] : $labels[$key];
         }
         $values['unassigned'] = 'Bez hodnoty';
         if ($valueId !== 'total' && !array_key_exists($valueId, $values)) {

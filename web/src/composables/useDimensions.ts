@@ -64,6 +64,15 @@ export function useDimensions() {
   const documentTypes = computed(() => types.value.filter(ty => ty.is_active && ty.show_on_documents))
   const valueById = computed(() => new Map(values.value.map(v => [v.id, v])))
   const typeById = computed(() => new Map(types.value.map(ty => [ty.id, ty])))
+  const valuesByType = computed(() => {
+    const out = new Map<number, DimensionValue[]>()
+    for (const v of values.value) {
+      const list = out.get(v.type_id)
+      if (list) list.push(v)
+      else out.set(v.type_id, [v])
+    }
+    return out
+  })
 
   function pathOf(value: DimensionValue): string[] {
     const out: string[] = []
@@ -102,11 +111,11 @@ export function useDimensions() {
   }
 
   function nameOf(value: DimensionValue): string {
-    return dimensionValueName({ t, te }, value, typeById.value.get(value.type_id)?.system_key)
+    return dimensionValueName({ t, te }, value, typeById.value.get(value.type_id)?.system_key, valuesByType.value.get(value.type_id))
   }
 
   function labelOf(value: DimensionValue): string {
-    return dimensionValueLabel({ t, te }, value, typeById.value.get(value.type_id)?.system_key)
+    return dimensionValueLabel({ t, te }, value, typeById.value.get(value.type_id)?.system_key, ' – ', valuesByType.value.get(value.type_id))
   }
 
   /**

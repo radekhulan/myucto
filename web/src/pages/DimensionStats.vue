@@ -53,8 +53,9 @@ const pct = (value: number | null) => value === null ? '-' : `${new Intl.NumberF
 
 const comparisons = computed(() => {
   if (!report.value) return []
-  const rows = report.value.rows.filter(row => row.depth === 0).map(row => ({
-    key: String(row.value_id), label: dimensionValueLabel({ t, te }, row, report.value!.type.system_key, ' '), amounts: report.value!.value_totals[String(row.value_id)] ?? zeroAmounts,
+  const roots = report.value.rows.filter(row => row.depth === 0)
+  const rows = roots.map(row => ({
+    key: String(row.value_id), label: dimensionValueLabel({ t, te }, row, report.value!.type.system_key, ' ', roots), amounts: report.value!.value_totals[String(row.value_id)] ?? zeroAmounts,
   }))
   rows.push({ key: '', label: t('dimensions.profit_unassigned'), amounts: report.value.unassigned })
   return rows

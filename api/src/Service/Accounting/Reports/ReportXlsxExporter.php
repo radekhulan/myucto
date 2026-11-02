@@ -1599,8 +1599,10 @@ final class ReportXlsxExporter
             $ms->setCellValue('A1', 'Rozpad po účtech — ' . $typeName . ', ' . $this->czDate($from) . ' – ' . $this->czDate($to));
             $ms->getStyle('A1')->getFont()->setBold(true)->setSize(14);
             $headers = ['Účet', 'Název'];
-            foreach ($matrix['columns'] ?? [] as $col) {
-                $headers[] = $col['value_id'] === null ? 'Bez hodnoty' : DimensionValueLabel::full($col);
+            $columns = $matrix['columns'] ?? [];
+            $labels = DimensionValueLabel::fullAll(array_filter($columns, static fn (array $col): bool => $col['value_id'] !== null));
+            foreach ($columns as $i => $col) {
+                $headers[] = $col['value_id'] === null ? 'Bez hodnoty' : $labels[$i];
             }
             $headers[] = 'Celkem';
             $cols = count($headers);
