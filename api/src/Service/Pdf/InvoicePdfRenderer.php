@@ -394,7 +394,7 @@ final class InvoicePdfRenderer
             $lineDiscountColumns = true;
         }
         $workReport = $includeWorkReport
-            ? $this->workReports->findByInvoice((int) $invoice['id'])
+            ? $this->workReports->findByInvoice((int) $invoice['id'], (int) ($invoice['supplier_id'] ?? 0))
             : null;
         if ($workReport !== null) {
             $workReport = TimeBillingPdfPresenter::workReport($workReport);

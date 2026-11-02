@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ensureLocaleLoaded } from '@/i18n'
 import { useRoute } from 'vue-router'
 import { approvalApi, type PublicApprovalData, type PublicApprovalDecided } from '@/api/approval'
 import { useTurnstile } from '@/composables/useTurnstile'
 
+const { t } = useI18n()
 const route = useRoute()
 const token = computed(() => String(route.params.token || ''))
 
@@ -28,7 +31,7 @@ const turnstile = useTurnstile()
 const turnstileEl = ref<HTMLElement | null>(null)
 const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
 
-const wrHasDates = computed(() => !!data.value?.work_report.items.some(i => !!i.work_date))
+const wrHasDates = computed(() => data.value?.work_report.effective_display_options?.date !== false && !!data.value?.work_report.items.some(i => !!i.work_date))
 const lang = computed(() => data.value?.invoice.language || decided.value?.invoice.language || 'cs')
 
 const EMPTY_BRANDING = { display_name: null, accent_color: null, logo_url: null }
@@ -36,12 +39,14 @@ const branding = computed(() => data.value?.branding || decided.value?.branding 
 /** Iniciála dodavatele místo našeho „M", dokud logo chybí. */
 const brandInitial = computed(() => branding.value.display_name?.trim().charAt(0).toUpperCase() || 'M')
 
-function fmtMoney(n: number, currency: string): string {
+function fmtMoney(n: number | null, currency: string): string {
+  if (n == null) return ''
   const decimals = currency === 'JPY' ? 0 : 2
   const locale = lang.value === 'en' ? 'en-US' : 'cs-CZ'
   return n.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + ' ' + currency
 }
-function fmtHours(n: number): string {
+function fmtHours(n: number | null): string {
+  if (n == null) return ''
   const locale = lang.value === 'en' ? 'en-US' : 'cs-CZ'
   return n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -68,6 +73,7 @@ onMounted(async () => {
     } else {
       data.value = payload as PublicApprovalData
     }
+    await ensureLocaleLoaded(lang.value)
     if (lang.value === 'en') localStorage.setItem('locale', 'en')
     else localStorage.setItem('locale', 'cs')
     document.title = tt('Schválení výkazu — MyÚčto.cz', 'Approve work report — MyÚčto.cz')
@@ -262,26 +268,29 @@ async function submit(decision: 'approve' | 'reject') {
               <span class="text-sm text-neutral-700">{{ data.work_report.title }}</span>
             </header>
             <div class="overflow-x-auto">
-              <table class="w-full text-sm table-sticky-first">
+              <table class="w-full text-sm table-sticky-first" :class="{ 'wr-compact': data.work_report.effective_display_options?.compact }">
                 <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                   <tr>
                     <th class="px-4 py-2 text-left font-medium">{{ tt('Popis', 'Description') }}</th>
                     <th v-if="wrHasDates" class="px-3 py-2 text-left font-medium w-28">{{ tt('Datum', 'Date') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-24 whitespace-nowrap">{{ tt('Hodin', 'Hours') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-40 whitespace-nowrap">{{ tt('Sazba', 'Rate') }}</th>
+                    <th v-if="data.work_report.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-medium w-24 whitespace-nowrap">{{ tt('Hodin', 'Hours') }}</th>
+                    <th v-if="data.work_report.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-medium w-40 whitespace-nowrap">{{ tt('Sazba', 'Rate') }}</th>
+                    <th v-if="data.work_report.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('workReportDisplay.amount', {}, { locale: lang }) }}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-100">
                   <tr v-for="it in data.work_report.items" :key="it.id">
                     <td class="px-4 py-2 whitespace-pre-wrap text-neutral-800">{{ it.description }}</td>
                     <td v-if="wrHasDates" class="px-3 py-2 whitespace-nowrap text-neutral-600">{{ fmtDate(it.work_date) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(it.hours) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, data.invoice.currency) }}</td>
+                    <td v-if="data.work_report.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(it.hours) }}</td>
+                    <td v-if="data.work_report.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, data.invoice.currency) }}</td>
+                    <td v-if="data.work_report.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, data.invoice.currency) }}</td>
                   </tr>
-                  <tr class="bg-neutral-50 font-semibold">
+                  <tr v-if="data.work_report.effective_display_options?.hours !== false || data.work_report.effective_display_options?.amount !== false" class="bg-neutral-50 font-semibold">
                     <td class="px-4 py-2 text-right" :colspan="wrHasDates ? 2 : 1">{{ tt('Celkem', 'Total') }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(data.work_report.total_hours) }} h</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(data.work_report.total_amount, data.invoice.currency) }}</td>
+                    <td v-if="data.work_report.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(data.work_report.total_hours) }} h</td>
+                    <td v-if="data.work_report.effective_display_options?.rate !== false"></td>
+                    <td v-if="data.work_report.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(data.work_report.total_amount, data.invoice.currency) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -299,7 +308,7 @@ async function submit(decision: 'approve' | 'reject') {
                     <th class="px-3 py-2 text-right font-medium w-20 whitespace-nowrap">{{ tt('Množství', 'Quantity') }}</th>
                     <th class="px-3 py-2 text-left font-medium w-16">{{ tt('MJ', 'Unit') }}</th>
                     <th class="px-3 py-2 text-right font-medium w-28 whitespace-nowrap">{{ tt('Cena/MJ', 'Unit price') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-28 whitespace-nowrap">{{ tt('Celkem', 'Total') }}</th>
+                    <th class="px-3 py-2 text-right font-medium w-28 whitespace-nowrap">{{ t('workReportDisplay.amount', {}, { locale: lang }) }}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-100">
@@ -407,3 +416,7 @@ async function submit(decision: 'approve' | 'reject') {
     </footer>
   </div>
 </template>
+
+<style scoped>
+.wr-compact :is(th, td) { padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.75rem; }
+</style>

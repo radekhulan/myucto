@@ -11,9 +11,9 @@
 v příloze posíláme výkaz víceprací{% if invoice.project_name %} za zakázku „{{ invoice.project_name }}"{% endif %}{% if invoice.client_company_name %} pro {{ invoice.client_company_name }}{% endif %} ke schválení.
 
 {% if work_report %}Výkaz:           {{ work_report.title }}
-{% if work_report.total_hours > 0 %}Hodin celkem:    {{ work_report.total_hours|number_format(2, ',', ' ') }} h
+{% if (work_report.effective_display_options.hours ?? true) and work_report.total_hours > 0 %}Hodin celkem:    {{ work_report.total_hours|number_format(2, ',', ' ') }} h
 {% endif %}{% if work_report.material_total > 0 %}{{ work_report.material_title|default('Materiál') }}:        {{ work_report.material_total|number_format(2, ',', ' ') }} {{ invoice.currency }}
-{% endif %}K vyúčtování:    {{ (work_report.total_amount + work_report.material_total)|number_format(2, ',', ' ') }} {{ invoice.currency }}
+{% endif %}{% if work_report.effective_display_options.amount ?? true %}K vyúčtování:    {{ (work_report.total_amount + work_report.material_total)|number_format(2, ',', ' ') }} {{ invoice.currency }}{% endif %}
 {% endif %}
 
 Po schválení Vám obratem pošleme fakturu — vše je automatizované,

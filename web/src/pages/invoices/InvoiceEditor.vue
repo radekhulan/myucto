@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
+import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
@@ -2277,6 +2279,7 @@ const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat && sup
 // ─── WORK REPORT ────────────────────────────────────────────────
 const wrOpen = ref(false)
 const wrTitle = ref('')
+const wrDisplayOptions = ref<Partial<WorkReportDisplayOptions> | null>(null)
 const wrItems = ref<WorkReportItem[]>([])
 const wrVatRateId = ref<number | null>(null)
 
@@ -2295,6 +2298,7 @@ async function loadWorkReport() {
   if (!invoiceId.value) return
   const wr = await invoicesApi.getWorkReport(invoiceId.value)
   if (wr) {
+    wrDisplayOptions.value = wr.display_options ?? null
     wrTitle.value = wr.title
     wrItems.value = wr.items.map(i => ({ ...i }))
     // Neplátce DPH: vždy 0% „Osvobozeno" (defaultVatRateId()), ať se do položek faktury
@@ -2848,6 +2852,7 @@ async function submit() {
         await invoicesApi.saveWorkReport(saved.id, {
           project_id: saved.project_id,
           title: wrTitle.value,
+          display_options: wrDisplayOptions.value,
           vat_rate_id: wrVatRateId.value,
           items: wrItemsValid.value.map((it, i) => ({
             description: it.description,
@@ -4085,6 +4090,8 @@ useWindowTitle(
           </div>
         </header>
         <div v-if="wrOpen" class="p-5 space-y-3">
+          <WorkReportDisplaySettings v-model="wrDisplayOptions" inheritable
+            :defaults="supplierStore.currentSupplier?.work_report_display_options" />
           <div class="flex flex-col sm:flex-row gap-2">
             <input v-model="wrTitle" type="text" :placeholder="t('invoice.wr_title')"
               class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm" />

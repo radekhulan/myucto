@@ -58,7 +58,7 @@ final class SupplierResponseFields
         'payment_thanks_max_age_days', 'self_copy', 'cfg_self_copy_fallback', 'accounting_mode',
         'accounting_enabled', 'payroll_enabled', 'dimensions_enabled', 'stock_enabled', 'stock_method',
         'stock_auto_issue', 'stock_in_transit_from', 'invoice_pdf_show_base_qty',
-        'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer',
+        'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer', 'work_report_display_options',
         'auto_post_invoices', 'auto_post_purchases', 'receipt_payable_account_code', 'taxpayer_type', 'vat_period', 'flat_tax_band', 'oss_enabled',
         'oss_valid_from', 'oss_valid_to', 'oss_identification_country', 'oss_return_currency',
         'financial_office_code', 'workplace_code', 'cz_nace_code', 'cz_nace_resolved',

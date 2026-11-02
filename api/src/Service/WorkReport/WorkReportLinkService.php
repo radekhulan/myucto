@@ -350,10 +350,12 @@ final class WorkReportLinkService
 
         // Výkazy všech faktur dávkově (odstranění N+1 findByInvoice ve smyčce).
         $wrByInvoice = $this->workReports->findByInvoiceIds(
-            array_map(static fn (array $r) => (int) $r['id'], $rows)
+            array_map(static fn (array $r) => (int) $r['id'], $rows), $supplierId
         );
 
         $reports = [];
+        $showAllAmounts = true;
+        $showAllHours = true;
         $totalHours = 0.0;
         $byCurrency = [];
         foreach ($rows as $row) {
@@ -361,27 +363,31 @@ final class WorkReportLinkService
             if ($wr === null) {
                 continue;
             }
+            $wr = WorkReportDisplayOptions::forPublic($wr);
+            $showAllAmounts = $showAllAmounts && $wr['effective_display_options']['amount'];
+            $showAllHours = $showAllHours && $wr['effective_display_options']['hours'];
             $currency = (string) $row['currency'];
             $totalHours += (float) $wr['total_hours'];
             $byCurrency[$currency] = ($byCurrency[$currency] ?? 0.0)
                 + (float) $wr['total_amount'] + (float) ($wr['material_total'] ?? 0);
 
             $reports[] = [
+                'effective_display_options' => $wr['effective_display_options'],
                 'invoice_id'   => (int) $row['id'],
                 'label'        => $row['varsymbol'] ?: null,
                 'date'         => $row['issue_date'] ?: substr((string) $row['created_at'], 0, 10),
                 'currency'     => $currency,
                 'project_name' => $row['project_name'] ?: null,
                 'title'          => (string) $wr['title'],
-                'total_hours'    => (float) $wr['total_hours'],
-                'total_amount'   => (float) $wr['total_amount'],
+                'total_hours'    => $wr['total_hours'],
+                'total_amount'   => $wr['total_amount'],
                 'items'          => array_map(static fn (array $it) => [
                     'description'  => (string) $it['description'],
                     'work_date'    => $it['work_date'],
-                    'hours'        => (float) $it['hours'],
+                    'hours'        => $it['hours'],
                     'duration_minutes' => $it['duration_minutes'] !== null ? (int) $it['duration_minutes'] : null,
-                    'rate'         => (float) $it['rate'],
-                    'total_amount' => (float) $it['total_amount'],
+                    'rate'         => $it['rate'],
+                    'total_amount' => $it['total_amount'],
                 ], $wr['items']),
                 'material_title' => $wr['material_title'] ?? null,
                 'material_total' => (float) ($wr['material_total'] ?? 0),
@@ -421,8 +427,8 @@ final class WorkReportLinkService
             'accent_color'         => !empty($supplier['email_branding_enabled']) ? ($supplier['email_accent_color'] ?? null) : null,
             'logo_src'             => $this->logoSrc($supplier),
             'reports'              => $reports,
-            'total_hours'          => $totalHours,
-            'totals_by_currency'   => $totalsByCurrency,
+            'total_hours'          => $showAllHours ? $totalHours : null,
+            'totals_by_currency'   => $showAllAmounts ? $totalsByCurrency : [],
         ];
     }
 

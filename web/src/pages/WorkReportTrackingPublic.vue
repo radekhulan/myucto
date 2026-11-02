@@ -35,13 +35,15 @@ const lang = computed(() => preview.value?.language || state.value?.language || 
 // Logo dodavatele (data: URI) místo MyInvoice loga — k dispozici v náhledu i na
 // ověřovací obrazovce. Prázdné → fallback na MyInvoice branding v hlavičce.
 
-function fmtMoney(n: number, currency: string, maxDecimals?: number): string {
+function fmtMoney(n: number | null, currency: string, maxDecimals?: number): string {
+  if (n == null) return ''
   const decimals = currency === 'JPY' ? 0 : 2
   const loc = lang.value === 'en' ? 'en-US' : 'cs-CZ'
   const precision = maxDecimals && n !== Math.round(n * 100) / 100 ? maxDecimals : decimals
   return n.toLocaleString(loc, { minimumFractionDigits: decimals, maximumFractionDigits: precision }) + ' ' + currency
 }
-function fmtHours(n: number): string {
+function fmtHours(n: number | null): string {
+  if (n == null) return ''
   const loc = lang.value === 'en' ? 'en-US' : 'cs-CZ'
   return n.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -289,29 +291,29 @@ async function verify() {
               </span>
             </header>
             <div class="overflow-x-auto">
-              <table class="w-full text-sm table-fixed">
+              <table class="w-full text-sm table-fixed" :class="{ 'wr-compact': rep.effective_display_options?.compact }">
                 <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                   <tr>
                     <th class="px-4 py-2 text-left font-medium">{{ t('workReportTracking.public.description') }}</th>
-                    <th v-if="reportHasDates(rep.items)" class="px-3 py-2 text-left font-medium w-28">{{ t('workReportTracking.public.date') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-20 whitespace-nowrap">{{ t('workReportTracking.public.hours') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-32 whitespace-nowrap">{{ t('workReportTracking.public.rate') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-36 whitespace-nowrap">{{ t('workReportTracking.public.amount') }}</th>
+                    <th v-if="rep.effective_display_options?.date !== false && reportHasDates(rep.items)" class="px-3 py-2 text-left font-medium w-28">{{ t('workReportTracking.public.date') }}</th>
+                    <th v-if="rep.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-medium w-20 whitespace-nowrap">{{ t('workReportTracking.public.hours') }}</th>
+                    <th v-if="rep.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-medium w-32 whitespace-nowrap">{{ t('workReportTracking.public.rate') }}</th>
+                    <th v-if="rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-medium w-36 whitespace-nowrap">{{ t('workReportTracking.public.amount') }}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-100">
                   <tr v-for="(it, idx) in rep.items" :key="idx">
                     <td class="px-4 py-2 whitespace-pre-wrap break-words text-neutral-800">{{ it.description }}</td>
-                    <td v-if="reportHasDates(rep.items)" class="px-3 py-2 whitespace-nowrap text-neutral-600">{{ fmtDate(it.work_date) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ it.duration_minutes != null ? formatDuration(it.duration_minutes) : fmtHours(it.hours) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, rep.currency, 6) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, rep.currency) }}</td>
+                    <td v-if="rep.effective_display_options?.date !== false && reportHasDates(rep.items)" class="px-3 py-2 whitespace-nowrap text-neutral-600">{{ fmtDate(it.work_date) }}</td>
+                    <td v-if="rep.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ it.duration_minutes != null ? formatDuration(it.duration_minutes) : fmtHours(it.hours) }}</td>
+                    <td v-if="rep.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, rep.currency, 6) }}</td>
+                    <td v-if="rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, rep.currency) }}</td>
                   </tr>
-                  <tr class="bg-neutral-50 border-t border-neutral-200 font-semibold">
-                    <td class="px-4 py-2 text-right" :colspan="reportHasDates(rep.items) ? 2 : 1">{{ t('workReportTracking.public.report') }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ durationTotal(rep.items) ?? fmtHours(rep.total_hours) }} h</td>
-                    <td></td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(rep.total_amount, rep.currency) }}</td>
+                  <tr v-if="rep.effective_display_options?.hours !== false || rep.effective_display_options?.amount !== false" class="bg-neutral-50 border-t border-neutral-200 font-semibold">
+                    <td class="px-4 py-2 text-right" :colspan="rep.effective_display_options?.date !== false && reportHasDates(rep.items) ? 2 : 1">{{ t('workReportTracking.public.report') }}</td>
+                    <td v-if="rep.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ durationTotal(rep.items) ?? fmtHours(rep.total_hours) }} h</td>
+                    <td v-if="rep.effective_display_options?.rate !== false"></td>
+                    <td v-if="rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(rep.total_amount, rep.currency) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -350,11 +352,11 @@ async function verify() {
           </div>
 
           <!-- Grand total -->
-          <div v-if="preview.reports.length" class="wr-grand bg-surface border border-neutral-200 rounded-xl p-5 shadow-sm">
+          <div v-if="preview.reports.length && (preview.total_hours != null || preview.totals_by_currency.length)" class="wr-grand bg-surface border border-neutral-200 rounded-xl p-5 shadow-sm">
             <div class="flex items-baseline justify-between gap-3 flex-wrap">
               <span class="text-xs font-semibold uppercase tracking-wide text-neutral-500">{{ t('workReportTracking.public.total_open') }}</span>
               <div class="text-right">
-                <div class="text-xl font-bold font-mono text-neutral-900">{{ durationTotal(preview.reports.flatMap(report => report.items)) ?? fmtHours(preview.total_hours) }} h</div>
+                <div v-if="preview.total_hours != null" class="text-xl font-bold font-mono text-neutral-900">{{ durationTotal(preview.reports.flatMap(report => report.items)) ?? fmtHours(preview.total_hours) }} h</div>
                 <div v-for="tc in preview.totals_by_currency" :key="tc.currency" class="text-xl font-bold font-mono text-neutral-900">
                   {{ fmtMoney(tc.total_amount, tc.currency) }}
                 </div>
@@ -389,4 +391,8 @@ async function verify() {
 .wr-link:hover {
   text-decoration: underline;
 }
+</style>
+
+<style scoped>
+.wr-compact :is(th, td) { padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.75rem; }
 </style>

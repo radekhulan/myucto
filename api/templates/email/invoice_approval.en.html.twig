@@ -26,7 +26,7 @@
           <td style="padding:4px 0;color:#7A748C;width:42%;">Report</td>
           <td style="padding:4px 0;font-weight:600;color:#15131D;">{{ work_report.title }}</td>
         </tr>
-        {% if work_report.total_hours > 0 %}
+        {% if (work_report.effective_display_options.hours ?? true) and work_report.total_hours > 0 %}
         <tr>
           <td style="padding:4px 0;color:#7A748C;">Total hours</td>
           <td style="padding:4px 0;font-family:monospace;font-weight:600;">{{ work_report.total_hours|number_format(2, '.', ',') }} h</td>
@@ -38,12 +38,14 @@
           <td style="padding:4px 0;font-family:monospace;font-weight:600;">{{ work_report.material_total|number_format(2, '.', ',') }} {{ invoice.currency }}</td>
         </tr>
         {% endif %}
+        {% if work_report.effective_display_options.amount ?? true %}
         <tr>
           <td style="padding:8px 0 0;color:#7A748C;border-top:1px solid #E5E0F4;">Amount</td>
           <td style="padding:8px 0 0;border-top:1px solid #E5E0F4;font-size:18px;font-weight:700;color:{{ accent }};font-family:monospace;">
             {{ (work_report.total_amount + work_report.material_total)|number_format(2, '.', ',') }} {{ invoice.currency }}
           </td>
         </tr>
+        {% endif %}
         {% endif %}
       </table>
     </td>
