@@ -1,0 +1,26 @@
+MyÚčto.cz — Invoicing system================================
+
+Hello,
+------------
+
+
+please find attached a work report for project "Syntetická zakázka" on behalf of Testovací odběratel s.r.o. awaiting your approval.
+
+Report:        Materiál
+Spotřební materiál:      149.85 CZK
+Amount:        149.85 CZK
+
+Once approved, we will send the invoice immediately — everything is automated,
+no need to reply. Approve or reject at:
+
+  https://example.test/approval/token
+
+Full breakdown is attached as a PDF (Vykaz-20960001.pdf).
+
+
+--
+Testovací dodavatel
+
+ 
+--
+Powered by MyÚčto.cz accounting system by MyWebdesign.cz — https://myucto.cz/ · https://mywebdesign.cz/

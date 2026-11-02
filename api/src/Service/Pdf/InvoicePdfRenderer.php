@@ -97,6 +97,7 @@ final class InvoicePdfRenderer
             @filemtime(Bootstrap::rootDir() . '/styles/invoice.css') ?: 0,
             @filemtime(Bootstrap::rootDir() . '/' . PdfBranding::MONOCHROME_CSS) ?: 0,
             @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/invoice.twig') ?: 0,
+            @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/work_report_items.twig') ?: 0,
             @filemtime(__DIR__ . '/TimeBillingPdfPresenter.php') ?: 0,
             @filemtime(__FILE__) ?: 0,
         );
