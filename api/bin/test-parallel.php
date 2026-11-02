@@ -19,6 +19,9 @@ require dirname(__DIR__) . '/vendor/autoload.php';
  *   php api/bin/test-parallel.php
  *   php api/bin/test-parallel.php --processes=4 --application
  *   php api/bin/test-parallel.php --source=myucto_test --keep-databases
+ *   MYINVOICE_TEST_MAX_BATCH_SIZE=20 php api/bin/test-parallel.php --testsuite=AuditCore
+ * Obnova workerů po N třídách omezuje růst jejich paměťových cache; 0 zachová
+ * původní běh bez obnovování. Stejnou volbu lze předat přes --max-batch-size=N.
  */
 
 /** @return never */
@@ -26,6 +29,17 @@ function fail(string $message): never
 {
     fwrite(STDERR, "[PARALLEL TEST] {$message}\n");
     exit(2);
+}
+
+/** @return list<string> */
+function parallelWorkerBatchOptions(mixed $value): array
+{
+    $size = (is_string($value) || is_int($value))
+        ? filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]) : false;
+    if ($size === false) {
+        throw new InvalidArgumentException('--max-batch-size musí být nezáporné celé číslo (0 = bez obnovování workerů).');
+    }
+    return ['--max-batch-size=' . $size];
 }
 
 function quoteIdentifier(string $identifier): string
@@ -372,9 +386,10 @@ if (defined('MYINVOICE_PARALLEL_RUNNER_FUNCTIONS_ONLY')) {
 
 require_once dirname(__DIR__) . '/tests/Support/ParallelRuntime.php';
 
-$options = getopt('', ['processes::', 'source::', 'keep-databases', 'testsuite::', 'application', 'timings::', 'log-junit::', 'rerun-failures', 'green-check', 'audit-check']);
+$options = getopt('', ['processes::', 'max-batch-size::', 'source::', 'keep-databases', 'testsuite::', 'application', 'timings::', 'log-junit::', 'rerun-failures', 'green-check', 'audit-check']);
 if (in_array('--help', $_SERVER['argv'], true) || in_array('-h', $_SERVER['argv'], true)) {
-    fwrite(STDOUT, "Použití: php api/bin/test-parallel.php [--processes=N] [--source=DB] [--keep-databases] [--timings=PATH] [--log-junit=PATH] [--rerun-failures] [--testsuite=Application|Architecture|Invariants|AuditCore|--application]\n"
+    fwrite(STDOUT, "Použití: php api/bin/test-parallel.php [--processes=N] [--max-batch-size=N] [--source=DB] [--keep-databases] [--timings=PATH] [--log-junit=PATH] [--rerun-failures] [--testsuite=Application|Architecture|Invariants|AuditCore|--application]\n"
+        . "        MYINVOICE_TEST_MAX_BATCH_SIZE=N obnoví workery po N třídách i při spuštění přes auditní bránu (výchozí 0).\n"
         . "        php api/bin/test-parallel.php --green-check   (exit 0 = plná sada už prošla nad stejným kódem)\n"
         . "        php api/bin/test-parallel.php --audit-check   (výsledek AuditCore z plné sady nad stejným kódem: 0 = bez pádů, 2 = padlo, 1 = běh chybí)\n");
     exit(0);
@@ -431,6 +446,11 @@ if (is_string($suite) && $suite !== '' && !in_array($suite, ['Application', 'Arc
     fail('--testsuite podporuje jen Application, Architecture, Invariants nebo AuditCore.');
 }
 $rerunFailures = array_key_exists('rerun-failures', $options);
+try {
+    $workerBatchOptions = parallelWorkerBatchOptions($options['max-batch-size'] ?? (getenv('MYINVOICE_TEST_MAX_BATCH_SIZE') !== false ? getenv('MYINVOICE_TEST_MAX_BATCH_SIZE') : 0));
+} catch (InvalidArgumentException $e) {
+    fail($e->getMessage());
+}
 $fullSuite = !$application && ($suite === null || $suite === '');
 // Otisk se bere PŘED během: změna kódu během testů nesmí dostat zelené razítko.
 $fingerprint = $fullSuite ? treeFingerprint(dirname(__DIR__, 2)) : null;
@@ -560,6 +580,7 @@ try {
         $paraTest,
         '--configuration=' . $parallelConfig,
         '--processes=' . $processes,
+        ...$workerBatchOptions,
         '--exclude-group=http-integration',
         '--colors=auto',
     ];
