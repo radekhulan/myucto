@@ -3134,6 +3134,12 @@ i tehdy, když je příloha č. 1 prázdná, když firma nemá vyplněný finan�
 (dosadí se FÚ pro Prahu 1 a je potřeba ho ověřit), a když zaokrouhlení na
 celé koruny zbylo přes.
 
+**Zástupce.** Je-li ke dni vytvoření XML v evidenci zastoupení platný zástupce
+(`Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**), vyplní se
+do obou vyúčtování jako podepisující osoba, stejně jako u přiznání DPH a daně
+z příjmů. Lhůtu vyúčtování ale neprodlužuje žádný zástupce, ani daňový poradce
+s kódem 4b nebo 4c, a aplikace proto u vyúčtování na kód zástupce neupozorňuje.
+
 ### 85.14.24 Žádost o poukázání chybějící částky na daňovém bonusu
 
 Vyplatí-li zaměstnavatel na daňových bonusech víc, než kolik ten měsíc
@@ -3182,6 +3188,8 @@ musíte vrátit sami.
 
 Výstupem je XML pro EPO. Archivuje se se stejným otiskem jako ostatní daňová
 podání a v přehledu podání je najdete ve složce „Daňové bonusy“.
+Zástupce platný ke dni vytvoření XML se do žádosti vyplní jako podepisující
+osoba stejně jako u vyúčtování.
 S [Vyúčtováním daně](#851423-vyuctovani-zalohove-a-srazkove-dane) nemá
 žádost společný formulář ani přílohu; jsou to samostatná podání, byť se
 stejnými částkami vyplacených bonusů v pozadí.

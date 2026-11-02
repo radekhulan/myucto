@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\TaxBonus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollTaxBonusClaimRepository;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
+use MyInvoice\Service\Tax\Return\TaxRepresentationService;
 
 /**
  * Sestaví žádosti o poukázání chybějící částky na daňovém bonusu za jeden
@@ -25,6 +26,7 @@ final class TaxBonusRequestService
         private readonly PayrollTaxBonusClaimRepository $repository,
         private readonly TaxBonusClaimCalculator $calculator,
         private readonly TaxBonusRequestXmlBuilder $xmlBuilder,
+        private readonly TaxRepresentationService $representation,
     ) {}
 
     /**
@@ -67,7 +69,7 @@ final class TaxBonusRequestService
     /**
      * XML jedné žádosti.
      *
-     * @param array{verze_sw?:string,verze_pis?:string,zad_typ?:string,kc_ponech?:int} $meta
+     * @param array{verze_sw?:string,verze_pis?:string,zad_typ?:string,kc_ponech?:int,representation_date?:string} $meta
      * @return array{xml:string,summary:array<string,mixed>,warnings:list<string>}
      */
     public function build(
@@ -94,6 +96,7 @@ final class TaxBonusRequestService
         }
 
         $supplier = EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
+        $meta['representation'] = $this->representation->atSubmissionDate($supplierId, $meta);
         $built = $this->xmlBuilder->build($supplier, $claim, $meta);
 
         return [
