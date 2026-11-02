@@ -48647,7 +48647,10 @@ components:
           oneOf:
             - { $ref: '#/components/schemas/WorkReportDisplayOptions' }
             - { type: "null" }
-          description: Výchozí zobrazení práce pro firmu; null obnoví standardní podobu se všemi sloupci.
+          description: >-
+            Výchozí zobrazení práce pro firmu; null obnoví standardní podobu se všemi sloupci a stejně
+            se uloží i hodnota, která se standardní podobou shoduje. Výkazy vystavených faktur bez vlastní
+            volby si při změně výsledné podoby ponechají dosavadní zobrazení, koncepty převezmou nové.
         invoice_pdf_compact_items: { type: boolean, default: false, description: "Kompaktní řádky položek na PDF faktury: menší odsazení a písmo, rozpis balení a sériová čísla na řádku popisu; víc položek na stranu (migrace 2199)." }
         invoice_pdf_bank_in_footer: { type: boolean, default: false, description: "Bankovní spojení (číslo účtu, IBAN, BIC, banka) v patičce každé strany PDF faktury, platební panel u součtu ukáže jen QR. Uhrazeno, hotově, kartou a vratka beze změny (migrace 2200)." }
         branding_profiles_enabled: { type: boolean, description: "Zapíná volbu brandingových profilů; výchozí hodnota je false." }

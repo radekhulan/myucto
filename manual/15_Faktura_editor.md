@@ -880,9 +880,14 @@ odpovídající společný součet napříč výkazy. Výkaz materiálu si ponec
 Editor nadále ukazuje uložené údaje; skrytí výstupních sloupců nemění sazby, cenu práce
 ani částku faktury a nenahrazuje oprávnění k finančním datům.
 
+Pokud skrytí částky schová součet ve schvalovacím e-mailu, řádek materiálu v něm zůstává;
+u výkazu jen s materiálem zůstává i součet k vyúčtování. Schvalovací stránka ukáže částku
+u jednotlivých řádků práce jen u výkazu, u kterého je podoba změněná proti standardní.
+
 Výchozí podobu nastavuje správce v **Firma → Nastavení** u voleb vzhledu PDF.
-Změna výchozího nastavení se projeví u výkazů bez vlastní výjimky; vystavené PDF
-je potřeba pro změnu vzhledu přegenerovat. Zaškrtnutí dědění ve výkazu jeho výjimku zruší.
+Změna výchozího nastavení se projeví u konceptů faktur bez vlastní výjimky. Výkazy už
+vystavených faktur si ponechají dosavadní podobu i po přegenerování PDF; chcete-li ji
+změnit, nastavte výjimku přímo ve výkazu. Zaškrtnutí dědění ve výkazu jeho výjimku zruší.
 
 **Smazání výkazu.** V editoru klikněte na ikonu odpojit (řetěz). Položka faktury zůstane, ale
 ztratí detailní rozpis.
