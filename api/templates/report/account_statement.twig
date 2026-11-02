@@ -42,8 +42,11 @@
        a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
     .col-date { width: 7%; }
     .col-doc { width: 11%; }
-    .col-desc { width: 49%; }
+    .col-desc { width: 40%; }
+    .col-counter { width: 9%; }
     .col-num { width: 11%; }
+    .unusual { color: #b91c1c; }
+    .sign-note { font-size: 7pt; color: #555; margin-bottom: 2mm; }
 </style>
 </head>
 <body>
@@ -67,7 +70,13 @@
     </tr>
 </table>
 
-<div class="opening-line">Počáteční zůstatek: {{ opening_balance|cz_money }}</div>
+<div class="opening-line">Počáteční zůstatek: <span class="{{ opening_balance_unusual ? 'unusual' : '' }}">{{ (opening_balance_signed ?? opening_balance)|cz_money }}</span></div>
+{% if opening_balance_signed is defined %}
+    <div class="sign-note">Zůstatek je se znaménkem podle typu účtu, červeně neobvyklá strana.</div>
+{% endif %}
+{% if counter_filter %}
+    <div class="sign-note">Filtr protiúčtu: {{ counter_filter.account_code }} {{ counter_filter.name }}. Zůstatek je zůstatek celého účtu.</div>
+{% endif %}
 
 {% if items is empty %}
     <p style="text-align:center; color:#888; padding: 10mm 0;">
@@ -80,6 +89,7 @@
             <th class="thl col-date">Datum</th>
             <th class="thl col-doc">Doklad</th>
             <th class="thl col-desc">Popis</th>
+            <th class="thl col-counter">Protiúčet</th>
             <th class="col-num">MD</th>
             <th class="col-num">D</th>
             <th class="col-num">Zůstatek</th>
@@ -90,21 +100,46 @@
             <tr>
                 <td class="col-date">{{ item.entry_date|cz_date }}</td>
                 <td class="col-doc">{{ item.document_no }}</td>
-                <td class="col-desc">{{ item.description|slice(0, 70) }}</td>
+                <td class="col-desc">{{ item.description|slice(0, 60) }}</td>
+                <td class="col-counter">{{ item.counter_accounts }}</td>
                 <td class="num col-num">{{ item.side == 'debit' ? item.amount|cz_money : '' }}</td>
                 <td class="num col-num">{{ item.side == 'credit' ? item.amount|cz_money : '' }}</td>
-                <td class="num col-num">{{ item.balance|cz_money }}</td>
+                <td class="num col-num {{ item.balance_unusual ? 'unusual' : '' }}">{{ (item.balance_signed ?? item.balance)|cz_money }}</td>
             </tr>
         {% endfor %}
     </tbody>
     <tfoot>
         <tr>
-            <td colspan="3">Obraty za období / konečný zůstatek</td>
+            <td colspan="4">Obraty za období / konečný zůstatek</td>
             <td class="num">{{ turnover_md|cz_money }}</td>
             <td class="num">{{ turnover_d|cz_money }}</td>
-            <td class="num">{{ closing_balance|cz_money }}</td>
+            <td class="num {{ closing_balance_unusual ? 'unusual' : '' }}">{{ (closing_balance_signed ?? closing_balance)|cz_money }}</td>
         </tr>
     </tfoot>
+</table>
+{% endif %}
+
+{% if counter_totals is not empty %}
+<div class="opening-line" style="margin-top:4mm;">Součty podle protiúčtu</div>
+<table class="book">
+    <thead>
+        <tr>
+            <th class="thl col-doc">Protiúčet</th>
+            <th class="thl" style="width:67%;">Název</th>
+            <th class="col-num">MD</th>
+            <th class="col-num">D</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in counter_totals %}
+            <tr>
+                <td class="col-doc">{{ row.account_code ?? 'bez protiúčtu' }}</td>
+                <td>{{ row.name }}</td>
+                <td class="num col-num">{{ row.md|cz_money }}</td>
+                <td class="num col-num">{{ row.d|cz_money }}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
 </table>
 {% endif %}
 

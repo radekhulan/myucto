@@ -356,9 +356,14 @@ final class FinancialStatementService
      * zdaněním a po zdanění, nebo za ním. Účet mimo mapu jde do skupiny „nezařazené"
      * a VH ho zahrnuje, výkaz VZZ ho ale nemá, proto ho kontroly vypíšou.
      *
+     * S `$columns` přidá klíč `columns` ({@see StatementAccountColumns}). Je to jen pro
+     * obrazovku a XLSX: chce navíc dotaz na obraty měsíce, který souhrny nad více firmami
+     * neplatí. Rámec 504 má vlastní pohled a sloupce nemá.
+     *
+     * @param array{hide_zero:bool, analytics:bool}|null $columns
      * @return array<string,mixed>
      */
-    public function accountView(int $supplierId, int $periodId, ?string $asOf, ?DimensionFilter $dimension = null): array
+    public function accountView(int $supplierId, int $periodId, ?string $asOf, ?DimensionFilter $dimension = null, ?array $columns = null): array
     {
         $context = $this->frameworkResolver->context($supplierId, $periodId, $asOf);
         if ($context['framework'] === 'cz_504') {
@@ -385,6 +390,16 @@ final class FinancialStatementService
             $dimension !== null ? ['dimension' => $dimension] : [], true,
         );
 
+        $sectionOf = function (string $accountCode) use ($map, $sectionByRow): string {
+            foreach ($this->mapper->entriesFor($map, $accountCode, null) as $m) {
+                $section = $sectionByRow[(string) $m['row_code']] ?? null;
+                if ($section !== null) {
+                    return $section;
+                }
+            }
+            return 'unassigned';
+        };
+
         $balanceLeaves = [];
         $plLeaves = [];
         $technicalCents = 0;
@@ -407,14 +422,7 @@ final class FinancialStatementService
             if (in_array($type, ['asset', 'liability', 'equity'], true)) {
                 $balanceLeaves[] = $leaf;
             } elseif ($type === 'revenue' || $type === 'expense') {
-                $section = null;
-                foreach ($this->mapper->entriesFor($map, $leaf['account_code'], null) as $m) {
-                    $section = $sectionByRow[(string) $m['row_code']] ?? null;
-                    if ($section !== null) {
-                        break;
-                    }
-                }
-                $leaf['section'] = $section ?? 'unassigned';
+                $leaf['section'] = $sectionOf($leaf['account_code']);
                 $plLeaves[] = $leaf;
             } elseif ($type === 'closing') {
                 $technicalCents += $delta;
@@ -502,7 +510,25 @@ final class FinancialStatementService
                 'technical_residual' => $money($technicalCents),
                 'unassigned_count'   => count($sections['unassigned']['expenses']) + count($sections['unassigned']['revenues']),
             ],
-        ];
+        ] + ($columns === null ? [] : ['columns' => $this->accountColumns($supplierId, $raw, $sectionOf, $from, $asOf, $dimension, $columns)]);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $raw
+     * @param callable(string):string $sectionOf
+     * @param array{hide_zero:bool, analytics:bool} $options
+     * @return array<string,mixed>
+     */
+    private function accountColumns(int $supplierId, array $raw, callable $sectionOf, string $from, string $asOf, ?DimensionFilter $dimension, array $options): array
+    {
+        // Období nemusí začínat prvním dnem měsíce, obrat měsíce pak jde od jeho začátku.
+        $monthFrom = max(substr($asOf, 0, 7) . '-01', $from);
+        $monthRows = $this->ledger->monthlyTurnovers(
+            $supplierId, $monthFrom, $asOf, true, $dimension !== null ? ['dimension' => $dimension] : [], true,
+        );
+        return StatementAccountColumns::build($raw, $monthRows, $sectionOf, self::ACCOUNT_VIEW_SECTIONS, $options + [
+            'from' => $from, 'month_from' => $monthFrom, 'as_of' => $asOf,
+        ]);
     }
 
     /** Skupiny výsledkových účtů pohledu po účtech, v pořadí výsledovky. */

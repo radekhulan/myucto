@@ -86,9 +86,25 @@ function queryParams() {
   }
 }
 
+const hideZero = ref(true)
+const showAnalytics = ref(true)
+
 function accountsParams(): Omit<StatementParams, 'scope'> {
   const { period_id, as_of, dimension_value_id, dimension_descendants } = queryParams() as StatementParams
-  return { period_id, as_of, dimension_value_id, dimension_descendants }
+  return {
+    period_id, as_of, dimension_value_id, dimension_descendants,
+    columns: 1, hide_zero: hideZero.value ? 1 : 0, analytics: showAnalytics.value ? 1 : 0,
+  }
+}
+
+function onHideZero(value: boolean) {
+  hideZero.value = value
+  void load()
+}
+
+function onShowAnalytics(value: boolean) {
+  showAnalytics.value = value
+  void load()
 }
 
 function switchView(next: 'statement' | 'accounts') {
@@ -336,7 +352,9 @@ onMounted(async () => {
         · {{ t('accounting.balance_sheet.prepared_at') }}: {{ accountsReport.entity.prepared_at }}
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
-      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm" />
+      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm"
+        :hide-zero="hideZero" :show-analytics="showAnalytics"
+        @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
     </template>
 
     <template v-else-if="report">

@@ -233,8 +233,10 @@ final class FinancialStatementAction
         $params = $this->validateParams($request, $response, $supplierId, $err);
         if ($params === null) return $err;
 
+        $columns = (string) ($request->getQueryParams()['columns'] ?? '') === '1' ? $this->columnOptions($request) : null;
+
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null);
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $columns);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -274,7 +276,7 @@ final class FinancialStatementAction
         }
 
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null);
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $format === 'xlsx' ? $this->columnOptions($request) : null);
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit]),
@@ -300,6 +302,20 @@ final class FinancialStatementAction
             ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
             ->withHeader('Content-Length', (string) strlen($out['bytes']))
             ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Přepínače sloupcového pohledu, stejné pro obrazovku i XLSX.
+     *
+     * @return array{hide_zero:bool, analytics:bool}
+     */
+    private function columnOptions(Request $request): array
+    {
+        $q = $request->getQueryParams();
+        return [
+            'hide_zero' => (string) ($q['hide_zero'] ?? '1') !== '0',
+            'analytics' => (string) ($q['analytics'] ?? '1') !== '0',
+        ];
     }
 
     /** @param 'balance_sheet'|'income_statement'|'income_statement_purpose' $type */

@@ -18344,12 +18344,12 @@
     },
     "balance_inventory": {
       "title": "Inventarizace rozvahových účtů",
-      "subtitle": "Soupis rozvahových účtů (třídy 0–4) s konečným zůstatkem k rozvahovému dni, doložením a prostorem pro podpis (§29–30 ZoÚ).",
+      "subtitle": "Soupis rozvahových účtů (třídy 0–4) po analytikách s konečným zůstatkem k rozvahovému dni, doložením a podpisy (§29–30 ZoÚ).",
       "empty": "K rozvahovému dni nejsou žádné rozvahové účty se zůstatkem ani pohybem.",
       "filter_period": "Období",
       "export_pdf": "Export PDF",
       "export_xlsx": "Export XLSX",
-      "as_of_hint": "Rozvahový den: {date}. Sloupce „Skutečný stav“ a „Rozdíl“ se doplňují ručně po provedené inventuře - jsou v exportu (PDF/XLSX).",
+      "as_of_hint": "Rozvahový den: {date}. Export (PDF/XLSX) je vyplněný protokol s uloženým skutečným stavem, rozdílem, poznámkou a místem pro podpisy. Nenapočítané účty zůstanou prázdné k ručnímu doplnění.",
       "draft_warning": "V období je {n} nezaúčtovaných konceptů - nejsou zahrnuty do zůstatků.",
       "sign_hint": "Účetní i skutečný stav se uvádí na normální straně účtu - u pasivních účtů (závazky, oprávky, vlastní kapitál) tedy kladné číslo. Účty bez určené strany (±, např. 343 nebo 431) se uvádí znaménkově: kladně na MD, záporně na Dal.",
       "col_account": "Účet",
@@ -18381,7 +18381,19 @@
       "save_complete": "Uložit a dokončit",
       "saved": "Inventarizace uložena.",
       "saved_completed": "Inventarizace dokončena.",
-      "completed_blocked": "Nelze dokončit - {count} nevyřešených rozdílů. Vyřešte je (potvrďte nebo naprav) před dokončením."
+      "completed_blocked": "Nelze dokončit - {count} nevyřešených rozdílů. Vyřešte je (potvrďte nebo naprav) před dokončením.",
+      "rolled_up_hint": "Protokol je za některé syntetiky uložený souhrnně. Po vymazání skutečného stavu a uložení se účet rozpadne na analytiky.",
+      "confirm_zero": "Potvrdit nulové účty",
+      "open_items": {
+        "title": "Soupis otevřených položek",
+        "hint": "Podklad k inventarizaci průběžných účtů k {date}. Bez zadání ukáže 261, 335, 395 a zúčtovací účty z osnovy.",
+        "codes_ph": "Účty, např. 261, 335, 395",
+        "show": "Zobrazit",
+        "empty": "Vybrané účty nemají k datu žádný pohyb.",
+        "col_count": "Položek",
+        "col_check": "Kontrola",
+        "truncated": "Zobrazena jen část položek, účet jich má {total}. Celý soupis je v exportu."
+      }
     },
     "offsets": {
       "title": "Zápočty",
@@ -18638,7 +18650,7 @@
     },
     "account_statement": {
       "title": "Opis účtu",
-      "subtitle": "Chronologický opis zápisů na účtu s běžícím zůstatkem.",
+      "subtitle": "Chronologický opis zápisů na účtu s běžícím zůstatkem. Zůstatek je se znaménkem podle typu účtu, neobvyklá strana je červeně.",
       "empty": "Žádné pohyby ve zvoleném rozsahu.",
       "filter_from": "Od",
       "filter_to": "Do",
@@ -18706,6 +18718,22 @@
         "reversed": "stornováno",
         "close": "Zavřít",
         "empty": "K datu nejsou žádné otevřené položky."
+      },
+      "mode_inventory": "Inventura účtu",
+      "filter_counter": "Protiúčet",
+      "counter_all": "Všechny protiúčty",
+      "counter_none": "bez protiúčtu",
+      "counter_totals_title": "Součty podle protiúčtu",
+      "counter_totals_hint": "Složený zápis se dělí poměrem řádků protistrany. Kliknutím na řádek opis vyfiltrujete.",
+      "counter_total": "Celkem = obrat účtu",
+      "counter_filter_note": "Filtr protiúčtu {account}: podíl na obratu MD {md}, Dal {d}. Zůstatek v řádcích je zůstatek celého účtu.",
+      "inventory": {
+        "subtitle": "Účetní a skutečný stav účtu a jeho analytik z inventarizačního protokolu.",
+        "as_of": "Inventura k rozvahovému dni {date}",
+        "open_protocol": "Otevřít protokol",
+        "not_applicable": "Výsledkové účty se neinventarizují. Vedou do účtu 710, obraty najdete v opisu účtu.",
+        "no_rows": "Účet nemá v období žádný pohyb.",
+        "no_period": "K tomuto datu není založené účetní období."
       }
     },
     "section18": {
@@ -18786,7 +18814,7 @@
       "tab_statement": "Výkaz",
       "tab_accounts_balance": "Účet 702 (po účtech)",
       "tab_accounts_income": "Účet 710 (po účtech)",
-      "note_before_closing": "Zůstatky účtů před uzavřením účetních knih, bez uzávěrkového zápisu. Kliknutím na účet otevřete jeho opis.",
+      "note_before_closing": "Zůstatky účtů před uzavřením účetních knih, bez uzávěrkového zápisu. Kliknutím na účet otevřete jeho inventuru.",
       "closed_note": "Rok je uzavřený, zůstatky odpovídají obsahu účtů 702 a 710.",
       "show_analytics": "Zobrazit analytiky",
       "col_account": "Účet",
@@ -18847,7 +18875,23 @@
         "src_dppo": "Náhled DPPO",
         "src_dppo_adjustments": "Úpravy základu DPPO",
         "src_advances": "Zálohy"
-      }
+      },
+      "hide_zero": "Skrýt nulové účty",
+      "col_ps": "Počáteční stav",
+      "col_month": "Obrat {month}",
+      "col_ytd": "Obrat od {date}",
+      "col_ks": "Konečný stav",
+      "side_assets": "Aktiva",
+      "side_liabilities": "Pasiva",
+      "side_expenses": "Náklady",
+      "side_revenues": "Výnosy",
+      "total_assets": "Aktiva celkem",
+      "total_liabilities": "Pasiva celkem",
+      "total_liabilities_result": "Pasiva s výsledkem hospodaření",
+      "total_expenses": "Náklady celkem",
+      "total_revenues": "Výnosy celkem",
+      "open_inventory": "Otevřít inventuru účtu",
+      "sign_hint": "Znaménko podle typu účtu: aktiva a náklady MD − Dal, pasiva a výnosy Dal − MD. U každého účtu platí počáteční stav + obrat od začátku období = konečný stav. Neobvyklá strana je červeně; oprávky jsou v aktivech záporně a neobvyklé nejsou."
     },
     "income_statement": {
       "title": "Výkaz zisku a ztráty",
@@ -19401,7 +19445,8 @@
         "accruals": "Časové rozlišení (381–385)",
         "statement_notes": "Příloha k účetní závěrce (§ 18/1/c)",
         "cash_flow": "Přehled o peněžních tocích (§ 18/2)",
-        "equity_changes": "Přehled o změnách vlastního kapitálu (§ 18/2)"
+        "equity_changes": "Přehled o změnách vlastního kapitálu (§ 18/2)",
+        "open_items": "Soupis otevřených položek (261, 335, 395 a zúčtovací účty)"
       },
       "edit_notes": "Vyplnit přílohu",
       "notes_incomplete_hint": "Přílohu k závěrce lze doplnit v editoru - vyplněné sekce se do balíčku promítnou při dalším vygenerování."
