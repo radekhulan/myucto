@@ -21,6 +21,7 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
+use MyInvoice\Service\Accounting\OtherItemKindService;
 use MyInvoice\Service\Ai\AccountingAssistantService;
 use MyInvoice\Service\Ai\AiAssistantHistoryService;
 use MyInvoice\Service\Ai\AiInternalDocumentValidator;
@@ -329,6 +330,7 @@ final class AccountingAssistantInternalDocumentTest extends TestCase
             $c->get(ChartOfAccountsRepository::class),
             $c->get(VatStatusService::class),
             $c->get(AiInternalDocumentValidator::class),
+            $c->get(OtherItemKindService::class),
         );
     }
 

@@ -126,8 +126,13 @@ její deaktivace nebo odebrání firmy se projeví bez nového přihlášení a 
 
 **Správce instance** zajišťuje technický provoz bez přístupu k firemním agendám. Aktivní účet zabírá uživatelské
 licenční místo, mzdové místo nečerpá. Přihlašuje se běžným účtem, může používat vlastní MFA a po přihlášení otevře samostatnou
-**Správu instance**. Superadmin do ní může vstoupit také z menu Systém. Na spravované instalaci se o provoz stará
-provozovatel a Správa instance tam není dostupná.
+**Správu instance** mimo běžné pracovní panely a firemní menu aplikace. Horní lišta vypadá stejně jako v aplikaci, menu
+ale obsahuje jen **Přehled** a **Profil** a chybí v ní přepínač firem. Téma, jazyk a odhlášení jsou v uživatelském menu
+vpravo nahoře, na mobilu ve vysouvacím menu.
+
+Superadmin otevírá stejnou správu tlačítkem **Správa instance** na stránce **Systém → Diagnostika** jako běžnou stránku
+v pracovním panelu. Přímý odkaz na technickou plochu ho přesměruje do této integrované správy. Na spravované instalaci se
+o provoz stará provozovatel: Správa instance tam není dostupná a tlačítko se nezobrazí.
 
 **Založení a rozsah:**
 

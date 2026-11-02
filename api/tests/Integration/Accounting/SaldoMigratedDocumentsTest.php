@@ -685,7 +685,122 @@ final class SaldoMigratedDocumentsTest extends TestCase
         self::assertSame(self::cents(300.00), self::cents($early[$piA] ?? 0), 'Zápočet po rozvahovém dni nevyrovnává.');
     }
 
+    /**
+     * Ruční zápis 321/365 vyrovnává přijatou fakturu a účetní ho k ní eviduje dvakrát:
+     * zápočtem i měkkou vazbou. Částka se smí započíst jednou. Dřív kontrola hlásila doklad
+     * jako přeplacený a částečné vyrovnání by v saldokontu vypadalo jako dvojnásobné.
+     */
+    public function testManualEntryWithSettlementAndLinkCountsOnce(): void
+    {
+        $vendor = $this->client('Zápočet s vazbou dodavatel');
+        $paid = $this->purchaseInvoice($vendor, 2799.00, self::YEAR . '-03-01', self::YEAR . '-03-15');
+        $this->postPurchase($paid, [self::l('518', 'debit', 2799.00), self::l('321', 'credit', 2799.00)], self::YEAR . '-03-01');
+        $this->settleByManualEntry('purchase_invoice', $paid, 2799.00, self::YEAR . '-03-20');
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")->execute([self::YEAR . '-03-20', $paid]);
+
+        $closing = new ClosingRepository($this->db);
+        self::assertNotContains($paid, array_column($closing->paidPurchasesOpenSaldo($this->supplierId, self::YEAR . '-03-31'), 'id'));
+
+        $partial = $this->purchaseInvoice($vendor, 1000.00, self::YEAR . '-04-01', self::YEAR . '-04-15');
+        $this->postPurchase($partial, [self::l('518', 'debit', 1000.00), self::l('321', 'credit', 1000.00)], self::YEAR . '-04-01');
+        $this->settleByManualEntry('purchase_invoice', $partial, 400.00, self::YEAR . '-04-20');
+
+        $acc = $this->account('321', self::YEAR . '-04-30');
+        self::assertSame(0, self::cents($acc['difference']), 'Saldokonto musí sedět na hlavní knihu.');
+        self::assertSame(self::cents(600.00), self::cents($acc['open_items_total']), 'Zbývá 600, ne 200.');
+    }
+
+    /** Vydaná faktura: zápočet s evidovanou platbou a zároveň vazba na tentýž zápis. */
+    public function testManualEntryWithIssuedSettlementAndLinkCountsOnce(): void
+    {
+        $client = $this->client('Zápočet s vazbou odběratel');
+        $inv = $this->invoice($client, 500.00, self::YEAR . '-03-03', self::YEAR . '-03-17');
+        $this->posting->postDocument($this->supplierId, 'invoice', $inv, [
+            self::l('311', 'debit', 500.00), self::l('602', 'credit', 500.00),
+        ], $this->opts(self::YEAR . '-03-03'));
+        $this->settleByManualEntry('invoice', $inv, 500.00, self::YEAR . '-03-20');
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_total = 500.00, paid_at = ? WHERE id = ?")->execute([self::YEAR . '-03-20', $inv]);
+
+        $closing = new ClosingRepository($this->db);
+        self::assertNotContains($inv, array_column($closing->paidInvoicesOpenSaldo($this->supplierId, self::YEAR . '-03-31'), 'id'));
+    }
+
+    /**
+     * Vazba bez evidovaného zápočtu vyrovnává dál: kontrola zápočtů se jí nesmí dotknout.
+     */
+    public function testManualEntryWithLinkOnlyStillSettles(): void
+    {
+        $vendor = $this->client('Jen vazba dodavatel');
+        $pi = $this->purchaseInvoice($vendor, 300.00, self::YEAR . '-03-01', self::YEAR . '-03-15');
+        $this->postPurchase($pi, [self::l('518', 'debit', 300.00), self::l('321', 'credit', 300.00)], self::YEAR . '-03-01');
+        $entry = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            self::l('321', 'debit', 300.00), self::l('365', 'credit', 300.00),
+        ], $this->opts(self::YEAR . '-03-20'));
+        $this->links->add($entry, $this->supplierId, 'purchase_invoice', $pi, null, $this->userId);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = ? WHERE id = ?")->execute([self::YEAR . '-03-20', $pi]);
+
+        $closing = new ClosingRepository($this->db);
+        self::assertNotContains($pi, array_column($closing->paidPurchasesOpenSaldo($this->supplierId, self::YEAR . '-03-31'), 'id'));
+        self::assertNull($this->partner($this->account('321', self::YEAR . '-03-31'), $vendor));
+    }
+
+    /**
+     * Kontrola zaplacené proformy: inkaso na účtu záloh i na 311 je v deníku, bez inkasa
+     * nebo s inkasem jinam se hlásí. Firma může z 311 přejít na 324 a staré roky nechat být.
+     */
+    public function testPaidProformaFindingAcceptsAdvanceAccountAnd311(): void
+    {
+        $client = $this->client('Proforma kontrola');
+        $paidProforma = function (string $date) use ($client): int {
+            $id = $this->invoice($client, 1210.00, $date, $date);
+            $this->db->pdo()->prepare("UPDATE invoices SET invoice_type = 'proforma', status = 'paid', paid_at = ? WHERE id = ?")->execute([$date, $id]);
+            return $id;
+        };
+        $collect = function (int $proforma, string $date, string $account): void {
+            $tx = $this->bankInvoicePayment($proforma, 1210.00, $date);
+            $this->posting->postDocument($this->supplierId, 'bank', $tx, [
+                self::l('221', 'debit', 1210.00),
+                self::l($account, 'credit', 1210.00),
+            ], $this->opts($date));
+        };
+
+        $on324 = $paidProforma(self::YEAR . '-05-01');
+        $collect($on324, self::YEAR . '-05-02', '324');
+        $on311 = $paidProforma(self::YEAR . '-05-03');
+        $collect($on311, self::YEAR . '-05-04', '311');
+        $elsewhere = $paidProforma(self::YEAR . '-05-05');
+        $collect($elsewhere, self::YEAR . '-05-06', '602');
+        $missing = $paidProforma(self::YEAR . '-05-07');
+
+        $found = array_column((new ClosingRepository($this->db))->paidProformasWithoutAdvance($this->supplierId, self::YEAR . '-05-31'), 'id');
+        self::assertNotContains($on324, $found);
+        self::assertNotContains($on311, $found);
+        self::assertContains($elsewhere, $found);
+        self::assertContains($missing, $found);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** Ruční zápis vyrovnávající doklad, navázaný na něj zápočtem i měkkou vazbou. */
+    private function settleByManualEntry(string $docType, int $docId, float $amount, string $date): void
+    {
+        $lines = $docType === 'invoice'
+            ? [self::l('365', 'debit', $amount), self::l('311', 'credit', $amount)]
+            : [self::l('321', 'debit', $amount), self::l('365', 'credit', $amount)];
+        $entry = $this->posting->postDocument($this->supplierId, 'manual', null, $lines, $this->opts($date));
+        $pdo = $this->db->pdo();
+        $payment = null;
+        if ($docType === 'invoice') {
+            $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source) VALUES (?, ?, ?, ?, 'CZK', 'settlement')")
+                ->execute([$this->supplierId, $docId, $date, $amount]);
+            $payment = (int) $pdo->lastInsertId();
+        }
+        $account = (int) $pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '365'")->fetchColumn();
+        $pdo->prepare("INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, note, status, journal_entry_id, invoice_payment_id, created_by)
+                       VALUES (?, ?, ?, ?, ?, ?, 'zápočet', 'confirmed', ?, ?, ?)")
+            ->execute([$this->supplierId, $docType, $docId, $date, $amount, $account, $entry, $payment, $this->userId]);
+        $this->links->add($entry, $this->supplierId, $docType, $docId, null, $this->userId);
+    }
 
     /**
      * Doklad zaúčtovaný víc zápisy jako po převodu: první nese zdroj dokladu, další jsou

@@ -163,11 +163,12 @@ Kontrola porovnává evidenční stav dokladu, platební vazby a deník:
 
 - zaplacené vydané faktury s otevřeným saldem na 311,
 - zaplacené přijaté faktury s otevřeným saldem na 321,
-- zaplacené proformy bez zaúčtované přijaté zálohy na 324,
+- zaplacené proformy, které nemají inkaso na účtu přijatých záloh ani na 311,
 - zaplacené zálohové přijaté faktury bez úhrady na 314,
 - doklady stále ve stavu odeslané/přijaté, přestože účetní saldo už je
   vyrovnané,
-- nesoulady spárované platby v částce, měně, protistraně nebo použití kurzu,
+- nesoulady spárované platby v částce, měně, protistraně nebo použití kurzu;
+  u plateb kartou se protistrana neporovnává, banka v ní neuvádí obchodníka,
 - realizované kurzové rozdíly, které nebyly zaúčtované na 563/663,
 - otevřené cizoměnové položky určené k přecenění,
 - řádky devizových účtů s neúplnou stopou měny a

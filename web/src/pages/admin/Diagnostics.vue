@@ -193,9 +193,20 @@ const canBuild = computed(() => {
 
 <template>
   <div class="max-w-4xl mx-auto">
-    <header class="mb-6">
-      <h1 class="text-2xl font-semibold text-neutral-900">{{ t('diagnostics.title') }}</h1>
-      <p class="text-sm text-neutral-500 mt-0.5">{{ t('diagnostics.subtitle') }}</p>
+    <header class="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold text-neutral-900">{{ t('diagnostics.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ t('diagnostics.subtitle') }}</p>
+      </div>
+      <RouterLink
+        v-if="isAdmin && !auth.isManagedInstallation"
+        to="/admin/instance"
+        :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+        data-testid="diagnostics-instance-admin"
+      >
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+        {{ t('instance_admin.title') }}
+      </RouterLink>
     </header>
 
     <div

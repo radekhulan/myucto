@@ -1,5 +1,11 @@
 import { bankApi, type BankStatement } from '@/api/bank'
 
+export function statementDownloadsWithMovements<T extends { transaction_count: number }>(
+  s: { evidence_statements?: T[] } | null | undefined,
+): T[] {
+  return (s?.evidence_statements ?? []).filter(source => source.transaction_count > 0)
+}
+
 export function statementClosingBalance(s: BankStatement): number | null {
   return s.curr_balance ?? s.balance_calculation?.confirmed_closing ?? s.balance_calculation?.closing ?? null
 }

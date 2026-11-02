@@ -47,6 +47,11 @@ final class ListPurchaseInvoicesAction
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
+        foreach (['has_visual_document', 'has_structured_source'] as $key) {
+            if (array_key_exists($key, $filter) && !in_array($filter[$key], ['0', '1'], true)) {
+                return Json::error($response, 'validation_failed', "filter[{$key}] musí být 0 nebo 1.", 422);
+            }
+        }
         if (($filter['include_dimensions'] ?? null) === '1'
             && !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
@@ -93,6 +98,8 @@ final class ListPurchaseInvoicesAction
             'paid_shortfall' => !empty($filter['paid_shortfall']),
             'payment_ordered' => $filter['payment_ordered'] ?? null,
             'booked'        => $filter['booked'] ?? null,
+            'has_visual_document' => $filter['has_visual_document'] ?? null,
+            'has_structured_source' => $filter['has_structured_source'] ?? null,
             'import_batch_id' => $filter['import_batch_id'] ?? null,
             'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
             'group_by_month' => !is_scalar($filter['group_by_month'] ?? null) || (string) $filter['group_by_month'] !== '0',
@@ -111,7 +118,11 @@ final class ListPurchaseInvoicesAction
         $default = (int) $this->config->get('pagination.invoices_per_page', 50);
         $perPage = min(200, max(5, (int) ($q['per_page'] ?? $default)));
 
-        $result = $this->repo->listGroupedByMonth($filters, $page, $perPage);
+        // Bez práva číst Dokumenty se počítá jen vlastní archiv faktury.
+        $documentViewer = isset($filter['has_visual_document'])
+            && RequestAuthorization::allows($request, 'documents', AccessLevel::READ)
+            ? DocumentViewerResolver::fromRequest($request) : null;
+        $result = $this->repo->listGroupedByMonth($filters, $page, $perPage, $documentViewer);
 
         // Jednotný kontrakt zámku per-row (Epic F6, §4.5) — batch přes lockedMapForSources,
         // jeden IN dotaz na posted zápisy, žádné N+1.

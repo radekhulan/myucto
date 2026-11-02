@@ -460,6 +460,32 @@ final class SyntheticPohodaExport
             . '<typ:sourceDocument><typ:number>BAN9990001</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
     }
 
+    /** Doklady, jejichž skupinu párovacího symbolu má POHODA vyrovnanou ({@see withClosedPairingGroups()}). */
+    public const PAIRED_ISSUED = '26FV0090';
+    public const PAIRED_PURCHASE = '26PF0090';
+
+    /**
+     * Vydaná a přijatá faktura z 1 210 Kč, které POHODA vede jako neuhrazené, ale v deníku je
+     * vyrovnává interní doklad se stejným párovacím symbolem.
+     */
+    public static function withClosedPairingGroups(string $dir): void
+    {
+        $paired = static fn (string $symbol, string $entry): string => str_replace(
+            '</act:accountingItem>',
+            '<act:pairing><act:symbol>' . $symbol . '</act:symbol></act:pairing></act:accountingItem>',
+            $entry,
+        );
+        self::append($dir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('issuedInvoice', self::PAIRED_ISSUED, '260090', '2026-04-01', 1000, 210));
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('receivedInvoice', self::PAIRED_PURCHASE, '260091', '2026-04-01', 1000, 210));
+        self::append($dir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            $paired('260090', self::entry('Vydané faktury', self::PAIRED_ISSUED, 'Služby', 1210, '311001', '602000', '2026-04-01'))
+            . $paired('260090', self::entry('Interní doklady', '26IN0090', 'Vyrovnání faktury', 1210, '518000', '311001', '2026-04-20'))
+            . $paired('260091', self::entry('Přijaté faktury', self::PAIRED_PURCHASE, 'Materiál', 1210, '518000', '321001', '2026-04-01'))
+            . $paired('260091', self::entry('Interní doklady', '26IN0091', 'Vyrovnání faktury', 1210, '321001', '602000', '2026-04-21')));
+    }
+
     /** Zápis deníku se střediskem VYUKA, 500 Kč na 518000 / 321001. */
     public const CENTRE_DOCUMENT = '26IN0099';
 

@@ -7,6 +7,7 @@ import {
   createRouter,
   useRoute,
   type Router,
+  type RouteLocationRaw,
 } from 'vue-router'
 
 vi.mock('@/i18n', () => ({
@@ -112,6 +113,7 @@ function createHarness(options: {
   switchSupplier?: (id: number) => Promise<boolean>
   frames?: boolean
   routerFactory?: () => Router
+  globalNavigate?: (to: RouteLocationRaw) => void
 } = {}): Harness {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -129,6 +131,7 @@ function createHarness(options: {
     currentSupplier: () => options.supplier ?? { id: 0, name: '' },
     switchSupplier: options.switchSupplier,
     frames: options.frames,
+    globalNavigate: options.globalNavigate,
     frameContainer: () => frameContainer,
   })
 
@@ -207,6 +210,31 @@ afterEach(() => {
 })
 
 describe('workspace window manager', () => {
+  it('otevření globálního cíle napravo nerozdělí pracovní plochu', async () => {
+    const globalNavigate = vi.fn()
+    const { manager, store } = createHarness({ globalNavigate })
+    await manager.open('/editor/1', 'primary')
+    const before = JSON.stringify(store.$state)
+    await manager.openRight('/instance-admin', 'primary')
+    expect(globalNavigate).toHaveBeenCalledWith('/instance-admin')
+    expect(JSON.stringify(store.$state)).toBe(before)
+  })
+
+  it.each([false, true])('předá globální cíl hlavnímu routeru bez změny panelu (iframe: %s)', async frames => {
+    if (frames) vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set').mockImplementation(() => undefined)
+    const globalNavigate = vi.fn()
+    const { manager, store } = createHarness({ frames, supplier: { id: 1, name: 'Test' }, globalNavigate })
+    await manager.open('/editor/1', 'primary')
+    const before = JSON.stringify(store.$state)
+    await manager.open('/instance-admin?tab=smtp#targets', 'primary')
+    await manager.open({ name: 'instance-admin' }, 'primary', { fresh: true })
+    expect(globalNavigate.mock.calls).toEqual([
+      ['/instance-admin?tab=smtp#targets'],
+      [{ name: 'instance-admin' }],
+    ])
+    expect(JSON.stringify(store.$state)).toBe(before)
+  })
+
   it.each([1, 2, 3] as const)('nové čisté okno zachová rozepsanou instanci stejné stránky při %i panelech', async panes => {
     const harness = createHarness({ panes })
     const mounts = harness.store.panes.map(pane => harness.attachPane(pane.id))

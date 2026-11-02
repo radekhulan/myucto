@@ -611,7 +611,7 @@ kapitoly manuálu.
 
 Kontroluje se verze PHP a povinná rozšíření, klíčové hodnoty `php.ini` (`memory_limit`,
 limity nahrávání, časové pásmo, OPcache), verze a nastavení MariaDB, dostupnost Redisu,
-volné místo a práva zápisu, shoda časových pásem, stav databázových migrací, struktura
+volné a celkové místo na disku (na spravované instalaci ho hlídá provozovatel a kontrola se nezobrazuje) a práva zápisu, shoda časových pásem, stav databázových migrací, struktura
 databáze proti migracím ([§ 999.6.1.3](#999613-struktura-databaze)), poslední běhy
 plánovaných úloh, stav licence, dostupnost novější verze aplikace a šifrování mzdového
 archivu ([§ 999.6.1.4](#999614-sifrovani-mzdoveho-archivu-a-rotace-klice)).

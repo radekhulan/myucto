@@ -91,12 +91,41 @@ final class DocumentItemsPayload
      * kdežto tělo requestu nese cokoliv od `1` po `"1.000"` — string compare by z formátové
      * neshody udělal účetní změnu a zablokoval legitimní `force_mode=notes_only`.
      *
+     * Klasifikace DPH se dopočítává, jen když v těle chybí. Poslaná je rozhodnutí o řádku
+     * přiznání, takže její změna je změna položky ({@see self::classificationChanged()}).
+     *
      * @param array<int,mixed> $old
      * @param array<int,mixed> $new
      */
     public static function changed(array $old, array $new): bool
     {
-        return self::fingerprint($old) !== self::fingerprint($new);
+        return self::fingerprint($old) !== self::fingerprint($new)
+            || self::classificationChanged($old, $new);
+    }
+
+    /**
+     * Přesune poslaný kód řádek v přiznání a KH? Vynechaný klíč nic neříká, kód se dopočítá
+     * ze zadaných polí a ta hlídá otisk. Řádky se párují pořadím, přidaný nebo ubraný řádek
+     * otisk zachytí sám.
+     *
+     * @param array<int,mixed> $old
+     * @param array<int,mixed> $new
+     */
+    private static function classificationChanged(array $old, array $new): bool
+    {
+        $old = array_values($old);
+        foreach (array_values($new) as $i => $item) {
+            if (!is_array($item) || InvoiceItemKind::isText($item)
+                || !array_key_exists('vat_classification_code', $item)) {
+                continue;
+            }
+            $stored = is_array($old[$i] ?? null) ? ($old[$i]['vat_classification_code'] ?? '') : '';
+            if ((string) ($item['vat_classification_code'] ?? '') !== (string) $stored) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

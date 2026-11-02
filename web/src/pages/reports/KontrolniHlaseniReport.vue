@@ -37,6 +37,10 @@ function sectionBookRoute(section: string) {
 }
 const loading = ref(true)
 const error = ref('')
+const postFilingDocs = computed(() => preview.value?.post_filing_changes?.documents ?? [])
+function formatAmount(value: number): string {
+  return new Intl.NumberFormat(locale.value, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+}
 
 type KhSectionRow = {
   code: string
@@ -245,6 +249,31 @@ onMounted(() => { void initialize() })
       </div>
 
       <PendingApprovalVatNotice :findings="crossCheck" />
+
+      <!-- Rozdíly dnešního hlášení proti podanému XML -->
+      <div v-if="postFilingDocs.length > 0" data-testid="kh-post-filing"
+        class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 space-y-2">
+        <strong>{{ t('reports.kh.post_filing.title') }}</strong>
+        <p class="text-xs">{{ t('reports.kh.post_filing.hint') }}</p>
+        <ul class="list-disc list-inside">
+          <li v-for="d in postFilingDocs" :key="d.section + d.status + d.doc_number">
+            <span class="font-mono">{{ d.section }}</span>
+            <span v-if="d.doc_number" class="font-mono"> {{ d.doc_number }}</span>
+            - {{ t(`reports.kh.post_filing.status.${d.status}`) }}
+            <span class="text-xs text-neutral-500">
+              <template v-if="d.filed">{{ t('reports.kh.post_filing.filed') }}: {{ formatAmount(d.filed.base) }} / {{ formatAmount(d.filed.vat) }}</template>
+              <template v-if="d.filed && d.current"> · </template>
+              <template v-if="d.current">{{ t('reports.kh.post_filing.current') }}: {{ formatAmount(d.current.base) }} / {{ formatAmount(d.current.vat) }}</template>
+            </span>
+          </li>
+        </ul>
+        <RouterLink
+          v-if="preview.post_filing_changes?.submission"
+          :to="`/reports/submissions/${preview.post_filing_changes.submission.id}/kh-evidence`"
+          class="text-xs font-medium underline hover:no-underline"
+          data-testid="kh-post-filing-evidence"
+        >{{ t('reports.kh.post_filing.evidence') }}</RouterLink>
+      </div>
 
       <!-- Deadline card -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">

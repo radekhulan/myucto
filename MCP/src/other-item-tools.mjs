@@ -48,7 +48,10 @@ const ITEM_INPUT = {
     enum: ['receivable', 'payable'],
   }),
   kind: str('Druh: other = ostatní, rent = nájem, loan = půjčka nebo úvěr, deposit = kauce či záloha, '
-    + 'insurance = pojistné, fee = poplatek, claim = jiný nárok. Výchozí other.', { enum: KINDS }),
+    + 'insurance = pojistné, fee = poplatek, claim = jiný nárok. Výchozí other. Skrytý druh (list_other_item_kinds, '
+    + 'is_active false) nový koncept nedostane.', { enum: KINDS }),
+  kind_id: nullable(id('Vlastní druh firmy (list_other_item_kinds, builtin false) se stejnou stranou a is_active. '
+    + 'Má-li druh vlastní řadu, doklad dostane číslo z ní. S kind_id se `kind` uloží jako other.')),
   title: str('Popis dokladu, např. „Nájem kanceláře 10/2026".', { minLength: 1, maxLength: 255 }),
   partner_id: nullable(id('ID protistrany z adresáře (search_clients).')),
   partner_name: nullable(str('Název protistrany, když není v adresáři.', { maxLength: 190 })),
@@ -68,7 +71,7 @@ const ITEM_INPUT = {
 
 /** Pole hlavičky, která PUT přepisuje vždy celá. Kontace se skládá zvlášť. */
 const HEAD_KEYS = [
-  'side', 'kind', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
+  'side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
   'due_on', 'amount', 'variable_symbol', 'account_code', 'note',
 ];
 const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines'];
@@ -135,6 +138,9 @@ function updateBody(current, a) {
   assertKontace(a);
   const body = merged(current, a, HEAD_KEYS);
   for (const key of ['amount', 'partner_id']) body[key] = numeric(body[key]);
+  if (body.kind_id !== undefined) body.kind_id = numeric(body.kind_id);
+  // Jiný vestavěný druh než other bez kind_id = přepnutí z vlastního druhu (shodně se serverem).
+  if (a.kind !== undefined && a.kind !== 'other' && a.kind_id === undefined) body.kind_id = null;
   if (a.issued_on !== undefined && a.accounting_on === undefined
     && current?.accounting_on && current.accounting_on === current.issued_on) {
     body.accounting_on = a.issued_on;
@@ -230,16 +236,17 @@ export const OTHER_ITEM_TOOLS = [
       status: str('Stav: open = neuhrazené aktivní, all = vše.', {
         enum: ['open', 'all', 'draft', 'confirmed', 'posted', 'reversed', 'cancelled'],
       }),
-      kind: str('Druh dokladu.', { enum: KINDS }),
+      kind: str('Vestavěný druh dokladu (položky bez vlastního druhu).', { enum: KINDS }),
+      kind_id: id('Vlastní druh firmy (list_other_item_kinds); má přednost před kind.'),
       from: date('Splatnost od.'),
       to: date('Splatnost do.'),
       query: str('Hledaný text v popisu, protistraně, čísle dokladu nebo VS.'),
-      sort_by: str('Řazení.', { enum: ['title', 'partner_name', 'due_on', 'amount', 'remaining_amount', 'status'] }),
+      sort_by: str('Řazení.', { enum: ['document_no', 'title', 'partner_name', 'due_on', 'amount', 'remaining_amount', 'status'] }),
       sort_dir: str('Směr řazení.', { enum: ['asc', 'desc'] }),
       page: int('Stránka od 1.', { minimum: 1 }),
       per_page: int('Záznamů na stránce (1 až 200).', { minimum: 1, maximum: 200 }),
     }, () => BASE, (a) => {
-      const q = changed(a, ['side', 'status', 'kind', 'from', 'to', 'sort_by', 'sort_dir', 'page', 'per_page']);
+      const q = changed(a, ['side', 'status', 'kind', 'kind_id', 'from', 'to', 'sort_by', 'sort_dir', 'page', 'per_page']);
       if (a.query !== undefined) q.q = a.query;
       return q;
     }),
@@ -260,6 +267,11 @@ export const OTHER_ITEM_TOOLS = [
       if (a.query !== undefined) q.q = a.query;
       return q;
     }, ['id']),
+  read('list_other_item_kinds', 'Druhy ostatních položek',
+    'Vestavěné druhy (builtin_code = hodnota `kind`) a vlastní druhy firmy po stranách, s příznakem vlastní číselné '
+    + 'řady (own_series, series_prefix) a skrytí (is_active). `id` vlastního druhu se zadává jako `kind_id`, vestavěný '
+    + 'druh se volí přes `kind`. Nastavení druhů se mění ve webovém rozhraní.',
+    {}, () => `${BASE}/kinds`),
   read('list_other_item_schedules', 'Opakování ostatních položek',
     'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování.',
     {}, () => `${BASE}/schedules`),

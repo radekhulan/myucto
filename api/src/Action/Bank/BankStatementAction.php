@@ -89,6 +89,9 @@ final class BankStatementAction
      */
     private const PDF_ATTACH_MIN_COVERAGE = 0.8;
 
+    /** Kolik PDF se nejvýš přečte při jednom zobrazení, viz {@see healPdfBalances()}. */
+    private const PDF_BALANCE_HEAL_LIMIT = 5;
+
     public function __construct(
         private readonly Connection $db,
         private readonly StatementImporter $importer,
@@ -403,6 +406,7 @@ final class BankStatementAction
         // idempotentně vrať původní výpis místo druhé kopie.
         $existingPdfId = $this->statementWithPdfHash($pdfHash, $sid);
         if ($existingPdfId !== null) {
+            $this->recordPdfBalances($existingPdfId, $parsed);
             return Json::ok($response, $this->withTargetSupplier($request, [
                 'statement_id' => $existingPdfId,
                 'transactions' => 0,
@@ -420,11 +424,7 @@ final class BankStatementAction
             return Json::error($response, 'statement_overlap', $e->getMessage(), 409);
         }
         if ($target !== null) {
-            $this->db->pdo()->prepare(
-                'UPDATE bank_statements
-                    SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
-                  WHERE id = ?'
-            )->execute([$pdfBytes, $name, $pdfHash, strlen($pdfBytes), $target]);
+            $this->attachParsedPdf($target, $parsed, $pdfBytes, $name, $pdfHash);
 
             $this->logger->log('bank.statement_pdf_attached', $user['id'] ?? null, 'bank_statement', $target, [
                 'pdf_name' => $name,
@@ -453,6 +453,72 @@ final class BankStatementAction
         $this->logger->log('bank.statement_pdf_imported', $user['id'] ?? null, 'bank_statement', $r['statement_id'], $r + ['parser' => $parsed['parser'] ?? null], $ip, $request->getHeaderLine('User-Agent'), $sid);
 
         return Json::ok($response, $this->withTargetSupplier($request, $r, $sid));
+    }
+
+    /** @param array{header:array<string,mixed>,transactions:list<array<string,mixed>>} $parsed */
+    private function attachParsedPdf(int $target, array $parsed, string $pdfBytes, string $name, string $pdfHash): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE bank_statements
+                SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
+              WHERE id = ?'
+        )->execute([$pdfBytes, $name, $pdfHash, strlen($pdfBytes), $target]);
+        $this->recordPdfBalances($target, $parsed);
+    }
+
+    /**
+     * Měsíc složený z bankovního feedu zůstatky nemá. PDF je údaj banky a parser je přečetl,
+     * takže zapsané doloží vypočtený zůstatek a jsou kotvou dalšího měsíce. Bez nich výpočet
+     * přiložené PDF odmítl jako neověřené (`balance_pdf_unverified`).
+     *
+     * @param array{header:array<string,mixed>,transactions:list<array<string,mixed>>} $parsed
+     */
+    private function recordPdfBalances(int $statementId, array $parsed): void
+    {
+        $previous = $parsed['header']['prev_balance'] ?? null;
+        $current = $parsed['header']['curr_balance'] ?? null;
+        if (!is_numeric($previous) || !is_numeric($current)) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            "UPDATE bank_statements SET prev_balance = ?, curr_balance = ?
+              WHERE id = ? AND source = 'bank_api' AND file_content IS NULL AND curr_balance IS NULL"
+        )->execute([$previous, $current, $statementId]);
+    }
+
+    /**
+     * Dohledá zůstatky u měsíců, kde PDF visí, ale zůstatky z něj zapsané nejsou: PDF přiložené
+     * ručně, nebo importem před touhle opravou. Bez toho by takový měsíc zůstal „Zůstatek nelze
+     * bezpečně vypočítat" a opakovaný import by ho nespravil, dokud ho někdo nepošle znovu.
+     *
+     * Nečitelné PDF se zkouší znovu při každém zobrazení, proto strop na jeden požadavek.
+     * Vlastní obsah PDF se ověří stejně jako při přiložení: účet a pokrytí pohybů.
+     *
+     * @param list<int> $statementIds
+     */
+    private function healPdfBalances(array $statementIds): void
+    {
+        if ($statementIds === []) {
+            return;
+        }
+        $rows = $this->db->pdo()->query(
+            "SELECT id, account_number, pdf_content FROM bank_statements
+              WHERE id IN (" . implode(',', array_map('intval', $statementIds)) . ")
+                AND source = 'bank_api' AND file_content IS NULL AND curr_balance IS NULL
+                AND OCTET_LENGTH(pdf_content) > 0
+              ORDER BY statement_date DESC LIMIT " . self::PDF_BALANCE_HEAL_LIMIT
+        )->fetchAll(\PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            try {
+                $parsed = $this->pdfParsers->parse((string) $row['pdf_content']);
+            } catch (\Throwable) {
+                continue;
+            }
+            if (AccountNumberNormalizer::equals((string) ($parsed['header']['account_number'] ?? ''), (string) $row['account_number'])
+                && $this->pdfCoversStatement((int) $row['id'], $parsed['transactions'])) {
+                $this->recordPdfBalances((int) $row['id'], $parsed);
+            }
+        }
     }
 
     /**
@@ -952,6 +1018,10 @@ final class BankStatementAction
         // pak parametry scope predikátu ve WHERE a nakonec filtry.
         $stmt->execute(array_merge([$sid, $sid], $scopeParams, $filterParams));
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $this->healPdfBalances(array_map('intval', array_column(
+            array_filter($rows, static fn (array $row): bool => $row['source'] === 'bank_api' && !empty($row['has_pdf'])),
+            'id',
+        )));
         $balanceSummaries = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summaries(
             $sid,
             // Stav se počítá výpisům, jejichž GPC se skládá ze zůstatků (API, převod z jiného programu).
@@ -1639,9 +1709,11 @@ final class BankStatementAction
         $hash = hash('sha256', $content);
         $this->db->pdo()->prepare(
             'UPDATE bank_statements
-                SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
+                SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW(), '
+                . \MyInvoice\Service\Bank\BankApiMonthlyStatements::DROP_PDF_BALANCES . '
               WHERE id = ?'
         )->execute([$content, $name, $hash, strlen($content), $id]);
+        $this->healPdfBalances([$id]);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.pdf_uploaded', $user['id'] ?? null, 'bank_statement', $id, [
@@ -1719,7 +1791,8 @@ final class BankStatementAction
 
         $this->db->pdo()->prepare(
             'UPDATE bank_statements
-                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL
+                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL, '
+                . \MyInvoice\Service\Bank\BankApiMonthlyStatements::DROP_PDF_BALANCES . '
               WHERE id = ?'
         )->execute([$id]);
 
@@ -1928,6 +2001,7 @@ final class BankStatementAction
             : null;
         $s['balance_calculation'] = null;
         if (\MyInvoice\Service\Bank\BankStatementSource::isStatement((string) $s['source'])) {
+            $this->healPdfBalances([$id]);
             $s['balance_calculation'] = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($sid, $id);
         }
         return Json::ok($response, $s);

@@ -8,6 +8,7 @@ vi.mock('@/i18n', () => ({
 
 import routePolicy from '@shared/client-route-policy.json'
 import appLayoutSourceRaw from '@/components/layout/AppLayout.vue?raw'
+import userMenuSource from '@/components/layout/AppUserMenu.vue?raw'
 import routerSourceRaw from '@/router/index.ts?raw'
 import { router } from '@/router'
 import {
@@ -526,9 +527,11 @@ describe('sdílená klientská plocha vlastní domény', () => {
         'setup-totp',
       ])
 
-    const profileMenuPaths = [...appLayoutSource.matchAll(
-      /<(?:RouterLink|WorkspaceNavLink)[^>]*\bto="(?<path>\/profile\/password[^"]*)"/g,
-    )].map(item => item.groups!.path)
+    const profileMenuPaths = [
+      '/profile/password',
+      ...[...userMenuSource.matchAll(/:to="`\$\{profilePath\}(?<query>\?tab=[a-z-]+)`"/g)]
+        .map(item => `/profile/password${item.groups!.query}`),
+    ]
     expect([...new Set(profileMenuPaths)].sort()).toEqual([
       '/profile/password',
       '/profile/password?tab=passkeys',

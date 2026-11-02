@@ -22,6 +22,8 @@ use MyInvoice\Service\Submission\SubmissionOutboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use MyInvoice\Support\PeriodFilter;
 
 /**
@@ -71,8 +73,17 @@ final class SubmissionOutboxAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
+        $settlement = new PayrollSubmissionSettlementPolicy(new PayrollDispatchCapabilityCatalog());
+
         return Json::ok($response, [
-            'items' => $page['items'],
+            // Řádek musí poznat agendu, na kterou úřad výsledek neposílá:
+            // „zatím nevíme" by tam slibovalo odpověď, která nikdy nepřijde.
+            'items' => array_map(
+                static fn (array $row): array => $row + [
+                    'settles_on_delivery' => $settlement->settlesOnDelivery((string) $row['agenda_code']),
+                ],
+                $page['items'],
+            ),
             'total' => $page['total'],
             'years' => $page['years'],
             'limit' => $limit,

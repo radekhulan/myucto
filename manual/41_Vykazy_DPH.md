@@ -114,6 +114,8 @@ Typ opravy záleží na tom, zda ještě běží lhůta pro podání.
 
 ### 41.5.2 Následné kontrolní hlášení a odpověď na výzvu
 
+Je-li hlášení za období už podané, stránka porovná jeho XML s hlášením sestaveným z dnešních dokladů. Liší-li se, ukáže sekci **Rozdíly proti podanému kontrolnímu hlášení** s oddílem, číslem dokladu a částkami. Souhrnné oddíly A.5 a B.3 se porovnávají jako celek, bez jednotlivých dokladů, ty najdete v soupisu podaného hlášení, kam vede odkaz ze sekce. Úhrada ani jiná úprava bez dopadu na hlášení rozdíl nevyvolá.
+
 1. Otevřete `Daně → Kontrolní hlášení` a zvolte opravované období.
 2. V poli **Typ podání** zvolte **Následné (§ 101f/2 - po lhůtě)**.
 3. Vyplňte **Datum zjištění**. Reagujete-li na výzvu správce daně, vyplňte i **Č.j. výzvy**.
@@ -401,7 +403,7 @@ Volba **Dodatečné/opravné** (oprava už podaného dodatečného přiznání) 
 
 ### 41.13.4 Fronta Doklady změněné po podání
 
-Jakmile bylo přiznání za dané období aspoň jednou v archivu označeno jako odeslané, může se na stránce objevit žlutá sekce **Doklady změněné po podání**. Obsahuje doklady (vydané i přijaté faktury, daňové pokladní doklady), které svým DPH-rozhodným datem (viz [§ 41.13.7](#41137-jak-se-dphdp3-sestavuje)) spadají do naposledy podaného období, ale byly vytvořené nebo upravené až poté, co bylo přiznání naposledy podáno. Snapshot podání zachytí také doklad, který byl po podání stornován nebo mu bylo DUZP přesunuto mimo období. U každého dokladu vidíte jeho číslo, částku a datum poslední změny. U starších podání bez snapshotu aplikace zobrazí upozornění, že je potřeba porovnat podání s knihou DPH ručně.
+Jakmile bylo přiznání za dané období aspoň jednou v archivu označeno jako odeslané, může se na stránce objevit žlutá sekce **Doklady změněné po podání**. Obsahuje doklady (vydané i přijaté faktury, daňové pokladní doklady), které svým DPH-rozhodným datem (viz [§ 41.13.7](#41137-jak-se-dphdp3-sestavuje)) spadají do naposledy podaného období, ale po posledním podání přibyly nebo se změnilo něco, co ovlivňuje DPH: částka, DUZP, základ nebo daň na řádcích přiznání. Snapshot podání zachytí také doklad, který byl po podání stornován nebo mu bylo DUZP přesunuto mimo období. Úhrada, upomínka ani jiná úprava bez dopadu na DPH doklad do fronty nezařadí. U každého dokladu vidíte jeho číslo, částku a datum poslední změny. U starších podání bez snapshotu aplikace zobrazí upozornění, že je potřeba porovnat podání s knihou DPH ručně.
 
 Sekce se zobrazí jen tehdy, když za dané období už bylo přiznání v archivu označeno jako odeslané (řádné, opravné nebo dodatečné). U období, které ještě podané nebylo, fronta nedává smysl.
 

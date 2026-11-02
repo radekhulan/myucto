@@ -26,6 +26,14 @@ final class OtherItemRepository
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
+        // Název druhu zvlášť a bez zámku: JOIN v zamykacím čtení by zamkl i řádek druhu
+        // a serializoval všechny položky stejného druhu (i s úpravou druhu v Nástrojích).
+        $row['kind_name'] = null;
+        if ($row['kind_id'] !== null) {
+            $kind = $this->db->pdo()->prepare('SELECT name FROM other_item_kinds WHERE id = ? AND supplier_id = ?');
+            $kind->execute([(int) $row['kind_id'], $supplierId]);
+            $row['kind_name'] = $kind->fetchColumn() ?: null;
+        }
         $row['posting_lines'] = $this->postingLines($supplierId, $id);
         if ($row['posting_lines'] === [] && $row['counter_account_code'] !== null) {
             $row['posting_lines'] = [[
@@ -62,11 +70,18 @@ final class OtherItemRepository
     {
         $where = ['oi.supplier_id = ?', 'oi.deleted_at IS NULL'];
         $params = [$supplierId];
-        foreach (['side', 'kind'] as $field) {
-            if (!empty($filters[$field])) {
-                $where[] = 'oi.' . $field . ' = ?';
-                $params[] = $filters[$field];
-            }
+        if (!empty($filters['side'])) {
+            $where[] = 'oi.side = ?';
+            $params[] = $filters['side'];
+        }
+        // Vlastní druh se filtruje podle kind_id; vestavěný podle kind bez vlastního druhu,
+        // jinak by „other“ vracel i položky vlastních druhů (ty nesou kind = other).
+        if (!empty($filters['kind_id'])) {
+            $where[] = 'oi.kind_id = ?';
+            $params[] = (int) $filters['kind_id'];
+        } elseif (!empty($filters['kind'])) {
+            $where[] = 'oi.kind = ? AND oi.kind_id IS NULL';
+            $params[] = $filters['kind'];
         }
         if (!empty($filters['status']) && $filters['status'] !== 'all') {
             if ($filters['status'] === 'open') {
@@ -97,11 +112,13 @@ final class OtherItemRepository
         $offset = ($page - 1) * $perPage;
         $stmt = $this->db->pdo()->prepare(
             'SELECT oi.*, COALESCE(a.paid_amount, 0) + oi.settled_outside_amount paid_amount,
-                    oi.amount - oi.settled_outside_amount - COALESCE(a.paid_amount, 0) remaining_amount
+                    oi.amount - oi.settled_outside_amount - COALESCE(a.paid_amount, 0) remaining_amount,
+                    k.name kind_name
                FROM other_items oi
                LEFT JOIN (SELECT other_item_id, SUM(amount) paid_amount FROM other_item_allocations
                            WHERE reversed_on IS NULL GROUP BY other_item_id) a
                  ON a.other_item_id = oi.id
+               LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
               WHERE ' . $whereSql . '
               ORDER BY ' . OtherItemSort::orderBy($filters) . ' LIMIT ' . (int) $perPage . ' OFFSET ' . (int) $offset
         );
@@ -114,13 +131,13 @@ final class OtherItemRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO other_items
-              (supplier_id, side, kind, title, partner_id, partner_name, issued_on, accounting_on,
+              (supplier_id, side, kind, kind_id, title, partner_id, partner_name, issued_on, accounting_on,
                due_on, currency, amount, exchange_rate, amount_czk, variable_symbol,
                account_code, counter_account_code, note, created_by, updated_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
-            $supplierId, $data['side'], $data['kind'], $data['title'], $data['partner_id'],
+            $supplierId, $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'],
             $data['partner_name'], $data['issued_on'], $data['accounting_on'], $data['due_on'],
             $data['currency'], $data['amount'], $data['exchange_rate'], $data['amount_czk'],
             $data['variable_symbol'], $data['account_code'], $data['counter_account_code'],
@@ -132,14 +149,14 @@ final class OtherItemRepository
     public function updateDraft(int $supplierId, int $id, array $data, ?int $userId): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE other_items SET side = ?, kind = ?, title = ?, partner_id = ?, partner_name = ?,
+            'UPDATE other_items SET side = ?, kind = ?, kind_id = ?, title = ?, partner_id = ?, partner_name = ?,
                     issued_on = ?, accounting_on = ?, due_on = ?, currency = ?, amount = ?,
                     exchange_rate = ?, amount_czk = ?, variable_symbol = ?, account_code = ?,
                     counter_account_code = ?, note = ?, updated_by = ?, row_version = row_version + 1
               WHERE id = ? AND supplier_id = ? AND status = \'draft\' AND deleted_at IS NULL'
         );
         $stmt->execute([
-            $data['side'], $data['kind'], $data['title'], $data['partner_id'], $data['partner_name'],
+            $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'], $data['partner_name'],
             $data['issued_on'], $data['accounting_on'], $data['due_on'], $data['currency'], $data['amount'],
             $data['exchange_rate'], $data['amount_czk'], $data['variable_symbol'], $data['account_code'],
             $data['counter_account_code'], $data['note'], $userId, $id, $supplierId,

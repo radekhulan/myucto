@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   peopleOptions: vi.fn(),
   manualForm: vi.fn(),
   manualSave: vi.fn(),
+  manualFiledForms: vi.fn(),
   success: vi.fn(),
   routeQuery: {} as Record<string, string>,
 }))
@@ -14,7 +15,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: { peopleOptions: m.peopleOptions },
 }))
 vi.mock('@/api/payrollMigrationReconciliation', () => ({
-  payrollTakeoverWagesApi: { manualForm: m.manualForm, manualSave: m.manualSave },
+  payrollTakeoverWagesApi: { manualForm: m.manualForm, manualSave: m.manualSave, manualFiledForms: m.manualFiledForms },
 }))
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
@@ -100,6 +101,29 @@ describe('TakeoverManualEntry', () => {
 
     expect(m.manualForm).toHaveBeenCalledWith(2026, 7)
     expect(wrapper.find('[data-test="takeover-manual-row-11-1"]').exists()).toBe(true)
+  })
+
+  /** Návrh z hlášení jen vyplní formulář, ukládá až účetní. */
+  it('doplní prázdná pole z přijatých hlášení a neuloží je', async () => {
+    m.routeQuery = { employee: '7' }
+    m.manualFiledForms.mockResolvedValue({
+      rows: [{ ...row(11, 1, 450_000), employee_social_minor: 32_000, insurance_days: 31, derived: ['net_minor'] }],
+      missing_months: [2],
+    })
+    const wrapper = mount(TakeoverManualEntry, { props: { year: 2026, canWrite: true } })
+    await flushPromises()
+
+    await wrapper.get('[data-test="takeover-manual-prefill"]').trigger('click')
+    await flushPromises()
+
+    expect(m.manualFiledForms).toHaveBeenCalledWith(2026, 7)
+    expect(m.manualSave).not.toHaveBeenCalled()
+    const social = wrapper.get('[data-test="takeover-manual-11-1-employee_social_minor"]').element as HTMLInputElement
+    expect(social.value).toBe('320')
+    const note = wrapper.get('[data-test="takeover-manual-prefill-note"]').text()
+    expect(note).toContain('payroll.takeover_manual.prefill_done')
+    expect(note).toContain('payroll.takeover_manual.prefill_derived')
+    expect(note).toContain('payroll.takeover_manual.prefill_missing')
   })
 
   /** Proklik z kontroly převzetí otevře formulář rovnou u toho, komu něco chybí. */

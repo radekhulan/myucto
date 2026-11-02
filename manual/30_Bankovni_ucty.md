@@ -248,7 +248,7 @@ Měsíční GPC při jednoznačné shodě použije již načtený pohyb z API. Z
 
 Shoda vyžaduje stejnou firmu, vlastní účet, banku, měnu, den a částku se znaménkem. Kontrolují se dostupné symboly a protiúčet. Automatické spojení rozpozná společnou bankovní referenci, shodný protiúčet s neprázdným variabilním symbolem nebo shodný dostatečně podrobný popis platby. U popisu se ignorují mezery a interpunkce; rozpozná se také zpráva doplněná názvem před oddělovačem. Každá platba musí mít jediný protějšek. Tyto shody automaticky zpracuje i cron a uloží jejich vazbu pro další načítání bez zásahu uživatele. Samotná shoda částky a dne nestačí, protože může jít o další skutečnou platbu.
 
-Při nedostatku dalších údajů načítání nabídne jednoznačné dvojice ke kontrole (**Potvrzení shod bankovních pohybů**, tlačítko **Potvrdit shody (počet) a načíst znovu**). Porovnejte datum, částku, popisy a dostupné platební údaje s původním výpisem. Potvrďte je pouze tehdy, když jde o stejné platby. Potvrzení připojí nový výpis k existujícím pohybům a další překrývající se načítání už tyto vazby pozná. Při zrušení se nový výpis neuloží. Automatické načítání samo slabé shody nepotvrzuje; vyřešte je ručním načtením se stejným rozsahem nebo s prázdným datem **Od data**. Pokud nelze odlišit několik stejných plateb, import se zastaví bez možnosti hromadného potvrzení a pohyby je potřeba jednotlivě prověřit. Již zaúčtované pohyby se tím nemění. Historické duplicity vytvořené staršími importy se automaticky nemažou.
+Nahrané GPC pozná pohyb sám i bez reference a variabilního symbolu, pokud je v GPC i v načtených pohybech jediný pohyb téhož dne a částky se stejným protiúčtem. Při nedostatku dalších údajů načítání nabídne jednoznačné dvojice ke kontrole (**Potvrzení shod bankovních pohybů**, tlačítko **Potvrdit shody (počet) a načíst znovu**). Porovnejte datum, částku, popisy a dostupné platební údaje s původním výpisem. Potvrďte je pouze tehdy, když jde o stejné platby. Potvrzení připojí nový výpis k existujícím pohybům a další překrývající se načítání už tyto vazby pozná. Při zrušení se nový výpis neuloží. Automatické načítání samo slabé shody nepotvrzuje; vyřešte je ručním načtením se stejným rozsahem nebo s prázdným datem **Od data**. Pokud nelze odlišit několik stejných plateb, import se zastaví bez možnosti hromadného potvrzení a pohyby je potřeba jednotlivě prověřit. Již zaúčtované pohyby se tím nemění. Historické duplicity vytvořené staršími importy se automaticky nemažou.
 
 Selhání načítání aktivního účtu se zobrazí také v přehledu **Akce pro tebe** uživateli s oprávněním spravovat bankovní účty. Upozornění rozliší nejednoznačné shody od ostatních chyb a otevře nastavení konkrétního účtu. Po úspěšném načtení samo zmizí.
 
@@ -544,8 +544,10 @@ Whitelist může obsahovat víc položek oddělených mezerou, čárkou nebo st�
 
 Doménový tvar použijte u bank, které rozesílají avíza z několika adres. Odesílatel je ale jen první filtr, skutečnou ochranu dělá **Vyžadovat ověření autenticity** u IMAP účtu a povinné mapování cílového účtu avíza na váš bankovní účet.
 
-Povinná vytěžená pole: `variable_symbol`, `amount`, `currency`, `posted_at`, `recipient_account`. Volitelná pole:
+Povinná vytěžená pole: `amount`, `currency`, `posted_at`, `recipient_account`. Volitelná pole:
 
+- `direction` (směr platby, viz níže)
+- `variable_symbol` (avízo bez něj se zaeviduje, jen se nespáruje podle VS)
 - `counterparty_account`
 - `counterparty_name`
 - `constant_symbol`
@@ -553,7 +555,9 @@ Povinná vytěžená pole: `variable_symbol`, `amount`, `currency`, `posted_at`,
 - `bank_ref`
 - `balance` (disponibilní zůstatek účtu z avíza - zobrazí se v detailu měsíčního avízo-výpisu a promítne se do přehledu **Stavy na účtech**)
 
-Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56`, datum například `01. 06. 2026 10:15`.
+Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56` i mezery mezi tisíci, datum například `01. 06. 2026 10:15`.
+
+Částka se bere se znaménkem z avíza. Avízo bez znaménka určí směr polem `direction`: výdej znamená zachycený text obsahující například `odchozí`, `odešla`, `výdaj`, `debet`, `odepsáno` nebo `platba kartou`, jakýkoli jiný text příjem. U avíza, které je vždy výdejem, stačí vzor zachytit slovo z jeho věty, například `(?<value>platbu\s+kartou)`. Když vzor v avízu nic nenajde, zůstane znaménko z částky.
 
 ### 30.11.13 Příklad regex provideru pro Raiffeisenbank
 

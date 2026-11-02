@@ -55,6 +55,7 @@ final class PohodaReconciler
         private readonly TrialBalanceService $trialBalance,
         private readonly FinancialStatementService $statements,
         private readonly SaldoService $saldo,
+        private readonly PohodaSaldoPairing $pairing,
     ) {}
 
     public function run(PohodaContext $ctx): void
@@ -173,6 +174,7 @@ final class PohodaReconciler
                         'open_items_total' => round((float) $block['open_items_total'], 2),
                         'difference' => round((float) $block['difference'], 2),
                     ];
+                    $difference['by_symbol'] = $this->pairing->breakdown($ctx->supplierId, $difference['account'], $asOf);
                     $row['status'] = 'differences';
                     $row['differences'][] = $difference;
                     $ctx->protocol->warn(self::STEP, 'saldo_difference', self::saldoDifferenceText($row['year'], $asOf, $difference), ['year' => $row['year'], 'as_of' => $asOf] + $difference);
@@ -210,8 +212,9 @@ final class PohodaReconciler
     {
         $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
         return sprintf(
-            'Rok %d, saldokonto k %s, účet %s %s: zůstatek hlavní knihy %s Kč, součet položek %s Kč, rozdíl %s Kč. Může být oprávněný (například přeplatek bez dokladu), zkontrolujte ho.',
+            'Rok %d, saldokonto k %s, účet %s %s: zůstatek hlavní knihy %s Kč, součet položek %s Kč, rozdíl %s Kč. Může být oprávněný (například přeplatek bez dokladu), zkontrolujte ho.%s',
             $year, self::saldoDay($asOf), $d['account'], $d['name'], $money($d['gl_balance']), $money($d['open_items_total']), $money($d['difference']),
+            PohodaSaldoPairing::describe($d['by_symbol'] ?? null),
         );
     }
 

@@ -13,6 +13,7 @@ import {
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
+import { useAccountBalance } from '@/composables/useAccountBalance'
 import { ICONS, btnOutline, btnFilled, BTN_ICON_SM_BASE, OUTLINE } from '@/components/ui/buttonStyles'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -22,6 +23,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const { balanceLabel, formatBalance, formatBalanceAmount } = useAccountBalance()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -477,8 +479,8 @@ onMounted(reload)
     <template v-if="mode === 'movements'">
       <div v-if="report" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-          <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.opening') }}</div>
-          <div class="text-lg font-semibold font-mono">{{ formatMoney(report.opening_balance) }}</div>
+          <div class="text-xs text-neutral-500" data-testid="opening-label">{{ balanceLabel(t('accounting.account_statement.opening'), report.opening_balance) }}</div>
+          <div class="text-lg font-semibold font-mono">{{ formatBalanceAmount(report.opening_balance) }}</div>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.turnover_md') }}</div>
@@ -489,8 +491,8 @@ onMounted(reload)
           <div class="text-lg font-semibold font-mono">{{ formatMoney(report.turnover_d) }}</div>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-          <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.closing') }}</div>
-          <div class="text-lg font-semibold font-mono">{{ formatMoney(report.closing_balance) }}</div>
+          <div class="text-xs text-neutral-500" data-testid="closing-label">{{ balanceLabel(t('accounting.account_statement.closing'), report.closing_balance) }}</div>
+          <div class="text-lg font-semibold font-mono" data-testid="closing-amount">{{ formatBalanceAmount(report.closing_balance) }}</div>
         </div>
       </div>
 
@@ -548,7 +550,7 @@ onMounted(reload)
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">
                   <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
                 </td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(it.balance) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatBalance(it.balance) }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ it.counter_accounts || '' }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ it.pairing_id ? `#${it.pairing_id}` : '' }}</td>
                 <td class="px-3 py-2 text-xs text-neutral-600 whitespace-nowrap">{{ currencyLabel(it) }}</td>
@@ -596,7 +598,7 @@ onMounted(reload)
         </div>
         <div :class="['border rounded-lg shadow-sm p-3', checkOk ? 'bg-success-50 border-success-200' : 'bg-danger-50 border-danger-200']">
           <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.open.account_balance') }}</div>
-          <div class="text-lg font-semibold font-mono">{{ formatMoney(openReport.balance) }}</div>
+          <div class="text-lg font-semibold font-mono">{{ formatBalance(openReport.balance) }}</div>
           <div :class="['text-xs mt-0.5', checkOk ? 'text-success-700' : 'text-danger-700']">
             {{ checkOk ? t('accounting.account_statement.open.check_ok') : t('accounting.account_statement.open.check_diff', { amount: formatMoney(openReport.difference) }) }}
           </div>
@@ -729,14 +731,14 @@ onMounted(reload)
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">
                   <template v-if="it.side === 'credit' && it.open_amount !== 0">{{ formatMoney(it.open_amount) }}</template>
                 </td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(it.open_balance) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatBalance(it.open_balance) }}</td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">
                   <template v-if="it.side === 'debit'">{{ formatMoney(it.amount) }}</template>
                 </td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">
                   <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
                 </td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">{{ formatMoney(it.balance) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">{{ formatBalance(it.balance) }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ it.counter_accounts || '' }}</td>
                 <td class="px-3 py-2 text-neutral-600">{{ it.partner || '' }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600">{{ it.variable_symbol || '' }}</td>

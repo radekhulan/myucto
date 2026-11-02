@@ -249,9 +249,18 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     visitIndex = currentVisit ? visits.lastIndexOf(currentVisit) : -1
   }
 
+  function forwardGlobalNavigation(to: RouteLocationRaw, resolver: Router): boolean {
+    // Samostatné plochy nepatří do panelu; autorizaci provede hlavní router.
+    const missingName = typeof to === 'object' && 'name' in to && to.name != null && !resolver.hasRoute(to.name)
+    if (!missingName && resolver.resolve(to).matched.length) return false
+    options.globalNavigate?.(to)
+    return true
+  }
+
   async function open(to: RouteLocationRaw, paneId: PaneId, fresh = false, reuseVisibleElsewhere = true): Promise<void> {
     if (!workspace.panes.some(pane => pane.id === paneId)) return
     const resolver = options.createRouter()
+    if (forwardGlobalNavigation(to, resolver)) return
     const resolved = resolver.resolve(to)
     const fullPath = resolved.fullPath
     const supplier = options.currentSupplier?.() ?? { id: 0, name: '' }
@@ -420,6 +429,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
   }
 
   async function openRight(to: RouteLocationRaw, sourcePaneId: PaneId, source = windowFor(sourcePaneId)): Promise<void> {
+    if (forwardGlobalNavigation(to, options.createRouter())) return
     const sourceGeneration = generation
     if (!rightPanePlan(sourcePaneId, workspace.panes, workspace.maximumPaneCount)) return
     if (source && !await authorized(source)) return

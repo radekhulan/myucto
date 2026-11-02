@@ -65,6 +65,7 @@ final class ArchiveService
         'tax_loss_applications',
         'tax_advance_schedules',     // zálohy na daň (1044)
         'journal_entry_attachments', // §33a přílohy zápisů (metadata; binárky viz files)
+        'other_item_kinds',          // vlastní druhy ostatních položek (2228)
         'other_items',
         'other_item_schedules',
         'other_item_schedule_occurrences',

@@ -207,8 +207,8 @@ MyÚčto stojí na dvou vrstvách:
   [MyInvoice](https://github.com/radekhulan/myinvoice) lze používat navždy
   zdarma, včetně vytváření a úprav dat. Původní zdrojový kód zůstává pod MIT.
 - **Komerční nadstavba (source-available).** Účetnictví (podvojné i daňová
-  evidence), mzdy, sklad s napojením e-shopu a režim OSS jsou proprietární
-  moduly a vyžadují komerční licenci sjednanou **předplatným na myucto.cz**.
+  evidence), mzdy, sklad s napojením e-shopu, režim OSS a agenda SVJ jsou
+  proprietární moduly a vyžadují komerční licenci sjednanou **předplatným na myucto.cz**.
   Totéž platí pro věci, které se o ně opírají: účetní nástroje a uzávěrky,
   evidence majetku, automatizace, přehled firem, EPO podání a archív
   a rozšířené opravy DPH podle § 74b, § 43, § 46 a § 79.

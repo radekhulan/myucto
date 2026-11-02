@@ -266,6 +266,24 @@ export interface KhPreview {
   }
   warnings: string[]
   cross_check?: DphCrossCheckFinding[]
+  post_filing_changes?: KhPostFilingChanges
+}
+
+/** Rozdíl dnešního kontrolního hlášení proti podanému XML; částky jsou základ a daň. */
+export interface KhPostFilingDocument {
+  section: string
+  status: 'amount_diff' | 'only_submitted' | 'only_current'
+  doc_number: string
+  is_aggregate: boolean
+  filed: { base: number; vat: number } | null
+  current: { base: number; vat: number } | null
+}
+
+export interface KhPostFilingChanges {
+  has_filing: boolean
+  snapshot_available: boolean
+  submission: { id: number; generated_at: string; form_variant: string } | null
+  documents: KhPostFilingDocument[]
 }
 
 export interface OssPreview {

@@ -71,6 +71,9 @@ final class CommercialFeatureAccess
         '#^/api/bank-ai-suggestion-availability$#',
         '#^/api/accounting(?:$|/(?!cash-(?:documents|registers)(?:/|$)|bank-accounts(?:/|$)))#',
         '#^/api/(automation|portfolio)(/|$)#',
+        // Agenda SVJ (registr, předpisy, vyúčtování, fondy, platby) je placený modul
+        // a sama skládá účetní zápisy.
+        '#^/api/property(/|$)#',
         '#^/api/ai/suggestions(/|$)#',
         '#^/api/purchase-ai-suggestion-availability$#',
         '#^/api/settings/accounting-activation(/|$)#',

@@ -174,17 +174,17 @@ onActivated(() => { if (firstActivation) firstActivation = false; else void load
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="max-w-4xl mx-auto space-y-6">
     <header class="flex flex-wrap items-center justify-between gap-3">
-      <div><h1 class="text-2xl font-semibold">{{ t('instance_admin.title') }}</h1><p class="mt-1 text-sm text-neutral-500">{{ t('instance_admin.subtitle') }}</p></div>
+      <div><h1 class="text-2xl font-semibold text-neutral-900">{{ t('instance_admin.title') }}</h1><p class="text-sm text-neutral-500 mt-0.5">{{ t('instance_admin.subtitle') }}</p></div>
       <button :class="btnOutline('neutral')" :disabled="loading || busy" @click="load"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('common.refresh') }}</button>
     </header>
     <p v-if="error" role="alert" class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-danger-700">{{ error }}</p>
     <p v-if="notice" role="status" class="rounded-lg border border-success-200 bg-success-50 p-3 text-success-700">{{ notice }}</p>
     <p v-if="loading" role="status" class="text-neutral-500">{{ t('common.loading') }}</p>
 
-    <section v-if="status" class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="mb-4 text-lg font-semibold">{{ t('instance_admin.runtime') }}</h2>
+    <section v-if="status" class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <h2 class="mb-4 text-lg font-semibold text-neutral-900">{{ t('instance_admin.runtime') }}</h2>
       <dl class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div><dt class="text-sm text-neutral-500">{{ t('instance_admin.app_version') }}</dt><dd class="font-medium">{{ status.version }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('instance_admin.php_version') }}</dt><dd class="font-medium">{{ status.php_version }}</dd></div>
@@ -194,8 +194,8 @@ onActivated(() => { if (firstActivation) firstActivation = false; else void load
       <div class="mt-4 flex flex-wrap gap-2"><span v-for="extension in status.extensions" :key="extension.name" class="rounded-md px-2 py-1 text-xs" :class="extension.available ? 'bg-success-50 text-success-700' : 'bg-danger-50 text-danger-700'">{{ extension.name }}: {{ available(extension.available) }}</span></div>
     </section>
 
-    <section v-if="smtp" class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="text-lg font-semibold">{{ t('instance_admin.smtp') }}</h2>
+    <section v-if="smtp" class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <h2 class="text-lg font-semibold text-neutral-900">{{ t('instance_admin.smtp') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('instance_admin.smtp_hint') }}</p>
       <p v-if="smtp.read_only" class="mt-3 rounded-md bg-warning-50 p-3 text-sm text-warning-800">{{ t(smtp.read_only_reason === 'environment' ? 'instance_admin.environment_locked' : 'instance_admin.managed_locked') }}</p>
       <form class="mt-4 space-y-4" @submit.prevent="saveSmtp">
@@ -217,8 +217,8 @@ onActivated(() => { if (firstActivation) firstActivation = false; else void load
       </form>
     </section>
 
-    <section class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="text-lg font-semibold">{{ t('instance_admin.suppliers') }}</h2>
+    <section class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <h2 class="text-lg font-semibold text-neutral-900">{{ t('instance_admin.suppliers') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('instance_admin.suppliers_hint') }}</p>
       <p v-if="!loading && !suppliers.length" class="mt-4 text-sm text-neutral-500">{{ t('instance_admin.no_suppliers') }}</p>
       <ul class="mt-4 divide-y divide-neutral-100"><li v-for="supplier in suppliers" :key="supplier.supplier_id" class="flex flex-wrap items-center justify-between gap-2 py-3"><span>{{ supplier.name }} <span class="text-xs text-neutral-500">#{{ supplier.supplier_id }}</span></span><button :class="btnOutline('neutral')" :disabled="busy" @click="selectSupplier(supplier.supplier_id)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.eye" /></svg>{{ t('instance_admin.technical_status') }}</button></li></ul>
@@ -230,8 +230,8 @@ onActivated(() => { if (firstActivation) firstActivation = false; else void load
       </div>
     </section>
 
-    <section v-if="auth.isSuperadmin" class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="text-lg font-semibold">{{ t('instance_admin.target_management') }}</h2>
+    <section v-if="auth.isSuperadmin" class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <h2 class="text-lg font-semibold text-neutral-900">{{ t('instance_admin.target_management') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('instance_admin.target_management_hint') }}</p>
       <ul class="mt-3 divide-y divide-neutral-100"><li v-for="target in targets" :key="target.id" class="flex flex-wrap items-center justify-between gap-2 py-3"><span class="break-all">{{ target.name }} — {{ target.host }}:{{ target.port }}</span><button :class="btnOutline('danger')" :disabled="busy || smtp?.read_only || smtp?.target_id === target.id" @click="deleteTarget(target)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('common.delete') }}</button></li></ul>
       <form class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createTarget">
@@ -246,8 +246,8 @@ onActivated(() => { if (firstActivation) firstActivation = false; else void load
       </form>
     </section>
 
-    <section class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="text-lg font-semibold">{{ t('instance_admin.audit') }}</h2>
+    <section class="rounded-lg border border-neutral-200 bg-surface p-5">
+      <h2 class="text-lg font-semibold text-neutral-900">{{ t('instance_admin.audit') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('instance_admin.audit_hint') }}</p>
       <p v-if="!loading && !audit.length" class="mt-3 text-sm text-neutral-500">{{ t('instance_admin.no_audit') }}</p>
       <ul class="mt-3 divide-y divide-neutral-100"><li v-for="event in audit" :key="event.id" class="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"><span>{{ event.created_at }} · {{ auditAction(event.action) }}<span v-if="event.supplier_id"> · #{{ event.supplier_id }}</span></span><span class="rounded-md bg-neutral-100 px-2 py-1 text-xs">{{ auditResult(event.result) }}</span></li></ul>

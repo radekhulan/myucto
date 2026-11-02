@@ -10,8 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
  * Číslo dokladu v hlavičce zápisu vydané a přijaté faktury (journal_entries.document_no).
  *
  * Jediné místo, které ho určuje: vydaná faktura (i dobropis, DDKP, penalizace) nese
- * své číslo (varsymbol), přijatá číslo dokladu dodavatele, a když chybí, interní číslo
- * přijaté faktury. Stejná konvence platila pro zápisy z doúčtování už dřív.
+ * své číslo (varsymbol), přijatá naše číslo (varsymbol), a když chybí, číslo dokladu
+ * dodavatele. Platí pro nové a přeúčtované zápisy, starší zápis si své číslo nechává.
  *
  * Proč SSOT: číslo dřív dodávali volající. Doúčtování ho předávalo, automatické
  * zaúčtování po vystavení a přeúčtování ne — a dokud doúčtování přepisovalo i už
@@ -51,7 +51,7 @@ final class DocumentEntryNumber
                         SELECT NULLIF(TRIM(i.varsymbol), '') FROM invoices i
                          WHERE i.id = {$idExpr} AND i.supplier_id = {$supplierExpr})
                     WHEN {$typeExpr} = 'purchase_invoice' THEN (
-                        SELECT COALESCE(NULLIF(TRIM(p.vendor_invoice_number), ''), NULLIF(TRIM(p.varsymbol), ''))
+                        SELECT COALESCE(NULLIF(TRIM(p.varsymbol), ''), NULLIF(TRIM(p.vendor_invoice_number), ''))
                           FROM purchase_invoices p
                          WHERE p.id = {$idExpr} AND p.supplier_id = {$supplierExpr})
                  END, 50)";

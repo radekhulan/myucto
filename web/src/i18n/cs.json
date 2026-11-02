@@ -171,6 +171,31 @@
       "payroll_payment": "Mzdy"
     },
     "kind_label": "Druh",
+    "document_no": "Číslo dokladu",
+    "kinds": {
+      "title": "Druhy",
+      "hint": "Každý druh jde skrýt, aby se nenabízel u nových dokladů, a každý může číslovat doklady vlastní řadou. Ostatní druhy jedou na společné řadě OP (pohledávky) a OZ (závazky). Prefix, tvar čísla a čítač řady upravíte v Nástrojích → Číselné řady.",
+      "name": "Druh",
+      "series": "Číselná řada",
+      "own_series": "Vlastní",
+      "company_series_receivable": "Společná OP",
+      "company_series_payable": "Společná OZ",
+      "custom": "vlastní",
+      "inactive": "skrytý",
+      "activate": "Zobrazit",
+      "deactivate": "Skrýt",
+      "series_on": "Vlastní řada",
+      "series_off": "Společná řada",
+      "other_note": "Jiná pohledávka a Jiný závazek jsou výchozí druhy: nabízejí se vždy a číslují společnou řadou.",
+      "new": "Nový vlastní druh",
+      "add": "Přidat druh",
+      "custom_tax_note": "Vlastní druh se chová jako jiná pohledávka / jiný závazek. Půjčky a kauce veďte pod vestavěným druhem, jen u něj daňová evidence pozná nedaňovou splátku; vlastní řadu mu můžete zapnout výše.",
+      "own_series_label": "Číslovat doklady vlastní řadou",
+      "own_series_hint": "Prefix musí být jiný než OP, OZ a prefixy ostatních druhů. Vlastní řadu jde zapnout i vypnout později; vydaná čísla zůstávají a změna platí od dalšího potvrzeného dokladu.",
+      "validation_required": "Vyplňte název druhu a u vlastní řady prefix.",
+      "confirm_delete": "Smazat druh „{name}“? Druh s doklady nebo opakováním nejde smazat, jen skrýt.",
+      "custom_group": "Vlastní druhy"
+    },
     "kind": {
       "other": "Ostatní",
       "rent": "Nájem",
@@ -2561,12 +2586,16 @@
       "opening_only_hint": "Počáteční stav měsíc má, převzatá mzda ne. Bez ní nevznikne evidenční list důchodového pojištění za rok přechodu.",
       "takeover_only_title": "Převzatá mzda bez počátečního stavu",
       "takeover_only_hint": "Převzatá mzda měsíc má, počáteční stav ne - roční zúčtování ani vyúčtování daně s ním nepočítají.",
+      "jmhz_form_incomplete_title": "Ručně převzaté mzdě chybí údaje z přijatého hlášení JMHZ",
+      "jmhz_form_incomplete_hint": "Převzatá mzda má v těchto veličinách nulu, ČSSZ má z hlášení správná čísla. Doplňte převzatou mzdu tlačítkem Doplnit z přijatých hlášení v ručním zadání. Opravné hlášení kvůli tomu nepodávejte, leda by nula byla opravdu správná.",
+      "jmhz_form_incomplete_person": "{name}: převzaté mzdě za {period} chybí údaje z přijatého hlášení",
       "jmhz_form_title": "Hlášení JMHZ podané s jinými údaji, než má konečná mzda",
       "invariants_title": "Převod porušil kontrolu převzetí",
       "invariants_hint": "Každé porušení je chyba převodu, ne upozornění: převzaté mzdy pak nesedí na zdroj nebo na vztahy v MyÚčtu. Opravte data a převod zopakujte, nebo rozdíl vědomě přijměte.",
       "invariants_source": "(převod {source}, {at})",
       "invariant_codes": {
         "takeover_totals_without_employment": "Převzaté mzdy bez pracovního vztahu",
+        "takeover_manual_totals_incomplete": "Ručně převzatý měsíc bez dnů účasti nebo pojistného",
         "takeover_relation_missing": "Vztah s výplatou ve zdroji chybí v MyÚčtu",
         "takeover_totals_mismatch": "Součty po osobě a měsíci nesedí na zdroj",
         "takeover_source_rows_skipped": "Mzdy zdroje, které se nepřevzaly",
@@ -2588,6 +2617,13 @@
       }
     },
     "takeover_manual": {
+      "prefill": "Doplnit z přijatých hlášení",
+      "prefill_hint": "Doplní prázdná pole z importovaných přijatých hlášení JMHZ. Vyplněná čísla nechá být a nic neukládá.",
+      "prefill_done": "Doplněno z hlášení, řádků: {count}. Zkontrolujte čísla a uložte.",
+      "prefill_derived": "Hlášení je nenese, proto jsou dopočítané: {fields}.",
+      "prefill_missing": "Bez přijatého hlášení zůstaly měsíce: {months}.",
+      "prefill_failed": "Přijatá hlášení se nepodařilo načíst.",
+      "partial_lock": "{reason} Doplnit ale můžete údaje, které hlášení z převzatých úhrnů nevzalo: dny účasti, odvody, zdravotní pojištění a čistou mzdu.",
       "title": "Ruční zadání převzatých mezd",
       "hint": "Pro měsíce, které vedl předchozí program a ze kterých nemáte export ani hlášení. Každý měsíc zadejte jednou, po pracovních vztazích a v korunách - uložení naplní počáteční stavy (roční zúčtování, vyúčtování daně, potvrzení o příjmech) i převzaté mzdy (evidenční list důchodového pojištění).",
       "employee": "Zaměstnanec",
@@ -5763,6 +5799,7 @@
       "statutory_bulk_action": "Doplnit výchozí zákonné údaje",
       "declaration_sign_bulk_action": "Podepsaná prohlášení hromadně",
       "workplace_bulk_action": "Doplnit místo výkonu práce",
+      "more_functions": "Další funkce",
       "no_results_title": "Žádný zaměstnanec neodpovídá filtru",
       "no_results_description": "Upravte hledaný text nebo zvolte jiné zobrazení.",
       "filters": {
@@ -19808,7 +19845,7 @@
         "card_clearing_open": "Mezičlen plateb kartou (378.x) se zůstatkem - nevypořádané platby kartou k rozvahovému dni",
         "card_payments_unmatched": "Platby kartou bez dokladu starší než lhůta z nastavení účtování karet",
         "fx_footprint_missing": "Cizoměnové řádky na devizovém účtu bez úplné měnové stopy (currency_code/amount_foreign)",
-        "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy na 324",
+        "paid_proformas_no_advance": "Zaplacené proformy bez zaúčtované přijaté zálohy",
         "paid_advances_no_payment": "Zaplacené zálohové faktury dodavatelům bez zaúčtované úhrady na 314",
         "settled_but_unpaid": "Doklady se stavem Odeslaná, ale s úhradou už v deníku (aktualizujte stav na Zaplacená)",
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
@@ -20140,6 +20177,7 @@
         "hint": "Číselné řady deníku per rok - prefix, tvar čísla i další číslo lze upravit, čísla se vydávají vzestupně a mezery po smazaných zápisech se nedorovnávají.",
         "empty": "Zatím žádné číselné řady - vzniknou při prvním výdeji čísla.",
         "not_issued": "zatím nevydáno",
+        "other_item_kind": "Druh",
         "code": "Řada",
         "codes": {
           "closing": "Uzávěrkové zápisy (UZ)",
@@ -20153,7 +20191,9 @@
           "stock_out": "Skladové výdejky (VYD)",
           "stock_transfer": "Skladové převodky (PRE)",
           "offset": "Zápočty (ZAP)",
-          "purchase_order": "Objednávky dodavatelům (OBJ)"
+          "purchase_order": "Objednávky dodavatelům (OBJ)",
+          "other_receivable": "Ostatní pohledávky (OP)",
+          "other_payable": "Ostatní závazky (OZ)"
         },
         "prefix": "Prefix",
         "number_format": "Tvar čísla",
@@ -21045,6 +21085,18 @@
     "vendor_detail": "Detail dodavatele",
     "show_invoices_for_vendor": "Zobrazit faktury dodavatele",
     "filters": {
+      "has_visual_document": "PDF / sken",
+      "has_structured_source": "ISDOC / XML",
+      "has_visual_document_all": "PDF / sken: vše",
+      "has_visual_document_present": "PDF / sken: přiložen",
+      "has_visual_document_missing": "PDF / sken: chybí",
+      "has_structured_source_all": "ISDOC / XML: vše",
+      "has_structured_source_present": "ISDOC / XML: přiložen",
+      "has_structured_source_missing": "ISDOC / XML: chybí",
+      "document_present": "Přiložen",
+      "document_missing": "Chybí",
+      "has_visual_document_hint": "Uložené PDF nebo fotka dokladu, včetně dostupných PDF a obrázků v připojených Dokumentech. Kontroluje přítomnost, nikoli obsah či pravost; přílohou může být i dodací list. Externí archiv a vlastní tiskové PDF se nezapočítávají.",
+      "has_structured_source_hint": "Archivovaný zdroj importu: ISDOC, ISDOCX, Pohoda XML nebo iDoklad/Fakturoid JSON. Samotné PDF ani libovolné XML v připojených Dokumentech nestačí.",
       "all_statuses": "Všechny stavy",
       "all_kinds": "Všechny typy",
       "all_vendors": "Všichni dodavatelé",
@@ -21494,7 +21546,7 @@
     "client": "Klient",
     "project": "Zakázka",
     "catalog_item": "Zdroj položky",
-    "vat_classification": "Klasifikace DPH",
+    "vat_classification": "Členění DPH",
     "vat_classification_auto": "Automaticky podle sazby",
     "vat_classification_hint": "Kód pro přiznání k DPH a kontrolní/souhrnné hlášení. Automaticky se odvodí ze sazby a měrné jednotky - vyplňte jen tam, kde odvození nestačí (např. dodání zboží do EU u jednotky „ks\" nebo prodej dlouhodobého majetku). Volba se přenese na každou vygenerovanou fakturu.",
     "catalog_manual": "Ručně zadaná položka",
@@ -22328,7 +22380,7 @@
       "attachment_counterparty_ico": "IČO protistrany na příloze jiné",
       "attachment_variable_symbol": "VS na příloze jiný",
       "payment_header_divergence": "Údaj o zaplacení dokladu se liší od doložených úhrad. Přecenění používá úhrady doložené k rozvahovému dni.",
-      "fx_settlement_unproven": "Zůstatek dokladu nelze pro přecenění spolehlivě určit. Otevřete náhled kurzových rozdílů a opravte uvedené vazby."
+      "fx_settlement_unproven": "Zůstatek dokladu v cizí měně nejde určit a doklad zastaví krok přecenění. Otevřete doklad a opravte párování úhrady."
     },
     "open_list": "Otevřít v seznamu",
     "field": {
@@ -22381,7 +22433,7 @@
       "not_applicable": "Nevztahuje se",
       "pending": "chybí aktuální posouzení"
     },
-    "findings_count": "{count} nálezů",
+    "findings_count": "Nálezů: {count}",
     "showing_capped": "Zobrazeno {shown} z {total} nálezů",
     "capped_hint": "Seznam je zkrácený. Úplný přehled získáte exportem do CSV.",
     "loading": "Načítám nálezy…",
@@ -22742,13 +22794,16 @@
       "free_hint": "Vratka bez původní faktury: kus zadejte ručně, naskladní se jako vrácený."
     },
     "item_account": {
-      "show": "Účty položek",
-      "hide": "Skrýt účty položek",
-      "open": "Zobrazit účet položky",
-      "close": "Skrýt účet položky",
       "hint": "Účet jednotlivých položek: výnosový, u přefakturace i rozvahový (kromě saldokontních, daňových a peněžních účtů). Prázdné pole = účet produktu, jeho kategorie, pravidlo výnosů, jinak předkontace faktury.",
       "label": "Účet položky",
       "placeholder": "podle produktu / dokladu"
+    },
+    "item_details": {
+      "open": "Zobrazit podrobnosti položky",
+      "close": "Skrýt podrobnosti položky",
+      "vat_classification": "Členění DPH",
+      "vat_classification_auto": "Automaticky podle sazby",
+      "vat_classification_hint": "Kód pro přiznání k DPH a kontrolní a souhrnné hlášení. Automaticky se odvodí ze sazby a měrné jednotky a po jejich změně se odvodí znovu. Vyberte ho jen tam, kde odvození nestačí, například u dodání zboží do EU s jednotkou „ks\" nebo u prodeje dlouhodobého majetku."
     },
     "title": "Vydané faktury",
     "col_order_number": "Objednávka",
@@ -24200,6 +24255,11 @@
     "download": "Stáhnout",
     "download_gpc": "Stáhnout GPC",
     "evidence_pdf": "PDF podkladu: {name}",
+    "downloads_action": "Stažení z banky ({count})",
+    "downloads_title": "Stažení z banky",
+    "downloads_hint": "Stažení, která do měsíce přinesla pohyby. V detailu stažení ho můžete smazat, když přineslo duplicitu.",
+    "downloads_movements": "pohybů: {count}",
+    "downloads_open": "Otevřít",
     "download_pdf": "Stáhnout PDF",
     "pdf_upload": "Nahrát PDF",
     "pdf_upload_hint": "Přiložit PDF verzi výpisu z banky",
@@ -24215,7 +24275,6 @@
     "statement_delete_confirm": "Opravdu smazat tento avízo-výpis včetně jeho transakcí?",
     "statement_deleted": "Výpis smazán.",
     "statement_delete_failed": "Smazání výpisu selhalo.",
-    "evidence_statement": "Zdrojový výpis {name} ({count} pohybů)",
     "statement_delete_evidence": "Smazat zdrojový výpis",
     "statement_delete_evidence_hint": "Smaže tento zdrojový výpis měsíčního výpisu API i s jeho vlastními pohyby, například duplicitu z opakovaného stažení. Zaúčtované pohyby se stornují a měsíční výpis se přepočítá.",
     "statement_delete_evidence_confirm": "Opravdu smazat tento zdrojový výpis včetně jeho pohybů? Jejich zaúčtování se stornuje a měsíční výpis se přepočítá.",
@@ -25466,9 +25525,9 @@
     "th_regex": "Regex",
     "field_required": "povinné",
     "field_optional": "volitelné",
-    "normalizer_config": "Normalizer config",
     "normalizer_invalid": "Normalizer config musí být validní JSON objekt.",
     "save_provider": "Uložit provider",
+    "field_direction": "Směr platby",
     "field_variable_symbol": "Variabilní symbol",
     "field_amount": "Částka",
     "field_currency": "Měna",
@@ -27738,6 +27797,18 @@
     },
     "kh": {
       "title": "Kontrolní hlášení (DPHKH1)",
+      "post_filing": {
+        "title": "Rozdíly proti podanému kontrolnímu hlášení",
+        "hint": "Z aktuálních dokladů by dnes vzniklo jiné hlášení, než které bylo podáno. Zvažte opravné nebo následné kontrolní hlášení. Částky jsou základ / daň.",
+        "filed": "podáno",
+        "current": "dnes",
+        "evidence": "Otevřít soupis dokladů podaného hlášení",
+        "status": {
+          "amount_diff": "rozdíl částky",
+          "only_submitted": "jen v podaném hlášení",
+          "only_current": "jen v aktuálních datech"
+        }
+      },
       "subtitle": "Výkaz pro EPO portál MF ČR. Verze 03.01.",
       "download_xml": "Stáhnout XML",
       "rows": "řádků",
@@ -31193,7 +31264,9 @@
         "fix": "Spusťte Redis, nebo ho v konfiguraci vypněte."
       },
       "disk_space": {
-        "label": "Volné místo na disku",
+        "label": "Místo na disku",
+        "actual_label": "Volné",
+        "info_label": "Celkem",
         "impact": "Po zaplnění disku přestanou tiše vznikat zálohy, PDF i nahrané dokumenty.",
         "fix": "Uvolněte místo, nebo zvětšete svazek s daty."
       },
@@ -31619,6 +31692,8 @@
     },
     "acceptance": {
       "unknown": "Vyřízení úřadem: zatím nevíme",
+      "settled_by_delivery": "Splněno doručením",
+      "no_authority_result": "Úřad výsledek neposílá",
       "accepted": "Zpracováno úřadem",
       "rejected": "Odmítnuto úřadem"
     },
@@ -31674,6 +31749,7 @@
       "resolvedNotSent": "Zpráva v odeslaných není - podání neodešlo a můžete ho bezpečně zařadit znovu.",
       "resolveInconclusive": "Na datovou schránku se nepodařilo dovolat, takže dál nevíme, jestli zpráva odešla. Zkuste to prosím znovu později.",
       "deliveredNotProcessed": "Doručenka potvrzuje, že zpráva dorazila do schránky úřadu. Neznamená to, že úřad podání zpracoval a přijal - případné vady vám úřad oznámí samostatnou zprávou.",
+      "settledByDelivery": "Doručením je povinnost splněná a nemusíte už nic potvrzovat. Úřad výsledek zpracování neposílá, případnou vadu by oznámil samostatnou zprávou.",
       "markSent": "Označit jako odesláno ručně",
       "markSentConfirm": "Zapsat odeslání",
       "messageIdLabel": "ID zprávy z datové schránky",
@@ -31853,6 +31929,8 @@
       "unread": "Nepřečteno",
       "markRead": "Přečteno",
       "markUnread": "Nepřečteno",
+      "markAllRead": "Označit vše za přečtené",
+      "markedAllRead": "Označeno za přečtené: {count}",
       "reassign": "Přeřadit",
       "system": {
         "tax_office": "Finanční a celní správa",
@@ -40772,7 +40850,8 @@
   "instance_admin": {
     "title": "Správa instance",
     "overview": "Přehled",
-    "back_to_app": "Zpět do aplikace",
+    "menu_theme": "Vzhled",
+    "menu_language": "Jazyk",
     "subtitle": "Technická správa bez přístupu k obchodním a účetním datům.",
     "runtime": "Provozní stav",
     "app_version": "Verze aplikace",

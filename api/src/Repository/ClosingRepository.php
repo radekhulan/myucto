@@ -1654,6 +1654,14 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = i.client_id
              WHERE i.status = 'paid'
                AND (i.paid_at IS NULL OR i.paid_at <= ?)
+               -- Úhrada zaúčtovaná až po rozvahovém dni, zdůvodnění viz paidPurchasesOpenSaldo.
+               AND NOT (ABS(g.settled) < 0.005 AND EXISTS (
+                   SELECT 1 FROM invoice_payments lip
+                     JOIN journal_entries le ON le.supplier_id = lip.supplier_id
+                      AND le.source_type = 'bank' AND le.source_id = lip.bank_transaction_id
+                    WHERE lip.supplier_id = i.supplier_id AND lip.invoice_id = i.id
+                      AND le.posted_at IS NOT NULL AND le.reversed_by IS NULL AND le.entry_date > ?
+               ))
                -- DDKP bez konečné faktury = čerpání přijaté zálohy, která na 311 čeká na
                -- vyúčtování. Úhradu nese proforma, takže by tu svítil jako nezaplacený.
                AND NOT (i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL)
@@ -1673,7 +1681,7 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // settled_manual (vazba bez částky)
             $supplierId, $asOf, $asOf,          // settled_manual (rozpad řádků)
             $supplierId,                        // doc
-            $supplierId, $asOf,                 // final SELECT
+            $supplierId, $asOf, $asOf,          // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
@@ -1970,6 +1978,15 @@ final class ClosingRepository
               JOIN clients cl ON cl.id = pi.vendor_id
              WHERE pi.status = 'paid'
                AND (pi.paid_at IS NULL OR pi.paid_at <= ?)
+               -- Úhrada zaúčtovaná až po rozvahovém dni, `paid_at` z hlavičky je dřívější (datum
+               -- dokladu). K tomu dni byl doklad prostě nezaplacený, úhrada v deníku nechybí.
+               AND NOT (ABS(g.settled) < 0.005 AND EXISTS (
+                   SELECT 1 FROM payment_matches lpm
+                     JOIN journal_entries le ON le.supplier_id = lpm.supplier_id
+                      AND le.source_type = 'bank' AND le.source_id = lpm.bank_transaction_id
+                    WHERE lpm.supplier_id = pi.supplier_id AND lpm.purchase_invoice_id = pi.id
+                      AND le.posted_at IS NOT NULL AND le.reversed_by IS NULL AND le.entry_date > ?
+               ))
                -- DDKP bez konečné faktury = čerpání poskytnuté zálohy, která na 321 čeká na
                -- vyúčtování; úhradu nese záloha.
                AND NOT (pi.document_kind = 'tax_document' AND pi.parent_purchase_invoice_id IS NOT NULL)
@@ -1995,9 +2012,41 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // settled_manual (vazba bez částky)
             $supplierId, $asOf, $asOf,          // settled_manual (rozpad řádků)
             $supplierId,                        // doc
-            $supplierId, $asOf,                 // final SELECT
+            $supplierId, $asOf, $asOf,          // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Je cizoměnový doklad k datu v deníku vyrovnaný? Čistý pohyb na saldokontním účtu ze
+     * zápisů dokladu a bankovních úhrad na něj spárovaných. Platba rozdělená mezi víc dokladů
+     * vyjde nenulově, takže odpověď je konzervativní: „ano" znamená doložené vyrovnání.
+     *
+     * @param 'invoice'|'purchase_invoice'|string $docType
+     */
+    public function fxDocumentSettledInLedger(int $supplierId, string $docType, int $docId, int $accountId, string $asOf): bool
+    {
+        [$link, $column] = $docType === 'invoice'
+            ? ['invoice_payments', 'invoice_id']
+            : ['payment_matches', 'purchase_invoice_id'];
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) AS line_count,
+                    COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS balance
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               LEFT JOIN journal_entries rev ON rev.id = e.reversed_by AND rev.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND l.account_id = ?
+                AND e.posted_at IS NOT NULL AND e.entry_date <= ?
+                AND (e.reversed_by IS NULL OR rev.entry_date > ?)
+                AND ((e.source_type = ? AND e.source_id = ?)
+                     OR (e.source_type = 'bank' AND e.source_id IN (
+                         SELECT bank_transaction_id FROM {$link}
+                          WHERE supplier_id = ? AND {$column} = ? AND bank_transaction_id IS NOT NULL)))"
+        );
+        $stmt->execute([$supplierId, $accountId, $asOf, $asOf, $docType, $docId, $supplierId, $docId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return (int) $row['line_count'] > 0 && abs((float) $row['balance']) < 0.005;
     }
 
     /**
@@ -2011,6 +2060,11 @@ final class ClosingRepository
      * Vazba inkasa na proformu: invoice_payments.invoice_id (banka) / cash_documents.invoice_id
      * (pokladna). Konzervativně jen EXISTENČNÍ kontrola (žádný 324 kredit navázaný na
      * doklad) — bez dopočtu částky, ať nevznikají falešné poplachy z částečných záloh.
+     *
+     * Uznává se kredit na účtu přijatých záloh NEBO na saldokontní 311, stejně jako
+     * {@see paidAdvancesWithoutBookedPayment} uznává 314 i 321. Záloha inkasovaná na 311
+     * je legitimní varianta a deník o ní ví. Firma, která z 311 přešla na 324 a staré roky
+     * nechala být, by jinak dostávala nález ke každé proformě z uzavřených let.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
@@ -2060,7 +2114,8 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE ip.supplier_id = i.supplier_id AND ip.invoice_id = i.id AND l.side = 'credit'
-                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?)
+                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?
+                            OR ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM cash_documents cd
@@ -2071,7 +2126,8 @@ final class ClosingRepository
                       JOIN chart_of_accounts ca ON ca.id = l.account_id
                       LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
                      WHERE cd.supplier_id = i.supplier_id AND cd.invoice_id = i.id AND l.side = 'credit'
-                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?)
+                       AND (ca.account_code LIKE ? OR COALESCE(pa.account_code, '') LIKE ?
+                            OR ca.account_code LIKE '311%' OR COALESCE(pa.account_code, '') LIKE '311%')
                 )
               ORDER BY i.id";
         $adv = $this->advanceReceivedAccount($supplierId) . '%';

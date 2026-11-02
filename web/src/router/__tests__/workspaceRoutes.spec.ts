@@ -83,7 +83,10 @@ describe('workspace route factory', () => {
     const route = (records[0]!.children ?? []).find(item => item.name === 'property-registry')!
 
     expect(route.path).toBe('property/registry')
-    expect(route.meta).toMatchObject({ permission: 'property', access: 'read', requiresSupplier: true })
+    expect(route.meta).toMatchObject({ permission: 'property', access: 'read', requiresSupplier: true, commercialOnly: true })
+    for (const item of (records[0]!.children ?? []).filter(child => String(child.name).startsWith('property-'))) {
+      expect(item.meta?.commercialOnly, String(item.name)).toBe(true)
+    }
     for (const gate of ['requiresDoubleEntry', 'requiresAccountingMode', 'requiresTaxEvidence', 'requiresVat', 'adminPlusOnly', 'superadminOnly']) {
       expect(route.meta?.[gate], gate).toBeUndefined()
     }

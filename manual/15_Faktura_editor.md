@@ -618,6 +618,12 @@ službu a každý řádek sedne na svůj účet. Nenavázané řádky zůstávaj
 dlouhodobým majetkem navíc dostane klasifikaci DPH **1m/2m**, prodej dlouhodobého majetku se
 podle § 76 odst. 4 ZDPH nezapočítává do koeficientu. Ruční volba klasifikace má přednost.
 
+**Členění DPH položky** zvolíte pod šipkou na konci řádku, kde je i účet položky. Výchozí
+**Automaticky podle sazby** kód odvodí ze sazby, jednotky a odběratele. Zvolený kód se při dalším
+uložení zachová, dokud nezměníte sazbu, jednotku, kartu majetku, odběratele, přenesenou daňovou
+povinnost nebo datum plnění. Po takové změně se kód odvodí znovu. V podaném období DPH je změna
+členění změnou položky a platí pro ni stejný zámek jako pro změnu částky.
+
 Pokud se kartu uzavřít nepodaří (zavřené účetní období, nebo u dlouhodobého majetku rok, který
 nemá potvrzený ani přerušený daňový odpis), **faktura se přesto vystaví a zaúčtuje** a systém
 hned po vystavení upozorní, která karta zůstala v užívání a proč (např. „rok 2025 nemá

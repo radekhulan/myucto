@@ -306,6 +306,8 @@ doplňte řádky ručně. Doklady s uvedenými jednotkovými cenami se přebíra
   Datum objednávky, expedice, tisku nebo přijetí objednávky za něj nezamění.
 - **Chybějící splatnost se neodhaduje.** Pokud na dokladu datum splatnosti není, výsledek ho nechá neurčené a doplníte ho při
   kontrole v editoru. Stejně tak se extraktor nesnaží „opravovat" DUZP jen proto, že předchází datu vystavení.
+- **Doklad s jediným datem dostane DUZP z data vystavení.** Typicky účtenka nebo doklad zaplacený kartou. Prázdné DUZP zůstane
+  u zálohy, dobropisu, dokladu s datem dodání a u pořízení zboží z EU, kde chybí datum dodání.
 - **Datum přijetí se bere z dokladu, ne ze dne vytěžení.** Do pole **Datum přijetí** se doplní **datum vystavení** dokladu,
   a když ho doklad nenese, DUZP. Datum v budoucnosti se nepoužije nikdy. Nemá-li doklad čitelné vůbec žádné datum, zůstane
   den importu a doklad na to upozorní žlutou hláškou. Chcete-li jako datum přijetí den importu, přepněte v

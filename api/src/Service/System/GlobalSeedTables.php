@@ -252,6 +252,8 @@ final class GlobalSeedTables
         'supplier_accounting_modes', 'supplier_accounting_frameworks',
         'accounting_periods', 'entity_category_history',
         'accounting_account_definition_history', 'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
+        // Vlastní druhy ostatních položek nesou vlastní číselné řady, které reset ponechává.
+        'other_item_kinds',
         'accounting_fixed_exchange_rates',
         'auto_posting_policy', 'expense_classification_rules', 'revenue_classification_rules', 'posting_rules',
         'journal_entry_templates', 'journal_entry_template_lines',
@@ -406,7 +408,7 @@ final class GlobalSeedTables
         'journal_entries', 'journal_entry_attachments', 'journal_entry_document_links', 'journal_document_postings',
         'journal_entry_line_dimension_splits', 'journal_entry_line_dimensions', 'journal_entry_lines',
         'journal_settlement_allocations',
-        'journal_entry_notes', 'journal_integrity_findings', 'journal_line_pairing_items',
+        'journal_entry_notes', 'journal_integrity_findings', 'journal_line_pairing', 'journal_line_pairing_items',
         'joint_allocation_batches', 'joint_allocation_cancellations', 'joint_allocation_source_claims',
         'joint_allocation_audit',
         'journal_line_pairings',

@@ -6,6 +6,7 @@ const root = new URL('../src/', import.meta.url)
 const client = await readFile(new URL('api/client.ts', root), 'utf8')
 const auth = await readFile(new URL('stores/auth.ts', root), 'utf8')
 const layout = await readFile(new URL('components/layout/AppLayout.vue', root), 'utf8')
+const userMenu = await readFile(new URL('components/layout/AppUserMenu.vue', root), 'utf8')
 const forcedSetup = await readFile(new URL('pages/ForcedMfaSetup.vue', root), 'utf8')
 const sessionSecurity = await readFile(new URL('stores/sessionSecurity.ts', root), 'utf8')
 const login = await readFile(new URL('pages/Login.vue', root), 'utf8')
@@ -37,8 +38,10 @@ test('logout failures are surfaced by both private layout and forced MFA setup',
 })
 
 test('manual lock is available only for a session with passkey unlock', () => {
-  assert.match(layout, /canLockSession[\s\S]*unlock_methods\.includes\('passkey'\)/)
-  assert.equal((layout.match(/v-if="canLockSession"/g) || []).length, 2)
+  for (const source of [layout, userMenu]) {
+    assert.match(source, /canLockSession[\s\S]*unlock_methods\.includes\('passkey'\)/)
+    assert.equal((source.match(/v-if="canLockSession"/g) || []).length, 1)
+  }
   assert.match(
     sessionSecurity,
     /async function lock\(\) \{[\s\S]*!state\.value\.unlock_methods\.includes\('passkey'\)[\s\S]*return/,

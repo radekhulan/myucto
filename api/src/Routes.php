@@ -1261,6 +1261,10 @@ final class Routes
                 '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
                 [PayrollTakeoverWageAction::class, 'manualForm'],
             );
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}/filed-forms',
+                [PayrollTakeoverWageAction::class, 'manualFiledForms'],
+            );
             $g->put(
                 '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
                 [PayrollTakeoverWageAction::class, 'manualSave'],
@@ -3172,6 +3176,11 @@ final class Routes
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
             $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);
+            $g->get   ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'list']);
+            $g->post  ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'create']);
+            $g->put   ('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'update']);
+            $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'updateBuiltin']);
+            $g->delete('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'delete']);
             $g->get   ('/other-items/schedules',               [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
             $g->get   ('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'get']);
             $g->delete('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'delete']);
@@ -3901,6 +3910,7 @@ final class Routes
         $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);
         // Kategorie zpráv, pravidla zařazení, ruční přeřazení a stav přečtení.
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/category', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'assign']);
+        $app->post   ('/api/submissions/inbox/read-all', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markAllRead']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/read', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markRead']);
         $app->get    ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'overview']);
         $app->post   ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'createCategory']);

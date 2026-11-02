@@ -165,6 +165,8 @@ nebo ji tam zapíšete jako odeslanou ručně.
 
 **Jak poznáte, že je hotovo:** Podání má stav **Odesláno, čeká na doručenku** a po doručence **Doručeno**. Doručená datová
 zpráva ale ještě neznamená, že instituce podání přijala bez výhrad (viz [§ 97.10.1](#97101-stavy-podani-a-doruceni)).
+Výjimkou jsou přehledy a hromadná oznámení zdravotním pojišťovnám: pojišťovna výsledek neposílá, proto je povinnost
+splněná samotným doručením a podání ukazuje **Splněno doručením**.
 
 > [!WARNING]
 > Přímé odeslání vždy vyžaduje váš úkon u konkrétního podání: potvrzení relace v Mobilním klíči, zadání hesla pro
@@ -176,7 +178,9 @@ zpráva ale ještě neznamená, že instituce podání přijala bez výhrad (viz
 
 **Doručenky ke všem čekajícím podáním:**
 
-1. Na záložce **Odchozí podání** klikněte na **Načíst hromadně doručenky**. Aplikace si vyžádá dodejky ke všem odeslaným zprávám, které je ještě nemají. Není to vyzvednutí schránky.
+Načtením příchozích zpráv se v téže relaci stáhnou i doručenky čekajících podání. Když chcete jen doručenky, bez vyzvednutí schránky:
+
+1. Na záložce **Odchozí podání** klikněte na **Načíst hromadně doručenky**. Aplikace si vyžádá dodejky ke všem odeslaným zprávám, které je ještě nemají.
 2. Klikněte na **Přihlásit a stáhnout doručenky** (u SMS na **Ověřit SMS a stáhnout doručenky**).
 3. Zkontrolujte shrnutí: připojeno, zatím bez dodejky, nepodařilo se zeptat.
 
@@ -303,7 +307,7 @@ sama žádnou odpověď neodešle. Zapište také vazbu na původní podání.
 | „Přihlášení k datové schránce není dokončené, takže se odesílat nesmí.“ | Přihlášení Mobilním klíčem nebylo potvrzené | Potvrďte přihlášení a odeslání spusťte znovu. |
 | Relace vypršela během odeslání | Relace Mobilního klíče žije jen pár minut | Přihlaste se znovu a akci zopakujte. Zpráva prokazatelně neodešla, duplicita nehrozí. |
 | Stav **Nevíme, jestli odešlo** | Spojení se přerušilo uprostřed odesílání | Použijte **Dohledat, jestli odešlo** ([§ 97.6](#976-krok-za-krokem-kdyz-neni-jiste-zda-zprava-odesla)). |
-| Doručenka se nenačetla | Doručenka se nestahuje sama | Klikněte na **Načíst hromadně doručenky**, nebo ji nahrajte ručně. |
+| Doručenka se nenačetla | Úřad zprávu ještě nepřevzal, nebo jste od odeslání schránku nenačetli | Načtěte příchozí zprávy nebo klikněte na **Načíst hromadně doručenky**, případně ji nahrajte ručně. |
 | Prázdný seznam příchozích zpráv | Neúplné načtení nebo schránka nedostupná | Zopakujte načtení po kontrole stavu. Prázdný seznam není důkazem, že zprávy nejsou. |
 | Neúplné načtení: u některých zpráv se stažení nezdařilo | Chyba stažení nebo uložení | Načtení zopakujte. |
 | Příjemce nejde zvolit | U záznamu chybí ID datové schránky | Doplňte ID v záložce **Příjemci**. |

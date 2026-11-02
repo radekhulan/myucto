@@ -361,12 +361,13 @@ final readonly class PayrollMonthlyChecklistService
             if ($dispatched || $done) {
                 $description['channel'] = self::dispatchedChannel(
                     $outbox,
+                    $row['latest_submission']['channel'] ?? null,
                     $description['channel'],
                 );
             } elseif (str_starts_with($channels['default'], 'vrep_')) {
                 // JMHZ odejde frontou přes VREP, když je zvolený podpisový
                 // certifikát — sloupec „Jakou cestou" nesmí tvrdit datovku.
-                $description['channel'] = ['label' => 'VREP ČSSZ (podpisový certifikát)', 'note' => ''];
+                $description['channel'] = ['label' => self::VREP_CHANNEL_LABEL, 'note' => ''];
             }
             if ($dispatched && !$done) {
                 $description['action'] = [
@@ -642,6 +643,8 @@ final readonly class PayrollMonthlyChecklistService
      */
     private const DISPATCHED_STATUSES = ['submitted', 'processing', 'waiting_for_identity'];
 
+    private const VREP_CHANNEL_LABEL = 'VREP ČSSZ (podpisový certifikát)';
+
     private static function settlementPolicy(): PayrollSubmissionSettlementPolicy
     {
         return new PayrollSubmissionSettlementPolicy(new PayrollDispatchCapabilityCatalog());
@@ -649,17 +652,20 @@ final readonly class PayrollMonthlyChecklistService
 
     /**
      * Kanál, kterým zpráva SKUTEČNĚ odešla. Odchozí fronta existuje jen
-     * u datové schránky; bez ní zůstává popis agendy, ale bez poznámky
-     * o tom, jak by se odesílalo dnes.
+     * u datové schránky, podání přes VREP nese kanál samo; jinak zůstává
+     * popis agendy, ale bez poznámky o tom, jak by se odesílalo dnes.
      *
      * @param array<string,mixed>|null $outbox
      * @param array{label:?string,note:string} $fallback
      * @return array{label:?string,note:string}
      */
-    private static function dispatchedChannel(?array $outbox, array $fallback): array
+    private static function dispatchedChannel(?array $outbox, mixed $submissionChannel, array $fallback): array
     {
         if ($outbox !== null) {
             return ['label' => 'datová schránka', 'note' => ''];
+        }
+        if (is_string($submissionChannel) && str_starts_with($submissionChannel, 'vrep_')) {
+            return ['label' => self::VREP_CHANNEL_LABEL, 'note' => ''];
         }
 
         return ['label' => $fallback['label'], 'note' => ''];

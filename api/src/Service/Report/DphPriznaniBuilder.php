@@ -1138,7 +1138,9 @@ final class DphPriznaniBuilder
             'tax_date'      => $row['tax_date'] !== null ? (string) $row['tax_date'] : null,
             'updated_at'    => null,
             'total'         => (float) $row['document_total'],
+            'vat_lines'     => $refs[$key]['vat_lines'] ?? [],
         ];
+        VatPostFilingChangesService::addVatLine($refs[$key]['vat_lines'], $row);
     }
 
     /**

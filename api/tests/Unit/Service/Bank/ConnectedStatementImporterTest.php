@@ -429,22 +429,20 @@ final class ConnectedStatementImporterTest extends TestCase
         }
     }
 
-    public function testMonthlyGpcWithDifferentReferenceReusesConfirmedApiMovement(): void
+    /**
+     * Stejný den, částka a protiúčet, v GPC i ve feedu jediný takový pohyb: jde o tutéž platbu
+     * i s jinou referencí a popisem (převod mezi vlastními účty bez VS), potvrzení netřeba.
+     */
+    public function testMonthlyGpcWithDifferentReferenceReusesUniqueApiMovement(): void
     {
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
+        $parsed['transactions'][0]['description'] = 'Odchozi uhrada';
         $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
         $this->importer->importConnectedParsed($parsed, 'synthetic-first-api', 'synthetic.json', null, 1, 10);
         $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
-        try {
-            $this->importer->import($content, 'synthetic.gpc', null, 1);
-            self::fail('Confirmation required.');
-        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
-            $keys = array_column($e->candidates, 'confirmation_key');
-            self::assertCount(1, $keys);
-        }
-        $result = $this->importer->import($content, 'synthetic.gpc', null, 1, $keys);
+        $result = $this->importer->import($content, 'synthetic.gpc', null, 1);
         self::assertSame(0, $result['transactions']);
         self::assertSame(1, $result['skipped_duplicates']);
         $retry = $this->importer->import($content . "\r\n", 'synthetic-overlap.gpc', null, 1);
@@ -523,14 +521,18 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->importer->import($this->transferGpc(), 'synthetic.gpc', null, 1);
     }
 
-    public function testDifferentReferencesDoNotHideAnotherPaymentToSameAccount(): void
+    /**
+     * Feed je jen okno pohybů, ne úplný seznam účtu: proti uloženému GPC jediný pohyb téhož dne
+     * nic nedokazuje a shodu dál potvrzuje člověk. Automaticky ji bere jen GPC proti feedu.
+     */
+    public function testFeedWithDifferentReferenceAgainstGpcStillRequiresConfirmation(): void
     {
         $parsed = new GpcParser()->parse($this->transferGpc());
         $parsed['transactions'][0]['bank_ref'] = 'synthetic-distinct-payment';
         $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
-        $this->importer->importConnectedParsed($parsed, '{"synthetic":8}', 'synthetic.json', null, 1, 10);
-        $this->expectException(\InvalidArgumentException::class);
         $this->importer->import($this->transferGpc(), 'synthetic.gpc', null, 1);
+        $this->expectException(\MyInvoice\Service\Bank\StatementReconciliationException::class);
+        $this->importer->importConnectedParsed($parsed, '{"synthetic":8}', 'synthetic.json', null, 1, 10);
     }
 
     public function testApiDownloadReusesMovementTakenOverFromAnotherProgram(): void

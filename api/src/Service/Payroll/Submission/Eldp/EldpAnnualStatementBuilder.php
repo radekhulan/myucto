@@ -2008,27 +2008,35 @@ final class EldpAnnualStatementBuilder
             'takeover_source' => $month->source,
         ];
 
-        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp'], true)) {
+        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'], true)) {
             $blockers[] = [
                 'code' => 'eldp_takeover_relationship_kind_unsupported',
-                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ ani DPP ("
-                    . ($month->relationType ?? 'neuvedeno') . '); evidenční list jiný neumí.'
+                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ, DPP, "
+                    . 'společník ani člen orgánu (' . ($month->relationType ?? 'neuvedeno')
+                    . '); evidenční list jiný neumí.'
                     . $where,
                 'detail' => $detail + ['relation_type' => $month->relationType],
             ];
 
             return null;
         }
-        $code = $month->relationType === 'employment'
-            ? $month->eldpCode()
-            : ($month->activityCode !== null
+        // Převzatý řádek nenese bližší určení, u společníka a člena orgánu
+        // proto rozhoduje jen rodina druhu činnosti (měsíční hlášení: S++).
+        $code = match (true) {
+            $month->relationType === 'employment' => $month->eldpCode(),
+            self::socialKind($month->relationType) === 'corporate_body' => $month->activityCode !== null
+                && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($month->activityCode)
+                    ? $month->activityCode . '++'
+                    : null,
+            default => $month->activityCode !== null
                 && PayrollEmploymentJmhzActivityFamily::matches(
                     $month->relationType,
                     $month->activityCode,
                     null,
                 )
                     ? $month->activityCode . '++'
-                    : null);
+                    : null,
+        };
         if ($code === null) {
             $blockers[] = [
                 'code' => 'eldp_takeover_activity_missing',

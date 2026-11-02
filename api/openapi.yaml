@@ -3074,7 +3074,9 @@ paths:
         jinak zůstane uložený kód. (4) `issue_date` bez `due_date` zachová uloženou lhůtu splatnosti
         (rozdíl `due_date` a `issue_date` ve dnech). (5) `discount_percent` bez `items` přegeneruje
         slevové řádky z uložených položek. (6) Kurz se znovu stahuje jen tehdy, když se skutečně
-        změní `currency_id`, `issue_date` nebo `tax_date` oproti uloženým hodnotám.
+        změní `currency_id`, `issue_date` nebo `tax_date` oproti uloženým hodnotám. (7) Poslaný
+        `vat_classification_code` položky, který se liší od uloženého, je účetní změna: neprojde
+        režimem `notes_only` ani zámkem podaného období DPH. Vynechaný kód se odvodí ze sazby a jednotky.
       requestBody:
         required: true
         content:
@@ -8602,6 +8604,25 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
+          name: filter[has_visual_document]
+          description: >
+            1 = přiložené PDF / sken, 0 = chybí; vynechání neomezuje výběr.
+            Počítá uložené PDF faktury (také source_format=pdf) a aktivní připojené
+            PDF/obrázky dostupné uživateli. Dokumenty vyžadují právo documents:read
+            a procházejí stejnou kontrolou viditelnosti jako seznam příloh.
+            Bez tohoto práva se počítá jen vlastní archiv faktury.
+            Vlastní tiskový výstup ani externí archiv se nezapočítávají.
+            Přítomnost neověřuje obsah, pravost ani fyzickou dostupnost souboru.
+          schema: { type: string, enum: ['0', '1'] }
+        - in: query
+          name: filter[has_structured_source]
+          description: >
+            1 = archivovaný strukturovaný zdroj importu, 0 = chybí; vynechání neomezuje
+            výběr. Vyžaduje neprázdné source_path a source_format isdoc, isdocx,
+            pohoda_xml, idoklad_json nebo fakturoid_json. PDF ani libovolné XML
+            v připojených Dokumentech nestačí. Oba filtry se kombinují podmínkou AND.
+          schema: { type: string, enum: ['0', '1'] }
+        - in: query
           name: filter[status]
           schema: { type: string, enum: [draft, received, booked, paid, cancelled] }
         - in: query
@@ -8677,6 +8698,8 @@ paths:
           name: per_page
           schema: { type: integer, default: 50, maximum: 200 }
       responses:
+        '422':
+          description: Neplatná hodnota filtru (has_visual_document a has_structured_source přijímají pouze 0 nebo 1).
         '200':
           description: OK
           content:
@@ -9405,9 +9428,9 @@ paths:
           description: |
             Summary s counts sekcí A.1/A.2/A.4/A.5/B.1/B.2/B.3, varování k volbě typu podání,
             `cross_check` (přijaté doklady čekající na schválení, týž tvar nálezů jako
-            u DPHDP3; samovyměření je blokující) a fronta `post_filing_changes` (doklady
-            změněné po posledním podání za období — podklad pro rozhodnutí o opravném či
-            následném hlášení).
+            u DPHDP3; samovyměření je blokující) a `post_filing_changes` (řádky, kterými se
+            dnes sestavené hlášení liší od posledního podaného XML, podklad pro rozhodnutí
+            o opravném či následném hlášení).
           content:
             application/json:
               schema:
@@ -15090,6 +15113,9 @@ paths:
         k platbě) a `tax_document_id`; `remaining_czk` je základ zálohy se znaménkem
         (součet položek = zůstatek hlavní knihy) a `days_overdue` je 0.
 
+        `other_doc_no` = druhé číslo přijaté faktury vedle `doc_no` (naše číslo nebo číslo
+        dodavatele); `null`, když doklad druhé číslo nemá nebo je stejné.
+
         `settleable` = vydaný nebo přijatý doklad s vlastním předpisem na účtu, který lze
         vyrovnat přiřazením zápisu v deníku (`/api/v1/accounting/saldo-settlements/*`).
         Doklady zastoupené jen v počátečních stavech a úhrady před zaúčtováním ho nemají.
@@ -17338,15 +17364,17 @@ paths:
         {PREFIX}, {YYYY}, {YY} a {C+} (počet C = odsazení nulami); prázdná / null vrací
         řadu na vestavěné `{PREFIX}-{YYYY}-{CCCC}`. `next_number` je číslo PŘÍŠTÍHO
         vydaného dokladu — umožňuje navázat na řadu převzatou z jiného systému.
-        `register_id` > 0 míří na vlastní řadu té pokladny (jen `cash_in` / `cash_out`),
-        0 nebo vynechané na společnou řadu firmy.
+        `register_id` > 0 míří na vlastní řadu pokladny (`cash_in` / `cash_out`) nebo vlastního
+        druhu ostatní položky (`other_receivable` / `other_payable`), 0 nebo vynechané na
+        společnou řadu firmy. Prefix se nesmí shodovat s jinou řadou téže skupiny (pokladní
+        řady, řady ostatních položek) — jinak `series_prefix_taken`.
 
         Deníkové řady (`closing`, `opening`, `fx`, `transfer`, `manual`, `offset`) jsou
         dostupné jen v podvojném účetnictví; v daňové evidenci vrátí `wrong_accounting_mode`
         (403). Pokladní, skladové a objednávkové řady editují oba režimy.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order] } }
+        - { in: path, name: code, required: true, schema: { type: string, enum: [closing, opening, fx, transfer, manual, cash_in, cash_out, stock_in, stock_out, stock_transfer, offset, purchase_order, other_receivable, other_payable] } }
         - { in: path, name: year, required: true, schema: { type: integer } }
       requestBody:
         required: true
@@ -17359,7 +17387,7 @@ paths:
                 prefix: { type: string, pattern: "^[A-Z0-9]{1,10}$" }
                 number_format: { type: string, nullable: true, maxLength: 40, example: "{PREFIX}{CCCCC}" }
                 next_number: { type: integer, minimum: 1, maximum: 999999999 }
-                register_id: { type: integer, minimum: 0, default: 0, description: "Vlastní řada pokladny (jen cash_in/cash_out); 0 = společná řada firmy" }
+                register_id: { type: integer, minimum: 0, default: 0, description: "Vlastní řada pokladny (cash_in/cash_out) nebo druhu ostatní položky s vlastní řadou (other_receivable/other_payable); 0 = společná řada firmy" }
       responses:
         '200': { description: OK (aktuální seznam řad), content: { application/json: { schema: { type: array, items: { type: object } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -17953,13 +17981,14 @@ paths:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: query, name: side, schema: { type: string, enum: [receivable, payable] } }
         - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] } }
-        - { in: query, name: kind, schema: { type: string } }
+        - { in: query, name: kind, schema: { type: string }, description: Vestavěný druh; vrací jen položky bez vlastního druhu (kind_id null). }
+        - { in: query, name: kind_id, schema: { type: integer, minimum: 1 }, description: Vlastní druh firmy (GET /accounting/other-items/kinds); má přednost před kind a vynechá převzaté zdroje. }
         - { in: query, name: from, schema: { type: string, format: date } }
         - { in: query, name: to, schema: { type: string, format: date } }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: page, schema: { type: integer, minimum: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
-        - { in: query, name: sort_by, schema: { type: string, enum: [title, partner_name, due_on, amount, remaining_amount, status] }, description: Řazení ručních položek před stránkováním; převzaté zdroje zůstávají oddělené. }
+        - { in: query, name: sort_by, schema: { type: string, enum: [document_no, title, partner_name, due_on, amount, remaining_amount, status] }, description: Řazení ručních položek před stránkováním; převzaté zdroje zůstávají oddělené. }
         - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc } }
       responses:
         '200': { description: Stránkované ruční položky a oddělené převzaté zdroje, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemList' } } } }
@@ -17977,6 +18006,24 @@ paths:
         '201': { description: Koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/other-items/kinds:
+    get:
+      tags: [Accounting]
+      summary: Druhy ostatních pohledávek a závazků
+      description: |
+        Všechny druhy firmy po stranách: vestavěné (`builtin_code` = hodnota `kind`, bez názvu)
+        a za nimi vlastní druhy firmy (`name`). Položka s vlastním druhem nese `kind_id`
+        a v `kind` hodnotu `other`. Druh s `own_series` čísluje doklady vlastní řadou
+        (`other_receivable` / `other_payable` s `register_id` = `id` druhu); ostatní jedou na
+        společné řadě OP/OZ. Skrytý druh (`is_active` false) nejde zvolit pro nový koncept.
+        Výchozí druh `other` v seznamu není: nabízí se vždy a čísluje společnou řadou.
+        Nastavení druhů se mění jen ve webovém rozhraní.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+      responses:
+        '200': { description: Druhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemKind' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /api/v1/accounting/other-items/{id}:
     parameters:
@@ -18031,6 +18078,7 @@ paths:
       responses:
         '200': { description: Potvrzený nebo zaúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Doklad není koncept, nebo číslo z řady už nese jiný doklad — upravte prefix nebo čítač řady (`other_items.error.not_draft|document_no_taken`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/reverse:
     post:
@@ -40521,6 +40569,9 @@ components:
       properties:
         side: { type: string, enum: [receivable, payable] }
         kind: { type: string, enum: [other, rent, loan, deposit, insurance, fee, claim], default: other }
+        kind_id:
+          type: [integer, 'null']
+          description: Vlastní druh firmy (GET /accounting/other-items/kinds) se stejnou stranou; s ním se kind uloží jako other. Skrytý druh nejde zvolit pro nový koncept, koncept si dříve zvolený druh ponechá i po jeho skrytí (platí i pro skrytý vestavěný kind). Při úpravě vlastní druh zruší jiný vestavěný kind než other bez kind_id, nebo výslovné kind_id null; kind other bez kind_id ho ponechá.
         title: { type: string, maxLength: 255 }
         partner_id: { type: [integer, 'null'] }
         partner_name: { type: [string, 'null'] }
@@ -40540,6 +40591,20 @@ components:
           description: Protiřádky kontace v CZK; součet musí přesně odpovídat amount_czk. U starých dokladů se jednořádková kontace vrací synteticky.
           items: { $ref: '#/components/schemas/OtherItemPostingLine' }
         note: { type: [string, 'null'] }
+    OtherItemKind:
+      type: object
+      required: [id, side, builtin, builtin_code, name, own_series, is_active]
+      properties:
+        id: { type: [integer, 'null'], description: Id řádku nastavení; null u vestavěného druhu ve výchozím stavu. }
+        side: { type: string, enum: [receivable, payable] }
+        builtin: { type: boolean, description: Vestavěný druh (true) nebo vlastní druh firmy. }
+        builtin_code: { type: [string, 'null'], enum: [rent, loan, deposit, insurance, fee, claim, null], description: Kód vestavěného druhu (hodnota kind položky). }
+        name: { type: [string, 'null'], maxLength: 100, description: Název vlastního druhu; null u vestavěného. }
+        own_series: { type: boolean, description: Druh čísluje doklady vlastní řadou. }
+        series_prefix: { type: [string, 'null'], description: Prefix vlastní řady druhu (i vypnuté); null, dokud ji druh neměl. }
+        is_active: { type: boolean, description: Skrytý druh nejde zvolit pro nový koncept; koncept a opakování, které ho nesou, ho ponechají. }
+        created_at: { type: [string, 'null'], format: date-time }
+        updated_at: { type: [string, 'null'], format: date-time }
     OtherItem:
       allOf:
         - { $ref: '#/components/schemas/OtherItemInput' }
@@ -40548,7 +40613,8 @@ components:
           properties:
             id: { type: integer, format: int64 }
             status: { type: string, enum: [draft, confirmed, posted, reversed, cancelled] }
-            document_no: { type: [string, 'null'] }
+            document_no: { type: [string, 'null'], description: Číslo z řady druhu s vlastní řadou, jinak ze společné řady OP/OZ. }
+            kind_name: { type: [string, 'null'], description: Název vlastního druhu (kind_id); null u vestavěného druhu. }
             amount_czk: { type: number }
             settled_outside_amount: { type: number, description: Část uhrazená mimo banku a pokladnu (zápočet, interní doklad, stav úhrady převzatý z jiného programu). Je součástí paid_amount. }
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }
@@ -40612,6 +40678,7 @@ components:
         doc_type: { type: string, enum: [invoice, purchase_invoice, cash, bank] }
         doc_id: { type: integer }
         note: { type: [string, 'null'], maxLength: 255 }
+        doc_title: { type: [string, 'null'], readOnly: true, description: Číslo navázaného dokladu; null u smazaného dokladu }
     InternalDocumentInput:
       type: object
       required: [title, document_date]
@@ -49142,6 +49209,8 @@ components:
         vat_deduction: { type: string, enum: [full, none, proportional, reduced] }
         vat_deduction_percent: { type: number, format: float }
         tax_deductible: { type: boolean }
+        reverse_charge: { type: boolean, description: "Přenesená daňová povinnost, stejná hodnota jako v detailu dokladu." }
+        prices_include_vat: { type: boolean, description: "Ceny položek jsou zadané včetně DPH, stejná hodnota jako v detailu dokladu." }
         extraction_warning: { type: [string, "null"] }
         currency_symbol: { type: string }
         vendor_company_name: { type: string }

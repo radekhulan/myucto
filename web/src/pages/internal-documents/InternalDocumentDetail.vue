@@ -246,8 +246,8 @@ onMounted(load)
         <ul class="divide-y divide-neutral-100 text-sm">
           <li v-for="link in doc.document_links" :key="`${link.doc_type}:${link.doc_id}`" class="flex flex-wrap items-center gap-2 py-2">
             <span class="text-xs text-neutral-500">{{ docTypeLabel(link.doc_type) }}</span>
-            <RouterLink v-if="linkRoute(link)" :to="linkRoute(link)!" class="font-medium text-primary-700 hover:underline">#{{ link.doc_id }}</RouterLink>
-            <span v-else class="font-medium">#{{ link.doc_id }}</span>
+            <RouterLink v-if="linkRoute(link)" :to="linkRoute(link)!" class="font-medium text-primary-700 hover:underline" data-test="link-title">{{ link.doc_title || `#${link.doc_id}` }}</RouterLink>
+            <span v-else class="font-medium" data-test="link-title">{{ link.doc_title || `#${link.doc_id}` }}</span>
             <span v-if="link.note" class="text-neutral-500">· {{ link.note }}</span>
           </li>
         </ul>

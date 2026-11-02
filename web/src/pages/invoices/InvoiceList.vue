@@ -1798,7 +1798,6 @@ useWindowRefresh(refreshLoadedPages,
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
-              <WorkspaceDragHandle />
               <input
                 type="checkbox"
                 :checked="selectedIds.includes(inv.id)"

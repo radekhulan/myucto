@@ -235,7 +235,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles',
   'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-update',
-  'admin-isds-gateway',
+  'admin-isds-gateway', 'admin-instance',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
@@ -284,7 +284,7 @@ export function applyAuthorizationMeta(records: RouteRecordRaw[], inheritedRequi
     if (superadminRouteNames.has(name)) record.meta = { ...record.meta, superadminOnly: true }
     if (adminPlusRouteNames.has(name)) record.meta = { ...record.meta, adminPlusOnly: true }
     if (companyAdminRouteNames.has(name)) record.meta = { ...record.meta, companyAdminOnly: true }
-    if (record.meta?.requiresDoubleEntry || record.meta?.requiresStock || commercialOnlyRouteNames.has(name)) {
+    if (record.meta?.requiresDoubleEntry || record.meta?.requiresStock || record.meta?.frameworkScope === 'svj' || commercialOnlyRouteNames.has(name)) {
       record.meta = { ...record.meta, commercialOnly: true }
     }
     if (name === 'admin-branding') record.meta = { ...record.meta, staffOnly: true }
@@ -515,7 +515,13 @@ export async function authorizationGuard(
     return { name: 'instance-admin' }
   }
   const instanceAdminOnly = to.matched.some(r => r.meta.instanceAdminOnly)
-  if (instanceAdminOnly && !auth.isInstanceAdmin && (!auth.isSuperadmin || auth.isManagedInstallation)) return denyFallback(to.name, auth)
+  if (instanceAdminOnly && auth.isSuperadmin && !auth.isInstanceAdmin && !auth.isManagedInstallation) {
+    // Superadmin používá běžné panely; oddělený shell patří technickému účtu.
+    return { name: to.name === 'instance-admin-profile' ? 'profile-password' : 'admin-instance', query: to.query, hash: to.hash }
+  }
+  if (instanceAdminOnly && !auth.isInstanceAdmin) return denyFallback(to.name, auth)
+  // Na spravované instalaci se o provoz stará provozovatel, API správy tam vrací 404.
+  if (to.name === 'admin-instance' && auth.isManagedInstallation) return denyFallback(to.name, auth)
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
     return true

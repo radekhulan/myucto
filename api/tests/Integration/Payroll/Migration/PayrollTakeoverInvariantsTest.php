@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
 use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotals;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationReferenceTotalsWriter;
+use MyInvoice\Service\Payroll\Migration\PayrollMigrationTakeoverFacts;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverInvariants;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaPayrollTwoYears as Payroll;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -174,6 +176,29 @@ final class PayrollTakeoverInvariantsTest extends TestCase
         self::assertTrue($protocol->acceptableOnly(), $this->explain($protocol));
         $stored = array_column($this->invariants->stored($supplierId)[0]['violations'], 'code');
         self::assertNotContains(PayrollTakeoverInvariants::ORPHAN_TOTALS, $stored, 'Kontroly vlastních dat počítá stránka znovu, uložené jsou jen ty proti zdroji.');
+    }
+
+    /** Ruční měsíc se základem bez dnů nebo pojistného se musí ukázat dřív než v lednu. */
+    public function testManualMonthWithBaseButNoDaysIsReported(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $writer = new PayrollMigrationReferenceTotalsWriter($this->db);
+        $facts = new PayrollMigrationTakeoverFacts(
+            relationshipStartDate: '2026-01-01',
+            relationshipEndDate: null,
+            relationType: 'partner_dependent',
+            activityCode: 'S',
+            pensionParticipation: true,
+            insuranceDays: 0,
+        );
+        $writer->store($supplierId, 'other', [new PayrollMigrationReferenceTotals(
+            '2026-03', 'employee:synt', 'employment:synt', null, null,
+            450_000, 0, 450_000, 0, 0, 0, 0, 0, 67_500, 0, 0, $facts,
+        )], 'manual-entry');
+
+        $codes = array_column($this->invariants->live($supplierId, 2026), 'code');
+
+        self::assertContains(PayrollTakeoverInvariants::INCOMPLETE_MANUAL_TOTALS, $codes);
     }
 
     public function testSourceTotalsAreComparedPerPersonAndMonth(): void

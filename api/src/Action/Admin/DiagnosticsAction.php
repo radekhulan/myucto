@@ -14,6 +14,7 @@ use MyInvoice\Service\System\DiagnosticsBundleOptions;
 use MyInvoice\Service\System\DiagnosticsBundleService;
 use MyInvoice\Service\System\DiagnosticsLogReader;
 use MyInvoice\Service\System\EnvironmentCheckService;
+use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\System\ImportedPostingDiagnostics;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -39,6 +40,7 @@ final class DiagnosticsAction
         private readonly ActivityLogger $activity,
         private readonly PayrollArchiveDiagnostics $payrollArchive,
         private readonly ImportedPostingDiagnostics $importedPostings,
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     /** GET /api/admin/diagnostics */
@@ -48,7 +50,11 @@ final class DiagnosticsAction
             return $err;
         }
 
-        $report = $this->payrollArchive->appendTo($this->environment->report());
+        $environment = $this->environment->report();
+        if ($this->managed->isManaged()) {
+            $environment = EnvironmentCheckService::withoutDiskSpace($environment);
+        }
+        $report = $this->payrollArchive->appendTo($environment);
         $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         $report['imported_posting_ambiguities'] = !empty($report['facts']['database']['available']) ? $this->importedPostings->report(
             $supplierId,

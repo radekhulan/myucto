@@ -229,7 +229,9 @@ final class StatementBalanceService
      * kotvit: zůstatky se sice v řádku ukládají, ale nepoužily se, takže měsíc zůstal
      * `missing_anchor` a export GPC navždy zablokovaný.
      *
-     * Měsíční projekce se takhle nikdy nekvalifikuje — zůstatky ani soubor nemá.
+     * Měsíční projekce zůstatky ani soubor sama nemá. Doloží je až přiložené PDF výpisu,
+     * jehož zůstatky přečetl parser: nese je jen tehdy, viz
+     * {@see \MyInvoice\Action\Bank\BankStatementAction::attachParsedPdf()}.
      *
      * @param array<string,mixed> $row
      */
@@ -237,7 +239,7 @@ final class StatementBalanceService
     {
         if (BankStatementSource::isBalanceAnchor((string) $row['source'])) return true;
         return (string) $row['source'] === 'bank_api'
-            && !empty($row['has_file'])
+            && (!empty($row['has_file']) || !empty($row['has_pdf']))
             && $row['prev_balance'] !== null
             && $row['curr_balance'] !== null;
     }
@@ -311,11 +313,15 @@ final class StatementBalanceService
             if ($date > $to) continue;
             if ($row['curr_balance'] !== null || $row['prev_balance'] !== null) $hasKnownBalance = true;
             if ($date < $from) $historyBefore = true;
-            if ($row['source'] === 'bank_api' && $row['has_pdf'] && $date >= $from) $unverifiedPdf = true;
+            // PDF bez přečtených zůstatků nejde s pohyby porovnat. Přečtené je kontrolní bod níže.
+            if ($row['source'] === 'bank_api' && $row['has_pdf'] && $row['curr_balance'] === null && $date >= $from) $unverifiedPdf = true;
             if (!self::isAnchorRow($row) || $row['curr_balance'] === null) continue;
             $latestBalanceDate = $date;
             $balance = self::cents($row['curr_balance']);
-            if ($row['prev_balance'] !== null && $row['credit_total'] !== null && $row['debit_total'] !== null
+            // Obraty měsíční projekce počítáme z pohybů, nejsou údajem banky. Rozdíl proti
+            // zůstatkům z PDF je chybějící pohyb a má se ukázat jako rozdíl, ne jako konflikt.
+            $ownTotals = $row['source'] !== 'bank_api' || !empty($row['has_file']);
+            if ($ownTotals && $row['prev_balance'] !== null && $row['credit_total'] !== null && $row['debit_total'] !== null
                 && self::cents($row['prev_balance']) + self::cents($row['credit_total']) - self::cents($row['debit_total']) !== $balance) {
                 throw new \InvalidArgumentException('balance_conflict');
             }

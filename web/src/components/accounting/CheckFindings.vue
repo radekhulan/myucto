@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Modal from '../ui/Modal.vue'
 import { btnOutline } from '../ui/buttonStyles'
 import { closingApi } from '../../api/closing'
+import { useAccountBalance } from '../../composables/useAccountBalance'
 import FindingRemedyModal from './FindingRemedyModal.vue'
 
 /**
@@ -65,6 +66,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { formatBalance } = useAccountBalance()
 const open = ref(false)
 
 /**
@@ -76,6 +78,9 @@ const open = ref(false)
 const liveValue = ref<CheckValue | null>(null)
 const loading = ref(false)
 const loadFailed = ref(false)
+
+// Nový výsledek kontroly: dřívější detail už neplatí a nesmí přebít počet v řádku.
+watch(() => props.value, () => { liveValue.value = null })
 
 async function openDetail() {
   open.value = true
@@ -325,6 +330,8 @@ function fmtScalar(key: string, value: unknown): string {
     const v = t(k)
     return v === k ? String(value) : v
   }
+  // Zůstatek účtu (klíč je kód účtu): MD − Dal se znaménkem, zobrazí se se stranou.
+  if (/^\d{3}$/.test(key)) return formatBalance(value)
   return COUNT_LIKE.test(key) ? String(value) : money.format(value)
 }
 

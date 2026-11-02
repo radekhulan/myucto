@@ -36,6 +36,28 @@ Oproti vystaveným fakturám se liší takto:
 | po přijetí a uhrazení | Zaúčtovat doklady do deníku | detail faktury nebo seznam, postup v [§ 23.7](#237-krok-za-krokem-zauctovat-fakturu) |
 | po uzávěrce měsíce | Předat doklady účetní | [Export přijatých](24_Export_prijatych.md) |
 
+### Filtry podkladů
+
+V **Filtrech** seznamu přijatých faktur jsou dva nezávislé výběry:
+
+| Filtr | Co kontroluje |
+|---|---|
+| **PDF / sken** | Uložené PDF či nahranou fotku, včetně dostupných PDF a obrázků v připojených Dokumentech. |
+| **ISDOC / XML** | Archivovaný zdroj importu: ISDOC, ISDOCX, Pohoda XML nebo iDoklad/Fakturoid JSON. |
+
+Oba nabízejí vše, přiložen a chybí. Lze je kombinovat s rokem,
+dodavatelem a dalšími filtry a uložit do pohledu. Například **PDF / sken: chybí**
+a **ISDOC / XML: přiložen** vyhledá importované faktury bez vizuálního podkladu.
+
+Filtry kontrolují přítomnost podkladu v aplikaci, nikoli jeho obsah nebo pravost;
+připojeným PDF může být i smlouva či dodací list. Neověřují fyzickou dostupnost
+souboru na disku. Dokumenty v koši nebo bez oprávnění k zobrazení se nezapočítávají.
+Bez práva číst Dokumenty se vizuální podklad počítá jen z vlastního archivu faktury.
+Vlastní tiskové PDF vytvořené myÚčtem ani soubory v externím archivu se nepočítají.
+PDF ve zdrojovém archivu patří pouze mezi vizuální podklady; libovolné XML
+připojené v Dokumentech nenahrazuje strukturovaný zdroj importu.
+Přílohy jsou volitelné a **Chybí** neznamená chybu účetního dokladu.
+
 ## 23.2 Než začnete
 
 - **Dodavatel v adresáři.** Můžete ho vybrat ze seznamu, nebo založit přímo ve formuláři
@@ -538,6 +560,9 @@ faktura spadne do lednové [Knihy DPH](42_Kniha_DPH.md) i přiznání, ne do pro
 (AI extrakce, ISDOC, iDoklad, Fakturoid, bankovní avízo, scan inboxu) se datum přijetí do tohoto výpočtu nepočítá,
 import ho přebírá z dokladu (datum vystavení, jinak DUZP), což není totéž co vědomé posouzení účetní, kdy jste doklad
 opravdu drželi. Jakmile na poli něco změníte, stane se z něj vědomé zadání a do výpočtu období odpočtu vstoupí.
+
+**Číslo v účetním deníku.** Nový nebo přeúčtovaný zápis přijaté faktury nese **Naše číslo**, a když chybí, **Číslo dokladu
+dodavatele**. Starší zápisy si nechávají své číslo. Kontrolní hlášení dál uvádí číslo dodavatele a Kniha DPH obě čísla.
 
 ### 23.11.6 Položky a druh výdaje
 

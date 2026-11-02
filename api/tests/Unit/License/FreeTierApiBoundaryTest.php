@@ -60,6 +60,9 @@ final class FreeTierApiBoundaryTest extends TestCase
         yield 'daňová evidence'     => ['/api/tax-evidence/cash-journal'];
         yield 'aktivace účetnictví' => ['/api/settings/accounting-activation'];
         yield 'oprava odpočtu §74b' => ['/api/reports/s74b'];
+        yield 'SVJ — registr'       => ['/api/property/objects'];
+        yield 'SVJ — převzetí stavů' => ['/api/property/openings/confirm'];
+        yield 'SVJ — fondy'         => ['/api/property/funds/balances'];
     }
 
     #[DataProvider('freePaths')]

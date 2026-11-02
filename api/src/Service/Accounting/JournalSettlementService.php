@@ -317,7 +317,7 @@ final class JournalSettlementService
             $this->assertLine($supplierId, $line, null, SaldoService::DEFAULT_ACCOUNTS, $fromPayment
                 ? [...JournalSettlementRepository::ALLOCATABLE_SOURCES, ...JournalSettlementRepository::PAYMENT_SOURCES]
                 : JournalSettlementRepository::ALLOCATABLE_SOURCES);
-            if ($this->repo->hasCountedLink($supplierId, $line['entry_id'])) {
+            if (!$fromPayment && $this->repo->hasCountedLink($supplierId, $line['entry_id'])) {
                 throw new JournalSettlementException('entry_linked', 'Zápis už je navázaný na doklad, zůstatek bez dokladu z něj založit nelze.', 409);
             }
             $free = round($line['amount'] - $this->repo->usedOnLine($supplierId, $line), 2);

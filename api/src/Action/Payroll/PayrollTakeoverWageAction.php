@@ -10,6 +10,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Payroll\Import\Takeover\TakeoverTabularImportService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
+use MyInvoice\Service\Payroll\Migration\PayrollTakeoverFiledFormPrefill;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverManualEntryService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -34,6 +35,7 @@ final class PayrollTakeoverWageAction
         private readonly PayrollTakeoverCoverage $coverage,
         private readonly PayrollTakeoverLayerCheck $layers,
         private readonly PayrollTakeoverManualEntryService $manual,
+        private readonly PayrollTakeoverFiledFormPrefill $prefill,
     ) {}
 
     /**
@@ -74,6 +76,27 @@ final class PayrollTakeoverWageAction
         }
         try {
             return Json::ok($response, ['entry' => $this->manual->form(
+                $this->currentSupplierId($request),
+                (int) $args['employeeId'],
+                self::year($args['year']),
+            )]);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+    }
+
+    /**
+     * Návrh ručního zadání z přijatých hlášení JMHZ; nic neukládá.
+     *
+     * @param array{year:string,employeeId:string} $args
+     */
+    public function manualFiledForms(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        try {
+            return Json::ok($response, ['suggestion' => $this->prefill->suggest(
                 $this->currentSupplierId($request),
                 (int) $args['employeeId'],
                 self::year($args['year']),

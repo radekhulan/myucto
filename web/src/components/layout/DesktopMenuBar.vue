@@ -3,6 +3,7 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { TOP_NAV_ITEM, TOP_NAV_ITEM_ACTIVE, TOP_NAV_ITEM_PADDING } from './navStyles'
 
 interface NavItem {
   to: string
@@ -183,12 +184,12 @@ onBeforeUnmount(() => {
       -->
       <button
         type="button"
-        class="cursor-pointer group relative inline-flex min-w-0 self-center items-center h-8 rounded-lg text-sm font-medium whitespace-nowrap text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors"
         :class="[
+          TOP_NAV_ITEM,
           showArrows ? 'gap-1.5' : '',
-          tight ? 'px-1.5' : 'px-2.5 xl:px-3',
+          tight ? 'px-1.5' : TOP_NAV_ITEM_PADDING,
           sectionIsActive(section)
-          ? `${ACCENT_PILL[section.accent ?? 'primary']} text-neutral-900 font-semibold`
+          ? `${ACCENT_PILL[section.accent ?? 'primary']} ${TOP_NAV_ITEM_ACTIVE}`
           : (openSection === section.key ? 'bg-neutral-100 text-neutral-900' : ''),
         ]"
         :aria-expanded="openSection === section.key"

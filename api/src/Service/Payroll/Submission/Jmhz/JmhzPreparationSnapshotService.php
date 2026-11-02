@@ -608,7 +608,8 @@ final readonly class JmhzPreparationSnapshotService
                  * Chybějící schválený průměr (10345) se dřív ukázal až u zmrazení
                  * hlášení, tedy po schválení revize. Stejně jako zmrazení ho tu
                  * nežádáme u měsíce bez příjmu (nulový formulář, viz
-                 * JmhzZeroReportProfile); jinak průměr patří do snímku vstupů.
+                 * JmhzZeroReportProfile) ani u scénáře, jehož formulář pole nemá;
+                 * jinak průměr patří do snímku vstupů.
                  */
                 if ($employmentId > 0
                     && ($entry['average_earning'] ?? null) === null
@@ -616,6 +617,7 @@ final readonly class JmhzPreparationSnapshotService
                         static fn (mixed $row): mixed => is_array($row) ? ($row['amount_minor'] ?? null) : null,
                         $inputRows,
                     ))
+                    && $this->builder->averageEarningRequired($entry, substr($periodEnd, 0, 8) . '01')
                 ) {
                     $issues[] = [
                         'code' => 'jmhz_average_hourly_earning_missing',

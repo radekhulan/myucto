@@ -125,6 +125,23 @@ final class PohodaJournal
     }
 
     /**
+     * Párovací symbol strany řádku na saldokontním účtu. Saldo POHODY páruje podle `ParSym`,
+     * u zápočtu zálohy nese účet zálohy druhý symbol `ParSym2` (MD 321 / D 314: symbol faktury
+     * na 321, symbol zálohy na 314). Na ostatních účtech je `null`.
+     */
+    public static function pairingSymbol(array $item, string $account): ?string
+    {
+        $synthetic = substr($account, 0, 3);
+        if (!in_array($synthetic, ['311', '314', '315', '321', '324', '325'], true)) {
+            return null;
+        }
+        $advance = PohodaXml::text($item, 'pairing/advance');
+        $symbol = in_array($synthetic, ['314', '324'], true) && $advance !== '' ? $advance : PohodaXml::text($item, 'pairing/symbol');
+        $symbol = mb_substr(trim($symbol), 0, 40);
+        return $symbol === '' ? null : $symbol;
+    }
+
+    /**
      * Čistý účetní účinek řádku: kladná částka jde MD `credit` / D `debit`, záporná
      * obráceně. `null` = bez účinku (nulová částka, chybějící účet, stejný účet na obou
      * stranách - Pohoda tak vede třeba vyměření DPH v cizí měně na 349/349).

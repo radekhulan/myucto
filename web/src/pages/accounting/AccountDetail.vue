@@ -5,6 +5,7 @@ import { useRoute, RouterLink } from 'vue-router'
 import { accountingApi, type AccountDetailReport, type AccountDetailChild, type AccountingPeriod, type AccountStatementItem } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
+import { useAccountBalance } from '@/composables/useAccountBalance'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -21,6 +22,7 @@ import { ICONS, BTN_ICON_SM_BASE, OUTLINE } from '@/components/ui/buttonStyles'
  */
 
 const { t } = useI18n()
+const { balanceLabel, formatBalance, formatBalanceAmount } = useAccountBalance()
 const route = useRoute()
 const toast = useToast()
 
@@ -196,11 +198,6 @@ const actions = computed<ActionItem[]>(() => {
   ]
 })
 
-/** Zůstatek na „správné" straně účtu — kladné = MD, záporné = Dal. */
-function balanceSide(v: number): string {
-  return v >= 0 ? t('accounting.journal.side.debit') : t('accounting.journal.side.credit')
-}
-
 watch(accountId, () => { void load() })
 
 onMounted(async () => {
@@ -296,8 +293,8 @@ onMounted(async () => {
         <!-- Souhrn účtu -->
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-            <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.opening') }}</div>
-            <div class="text-lg font-semibold font-mono">{{ formatMoney(report.totals.opening_balance) }}</div>
+            <div class="text-xs text-neutral-500" data-testid="opening-label">{{ balanceLabel(t('accounting.account_statement.opening'), report.totals.opening_balance) }}</div>
+            <div class="text-lg font-semibold font-mono" data-testid="opening-amount">{{ formatBalanceAmount(report.totals.opening_balance) }}</div>
           </div>
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
             <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.turnover_md') }}</div>
@@ -308,10 +305,8 @@ onMounted(async () => {
             <div class="text-lg font-semibold font-mono">{{ formatMoney(report.totals.turnover_d) }}</div>
           </div>
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
-            <div class="text-xs text-neutral-500">
-              {{ t('accounting.account_statement.closing') }} · {{ balanceSide(report.totals.closing_balance) }}
-            </div>
-            <div class="text-lg font-semibold font-mono">{{ formatMoney(report.totals.closing_balance) }}</div>
+            <div class="text-xs text-neutral-500" data-testid="closing-label">{{ balanceLabel(t('accounting.account_statement.closing'), report.totals.closing_balance) }}</div>
+            <div class="text-lg font-semibold font-mono" data-testid="closing-amount">{{ formatBalanceAmount(report.totals.closing_balance) }}</div>
           </div>
         </div>
 
@@ -403,7 +398,7 @@ onMounted(async () => {
                   <td class="px-3 py-2 text-right font-mono">
                     <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
                   </td>
-                  <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.balance) }}</td>
+                  <td class="px-3 py-2 text-right font-mono">{{ formatBalance(it.balance) }}</td>
                   <td class="px-3 py-2 text-right whitespace-nowrap">
                     <button type="button" :class="[BTN_ICON_SM_BASE, OUTLINE.neutral]"
                       :title="t('accounting.account_statement.preview_source')" @click="previewEntryId = it.entry_id">
@@ -459,10 +454,10 @@ onMounted(async () => {
                       </RouterLink>
                     </td>
                     <td class="px-3 py-2">{{ c.name }}</td>
-                    <td class="px-3 py-2 text-right font-mono">{{ formatMoney(c.opening_balance) }}</td>
+                    <td class="px-3 py-2 text-right font-mono">{{ formatBalance(c.opening_balance) }}</td>
                     <td class="px-3 py-2 text-right font-mono">{{ formatMoney(c.turnover_md) }}</td>
                     <td class="px-3 py-2 text-right font-mono">{{ formatMoney(c.turnover_d) }}</td>
-                    <td class="px-3 py-2 text-right font-mono font-medium">{{ formatMoney(c.closing_balance) }}</td>
+                    <td class="px-3 py-2 text-right font-mono font-medium">{{ formatBalance(c.closing_balance) }}</td>
                     <td class="px-3 py-2 text-right text-neutral-500">
                       <span v-if="c.line_count">{{ c.line_count }}</span>
                       <span v-else class="text-neutral-300" :title="t('accounting.accounts.detail.no_movement')">—</span>
@@ -478,7 +473,7 @@ onMounted(async () => {
                 class="block p-3 space-y-1 hover:bg-neutral-50" :class="{ 'opacity-50': !c.is_active }">
                 <div class="flex items-baseline justify-between gap-2">
                   <span class="font-mono text-primary-600">{{ c.code }}</span>
-                  <span class="font-mono font-medium">{{ formatMoney(c.closing_balance) }}</span>
+                  <span class="font-mono font-medium">{{ formatBalance(c.closing_balance) }}</span>
                 </div>
                 <div class="text-neutral-900">{{ c.name }}</div>
                 <div class="text-xs text-neutral-500 font-mono">

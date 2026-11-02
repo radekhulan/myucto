@@ -179,16 +179,45 @@ function abortClosing() {
 }
 
 // ── Precheck ───────────────────────────────────────────────────────────────
-const precheckItems = computed<PrecheckItem[]>(() => {
+const precheckSnapshot = computed<PrecheckItem[]>(() => {
   const p = step('precheck')?.payload
   if (!p) return []
   if (Array.isArray(p)) return p as unknown as PrecheckItem[]
   return p.checks ?? []
 })
 
+/**
+ * Řádky kontrol počítané živě. Snímek kroku je auditní záznam z okamžiku spuštění, kdežto
+ * popup nálezů čte vždy aktuální data. Ze snímku by řádek hlásil „9 nálezů" a popup žádný,
+ * snímek navíc neobsahuje kontroly přidané později. Bez živých dat zůstává snímek.
+ */
+const liveChecks = ref<PrecheckItem[] | null>(null)
+const liveChecksLoading = ref(false)
+let liveChecksRequest = 0
+
+async function loadLiveChecks() {
+  const request = ++liveChecksRequest
+  liveChecksLoading.value = true
+  try {
+    const result = await closingApi.monthlyCheck(periodId)
+    if (request === liveChecksRequest) liveChecks.value = result.checks
+  } catch {
+    if (request === liveChecksRequest) liveChecks.value = null
+  } finally {
+    if (request === liveChecksRequest) liveChecksLoading.value = false
+  }
+}
+
+watch([selected, state], () => {
+  if (selected.value === 'precheck' && step('precheck')?.status === 'done') void loadLiveChecks()
+})
+
+const precheckItems = computed<PrecheckItem[]>(() => liveChecks.value ?? precheckSnapshot.value)
+
 // Uložený precheck snímek zastaral (BE porovná živé error-kontroly proti snímku).
 // Typicky po uzavření předchozího období: staré červené chyby už neplatí.
-const precheckStale = computed(() => state.value?.precheck_stale ?? false)
+// Živé řádky zastarat nemohou.
+const precheckStale = computed(() => liveChecks.value === null && (state.value?.precheck_stale ?? false))
 
 // Blokují jen SKUTEČNĚ NEsplněné (ok=false) error kontroly — ne error-severity kontrola,
 // která prošla (např. u prvního období „předchozí období není uzavřené" = ok, není žádné).
@@ -308,6 +337,7 @@ async function bookDepreciation() {
 // ── Kurzové rozdíly ────────────────────────────────────────────────────────
 const fxPreview = ref<FxPreview | null>(null)
 const fxLoading = ref(false)
+const fxError = ref<string | null>(null)
 interface BankRowForm { account_code: string; currency_code: string; foreign_balance: number | null }
 const bankRows = ref<BankRowForm[]>([])
 const fxLoaded = ref(false)
@@ -348,7 +378,10 @@ async function loadFxPreview(withRows: boolean) {
       }
     }
     fxLoaded.value = true
+    fxError.value = null
   } catch (e: any) {
+    // Bez náhledu je panel prázdný, důvod proto musí zůstat vidět i po zmizení hlášky.
+    fxError.value = e?.response?.data?.error?.message ?? null
     handleApiError(e)
   } finally {
     fxLoading.value = false
@@ -910,7 +943,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           <div v-if="precheckStale" class="rounded-lg border border-warning-200 bg-warning-50 dark:bg-warning-500/[0.06] px-3 py-2 text-sm text-warning-800 dark:text-warning-200">
             {{ t('accounting.closing.precheck_stale_hint') }}
           </div>
-          <div v-if="precheckItems.length" class="overflow-x-auto" :class="{ 'opacity-50': precheckStale }">
+          <div v-if="precheckItems.length" class="overflow-x-auto" :class="{ 'opacity-50': precheckStale || liveChecksLoading }">
             <table class="w-full text-sm">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
@@ -1001,6 +1034,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           </div>
           <template v-else>
             <div v-if="fxLoading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+            <div v-else-if="fxError && !fxPreview" data-testid="fx-error" class="rounded-lg border border-warning-200 bg-warning-50 dark:bg-warning-500/[0.06] px-3 py-2 text-sm text-warning-800 dark:text-warning-200">
+              {{ fxError }}
+            </div>
             <template v-else-if="fxPreview">
               <div v-if="fxPreview.rate_info?.length" class="flex flex-wrap gap-2 text-xs text-neutral-500">
                 <span v-for="ri in fxPreview.rate_info" :key="ri.currency"

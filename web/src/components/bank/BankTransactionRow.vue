@@ -492,7 +492,8 @@ function candidateReject() {
         {{ tx.posting?.counter_account_codes?.join(', ') || '-' }}
       </td>
       <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
-        <div class="flex flex-wrap items-center justify-end gap-1">
+        <!-- Šířka pro „Zrušit zaúčtování" a dvě ikony na jednom řádku: akce zaberou nejvýš dva řádky. -->
+        <div class="flex flex-wrap items-center justify-end gap-1 min-w-60">
           <BankTransactionJournalLink :tx="tx" />
           <PostingRowActions v-if="isDoubleEntry"
             :tx="tx" :currency="currency()"

@@ -480,6 +480,29 @@ final class JournalLinkService
     }
 
     /**
+     * Vazby uložené mimo deník (interní doklad) doplní o číslo dokladu ze stejného popisu
+     * jako panel „Souvisí". Smazaný doklad zůstane bez čísla.
+     *
+     * @param  list<array<string,mixed>> $links
+     * @return list<array<string,mixed>>
+     */
+    public function withDocumentTitles(int $supplierId, array $links): array
+    {
+        $ids = [];
+        foreach ($links as $link) {
+            $ids[(string) $link['doc_type']][] = (int) $link['doc_id'];
+        }
+        $described = [];
+        foreach ($ids as $kind => $docIds) {
+            $described[$kind] = $this->describe($supplierId, (string) $kind, array_values(array_unique($docIds)));
+        }
+        return array_map(
+            static fn (array $link): array => $link + ['doc_title' => $described[$link['doc_type']][(int) $link['doc_id']]['title'] ?? null],
+            $links,
+        );
+    }
+
+    /**
      * Doklad → jeho úhrady (banka, pokladna, zápočet).
      *
      * @return list<array{kind:string, id:int, relation:string, allocated:?float}>

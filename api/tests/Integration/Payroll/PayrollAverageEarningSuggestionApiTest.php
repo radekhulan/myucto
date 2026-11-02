@@ -322,6 +322,31 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         ));
     }
 
+    /**
+     * Formulář `cinnostKS` (scénář 3, společník s. r. o.) pole 10345 nemá a zmrazení
+     * ho nežádá. Předběžná kontrola se nesmí ptát na průměr, který hlášení nepotřebuje.
+     */
+    public function testReadinessProbeSkipsMissingAverageWhenScenarioHasNoSuchField(): void
+    {
+        $probe = Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $snapshot = fn (string $activityCode, ?string $detailCode): array => ['people' => [[
+            'employee' => ['id' => $this->employeeId],
+            'employments' => [[
+                'employment' => ['id' => $this->employmentId],
+                'term' => ['activity_code' => $activityCode, 'jmhz_relationship_detail_code' => $detailCode],
+                'inputs' => [['amount_minor' => 450_000]],
+                'average_earning' => null,
+            ]],
+        ]]];
+        $missing = static fn (array $findings): array => array_values(array_filter(
+            $findings,
+            static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
+        ));
+
+        self::assertSame([], $missing($probe->inspect($this->supplierId, '2026-10-01', $snapshot('S', '1'))));
+        self::assertCount(1, $missing($probe->inspect($this->supplierId, '2026-10-01', $snapshot('A', null))));
+    }
+
     /** @return array<string,mixed> */
     private function averageBody(int $year, int $quarter): array
     {

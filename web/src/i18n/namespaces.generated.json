@@ -11,7 +11,6 @@
     "eet",
     "favorites",
     "hosting",
-    "instance_admin",
     "instance_alert",
     "invoice",
     "jointAllocations",
@@ -88,6 +87,7 @@
     "gopay",
     "group_stats",
     "imports",
+    "instance_admin",
     "instance_export",
     "integrations",
     "internal_documents",
@@ -176,6 +176,9 @@
     "workReportTracking"
   ],
   "routes": {
+    "instance-admin": [
+      "instance_admin"
+    ],
     "instance-admin-profile": [
       "domain_login",
       "mfa_setup",
@@ -1079,7 +1082,11 @@
       "cron_jobs",
       "diagnostics"
     ],
+    "admin-instance": [
+      "instance_admin"
+    ],
     "admin-users": [
+      "instance_admin",
       "roles",
       "settings",
       "users"
@@ -1182,7 +1189,8 @@
     ],
     "tools": [
       "cash",
-      "codebookTransfer"
+      "codebookTransfer",
+      "other_items"
     ],
     "admin-integrations": [
       "aiGateway",
@@ -1318,7 +1326,8 @@
       "time_billing"
     ],
     "admin-diagnostics": [
-      "diagnostics"
+      "diagnostics",
+      "instance_admin"
     ],
     "admin-support": [
       "support_page"

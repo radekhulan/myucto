@@ -157,7 +157,7 @@ describe('InternalDocumentEditor rychlé zadání', () => {
     m.route.params = { id: '77' }
     m.get.mockResolvedValue({
       id: 77, status: 'draft', kind: 'write_off', title: 'Odpis', document_date: '2099-02-01', entry_date: '2099-02-01',
-      partner_id: null, partner_name: null, note: null, document_links: [{ doc_type: 'invoice', doc_id: 5, note: null }],
+      partner_id: null, partner_name: null, note: null, document_links: [{ doc_type: 'invoice', doc_id: 5, note: null, doc_title: 'FV2099001' }],
       lines: [{ account_code: '546', side: 'debit', amount: 800 }, { account_code: '311', side: 'credit', amount: 800 }],
     })
     const wrapper = await mountEditor()

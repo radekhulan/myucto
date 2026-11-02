@@ -36,6 +36,30 @@ final class PayrollTakeoverJmhzFormCheckTest extends TestCase
         ], $rows[0]['differences']);
     }
 
+    /** Ručně převzatý měsíc bez pojistného se má doplnit, ne opravovat hlášením. */
+    public function testManualMonthMissingFiguresIsMarkedIncomplete(): void
+    {
+        $rows = PayrollTakeoverJmhzFormCheck::compare(
+            [self::wage(1, 11, 450_000, 450_000, 67_500, 0, 0, 'other')],
+            [self::entry(1, 11, self::form(4_500, 4_500, 675, 2_619, null))],
+        );
+
+        self::assertCount(1, $rows);
+        self::assertTrue($rows[0]['takeover_incomplete']);
+
+        $imported = PayrollTakeoverJmhzFormCheck::compare(
+            [self::wage(1, 11, 450_000, 450_000, 67_500, 0, 0)],
+            [self::entry(1, 11, self::form(4_500, 4_500, 675, 2_619, null))],
+        );
+        self::assertFalse($imported[0]['takeover_incomplete']);
+
+        $different = PayrollTakeoverJmhzFormCheck::compare(
+            [self::wage(1, 11, 450_000, 400_000, 67_500, 100_000, 0, 'other')],
+            [self::entry(1, 11, self::form(4_500, 4_500, 675, 2_619, null))],
+        );
+        self::assertFalse($different[0]['takeover_incomplete']);
+    }
+
     public function testRoundingToWholeCrownsIsNotReported(): void
     {
         // Převzatá strana v haléřích, hlášení v celých korunách; zdravotní pojistné

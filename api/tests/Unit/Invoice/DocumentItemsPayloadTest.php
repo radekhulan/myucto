@@ -175,6 +175,34 @@ final class DocumentItemsPayloadTest extends TestCase
     }
 
     /**
+     * Poslaný kód členění přesouvá řádek v přiznání a KH, takže v podaném období nesmí
+     * projít jako poznámková úprava. Vynechaný klíč dál změnou není.
+     */
+    public function testSentVatClassificationIsContentMissingKeyIsNot(): void
+    {
+        $stored = [[
+            'description' => 'Zboží', 'quantity' => 1.0, 'unit' => 'ks',
+            'unit_price_without_vat' => 1000.0, 'vat_rate_id' => 3, 'vat_classification_code' => '22',
+        ]];
+        $form = [[
+            'description' => 'Zboží', 'quantity' => '1', 'unit' => 'ks',
+            'unit_price_without_vat' => '1000.00', 'vat_rate_id' => '3',
+        ]];
+
+        self::assertFalse(DocumentItemsPayload::changed($stored, $form), 'Vynechaný kód se dopočítá.');
+        self::assertFalse(DocumentItemsPayload::changed($stored, [[...$form[0], 'vat_classification_code' => '22']]),
+            'Stejný kód poslaný zpět není změna.');
+        self::assertTrue(DocumentItemsPayload::changed($stored, [[...$form[0], 'vat_classification_code' => '20']]),
+            'Jiný kód je jiný řádek přiznání.');
+        self::assertTrue(DocumentItemsPayload::changed($stored, [[...$form[0], 'vat_classification_code' => null]]),
+            'Výslovný návrat na automatiku může kód změnit.');
+
+        $noCode = [[...$stored[0], 'vat_classification_code' => null]];
+        self::assertFalse(DocumentItemsPayload::changed($noCode, [[...$form[0], 'vat_classification_code' => null]]));
+        self::assertFalse(DocumentItemsPayload::changed($noCode, [[...$form[0], 'vat_classification_code' => '']]));
+    }
+
+    /**
      * Zhasnutý přepínač zapíše repozitář jako samé NULL, takže osiřelá země v těle
      * nesmí vypadat jako změna — uložení ji stejně zahodí.
      */

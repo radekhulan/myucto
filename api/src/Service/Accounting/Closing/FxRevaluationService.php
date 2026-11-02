@@ -68,6 +68,48 @@ final class FxRevaluationService
     ) {}
 
     /**
+     * Doklad bez důkazu úhrady přecenění zastaví, protože jeho zůstatek v cizí měně nejde určit.
+     * Výjimkou je doklad, který je v deníku vyrovnaný a nenese dřívější přecenění: není co
+     * přeceňovat, ať už párování vypadá jakkoli. Hlásí se všechny doklady naráz i s číslem,
+     * jinak by se účetní k dalšímu dostala až po opravě předchozího.
+     *
+     * @param list<array<string,mixed>> $items projekce `item` + `evidence`
+     * @param array<string,int> $carrying
+     */
+    private function assertSettlementsProven(int $supplierId, array $items, array $carrying, string $endsOn): void
+    {
+        $unproven = [];
+        foreach ($items as $projection) {
+            $item = $projection['item'];
+            if ($projection['evidence']['complete'] || self::isNonMonetaryAdvanceAccount((string) $item['account_code'])) {
+                continue;
+            }
+            if (($carrying[FxCaseCarryingProjection::key($item)] ?? 0) === 0
+                && $this->repo->fxDocumentSettledInLedger($supplierId, (string) $item['doc_type'], (int) $item['doc_id'], (int) $item['account_id'], $endsOn)) {
+                continue;
+            }
+            $unproven[] = sprintf(
+                '%s %s: %s',
+                $item['doc_type'] === 'invoice' ? 'vydaná faktura' : 'přijatá faktura',
+                (string) ($item['varsymbol'] ?: '#' . $item['doc_id']),
+                self::settlementFindingText($projection['evidence']['findings'][0]),
+            );
+        }
+        if ($unproven === []) {
+            return;
+        }
+        $shown = array_slice($unproven, 0, 10);
+        $more = count($unproven) - count($shown);
+        throw new ClosingException(
+            'fx_settlement_unproven',
+            'Přecenění nelze dokončit, u těchto dokladů nejde určit zůstatek v cizí měně: ' . implode(' ', $shown)
+                . ($more > 0 ? ' A dalších ' . $more . '.' : '')
+                . ' Opravte párování úhrady na dokladu. Úplný seznam je v kroku Kontroly v řádku Cizoměnové otevřené doklady.',
+            422,
+        );
+    }
+
+    /**
      * Výpočet přecenění bez zápisu — podklad pro FE náhled i pro buildEntries.
      *
      * @param array<string,mixed> $period řádek accounting_periods (starts_on/ends_on/fiscal_year)
@@ -92,6 +134,7 @@ final class FxRevaluationService
         if (!$carrying['complete']) {
             throw new ClosingException('fx_case_history_unproven', FxCaseCarryingProjection::findingMessage($carrying['findings'][0]), 422);
         }
+        $this->assertSettlementsProven($supplierId, $snapshot['items'], $carrying['carrying'], $endsOn);
 
         foreach ($snapshot['items'] as $projection) {
             $item = $projection['item'];
@@ -112,9 +155,9 @@ final class FxRevaluationService
 
             $currency = (string) $item['currency_code'];
             $evidence = $projection['evidence'];
+            // Sem dojde jen doklad vyrovnaný v deníku, ostatní odmítl assertSettlementsProven().
             if (!$evidence['complete']) {
-                $label = $item['doc_type'] === 'invoice' ? 'Vydaná faktura' : 'Přijatá faktura';
-                throw new ClosingException('fx_settlement_unproven', self::settlementFindingText($evidence['findings'][0]) . ' ' . $label . ': #' . $item['doc_id'], 422);
+                continue;
             }
             foreach ($evidence['diagnostics'] ?? [] as $diagnostic) {
                 $warnings[] = ['code' => $diagnostic, 'doc_type' => $item['doc_type'], 'doc_id' => $item['doc_id']];

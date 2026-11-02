@@ -480,6 +480,11 @@ final readonly class SubmissionInboxService
         ];
     }
 
+    public function markAllRead(int $supplierId, string $environment, SubmissionInboxListQuery $query, ?int $userId): int
+    {
+        return $this->inbox->markAllRead($supplierId, $environment, $query, $userId);
+    }
+
     public function markRead(int $supplierId, int $messageId, bool $read, ?int $userId): bool
     {
         return $this->inbox->markRead($supplierId, $messageId, $read, $userId);

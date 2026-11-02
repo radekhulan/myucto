@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverLayerCheck;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverManualEntryService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverReader;
+use MyInvoice\Service\Payroll\PayrollOpeningBalanceService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -109,6 +110,33 @@ final class PayrollTakeoverManualEntryTest extends TestCase
         // A obě vrstvy se shodují.
         self::assertSame([], $this->layers->check($this->supplierId, 2026)['differences']);
         self::assertTrue($saved['rows'][0]['stored']);
+    }
+
+    /** Po podaném hlášení se smí doplnit zdravotní pojistné, základ SP ani daň ne. */
+    public function testFiledReportLocksOnlyWhatItTookFromOpenings(): void
+    {
+        $stored = [[
+            'month' => 1,
+            'social_assessment_base_minor_units' => 450_000,
+            'advance_tax_minor_units' => 67_500,
+            'health_employee_contribution_minor_units' => 0,
+        ]];
+        $healthFilled = [['health_employee_contribution_minor_units' => 261_900, 'health_assessment_base_minor_units' => 2_240_000] + $stored[0]];
+        $socialChanged = [['social_assessment_base_minor_units' => 500_000] + $stored[0]];
+        $taxChanged = [['advance_tax_minor_units' => 70_000] + $stored[0]];
+
+        self::assertEquals(
+            PayrollOpeningBalanceService::reportedColumns($stored),
+            PayrollOpeningBalanceService::reportedColumns($healthFilled),
+        );
+        self::assertNotEquals(
+            PayrollOpeningBalanceService::reportedColumns($stored),
+            PayrollOpeningBalanceService::reportedColumns($socialChanged),
+        );
+        self::assertNotEquals(
+            PayrollOpeningBalanceService::reportedColumns($stored),
+            PayrollOpeningBalanceService::reportedColumns($taxChanged),
+        );
     }
 
     public function testEmptyMonthMustBeConfirmedAndMissingMonthIsRejected(): void

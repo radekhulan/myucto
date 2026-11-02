@@ -513,10 +513,9 @@ odmítne.
 #### Účet položky vydané faktury
 
 Vydaná faktura i šablona pravidelné fakturace mají u položek volitelný
-**účet položky**. V editoru faktury se pole otevře malou šipkou na konci řádku
-položky (samo se otevře, když už položka účet má), v šabloně pravidelné fakturace
-odkazem **Účty položek** nad položkami. Prázdné pole znamená účet
-produktu, jeho kategorie, pravidlo výnosů, jinak předkontaci dokladu.
+**účet položky**. Pole otevře malá šipka na konci řádku položky (sama se otevře,
+když už položka účet má). Prázdné pole znamená účet produktu, jeho kategorie,
+pravidlo výnosů, jinak předkontaci dokladu.
 
 Na rozdíl od produktu a kategorie (jen třída 6) smí položka nést i rozvahový nebo
 nákladový účet, například přefakturaci na 315 nebo 378. Nepovolené jsou jen

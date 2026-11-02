@@ -2,6 +2,8 @@
 
 Registr najdete v nabídce **Registr SVJ**. Eviduje domy, jednotky, služby a jejich časově účinné právní podklady. Nejde o seznam kontaktů: jedna vlastnická účast může zahrnovat více osob a jedna osoba může mít různé doložené role.
 
+Agenda SVJ je komerční modul a vyžaduje platnou licenci. Bez ní zmizí z menu a její data nejsou dostupná, po obnovení licence se vrátí beze změny.
+
 ## Jak začít
 
 Stránka **Registr SVJ** vás provede založením krok za krokem. Hotové kroky jsou označené zaškrtnutím, další krok má zvýrazněné tlačítko.

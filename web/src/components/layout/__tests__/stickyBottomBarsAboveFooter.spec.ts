@@ -15,6 +15,7 @@ import { join, relative, resolve } from 'node:path'
 const root = resolve(process.cwd(), 'src')
 const allowed = new Set([
   'components/layout/AppLayout.vue',
+  'components/layout/InstanceAdminLayout.vue',
   'components/cash/CashRegisterManager.vue',
   'pages/payroll/PayrollQuickInputs.vue',
 ])

@@ -26,8 +26,11 @@ export function formatHourlyRate(value: number, currency = 'CZK'): string {
   return formatMoney(value, currency, decimals)
 }
 
-export function formatMoney(value: number | null | undefined, currency: string = 'CZK', decimals?: number): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+export function formatMoney(value: number | string | null | undefined, currency: string = 'CZK', decimals?: number): string {
+  if (value === null || value === undefined) return '—'
+  // API posílá částky z DECIMAL sloupců i jako text („237600.60").
+  const amount = Number(value)
+  if (Number.isNaN(amount)) return '—'
   const dec = decimals ?? defaultDecimals(currency)
   const formatter = new Intl.NumberFormat(activeLocale(), {
     style: 'decimal',
@@ -39,7 +42,9 @@ export function formatMoney(value: number | null | undefined, currency: string =
   // sloupci (účetní deník, banka) odlomilo „Kč" na druhý řádek a částka se
   // rozpadla na dva řádky. Odpovídá to i české typografii — číslo a jednotka
   // k sobě patří. Oddělovač tisíců z Intl(cs-CZ) je nezlomitelný už sám o sobě.
-  return `${formatter.format(value)} ${symbol}`
+  // Částka, která se zaokrouhlí na nulu, nesmí nést znaménko: Intl jinak vypíše „-0,00".
+  const shown = Number(amount.toFixed(dec)) === 0 ? 0 : amount
+  return `${formatter.format(shown)} ${symbol}`
 }
 
 /**

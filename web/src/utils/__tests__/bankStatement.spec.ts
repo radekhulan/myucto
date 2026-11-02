@@ -2,10 +2,22 @@ import { describe, expect, it } from 'vitest'
 import type { BankStatement } from '@/api/bank'
 import {
   statementClosingBalance,
+  statementDownloadsWithMovements,
   statementGpcTitle,
   statementGpcUrl,
   statementHasGpc,
 } from '@/utils/bankStatement'
+
+describe('stažení z banky v detailu měsíce', () => {
+  it('nabídne jen stažení s pohyby', () => {
+    const empty = { id: 1, transaction_count: 0 }
+    const withMovements = { id: 2, transaction_count: 20 }
+
+    expect(statementDownloadsWithMovements({ evidence_statements: [empty, withMovements] })).toEqual([withMovements])
+    expect(statementDownloadsWithMovements({})).toEqual([])
+    expect(statementDownloadsWithMovements(null)).toEqual([])
+  })
+})
 
 describe('intraday advice balance', () => {
   const advice = {

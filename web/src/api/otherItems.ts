@@ -15,6 +15,11 @@ export interface OtherItem {
   source_id: number | string
   side: OtherItemSide
   kind: string
+  /** Vlastní druh (migrace 2228); null = vestavěný druh podle `kind`. */
+  kind_id?: number | string | null
+  kind_name?: string | null
+  /** Číslo z řady; koncept ho ještě nemá. */
+  document_no?: string | null
   title: string
   partner_id?: number | null
   partner_name: string | null
@@ -44,6 +49,8 @@ export interface OtherItem {
 export interface OtherItemPayload {
   side: OtherItemSide
   kind: string
+  /** Vlastní druh; vynechané = vestavěný druh (AI návrh). */
+  kind_id?: number | null
   title: string
   partner_id: number | null
   partner_name: string | null
@@ -101,8 +108,41 @@ export interface OtherItemRepostPayload {
   reason: string
 }
 
+/**
+ * Druh ostatní položky. Vestavěný (`builtin_code`, bez názvu) má `id` až po první změně
+ * nastavení; vlastní druh má název a `id` vždy.
+ */
+export interface OtherItemKind {
+  id: number | null
+  side: OtherItemSide
+  builtin: boolean
+  builtin_code: string | null
+  name: string | null
+  own_series: boolean
+  is_active: boolean
+  /** Prefix vlastní řady (i vypnuté); null = druh vlastní řadu ještě neměl. */
+  series_prefix?: string | null
+}
+
+export interface OtherItemKindPayload {
+  side?: OtherItemSide
+  name?: string
+  own_series?: boolean
+  prefix?: string
+  is_active?: boolean
+}
+
+export const otherItemKindsApi = {
+  list: () => api.get<{ items: OtherItemKind[] }>('/accounting/other-items/kinds').then(r => r.data.items),
+  create: (payload: OtherItemKindPayload) => api.post<OtherItemKind>('/accounting/other-items/kinds', payload).then(r => r.data),
+  update: (id: number, payload: OtherItemKindPayload) => api.put<OtherItemKind>(`/accounting/other-items/kinds/${id}`, payload).then(r => r.data),
+  updateBuiltin: (side: OtherItemSide, code: string, payload: OtherItemKindPayload) =>
+    api.put<OtherItemKind>(`/accounting/other-items/kinds/builtin/${side}/${code}`, payload).then(r => r.data),
+  remove: (id: number) => api.delete(`/accounting/other-items/kinds/${id}`).then(r => r.data),
+}
+
 export const otherItemsApi = {
-  list: (params: { side?: OtherItemSide; status?: 'open' | 'all'; q?: string; from?: string; to?: string; page?: number; sort_by?: string; sort_dir?: 'asc' | 'desc' }) =>
+  list: (params: { side?: OtherItemSide; status?: 'open' | 'all'; kind?: string; kind_id?: number; q?: string; from?: string; to?: string; page?: number; sort_by?: string; sort_dir?: 'asc' | 'desc' }) =>
     api.get<OtherItemsResult>('/accounting/other-items', { params }).then(r => ({
       ...r.data,
       items: r.data.items.map(item => ({

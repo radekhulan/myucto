@@ -679,6 +679,7 @@ export type SeriesCode =
   | 'cash_in' | 'cash_out'
   | 'stock_in' | 'stock_out' | 'stock_transfer'
   | 'offset' | 'purchase_order'
+  | 'other_receivable' | 'other_payable'
 
 /**
  * Výchozí prefixy řad = zrcadlo DocumentSeriesService::DEFAULT_PREFIXES. Řádek řady
@@ -698,6 +699,8 @@ export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
   stock_transfer: 'PRE',
   offset: 'ZAP',
   purchase_order: 'OBJ',
+  other_receivable: 'OP',
+  other_payable: 'OZ',
 }
 
 /**
@@ -710,10 +713,14 @@ export const SERIES_DOUBLE_ENTRY_ONLY: SeriesCode[] = ['closing', 'opening', 'fx
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode
-  /** L-3: 0 = společná řada firmy, >0 = vlastní řada té pokladny. */
+  /** 0 = společná řada firmy, >0 = vlastní řada pokladny (cash_*) nebo druhu ostatní položky (other_*). */
   register_id?: number
   /** Název pokladny u vlastní řady — jen pro zobrazení (BE dopočítává). */
   register_name?: string | null
+  /** Název vlastního druhu ostatní položky u jeho vlastní řady (other_receivable / other_payable). */
+  kind_name?: string | null
+  /** Kód vestavěného druhu ostatní položky u jeho vlastní řady (název je v překladech). */
+  kind_builtin_code?: string | null
   fiscal_year: number
   prefix: string
   /** Šablona čísla ({PREFIX}/{YYYY}/{YY}/{C+}); null = vestavěné {PREFIX}-{YYYY}-{CCCC}. */

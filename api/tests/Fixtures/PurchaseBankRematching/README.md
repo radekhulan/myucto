@@ -2,7 +2,7 @@
 
 Pouze syntetická data. Testujte v oddělené instalaci s řádnou free licencí,
 nikoli v běžné firmě. Není nutné připojit skutečnou banku, AI ani placené účetnictví.
-Nevypínejte licenční kontroly. Větev vyžaduje migraci 2226 a nový frontendový build.
+Nevypínejte licenční kontroly. Větev vyžaduje migraci 2229 a nový frontendový build.
 
 1. V testovací firmě nastavte korunový bankovní účet `1000000005 / 0100`.
    Firma nesmí mít starší doklady ze stejného testu. Vypněte automatické e-maily.

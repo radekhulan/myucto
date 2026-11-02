@@ -47,7 +47,7 @@ Kapitolu otevřete, když:
 | Klient | Vystaví fakturu, nahraje přijatou fakturu, přidá kontakt | úvodní stránka **Přehled firmy**, rychlé odkazy |
 | Klient, superadmin | Předá doklady účetní | `Dokumenty → Předat doklady účetní` |
 | Klient | Odpoví na požadavek účetní | `Dokumenty → Chybějící doklady` |
-| Účetní | Vyžádá chybějící doklad | `Firma → Chybějící doklady` |
+| Účetní | Vyžádá chybějící doklad | `Dokumenty → Chybějící doklady` |
 | Účetní | Zpracuje předané doklady | `Nákup → Příchozí doklady` |
 | Účetní, admin | Zkontroluje, co vidí klient | `Grafy → Přehled firmy` |
 
@@ -122,7 +122,7 @@ Samotné nahrání nic nezaúčtuje a faktura v té chvíli ještě nevzniká.
 
 Provede účetní.
 
-1. Otevřete `Firma → Chybějící doklady` a klikněte na **Nový požadavek**.
+1. Otevřete `Dokumenty → Chybějící doklady` a klikněte na **Nový požadavek**.
 2. Vyplňte popis (co chybí), volitelně částku, kontextové datum a termín.
 3. Požadavek uložte.
 

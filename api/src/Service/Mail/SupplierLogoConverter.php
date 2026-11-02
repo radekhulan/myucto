@@ -214,55 +214,104 @@ final class SupplierLogoConverter
      * SVG via Imagick. Vrací true při úspěchu, false pokud Imagick neumí SVG
      * (chybí delegate) — caller pak zkusí rsvg-convert.
      *
-     * Klíčový detail: Imagick by default rasterizuje SVG na nativní velikost
-     * (`width`/`height` z SVG nebo viewBox při 72 DPI). Pro malá loga to dělá
-     * rozmazaný výsledek na retině — proto před readImage zvedáme resolution
-     * tak, aby výstup měl alespoň MAX_HEIGHT_PX, a pak downscalujeme s Lanczos.
+     * Obecný coder SVG může i při pingImage spustit externí Inkscape a vykreslit
+     * celý nativní rastr mimo limity Imagicku. Rozměry proto čteme interním MSVG
+     * a vykreslujeme explicitním RSVG/MSVG až s omezeným cílovým rozměrem.
      */
     private function convertSvgViaImagick(string $sourcePath, string $targetPath): bool
     {
-        // Coder vynucený prefixem `svg:` (žádná autodetekce formátu) a stejné resource
-        // limity jako náhledy dokumentů.
-        $spec = 'svg:' . $sourcePath;
         try {
-            return ImagickGuard::withLimits(function () use ($spec, $targetPath): bool {
-                // Probe nativní rozměry (ping = bez full decode)
-                $size = ImagickGuard::ping($spec);
-                if ($size === null) {
-                    return false;
+            $hasRsvg = \Imagick::queryFormats('RSVG') !== [];
+            $probeCoder = \Imagick::queryFormats('MSVG') !== [] ? 'msvg:' : ($hasRsvg ? 'rsvg:' : null);
+            if ($probeCoder === null) return false;
+            return $this->rasterizeSvgViaImagick($sourcePath, $targetPath, $hasRsvg ? 'rsvg:' : 'msvg:', $probeCoder);
+        } catch (\Throwable $e) {
+            $this->logger->info('Imagick SVG conversion failed, will try rsvg fallback: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /** Explicitní coder sdílí normalizaci viewportu i stejné limity na všech platformách. */
+    private function rasterizeSvgViaImagick(string $sourcePath, string $targetPath, string $coder, string $probeCoder): bool
+    {
+        $normalized = null;
+        try {
+            $document = new \DOMDocument();
+            $svg = file_get_contents($sourcePath);
+            if ($svg === false || !@$document->loadXML($svg, LIBXML_NONET) || $document->doctype !== null) return false;
+            $root = $document->documentElement;
+            if ($root === null || $root->localName !== 'svg') return false;
+            $viewBox = trim($root->getAttribute('viewBox'));
+            if ($viewBox !== '') {
+                $values = preg_split('/[\s,]+/', $viewBox);
+                if (count($values) !== 4) return false;
+                foreach ($values as $value) {
+                    if (!is_numeric($value) || !is_finite((float) $value)) return false;
                 }
+                if ((float) $values[2] <= 0 || (float) $values[3] <= 0) return false;
+                // Některé buildy MSVG odmítají chybějící rozměry a procentní
+                // viewport renderují prázdný. Samostatné logo nemá rodičovský viewport.
+                foreach (['width' => 2, 'height' => 3] as $attribute => $index) {
+                    $value = trim($root->getAttribute($attribute));
+                    if ($value === '' || str_ends_with($value, '%')) $root->setAttribute($attribute, $values[$index]);
+                }
+            }
+            // Samostatný SVG obrázek bez přirozených rozměrů používá výchozí
+            // viewport 300 × 150 (SVG Integration, chybějící sizing attributes):
+            // https://svgwg.org/specs/integration/#svg-css-sizing
+            // MSVG jej samo nedoplní; obecný SVG coder by přitom spustil externí renderer.
+            if ($viewBox === '') {
+                foreach (['width' => 300, 'height' => 150] as $attribute => $fallback) {
+                    $value = trim($root->getAttribute($attribute));
+                    if ($value === '' || $value === 'auto') {
+                        $root->setAttribute($attribute, (string) $fallback);
+                    } elseif (preg_match('/\A([0-9]+(?:\.[0-9]+)?)%\z/D', $value, $percentage)) {
+                        $root->setAttribute($attribute, (string) ($fallback * (float) $percentage[1] / 100));
+                    }
+                }
+            }
+            $normalized = tempnam(sys_get_temp_dir(), 'logo-svg-');
+            if ($normalized === false) return false;
+            if ($document->save($normalized) === false) return false;
+            return ImagickGuard::withLimits(function () use ($normalized, $targetPath, $coder, $probeCoder, $document, $root, $viewBox): bool {
+                $size = ImagickGuard::ping($probeCoder . $normalized);
+                if ($size === null) return false;
                 [$natW, $natH] = $size;
-
-                // Pokud je nativní výška menší než target, boostni rasterizační DPI
-                // tak, aby SVG vyrenderovalo aspoň MAX_HEIGHT_PX vysoké
-                $boost = max(1.0, self::MAX_HEIGHT_PX / $natH);
-                $dpi   = (int) ceil(72 * $boost);
-                // Pixel-bomb: obří deklarované rozměry renderujeme v menším měřítku, aby
-                // rastr nepřesáhl MAX_DECODED_PIXELS (výstup se stejně zmenší na 800×240).
-                $cap = sqrt(self::MAX_DECODED_PIXELS / ($natW * $natH));
-                if ($boost > $cap) {
-                    $dpi = max(1, (int) floor(72 * $cap));
-                }
-
+                // Malé vektory zvětšíme pro retinu. Subpixelovou hranu RSVG
+                // zaokrouhluje na nulu, proto mezirastr má nejkratší hranu 1 px.
+                $scale = max(min(self::MAX_WIDTH_PX / $natW, self::MAX_HEIGHT_PX / $natH), 1 / min($natW, $natH));
+                $width = max(1, (int) round($natW * $scale));
+                $height = max(1, (int) round($natH * $scale));
+                if (!ImagickGuard::withinPixelLimit($width, $height, self::MAX_DECODED_PIXELS)) return false;
+                // Měníme jen rasterizační kopii; původní sanitizované SVG zůstává
+                // pro PDF. Explicitní viewport zabrání prázdnému PNG z MSVG.
+                if ($viewBox === '') $root->setAttribute('viewBox', "0 0 $natW $natH");
+                $root->setAttribute('width', (string) $width);
+                $root->setAttribute('height', (string) $height);
+                if ($document->save($normalized) === false) return false;
                 $im = new \Imagick();
-                $im->setBackgroundColor(new \ImagickPixel('transparent'));
-                $im->setResolution($dpi, $dpi);
-                $im->readImage($spec);
-                $im->setImageFormat('png32'); // PNG s alfa kanálem
-
-                // Resize do MAX bounds (bestfit zachová poměr stran)
-                if ($im->getImageHeight() > self::MAX_HEIGHT_PX || $im->getImageWidth() > self::MAX_WIDTH_PX) {
-                    $im->resizeImage(self::MAX_WIDTH_PX, self::MAX_HEIGHT_PX, \Imagick::FILTER_LANCZOS, 1, true);
+                try {
+                    $im->setBackgroundColor(new \ImagickPixel('transparent'));
+                    $im->setSize($width, $height);
+                    $im->readImage($coder . $normalized);
+                    $im->setImageFormat('png32');
+                    if ($im->getImageHeight() > self::MAX_HEIGHT_PX || $im->getImageWidth() > self::MAX_WIDTH_PX) {
+                        [$width, $height] = $this->fitTo($im->getImageWidth(), $im->getImageHeight(), self::MAX_WIDTH_PX, self::MAX_HEIGHT_PX);
+                        // Best-fit může zaokrouhlit úzkou hranu na nulu; fitTo ji
+                        // bezpečně ponechá na jednom pixelu.
+                        $im->resizeImage($width, $height, \Imagick::FILTER_LANCZOS, 1, false);
+                    }
+                    return $im->writeImage('png32:' . $targetPath) && is_file($targetPath);
+                } finally {
+                    $im->clear();
                 }
-                $ok = $im->writeImage('png32:' . $targetPath);
-                $im->clear();
-                $im->destroy();
-                return $ok && is_file($targetPath);
             });
         } catch (\Throwable $e) {
             $this->logger->info('Imagick SVG conversion failed, will try rsvg fallback: ' . $e->getMessage());
             if (is_file($targetPath)) @unlink($targetPath);
             return false;
+        } finally {
+            if (is_string($normalized)) @unlink($normalized);
         }
     }
 

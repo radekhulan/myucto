@@ -5,6 +5,7 @@ import { overdueDays } from '@/utils/date'
 import {
   formatCompactNumber,
   formatDateTime,
+  formatMoney,
   formatMoneyMinor,
   formatMoneyWhole,
   formatNumber,
@@ -19,6 +20,23 @@ afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllEnvs()
   i18n.global.locale.value = 'cs'
+})
+
+describe('formatMoney', () => {
+  it.each([-0, -0.001, -0.004])('nezobrazí záporné znaménko u nuly (%s)', (value) => {
+    expect(formatMoney(value)).toBe('0,00 Kč')
+  })
+
+  it('přečte částku poslanou z API jako text', () => {
+    expect(formatMoney('237600.60')).toBe(formatMoney(237600.6))
+    expect(formatMoney('-0.00')).toBe(formatMoney(0))
+    expect(formatMoney('neni-cislo')).toBe('—')
+  })
+
+  it('zápornou částku dál zobrazí se znaménkem', () => {
+    expect(formatMoney(-0.01)).toContain('0,01')
+    expect(formatMoney(-0.01)).not.toBe('0,01 Kč')
+  })
 })
 
 describe('isOverdue', () => {

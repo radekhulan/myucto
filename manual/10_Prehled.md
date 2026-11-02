@@ -284,12 +284,12 @@ Na menší obrazovce lze tlačítkem **Menu vlevo** ve spodní liště nahradit 
 | **Prodej** | Vydané a pravidelné faktury, klienti, zakázky, AI import, export a import |
 | **Nákup** | Přijaté faktury, Příchozí doklady, AI import, dodavatelé, platební příkazy, drobný majetek, export a import |
 | **Peníze** | Bankovní účty a Pokladna |
-| **Dokumenty** | Dokumenty a Kniha jízd |
+| **Dokumenty** | Dokumenty, Chybějící doklady a Kniha jízd |
 | **Sklad** | Skladové karty, příjemky a výdejky, E-shop, inventury a sestavy |
 | **Daně** | Daňové výkazy, Daňový optimalizátor a samostatný **Hromadný export** |
 | **Účetnictví** | Účetní deník, Automat, K doúčtování, účetní výkazy, kontroly, mzdy a majetek |
 | **Nástroje** | Šablony, Účtový rozvrh, Zápočty, Aktivace a doúčtování, Inventarizace účtů, výkazy kapitálu, Spojené osoby, Uzávěrka, Účetní nastavení a jako poslední **EPO podání a archív** |
-| **Firma** | Nastavení firmy, integrace, AI nastavení, branding, kategorie, API tokeny a Chybějící doklady |
+| **Firma** | Nastavení firmy, integrace, AI nastavení, branding, kategorie a API tokeny |
 | **Systém** | **Přehled firem** (jen s přístupem k více firmám), Sazby a číselníky, samostatné **Daňové konstanty**, dodavatelé, uživatelé, role, e-maily, log, plánované úlohy, aktualizace a licenční položky |
 
 ### 10.10.10 Více panelů pracovního prostoru
