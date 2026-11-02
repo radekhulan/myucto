@@ -144,9 +144,9 @@ test('zisk a cash flow předávají rozsah, globální skupinu a rozpad', async 
 test('výpis účetního účtu používá povinná data místo nepodporovaného period_id', async () => {
   const tool = TOOLS_BY_NAME.get('account_statement');
   assert.deepEqual(tool.inputSchema.required, ['account_id', 'from', 'to']);
-  const request = await call('account_statement', { account_id: 9, from: '2026-01-01', to: '2026-06-30', page: 2, per_page: 25, after_closing: true });
+  const request = await call('account_statement', { account_id: 9, from: '2026-01-01', to: '2026-06-30', page: 2, per_page: 25, after_closing: true, counter_account_id: 12 });
   assert.equal(request.path, '/accounting/reports/account-statement/9');
-  assert.deepEqual(request.query, { from: '2026-01-01', to: '2026-06-30', page: 2, per_page: 25, after_closing: 1 });
+  assert.deepEqual(request.query, { from: '2026-01-01', to: '2026-06-30', page: 2, per_page: 25, after_closing: 1, counter_account_id: 12 });
 });
 
 test('seznamy dokladů vracejí dimenze jen na explicitní požadavek', async () => {

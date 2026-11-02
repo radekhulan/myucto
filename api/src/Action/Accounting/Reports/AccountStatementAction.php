@@ -53,7 +53,7 @@ final class AccountStatementAction
         if ($params === null) return $err;
 
         try {
-            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], $params['page'], $params['per_page'], $params['after_closing']);
+            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], $params['page'], $params['per_page'], $params['after_closing'], $params['counter_account_id']);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -77,7 +77,7 @@ final class AccountStatementAction
         }
 
         try {
-            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], 1, self::EXPORT_MAX_ROWS, $params['after_closing']);
+            $data = $this->statement->build($supplierId, $params['account_id'], $params['from'], $params['to'], 1, self::EXPORT_MAX_ROWS, $params['after_closing'], $params['counter_account_id']);
             $data['from'] = $params['from'];
             $data['to']   = $params['to'];
             $out = $format === 'pdf'
@@ -108,7 +108,7 @@ final class AccountStatementAction
     }
 
     /**
-     * @return array{account_id:int, from:string, to:string, page:int, per_page:int, after_closing:bool}|null
+     * @return array{account_id:int, from:string, to:string, page:int, per_page:int, after_closing:bool, counter_account_id:?int}|null
      */
     private function validateParams(Request $request, Response $response, array $args, ?Response &$err): ?array
     {
@@ -137,6 +137,12 @@ final class AccountStatementAction
         $perPage = (int) ($q['per_page'] ?? 50);
         $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
 
+        $counterRaw = trim((string) ($q['counter_account_id'] ?? ''));
+        if ($counterRaw !== '' && !ctype_digit($counterRaw)) {
+            $err = Json::error($response, 'validation_failed', 'counter_account_id musí být ID účtu.', 422);
+            return null;
+        }
+
         $err = null;
         return [
             'account_id' => $accountId,
@@ -147,6 +153,7 @@ final class AccountStatementAction
             // Výchozí je stav PŘED uzavřením knih — po uzavření je zůstatek účtu
             // nulový a opis by k rozvahovému dni neukázal nic.
             'after_closing' => (string) ($q['after_closing'] ?? '') === '1',
+            'counter_account_id' => $counterRaw === '' ? null : (int) $counterRaw,
         ];
     }
 

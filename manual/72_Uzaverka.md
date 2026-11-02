@@ -501,7 +501,7 @@ Příloha k závěrce a uzávěrkový balíček respektují účetní rámec zvo
 Uzávěrkový balíček je výběrový ZIP sestav za jedno období.
 
 1. Otevřete `Nástroje → Uzávěrka` a u období klikněte na **Uzávěrkový balíček** (vyžaduje oprávnění k exportu sestav).
-2. V části **Co zahrnout do balíčku** vyberte sestavy (**Vybrat vše**, **Zrušit výběr**). K dispozici jsou rozvaha, výsledovka, hlavní kniha, obratová předvaha, deník, kniha DPH, přiznání k dani z příjmů (XML), PDF sestava přiznání, přehled záloh na daň z příjmů právnických osob, inventura dlouhodobého majetku, saldo starší než jeden rok a soupis dohadných položek a časového rozlišení. Náhled nejprve ukáže, které části mají data.
+2. V části **Co zahrnout do balíčku** vyberte sestavy (**Vybrat vše**, **Zrušit výběr**). K dispozici jsou rozvaha, výsledovka, hlavní kniha, obratová předvaha, deník, vyplněný protokol inventarizace rozvahových účtů, soupis otevřených položek, kniha DPH, přiznání k dani z příjmů (XML), PDF sestava přiznání, přehled záloh na daň z příjmů právnických osob, inventura dlouhodobého majetku, saldo starší než jeden rok a soupis dohadných položek a časového rozlišení. Náhled nejprve ukáže, které části mají data.
 3. Volitelně zaškrtněte **Přiložit i XLSX** (kromě Knihy DPH, přiznání k dani a záloh, ty jsou jen PDF/XML). Výstup je standardně PDF.
 4. Případně doplňte přílohu k závěrce tlačítkem **Vyplnit přílohu** (vyplněné sekce se do balíčku promítnou při dalším vygenerování).
 5. Klikněte na **Připravit balíček**.

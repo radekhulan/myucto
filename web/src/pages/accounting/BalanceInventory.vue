@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import {
   accountingApi,
   type AccountingPeriod,
@@ -15,9 +15,14 @@ import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import OpenItemsListPanel from '@/components/accounting/OpenItemsListPanel.vue'
 
 const { t } = useI18n()
 const toast = useToast()
+const route = useRoute()
+
+/** Účet z prokliku z inventury účtu se v protokolu zvýrazní. */
+const focusAccountId = computed(() => Number(route.query.account) || null)
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<BalanceInventoryReport | null>(null)
@@ -95,6 +100,61 @@ const unresolvedCount = computed(() =>
   (report.value?.rows ?? []).filter(r => !rowResolved(r)).length)
 
 const inventoryStatus = computed(() => report.value?.inventory?.status ?? 'in_progress')
+
+/**
+ * Součtový řádek nad analytikami jedné syntetiky. Skutečný stav a rozdíl se sečtou, až když
+ * jsou napočítané všechny analytiky; stejně to dělá protokol na serveru (protocolRows).
+ */
+interface SyntheticSummary {
+  code: string
+  name: string
+  book: number
+  counted: number | null
+  difference: number | null
+}
+
+const displayRows = computed<Array<{ row?: BalanceInventoryRow; summary?: SyntheticSummary; key: string }>>(() => {
+  const rows = report.value?.rows ?? []
+  const groups = new Map<number, BalanceInventoryRow[]>()
+  for (const row of rows) {
+    const key = row.parent_id ?? row.account_id
+    groups.set(key, [...(groups.get(key) ?? []), row])
+  }
+  const out: Array<{ row?: BalanceInventoryRow; summary?: SyntheticSummary; key: string }> = []
+  for (const [key, group] of groups) {
+    const child = group.find(r => r.parent_id != null)
+    if (child) {
+      const factor = child.parent_normal_side === 'credit' ? -1 : 1
+      const book = group.reduce((sum, r) => sum + (r.book_balance ?? (r.ks_md - r.ks_d)), 0) * factor
+      const differences = group.map(r => liveDifference(r))
+      const counted = differences.every(d => d !== null)
+        ? group.reduce((sum, r) => sum + Number(edits[r.account_id]?.counted.replace(',', '.') ?? 0) * sideSign(r) * factor, 0)
+        : null
+      out.push({
+        key: `summary-${key}`,
+        summary: {
+          code: child.parent_code ?? '',
+          name: child.parent_name ?? '',
+          book: book === 0 ? 0 : Math.round(book * 100) / 100,
+          counted: counted === null ? null : Math.round(counted * 100) / 100,
+          difference: counted === null ? null : Math.round((counted - book) * 100) / 100,
+        },
+      })
+    }
+    for (const row of group) out.push({ row, key: `row-${row.account_id}` })
+  }
+  return out
+})
+
+const hasRolledUp = computed(() => (report.value?.rows ?? []).some(r => r.rolled_up))
+
+/** Nulové účty s pohybem potvrdí účetní hromadně, jinak by každý zvlášť blokoval dokončení. */
+function confirmZeroAccounts() {
+  for (const row of report.value?.rows ?? []) {
+    const e = edits[row.account_id]
+    if (e && e.counted === '' && bookBalance(row) === 0) e.counted = '0'
+  }
+}
 
 function hydrateEdits(r: BalanceInventoryReport) {
   for (const k of Object.keys(edits)) delete edits[Number(k)]
@@ -212,9 +272,9 @@ function downloadBlob(blob: Blob, filename: string) {
 onMounted(async () => {
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   const open = periods.value.filter(p => p.status === 'open' || p.status === 'closing')
-  const def = open.length
+  const def = periods.value.find(p => p.id === Number(route.query.period_id)) ?? (open.length
     ? open.reduce((a, b) => (b.fiscal_year > a.fiscal_year ? b : a))
-    : periods.value[0]
+    : periods.value[0])
   if (def) {
     filters.period_id = def.id
     await load()
@@ -305,7 +365,12 @@ onMounted(async () => {
         <span>{{ t('accounting.balance_inventory.back_filled_hint') }}</span>
       </div>
       <div v-else-if="!editable" class="text-xs text-neutral-500">{{ t('accounting.balance_inventory.readonly_hint') }}</div>
-      <div v-if="editable" class="flex items-center justify-end gap-2 pt-1">
+      <div v-if="hasRolledUp" class="text-xs text-warning-700" data-test="inventory-rolled-up-hint">{{ t('accounting.balance_inventory.rolled_up_hint') }}</div>
+      <div v-if="editable" class="flex flex-wrap items-center justify-end gap-2 pt-1">
+        <button type="button" :disabled="saving" :class="[btnOutline('neutral'), 'whitespace-nowrap mr-auto']" data-test="inventory-confirm-zero" @click="confirmZeroAccounts">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+          {{ t('accounting.balance_inventory.confirm_zero') }}
+        </button>
         <button :disabled="saving" @click="save(false)" :class="btnOutline('primary')">
           {{ t('accounting.balance_inventory.save') }}
         </button>
@@ -335,40 +400,52 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="row in report.rows" :key="row.account_id" class="hover:bg-neutral-50"
-              :class="!rowResolved(row) ? 'bg-danger-50/40' : ''">
-              <td class="px-3 py-2 align-top">
-                <RouterLink :to="statementLink(row)"
-                  class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
-                  {{ row.account_code }}
-                </RouterLink>
-              </td>
-              <td class="px-3 py-2 align-top">{{ row.name }}</td>
-              <td class="px-3 py-2 text-center align-top text-xs text-neutral-500 font-mono">{{ sideLabel(row) }}</td>
-              <td class="px-3 py-2 text-right font-mono align-top">{{ formatMoney(bookBalance(row)) }}</td>
-              <td class="px-3 py-2 text-right align-top">
-                <input v-if="editable" v-model="edits[row.account_id].counted" type="text" inputmode="decimal"
-                  class="w-28 h-8 px-2 text-right font-mono border border-neutral-300 rounded-md text-sm bg-surface" />
-                <span v-else class="font-mono">{{ countedBalance(row) != null ? formatMoney(countedBalance(row)!) : '—' }}</span>
-              </td>
-              <td class="px-3 py-2 text-right font-mono align-top"
-                :class="liveDifference(row) != null && Math.abs(liveDifference(row)!) >= 0.005 ? 'text-danger-600 font-semibold' : 'text-neutral-500'">
-                {{ liveDifference(row) != null ? formatMoney(liveDifference(row)!) : '—' }}
-              </td>
-              <td class="px-3 py-2 text-center align-top">
-                <input v-if="editable" type="checkbox" v-model="edits[row.account_id].resolved"
-                  class="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
-                <svg v-else-if="rowResolved(row)" class="w-4 h-4 inline text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-                <span v-else class="text-danger-600">•</span>
-              </td>
-              <td class="px-3 py-2 text-neutral-600 align-top">
-                <div>{{ row.documentation_hint }}</div>
-                <input v-if="editable" v-model="edits[row.account_id].note" type="text"
-                  :placeholder="t('accounting.balance_inventory.note_ph')"
-                  class="mt-1 w-full h-7 px-2 border border-neutral-200 rounded text-xs bg-surface" />
-                <div v-else-if="row.item_note" class="mt-0.5 text-xs text-neutral-500">{{ row.item_note }}</div>
-              </td>
-            </tr>
+            <template v-for="item in displayRows" :key="item.key">
+              <tr v-if="item.summary" class="bg-neutral-50 font-semibold" :data-test="`inventory-summary-${item.summary.code}`">
+                <td class="px-3 py-2 font-mono">{{ item.summary.code }}</td>
+                <td class="px-3 py-2">{{ item.summary.name }}</td>
+                <td class="px-3 py-2"></td>
+                <td class="px-3 py-2 text-right font-mono">{{ formatMoney(item.summary.book) }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ item.summary.counted != null ? formatMoney(item.summary.counted) : '' }}</td>
+                <td class="px-3 py-2 text-right font-mono">{{ item.summary.difference != null ? formatMoney(item.summary.difference) : '' }}</td>
+                <td class="px-3 py-2"></td>
+                <td class="px-3 py-2"></td>
+              </tr>
+              <tr v-else-if="item.row" class="hover:bg-neutral-50" :data-test="`inventory-row-${item.row.account_code}`"
+                :class="[!rowResolved(item.row) ? 'bg-danger-50/40' : '', focusAccountId === item.row.account_id ? 'ring-1 ring-inset ring-primary-400' : '']">
+                <td class="py-2 pr-3 align-top" :class="item.row.parent_id != null ? 'pl-7' : 'pl-3'">
+                  <RouterLink :to="statementLink(item.row)"
+                    class="font-mono text-primary-600 hover:text-primary-700 hover:underline">
+                    {{ item.row.account_code }}
+                  </RouterLink>
+                </td>
+                <td class="px-3 py-2 align-top">{{ item.row.name }}</td>
+                <td class="px-3 py-2 text-center align-top text-xs text-neutral-500 font-mono">{{ sideLabel(item.row) }}</td>
+                <td class="px-3 py-2 text-right font-mono align-top">{{ formatMoney(bookBalance(item.row)) }}</td>
+                <td class="px-3 py-2 text-right align-top">
+                  <input v-if="editable" v-model="edits[item.row.account_id].counted" type="text" inputmode="decimal"
+                    class="w-28 h-8 px-2 text-right font-mono border border-neutral-300 rounded-md text-sm bg-surface" />
+                  <span v-else class="font-mono">{{ countedBalance(item.row) != null ? formatMoney(countedBalance(item.row)!) : '—' }}</span>
+                </td>
+                <td class="px-3 py-2 text-right font-mono align-top"
+                  :class="liveDifference(item.row) != null && Math.abs(liveDifference(item.row)!) >= 0.005 ? 'text-danger-600 font-semibold' : 'text-neutral-500'">
+                  {{ liveDifference(item.row) != null ? formatMoney(liveDifference(item.row)!) : '—' }}
+                </td>
+                <td class="px-3 py-2 text-center align-top">
+                  <input v-if="editable" type="checkbox" v-model="edits[item.row.account_id].resolved"
+                    class="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
+                  <svg v-else-if="rowResolved(item.row)" class="w-4 h-4 inline text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  <span v-else class="text-danger-600">•</span>
+                </td>
+                <td class="px-3 py-2 text-neutral-600 align-top">
+                  <div>{{ item.row.documentation_hint }}</div>
+                  <input v-if="editable" v-model="edits[item.row.account_id].note" type="text"
+                    :placeholder="t('accounting.balance_inventory.note_ph')"
+                    class="mt-1 w-full h-7 px-2 border border-neutral-200 rounded text-xs bg-surface" />
+                  <div v-else-if="item.row.item_note" class="mt-0.5 text-xs text-neutral-500">{{ item.row.item_note }}</div>
+                </td>
+              </tr>
+            </template>
           </tbody>
           <tfoot>
             <!-- Na normální straně účtu se aktiva a pasiva sčítat nedají (vyšel by
@@ -389,5 +466,7 @@ onMounted(async () => {
         </table>
       </div>
     </div>
+
+    <OpenItemsListPanel v-if="report" :as-of="report.as_of" />
   </div>
 </template>

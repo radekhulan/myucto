@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Soupis otevřených položek</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 0 6mm; }
+    .header-period { text-align: center; font-size: 10pt; margin-top: 2mm; }
+    .note { font-size: 7pt; color: #555; margin-bottom: 3mm; }
+    .account-title { font-size: 9pt; font-weight: bold; margin: 3mm 0 1mm 0; }
+    .mismatch { color: #b91c1c; font-weight: bold; }
+    .unusual { color: #b91c1c; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; }
+    table.book thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: right; padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    table.book tfoot td { font-weight: bold; padding: 1.5mm; border-top: 0.5pt solid #333; }
+    .num { text-align: right; }
+    .sign-table { width: 100%; border-collapse: collapse; margin-top: 12mm; }
+    .sign-cell { width: 50%; font-size: 8pt; color: #555; padding-top: 8mm; border-top: 0.3pt solid #999; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">{{ entity.name }}</div>
+            <div class="header-meta">IČO: {{ entity.ico }}</div>
+            <div class="header-meta">{{ entity.address }}</div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Soupis otevřených položek</div>
+            <div class="header-period">k datu {{ as_of|cz_date }}</div>
+        </td>
+        <td style="width:30%;">
+            <div class="header-meta">Sestaveno: {{ entity.prepared_at }}</div>
+        </td>
+    </tr>
+</table>
+
+<div class="note">
+    Podklad k inventarizaci účtů (§29–30 zákona č. 563/1991 Sb., o účetnictví). Součet otevřených částek každého účtu se porovnává se zůstatkem účtu k datu. Zůstatek je se znaménkem podle typu účtu.
+</div>
+
+{% if accounts is empty %}
+    <p style="text-align:center; color:#888; padding: 10mm 0;">Vybrané účty nemají k datu žádný pohyb.</p>
+{% endif %}
+
+{% for acc in accounts %}
+    <div class="account-title">{{ acc.account.code }} {{ acc.account.name }}</div>
+    <table class="book">
+        <thead>
+            <tr>
+                <th class="thl" style="width:9%;">Datum</th>
+                <th class="thl" style="width:13%;">Doklad</th>
+                <th class="thl" style="width:8%;">Účet</th>
+                <th class="thl" style="width:30%;">Popis</th>
+                <th class="thl" style="width:16%;">Partner</th>
+                <th class="thl" style="width:8%;">Okruh</th>
+                <th style="width:8%;">Otevřeno MD</th>
+                <th style="width:8%;">Otevřeno Dal</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in acc.items %}
+                <tr>
+                    <td>{{ item.entry_date|cz_date }}</td>
+                    <td>{{ item.document_no }}</td>
+                    <td>{{ item.account_code }}</td>
+                    <td>{{ item.description|slice(0, 60) }}</td>
+                    <td>{{ item.partner|slice(0, 30) }}</td>
+                    <td>{{ item.pairing_id ? '#' ~ item.pairing_id : '' }}</td>
+                    <td class="num">{{ item.side == 'debit' ? item.open_amount|cz_money : '' }}</td>
+                    <td class="num">{{ item.side == 'credit' ? item.open_amount|cz_money : '' }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td colspan="6">
+                    Otevřených položek: {{ acc.open_count }} · zůstatek účtu:
+                    <span class="{{ acc.balance_unusual ? 'unusual' : '' }}">{{ acc.balance_signed|cz_money }}</span>
+                    {% if not acc.matches %}
+                        · <span class="mismatch">rozdíl proti zůstatku {{ acc.difference|cz_money }}</span>
+                    {% endif %}
+                </td>
+                <td class="num">{{ acc.open_md|cz_money }}</td>
+                <td class="num">{{ acc.open_d|cz_money }}</td>
+            </tr>
+        </tfoot>
+    </table>
+{% endfor %}
+
+<table class="sign-table">
+    <tr>
+        <td class="sign-cell">Sestavil (datum, podpis)</td>
+        <td class="sign-cell">Schválil, odpovědná osoba (datum, podpis)</td>
+    </tr>
+</table>
+
+</body>
+</html>

@@ -6,6 +6,8 @@ import {
   accountingApi,
   type AccountStatementReport,
   type AccountStatementItem,
+  type AccountCounterTotal,
+  type AccountInventoryReport,
   type OpenItemsReport,
   type OpenItemLine,
   type LinePairing,
@@ -23,7 +25,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
-const { balanceLabel, formatBalance, formatBalanceAmount } = useAccountBalance()
+const { balanceLabel } = useAccountBalance()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -32,14 +34,23 @@ const auth = useAuthStore()
 const accountId = computed(() => Number(route.params.accountId))
 const canWrite = computed(() => auth.canWrite('accounting'))
 
-/** Pohyby (opis) nebo otevřené položky s párováním do okruhů. */
-type Mode = 'movements' | 'open'
-const mode = ref<Mode>(route.query.mode === 'open' ? 'open' : 'movements')
+/** Pohyby (opis), otevřené položky s párováním do okruhů, nebo inventura účtu. */
+type Mode = 'movements' | 'open' | 'inventory'
+function modeFromQuery(): Mode {
+  return route.query.mode === 'open' || route.query.mode === 'inventory' ? route.query.mode : 'movements'
+}
+const mode = ref<Mode>(modeFromQuery())
+
+/** Filtr protiúčtu: řádky s tímto účtem na opačné straně; zůstatek zůstává za celý účet. */
+const counterAccountId = ref<number | null>(Number(route.query.counter) || null)
 
 /** Náhled zdrojového dokladu zápisu — sdílený drawer s deníkem (read-only). */
 const previewEntryId = ref<number | null>(null)
 
 const report = ref<AccountStatementReport | null>(null)
+/** Součty přichází jen s první stránkou opisu, při stránkování zůstávají. */
+const counterTotals = ref<AccountCounterTotal[]>([])
+const counterFilterInfo = ref<AccountStatementReport['counter_filter']>(null)
 const loading = ref(false)
 
 const page = ref(1)
@@ -68,7 +79,12 @@ async function load() {
       to: filters.to,
       page: page.value,
       per_page: perPage.value,
+      ...(counterAccountId.value ? { counter_account_id: counterAccountId.value } : {}),
     })
+    if (report.value.counter_totals !== null) {
+      counterTotals.value = report.value.counter_totals
+      counterFilterInfo.value = report.value.counter_filter
+    }
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -83,6 +99,21 @@ function applyFilters() {
   suggestions.value = null
   reload()
 }
+
+function setCounterFilter(accountId: number | null) {
+  counterAccountId.value = accountId
+  page.value = 1
+  router.replace({ query: { ...route.query, counter: accountId ? String(accountId) : undefined } })
+  load()
+}
+
+function toggleCounterRow(row: AccountCounterTotal) {
+  if (row.account_id !== null) setCounterFilter(counterAccountId.value === row.account_id ? null : row.account_id)
+}
+
+const counterOptions = computed(() => counterTotals.value.filter(r => r.account_id !== null))
+const counterTotalMd = computed(() => counterTotals.value.reduce((sum, r) => sum + r.md, 0))
+const counterTotalD = computed(() => counterTotals.value.reduce((sum, r) => sum + r.d, 0))
 
 function goToPage(p: number) {
   const np = Math.min(Math.max(1, p), totalPages.value)
@@ -125,6 +156,7 @@ async function exportFile(format: 'pdf' | 'xlsx') {
       from: filters.from,
       to: filters.to,
       format,
+      ...(counterAccountId.value ? { counter_account_id: counterAccountId.value } : {}),
     })
     downloadBlob(r.data as unknown as Blob, `opis-uctu-${report.value.account.code}-${filters.from}-${filters.to}.${format}`)
   } catch (e: any) {
@@ -151,6 +183,21 @@ function currencyLabel(it: { currency: string; amount_foreign: number | null }) 
 // ── Otevřené položky a párování ────────────────────────────────────────────
 
 const openReport = ref<OpenItemsReport | null>(null)
+const exportingOpen = ref(false)
+
+async function exportOpenItems(format: 'pdf' | 'xlsx') {
+  const code = openReport.value?.account.code
+  if (!code) return
+  exportingOpen.value = true
+  try {
+    const r = await accountingApi.exportReport('/accounting/reports/open-items-list/export', { as_of: filters.to, codes: code, format })
+    downloadBlob(r.data as unknown as Blob, `otevrene-polozky-${code}-${filters.to}.${format}`)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    exportingOpen.value = false
+  }
+}
 const onlyOpen = ref(route.query.only_open !== '0')
 const openPage = ref(1)
 const openPerPage = 100
@@ -183,13 +230,33 @@ async function loadOpen() {
 
 function reload() {
   if (mode.value === 'open') loadOpen()
+  else if (mode.value === 'inventory') { load(); loadInventory() }
   else load()
 }
+
+// ── Inventura účtu ──
+
+const inventoryReport = ref<AccountInventoryReport | null>(null)
+
+async function loadInventory() {
+  if (!accountId.value) return
+  try {
+    inventoryReport.value = await accountingApi.getAccountInventory(accountId.value, filters.to)
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    inventoryReport.value = null
+  }
+}
+
+const protocolLink = computed(() => ({
+  name: 'accounting-balance-inventory',
+  query: { period_id: inventoryReport.value?.period?.id, account: accountId.value },
+}))
 
 function setMode(m: Mode) {
   if (mode.value === m) return
   mode.value = m
-  router.replace({ query: { ...route.query, mode: m === 'open' ? 'open' : undefined } })
+  router.replace({ query: { ...route.query, mode: m === 'movements' ? undefined : m } })
   reload()
 }
 
@@ -418,7 +485,7 @@ onMounted(reload)
           </template>
         </h1>
         <p class="text-sm text-neutral-500 mt-0.5">
-          {{ mode === 'open' ? t('accounting.account_statement.open.subtitle') : t('accounting.account_statement.subtitle') }}
+          {{ mode === 'open' ? t('accounting.account_statement.open.subtitle') : mode === 'inventory' ? t('accounting.account_statement.inventory.subtitle') : t('accounting.account_statement.subtitle') }}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -432,6 +499,16 @@ onMounted(reload)
             {{ t('accounting.account_statement.export_pdf') }}
           </button>
           <button :disabled="!report || exporting" @click="exportFile('xlsx')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('accounting.account_statement.export_xlsx') }}
+          </button>
+        </template>
+        <template v-else-if="mode === 'open'">
+          <button :disabled="!openReport || exportingOpen" @click="exportOpenItems('pdf')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ t('accounting.account_statement.export_pdf') }}
+          </button>
+          <button :disabled="!openReport || exportingOpen" @click="exportOpenItems('xlsx')" :class="[btnOutline('primary'), 'whitespace-nowrap']">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('accounting.account_statement.export_xlsx') }}
           </button>
@@ -451,12 +528,17 @@ onMounted(reload)
           mode === 'open' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700']">
         {{ t('accounting.account_statement.mode_open') }}
       </button>
+      <button type="button" data-testid="mode-inventory" @click="setMode('inventory')"
+        :class="['cursor-pointer whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 -mb-px',
+          mode === 'inventory' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700']">
+        {{ t('accounting.account_statement.mode_inventory') }}
+      </button>
     </div>
 
     <!-- Filtry -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3 mb-4">
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-        <div v-if="mode === 'movements'">
+        <div v-if="mode !== 'open'">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.account_statement.filter_from') }}</label>
           <DateInput v-model="filters.from" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
@@ -468,6 +550,18 @@ onMounted(reload)
           <DateInput v-model="filters.to" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
+        <div v-if="mode === 'movements'">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.account_statement.filter_counter') }}</label>
+          <select :value="counterAccountId ?? ''" data-testid="counter-filter"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+            @change="setCounterFilter(Number(($event.target as HTMLSelectElement).value) || null)">
+            <option value="">{{ t('accounting.account_statement.counter_all') }}</option>
+            <option v-if="counterFilterInfo && !counterOptions.some(o => o.account_id === counterFilterInfo?.account_id)" :value="counterFilterInfo.account_id">
+              {{ counterFilterInfo.account_code }} {{ counterFilterInfo.name }}
+            </option>
+            <option v-for="o in counterOptions" :key="o.account_id ?? 0" :value="o.account_id ?? ''">{{ o.account_code }} {{ o.name }}</option>
+          </select>
+        </div>
         <label v-if="mode === 'open'" class="inline-flex items-center gap-2 h-9 text-sm text-neutral-700 cursor-pointer">
           <input v-model="onlyOpen" type="checkbox" class="rounded border-neutral-300" @change="toggleOnlyOpen" />
           {{ t('accounting.account_statement.open.only_open') }}
@@ -475,12 +569,10 @@ onMounted(reload)
       </div>
     </div>
 
-    <!-- ═══ Pohyby ═══ -->
-    <template v-if="mode === 'movements'">
-      <div v-if="report" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+    <div v-if="mode !== 'open' && report" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500" data-testid="opening-label">{{ balanceLabel(t('accounting.account_statement.opening'), report.opening_balance) }}</div>
-          <div class="text-lg font-semibold font-mono">{{ formatBalanceAmount(report.opening_balance) }}</div>
+          <div class="text-lg font-semibold font-mono" :class="report.opening_balance_unusual ? 'text-danger-600' : ''" data-testid="opening-amount">{{ formatMoney(report.opening_balance_signed) }}</div>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.turnover_md') }}</div>
@@ -492,8 +584,54 @@ onMounted(reload)
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">
           <div class="text-xs text-neutral-500" data-testid="closing-label">{{ balanceLabel(t('accounting.account_statement.closing'), report.closing_balance) }}</div>
-          <div class="text-lg font-semibold font-mono" data-testid="closing-amount">{{ formatBalanceAmount(report.closing_balance) }}</div>
+          <div class="text-lg font-semibold font-mono" :class="report.closing_balance_unusual ? 'text-danger-600' : ''" data-testid="closing-amount">{{ formatMoney(report.closing_balance_signed) }}</div>
         </div>
+    </div>
+
+    <!-- ═══ Pohyby ═══ -->
+    <template v-if="mode === 'movements'">
+      <div v-if="report && counterTotals.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 overflow-hidden" data-testid="counter-totals">
+        <div class="px-3 py-2 border-b border-neutral-100 text-sm font-medium">
+          {{ t('accounting.account_statement.counter_totals_title') }}
+          <span class="ml-2 text-xs font-normal text-neutral-500">{{ t('accounting.account_statement.counter_totals_hint') }}</span>
+        </div>
+        <div class="overflow-x-auto max-h-72">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium w-28">{{ t('accounting.account_statement.col_counter_account') }}</th>
+                <th class="px-3 py-2 text-left font-medium">{{ t('accounting.balance_inventory.col_name') }}</th>
+                <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_md') }}</th>
+                <th class="px-3 py-2 text-right font-medium w-32">{{ t('accounting.account_statement.col_d') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="row in counterTotals" :key="row.account_id ?? 0" data-testid="counter-row"
+                :class="['hover:bg-neutral-50', row.account_id !== null ? 'cursor-pointer' : '', counterAccountId === row.account_id ? 'bg-primary-50' : '']"
+                @click="toggleCounterRow(row)">
+                <td class="px-3 py-1.5 font-mono text-xs">{{ row.account_code ?? t('accounting.account_statement.counter_none') }}</td>
+                <td class="px-3 py-1.5">{{ row.name ?? '' }}</td>
+                <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ formatMoney(row.md) }}</td>
+                <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ formatMoney(row.d) }}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr class="font-semibold border-t border-neutral-300 bg-neutral-50">
+                <td colspan="2" class="px-3 py-1.5">{{ t('accounting.account_statement.counter_total') }}</td>
+                <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ formatMoney(counterTotalMd) }}</td>
+                <td class="px-3 py-1.5 text-right font-mono whitespace-nowrap">{{ formatMoney(counterTotalD) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <div v-if="counterFilterInfo" class="mb-4 px-3 py-2 rounded-md bg-primary-50 border border-primary-200 text-primary-800 text-sm" data-testid="counter-filter-note">
+        {{ t('accounting.account_statement.counter_filter_note', {
+          account: `${counterFilterInfo.account_code} ${counterFilterInfo.name}`,
+          md: formatMoney(counterFilterInfo.md),
+          d: formatMoney(counterFilterInfo.d),
+        }) }}
       </div>
 
       <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
@@ -550,7 +688,7 @@ onMounted(reload)
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">
                   <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
                 </td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatBalance(it.balance) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="it.balance_unusual ? 'text-danger-600 font-semibold' : ''">{{ formatMoney(it.balance_signed) }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ it.counter_accounts || '' }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ it.pairing_id ? `#${it.pairing_id}` : '' }}</td>
                 <td class="px-3 py-2 text-xs text-neutral-600 whitespace-nowrap">{{ currencyLabel(it) }}</td>
@@ -580,6 +718,76 @@ onMounted(reload)
       </nav>
     </template>
 
+    <!-- ═══ Inventura účtu ═══ -->
+    <template v-else-if="mode === 'inventory'">
+      <div v-if="inventoryReport" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3" data-testid="account-inventory">
+        <div v-if="!inventoryReport.inventoriable" class="text-sm text-neutral-600" data-testid="inventory-not-applicable">
+          {{ t('accounting.account_statement.inventory.not_applicable') }}
+        </div>
+        <template v-else-if="inventoryReport.period">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-sm text-neutral-600">
+              {{ t('accounting.account_statement.inventory.as_of', { date: formatDate(inventoryReport.as_of ?? '') }) }}
+              <template v-if="inventoryReport.inventory?.responsible_person"> · {{ inventoryReport.inventory.responsible_person }}</template>
+              <span class="ml-2 px-2 py-0.5 rounded text-xs font-medium"
+                :class="inventoryReport.inventory?.completed ? 'bg-success-100 text-success-700' : 'bg-warning-100 text-warning-700'">
+                {{ inventoryReport.inventory?.completed ? t('accounting.balance_inventory.status_completed') : t('accounting.balance_inventory.status_in_progress') }}
+              </span>
+            </div>
+            <RouterLink :to="protocolLink" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-testid="inventory-protocol-link">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
+              {{ t('accounting.account_statement.inventory.open_protocol') }}
+            </RouterLink>
+          </div>
+          <div v-if="inventoryReport.rows.length === 0" class="text-sm text-neutral-500">{{ t('accounting.account_statement.inventory.no_rows') }}</div>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium w-24">{{ t('accounting.balance_inventory.col_account') }}</th>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('accounting.balance_inventory.col_name') }}</th>
+                  <th class="px-3 py-2 text-right font-medium">{{ t('accounting.balance_inventory.col_book') }}</th>
+                  <th class="px-3 py-2 text-right font-medium">{{ t('accounting.balance_inventory.col_counted') }}</th>
+                  <th class="px-3 py-2 text-right font-medium">{{ t('accounting.balance_inventory.col_difference') }}</th>
+                  <th class="px-3 py-2 text-center font-medium">{{ t('accounting.balance_inventory.col_resolved') }}</th>
+                  <th class="px-3 py-2 text-left font-medium">{{ t('accounting.balance_inventory.col_hint') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-neutral-100">
+                <tr v-for="row in inventoryReport.rows" :key="row.account_id" :class="!row.resolved ? 'bg-danger-50/40' : ''">
+                  <td class="px-3 py-2 font-mono">{{ row.account_code }}</td>
+                  <td class="px-3 py-2">{{ row.name }}</td>
+                  <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(row.book_display) }}</td>
+                  <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ row.counted_display != null ? formatMoney(row.counted_display) : '—' }}</td>
+                  <td class="px-3 py-2 text-right font-mono whitespace-nowrap"
+                    :class="row.difference_display ? 'text-danger-600 font-semibold' : 'text-neutral-500'">{{ row.difference_display != null ? formatMoney(row.difference_display) : '—' }}</td>
+                  <td class="px-3 py-2 text-center">
+                    <svg v-if="row.resolved" class="w-4 h-4 inline text-success-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                    <span v-else class="text-danger-600">•</span>
+                  </td>
+                  <td class="px-3 py-2 text-neutral-600">
+                    <div>{{ row.documentation_hint }}</div>
+                    <div v-if="row.item_note" class="mt-0.5 text-xs text-neutral-500">{{ row.item_note }}</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="setMode('movements')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+              {{ t('accounting.account_statement.mode_movements') }}
+            </button>
+            <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="setMode('open')">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+              {{ t('accounting.account_statement.mode_open') }}
+            </button>
+          </div>
+        </template>
+        <div v-else class="text-sm text-neutral-500">{{ t('accounting.account_statement.inventory.no_period') }}</div>
+      </div>
+    </template>
+
     <!-- ═══ Otevřené položky – párování ═══ -->
     <template v-else>
       <div v-if="openReport" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
@@ -598,7 +806,7 @@ onMounted(reload)
         </div>
         <div :class="['border rounded-lg shadow-sm p-3', checkOk ? 'bg-success-50 border-success-200' : 'bg-danger-50 border-danger-200']">
           <div class="text-xs text-neutral-500">{{ t('accounting.account_statement.open.account_balance') }}</div>
-          <div class="text-lg font-semibold font-mono">{{ formatBalance(openReport.balance) }}</div>
+          <div class="text-lg font-semibold font-mono" :class="openReport.balance_unusual ? 'text-danger-600' : ''">{{ formatMoney(openReport.balance_signed) }}</div>
           <div :class="['text-xs mt-0.5', checkOk ? 'text-success-700' : 'text-danger-700']">
             {{ checkOk ? t('accounting.account_statement.open.check_ok') : t('accounting.account_statement.open.check_diff', { amount: formatMoney(openReport.difference) }) }}
           </div>
@@ -731,14 +939,14 @@ onMounted(reload)
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">
                   <template v-if="it.side === 'credit' && it.open_amount !== 0">{{ formatMoney(it.open_amount) }}</template>
                 </td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatBalance(it.open_balance) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(it.open_balance_signed) }}</td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">
                   <template v-if="it.side === 'debit'">{{ formatMoney(it.amount) }}</template>
                 </td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">
                   <template v-if="it.side === 'credit'">{{ formatMoney(it.amount) }}</template>
                 </td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-500">{{ formatBalance(it.balance) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap" :class="it.balance_unusual ? 'text-danger-600' : 'text-neutral-500'">{{ formatMoney(it.balance_signed) }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ it.counter_accounts || '' }}</td>
                 <td class="px-3 py-2 text-neutral-600">{{ it.partner || '' }}</td>
                 <td class="px-3 py-2 font-mono text-xs text-neutral-600">{{ it.variable_symbol || '' }}</td>
