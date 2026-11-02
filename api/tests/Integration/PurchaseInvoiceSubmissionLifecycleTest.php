@@ -225,6 +225,41 @@ final class PurchaseInvoiceSubmissionLifecycleTest extends TestCase
         self::assertNull($this->documentDeletedAt($row['document_id']));
     }
 
+    /**
+     * Přerušené vytěžení (požadavek nedoběhl) nechalo podání ve stavu `processing`:
+     * fronta ho neukázala mezi čekajícími a nešlo vytěžit znovu ani smazat.
+     */
+    public function testInterruptedExtractionReturnsToQueueAndCanBeRetriedOrDeleted(): void
+    {
+        $row = $this->submission('staff');
+        $markStale = $this->db->pdo()->prepare(
+            "UPDATE purchase_invoice_submissions
+                SET status = 'processing', extraction_status = 'running',
+                    processing_started_at = NOW() - INTERVAL " . (PurchaseInvoiceSubmissionRepository::STALE_PROCESSING_MINUTES + 1) . ' MINUTE
+              WHERE id = ?'
+        );
+        $markStale->execute([$row['id']]);
+
+        self::assertTrue($this->submissions->find($row['id'], $this->supplierA)['processing_stale']);
+        self::assertContains($row['id'], $this->pendingIds());
+
+        self::assertTrue($this->submissions->claimForExtraction($row['id'], $this->supplierA), 'Přerušené vytěžení jde spustit znovu.');
+        self::assertFalse($this->submissions->find($row['id'], $this->supplierA)['processing_stale']);
+        self::assertNotContains($row['id'], $this->pendingIds(), 'Právě běžící vytěžení mezi čekajícími není.');
+        self::assertFalse($this->submissions->claimForExtraction($row['id'], $this->supplierA), 'Běžící vytěžení se nesmí spustit podruhé.');
+
+        $markStale->execute([$row['id']]);
+        $response = $this->inboxAction->delete($this->inboxRequest('DELETE', '/api/purchase-invoice-submissions/' . $row['id']), (new ResponseFactory())->createResponse(), ['id' => $row['id']]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertNull($this->submissions->find($row['id'], $this->supplierA));
+    }
+
+    /** @return list<int> */
+    private function pendingIds(): array
+    {
+        return array_map(static fn (array $i): int => (int) $i['id'], $this->submissions->paginate($this->supplierA, 'submitted', 100, 0)['items']);
+    }
+
     public function testFailedStaffDeleteRollsBackRequestReopening(): void
     {
         $row = $this->submission();

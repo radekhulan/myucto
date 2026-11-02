@@ -157,6 +157,13 @@ Originál vybraného dokladu je vedle údajů o dokladu. Tlačítkem **Skrýt or
 **Jak poznáte, že je hotovo:** z dokladu vznikl koncept přijaté faktury a originál se přesunul do archivu
 (složka **Příchozí doklady / Archiv / rok / měsíc**).
 
+Doklad zůstane konceptem, dokud ho nepřijmete. Nese-li vytěžení varování (například přenesená daňová
+povinnost, doklad podle textu už uhrazený nebo dodavatel neplátce DPH), otevře se nejdřív kontrola
+vytěžení a teprve po ní editor.
+
+Pokud se vytěžení nedokončí (například se přeruší spojení), vrátí se doklad po 10 minutách mezi čekající
+s upozorněním, že zpracování bylo přerušeno. Pak ho vytěžte znovu, nebo smažte z fronty.
+
 Podrobnosti o frontě, hromadných akcích a odmítnutí jsou v [§ 23.11.3](#23113-prichozi-doklady).
 
 ## 23.6 Krok za krokem: zaplatit fakturu

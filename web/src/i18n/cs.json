@@ -14040,6 +14040,7 @@
     "delete_success": "Doklad byl vyřazen z fronty a originál je v koši Dokumentů.",
     "submitted_by": "Předal/a: {name}",
     "processed_success": "Doklad byl zpracován do přijaté faktury.",
+    "processing_stale": "Vytěžení se nedokončilo, zpracování bylo přerušeno. Spusťte ho znovu, nebo doklad smažte.",
     "already_exists": "Tento doklad už v systému je jako přijatá faktura {number}, nová faktura nevznikla. Stornovaný doklad zpracování neblokuje.",
     "bulk_duplicates": "Už v systému bylo dokladů: {n}. Nová faktura k nim nevznikla.",
     "upload_already_processed": "Soubor {file} už byl zpracován jako přijatá faktura {number}.",

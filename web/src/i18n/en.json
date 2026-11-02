@@ -14040,6 +14040,7 @@
     "delete_success": "The document left the queue and its original is in the Documents trash.",
     "submitted_by": "Submitted by: {name}",
     "processed_success": "The document was processed into a received invoice.",
+    "processing_stale": "Extraction did not finish because processing was interrupted. Run it again or delete the document.",
     "already_exists": "This document is already in the system as received invoice {number}; no new invoice was created. A cancelled document does not block processing.",
     "bulk_duplicates": "Already in the system: {n} documents. No new invoice was created for them.",
     "upload_already_processed": "File {file} has already been processed as received invoice {number}.",
