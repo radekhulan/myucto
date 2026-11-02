@@ -133,7 +133,9 @@ describe('AccountStatement.vue', () => {
     expect(box.text()).toContain('321001')
     expect(box.text()).toContain('-100')
     expect(box.text()).toContain('Dobropis')
-    expect(wrapper.getComponent('[data-testid="inventory-protocol-link"]').props('to')).toEqual({
+    const protocolLink = wrapper.findAllComponents({ name: 'RouterLink' })
+      .find((link) => link.attributes('data-testid') === 'inventory-protocol-link')
+    expect(protocolLink?.props('to')).toEqual({
       name: 'accounting-balance-inventory', query: { period_id: 5, account: 7 },
     })
   })
