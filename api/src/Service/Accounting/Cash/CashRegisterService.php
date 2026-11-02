@@ -346,38 +346,18 @@ final class CashRegisterService
             return false;
         }
 
-        $existing = [];
-        $prefixByCode = [];
-        $formatByCode = [];
-        foreach ($this->series->list($supplierId) as $row) {
-            if ((int) $row['register_id'] !== $registerId) {
-                continue;
-            }
-            $code = (string) $row['series_code'];
-            if ((int) $row['fiscal_year'] === $fiscalYear) {
-                $existing[$code] = true;
-            }
-            // Prefix pokladny se přes roky nemění — účetní ho zná a řada by jinak
-            // každý leden vypadala jako řada jiné pokladny. Totéž platí o šabloně
-            // čísla: řada převzatá z jiného systému (`{YY}{PREFIX}{CCCCC}`) by
-            // v lednu tiše přešla na vestavěné `{PREFIX}-{YYYY}-{CCCC}`.
-            $prefixByCode[$code] ??= (string) $row['prefix'];
-            $formatByCode[$code] ??= $row['number_format'] !== null ? (string) $row['number_format'] : null;
-        }
+        // Prefix a šablona pokladny se přes roky nemění (ensureOwnSeriesYear); úplně první
+        // rok řady dostane volný prefix, aby nekolidoval s firemní PPD/VPD.
         foreach (['cash_in', 'cash_out'] as $seriesCode) {
-            if (isset($existing[$seriesCode])) {
+            if ($this->series->ensureOwnSeriesYear($supplierId, $seriesCode, $registerId, $fiscalYear)) {
                 continue;
             }
-            $prefix = $prefixByCode[$seriesCode]
-                ?? $this->freeSeriesPrefix($supplierId, DocumentSeriesService::DEFAULT_PREFIXES[$seriesCode]);
-            // `ensure` semantika, ne `updateSeries`: čítač se smí nastavit jen při
-            // skutečném zakládání řádku, jinak ho souběžné vystavení vrátí na 1.
             $this->series->ensureSeriesRow(
                 $supplierId,
                 $seriesCode,
                 $fiscalYear,
-                $prefix,
-                $formatByCode[$seriesCode] ?? null,
+                $this->freeSeriesPrefix($supplierId, DocumentSeriesService::DEFAULT_PREFIXES[$seriesCode]),
+                null,
                 $registerId,
             );
         }

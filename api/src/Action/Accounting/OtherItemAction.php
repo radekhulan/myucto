@@ -37,6 +37,13 @@ final class OtherItemAction
         foreach (['side', 'status', 'kind', 'q', 'from', 'to', 'sort_by', 'sort_dir'] as $field) {
             if (isset($q[$field]) && is_scalar($q[$field])) $filters[$field] = trim((string) $q[$field]);
         }
+        if (isset($q['kind_id']) && is_scalar($q['kind_id']) && trim((string) $q['kind_id']) !== '') {
+            $kindId = filter_var($q['kind_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($kindId === false) {
+                return Json::error($response, 'other_items.error.invalid_kind', 'Neplatný druh dokladu.', 422);
+            }
+            $filters['kind_id'] = $kindId;
+        }
         $hasFrom = isset($filters['from']);
         $hasTo = isset($filters['to']);
         $from = $hasFrom ? $filters['from'] : ($hasTo ? '1000-01-01' : date('Y-m-d', strtotime('-1 year')));
@@ -76,6 +83,7 @@ final class OtherItemAction
             array_filter($derived, static fn (array $row): bool =>
                 (!isset($filters['status']) || $filters['status'] === 'all' || (float) $row['remaining'] > 0)
                 && (!isset($filters['side']) || $row['side'] === $filters['side'])
+                && !isset($filters['kind_id'])
                 && (!isset($filters['kind']) || $row['kind'] === $filters['kind'])
                 && (!isset($filters['status']) || $filters['status'] === 'all'
                     || $filters['status'] === 'open' && $row['status'] !== 'paid'

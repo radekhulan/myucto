@@ -24,6 +24,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankConnectionsPanel from '@/components/bank/BankConnectionsPanel.vue'
 
@@ -1641,9 +1642,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
       </div>
     </div>
 
-    <div v-if="canManageAccounts && currencyFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-        <h3 class="text-lg font-semibold mb-3">{{ editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel }) }}</h3>
+    <Modal v-if="canManageAccounts && currencyFormOpen" width-class="max-w-md"
+      :title="editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel })"
+      @close="closeCurrencyForm">
         <div class="space-y-3">
           <div class="grid grid-cols-3 gap-3">
             <div>
@@ -1728,7 +1729,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <input v-model="currencyDraft.is_default" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('bank_accounts.default_for_currency') }}
           </label>
-          <div class="flex justify-end gap-2 pt-2">
+        </div>
+        <template #footer>
+          <div class="flex flex-wrap justify-end gap-2">
             <button type="button" @click="closeCurrencyForm"
               :class="btnOutline('neutral')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
@@ -1738,9 +1741,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('common.save') }}</button>
           </div>
-        </div>
-      </div>
-    </div>
+        </template>
+    </Modal>
 
     <div v-if="providerFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto p-5">

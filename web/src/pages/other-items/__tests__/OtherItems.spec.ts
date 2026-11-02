@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
   list: vi.fn(),
+  listKinds: vi.fn(),
   remove: vi.fn(),
   canWrite: vi.fn(),
   toastSuccess: vi.fn(),
@@ -11,6 +12,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { list: m.list, remove: m.remove },
+  otherItemKindsApi: { list: m.listKinds },
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
@@ -47,6 +49,7 @@ describe('OtherItems actions', () => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
     m.remove.mockResolvedValue({})
+    m.listKinds.mockResolvedValue([])
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
@@ -112,5 +115,40 @@ describe('OtherItems actions', () => {
     expect(wrapper.text()).toContain('Nové pořadí')
     expect(wrapper.text()).not.toContain('Zastaralá odpověď')
     wrapper.unmount()
+  })
+
+  it('ukáže číslo dokladu a filtruje druh i se stranou, vestavěný přes kind, vlastní přes kind_id', async () => {
+    m.listKinds.mockResolvedValue([
+      { id: 5, side: 'payable', builtin: false, builtin_code: null, name: 'Syntetické nájemné', own_series: true, is_active: true },
+      { id: 6, side: 'receivable', builtin: false, builtin_code: null, name: 'Syntetický nárok', own_series: false, is_active: false },
+    ])
+    m.list.mockResolvedValue({ items: [{ ...item('posted'), document_no: 'NJ-2099-0001' }], sources: [], total: 1, per_page: 50 })
+    const wrapper = shallowMount(OtherItems, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('NJ-2099-0001')
+
+    // Bez směru nabídne druhy obou stran, každou ve své skupině (skrytý druh také).
+    const kind = wrapper.findAll('select')[2]!
+    const groups = kind.findAll('optgroup')
+    expect(groups.map(group => group.attributes('label'))).toEqual(['other_items.side.payable', 'other_items.side.receivable'])
+    expect(groups[0]!.text()).toContain('other_items.kind_by_side.payable.rent')
+    expect(groups[0]!.text()).toContain('Syntetické nájemné')
+    expect(groups[1]!.text()).toContain('other_items.kind_by_side.receivable.rent')
+    expect(groups[1]!.text()).toContain('Syntetický nárok')
+
+    await kind.setValue('receivable|rent')
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ side: 'receivable', kind: 'rent' }))
+    await kind.setValue('payable|custom:5')
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ side: 'payable', kind_id: 5 }))
+    expect(m.list.mock.lastCall![0]).not.toHaveProperty('kind')
+
+    // Po přepnutí na pohledávky druh závazků z filtru vypadne a zůstane jen skupina pohledávek.
+    await wrapper.findAll('select')[0]!.setValue('receivable')
+    await flushPromises()
+    expect((kind.element as HTMLSelectElement).value).toBe('')
+    expect(m.list.mock.lastCall![0]).not.toHaveProperty('kind_id')
+    expect(kind.findAll('optgroup').map(group => group.attributes('label'))).toEqual(['other_items.side.receivable'])
   })
 })

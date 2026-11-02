@@ -52,7 +52,7 @@ final class OtherItemScheduleService
                 throw new OtherItemException('invalid_due_offset', 'Splatnost musí být nejvýše deset let od vystavení.');
             }
             $template = [];
-            foreach (['side', 'kind', 'title', 'partner_id', 'partner_name', 'currency', 'amount',
+            foreach (['side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'currency', 'amount',
                       'exchange_rate', 'variable_symbol', 'account_code', 'counter_account_code',
                       'posting_lines', 'note'] as $field) {
                 if ($field === 'posting_lines' && $item[$field] === []) continue;
@@ -176,7 +176,10 @@ final class OtherItemScheduleService
                 $due = (new \DateTimeImmutable($issued))->modify('+' . (int) $schedule['due_days'] . ' days')->format('Y-m-d');
                 $item = $this->service->create($supplierId, $template + [
                     'issued_on' => $issued, 'accounting_on' => $issued, 'due_on' => $due,
-                ], $userId);
+                ], $userId, [
+                    'kind' => (string) ($template['kind'] ?? 'other'), 'side' => (string) ($template['side'] ?? ''),
+                    'kind_id' => isset($template['kind_id']) ? (int) $template['kind_id'] : null,
+                ]);
                 $this->link($supplierId, $id, $index, (int) $item['id']);
                 $documents = $pdo->prepare("INSERT IGNORE INTO document_links
                     (document_id, supplier_id, entity_type, entity_id)

@@ -88,7 +88,7 @@ final class MeActionTest extends TestCase
             ->willReturn($supplierStatement);
         $db = $this->createMock(Connection::class);
         // Sloupce kontrolované kvůli instalacím pozadu s migrací: OSS, zjednodušený doklad (2037)
-        // rozpis slevy na PDF (2035) a zobrazení výkazu (2228, oba tady záměrně chybí).
+        // rozpis slevy na PDF (2035) a zobrazení výkazu (2229, oba tady záměrně chybí).
         $db->expects(self::exactly(4))->method('hasColumn')
             ->willReturnCallback(static fn (string $table, string $column): bool =>
                 $table === 'supplier' && in_array($column, ['oss_enabled', 'simplified_hide_customer_default'], true));

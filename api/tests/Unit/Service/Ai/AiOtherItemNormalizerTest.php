@@ -41,6 +41,15 @@ final class AiOtherItemNormalizerTest extends TestCase
         self::assertTrue($out[0]['installments_valid']);
     }
 
+    public function testHiddenBuiltinKindFallsBackToOtherOnItsSideOnly(): void
+    {
+        $out = AiOtherItemNormalizer::normalize([self::item(), self::item(['side' => 'receivable'])], self::CHART, '2026-10-11', [], ['payable:loan']);
+
+        // Skrytý druh by uložení odmítlo (kind_inactive); druhá strana skrytá není.
+        self::assertSame('other', $out[0]['kind']);
+        self::assertSame('loan', $out[1]['kind']);
+    }
+
     public function testInstallmentsNotSummingToAmountOrNotAscendingAreFlagged(): void
     {
         $short = AiOtherItemNormalizer::normalize([self::item(['amount' => 30000.01])], self::CHART, '2026-10-11', []);

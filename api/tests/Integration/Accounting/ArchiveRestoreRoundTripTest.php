@@ -145,6 +145,40 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertSame($restoredPartner, (int) $item['partner_id']);
     }
 
+    public function testOtherItemKindIsRemappedOnItemsAndScheduleTemplate(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $kinds = $container->get(\MyInvoice\Service\Accounting\OtherItemKindService::class);
+        $items = $container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
+        $plans = $container->get(\MyInvoice\Service\Accounting\OtherItemScheduleService::class);
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $kind = $kinds->create($this->supplierId, ['side' => 'payable', 'name' => 'Syntetické nájemné'], $this->userId);
+        $source = $items->create($this->supplierId, [
+            'side' => 'payable', 'kind_id' => $kind['id'], 'title' => 'Syntetický archivní nájem druhu',
+            'issued_on' => '2097-01-01', 'due_on' => '2097-01-20', 'currency' => 'CZK', 'amount' => 900,
+        ], $this->userId);
+        $items->post($this->supplierId, (int) $source['id'], $this->userId);
+        $plans->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], $this->userId);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $newSid = (int) $this->restore->restore($path)['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $restoredKind = array_values(array_filter($kinds->list($newSid), static fn (array $k): bool => !$k['builtin']));
+        self::assertCount(1, $restoredKind);
+        self::assertNotSame((int) $kind['id'], $restoredKind[0]['id']);
+        $pdo = $this->db->pdo();
+        $schedule = (int) $pdo->query('SELECT id FROM other_item_schedules WHERE supplier_id = ' . $newSid)->fetchColumn();
+        $generated = $plans->generate($newSid, $schedule, '2097-02-01', $this->userId);
+        self::assertCount(1, $generated['created_ids']);
+        foreach ($items->list($newSid, ['status' => 'all'], 1, 10)['items'] as $item) {
+            self::assertSame($restoredKind[0]['id'], (int) $item['kind_id'], (string) $item['title']);
+        }
+    }
+
     public function testInternalDocumentsSurviveArchiveRoundTrip(): void
     {
         $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")

@@ -139,6 +139,7 @@ final class IsdocToPurchaseInvoiceMapper
             $parsed['issue_date'] ?? null,
             $parsed['tax_date'] ?? null,
         );
+        $documentKind = $this->mapDocumentKind((string) ($parsed['invoice_type'] ?? 'invoice'));
 
         $payload = [
             'vendor_id'             => $resolved['id'],
@@ -146,9 +147,9 @@ final class IsdocToPurchaseInvoiceMapper
                 ?? $resolved['is_vat_payer']
                 ?? $this->liveVendorVatPayer((int) $resolved['id']),
             'vendor_invoice_number' => $this->safeVarsymbol((string) ($parsed['varsymbol'] ?? '')),
-            'document_kind'         => $this->mapDocumentKind((string) ($parsed['invoice_type'] ?? 'invoice')),
+            'document_kind'         => $documentKind,
             'issue_date'            => (string) ($parsed['issue_date'] ?? date('Y-m-d')),
-            'tax_date'              => $parsed['tax_date'] !== null ? (string) $parsed['tax_date'] : null,
+            'tax_date'              => ImportedTaxDatePolicy::resolve($parsed['tax_date'] ?? null, null, $parsed['issue_date'] ?? null, $documentKind),
             'due_date'              => (string) ($parsed['due_date'] ?? date('Y-m-d', strtotime('+14 days'))),
             'received_at'           => $receivedAt['date'],
             // C6 (§ 73/1/a): received_at je jen otisk dat ze souboru, ne vědomé zadání data

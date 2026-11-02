@@ -418,6 +418,19 @@ body.workspace-window-frame #app {
   padding-bottom: 1rem;
 }
 
+/* Vystředěný dialog nesmí na nízkém displeji utéct z obrazovky: bez scrollu by šlo
+   k Uložit dojít jen přes zoom. Auto okraje středí jako items-center, ale při přetečení
+   začínají nahoře, takže zůstane dostupná i hlavička. Pravidlo drží všechny ruční
+   dialogy, hlídá ho dialogOverflowStructure.spec.ts. */
+.fixed.inset-0.flex.items-center.justify-center:not(.pointer-events-none) {
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fixed.inset-0.flex.items-center.justify-center:not(.pointer-events-none) > * {
+  margin-block: auto;
+}
+
 body.workspace-window-single #app {
   padding-top: 0;
   padding-bottom: 1.5rem;
