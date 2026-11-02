@@ -22,6 +22,7 @@ const m = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastWarning: vi.fn(),
   push: vi.fn(),
+  byEntity: vi.fn(),
 }))
 
 vi.mock('@/api/cash', () => ({
@@ -69,6 +70,14 @@ vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery, params: m.routeParams }),
   useRouter: () => ({ push: m.push, replace: m.replace }),
 }))
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: { flags: { preview_open: true } } }),
+  patchPagePrefs: vi.fn(),
+}))
+vi.mock('@/api/documents', () => ({
+  documentsApi: { byEntity: m.byEntity, previewUrl: (id: number) => `/documents/${id}/preview`, thumbUrl: () => '', downloadUrl: () => '' },
+}))
 
 import CashDocumentEditor from '@/pages/accounting/CashDocumentEditor.vue'
 
@@ -106,6 +115,28 @@ describe('CashDocumentEditor.vue', () => {
     m.clientsList.mockResolvedValue({ data: [] })
     m.createDocument.mockResolvedValue({ id: 1, doc_number: 'PPD-1', journal_entry_id: 1, status: 'posted', warnings: [] })
     m.searchUnpaid.mockResolvedValue({ items: [], truncated: false })
+    m.byEntity.mockResolvedValue([])
+  })
+
+  it('u uloženého konceptu ukáže přílohu vedle formuláře a na novém dokladu přílohy nečte', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 976, right: 976 } as DOMRect)
+    const fresh = await mountEditor()
+    expect(m.byEntity).not.toHaveBeenCalled()
+    expect(fresh.find('[data-test="cash-preview-toggle"]').exists()).toBe(false)
+
+    m.routeParams.id = '42'
+    m.getDocument.mockResolvedValue({
+      id: 42, status: 'draft', register_id: 1, doc_type: 'out', purpose: 'other', issue_date: '2093-03-01', tax_date: null,
+      partner_name: null, partner_ic: null, partner_dic: null, description: 'Účtenka', vat_mode: 'none', total_amount: 100,
+      amount_foreign: null, fx_rate: null, invoice_id: null, purchase_invoice_id: null, rule_key: null, counter_account_code: null, vat_lines: [],
+    })
+    m.byEntity.mockResolvedValue([{ id: 7, title: 'uctenka.pdf', doc_type: 'pdf', size_bytes: 1, has_thumb: false }])
+    const edit = await mountEditor()
+
+    expect(m.byEntity).toHaveBeenCalledWith('cash_document', 42)
+    expect(edit.find('[data-test="document-preview-splitter"]').exists()).toBe(true)
+    expect(edit.get('iframe').attributes('src')).toContain('/documents/7/preview')
+    width.mockRestore()
   })
 
   it('nákup nabídne aktivní nákladové účty a zvolenou analytiku promítne do náhledu i payloadu', async () => {

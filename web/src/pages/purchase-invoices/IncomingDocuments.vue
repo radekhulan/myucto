@@ -14,15 +14,16 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
-import SubmissionPreview from '@/components/documents/SubmissionPreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import { useDimensions } from '@/composables/useDimensions'
+import { useSidePreview } from '@/composables/useSidePreview'
 import type { DimensionMap } from '@/api/dimensions'
 
 const { t } = useI18n()
@@ -30,6 +31,8 @@ const router = useRouter()
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
 const toast = useToast()
+// Fronta je třídění podle obsahu dokladu, proto je náhled ve výchozím stavu otevřený.
+const preview = useSidePreview('purchase_invoices', 'inbox_preview_open', { defaultOpen: true })
 
 const items = ref<PurchaseInvoiceSubmission[]>([])
 const selected = ref<PurchaseInvoiceSubmission | null>(null)
@@ -727,8 +730,10 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         </div>
       </div>
 
-      <section v-if="selected" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="p-4 border-b border-neutral-200 space-y-3">
+      <section v-if="selected" class="min-w-0">
+        <DocumentPreviewSplit :ctrl="preview" :show="preview.open.value" :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
+          :file-name="selected.original_name" :doc-type="selected.doc_type" :empty-text="t('purchase_submissions.no_inline_preview')"
+          form-class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 class="font-semibold">{{ selected.original_name }}</h2>
@@ -782,6 +787,11 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
               {{ t('purchase_submissions.download') }}
             </a>
+            <button type="button" :class="btnOutline('neutral')" data-testid="inbox-preview-toggle"
+              :aria-pressed="preview.open.value" @click="preview.toggle()">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+              {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+            </button>
           </div>
 
           <div v-if="canMove(selected)" class="space-y-2 pt-2 border-t border-neutral-100" data-testid="inbox-move">
@@ -857,10 +867,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               {{ t('purchase_submissions.delete') }}
             </button>
           </details>
-        </div>
-
-        <SubmissionPreview :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
-          :file-name="selected.original_name" :doc-type="selected.doc_type" />
+        </DocumentPreviewSplit>
       </section>
     </div>
     <ExtractionReviewModal v-if="reviewInvoiceId" :invoice-ids="[reviewInvoiceId]" silent-when-empty @close="onReviewClosed" />
