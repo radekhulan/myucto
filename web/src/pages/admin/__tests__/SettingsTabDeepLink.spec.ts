@@ -181,6 +181,41 @@ describe('Nastavení — samostatný ISDOC', () => {
 })
 
 
+describe('Nastavení — podoba výkazu práce', () => {
+  const DEFAULTS = { compact: false, date: true, hours: true, rate: true, amount: true }
+
+  // BEZ OPRAVY PADÁ: každé uložení poslalo výslednou podobu, takže z firmy bez nastavení
+  // (NULL) se stala výslovná hodnota.
+  it('neposílá podobu výkazu, když ji uživatel nezměnil', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, work_report_display_options: DEFAULTS })
+    const wrapper = await mountSettings('documents')
+    try {
+      await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+      await flushPromises()
+      expect(m.updateSupplier).toHaveBeenCalledOnce()
+      expect(m.updateSupplier.mock.calls[0]![0]).not.toHaveProperty('work_report_display_options')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('pošle podobu výkazu po změně volby', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, work_report_display_options: DEFAULTS })
+    const wrapper = await mountSettings('documents')
+    try {
+      await wrapper.get('[data-test="work-report-compact"]').setValue(true)
+      await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+      await flushPromises()
+      expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({
+        work_report_display_options: { ...DEFAULTS, compact: true },
+      }))
+    } finally {
+      wrapper.unmount()
+    }
+  })
+})
+
+
 describe('Accounting decree settings', () => {
   it('shows the derived decree read-only and omits the preserved manual value from save', async () => {
     m.getSupplier.mockResolvedValue({ ...SUPPLIER, accounting_mode: 'double_entry', tax_accounting_decree: '504', tax_accounting_decree_effective: '500', tax_accounting_decree_is_derived: true })

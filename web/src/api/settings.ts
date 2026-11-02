@@ -352,6 +352,7 @@ export interface Supplier {
   /** Na PDF faktury tisknout řádek „Vystavil" (migrace 2032). */
   invoice_pdf_show_issued_by?: boolean
   /** Na PDF faktury rozepsat slevu z ceníkové ceny (Cena/j před slevou, Sleva, Cena/j po slevě). Výchozí vypnuto. */
+  work_report_display_options?: Partial<import('./invoices').WorkReportDisplayOptions> | null
   invoice_pdf_show_line_discount?: boolean
   /** Kompaktní řádky položek na PDF faktury (migrace 2199). Výchozí vypnuto. */
   invoice_pdf_compact_items?: boolean

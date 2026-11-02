@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -363,6 +364,12 @@ function selfCopyFallbackLabel(ct: SelfCopyType): string {
 const originalAccountingMode = ref<'tax_evidence' | 'double_entry' | null>(null)
 // Začátek účetního roku se posílá jen při změně: backend změnu proti existujícím obdobím odmítne.
 const originalFiscalStartMonth = ref<number>(1)
+// Podoba výkazu práce se posílá jen při změně: server vrací výsledné volby, a kdyby je
+// formulář posílal pokaždé, z firmy bez nastavení (NULL) by se stala výslovná hodnota.
+const originalWorkReportDisplay = ref('')
+const workReportDisplayKey = (options: Supplier['work_report_display_options']) =>
+  JSON.stringify((['compact', 'date', 'hours', 'rate', 'amount'] as const)
+    .map(key => options?.[key] ?? (key !== 'compact')))
 const FISCAL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const
 
 // ── CZ-NACE našeptávač nad číselníkem ČINNOSTI ─────────────────────────────
@@ -413,6 +420,7 @@ async function load() {
     naceResolved.value = supplier.value.cz_nace_resolved ?? null
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
     originalFiscalStartMonth.value = supplier.value.fiscal_year_start_month ?? 1
+    originalWorkReportDisplay.value = workReportDisplayKey(supplier.value.work_report_display_options)
   } finally { loading.value = false }
   loadSampleStatus()
   loadVatRegistrationCheck()
@@ -659,6 +667,9 @@ async function saveSupplier() {
       invoice_pdf_show_base_qty: supplier.value.invoice_pdf_show_base_qty ?? true,
       invoice_pdf_show_line_discount: supplier.value.invoice_pdf_show_line_discount ?? false,
       invoice_pdf_compact_items: supplier.value.invoice_pdf_compact_items ?? false,
+      ...(workReportDisplayKey(supplier.value.work_report_display_options) !== originalWorkReportDisplay.value
+        ? { work_report_display_options: supplier.value.work_report_display_options ?? null }
+        : {}),
       invoice_pdf_bank_in_footer: supplier.value.invoice_pdf_bank_in_footer ?? false,
       // Tax settings (EPO výkazy DPH/KH)
       // Účetní režim posíláme jen když ho uživatel opravdu přepnul. Server na
@@ -733,6 +744,7 @@ async function saveSupplier() {
     await saveReporting()
     originalAccountingMode.value = supplier.value.accounting_mode ?? 'tax_evidence'
     originalFiscalStartMonth.value = supplier.value.fiscal_year_start_month ?? 1
+    originalWorkReportDisplay.value = workReportDisplayKey(supplier.value.work_report_display_options)
     if (handOffToActivation) {
       // Uloženo je vše kromě režimu; ten přepne až průvodce po doúčtování.
       toast.info(t('activation.error.backfill_required'))
@@ -1239,6 +1251,9 @@ async function confirmTaxRepDelete() {
               <span class="font-medium">{{ t('settings.invoice_pdf_compact_items') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('settings.invoice_pdf_compact_items_hint') }}</p>
+          </div>
+          <div class="md:col-span-2">
+            <WorkReportDisplaySettings v-model="supplier.work_report_display_options" />
           </div>
           <div class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">

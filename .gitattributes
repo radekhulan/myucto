@@ -56,4 +56,8 @@ api/resources/epo/*.pem -text -diff
 api/resources/eet/*.wsdl -text
 api/resources/eet/trust/*.pem -text -diff
 api/tests/Fixtures/eet/*.xml -text
+
+# Výstup šablon výkazu práce se porovnává bajt po bajtu. Twig při načtení šablony
+# sjednotí konce řádků na LF, fixtury proto musí zůstat v LF i na Windows checkoutu.
+api/tests/Fixtures/WorkReport/default-output/* text eol=lf
 api/resources/eet/ca/*.pem -text -diff

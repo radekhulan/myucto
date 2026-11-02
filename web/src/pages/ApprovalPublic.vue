@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { ensureLocaleLoaded } from '@/i18n'
 import { useRoute } from 'vue-router'
 import { approvalApi, type PublicApprovalData, type PublicApprovalDecided } from '@/api/approval'
+import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useTurnstile } from '@/composables/useTurnstile'
 
+const { t } = useI18n()
 const route = useRoute()
 const token = computed(() => String(route.params.token || ''))
 
@@ -28,7 +32,13 @@ const turnstile = useTurnstile()
 const turnstileEl = ref<HTMLElement | null>(null)
 const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
 
-const wrHasDates = computed(() => !!data.value?.work_report.items.some(i => !!i.work_date))
+const WR_DEFAULTS: WorkReportDisplayOptions = { compact: false, date: true, hours: true, rate: true, amount: true }
+const wrOptions = computed<WorkReportDisplayOptions>(() => ({ ...WR_DEFAULTS, ...data.value?.work_report.effective_display_options }))
+/** Bez změněných voleb zůstává tabulka v původní podobě: částka jen v součtu, ne u řádků. */
+const wrCustomized = computed(() => (Object.keys(WR_DEFAULTS) as Array<keyof WorkReportDisplayOptions>)
+  .some(key => wrOptions.value[key] !== WR_DEFAULTS[key]))
+const wrAmountColumn = computed(() => wrCustomized.value && wrOptions.value.amount)
+const wrHasDates = computed(() => wrOptions.value.date && !!data.value?.work_report.items.some(i => !!i.work_date))
 const lang = computed(() => data.value?.invoice.language || decided.value?.invoice.language || 'cs')
 
 const EMPTY_BRANDING = { display_name: null, accent_color: null, logo_url: null }
@@ -36,12 +46,14 @@ const branding = computed(() => data.value?.branding || decided.value?.branding 
 /** Iniciála dodavatele místo našeho „M", dokud logo chybí. */
 const brandInitial = computed(() => branding.value.display_name?.trim().charAt(0).toUpperCase() || 'M')
 
-function fmtMoney(n: number, currency: string): string {
+function fmtMoney(n: number | null, currency: string): string {
+  if (n == null) return ''
   const decimals = currency === 'JPY' ? 0 : 2
   const locale = lang.value === 'en' ? 'en-US' : 'cs-CZ'
   return n.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + ' ' + currency
 }
-function fmtHours(n: number): string {
+function fmtHours(n: number | null): string {
+  if (n == null) return ''
   const locale = lang.value === 'en' ? 'en-US' : 'cs-CZ'
   return n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -68,6 +80,8 @@ onMounted(async () => {
     } else {
       data.value = payload as PublicApprovalData
     }
+    // Překlad potřebuje jen sloupec částky u upraveného výkazu; chyba načtení nesmí shodit stránku.
+    await ensureLocaleLoaded(lang.value).catch(() => undefined)
     if (lang.value === 'en') localStorage.setItem('locale', 'en')
     else localStorage.setItem('locale', 'cs')
     document.title = tt('Schválení výkazu — MyÚčto.cz', 'Approve work report — MyÚčto.cz')
@@ -262,26 +276,29 @@ async function submit(decision: 'approve' | 'reject') {
               <span class="text-sm text-neutral-700">{{ data.work_report.title }}</span>
             </header>
             <div class="overflow-x-auto">
-              <table class="w-full text-sm table-sticky-first">
+              <table class="w-full text-sm table-sticky-first" :class="{ 'wr-compact': wrOptions.compact }">
                 <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                   <tr>
                     <th class="px-4 py-2 text-left font-medium">{{ tt('Popis', 'Description') }}</th>
                     <th v-if="wrHasDates" class="px-3 py-2 text-left font-medium w-28">{{ tt('Datum', 'Date') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-24 whitespace-nowrap">{{ tt('Hodin', 'Hours') }}</th>
-                    <th class="px-3 py-2 text-right font-medium w-40 whitespace-nowrap">{{ tt('Sazba', 'Rate') }}</th>
+                    <th v-if="wrOptions.hours" class="px-3 py-2 text-right font-medium w-24 whitespace-nowrap">{{ tt('Hodin', 'Hours') }}</th>
+                    <th v-if="wrOptions.rate" class="px-3 py-2 text-right font-medium w-40 whitespace-nowrap">{{ tt('Sazba', 'Rate') }}</th>
+                    <th v-if="wrAmountColumn" class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ t('workReportDisplay.amount', {}, { locale: lang }) }}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-100">
                   <tr v-for="it in data.work_report.items" :key="it.id">
                     <td class="px-4 py-2 whitespace-pre-wrap text-neutral-800">{{ it.description }}</td>
                     <td v-if="wrHasDates" class="px-3 py-2 whitespace-nowrap text-neutral-600">{{ fmtDate(it.work_date) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(it.hours) }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, data.invoice.currency) }}</td>
+                    <td v-if="wrOptions.hours" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(it.hours) }}</td>
+                    <td v-if="wrOptions.rate" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, data.invoice.currency) }}</td>
+                    <td v-if="wrAmountColumn" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, data.invoice.currency) }}</td>
                   </tr>
-                  <tr class="bg-neutral-50 font-semibold">
+                  <tr v-if="wrOptions.hours || wrOptions.amount" class="bg-neutral-50 font-semibold">
                     <td class="px-4 py-2 text-right" :colspan="wrHasDates ? 2 : 1">{{ tt('Celkem', 'Total') }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(data.work_report.total_hours) }} h</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(data.work_report.total_amount, data.invoice.currency) }}</td>
+                    <td v-if="wrOptions.hours" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtHours(data.work_report.total_hours) }} h</td>
+                    <td v-if="wrAmountColumn && wrOptions.rate"></td>
+                    <td v-if="wrOptions.amount" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(data.work_report.total_amount, data.invoice.currency) }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -407,3 +424,7 @@ async function submit(decision: 'approve' | 'reject') {
     </footer>
   </div>
 </template>
+
+<style scoped>
+.wr-compact :is(th, td) { padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.75rem; }
+</style>

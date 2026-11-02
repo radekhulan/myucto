@@ -1,3 +1,4 @@
+import type { WorkReportDisplayOptions } from './invoices'
 import axios from 'axios'
 
 // Samostatný axios klient — public schvalování má být dostupné i nepřihlášeným,
@@ -21,9 +22,9 @@ export interface PublicApprovalWorkReportItem {
   id: number
   description: string
   work_date: string | null
-  hours: number
-  rate: number
-  total_amount: number
+  hours: number | null
+  rate: number | null
+  total_amount: number | null
   order_index: number
 }
 
@@ -42,13 +43,14 @@ export interface PublicApprovalWorkReport {
   invoice_id: number
   project_id: number
   title: string
-  total_hours: number
-  total_amount: number
+  total_hours: number | null
+  total_amount: number | null
   items: PublicApprovalWorkReportItem[]
   material_title: string | null
   material_total: number
   material_vat_rate_id: number | null
   materials: PublicApprovalWorkReportMaterial[]
+  effective_display_options?: WorkReportDisplayOptions
 }
 
 export interface PublicApprovalInvoice {
