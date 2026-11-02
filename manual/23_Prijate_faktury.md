@@ -137,6 +137,11 @@ Podrobnosti o frontě, hromadných akcích a odmítnutí jsou v [§ 23.11.3](#23
 
 ## 23.6 Krok za krokem: zaplatit fakturu
 
+Po spárování bankovní platby se v horní části detailu objeví zelený box **Úhrady dokladu**.
+U označení **Banka** ukazuje datum, částku a odkaz **Bankovní výpis**. Platí to i v daňové
+evidenci a bezplatném základu. Odkaz **Zaúčtování** se zobrazí jen u platby, která má
+skutečný účetní zápis; samotné spárování úhrady zaúčtování neznamená.
+
 ### 23.6.1 Přes QR kód v mobilní bance
 
 1. Otevřete detail nezaplacené faktury s kladnou částkou k úhradě.

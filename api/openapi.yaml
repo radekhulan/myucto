@@ -49577,6 +49577,20 @@ components:
         currency: { type: string, nullable: true }
         description: { type: string, nullable: true }
 
+    PurchaseInvoiceBankPayment:
+      type: object
+      required: [bank_transaction_id, statement_id, amount, posted_at, counterparty, currency, journal_entry_id]
+      properties:
+        bank_transaction_id: { type: integer }
+        statement_id: { type: integer }
+        amount: { type: number }
+        posted_at: { type: string, format: date }
+        counterparty: { type: [string, "null"] }
+        currency: { type: string }
+        journal_entry_id:
+          type: [integer, "null"]
+          description: Aktivní účetní zápis úhrady; bez zaúčtování NULL. Spárování s bankou účetní zápis nevyžaduje.
+
     PurchaseInvoice:
       type: object
       properties:
@@ -49585,6 +49599,10 @@ components:
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"] }
         vendor_invoice_number: { type: string }
+        bank_payments:
+          type: array
+          description: Bankovní úhrady v detailu dokladu včetně nezaúčtovaných plateb (daňová evidence a bezplatný základ).
+          items: { $ref: '#/components/schemas/PurchaseInvoiceBankPayment' }
         external_barcode: { type: [string, "null"], description: "Čárový kód dokladu z předchozího systému (nálepka na papírovém dokladu). Plní ho převod dat; slouží jako jistý klíč při připojování skenů." }
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
         advance_purchase_invoice_id: { type: [integer, "null"], description: "FK na zálohovou fakturu, kterou tento doklad vyúčtovává (párování zálohy)" }

@@ -18,6 +18,7 @@ use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseTokenVerifier;
 use MyInvoice\Tests\Support\LicenseTokenTrait;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -156,6 +157,54 @@ final class MarkPaidUnpostedByAccountingModeTest extends TestCase
             $this->repo(false)->find($id, $this->supplierId)['mark_paid_unposted'],
             'Bez licence se deník nevede, podvojná firma nemá kde mít otevřený 321.',
         );
+    }
+
+    public static function bankVisibilityCases(): iterable
+    {
+        yield 'free licence' => [false, false];
+        yield 'licensed, posting still missing' => [true, false];
+        yield 'foreign bank statement' => [false, true];
+    }
+
+    #[DataProvider('bankVisibilityCases')]
+    public function testBankPaymentVisibilityDoesNotDependOnPosting(bool $commercial, bool $foreign): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->modeForTestYear('double_entry');
+            $id = $this->paidPurchase('Syntetický dodavatel bankovní úhrady', 'CZ10970004', 'SYN-BANK-VISIBILITY');
+            $owner = $this->supplierId;
+            if ($foreign) {
+                $s = $pdo->prepare('SELECT id FROM supplier WHERE id <> ? ORDER BY id LIMIT 1');
+                $s->execute([$owner]);
+                $owner = (int) $s->fetchColumn();
+                self::assertGreaterThan(0, $owner);
+            }
+            $pdo->prepare('INSERT INTO bank_statements (supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)')->execute([$owner, 'synthetic.gpc', hash('sha256',random_bytes(20)), '1000000005','0100','CZK',self::YEAR.'-06-10',$this->userId]);
+            $statement = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO bank_transactions (statement_id,source,posted_at,amount,currency,description,match_status)
+                VALUES (?, 'statement', ?, -1000, 'CZK', 'Syntetická úhrada', 'manual')")->execute([$statement,self::YEAR.'-06-10']);
+            $transaction = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO payment_matches (supplier_id,bank_transaction_id,purchase_invoice_id,amount,match_type)
+                VALUES (?, ?, ?, 1000, 'manual')")->execute([$this->supplierId,$transaction,$id]);
+            $repo = $this->repo($commercial);
+            $row = $repo->find($id, $this->supplierId);
+            self::assertCount($foreign ? 0 : 1, $row['bank_payments']);
+            if (!$foreign) {
+                self::assertSame($transaction, $row['bank_payments'][0]['bank_transaction_id']);
+                self::assertSame($statement, $row['bank_payments'][0]['statement_id']);
+                self::assertSame(1000.0, $row['bank_payments'][0]['amount']);
+                self::assertNull($row['bank_payments'][0]['journal_entry_id']);
+                self::assertCount(1, $repo->find($id, $this->supplierId)['bank_payments']);
+            }
+            // Zobrazení vazby nesmí zaměnit bankovní spárování za zaúčtování:
+            // placené podvojné účetnictví dál hlásí chybějící zápis úhrady.
+            self::assertSame($commercial, $row['mark_paid_unposted']);
+        } finally {
+            $pdo->rollBack();
+        }
     }
 
     /**

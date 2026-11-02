@@ -380,6 +380,24 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     expect(bankLinks(wrapper)).toHaveLength(0)
   })
 
+  it('bankovní úhrada bez účetního zápisu ukáže výpis a neslibuje proklik do deníku', async () => {
+    m.get.mockResolvedValue(makeInvoice({ bank_payments: [{
+      bank_transaction_id: 71, statement_id: 42, amount: 1000, posted_at: '2026-06-14',
+      counterparty: 'Syntetický plátce', currency: 'CZK', journal_entry_id: null,
+    }] }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('purchase_invoice.payment_provenance.title')
+    expect(bankLinks(wrapper)).toHaveLength(1)
+    expect(bankLinks(wrapper)[0].props('to')).toEqual({ name: 'bank-detail', params: { id: 42 } })
+    const journal = wrapper.findAllComponents({ name: 'RouterLink' }).filter(link => {
+      const to = link.props('to') as { name?: string }
+      return to?.name === 'accounting-journal'
+    })
+    expect(journal).toHaveLength(0)
+    wrapper.unmount()
+  })
+
   it('inkaso ukáže způsob úhrady bez nadbytečného vysvětlení', async () => {
     m.get.mockResolvedValue(makeInvoice({ payment_method: 'direct_debit' }))
     const wrapper = mount(InvoiceDetail, { global: { stubs } })

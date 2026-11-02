@@ -274,8 +274,8 @@ final class PurchaseInvoiceRepository
         }
 
         // Bankovní úhrady dokladu — proklik z detailu na příslušný bankovní výpis.
-        // Jen POSTED bank zápisy (journal_entries source_type='bank', reversed_by IS NULL),
-        // vzor viz paidAdvanceAmount(). Splátky = víc řádků.
+        // Vazba na platbu platí i bez zaúčtování (daňová evidence / bezplatný základ).
+        // Deník pouze doplní případný proklik. Splátky = víc řádků.
         $row['bank_payments'] = $this->bankPaymentsFor($id, $supplierId);
         // Hotovostní úhrady dokladu — pokladní doklady (PPD/VPD) POSTED přes journal_entry_id.
         $row['cash_payments'] = $this->cashPaymentsFor($id, $supplierId);
@@ -309,7 +309,7 @@ final class PurchaseInvoiceRepository
         $coveredByAdvance = $linkedAdvancePaid && (float) ($row['amount_to_pay'] ?? 0) <= 0.005;
 
         $row['mark_paid_unposted'] = ($row['status'] === 'paid')
-            && $row['bank_payments'] === []
+            && !array_any($row['bank_payments'], static fn (array $payment): bool => $payment['journal_entry_id'] !== null)
             && $row['cash_payments'] === []
             && $row['settlement_payments'] === []
             && !$coveredByAdvance
@@ -334,12 +334,12 @@ final class PurchaseInvoiceRepository
 
     /**
      * Bankovní úhrady přijaté faktury pro proklik na výpis (statement_id). Zahrnuje
-     * jen matche s POSTED bank zápisem (journal_entries source_type='bank',
-     * source_id=bank_transaction_id, reversed_by IS NULL). Řazeno dle data zaúčtování.
+     * i matche bez účetního zápisu. Aktivní bankovní zápis jen doplní odkaz do
+     * deníku; samotné spárování není důkazem zaúčtování (viz mark_paid_unposted).
      *
      * @return list<array{bank_transaction_id:int, statement_id:int, amount:float,
      *                     posted_at:string, counterparty:?string, currency:string,
-     *                     journal_entry_id:int}>
+     *                     journal_entry_id:?int}>
      */
     private function bankPaymentsFor(int $invoiceId, int $supplierId): array
     {
@@ -350,13 +350,13 @@ final class PurchaseInvoiceRepository
                FROM payment_matches pm
                JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
                JOIN bank_statements bs ON bs.id = bt.statement_id
-               JOIN journal_entries je
+               LEFT JOIN journal_entries je
                  ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
                 AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
-              WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?
+              WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ? AND " . BankStatementOwnershipResolver::sql() . "
               ORDER BY bt.posted_at, pm.id"
         );
-        $stmt->execute([$supplierId, $invoiceId]);
+        $stmt->execute([$supplierId, $invoiceId, ...BankStatementOwnershipResolver::params($supplierId)]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $out[] = [
@@ -366,7 +366,7 @@ final class PurchaseInvoiceRepository
                 'posted_at'           => (string) $r['posted_at'],
                 'counterparty'        => $r['counterparty_name'] !== null ? (string) $r['counterparty_name'] : null,
                 'currency'            => (string) $r['currency'],
-                'journal_entry_id'    => (int) $r['journal_entry_id'],
+                'journal_entry_id'    => $r['journal_entry_id'] !== null ? (int) $r['journal_entry_id'] : null,
             ];
         }
         return $out;

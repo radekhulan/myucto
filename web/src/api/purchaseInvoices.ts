@@ -297,8 +297,8 @@ export interface PurchaseInvoiceBankPayment {
   posted_at: string
   counterparty: string | null
   currency: string
-  /** Zaúčtování úhrady (deník) — proklik na řádek deníku. */
-  journal_entry_id: number
+  /** Zaúčtování úhrady (deník); NULL, pokud platba není zaúčtovaná. */
+  journal_entry_id: number | null
 }
 
 /** Hotovostní úhrada přijaté faktury — pokladní doklad (PPD/VPD) POSTED přes journal_entry_id. */
