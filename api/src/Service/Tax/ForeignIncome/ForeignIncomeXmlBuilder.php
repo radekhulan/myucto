@@ -8,6 +8,7 @@ use DOMElement;
 use MyInvoice\Service\Report\EpoDate;
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\EpoPayerBlockBuilder;
+use MyInvoice\Service\Tax\Return\TaxRepresentationService;
 
 /**
  * Generátor EPO XML obou písemností správce daně k příjmům nerezidentů —
@@ -24,12 +25,18 @@ use MyInvoice\Service\Report\EpoPayerBlockBuilder;
  * - DPSHL1: `VetaD, VetaP, VetaR, VetaH, VetaU…, Prilohy`
  * - DPSZD1: `VetaD, VetaP, VetaR, Prilohy`
  *
+ * ## Zástupce
+ *
+ * `$meta['representation']` (výstup `TaxRepresentationService::at()`) naplní
+ * `zast_*` a `opr_*` ve `VetaP` stejnou cestou jako DPH, DPPO a DPFO. Schémata
+ * `dan_por` nemají, takže se emituje jen zástupce. Prodloužení lhůty podle
+ * § 136 odst. 2 DŘ zakládají jen kódy 4b a 4c, u ostatních kódů vrací builder
+ * upozornění.
+ *
  * ## Co ZÁMĚRNĚ negeneruje
  *
  * - **`VetaR` (textová příloha)** a **`Prilohy/ObecnaPriloha`** — obojí je
  *   volitelné a je to obsah, který píše člověk. Prázdná příloha je pravdivá.
- * - **`zast_*` ve `VetaP`** (podepisující zástupce) — plní se jen tam, kde
- *   podání podává zástupce; aplikace podává za plátce samotného.
  * - **`pohlavi`** — od zdaňovacího období 2024 je položka podle popisu
  *   tiskopisu neobsazená, takže by ji vyplňovala jen setrvačnost.
  */
@@ -47,7 +54,7 @@ final class ForeignIncomeXmlBuilder
     /**
      * @param array<string,mixed> $supplier Řádek z
      *        {@see \MyInvoice\Service\Report\EpoSupplierBlockBuilder::loadSupplier()}.
-     * @param array{verze_sw?:string,verze_pis?:string} $meta
+     * @param array{verze_sw?:string,verze_pis?:string,representation?:array<string,mixed>} $meta
      * @return array{xml:string,warnings:list<string>}
      */
     public function buildIncomeNotice(
@@ -89,7 +96,9 @@ final class ForeignIncomeXmlBuilder
         // ── VetaP — plátce daně ─────────────────────────────────────────────
         $vetaP = $dom->createElement('VetaP');
         // DPSHL1 na rozdíl od vyúčtování a žádostí o bonus nemá v XSD atribut titul.
-        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true, includePersonTitle: false);
+        $representation = (array) ($meta['representation'] ?? []);
+        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true, includePersonTitle: false, representation: $representation);
+        array_push($warnings, ...self::representationWarnings($representation));
         $root->appendChild($vetaP);
 
         // ── VetaH — poplatník a jeden druh příjmu ───────────────────────────
@@ -209,7 +218,7 @@ final class ForeignIncomeXmlBuilder
 
     /**
      * @param array<string,mixed> $supplier
-     * @param array{verze_sw?:string,verze_pis?:string} $meta
+     * @param array{verze_sw?:string,verze_pis?:string,representation?:array<string,mixed>} $meta
      * @return array{xml:string,warnings:list<string>}
      */
     public function buildSecurityNotice(
@@ -285,13 +294,34 @@ final class ForeignIncomeXmlBuilder
         // ── VetaP — plátce daně ─────────────────────────────────────────────
         $vetaP = $dom->createElement('VetaP');
         // DPSZD1 stejně jako DPSHL1 atribut titul v XSD nemá.
-        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true, includePersonTitle: false);
+        $representation = (array) ($meta['representation'] ?? []);
+        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, true, includePersonTitle: false, representation: $representation);
+        array_push($warnings, ...self::representationWarnings($representation));
         $root->appendChild($vetaP);
 
         return [
             'xml' => (string) $dom->saveXML(),
             'warnings' => array_values(array_unique($warnings)),
         ];
+    }
+
+    /**
+     * Zástupce s kódem mimo 4b a 4c podání podepíše, lhůtu ale neprodlužuje.
+     *
+     * @param array<string,mixed> $representation
+     * @return list<string>
+     */
+    private static function representationWarnings(array $representation): array
+    {
+        if (empty($representation['represented']) || TaxRepresentationService::isTaxAdvisor($representation)) {
+            return [];
+        }
+
+        return [sprintf(
+            'Zástupce s kódem %s podání podepisuje, ale lhůtu neprodlužuje.'
+            . ' Prodloužení lhůty dávají jen kódy 4b a 4c (daňový poradce nebo advokát).',
+            (string) TaxRepresentationService::codeOf($representation),
+        )];
     }
 
     private function set(DOMElement $element, string $name, ?string $value): void

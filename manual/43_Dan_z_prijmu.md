@@ -766,7 +766,14 @@ odlišný od sražené daně. Přečtěte si je před odesláním.
 
 Formulář zatím neumí víc odvodů sražené daně v jednom oznámení, byť je tiskopis
 připouští, a nepracuje s řádky 27a a 27b (příjem navýšený o povinné pojistné).
-Nevytváří textovou přílohu ani zástupce; takový případ dokončete v EPO.
+Nevytváří textovou přílohu; takový případ dokončete v EPO.
+
+**Zástupce.** Je-li ke dni vytvoření XML v evidenci zastoupení platný zástupce
+(`Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**), vyplní se
+jako podepisující osoba do obou písemností, stejně jako u přiznání DPH a daně z příjmů.
+Oznámení ani hlášení nemají pole "podává daňový poradce", uvede se jen zástupce
+a jeho kód. Lhůtu prodlužují jen kódy 4b a 4c; u ostatních kódů, například obecného
+zmocněnce 4a, aplikace uloží k podání varování.
 
 ### 43.11.19 Rozsah a co aplikace vědomě nepodporuje
 
