@@ -94,11 +94,7 @@ final class ForeignIncomeNoticeService
             );
         }
         $supplier = EpoSupplierBlockBuilder::loadSupplier($this->db->pdo(), $supplierId);
-        $representationDate = (string) ($meta['representation_date'] ?? '');
-        $meta['representation'] = $this->representation->at(
-            $supplierId,
-            preg_match('/^\d{4}-\d{2}-\d{2}$/', $representationDate) === 1 ? $representationDate : date('Y-m-d'),
-        );
+        $meta['representation'] = $this->representation->atSubmissionDate($supplierId, $meta);
 
         if ($formCode === self::FORM_INCOME_NOTICE) {
             $notice = $this->incomeNoticeFrom($payload);
