@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { api } from './client'
 import { apiErrorCode, apiErrorMessage } from './errors'
-import { dimensionValuePlainLabel } from '@/utils/dimensionValueLabel'
+import { dimensionValuePlainLabel } from '@/utils/dimensionValuePlainLabel'
 
 /** Souhrnný stav schvalování dokladu (sloupec `purchase_invoices.approval_status`). */
 export type PurchaseApprovalStatus = 'none' | 'pending' | 'approved' | 'rejected'

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
-import { dimensionValueLabel, dimensionValueName, dimensionValuePlainLabel } from '../dimensionValueLabel'
+import { dimensionValueLabel, dimensionValueName } from '../dimensionValueLabel'
+import { dimensionValuePlainLabel } from '../dimensionValuePlainLabel'
 
 function i18nOf(messages: Record<string, unknown>) {
   const lookup = (key: string): unknown => key.split('.').reduce<unknown>((node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined), messages)
