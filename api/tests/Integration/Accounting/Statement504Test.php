@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
@@ -229,6 +230,35 @@ final class Statement504Test extends TestCase
         self::assertSame(100.0, $rows['UT.8']['total']);
         self::assertSame(100.0, $rows['UT.8']['main']);
         self::assertSame(0.0, $rows['UT.8']['economic']);
+    }
+
+    /**
+     * Nulová regrese výkazů 504 bez filtru a s jednou hodnotou (činnosti i jiného
+     * typu) po zavedení filtru na víc dimenzí. Čísla platí i pro kód před ním.
+     */
+    public function testSingleValueFiltersKeepTheirResults(): void
+    {
+        $this->reference();
+        $this->pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_one','Synthetic project','custom')")->execute([$this->supplier]);
+        $type = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')->execute([$type, $this->supplier, 'p', 'Synthetic p']);
+        $project = (int) $this->pdo->lastInsertId();
+        foreach ([[1_000, 'main'], [400, 'economic']] as [$amount, $activity]) {
+            $entry = $this->post('2099-02-01', '518', '221', $amount, $activity);
+            $this->pdo->prepare("INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id)
+                SELECT supplier_id, id, ?, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                ->execute([$type, $project, $entry]);
+        }
+        $result = function (?DimensionFilter $filter): array {
+            $rows = array_column($this->statements->incomeStatement($this->supplier, $this->period, '2099-06-30', 'full', $filter)['rows'], null, 'row_code');
+            return [$rows['UT.8']['total'], $rows['UT.8']['main'], $rows['UT.8']['economic'], $rows['UT.63']['total']];
+        };
+        self::assertSame([116_400.0, 101_000.0, 15_400.0, 129_000.0], $result(null));
+        $main = $this->activity['values']['main'];
+        self::assertSame([101_000.0, 101_000.0, 0.0, 84_400.0], $result(new DimensionFilter($this->activity['id'], $main, [$main])));
+        self::assertSame([1_400.0, 1_000.0, 400.0, -1_400.0], $result(new DimensionFilter($type, $project, [$project])));
+        $bs = $this->statements->balanceSheet($this->supplier, $this->period, '2099-06-30', 'full');
+        self::assertSame(486_600.0, $bs['totals']['assets_end']);
     }
 
     public function testReceivableAndOwnerCreditAreNeverCompensated(): void

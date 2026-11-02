@@ -295,6 +295,72 @@ final class DimensionMultiFilterTest extends TestCase
         self::assertArrayNotHasKey('331', $tb);
     }
 
+    /**
+     * Nulová regrese sestav bez filtru a s jednou hodnotou: parametr bez hodnoty
+     * (chybí, prázdný, „0") dá filtr null jako dřív a jedna hodnota dá filtr shodný
+     * s dřívějším {@see DimensionService::filter()} — bez dalších podmínek, se stejným
+     * SQL zdroje řádků i podmínkou deníku. Předvaha, hlavní kniha, rozvaha, výsledovka
+     * i deník tak jdou původní cestou a dají stejná čísla.
+     */
+    public function testSingleValueAndNoFilterTakeTheOriginalPath(): void
+    {
+        $action = $this->value($this->projectType, 'MF-ONE-A');
+        $other = $this->value($this->projectType, 'MF-ONE-B');
+        $grant = $this->value($this->centerType, 'MF-ONE-D');
+        $own = $this->value($this->centerType, 'MF-ONE-V');
+        $this->post([['518', 'debit', 100.00, ['dimensions' => [$this->projectType => $action, $this->centerType => $grant]]], ['321', 'credit', 100.00]]);
+        $this->post([['518', 'debit', 40.00, ['dimension_splits' => [$this->projectType => [$action => 0.25, $other => 0.75]], 'dimensions' => [$this->centerType => $own]]], ['321', 'credit', 40.00]]);
+        $this->post([['521', 'debit', 30.00, ['cost_center' => 'MF-ONE-D']], ['331', 'credit', 30.00]]);
+        $this->post([['518', 'debit', 8.00, ['dimensions' => [$this->projectType => $action], 'is_red_storno' => true]], ['321', 'credit', 8.00, ['is_red_storno' => true]]]);
+        $this->post([['501', 'debit', 12.00], ['321', 'credit', 12.00]]);
+
+        $param = new class {
+            use \MyInvoice\Action\Accounting\Reports\DimensionFilterParam;
+
+            public function parse(DimensionService $dimensions, \Psr\Http\Message\ServerRequestInterface $request, int $supplierId): DimensionFilter|null|false
+            {
+                $err = null;
+                return $this->dimensionFilterParam($dimensions, $request, new Psr7Response(), $supplierId, $err);
+            }
+        };
+        foreach ([[], ['dimension_value_id' => ''], ['dimension_value_id' => '0']] as $query) {
+            self::assertNull($param->parse($this->dimensions, $this->request($query), $this->supplierId), json_encode($query, JSON_THROW_ON_ERROR));
+        }
+
+        foreach ([$action, $grant] as $valueId) {
+            foreach (['1', '0'] as $descendants) {
+                $old = $this->dimensions->filter($this->supplierId, $valueId, $descendants === '1');
+                $new = $param->parse($this->dimensions, $this->request(['dimension_value_id' => (string) $valueId, 'dimension_descendants' => $descendants]), $this->supplierId);
+                self::assertInstanceOf(DimensionFilter::class, $new);
+                self::assertEquals($old, $new);
+                self::assertSame([], $new->also);
+                self::assertSame($old->lineSource($this->supplierId, 'f', self::FROM, self::TO), $new->lineSource($this->supplierId, 'f', self::FROM, self::TO));
+                self::assertSame($old->lineSource($this->supplierId, 'f', null, self::TO), $new->lineSource($this->supplierId, 'f', null, self::TO));
+                self::assertSame($old->entrySql('je'), $new->entrySql('je'));
+                $array = $new->toArray();
+                self::assertSame($old->label, $array['label']);
+                self::assertSame([$old->typeId, $old->valueId, $old->valueIds], [$array['type_id'], $array['value_id'], $array['value_ids']]);
+            }
+        }
+
+        // Čísla pro jednu hodnotu: stejná jako před filtrem na víc dimenzí.
+        $actionFilter = $this->dimensions->filters($this->supplierId, [$action]);
+        $tb = array_column($this->trialBalance->build($this->supplierId, $this->periodId, null, null, false, false, $actionFilter)['rows'], null, 'account_code');
+        self::assertEqualsWithDelta(102.00, $tb['518']['turnover_md'], 0.001, '100 + 25 % ze 40 − 8 storno.');
+        self::assertEqualsWithDelta(-102.00, $this->incomeProfit($actionFilter), 0.001);
+        $grantFilter = $this->dimensions->filters($this->supplierId, [$grant]);
+        self::assertEqualsWithDelta(-130.00, $this->incomeProfit($grantFilter), 0.001, '100 + 30 mzdy s textovým střediskem.');
+        $found = $this->journal->paginate($this->supplierId, ['dimension' => $grantFilter], 50, 0);
+        self::assertCount(2, $found['items']);
+        $all = array_column($this->trialBalance->build($this->supplierId, $this->periodId, null, null, false, false, null)['rows'], null, 'account_code');
+        self::assertEqualsWithDelta(132.00, $all['518']['turnover_md'], 0.001);
+        self::assertEqualsWithDelta(-174.00, $this->incomeProfit(null), 0.001);
+        $gl = array_column($this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, ['dimension' => $actionFilter])['accounts'], null, 'account_code');
+        self::assertEqualsWithDelta(102.00, $gl['518']['turnover_md'], 0.001);
+        $bs = $this->statements->balanceSheet($this->supplierId, $this->periodId, self::TO, 'full', $grantFilter);
+        self::assertEqualsWithDelta(-130.00, $bs['checks']['profit_current'], 0.001);
+    }
+
     public function testFilterRejectsMoreDimensionTypesThanTheProductCanHold(): void
     {
         $types = $this->dimensions->ensureDefaultTypes($this->supplierId);
@@ -351,7 +417,7 @@ final class DimensionMultiFilterTest extends TestCase
         ), ['entry_date' => self::DATE, 'posted_by' => $this->userId]);
     }
 
-    private function incomeProfit(DimensionFilter $filter): float
+    private function incomeProfit(?DimensionFilter $filter): float
     {
         return (float) $this->statements->incomeStatement($this->supplierId, $this->periodId, self::TO, 'full', $filter)['checks']['profit_current'];
     }
