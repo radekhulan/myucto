@@ -79,7 +79,10 @@ api.interceptors.response.use(
     // Zapisující požadavek ohlásí změnu dat správci oken, který podle cesty pozná
     // dotčená okna (`workspace/dataDependencies.ts`). Okno v iframe mu ji pošle,
     // hlavní dokument ji vyvolá jako událost.
-    if (!['get', 'head', 'options'].includes(response.config.method?.toLowerCase() ?? 'get')) {
+    const method = response.config.method?.toLowerCase() ?? 'get'
+    const requestPath = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\/(?:v1\/)?/, '/')
+    const widgetRead = method === 'post' && requestPath === '/dashboard-widgets/query'
+    if (!['get', 'head', 'options'].includes(method) && !widgetRead) {
       const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/')
       const resource = path.split('/')[1]
       if (resource && /^[a-z0-9-]+$/.test(resource)) {

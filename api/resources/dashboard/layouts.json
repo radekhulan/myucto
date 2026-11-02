@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 2,
+  "sections": {
+    "home": [
+      {
+        "type": "actions",
+        "titleKey": "dashboardLayout.sections.home_actions"
+      },
+      {
+        "type": "drafts",
+        "titleKey": "dashboardLayout.sections.home_drafts"
+      },
+      {
+        "type": "tax-net",
+        "titleKey": "dashboardLayout.sections.home_tax_net"
+      },
+      {
+        "type": "tax-advances",
+        "titleKey": "dashboardLayout.sections.home_tax_advances"
+      },
+      {
+        "type": "sales",
+        "titleKey": "dashboardLayout.sections.home_sales"
+      },
+      {
+        "type": "purchases",
+        "titleKey": "dashboardLayout.sections.home_purchases"
+      },
+      {
+        "type": "statistics",
+        "titleKey": "dashboardLayout.sections.home_statistics"
+      },
+      {
+        "type": "due",
+        "titleKey": "dashboardLayout.sections.home_due"
+      },
+      {
+        "type": "forecast",
+        "titleKey": "dashboardLayout.sections.home_forecast"
+      },
+      {
+        "type": "invoice-lists",
+        "titleKey": "dashboardLayout.sections.home_invoice_lists"
+      },
+      {
+        "type": "top-clients",
+        "titleKey": "dashboardLayout.sections.home_top_clients"
+      }
+    ],
+    "portal": [
+      {
+        "type": "business",
+        "titleKey": "dashboardLayout.sections.portal_business"
+      },
+      {
+        "type": "cashflow",
+        "titleKey": "dashboardLayout.sections.portal_cashflow"
+      },
+      {
+        "type": "vat",
+        "titleKey": "dashboardLayout.sections.portal_vat"
+      },
+      {
+        "type": "quick-actions",
+        "titleKey": "dashboardLayout.sections.portal_quick_actions"
+      }
+    ]
+  },
+  "widgets": {
+    "business.kpi": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 3,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "business.monthly": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 9,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "sales.summary": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "purchases.summary": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "receivables.aging": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "payables.aging": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "cashflow.weekly": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "cashflow.collections": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "receivables.due": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "invoices.overdue": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "invoices.upcoming": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "clients.top": {
+      "minSpan": 6,
+      "maxSpan": 12,
+      "defaultSpan": 12,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "invoices.drafts": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 8,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "invoices.approvals": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "documents.requests": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "actions.quick": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 4,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "actions.todo": {
+      "minSpan": 6,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "vat.current": {
+      "minSpan": 3,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "tax.deadlines": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "tax.calendar": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "tax.net": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto"
+      ],
+      "defaultHeight": "auto"
+    },
+    "tax.advances": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 6,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    },
+    "accounting.status": {
+      "minSpan": 4,
+      "maxSpan": 12,
+      "defaultSpan": 12,
+      "heights": [
+        "auto",
+        "compact",
+        "normal",
+        "tall"
+      ],
+      "defaultHeight": "auto"
+    }
+  }
+}

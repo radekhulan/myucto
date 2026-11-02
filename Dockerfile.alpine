@@ -18,6 +18,8 @@ COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN corepack enable && corepack prepare pnpm@latest --activate \
  && pnpm install --frozen-lockfile
 COPY web/ ./
+# Editor sdílí statický popis bloků s API; relativní import vede nad /app.
+COPY api/resources/dashboard/layouts.json ../api/resources/dashboard/layouts.json
 # Image staví jen artefakt (kontroly + vite build). Typová kontrola vue-tsc potřebuje přes 3 GB
 # haldy a v Docker Desktop VM se 4 GB paměti padala na „heap out of memory"; kód typově
 # ověřuje CI (`pnpm type-check` ve frontend jobu, včetně testů).

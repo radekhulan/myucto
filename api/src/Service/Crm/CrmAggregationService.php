@@ -373,6 +373,33 @@ final class CrmAggregationService
         return false;
     }
 
+    /** Jeden výřez stejného přehledu; portál i widget používají stejné hranice a agregaci. */
+    public function overviewPeriod(int $supplierId, string $period, ?\DateTimeImmutable $now = null): array
+    {
+        [$from, $to, $label] = self::overviewPeriodRange($period, $now ?? new \DateTimeImmutable('today'));
+        return $this->aggregateRange($supplierId, $this->isVatPayer($supplierId), $from, $to, $label);
+    }
+
+    /** @return array{string,string,?string} */
+    public static function overviewPeriodRange(string $period, \DateTimeImmutable $now): array
+    {
+        $month = $now->modify('first day of this month');
+        $year = (int) $now->format('Y');
+        $yearStart = new \DateTimeImmutable(sprintf('%04d-01-01', $year));
+        $prevYearStart = new \DateTimeImmutable(sprintf('%04d-01-01', $year - 1));
+        [$from, $to, $label] = match ($period) {
+            'current_month' => [$month, $month->modify('+1 month'), $month->format('Y-m')],
+            'last_month' => [$month->modify('-1 month'), $month, $month->modify('-1 month')->format('Y-m')],
+            'ytd' => [$yearStart, $now->modify('+1 day'), null],
+            'last_12m' => [$month->modify('-11 months'), $month->modify('+1 month'), null],
+            'prev_12m' => [$month->modify('-23 months'), $month->modify('-11 months'), null],
+            'prev_year_full' => [$prevYearStart, $yearStart, null],
+            'prev_year_ytd' => [$prevYearStart, $now->modify('+1 day')->modify('-1 year'), null],
+            default => throw new \InvalidArgumentException('Neplatné období KPI.'),
+        };
+        return [$from->format('Y-m-d'), $to->format('Y-m-d'), $label];
+    }
+
     /**
      * Overview KPI (per currency):
      *   - current_month / last_month — aktuální a minulý měsíc
@@ -398,26 +425,21 @@ final class CrmAggregationService
         $d = static fn (\DateTimeImmutable $x): string => $x->format('Y-m-d');
 
         $today          = new \DateTimeImmutable('today');
-        $tomorrow       = $today->modify('+1 day');
         $firstThisMonth = $today->modify('first day of this month');
         $firstNextMonth = $firstThisMonth->modify('+1 month');
-        $firstPrevMonth = $firstThisMonth->modify('-1 month');
-        $first12        = $firstThisMonth->modify('-11 months'); // trailing 12 kal. měsíců vč. aktuálního
-        $first24        = $firstThisMonth->modify('-23 months');
-
-        $year     = (int) $today->format('Y');
-        $yearStart     = new \DateTimeImmutable(sprintf('%04d-01-01', $year));
-        $prevYearStart = new \DateTimeImmutable(sprintf('%04d-01-01', $year - 1));
-        $prevYearYtdEnd = $tomorrow->modify('-1 year'); // loni do stejného dne (půlotevřeně)
+        $yearStart = $today->modify('first day of January');
+        $period = function (string $name) use ($supplierId, $payer, $today): array {
+            return $this->aggregateRange($supplierId, $payer, ...self::overviewPeriodRange($name, $today));
+        };
 
         return [
-            'current_month'  => $this->aggregateRange($supplierId, $payer, $d($firstThisMonth), $d($firstNextMonth), $firstThisMonth->format('Y-m')),
-            'last_month'     => $this->aggregateRange($supplierId, $payer, $d($firstPrevMonth), $d($firstThisMonth), $firstPrevMonth->format('Y-m')),
-            'ytd'            => $this->aggregateRange($supplierId, $payer, $d($yearStart), $d($tomorrow)),
-            'last_12m'       => $this->aggregateRange($supplierId, $payer, $d($first12), $d($firstNextMonth)),
-            'prev_12m'       => $this->aggregateRange($supplierId, $payer, $d($first24), $d($first12)),
-            'prev_year_full' => $this->aggregateRange($supplierId, $payer, $d($prevYearStart), $d($yearStart)),
-            'prev_year_ytd'  => $this->aggregateRange($supplierId, $payer, $d($prevYearStart), $d($prevYearYtdEnd)),
+            'current_month'  => $period('current_month'),
+            'last_month'     => $period('last_month'),
+            'ytd'            => $period('ytd'),
+            'last_12m'       => $period('last_12m'),
+            'prev_12m'       => $period('prev_12m'),
+            'prev_year_full' => $period('prev_year_full'),
+            'prev_year_ytd'  => $period('prev_year_ytd'),
             'current_month_pipeline' => $this->currentMonthPipeline($supplierId, $payer, $d($firstThisMonth), $d($firstNextMonth)),
             'other_item_result_impact' => (new OtherItemForecastService($this->db))->resultImpact(
                 $supplierId, $d($yearStart), $d($yearStart->modify('+1 year'))),

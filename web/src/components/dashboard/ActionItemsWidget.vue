@@ -10,6 +10,9 @@ import { ensureInstanceStatus, instanceStatus } from '@/api/instanceStatus'
 import { resolveHostingActions, type HostingActionSeverity } from '@/api/hostingActions'
 import { PWA_INSTALL_ITEM_TYPE, usePwaInstall } from '@/composables/usePwaInstall'
 
+// Editor používá stejnou komponentu a dávkově načtená data. Původní umístění
+// bez těchto props zachovává vlastní načtení i odkládání úkolů.
+const props = defineProps<{ providedData?: ActionItemsResult; reloadData?: () => Promise<ActionItemsResult> }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
@@ -127,13 +130,24 @@ function appendItem(item: ActionItem) {
 }
 
 async function reload() {
+  if (props.reloadData) { await props.reloadData(); return }
   actionItems.value = await crmApi.actionItems()
   await loadTaxBalance()
 }
 
+let mounted = false
+watch(() => props.providedData, data => {
+  if (data) {
+    actionItems.value = { ...data, items: data.items.map(item => ({ ...item })) }
+    if (mounted) void loadTaxBalance()
+  }
+}, { immediate: true })
+
 onMounted(async () => {
+  mounted = true
+  if (props.providedData) { void loadTaxBalance(); return }
   try {
-    actionItems.value = await crmApi.actionItems()
+    actionItems.value = await (props.reloadData ? props.reloadData() : crmApi.actionItems())
   } catch {
     // tichý fail — widget se prostě nezobrazí
     return

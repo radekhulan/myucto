@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useDashboardLayout } from '@/dashboard/useDashboardLayout'
+import DashboardLayoutCanvas from '@/components/dashboard/layout/DashboardLayoutCanvas.vue'
+import DashboardLayoutToolbar from '@/components/dashboard/layout/DashboardLayoutToolbar.vue'
 import { portalApi, type PortalSummary, type PortalKpiPeriod, type PortalKpiRow, type PortalAgingRow, type PortalVatStatus } from '@/api/portal'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -10,6 +13,7 @@ import PortalMonthlyChart from '@/components/charts/PortalMonthlyChart.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
+const dashboardLayout = useDashboardLayout('portal')
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 
@@ -121,13 +125,13 @@ function vatPeriodLabel(status: PortalVatStatus): string {
 
     <template v-else-if="data">
       <!-- ═══ Hlavička ═══ -->
-      <div>
+      <div class="flex flex-wrap items-start justify-between gap-3"><div class="min-w-0">
         <h1 class="text-2xl font-semibold">{{ data.company.name || t('portal.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">
           {{ t('portal.title') }} · {{ formatDate(data.company.period.ytd_from) }} – {{ formatDate(data.company.period.today) }}
         </p>
         <p class="text-xs text-neutral-400 mt-1">{{ t('portal.disclaimer') }}</p>
-      </div>
+      </div><DashboardLayoutToolbar :state="dashboardLayout" /></div>
 
       <!-- ═══ Vyžádání chybějících dokladů (Fáze F, audit 2026-07) ═══ -->
       <RouterLink v-if="auth.canRead('documents.submit') && (data.document_requests_open?.open ?? 0) > 0" to="/portal/document-requests"
@@ -143,10 +147,9 @@ function vatPeriodLabel(status: PortalVatStatus): string {
       <!-- ═══ Empty state (nová firma bez dat) ═══ -->
       <EmptyState v-if="isEmpty" boxed icon="chart" :title="t('portal.empty_title')" :message="t('portal.empty_text')" />
 
-      <template v-else>
-        <!-- ═══ KPI karty (5 období, per měna) + měsíční graf ═══ -->
-        <!-- 5 karet na 4sloupcovém gridu → graf vyplní 3 prázdné buňky vedle 5. karty. -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <DashboardLayoutCanvas :state="dashboardLayout">
+      <template #business>
+        <div v-if="!isEmpty" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           <div v-for="card in kpiCards" :key="card.period"
             class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-2">{{ card.label }}</h3>
@@ -194,9 +197,9 @@ function vatPeriodLabel(status: PortalVatStatus): string {
             </div>
           </div>
         </div>
-
-        <!-- ═══ Cashflow: aging + forecast ═══ -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      </template>
+      <template #cashflow>
+        <div v-if="!isEmpty" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
             <h3 class="text-sm font-medium text-neutral-700 mb-2">{{ t('portal.receivables') }}</h3>
             <p v-if="data.cashflow.receivables.length === 0" class="text-sm text-neutral-400">—</p>
@@ -248,9 +251,9 @@ function vatPeriodLabel(status: PortalVatStatus): string {
             </table>
           </div>
         </div>
-
-        <!-- ═══ DPH stav + daňové termíny ═══ -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      </template>
+      <template #vat>
+        <div v-if="!isEmpty" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
             <h3 class="text-sm font-medium text-neutral-700 mb-2">{{ t('portal.vat_title') }}</h3>
             <p v-if="!data.vat.is_vat_payer" class="text-sm text-neutral-400">{{ t('portal.vat_not_payer') }}</p>
@@ -296,9 +299,8 @@ function vatPeriodLabel(status: PortalVatStatus): string {
           </div>
         </div>
       </template>
-
-      <!-- ═══ Rychlé akce — 3 CTA karty (min. 44px touch target) ═══ -->
-      <div v-if="auth.canWrite('dashboard')" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <template #quick-actions>
+        <div v-if="auth.canWrite('dashboard')" class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <RouterLink to="/invoices/new"
           class="flex items-center gap-3 min-h-[44px] bg-surface border border-neutral-200 rounded-lg shadow-sm px-4 py-3 hover:border-primary-400 hover:bg-primary-50 transition">
           <svg class="w-5 h-5 text-primary-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -321,6 +323,8 @@ function vatPeriodLabel(status: PortalVatStatus): string {
           <span class="text-sm font-medium text-neutral-700">{{ t('portal.quick_contact') }}</span>
         </RouterLink>
       </div>
+      </template>
+      </DashboardLayoutCanvas>
     </template>
   </div>
 </template>

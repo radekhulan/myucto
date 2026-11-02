@@ -40,6 +40,8 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
     {
         return [
             ['GET', '/api/invoices'],
+            ['GET', '/api/user/dashboard-layouts/home'],
+            ['POST', '/api/dashboard-widgets/query'],
             ['HEAD', '/api/reports/dph'],
             ['OPTIONS', '/api/invoices'],
             ['POST', '/api/auth/login'],
@@ -65,6 +67,9 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
     {
         return [
             ['POST', '/api/invoices'],
+            ['PUT', '/api/user/dashboard-layouts/home'],
+            ['DELETE', '/api/user/dashboard-layouts/portal'],
+            ['PUT', '/api/v1/user/dashboard-layouts/home'],
             ['POST', '/api/catalog/exports'],
             ['PUT', '/api/purchase-invoices/1'],
             ['PATCH', '/api/accounting/journal/1/description'],
