@@ -230,7 +230,7 @@ describe('EmploymentTerminationPanel', () => {
 
     const create = () => wrapper.findAll('button').find(button => button.text().includes('work_injury.create'))!
     expect(create().attributes('disabled')).toBeDefined()
-    expect((wrapper.get('[data-test="termination-work-injury-paid-on"]').element as HTMLInputElement).value).toBe('2026-07-31')
+    expect((wrapper.get('[data-test="termination-work-injury-paid-on"]').element as HTMLInputElement).value).toBe('31. 07. 2026')
 
     await wrapper.get('[data-test="termination-work-injury-payer"]').setValue('insurer')
     await wrapper.get('[data-test="termination-work-injury-paid-on"]').setValue('2026-08-20')

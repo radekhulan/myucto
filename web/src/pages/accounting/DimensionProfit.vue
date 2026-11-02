@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -334,11 +335,11 @@ function money(v: number) {
           @update:value-id="cashFlowForm.valueId = $event" @update:descendants="cashFlowForm.descendants = $event" />
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.profit_from') }}</label>
-          <input v-model="from" type="date" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="from" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.profit_to') }}</label>
-          <input v-model="to" type="date" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="to" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
         <label v-if="tab === 'profit'" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
           <input v-model="profitForm.accounts" type="checkbox" class="rounded border-neutral-300" data-test="profit-accounts" />

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { propertyReceivablesApi as api, type PartySaldoPage } from '@/api/propertyReceivables'
@@ -89,7 +90,7 @@ const actions = computed<ActionItem[]>(() => [
       <fieldset :disabled="loading" class="flex flex-wrap items-end gap-3">
         <label class="flex min-w-0 flex-col gap-1 text-sm">
           {{ t('propertySaldo.parties.date') }}
-          <input v-model="date" type="date" required :class="inputClass" data-field="party-saldo-date">
+          <DateInput v-model="date" required :class="inputClass" data-field="party-saldo-date" />
         </label>
         <label class="flex min-w-0 flex-col gap-1 text-sm">
           {{ t('propertySaldo.parties.pageSize') }}

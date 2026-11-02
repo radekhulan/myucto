@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -382,12 +383,10 @@ onMounted(async () => {
                     >
                   </td>
                   <td v-if="group.key === 'wage'" class="px-1 py-1">
-                    <input
+                    <DateInput
                       v-model="draft.payout_date"
-                      type="date"
                       :disabled="!canWrite || entry.locked || saving"
-                      class="w-36 rounded-md border border-neutral-300 bg-surface px-2 py-1 disabled:bg-neutral-100"
-                    >
+                      class="w-36 rounded-md border border-neutral-300 bg-surface px-2 py-1 disabled:bg-neutral-100" />
                   </td>
                 </template>
                 <td class="px-1 py-1 text-center">
