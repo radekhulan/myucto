@@ -250,6 +250,32 @@ final class DimensionMultiFilterTest extends TestCase
     }
 
     /**
+     * Deník filtrovaný na středisko hledá i řádky s textovým kódem střediska. Ty musí
+     * jít po indexu (supplier_id, cost_center), ne průchodem všech řádků deníku pro
+     * každý zápis firmy: u firmy se stovkami tisíc řádků by seznam deníku stál sekundy.
+     */
+    public function testJournalCostCentreTextGoesByIndex(): void
+    {
+        $grant = $this->value($this->centerType, 'MF-IX-D');
+        $this->post([['521', 'debit', 30.00, ['cost_center' => 'MF-IX-D']], ['331', 'credit', 30.00]]);
+        $filter = $this->dimensions->filter($this->supplierId, $grant, true);
+        self::assertNotSame([], $filter->costCenterCodes);
+
+        [$sql, $params] = $filter->entrySql('je', $this->supplierId);
+        $found = $this->journal->paginate($this->supplierId, ['dimension' => $filter], 50, 0);
+        self::assertCount(1, $found['items']);
+
+        $plan = $this->db->pdo()->prepare("EXPLAIN SELECT je.id FROM journal_entries je WHERE je.supplier_id = ? AND {$sql}");
+        $plan->execute([$this->supplierId, ...$params]);
+        $rows = array_values(array_filter($plan->fetchAll(\PDO::FETCH_ASSOC), static fn (array $r): bool => $r['table'] === 'jel_c'));
+        self::assertNotSame([], $rows, 'Plán musí obsahovat řádky s textovým střediskem.');
+        foreach ($rows as $row) {
+            self::assertNotContains($row['type'], ['ALL', 'index'], 'Řádky s textovým střediskem bez průchodu celou tabulkou: ' . json_encode($row, JSON_THROW_ON_ERROR));
+            self::assertSame('idx_jel_supplier_cost_center', $row['key']);
+        }
+    }
+
+    /**
      * Druh „středisko" smí mít víc typů firmy (createType hlídá jen kód), a hodnoty
      * každého z nich nesou kód navázaného střediska. Filtr přes dva takové typy tak
      * nemá podmínku bez textových středisek, podle které by deník hledal po indexu,
@@ -336,7 +362,7 @@ final class DimensionMultiFilterTest extends TestCase
                 self::assertSame([], $new->also);
                 self::assertSame($old->lineSource($this->supplierId, 'f', self::FROM, self::TO), $new->lineSource($this->supplierId, 'f', self::FROM, self::TO));
                 self::assertSame($old->lineSource($this->supplierId, 'f', null, self::TO), $new->lineSource($this->supplierId, 'f', null, self::TO));
-                self::assertSame($old->entrySql('je'), $new->entrySql('je'));
+                self::assertSame($old->entrySql('je', $this->supplierId), $new->entrySql('je', $this->supplierId));
                 $array = $new->toArray();
                 self::assertSame($old->label, $array['label']);
                 self::assertSame([$old->typeId, $old->valueId, $old->valueIds], [$array['type_id'], $array['value_id'], $array['value_ids']]);

@@ -1130,7 +1130,8 @@
         "2226_journal_line_pairing.sql",
         "2227_purchase_document_presence_indexes.sql",
         "2228_other_item_kinds.sql",
-        "2229_work_report_display_options.sql"
+        "2229_work_report_display_options.sql",
+        "2230_journal_lines_cost_center_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7909,6 +7910,7 @@
                 "idx_jel_entry": "BTREE (entry_id)",
                 "idx_jel_project": "BTREE (supplier_id, project_id, account_id)",
                 "idx_jel_supplier_account": "BTREE (supplier_id, account_id)",
+                "idx_jel_supplier_cost_center": "BTREE (supplier_id, cost_center, entry_id)",
                 "idx_jel_supplier_entry": "BTREE (supplier_id, entry_id)",
                 "ix_jel_closing_by_account": "BTREE (supplier_id, account_id, entry_id, side, amount)",
                 "ix_jel_closing_by_entry": "BTREE (supplier_id, entry_id, account_id, side, amount)",

@@ -188,10 +188,10 @@ final class DimensionFilter
      *
      * @return array{0:string,1:list<int|string>}
      */
-    public function entrySql(string $entryAlias): array
+    public function entrySql(string $entryAlias, int $supplierId): array
     {
         if ($this->also === []) {
-            return $this->singleEntrySql($entryAlias);
+            return $this->singleEntrySql($entryAlias, $supplierId);
         }
         // Řádky se hledají od podmínky bez textových středisek: její hodnoty a rozpady
         // jdou po indexu (typ, hodnota), ostatní podmínky se ověří jen na nalezených
@@ -214,7 +214,7 @@ final class DimensionFilter
             $lineConditions = [];
             $lineParams = [];
             foreach ($criteria as $criterion) {
-                [$sql, $sqlParams] = $criterion->singleEntrySql($entryAlias);
+                [$sql, $sqlParams] = $criterion->singleEntrySql($entryAlias, $supplierId);
                 $where[] = $sql;
                 array_push($params, ...$sqlParams);
                 [$sql, $sqlParams] = $criterion->lineCondition('jel_m');
@@ -270,7 +270,7 @@ final class DimensionFilter
     }
 
     /** @return array{0:string,1:list<int|string>} */
-    private function singleEntrySql(string $entryAlias): array
+    private function singleEntrySql(string $entryAlias, int $supplierId): array
     {
         $marks = implode(',', array_fill(0, count($this->valueIds), '?'));
         $sql = "({$entryAlias}.id IN (SELECT jel_f.entry_id
@@ -283,10 +283,12 @@ final class DimensionFilter
                          WHERE dim_s.dimension_type_id = ? AND dim_s.dimension_value_id IN ({$marks}))";
         $params = [$this->typeId, ...$this->valueIds, $this->typeId, ...$this->valueIds];
         if ($this->costCenterCodes !== []) {
+            // Nekorelovaný IN po indexu (supplier_id, cost_center, entry_id): zmaterializují
+            // se jen řádky s kódem střediska, ne průchod všemi řádky deníku pro každý zápis.
             [$lineSql, $lineParams] = $this->costCenterCondition('jel_c');
-            $sql .= " OR EXISTS (SELECT 1 FROM journal_entry_lines jel_c
-                                  WHERE jel_c.entry_id = {$entryAlias}.id AND {$lineSql})";
-            array_push($params, ...$lineParams);
+            $sql .= " OR {$entryAlias}.id IN (SELECT jel_c.entry_id FROM journal_entry_lines jel_c
+                                  WHERE jel_c.supplier_id = ? AND {$lineSql})";
+            array_push($params, $supplierId, ...$lineParams);
         }
         return [$sql . ')', $params];
     }
