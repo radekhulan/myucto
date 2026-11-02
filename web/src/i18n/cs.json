@@ -14138,6 +14138,13 @@
     "book_title": "Pokladní kniha",
     "new_document": "Nový pokladní doklad",
     "edit_document": "Úprava pokladního dokladu",
+    "original": {
+      "pick": "Přiložit originál",
+      "remove": "Odebrat originál",
+      "pending_hint": "Soubor se nahraje do Dokumentů a připojí k dokladu po uložení",
+      "unsupported": "Originál musí být PDF nebo obrázek",
+      "attach_failed": "Doklad je uložený, ale originál se nepodařilo připojit. Nahrajte ho v úpravě nebo detailu dokladu."
+    },
     "save_draft": "Uložit jako koncept",
     "post_document": "Vystavit",
     "post_and_next": "Vystavit a další",

@@ -23,6 +23,9 @@ const m = vi.hoisted(() => ({
   toastWarning: vi.fn(),
   push: vi.fn(),
   byEntity: vi.fn(),
+  docUpload: vi.fn(),
+  docAddLink: vi.fn(),
+  docRemove: vi.fn(),
 }))
 
 vi.mock('@/api/cash', () => ({
@@ -76,7 +79,10 @@ vi.mock('@/composables/useUserPrefs', () => ({
   patchPagePrefs: vi.fn(),
 }))
 vi.mock('@/api/documents', () => ({
-  documentsApi: { byEntity: m.byEntity, previewUrl: (id: number) => `/documents/${id}/preview`, thumbUrl: () => '', downloadUrl: () => '' },
+  documentsApi: {
+    byEntity: m.byEntity, upload: m.docUpload, addLink: m.docAddLink, remove: m.docRemove,
+    previewUrl: (id: number) => `/documents/${id}/preview`, thumbUrl: () => '', downloadUrl: () => '',
+  },
 }))
 
 import CashDocumentEditor from '@/pages/accounting/CashDocumentEditor.vue'
@@ -137,6 +143,60 @@ describe('CashDocumentEditor.vue', () => {
     expect(edit.find('[data-test="document-preview-splitter"]').exists()).toBe(true)
     expect(edit.get('iframe').attributes('src')).toContain('/documents/7/preview')
     width.mockRestore()
+  })
+
+  async function pickOriginal(wrapper: Awaited<ReturnType<typeof mountEditor>>) {
+    const input = wrapper.get('[data-test="cash-original-file"]')
+    const file = new File(['%PDF-1.4'], 'uctenka.pdf', { type: 'application/pdf' })
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+  }
+
+  it('nový doklad ukáže vybraný originál vedle formuláře a po uložení ho nahraje a připojí', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 976, right: 976 } as DOMRect)
+    const createUrl = vi.fn(() => 'blob:cash-original')
+    const revokeUrl = vi.fn()
+    Object.assign(URL, { createObjectURL: createUrl, revokeObjectURL: revokeUrl })
+    m.createDocument.mockResolvedValue({ id: 55, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
+    m.docUpload.mockResolvedValue({ root_ids: [91], errors: [] })
+    m.docAddLink.mockResolvedValue([])
+    const wrapper = await mountEditor()
+    await pickOriginal(wrapper)
+
+    expect(m.docUpload).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="document-preview-splitter"]').exists()).toBe(true)
+    expect(wrapper.get('embed').attributes('src')).toBe('blob:cash-original')
+
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Účtenka'
+    await vm.save(false)
+
+    expect(m.docUpload).toHaveBeenCalledWith([expect.objectContaining({ name: 'uctenka.pdf' })], { zipMode: 'keep' })
+    expect(m.docAddLink).toHaveBeenCalledWith(91, 'cash_document', 55)
+    expect(m.docRemove).not.toHaveBeenCalled()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:cash-original')
+    expect(m.push).toHaveBeenCalledWith('/accounting/cash')
+    width.mockRestore()
+  })
+
+  it('když se originál nepodaří připojit, smaže nahraný dokument a doklad nechá uložený', async () => {
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
+    m.createDocument.mockResolvedValue({ id: 56, doc_number: null, journal_entry_id: null, status: 'draft', warnings: [] })
+    m.docUpload.mockResolvedValue({ root_ids: [92], errors: [] })
+    m.docAddLink.mockRejectedValue(new Error('403'))
+    m.docRemove.mockResolvedValue({ ok: true })
+    const wrapper = await mountEditor()
+    await pickOriginal(wrapper)
+    const vm = wrapper.vm as any
+    vm.form.total_amount = 100
+    vm.form.description = 'Účtenka'
+    await vm.save(false)
+
+    expect(m.docRemove).toHaveBeenCalledWith(92)
+    expect(m.toastWarning).toHaveBeenCalledWith('cash.original.attach_failed')
+    expect(m.push).toHaveBeenCalledWith('/accounting/cash')
   })
 
   it('nákup nabídne aktivní nákladové účty a zvolenou analytiku promítne do náhledu i payloadu', async () => {

@@ -14138,6 +14138,13 @@
     "book_title": "Cash book",
     "new_document": "New cash document",
     "edit_document": "Edit cash document",
+    "original": {
+      "pick": "Attach original",
+      "remove": "Remove original",
+      "pending_hint": "The file is uploaded to Documents and attached to the document after saving",
+      "unsupported": "The original must be a PDF or an image",
+      "attach_failed": "The document is saved, but the original could not be attached. Upload it from the document edit or detail."
+    },
     "save_draft": "Save as draft",
     "post_document": "Post",
     "post_and_next": "Post and next",
