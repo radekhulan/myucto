@@ -198,6 +198,73 @@ final class OtherItemSaldoTest extends TestCase
         self::assertTrue($marchNew['matches']);
     }
 
+    /**
+     * Převzatá položka vyrovnaná interním dokladem (bez vazby na položku) nese úhradu
+     * v `settled_outside_amount`. Saldokonto ji musí vidět stejně jako detail položky,
+     * jinak svítí otevřená, přestože účet je v hlavní knize vyrovnaný.
+     */
+    public function testSettledOutsideAmountReducesOpenItemLikeItemDetail(): void
+    {
+        $partial = $this->item('receivable', '315', '602', 'Syntetický příspěvek částečně');
+        $this->post($partial, '315', 'debit', '602', '2099-01-10');
+        $full = $this->item('receivable', '315', '602', 'Syntetický příspěvek celý');
+        $this->post($full, '315', 'debit', '602', '2099-01-10');
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            $this->line('395', 'debit', 1400.0), $this->line('315', 'credit', 1400.0),
+        ], ['entry_date' => '2099-01-31', 'posted' => true]);
+        $outside = $this->pdo->prepare('UPDATE other_items SET settled_outside_amount = ? WHERE id = ? AND supplier_id = ?');
+        $outside->execute([400, $partial, $this->supplierId]);
+        $outside->execute([1000, $full, $this->supplierId]);
+
+        $account = $this->account('315', '2099-02-28');
+        self::assertSame(60000, $this->cents($account['gl_balance']));
+        self::assertSame(60000, $this->cents($account['open_items_total']));
+        self::assertSame(1, $account['open_items_count']);
+        self::assertTrue($account['matches']);
+        self::assertSame($partial, $account['partners'][0]['items'][0]['doc_id']);
+        self::assertSame(40000, $this->cents($account['partners'][0]['items'][0]['paid_czk']));
+        self::assertSame(60000, $this->cents((new OtherItemRepository($this->db))
+            ->find($this->supplierId, $partial)['remaining_amount']));
+    }
+
+    public function testSettledOutsideAmountAddsToAllocatedBankPayment(): void
+    {
+        $itemId = $this->item('receivable', '315', '602', 'Syntetický příspěvek s platbou');
+        $this->post($itemId, '315', 'debit', '602', '2099-01-10');
+        $bankId = $this->bankPayment(300.0);
+        $this->posting->postDocument($this->supplierId, 'bank', $bankId, [
+            $this->line('221', 'debit', 300.0), $this->line('315', 'credit', 300.0),
+        ], ['entry_date' => '2099-02-05', 'posted' => true]);
+        $this->items->allocate($this->supplierId, $itemId, ['bank_transaction_id' => $bankId, 'amount' => 300], null);
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            $this->line('395', 'debit', 400.0), $this->line('315', 'credit', 400.0),
+        ], ['entry_date' => '2099-02-10', 'posted' => true]);
+        $this->pdo->prepare('UPDATE other_items SET settled_outside_amount = 400 WHERE id = ? AND supplier_id = ?')
+            ->execute([$itemId, $this->supplierId]);
+
+        $account = $this->account('315', '2099-02-28');
+        self::assertSame(30000, $this->cents($account['gl_balance']));
+        self::assertSame(30000, $this->cents($account['open_items_total']));
+        self::assertTrue($account['matches']);
+        self::assertSame(70000, $this->cents($account['partners'][0]['items'][0]['paid_czk']));
+    }
+
+    public function testSettledOutsideAmountClosesPayable(): void
+    {
+        $itemId = $this->item('payable', '325', '518', 'Syntetický převzatý závazek');
+        $this->post($itemId, '325', 'credit', '518', '2099-01-10');
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            $this->line('325', 'debit', 1000.0), $this->line('395', 'credit', 1000.0),
+        ], ['entry_date' => '2099-01-31', 'posted' => true]);
+        $this->pdo->prepare('UPDATE other_items SET settled_outside_amount = 1000 WHERE id = ? AND supplier_id = ?')
+            ->execute([$itemId, $this->supplierId]);
+
+        $account = $this->account('325', '2099-02-28');
+        self::assertSame(0, $this->cents($account['open_items_total']));
+        self::assertSame(0, $account['open_items_count']);
+        self::assertTrue($account['matches']);
+    }
+
     public function testOtherItemOnAdvanceAccountIsIncludedOnce(): void
     {
         $id = $this->item('receivable', '314', '378', 'Syntetická záloha');
