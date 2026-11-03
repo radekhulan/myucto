@@ -225,6 +225,10 @@ balení a sledování šarží/sériových čísel. Server klientovi nevrací zd
 objednávky, nabídky dodavatelů ani historii pohybů šarží/sériových čísel.
 Platební údaje přijaté faktury vyžadují její čtení; obrázek QR se do MCP
 nepředává. Kategorie nákladů vyžadují čtení nastavení firmy.
+Čtení vydaných faktur zpřístupňuje i přehledy kandidátů k propojení záloh,
+konečných faktur, záloh k postupnému čerpání a náhled úroku z prodlení. Čtení
+přijatých faktur zpřístupňuje jejich kandidáty záloh a vyúčtování. Jde pouze
+o GET; zápisové nástroje pro vazby, čerpání a vytvoření penalizace nejsou převedené.
 Ostatní nástroje zůstávají výslovně vyloučené, dokud
 nebudou převedené se stejným ověřením závislostí.
 

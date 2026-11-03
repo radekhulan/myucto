@@ -181,9 +181,29 @@ const readDetails = [
   { name: 'list_expense_categories', path: '/expense-categories', response: [{ id: 7, name: 'Syntetická kategorie' }],
     variants: [{ args: { include_archived: true }, query: { include_archived: '1' } },
       { args: { include_archived: false }, query: {} }, { args: {}, query: {} }] },
+  { name: 'list_invoice_advance_candidates', path: '/invoices/7/advance-candidates',
+    response: { candidates: [{ id: 8, invoice_type: 'proforma', currency: 'CZK' }] },
+    variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'list_proforma_final_candidates', path: '/invoices/7/final-candidates',
+    response: { candidates: [{ id: 8, invoice_type: 'invoice', currency: 'CZK' }] },
+    variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'list_invoice_advance_drawdown_candidates', path: '/invoices/7/advance-drawdown',
+    response: [{ id: 8, total_with_vat: 1000, available: 250 }],
+    variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'list_purchase_advance_candidates', path: '/purchase-invoices/7/advance-candidates',
+    response: { candidates: [{ id: 8, document_kind: 'advance', currency: 'CZK' }] },
+    variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'list_purchase_settlement_candidates', path: '/purchase-invoices/7/settlement-candidates',
+    response: { candidates: [{ id: 8, document_kind: 'invoice', currency: 'CZK' }] },
+    variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'preview_invoice_penalty', path: '/invoices/7/penalty/preview',
+    response: { total_days: 30, total_interest: 9.86 }, variants: [
+      { args: { id: 7 }, query: {} },
+      { args: { id: 7, as_of: '2026-02-01', principal: 100.5 }, query: { as_of: '2026-02-01', principal: '100.5' } },
+    ] },
 ];
 
-test('detaily skladu a plateb i kategorie nákladů jsou v obou rozsazích pouze čtecí', async () => {
+test('klientské čtecí doplňky skladu a fakturace jsou v obou rozsazích pouze čtecí', async () => {
   const allowedTools = readDetails.map(entry => entry.name);
   for (const scope of ['read', 'read_write']) {
     const list = await runHosted({ operation: 'list', scope, boundSupplierId: 1, allowedTools });

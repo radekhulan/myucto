@@ -172,6 +172,14 @@ dodavatelů ani historii pohybů šarží a sériových čísel. S právem čten
 MCP vrací údaje bez obrázku QR kódu a platbu neprovádí. Seznam kategorií
 nákladů vyžaduje čtení nastavení firmy.
 
+Čtení vydaných faktur zpřístupňuje přehled záloh vhodných k propojení s fakturou,
+konečných faktur vhodných k propojení se zálohou a záloh s částkou dostupnou
+k postupnému čerpání na konceptu faktury. Umožňuje také náhled úroku z prodlení
+k vydané faktuře. Čtení přijatých faktur zpřístupňuje obdobné přehledy záloh
+a vyúčtovacích faktur od dodavatele. Tyto nástroje pouze zobrazují podklady;
+propojení dokladů, čerpání zálohy a vytvoření penalizační faktury se přes ně
+neprovádí.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou

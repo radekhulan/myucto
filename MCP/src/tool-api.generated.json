@@ -558,6 +558,24 @@
       ]
     ]
   },
+  "list_invoice_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/advance-candidates"
+      ]
+    ]
+  },
+  "list_invoice_advance_drawdown_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/advance-drawdown"
+      ]
+    ]
+  },
   "list_invoice_attachments": {
     "write": false,
     "api": [
@@ -651,6 +669,15 @@
       ]
     ]
   },
+  "list_proforma_final_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/final-candidates"
+      ]
+    ]
+  },
   "list_projects": {
     "write": false,
     "api": [
@@ -660,12 +687,30 @@
       ]
     ]
   },
+  "list_purchase_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/advance-candidates"
+      ]
+    ]
+  },
   "list_purchase_invoices": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/purchase-invoices"
+      ]
+    ]
+  },
+  "list_purchase_settlement_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/settlement-candidates"
       ]
     ]
   },
@@ -756,6 +801,15 @@
       [
         "POST",
         "/api/recurring/{id}/pause"
+      ]
+    ]
+  },
+  "preview_invoice_penalty": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/penalty/preview"
       ]
     ]
   },

@@ -783,8 +783,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_purchase_advance_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k vyúčtování přijaté faktury',
     description:
       'Nespárované zálohové faktury a samostatné daňové doklady k záloze od stejného dodavatele, '
@@ -795,8 +796,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_settlement_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/settlement-candidates'],
+    ],
     title: 'Faktury k vyúčtování zálohy',
     description: 'Opačný směr: z detailu zálohy nepropojené konečné faktury stejného dodavatele.',
     inputSchema: schema({ id: id('ID zálohové faktury.') }, ['id']),
