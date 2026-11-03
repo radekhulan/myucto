@@ -98,7 +98,7 @@ Ruční úpravu zahodíte tlačítkem **Vrátit ověřenou hodnotu**.
 
 ### 92.8.1 Které roky jsou pokryté
 
-Ověřená sada je v aplikaci pro rok **2025** a **2026**. Rok 2025 je v ní proto,
+Ověřená sada je v aplikaci pro roky **2025**, **2026** a **2027**. Rok 2025 je v ní proto,
 aby šlo opravit starší měsíc a provést roční zúčtování za rok 2025 skutečnými
 pravidly toho roku, ne dnešními.
 
@@ -127,10 +127,11 @@ mezd**, ne pro podání.
 
 ### 92.8.2 Příští rok bez sady
 
-Sada pro **rok 2027 zatím neexistuje a existovat nemůže**: odvíjí se od
-průměrné mzdy, kterou vláda vyhlašuje nařízením až na podzim předchozího roku.
-Nařízení musí vyjít **do 30. září**, takže od 1. října je sada sestavitelná.
-Minimální mzda a nezabavitelné částky obvykle vycházejí později.
+Sada pro příští rok se odvíjí od průměrné mzdy, kterou vláda vyhlašuje
+nařízením až na podzim předchozího roku. Nařízení musí vyjít **do 30. září**,
+takže od 1. října je sada sestavitelná. Minimální mzda, stravné a nezabavitelné
+částky obvykle vycházejí později; dokud nevyjdou, ukazuje karta oblasti
+dotčený parametr jménem jako **Čeká na vyhlášení**.
 
 Prázdná kostra sady se záměrně nezakládá: rok s prázdnou sadou by se tvářil
 jako pokrytý, zatímco výpočet by selhal. Za pokrytý se počítá jen **účinná**

@@ -115,7 +115,7 @@ final readonly class PayrollRuleValue
     {
         if ($this->capability !== PayrollRulesetCapability::Supported) {
             throw new PayrollRulesetException(
-                "Payroll ruleset parameter {$parameter} requires manual review: {$this->note}",
+                "Parametr legislativní sady {$parameter} nemá hodnotu pro výpočet: {$this->note}",
             );
         }
     }
