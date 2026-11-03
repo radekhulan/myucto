@@ -192,10 +192,43 @@ final class StatementBalanceIntradayTest extends TestCase
         self::assertEquals(100, $result['difference']);
     }
 
-    /** @param list<array{0:string,1:string}> $moves */
-    private function download(string $date, string $importedAt, string $prev, string $curr, array $moves = []): int
+    public function testDownloadAfterItsDayEndedIsNotCompleted(): void
     {
-        return $this->statement('bank_api', $date, $importedAt, $prev, $curr, '{}', $moves);
+        $this->download('2099-09-30', '2099-10-01 08:00:00', '1000.00', '1000.00');
+        // Ruční stažení října až 2. 11.: banka vrátila stav po skončení dne 31. 10.
+        $late = $this->download('2099-10-31', '2099-11-02 09:00:00', '1000.00', '900.00', [['2099-10-31', '-100.00']]);
+        // Pohyb s datem 31. 10., který banka do toho stavu nezapočetla, přišel až později.
+        $this->download('2099-11-05', '2099-11-05 00:00:00', '900.00', '850.00', [['2099-10-31', '-50.00']]);
+
+        $result = $this->service->summary($this->supplierId, $late);
+        self::assertSame('mismatch', $result['status']);
+        self::assertEquals(50, $result['difference']);
+    }
+
+    public function testDownloadWithOwnTotalsIsNotCompleted(): void
+    {
+        $this->download('2099-09-30', '2099-10-01 08:00:00', '1000.00', '1000.00');
+        // Stažení s obraty od banky (formát GPC): jeho rovnici zůstatků hlídá výpočet.
+        $morning = $this->download('2099-10-31', '2099-10-31 08:00:00', '1000.00', '900.00', [['2099-10-31', '-100.00']], ['0.00', '100.00']);
+        $this->download('2099-11-01', '2099-11-01 00:00:00', '900.00', '850.00', [['2099-10-31', '-50.00']]);
+
+        // Doplněný stav by rozbil rovnici výpisu a skončil jako konflikt. Rozdíl má zůstat vidět.
+        $result = $this->service->summary($this->supplierId, $morning);
+        self::assertSame('mismatch', $result['status']);
+        self::assertEquals(50, $result['difference']);
+    }
+
+    /**
+     * @param list<array{0:string,1:string}> $moves
+     * @param array{0:string,1:string}|null $totals obraty od banky [příjmy, výdaje]
+     */
+    private function download(string $date, string $importedAt, string $prev, string $curr, array $moves = [], ?array $totals = null): int
+    {
+        $id = $this->statement('bank_api', $date, $importedAt, $prev, $curr, '{}', $moves);
+        if ($totals !== null) {
+            $this->pdo->prepare('UPDATE bank_statements SET credit_total = ?, debit_total = ? WHERE id = ?')->execute([$totals[0], $totals[1], $id]);
+        }
+        return $id;
     }
 
     /** @param list<array{0:string,1:string}> $moves */
