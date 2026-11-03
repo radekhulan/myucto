@@ -850,8 +850,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_purchase_invoice_payment',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/payment-qr'],
+    ],
     title: 'Platební údaje přijaté faktury',
     description:
       'Účet dodavatele, částka k úhradě, měna a variabilní symbol pro zaplacení přijaté faktury. '
@@ -1027,8 +1028,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_expense_categories',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/expense-categories'],
+    ],
     title: 'Kategorie nákladů',
     description: 'Číselník kategorií nákladů s jejich ID pro `expense_category_id` přijaté faktury.',
     inputSchema: schema({ include_archived: bool('Vrátit i archivované kategorie.') }),

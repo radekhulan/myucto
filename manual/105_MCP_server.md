@@ -164,6 +164,14 @@ ze šablony. Čtení skladu umožňuje rychlé hledání zboží, množství vyb
 ve skladech určených k prodeji (bez odečtení rezervací) a seznam nebo detail
 skladů. Hodnotu zásob skladu klientská role nevidí.
 
+Čtení skladu zpřístupňuje také množství po odečtení rezervací přes
+`stock_quantities`, skladové lokace, balení a převody jednotek a aktuální
+zásobu šarží nebo sériových čísel včetně expirace. Klientská odpověď neobsahuje
+zdrojové objednávky, nabídky dodavatelů ani historii pohybů šarží a sériových
+čísel. S právem čtení přijatých faktur lze zobrazit platební údaje dokladu;
+MCP vrací údaje bez obrázku QR kódu a platbu neprovádí. Seznam kategorií
+nákladů vyžaduje čtení nastavení firmy.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou
