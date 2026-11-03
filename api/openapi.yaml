@@ -2987,6 +2987,68 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/invoices/book:
+    get:
+      tags: [Invoices]
+      summary: Kniha vystavených faktur (PDF nebo XLSX) nad filtrem seznamu
+      description: |
+        Tisková sestava všech vystavených dokladů, které odpovídají filtru seznamu
+        `GET /api/v1/invoices` (stejné parametry `q` a `filter[...]`), bez
+        stránkování. Doklad bez čísla (koncept) v knize není; koncepty s číslem
+        a stornované doklady jsou v ní jen tehdy, když je vybírá filtr, a do součtů
+        nevstupují. Řazení podle čísla dokladu.
+
+        Sloupce: číslo dokladu, datum vystavení, splatnost, DUZP, částka s DPH,
+        zbývá uhradit, odběratel, platební variabilní symbol a popis (text položky
+        s nejvyšší částkou, jinak první řádek textu nad položkami). Dobropisy mají
+        částky záporné.
+
+        Součty jsou po měnách bez přepočtu kurzem: celkem k úhradě (po odpočtu
+        záloh), zbývá uhradit u faktur, zbývá uhradit u dobropisů a zvlášť daňové
+        doklady k přijaté platbě. Hlavička nese firmu, IČ, období a shrnutí
+        použitého filtru, patička stránky autora tisku, datum a číslo strany. PDF je
+        A4 na šířku.
+
+        Vyžaduje stejné oprávnění jako seznam (`invoices` čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: 'filter[status]', description: Čárkou oddělený seznam stavů, schema: { type: string, example: 'issued,paid' } }
+        - { in: query, name: 'filter[type]', description: Čárkou oddělený seznam typů dokladu, schema: { type: string, example: 'invoice,credit_note' } }
+        - { in: query, name: 'filter[client_id]', schema: { type: integer } }
+        - { in: query, name: 'filter[project_id]', schema: { type: integer } }
+        - { in: query, name: 'filter[year]', description: Rok podle DUZP, schema: { type: integer } }
+        - { in: query, name: 'filter[month]', schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: 'filter[date_from]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[date_to]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[currency]', schema: { type: string, example: EUR } }
+        - { in: query, name: 'filter[unpaid_only]', schema: { type: boolean } }
+        - { in: query, name: 'filter[overdue]', schema: { type: boolean } }
+        - { in: query, name: 'filter[unpaid_as_of]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[booked]', schema: { type: string, enum: ['1', '0'] } }
+        - { in: query, name: 'filter[oss_review]', schema: { type: string, enum: [any, oss, domestic, '1'] } }
+        - { in: query, name: 'filter[revenue_category_id]', schema: { type: string, example: '3,7,none' } }
+        - { in: query, name: 'filter[revenue_category_exclude]', schema: { type: string, example: '12,none' } }
+      responses:
+        '200':
+          description: Soubor knihy (Content-Disposition attachment)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403':
+          description: Chybí oprávnění ke čtení vystavených faktur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Neplatný formát nebo hodnota filtru (`validation_failed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/invoices/{id}/isdoc:
     get:
       tags: [Invoices]
@@ -10537,6 +10599,72 @@ paths:
             X-Export-Reconstructed:
               schema: { type: integer }
               description: Počet faktur, u kterých se místo originálu vložila naše rekonstrukce (jen pdf-zip)
+
+  /api/v1/purchase-invoices/book:
+    get:
+      tags: [Purchase invoices]
+      summary: Kniha přijatých faktur (PDF nebo XLSX) nad filtrem seznamu
+      description: |
+        Tisková sestava všech přijatých faktur, které odpovídají filtru seznamu
+        `GET /api/v1/purchase-invoices` (stejné parametry `q` a `filter[...]`), bez
+        stránkování. Doklad bez čísla (koncept) v knize není; koncepty s číslem
+        a stornované doklady jsou v ní jen tehdy, když je vybírá filtr, a do součtů
+        nevstupují. Řazení podle čísla dokladu.
+
+        Sloupce: číslo dokladu, datum vystavení, splatnost, DUZP, částka s DPH,
+        zbývá uhradit, dodavatel, variabilní symbol (platební VS, jinak číslo
+        dokladu dodavatele) a popis (text položky s nejvyšší částkou, jinak první
+        řádek textu nad položkami). Dobropisy mají částky záporné.
+
+        Součty jsou po měnách bez přepočtu kurzem: celkem k úhradě, zbývá uhradit
+        u faktur, zbývá uhradit u dobropisů a zvlášť daňové doklady k přijaté
+        platbě. Hlavička nese firmu, IČ, období a shrnutí použitého filtru, patička
+        stránky autora tisku, datum a číslo strany. PDF je A4 na šířku.
+
+        Vyžaduje stejné oprávnění jako seznam (`purchase_invoices` čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: 'filter[status]', description: Čárkou oddělený seznam stavů, schema: { type: string, example: 'received,paid' } }
+        - { in: query, name: 'filter[document_kind]', description: Čárkou oddělený seznam druhů dokladu, schema: { type: string, example: 'invoice,credit_note' } }
+        - { in: query, name: 'filter[vendor_id]', schema: { type: integer } }
+        - { in: query, name: 'filter[project_id]', description: "ID zakázky nebo `none` = bez zakázky", schema: { type: string } }
+        - { in: query, name: 'filter[year]', schema: { type: integer } }
+        - { in: query, name: 'filter[month]', schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: 'filter[date_from]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[date_to]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[currency]', schema: { type: string, example: EUR } }
+        - { in: query, name: 'filter[unpaid_only]', schema: { type: boolean } }
+        - { in: query, name: 'filter[overdue]', schema: { type: boolean } }
+        - { in: query, name: 'filter[unpaid_as_of]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[unmatched]', schema: { type: boolean } }
+        - { in: query, name: 'filter[needs_review]', schema: { type: boolean } }
+        - { in: query, name: 'filter[paid_shortfall]', schema: { type: integer, enum: [0, 1] } }
+        - { in: query, name: 'filter[approval_status]', schema: { type: string, enum: [none, pending, approved, rejected] } }
+        - { in: query, name: 'filter[payment_ordered]', schema: { type: string, enum: ['1', '0'] } }
+        - { in: query, name: 'filter[booked]', schema: { type: string, enum: ['1', '0'] } }
+        - { in: query, name: 'filter[has_visual_document]', schema: { type: string, enum: ['0', '1'] } }
+        - { in: query, name: 'filter[has_structured_source]', schema: { type: string, enum: ['0', '1'] } }
+        - { in: query, name: 'filter[import_batch_id]', schema: { type: string } }
+      responses:
+        '200':
+          description: Soubor knihy (Content-Disposition attachment)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403':
+          description: Chybí oprávnění ke čtení přijatých faktur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Neplatný formát nebo hodnota filtru (`validation_failed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/purchase-invoices/{id}/activity:
     get:

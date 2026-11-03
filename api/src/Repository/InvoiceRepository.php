@@ -846,7 +846,14 @@ final class InvoiceRepository
         return ['ids' => $ids, 'none' => $none];
     }
 
-    public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0): array
+    /**
+     * WHERE seznamu faktur nad aliasy `i` (invoices), `c` (clients) a `cur` (currencies).
+     * Sdílí ho seznam i kniha vystavených faktur, aby export vybral totéž co obrazovka.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:list<mixed>}
+     */
+    public function listWhere(array $filters): array
     {
         $where = ['1=1'];
         $params = [];
@@ -1056,7 +1063,12 @@ final class InvoiceRepository
             $where[] = '(' . implode(' OR ', $or) . ')';
         }
 
-        $whereSql = implode(' AND ', $where);
+        return [implode(' AND ', $where), $params];
+    }
+
+    public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0): array
+    {
+        [$whereSql, $params] = $this->listWhere($filters);
 
         $total = null;
         if ($perPage > 0) {
@@ -1247,6 +1259,90 @@ final class InvoiceRepository
             'data' => array_values($grouped),
             'meta' => $meta,
         ];
+    }
+
+    /**
+     * Dávka knihy vystavených faktur: WHERE seznamu ({@see listWhere()}) jen pro doklady
+     * s číslem (koncept bez čísla do knihy nepatří), seřazená podle čísla dokladu. Stránkuje se klíčem (číslo, id), ne OFFSETem,
+     * takže celý rok dokladů nikdy neskončí v jednom poli. Bez firmy nevybere nic
+     * (listWhere sám firmu nevynucuje).
+     *
+     * @param array<string,mixed> $filters
+     * @param array{0:string, 1:int}|null $after klíč posledního řádku předchozí dávky
+     * @return list<array<string,mixed>>
+     */
+    public function listBookBatch(array $filters, ?array $after, int $limit): array
+    {
+        if ((int) ($filters['supplier_id'] ?? 0) <= 0) {
+            return [];
+        }
+        [$whereSql, $params] = $this->listWhere($filters);
+        $whereSql .= " AND i.varsymbol IS NOT NULL AND i.varsymbol <> ''";
+        if ($after !== null) {
+            $whereSql .= ' AND (i.varsymbol > ? OR (i.varsymbol = ? AND i.id > ?))';
+            array_push($params, $after[0], $after[0], $after[1]);
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.id, i.varsymbol, i.varsymbol AS number, i.payment_variable_symbol,
+                    i.invoice_type, i.status, i.issue_date, i.tax_date, i.due_date,
+                    cur.code AS currency, cur.decimals AS currency_decimals,
+                    i.total_with_vat, i.amount_to_pay,
+                    " . self::remainingSql('i') . " AS remaining_amount,
+                    i.note_above_items, c.company_name AS partner_name
+               FROM invoices i
+               JOIN clients c ON c.id = i.client_id
+               JOIN currencies cur ON cur.id = i.currency_id
+              WHERE $whereSql
+              ORDER BY i.varsymbol, i.id
+              LIMIT " . max(1, $limit)
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return [];
+        }
+
+        $main = $this->mainItemDescriptions(array_map(static fn (array $r): int => (int) $r['id'], $rows));
+        foreach ($rows as &$row) {
+            $row['id'] = (int) $row['id'];
+            $row['type'] = (string) $row['invoice_type'];
+            $row['variable_symbol'] = VariableSymbolNormalizer::forInvoicePayment($row);
+            $row['main_item'] = $main[$row['id']] ?? null;
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Text hlavní položky dokladu: položka s nejvyšší částkou s DPH (v absolutní hodnotě,
+     * dobropis má řádky záporné), při shodě ta dřívější.
+     *
+     * @param list<int> $ids
+     * @return array<int,string>
+     */
+    private function mainItemDescriptions(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $place = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT invoice_id, description FROM (
+                SELECT ii.invoice_id, ii.description,
+                       ROW_NUMBER() OVER (PARTITION BY ii.invoice_id
+                                          ORDER BY ABS(ii.total_with_vat) DESC, ii.order_index, ii.id) AS rn
+                  FROM invoice_items ii
+                 WHERE ii.invoice_id IN ($place) AND TRIM(ii.description) <> ''
+             ) ranked WHERE rn = 1"
+        );
+        $stmt->execute($ids);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['invoice_id']] = (string) $r['description'];
+        }
+        return $out;
     }
 
     public function createDraft(array $data, int $userId): int

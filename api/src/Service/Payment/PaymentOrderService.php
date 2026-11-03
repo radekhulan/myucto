@@ -948,17 +948,7 @@ final class PaymentOrderService
     /** VS pro platbu: payment_variable_symbol → vendor_invoice_number → varsymbol. */
     private function variableSymbol(array $inv): string
     {
-        foreach ([
-            (string) ($inv['payment_variable_symbol'] ?? ''),
-            (string) ($inv['vendor_invoice_number'] ?? ''),
-            (string) ($inv['varsymbol'] ?? ''),
-        ] as $c) {
-            $vs = VariableSymbolNormalizer::forPayment($c);
-            if ($vs !== '') {
-                return $vs;
-            }
-        }
-        return '';
+        return VariableSymbolNormalizer::forPurchasePayment($inv);
     }
 
     /** @return array{company_name:?string, abo_client_number:?string} */

@@ -675,6 +675,8 @@ final class Routes
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);
+        // Kniha vystavených faktur (PDF/XLSX) nad filtrem seznamu.
+        $app->get    ('/api/invoices/book',         [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'issued']);
         // Veřejný alias admin exportu (bearer allowlist pokrývá /api/invoices/*):
         // ?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv & month=YYYY-MM nebo period=quarterly&year&quarter
         $app->get    ('/api/invoices/export',       ExportAction::class);
@@ -775,6 +777,7 @@ final class Routes
         $app->post   ('/api/purchase-invoices/import-structured',         ImportStructuredPurchaseInvoiceAction::class);
         $app->post   ('/api/purchase-invoices/import-ai',                 AiExtractPdfAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
+        $app->get    ('/api/purchase-invoices/book',                       [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'received']);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
         // Přečíslování měsíce podle data vystavení (náhled + provedení).
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
