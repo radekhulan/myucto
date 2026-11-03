@@ -156,3 +156,72 @@ test('provozní čtecí nástroje fungují s read tokenem, zachovají filtry a n
     }
   }
 });
+
+const readDetails = [
+  { name: 'stock_quantities', path: '/stock/quantities', response: {
+    items: [{ stock_item_id: 7, on_hand: '5.000', reserved: '2.000', sellable: '3.000', in_transit: '1.000' }], total: 1,
+  }, variants: [
+    { args: { item_ids: [7, 8], warehouse_id: 9 }, query: { item_ids: '7,8', warehouse_id: '9' } },
+    { args: {}, query: {} },
+    { args: { item_ids: [] }, query: {} },
+  ] },
+  { name: 'list_stock_locations', path: '/stock/locations', response: [{ id: 7, code: 'SYNTHETIC', warehouse_id: 9 }],
+    variants: [{ args: { warehouse_id: 9 }, query: { warehouse_id: '9' } }, { args: {}, query: {} }] },
+  { name: 'get_product_packaging', path: '/stock/items/7/packaging', response: { packaging: [{ code: 'BOX', factor: '6' }] },
+    variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'get_product_tracking', path: '/stock/items/7/tracking', response: {
+    tracking_mode: 'lot', units: [], inventory: [{ lot_number: 'SYNTHETIC', expires_on: '2027-01-01' }], history: [],
+  }, variants: [{ args: { id: 7 }, query: {} }] },
+  { name: 'get_purchase_invoice_payment', path: '/purchase-invoices/7/payment-qr', response: {
+    account_number: '1000000005', bank_code: '0100', amount: '100.00', currency: 'CZK',
+  }, variants: [
+    { args: { id: 7 }, query: {}, qr: 'data:image/png;base64,U1lOVEhFVElD' },
+    { args: { id: 7 }, query: {} },
+  ] },
+  { name: 'list_expense_categories', path: '/expense-categories', response: [{ id: 7, name: 'Syntetická kategorie' }],
+    variants: [{ args: { include_archived: true }, query: { include_archived: '1' } },
+      { args: { include_archived: false }, query: {} }, { args: {}, query: {} }] },
+];
+
+test('detaily skladu a plateb i kategorie nákladů jsou v obou rozsazích pouze čtecí', async () => {
+  const allowedTools = readDetails.map(entry => entry.name);
+  for (const scope of ['read', 'read_write']) {
+    const list = await runHosted({ operation: 'list', scope, boundSupplierId: 1, allowedTools });
+    assert.deepEqual(list.tools.map(tool => tool.name).sort(), allowedTools.toSorted());
+    assert.ok(list.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
+  }
+});
+
+for (const entry of readDetails) {
+  test(`${entry.name}: GET zachová filtry a odpověď a odmítne cizí firmu i nepovolené volání`, async () => {
+    const input = { operation: 'call', boundSupplierId: 1, lockedSupplierId: 1,
+      apiUrl: 'https://portal.example.test/api/v1', token: 'synthetic-token', allowedTools: [entry.name], name: entry.name };
+    for (const scope of ['read', 'read_write']) {
+      for (const variant of entry.variants) {
+        const calls = [];
+        const fetcher = async (url, options) => {
+          calls.push(options.method);
+          assert.equal(options.headers['X-Supplier-Id'], '1');
+          assert.equal(options.headers['X-MyUcto-Tool'], entry.name);
+          assert.equal(new URL(url).pathname, `/api/v1${entry.path}`);
+          assert.deepEqual(Object.fromEntries(new URL(url).searchParams), variant.query);
+          return new Response(JSON.stringify(variant.qr ? { ...entry.response, qr_data_uri: variant.qr } : entry.response));
+        };
+        const call = { ...input, scope, arguments: variant.args };
+        const result = await runHosted(call, fetcher);
+        assert.equal(result.isError, undefined, JSON.stringify(result));
+        const expected = entry.name === 'get_purchase_invoice_payment'
+          ? { ...entry.response, has_qr_image: Boolean(variant.qr) } : entry.response;
+        assert.deepEqual(result.structuredContent, Array.isArray(expected) ? { result: expected } : expected);
+        assert.deepEqual(calls, ['GET']);
+        const denied = await runHosted({ ...call, allowedTools: [] }, fetcher);
+        assert.equal(denied.isError, true);
+        assert.match(denied.content[0].text, /nemáte oprávnění/);
+        const foreign = await runHosted({ ...call, arguments: { ...variant.args, supplier_id: 2 } }, fetcher);
+        assert.equal(foreign.isError, true);
+        assert.match(foreign.content[0].text, /původně schválenou firmu/);
+        assert.deepEqual(calls, ['GET']);
+      }
+    }
+  });
+}

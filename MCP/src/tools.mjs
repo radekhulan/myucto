@@ -3934,8 +3934,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_product_packaging',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/items/{id}/packaging'],
+    ],
     title: 'Balení zboží',
     description:
       'Nadřazené jednotky karty (karton, paleta) — kód balení, poměr k základní jednotce '
@@ -4723,21 +4724,24 @@ export const TOOLS = [
   },
   {
     name: 'get_product_tracking',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/items/{id}/tracking'],
+    ],
     title: 'Šarže a sériová čísla zboží',
     description:
       'Režim sledování karty (`none`, `lot` šarže, `serial` sériová čísla), převodní jednotky '
       + 'šarží, aktuální rozpis zásoby po šaržích a sériových číslech včetně expirace a úplná '
-      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali".',
+      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali". '
+      + 'Klientská role dostane režim, jednotky a aktuální zásobu; historie pohybů je pro ni prázdná.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/tracking`, null, tool),
   },
   {
     name: 'list_stock_locations',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/locations'],
+    ],
     title: 'Skladové lokace',
     description: 'Lokace (regály, pozice) uvnitř skladů firmy, volitelně jen jednoho skladu.',
     inputSchema: schema({ warehouse_id: int('Jen lokace tohoto skladu.', { minimum: 1 }) }),
@@ -4889,15 +4893,17 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'stock_quantities',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/quantities'],
+    ],
     title: 'Množství ve třech dimenzích',
     description:
       'Pro každé zboží vrátí `on_hand` (skladem), `reserved` (drží vystavená faktura), '
       + '`sellable` = skladem − rezervováno, `in_transit` (objednáno a na cestě), '
       + '`at_vendor` (co hlásí dodavatelé) a `available_to_promise` = skladem − '
       + 'rezervováno + na cestě. K tomu rozpad po skladech, seznam objednávek, '
-      + 'které zboží vezou, a nabídky dodavatelů.\n\n'
+      + 'které zboží vezou, a nabídky dodavatelů. Klientská role nedostane seznam '
+      + 'zdrojových objednávek ani nabídky dodavatelů.\n\n'
       + 'Zákazníkovi slibuj `sellable`, ne `on_hand` — jinak prodáš kus, který už '
       + 'někdo koupil. `available_to_promise` je interní číslo pro plánování nákupu, '
       + 'protože zahrnuje i to, co teprve dorazí; může vyjít i záporně (prodalo se '

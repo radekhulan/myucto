@@ -423,6 +423,24 @@
       ]
     ]
   },
+  "get_product_packaging": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/packaging"
+      ]
+    ]
+  },
+  "get_product_tracking": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/tracking"
+      ]
+    ]
+  },
   "get_project": {
     "write": false,
     "api": [
@@ -447,6 +465,15 @@
       [
         "GET",
         "/api/purchase-invoices/{id}/activity"
+      ]
+    ]
+  },
+  "get_purchase_invoice_payment": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/payment-qr"
       ]
     ]
   },
@@ -519,6 +546,15 @@
       [
         "GET",
         "/api/codebooks/currencies"
+      ]
+    ]
+  },
+  "list_expense_categories": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/expense-categories"
       ]
     ]
   },
@@ -639,6 +675,15 @@
       [
         "GET",
         "/api/recurring"
+      ]
+    ]
+  },
+  "list_stock_locations": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/locations"
       ]
     ]
   },
@@ -964,6 +1009,15 @@
       [
         "GET",
         "/api/stock/availability"
+      ]
+    ]
+  },
+  "stock_quantities": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/quantities"
       ]
     ]
   },

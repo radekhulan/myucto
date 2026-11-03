@@ -220,7 +220,12 @@ klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpr
 přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
 strukturovaný import. Ke čtení jsou také zůstatky bankovních účtů, návrhy
 párování výpisů, historie faktur ze šablony, hledání zboží, jeho dostupnost
-a seznam/detail skladů. Ostatní nástroje zůstávají výslovně vyloučené, dokud
+a seznam/detail skladů. Čtení skladu zpřístupňuje i `stock_quantities`, lokace,
+balení a sledování šarží/sériových čísel. Server klientovi nevrací zdrojové
+objednávky, nabídky dodavatelů ani historii pohybů šarží/sériových čísel.
+Platební údaje přijaté faktury vyžadují její čtení; obrázek QR se do MCP
+nepředává. Kategorie nákladů vyžadují čtení nastavení firmy.
+Ostatní nástroje zůstávají výslovně vyloučené, dokud
 nebudou převedené se stejným ověřením závislostí.
 
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
