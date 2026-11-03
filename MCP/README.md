@@ -216,8 +216,10 @@ a vazba na firmu ověřují znovu v API.
 nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář
 v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným operacím a
 zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
-klientské nástroje, výkazy práce a sazby DPH; ostatní nástroje zůstávají výslovně
-vyloučené, dokud nebudou převedené se stejným ověřením závislostí.
+klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpravy
+přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
+strukturovaný import. Ostatní nástroje zůstávají výslovně vyloučené, dokud
+nebudou převedené se stejným ověřením závislostí.
 
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
 pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník

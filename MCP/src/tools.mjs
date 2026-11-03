@@ -2240,8 +2240,9 @@ export const TOOLS = [
   },
   {
     name: 'list_currencies',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/codebooks/currencies'],
+    ],
     title: 'Měny dokladů',
     description:
       'Měny firmy s jejich ID. `currency_id` z tohoto seznamu patří do objednávek '
@@ -5827,8 +5828,9 @@ export const TOOLS = [
   },
   {
     name: 'resolve_price_list_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/price-list-items/{id}/resolve'],
+    ],
     title: 'Cena položky ceníku pro odběratele',
     description:
       'Výsledná jednotková cena jedné položky ceníku v měně dokladu: individuální cena '

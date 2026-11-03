@@ -50,3 +50,66 @@ test('výkazy respektují čtecí rozsah tokenu i přímé volání', async () =
     assert.equal(called, false);
   }
 });
+
+const documentReadTools = ['list_currencies', 'resolve_price_list_item'];
+const documentWriteTools = ['update_purchase_invoice', 'add_purchase_invoice_item', 'update_purchase_invoice_item',
+  'remove_purchase_invoice_item', 'upload_invoice_attachment', 'upload_purchase_invoice_pdf', 'import_purchase_invoice_file'];
+
+test('číselníky jsou čtecí, změny přijatých konceptů a soubory vyžadují zápisový token i povolený nástroj', async () => {
+  const input = { boundSupplierId: 1, allowedTools: [...documentReadTools, ...documentWriteTools] };
+  for (const scope of ['read', 'read_write']) {
+    const list = await runHosted({ ...input, scope, operation: 'list' });
+    assert.deepEqual(list.tools.map(t => t.name).sort(),
+      (scope === 'read' ? documentReadTools : input.allowedTools).toSorted());
+  }
+  for (const name of documentWriteTools) {
+    let called = false;
+    const invoke = (settings) => runHosted({ ...input, operation: 'call', name, arguments: {}, ...settings },
+      () => { called = true; });
+    const read = await invoke({ scope: 'read' });
+    assert.equal(read.isError, true, name);
+    assert.match(read.content[0].text, /jen pro čtení/);
+    const denied = await invoke({ scope: 'read_write', allowedTools: documentReadTools });
+    assert.equal(denied.isError, true, name);
+    assert.match(denied.content[0].text, /nemáte oprávnění/);
+    assert.equal(called, false);
+  }
+});
+
+test('klientské souborové nástroje posílají multipart ve své firmě a náhrada PDF vyžaduje potvrzení', async () => {
+  const content = '%PDF-synthetic';
+  const file = { filename: 'synthetic.pdf', content_base64: Buffer.from(content).toString('base64') };
+  const input = { operation: 'call', scope: 'read_write', boundSupplierId: 1, lockedSupplierId: 1,
+    apiUrl: 'https://portal.example.test/api/v1', token: 'synthetic-token',
+    allowedTools: ['upload_invoice_attachment', 'upload_purchase_invoice_pdf', 'import_purchase_invoice_file'] };
+  for (const entry of [
+    { name: 'upload_invoice_attachment', args: { id: 7, ...file }, path: '/api/v1/invoices/7/attachments' },
+    { name: 'import_purchase_invoice_file', args: file, path: '/api/v1/purchase-invoices/import-structured' },
+    { name: 'upload_purchase_invoice_pdf', args: { id: 7, ...file }, path: '/api/v1/purchase-invoices/7/pdf' },
+    { name: 'upload_purchase_invoice_pdf', args: { id: 7, ...file }, existing: true, blocked: true },
+    { name: 'upload_purchase_invoice_pdf', args: { id: 7, ...file, confirm: true }, existing: true, path: '/api/v1/purchase-invoices/7/pdf' },
+  ]) {
+    const calls = [];
+    const result = await runHosted({ ...input, name: entry.name, arguments: entry.args }, async (url, options) => {
+      calls.push([options.method, new URL(url).pathname]);
+      assert.equal(options.headers['X-Supplier-Id'], '1');
+      if (options.method === 'GET') {
+        return new Response(JSON.stringify({ id: 7, pdf_path: entry.existing ? 'synthetic.pdf' : null }));
+      }
+      assert.equal(options.method, 'POST');
+      assert.match(options.headers['Content-Type'], /^multipart\/form-data; boundary=/);
+      const body = Buffer.from(options.body).toString('utf8');
+      assert.match(body, /filename="synthetic.pdf"/);
+      assert.ok(body.includes(content));
+      return new Response(JSON.stringify({ id: 7, uploaded: true }));
+    });
+    if (entry.blocked) {
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /chybí potvrzení/);
+      assert.deepEqual(calls, [['GET', '/api/v1/purchase-invoices/7']]);
+    } else {
+      assert.equal(result.isError, undefined, JSON.stringify(result));
+      assert.deepEqual(calls.at(-1), ['POST', entry.path]);
+    }
+  }
+});

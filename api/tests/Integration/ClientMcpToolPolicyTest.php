@@ -22,11 +22,17 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 /** Skutečná resoluce rolí nad izolovanou SQLite; doménová politika i RBAC jsou produkční. */
 final class ClientMcpToolPolicyTest extends TestCase
 {
+    private const DOCUMENT_READ_TOOLS = ['list_currencies', 'resolve_price_list_item'];
+    private const DOCUMENT_WRITE_TOOLS = [
+        'update_purchase_invoice', 'add_purchase_invoice_item', 'update_purchase_invoice_item', 'remove_purchase_invoice_item',
+        'upload_invoice_attachment', 'upload_purchase_invoice_pdf', 'import_purchase_invoice_file',
+    ];
+
     #[TestWith(['client_read'])]
     #[TestWith(['client_write'])]
     #[TestWith(['accountant'])]
     #[TestWith(['admin'])]
-    public function testCatalogChangesOnlyByWorkReportsAndVatRates(string $preset): void
+    public function testCatalogAddsOnlyWorkReportsAndDocumentWorkflow(string $preset): void
     {
         // Zmrazená nabídka původního client-tools.json nad b939f31a7; není zdrojem produkčních práv.
         $baseline = json_decode(file_get_contents(__DIR__ . '/../Fixtures/Mcp/client-catalog-baseline.json'), true, flags: JSON_THROW_ON_ERROR);
@@ -35,13 +41,57 @@ final class ClientMcpToolPolicyTest extends TestCase
         foreach (['read', 'read_write'] as $scope) {
             $actual = array_values(array_filter($allowed, fn ($name) => $scope === 'read_write' || !$manifest[$name]['write']));
             sort($actual);
-            $additions = ['get_work_report', 'list_vat_rates'];
+            $additions = ['get_work_report', 'list_vat_rates', ...self::DOCUMENT_READ_TOOLS];
             if ($scope === 'read_write' && $preset !== 'client_read') {
-                array_push($additions, 'add_work_report_entry', 'add_work_report_material', 'remove_work_report_entry');
+                array_push($additions, 'add_work_report_entry', 'add_work_report_material', 'remove_work_report_entry', ...self::DOCUMENT_WRITE_TOOLS);
             }
             $expected = [...$baseline[$preset][$scope], ...$additions];
             sort($expected);
             self::assertSame($expected, $actual, $preset . ' / ' . $scope);
+        }
+    }
+
+    public function testPurchaseWorkflowRequiresAllAgendaPermissions(): void
+    {
+        $minimal = ['purchase_invoices' => 2, 'clients' => 1, 'settings.company' => 1];
+        $allowed = $this->catalog('client_none', overrides: $minimal);
+        self::assertContains('update_purchase_invoice', $allowed);
+        foreach (['add_purchase_invoice_item', 'update_purchase_invoice_item', 'remove_purchase_invoice_item', 'upload_purchase_invoice_pdf'] as $name) {
+            self::assertContains($name, $allowed);
+        }
+        self::assertNotContains('upload_invoice_attachment', $allowed);
+        self::assertNotContains('import_purchase_invoice_file', $allowed);
+        foreach (['clients', 'settings.company'] as $missing) {
+            $permissions = $minimal;
+            unset($permissions[$missing]);
+            $allowed = $this->catalog('client_none', overrides: $permissions);
+            self::assertNotContains('update_purchase_invoice', $allowed, $missing);
+            self::assertContains('add_purchase_invoice_item', $allowed);
+        }
+        foreach ([0, 1] as $level) {
+            $allowed = $this->catalog('client_none', overrides: [...$minimal, 'purchase_invoices' => $level]);
+            self::assertSame([], array_values(array_intersect(self::DOCUMENT_WRITE_TOOLS, $allowed)));
+        }
+    }
+
+    public function testFileOperationsUseTheirOwnAgendaPermissions(): void
+    {
+        $issued = $this->catalog('client_none', overrides: ['invoices' => 2]);
+        self::assertSame(['upload_invoice_attachment'], array_values(array_intersect(self::DOCUMENT_WRITE_TOOLS, $issued)));
+        $import = $this->catalog('client_none', overrides: ['purchase_invoices.create' => 2]);
+        self::assertSame(['import_purchase_invoice_file'], array_values(array_intersect(self::DOCUMENT_WRITE_TOOLS, $import)));
+    }
+
+    public function testCurrenciesAndPriceResolutionRespectReadAlternatives(): void
+    {
+        $none = $this->catalog('client_none');
+        self::assertNotContains('list_currencies', $none);
+        self::assertNotContains('resolve_price_list_item', $none);
+        foreach (['settings.company', 'price_list', 'stock', 'projects'] as $key) {
+            self::assertContains('list_currencies', $this->catalog('client_none', overrides: [$key => 1]), $key);
+        }
+        foreach (['price_list', 'invoices', 'recurring'] as $key) {
+            self::assertContains('resolve_price_list_item', $this->catalog('client_none', overrides: [$key => 1]), $key);
         }
     }
 
@@ -106,7 +156,7 @@ final class ClientMcpToolPolicyTest extends TestCase
     }
 
     /** @return list<string> */
-    public function catalog(string $preset, ?string $missing = null, ?string $manifestPath = null): array
+    public function catalog(string $preset, ?string $missing = null, ?string $manifestPath = null, array $overrides = []): array
     {
         $catalog = new PermissionCatalog();
         $type = str_starts_with($preset, 'client_') ? 'client' : 'staff';
@@ -118,6 +168,7 @@ final class ClientMcpToolPolicyTest extends TestCase
         }
         // Testujeme čtecí i zápisový token nad stejnou maticí agend.
         $permissions['profile.mcp'] = 2;
+        $permissions = [...$permissions, ...$overrides];
         unset($permissions[$missing ?? '']);
         $pdo = new PDO('sqlite::memory:', options: [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $pdo->exec('CREATE TABLE roles (id INTEGER PRIMARY KEY, system_key TEXT, name TEXT, role_type TEXT, is_active INTEGER);
