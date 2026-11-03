@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventSe
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Hlášky registračních událostí A2–A8 jdou beze změny přes akci až do
@@ -259,14 +260,17 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
 
     /**
      * Postavení v zaměstnání v A3/A4 se kontroluje proti číselníku ročníku
-     * věty podle dne platnosti: REGZEC 2025 slovník 1.4.1.6 (2119),
-     * REGZEC 2027 ČSÚ (2219).
+     * věty: REGZEC 2025 slovník 1.4.1.6 (2119), REGZEC 2027 ČSÚ (2219).
+     * U aktivního vztahu rozhoduje podle odpovědi ČSSZ 13 den vyhotovení
+     * (od 23. 12. 2026 REGZEC27), ne den platnosti změny.
      */
     public function testEmploymentChangeChecksStatusAgainstVintageCodebook(): void
     {
-        $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
         $method = new \ReflectionMethod(PayrollRegistrationEventService::class, 'employmentChange');
-        $rejected = static function (array $employment, string $effectiveOn) use ($method, $service): bool {
+        $rejected = static function (array $employment, string $effectiveOn, string $now) use ($method): bool {
+            $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
+            (new \ReflectionProperty(PayrollRegistrationEventService::class, 'clock'))
+                ->setValue($service, new MockClock($now . ' 10:00:00'));
             try {
                 $method->invoke($service, $employment, $effectiveOn);
                 return false;
@@ -276,10 +280,11 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
             }
         };
 
-        self::assertFalse($rejected(['employment_status_code' => '2119'], '2026-12-10'));
-        self::assertTrue($rejected(['employment_status_code' => '2219'], '2026-12-10'));
-        self::assertFalse($rejected(['employment_status_code' => '2219'], '2027-01-10'));
-        self::assertTrue($rejected(['employment_status_code' => '2119'], '2027-01-10'));
+        self::assertFalse($rejected(['employment_status_code' => '2119'], '2026-12-10', '2026-12-10'));
+        self::assertTrue($rejected(['employment_status_code' => '2219'], '2026-12-10', '2026-12-10'));
+        // Změna s platností v roce 2026 vyhotovená v lednu 2027 jde jako REGZEC27.
+        self::assertFalse($rejected(['employment_status_code' => '2219'], '2026-12-15', '2027-01-05'));
+        self::assertTrue($rejected(['employment_status_code' => '2119'], '2026-12-15', '2027-01-05'));
     }
 
     private function messageFrom(string $method, array $arguments): string

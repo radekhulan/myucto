@@ -2950,10 +2950,16 @@ final readonly class PayrollRegistrationEventService
         }
         if (isset($result['employment_status_code'])) {
             $code = (string) $result['employment_status_code'];
-            // Číselník podle ročníku věty. Pracovní údaje změny skončení
-            // nenesou, rozhodným datem je tedy den platnosti změny
-            // (PayrollRegistrationSchemaCatalog::decisiveDate).
-            $version = PayrollRegistrationEmploymentStatusCodebook::versionForDate($effectiveOn);
+            // Číselník podle ročníku věty, tedy podle téže volby jako schéma
+            // (PayrollRegistrationSchemaCatalog::versionFor). U A3 bez data
+            // skončení rozhoduje podle odpovědi ČSSZ 13 den vyhotovení, ne den
+            // platnosti změny; datum skončení doplní až withRegisteredEnd().
+            $version = PayrollRegistrationSchemaCatalog::versionFor(
+                3,
+                $effectiveOn,
+                null,
+                PayrollSubmissionCalendar::today($this->clock->now()),
+            );
             if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code, $version)) {
                 throw new \InvalidArgumentException($this->say(
                     'employment.employment_status_code',
