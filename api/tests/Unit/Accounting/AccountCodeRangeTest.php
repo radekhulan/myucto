@@ -16,6 +16,7 @@ final class AccountCodeRangeTest extends TestCase
         $range = AccountCodeRange::parse(' 0 ', ' 221.kb ');
         self::assertSame('0', $range->from);
         self::assertSame('221.KB', $range->to);
+        self::assertSame('221.KA', AccountCodeRange::parse(' 221.ka ', '221.kb')->from, 'Dolní mez se převádí stejně jako horní.');
         self::assertSame(['', 'ZZZZZZZZZZ'], AccountCodeRange::parse('', '')->sqlBounds());
         self::assertSame(['5', '5ZZZZZZZZZZ'], AccountCodeRange::parse('5', '5')->sqlBounds());
     }
