@@ -9,6 +9,7 @@ import { codebooksApi, type Currency } from '@/api/codebooks'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { unitPriceText } from '@/utils/unitPrice'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -140,7 +141,7 @@ onMounted(async () => {
               <td class="px-4 py-3">
                 <div class="flex flex-wrap gap-1">
                   <span v-for="price in item.prices.filter(row => !row.archived)" :key="price.currency_code" class="status-badge bg-neutral-100 text-neutral-700 font-mono">
-                    {{ price.currency_code }} {{ Number(price.unit_price).toFixed(2) }}
+                    {{ price.currency_code }} {{ unitPriceText(Number(price.unit_price)) }}
                   </span>
                   <span v-if="item.allow_exchange_rate_conversion" class="status-badge bg-primary-50 text-primary-700">{{ t('price_list.conversion_badge') }}</span>
                 </div>
@@ -178,7 +179,7 @@ onMounted(async () => {
           </div>
           <div class="flex flex-wrap gap-1">
             <span v-for="price in item.prices.filter(row => !row.archived)" :key="price.currency_code" class="status-badge bg-neutral-100 text-neutral-700 font-mono">
-              {{ price.currency_code }} {{ Number(price.unit_price).toFixed(2) }}
+              {{ price.currency_code }} {{ unitPriceText(Number(price.unit_price)) }}
             </span>
             <span v-if="item.allow_exchange_rate_conversion" class="status-badge bg-primary-50 text-primary-700">{{ t('price_list.conversion_badge') }}</span>
           </div>

@@ -3396,7 +3396,7 @@ useWindowRefresh(async () => {
                 <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ m.description }}</td>
                 <td class="px-4 py-2 text-right font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }}</td>
                 <td class="px-4 py-2 text-neutral-600">{{ m.unit }}</td>
-                <td class="px-4 py-2 text-right font-mono">{{ formatMoney(m.unit_price, invoice.currency) }}</td>
+                <td class="px-4 py-2 text-right font-mono">{{ formatUnitPrice(m.unit_price, invoice.currency) }}</td>
                 <td class="px-5 py-2 text-right font-mono">{{ formatMoney(Number(m.total_amount ?? Number(m.quantity) * Number(m.unit_price)), invoice.currency) }}</td>
               </tr>
               <tr class="bg-neutral-50 font-semibold">
@@ -3414,7 +3414,7 @@ useWindowRefresh(async () => {
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
               <span class="font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }} {{ m.unit }}</span>
               <span>
-                <span class="font-mono">{{ formatMoney(m.unit_price, invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(m.unit_price, invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
                 <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(Number(m.total_amount ?? Number(m.quantity) * Number(m.unit_price)), invoice.currency) }}</span>
               </span>

@@ -30,7 +30,8 @@ import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
-import { formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
+import { formatMoney, formatNumber, formatPercent, formatUnitPrice } from '@/composables/useFormat'
+import { hasSubCentPrice, roundUnitPrice, unitPriceDecimals, unitPriceText } from '@/utils/unitPrice'
 import { formatAdjustment } from '@/pages/eshop/priceAdjustment'
 import { evalMath } from '@/directives/vMath'
 import { apiErrorMessage } from '@/api/errors'
@@ -226,7 +227,7 @@ const priceListOptions = computed(() => priceListItems.value.map(item => {
     value: item.id,
     label: `${item.code} · ${item.name}`,
     secondary: resolved
-      ? `${t(`price_list.price_source.${resolved.catalog_price_source}`)} · ${resolved.unit_price_without_vat.toFixed(2)} ${resolved.target_currency_code}${resolved.catalog_exchange_rate_date ? ` · ${resolved.catalog_exchange_rate_date}` : ''}`
+      ? `${t(`price_list.price_source.${resolved.catalog_price_source}`)} · ${unitPriceText(resolved.unit_price_without_vat)} ${resolved.target_currency_code}${resolved.catalog_exchange_rate_date ? ` · ${resolved.catalog_exchange_rate_date}` : ''}`
       : undefined,
   }
 }))
@@ -542,7 +543,8 @@ function stockPriceForRow(item: InvoiceItem, net: number | null): number | null
 function stockPriceForRow(item: InvoiceItem, net: number | null): number | null {
   if (net === null || !form.value.prices_include_vat || !supplierIsVatPayer.value || form.value.reverse_charge) return net
   const rate = vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0
-  return round2(net * (100 + rate) / 100)
+  const gross = net * (100 + rate) / 100
+  return hasSubCentPrice(net) ? roundUnitPrice(gross) : round2(gross)
 }
 
 /** Odběratel bez hladiny u karty bez funkcí: řádek dostane zpět původní cenu karty, jednotka zůstává. */
@@ -604,7 +606,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       }
       if (si.promo_price != null) {
         toast.info(t('invoice.promo_price_applied', {
-          price: formatMoney(stockPriceForRow(item, Number(si.promo_price))),
+          price: formatUnitPrice(stockPriceForRow(item, Number(si.promo_price))),
           label: si.promo_label ?? t('invoice.promo_price_generic'),
         }))
       }
@@ -626,7 +628,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       void quoteStockRows([item], 'select', initialStockUnit(si)).then((quoted) => {
         if (!quoted && quoteFailureFallback('select', si)?.promoToast) {
           toast.info(t('invoice.promo_price_applied', {
-            price: formatMoney(stockPriceForRow(item, Number(si.promo_price))),
+            price: formatUnitPrice(stockPriceForRow(item, Number(si.promo_price))),
             label: si.promo_label ?? t('invoice.promo_price_generic'),
           }))
         }
@@ -802,7 +804,7 @@ function lineDiscountHint(item: InvoiceItem): string | null {
   const pct = lineDiscountPct(item.list_unit_price, item.unit_price_without_vat)
   if (pct === null || item.list_unit_price == null) return null
   const params = {
-    price: formatNumber(Number(item.list_unit_price), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    price: formatNumber(Number(item.list_unit_price), { minimumFractionDigits: 2, maximumFractionDigits: unitPriceDecimals(item.list_unit_price) }),
     pct: formatNumber(Math.abs(pct), { maximumFractionDigits: 2 }),
   }
   // Se slevou zadávanou u řádku je vidět, že se skladový řádek počítá z ceníku karty (ne z ceny hladiny).
@@ -4316,7 +4318,7 @@ useWindowTitle(
                   </select>
                 </td>
                 <td class="px-2 py-1.5">
-                  <input v-model.number="m.unit_price" type="number" step="0.01" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                  <input v-model.number="m.unit_price" type="number" step="any" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
                   {{ formatMoney((Number(m.quantity) || 0) * (Number(m.unit_price) || 0), form.currency) }}
@@ -4387,7 +4389,7 @@ useWindowTitle(
               <div class="grid grid-cols-2 gap-2 items-end">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                  <input v-model.number="m.unit_price" type="number" inputmode="decimal" step="0.01" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
+                  <input v-model.number="m.unit_price" type="number" inputmode="decimal" step="any" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
                 </div>
                 <div class="text-right pb-2">
                   <div class="text-xs font-medium text-neutral-500 uppercase tracking-wide">{{ t('invoice.wr_total') }}</div>

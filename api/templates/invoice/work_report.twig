@@ -52,7 +52,7 @@
 
 {% if work_report.material_total > 0 and work_report.materials|length > 0 %}
 {% set qty_dec  = (work_report.materials|filter(m => m.quantity != m.quantity|round(0))|length) > 0 ? 3 : 0 %}
-{% set mprice_dec = (work_report.materials|filter(m => m.unit_price != m.unit_price|round(0))|length) > 0 ? 2 : 0 %}
+{% set mprice_dec = work_report.material_price_decimals ?? ((work_report.materials|filter(m => m.unit_price != m.unit_price|round(0))|length) > 0 ? 2 : 0) %}
 {% set mtotal_dec = (work_report.materials|filter(m => m.total_amount != m.total_amount|round(0))|length) > 0 ? 2 : 0 %}
 
 <div class="wr-report-title" style="margin-top:6mm;margin-bottom:2mm;font-size:10pt;font-weight:bold;">{{ work_report.material_title|default(t('Materiál', 'Material')) }}</div>

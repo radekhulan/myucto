@@ -15,6 +15,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\PriceListItemResolver;
 use MyInvoice\Service\Invoice\PriceListResolutionException;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\CommercialFeatureAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -236,7 +237,7 @@ final class PriceListItemAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $price = $this->validPrice($body['unit_price'] ?? null);
-        if ($price === null) return Json::error($response, 'validation_failed', 'Cena musí být nezáporné číslo.', 400);
+        if ($price === null) return Json::error($response, 'validation_failed', 'Cena musí být nezáporné číslo s nejvýše šesti desetinnými místy.', 400);
 
         $item = $this->repo->find($id, $supplierId);
         $existed = array_any($item['prices'] ?? [], static fn (array $row): bool => $row['currency_code'] === $currency);
@@ -307,7 +308,7 @@ final class PriceListItemAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $price = $this->validPrice($body['unit_price'] ?? null);
-        if ($price === null) return Json::error($response, 'validation_failed', 'Cena musí být nezáporné číslo.', 400);
+        if ($price === null) return Json::error($response, 'validation_failed', 'Cena musí být nezáporné číslo s nejvýše šesti desetinnými místy.', 400);
 
         $existed = array_any(
             $this->repo->customerOverrides($supplierId, $id),
@@ -427,7 +428,7 @@ final class PriceListItemAction
             }
             if (isset($seen[$code])) return "Cena pro měnu {$code} je uvedena vícekrát.";
             $seen[$code] = true;
-            if ($this->validPrice($price['unit_price']) === null) return "Cena pro měnu {$code} musí být nezáporné číslo.";
+            if ($this->validPrice($price['unit_price']) === null) return "Cena pro měnu {$code} musí být nezáporné číslo s nejvýše šesti desetinnými místy.";
             if ($code === $base && empty($price['archived'])) $hasBase = true;
         }
         if ($requirePrices && !$hasBase) return 'Základní cena musí být aktivní.';
@@ -442,9 +443,9 @@ final class PriceListItemAction
 
     private function validPrice(mixed $value): ?float
     {
-        if (!is_numeric($value)) return null;
+        if (!is_numeric($value) || !UnitPricePrecision::isWithinPrecision($value)) return null;
         $price = (float) $value;
-        return is_finite($price) && $price >= 0 ? $price : null;
+        return is_finite($price) && $price >= 0 && $price < 10000000000 ? $price : null;
     }
 
     private function validCurrencyCode(string $code): bool

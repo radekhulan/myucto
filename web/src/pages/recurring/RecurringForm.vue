@@ -17,6 +17,7 @@ import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { formatMoney } from '@/composables/useFormat'
+import { roundUnitPrice, unitPriceText } from '@/utils/unitPrice'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { usePaneDom } from '@/composables/usePaneDom'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -432,7 +433,7 @@ function catalogSnapshotChanged(item: FormItem): boolean {
   if (!current) return false
   return item.catalog_price_source !== current.catalog_price_source
     || item.catalog_source_currency_code !== current.catalog_source_currency_code
-    || Math.abs(Number(item.catalog_source_unit_price ?? 0) - current.catalog_source_unit_price) >= 0.005
+    || roundUnitPrice(Number(item.catalog_source_unit_price ?? 0)) !== roundUnitPrice(Number(current.catalog_source_unit_price))
     || item.unit !== current.unit
     || item.vat_rate_id !== current.vat_rate_id
     || (item.description_source === 'catalog' && item.description !== current.description)
@@ -442,7 +443,7 @@ function catalogCurrentLabel(item: FormItem): string {
   const current = item.catalog_current
   if (!current) return ''
   return t('recurring.catalog_current_values', {
-    price: current.catalog_source_unit_price,
+    price: unitPriceText(current.catalog_source_unit_price),
     currency: current.catalog_source_currency_code,
     unit: current.unit,
     vat: current.vat_rate_percent,

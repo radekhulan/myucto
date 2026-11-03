@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -73,7 +74,7 @@ final class StockLevelRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
             $row = self::castLevel($r);
             if (in_array('sale_price', $extraColumns, true)) {
-                $row['sale_price'] = $r['sale_price'] !== null ? (string) $r['sale_price'] : null;
+                $row['sale_price'] = $r['sale_price'] !== null ? (string) UnitPricePrecision::toDecimalString($r['sale_price']) : null;
             }
             if (in_array('note', $extraColumns, true)) {
                 $row['note'] = $r['note'] !== null && $r['note'] !== '' ? (string) $r['note'] : null;

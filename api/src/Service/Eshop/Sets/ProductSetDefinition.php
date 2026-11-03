@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Eshop\Sets;
 
 use MyInvoice\Service\Eshop\EshopException;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class ProductSetDefinition
 {
@@ -50,7 +51,7 @@ final class ProductSetDefinition
             if (!in_array($mode, ['sum', 'discount', 'fixed'], true)) self::fail('set_price_invalid');
             $discount = $mode === 'discount' ? self::decimal($price['discount_pct'] ?? null, 3, 3, true) : null;
             if ($discount !== null && bccomp($discount, '100', 3) > 0) self::fail('set_price_invalid');
-            $result['prices'][$currency] = ['mode' => $mode, 'discount_pct' => $discount, 'fixed_price' => $mode === 'fixed' ? self::money($price['fixed_price'] ?? null) : null];
+            $result['prices'][$currency] = ['mode' => $mode, 'discount_pct' => $discount, 'fixed_price' => $mode === 'fixed' ? self::unitPrice($price['fixed_price'] ?? null) : null];
         }
         return $result;
     }
@@ -63,6 +64,16 @@ final class ProductSetDefinition
     public static function money(mixed $value): string
     {
         return self::decimal($value, 12, 2, true);
+    }
+
+    /**
+     * Jednotková cena (cena komponenty, pevná cena setu): šest desetinných míst jako
+     * cena karty, tvar {@see UnitPricePrecision::toDecimalString}, takže haléřová
+     * cena zůstává „99.99".
+     */
+    public static function unitPrice(mixed $value): string
+    {
+        return (string) UnitPricePrecision::toDecimalString(self::decimal($value, 12, UnitPricePrecision::DECIMALS, true));
     }
 
     public static function multiply(string $first, string $second): string

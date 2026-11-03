@@ -16,6 +16,7 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -131,6 +132,9 @@ final class SaveWorkReportMaterialsAction
             }
             if ((float) ($m['unit_price'] ?? 0) < 0) {
                 return Json::error($response, 'validation_failed', "Řádek $row: cena nesmí být záporná.", 400);
+            }
+            if (!UnitPricePrecision::isWithinPrecision($m['unit_price'] ?? null)) {
+                return Json::error($response, 'validation_failed', "Řádek $row: cena za jednotku smí mít nejvýše šest desetinných míst.", 400);
             }
         }
 

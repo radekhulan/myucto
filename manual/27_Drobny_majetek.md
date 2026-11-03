@@ -61,7 +61,8 @@ Ruční kartu použijte pro historický majetek, dar nebo vklad, který nemá do
 3. Uložte.
 
 **Jak poznáte, že je hotovo:** hláška **Karta založena.** a karta je v seznamu se zdrojem **Bez dokladu**. Cena musí být
-nezáporná, množství kladné a datum uvedení do používání nesmí předcházet pořízení.
+nezáporná, množství kladné a datum uvedení do používání nesmí předcházet pořízení. Cenu za kus lze zadat až na
+šest desetinných míst (levný majetek po tisících kusů), cena karty je v haléřích.
 
 ## 27.4 Krok za krokem: najít kartu v seznamu
 

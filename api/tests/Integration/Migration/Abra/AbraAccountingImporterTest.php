@@ -1767,10 +1767,10 @@ final class AbraAccountingImporterTest extends TestCase
             FROM stock_item_prices WHERE supplier_id = ? ORDER BY currency_code');
         $price->execute([$this->supplier]);
         self::assertSame([
-            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100.00', 'computed_price' => '100.00'],
-            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '100.00', 'computed_price' => '100.00'],
-            ['currency_code' => 'GBP', 'price_mode' => 'fixed', 'fixed_price' => '20.00', 'computed_price' => '20.00'],
-            ['currency_code' => 'USD', 'price_mode' => 'fixed', 'fixed_price' => '24.79', 'computed_price' => '24.79'],
+            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100.000000', 'computed_price' => '100.000000'],
+            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '100.000000', 'computed_price' => '100.000000'],
+            ['currency_code' => 'GBP', 'price_mode' => 'fixed', 'fixed_price' => '20.000000', 'computed_price' => '20.000000'],
+            ['currency_code' => 'USD', 'price_mode' => 'fixed', 'fixed_price' => '24.793388', 'computed_price' => '24.793388'],
         ], $price->fetchAll(\PDO::FETCH_ASSOC));
         $this->db->pdo()->prepare('UPDATE stock_items SET name = "Manually edited" WHERE supplier_id = ?')->execute([$this->supplier]);
         $changed = $this->catalogImporter->importPage($this->supplier, $rows, $cancelled);

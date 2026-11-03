@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemCustomerPriceRepository;
 use MyInvoice\Repository\StockItemPriceRepository;
 use MyInvoice\Repository\StockItemPromoPriceRepository;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -49,9 +50,9 @@ use PDO;
  * S `$clientId` se nejdřív hledá zákaznická cena karty platná k `$onDate`
  * v téže měně (`stock_item_customer_prices`). Ta NAHRAZUJE standardní cenu jako
  * základ: pevná cena → `fixed_price`, sleva → standardní cena × (1 − pct/100)
- * na haléře. Akční cena se pak použije jen tehdy, když je levnější než tento
- * základ (stejná `not_cheaper` logika) — zákazník dostane lepší z obou. Bez
- * klienta se chování nemění. Množstevní stropy akcí se posuzují v ZÁKLADNÍCH
+ * na šest desetinných míst jako cena karty. Akční cena se pak použije jen tehdy,
+ * když je levnější než tento základ (stejná `not_cheaper` logika) — zákazník
+ * dostane lepší z obou. Bez klienta se chování nemění. Množstevní stropy akcí se posuzují v ZÁKLADNÍCH
  * jednotkách karty (`$qty` musí volající převést přes StockUnitConverter).
  *
  * ── Cenové hladiny odběratelů (migrace 1833) ────────────────────────────────
@@ -65,8 +66,8 @@ use PDO;
  */
 final class EffectivePriceResolver
 {
-    /** Měřítko pro peníze (haléře) a pro množství (shodné s DECIMAL(14,3)). */
-    private const MONEY_SCALE = 2;
+    /** Měřítko jednotkové ceny (DECIMAL(16,6)) a množství (shodné s DECIMAL(14,3)). */
+    private const PRICE_SCALE = UnitPricePrecision::DECIMALS;
     private const QTY_SCALE = 3;
 
     public function __construct(
@@ -113,7 +114,7 @@ final class EffectivePriceResolver
 
     /**
      * Cena za základní jednotku podle řádku zákaznické ceny: pevná cena, nebo
-     * standardní cena ponížená o slevu (haléře, half-up). Záporná sleva je přirážka
+     * standardní cena ponížená o slevu (šest míst, half-up). Záporná sleva je přirážka
      * (cenové hladiny); výsledek je i tak vždy nezáporný, protože sleva je nejvýš 100 %.
      * Sleva bez standardní ceny nemá z čeho počítat → null.
      *
@@ -122,14 +123,14 @@ final class EffectivePriceResolver
     public static function customerBaseline(?string $standardPrice, array $row): ?string
     {
         if ((string) $row['price_type'] === 'fixed') {
-            return $row['fixed_price'] !== null ? bcadd((string) $row['fixed_price'], '0', self::MONEY_SCALE) : null;
+            return $row['fixed_price'] !== null ? self::unitPrice(bcadd((string) $row['fixed_price'], '0', self::PRICE_SCALE)) : null;
         }
         if ($standardPrice === null || $row['discount_pct'] === null) {
             return null;
         }
         $factor = bcsub('100', (string) $row['discount_pct'], 6);
         $raw = bcdiv(bcmul($standardPrice, $factor, 10), '100', 10);
-        return bcadd($raw, '0.005', self::MONEY_SCALE);
+        return self::unitPrice(bcadd($raw, '0.0000005', self::PRICE_SCALE));
     }
 
     /**
@@ -370,7 +371,7 @@ final class EffectivePriceResolver
 
             // Akce dražší (nebo stejná) než standardní cena nemá co zlepšit. Kandidáti
             // jsou řazení od nejlevnějšího, takže dál už to jen zdražuje → konec.
-            if ($basePrice !== null && bccomp($promoPrice, $basePrice, self::MONEY_SCALE) >= 0) {
+            if ($basePrice !== null && bccomp($promoPrice, $basePrice, self::PRICE_SCALE) >= 0) {
                 if ($result['promo_reason'] === 'none') {
                     $result['promo_reason'] = 'not_cheaper';
                 }
@@ -472,7 +473,7 @@ final class EffectivePriceResolver
         );
         $stmt->execute(array_merge([$supplierId], $missing));
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            $base[(int) $r['id']] = (string) $r['sale_price_without_vat'];
+            $base[(int) $r['id']] = self::unitPrice((string) $r['sale_price_without_vat']);
         }
         return $base;
     }
@@ -490,6 +491,11 @@ final class EffectivePriceResolver
             'promo_qty_available' => null,
             'promo'               => null,
         ];
+    }
+
+    private static function unitPrice(string $price): string
+    {
+        return (string) UnitPricePrecision::toDecimalString($price);
     }
 
     private function normalizeQty(string $qty): string

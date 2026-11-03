@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -279,6 +280,7 @@ final class StockItemPromoPriceRepository
         $r['is_active'] = (bool) $r['is_active'];
         $r['currency_code'] = strtoupper((string) $r['currency_code']);
         // promo_price, qty_limit zůstávají string (money-safe).
+        $r['promo_price'] = UnitPricePrecision::toDecimalString($r['promo_price']);
         return $r;
     }
 }

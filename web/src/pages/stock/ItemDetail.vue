@@ -9,7 +9,8 @@ import { eshopApi, type Attribute, type AttributeOption } from '@/api/eshop'
 import { purchaseOrdersApi, type StockQuantityRow } from '@/api/purchaseOrders'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatMoney, formatDate, formatUnitPrice } from '@/composables/useFormat'
+import { hasSubCentPrice, roundUnitPrice } from '@/utils/unitPrice'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnOutline } from '@/components/ui/buttonStyles'
@@ -141,6 +142,7 @@ const warehouseTotals = computed(() => {
 
 // Prodejní cena s DPH podle sazby karty, jen u plátce. Zaokrouhlení stejně jako
 // řádek faktury (InvoiceMath): DPH = round2(základ × sazba / 100), cena = základ + DPH.
+// Cena pod haléř (0,004 Kč/ks) by se tak vynulovala, ta se počítá na šest míst.
 const vatRates = ref<VatRate[]>([])
 async function loadVatRates() {
   try {
@@ -159,6 +161,7 @@ const salePriceWithVat = computed<number | null>(() => {
   const vatRate = vatRates.value.find(r => r.id === current.vat_rate_id)
   if (!vatRate || vatRate.is_reverse_charge) return null
   const rate = vatRate.rate_percent
+  if (hasSubCentPrice(net)) return roundUnitPrice(Number(net) * (1 + Number(rate) / 100))
   const base = round2(Number(net))
   return round2(base + round2(base * Number(rate) / 100))
 })
@@ -408,14 +411,14 @@ const openingBalanceNum = computed(() => Number(openingBalance.value))
           <div class="text-xs text-neutral-500">{{ t('stock.items.col_sale_price') }}</div>
           <!-- Platná cena = effective_price; při akci je původní hladina přeškrtnutá. -->
           <div class="text-lg font-semibold font-mono" :class="item.promo_price != null ? 'text-success-600' : ''">
-            {{ item.effective_price != null ? formatMoney(Number(item.effective_price)) : (item.sale_price_without_vat != null ? formatMoney(Number(item.sale_price_without_vat)) : '—') }}
+            {{ item.effective_price != null ? formatUnitPrice(Number(item.effective_price)) : (item.sale_price_without_vat != null ? formatUnitPrice(Number(item.sale_price_without_vat)) : '—') }}
           </div>
           <div v-if="item.promo_price != null" class="text-xs text-neutral-500 mt-0.5">
-            <span class="line-through">{{ item.sale_price_without_vat != null ? formatMoney(Number(item.sale_price_without_vat)) : '—' }}</span>
+            <span class="line-through">{{ item.sale_price_without_vat != null ? formatUnitPrice(Number(item.sale_price_without_vat)) : '—' }}</span>
             <span class="ml-1">{{ item.promo_label ?? t('eshop.promo.title') }}</span>
           </div>
           <div v-if="salePriceWithVat != null" data-test="sale-price-with-vat" class="text-xs text-neutral-500 mt-0.5">
-            {{ t('stock.item_detail.price_with_vat', { price: formatMoney(salePriceWithVat) }) }}
+            {{ t('stock.item_detail.price_with_vat', { price: formatUnitPrice(salePriceWithVat) }) }}
           </div>
         </div>
         <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-3">

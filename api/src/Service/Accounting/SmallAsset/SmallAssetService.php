@@ -9,6 +9,7 @@ use MyInvoice\Repository\SmallAssetRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -234,7 +235,7 @@ final class SmallAssetService
                 'quantity' => $qty,
                 // Jednotková cena PO slevě — jinak by karta tvrdila jinou cenu za kus,
                 // než kolik věc stála, a §26/2 se posuzuje právě podle ceny za kus.
-                'unit_price' => $qty != 0.0 ? round($price / $qty, 2) : $price,
+                'unit_price' => $qty != 0.0 ? UnitPricePrecision::normalize($price / $qty) : $price,
                 'price' => $price,
                 // DDHM vs DDNM — inventarizace hmotného je fyzická, u nehmotného se
                 // dokládá licenčním ujednáním; soupis, který obojí míchá, je nepoužitelný.

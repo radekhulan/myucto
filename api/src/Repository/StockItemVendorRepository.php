@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -73,7 +74,7 @@ final class StockItemVendorRepository
             return null;
         }
         return [
-            'purchase_price' => (string) $row['purchase_price'],
+            'purchase_price' => (string) UnitPricePrecision::toDecimalString($row['purchase_price']),
             'currency_code'  => (string) $row['currency_code'],
         ];
     }
@@ -339,6 +340,9 @@ final class StockItemVendorRepository
         }
         // purchase_price, stock_qty, min_order_qty, package_qty i on_hand zůstávají
         // string (money/qty-safe, žádné floatování).
+        if (array_key_exists('purchase_price', $r)) {
+            $r['purchase_price'] = UnitPricePrecision::toDecimalString($r['purchase_price']);
+        }
         return $r;
     }
 }

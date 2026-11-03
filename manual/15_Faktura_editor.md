@@ -840,8 +840,8 @@ cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 pravidelné fakturace.
 
 Cenu za jednotku lze u každé položky zadat až na šest desetinných míst, ve výkazu práce
-také sazbu. Ceník a skladová karta vedou ceny na dvě desetinná místa a takovou cenu do
-řádku předvyplní, přesnější cenu pak můžete v řádku zadat ručně.
+také sazbu. Ceník i skladová karta vedou ceny také na šest desetinných míst a do řádku
+předvyplní cenu se všemi místy, která má. Cena v haléřích se všude ukazuje na dvě místa.
 
 Uložené desetinné hodiny se při otevření ani uložení bez změny času nepřevádějí na celé
 minuty. Například `0,33 h` zůstává `0,33 h`, nikoli 20 minut. Desetinné zadání, které
@@ -1071,7 +1071,7 @@ materiálu**.
 | Popis | Co bylo dodáno (např. „Kabel UTP cat6“) |
 | Množství | Desetinné číslo (počet kusů, metrů, kg, ...) |
 | MJ | Měrná jednotka z číselníku (výchozí „ks“) |
-| Cena/MJ | Jednotková cena - **bez DPH, nebo s DPH podle režimu faktury** (viz níže) |
+| Cena/MJ | Jednotková cena až na šest desetinných míst - **bez DPH, nebo s DPH podle režimu faktury** (viz níže). PDF ukazuje víc než dvě místa jen u ceny, která je skutečně má |
 | Celkem | Automaticky: množství × cena/MJ |
 
 **Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH** (sumarizuje se do jedné položky

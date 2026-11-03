@@ -15,7 +15,7 @@ final class ProductSetQuoteCalculator
             if ($node['children'] === []) {
                 $price = $prices[$id] ?? null;
                 if ($price === null) throw new EshopException('set_price_missing', 'Komponenta nemá platnou cenu ve zvolené měně.', 422, ['item_id' => $id, 'currency_code' => $currency]);
-                $amount = self::round(bcmul(ProductSetDefinition::money($price), $node['quantity'], 5));
+                $amount = self::round(bcmul(ProductSetDefinition::unitPrice($price), $node['quantity'], 9));
                 return ['amount' => $amount, 'components' => [['item_id' => $id, 'quantity' => $node['quantity'], 'unit_price' => $price, 'amount' => $amount]]];
             }
             $components = [];
@@ -28,7 +28,7 @@ final class ProductSetQuoteCalculator
             $policy = $definitions[$id]['prices'][$currency] ?? ['mode' => 'sum'];
             $surcharge = $node['surcharges'][$currency] ?? '0';
             $amount = match ($policy['mode']) {
-                'fixed' => self::round(bcadd(bcmul($policy['fixed_price'], $node['quantity'], 5), $surcharge, 5)),
+                'fixed' => self::round(bcadd(bcmul($policy['fixed_price'], $node['quantity'], 9), $surcharge, 9)),
                 'discount' => self::round(bcdiv(bcmul(bcadd($subtotal, $surcharge, 5), bcsub('100', $policy['discount_pct'], 3), 8), '100', 8)),
                 default => self::round(bcadd($subtotal, $surcharge, 5)),
             };

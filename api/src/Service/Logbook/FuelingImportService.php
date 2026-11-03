@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Logbook;
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\Bank\Card\CardNumberMask;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use MyInvoice\Support\LocaleNumber;
 use MyInvoice\Support\Spreadsheet\SafeSpreadsheetReader;
@@ -157,7 +158,7 @@ final class FuelingImportService
             throw new \InvalidArgumentException('Chybí kladná částka tankování.');
         }
         if ($quantity !== null && $quantity > 0 && $unitPrice === null) {
-            $unitPrice = round($amount / $quantity, 4);
+            $unitPrice = UnitPricePrecision::normalize($amount / $quantity);
         }
 
         $carRaw = $get('car');

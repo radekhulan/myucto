@@ -55,12 +55,12 @@ final class PriceWriteTest extends StockTestCase
         );
     }
 
-    public function testPriceWriteRoundsHalfUp(): void
+    public function testPriceWriteKeepsSixDecimals(): void
     {
         $sid = $this->createSupplier();
         $item = $this->item($sid, 'PRICE-ROUND');
         $rows = $this->container->get(PriceWriteService::class)->save($sid, $item, [$this->row('CZK', '19.999')]);
-        self::assertSame('20.00', $rows[0]['computed_price']);
+        self::assertSame('19.999', $rows[0]['computed_price']);
     }
 
     public function testPartialCurrencyWritePreservesOtherCurrencies(): void

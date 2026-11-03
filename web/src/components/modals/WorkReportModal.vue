@@ -617,7 +617,7 @@ onMounted(() => {
                     </select>
                   </td>
                   <td class="px-3 py-1.5">
-                    <input v-model.number="m.unit_price" type="number" step="0.01" min="0"
+                    <input v-model.number="m.unit_price" type="number" step="any" min="0"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </td>
                   <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
@@ -679,7 +679,7 @@ onMounted(() => {
                   </div>
                   <div>
                     <label class="block text-[11px] text-neutral-500 mb-0.5">{{ unitPriceHeaderLabel }}</label>
-                    <input v-model.number="m.unit_price" type="number" step="0.01" min="0" inputmode="decimal"
+                    <input v-model.number="m.unit_price" type="number" step="any" min="0" inputmode="decimal"
                            class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                   </div>
                 </div>

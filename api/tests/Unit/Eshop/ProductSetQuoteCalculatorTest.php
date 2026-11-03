@@ -37,6 +37,30 @@ final class ProductSetQuoteCalculatorTest extends TestCase
         self::assertSame(['89.99', '89.99'], array_column($quote['components'], 'amount'));
     }
 
+    public function testComponentPriceKeepsSixDecimals(): void
+    {
+        $definitions = [10 => ProductSetDefinition::normalize([
+            'components' => [['item_id' => 1, 'quantity' => '1'], ['item_id' => 2, 'quantity' => '1000']],
+        ])];
+        $tree = (new ProductSetGraph())->expand(10, '1', $definitions)['tree'];
+        $quote = (new ProductSetQuoteCalculator())->calculate($tree, $definitions, [1 => '100.000000', 2 => '0.010800'], 'CZK');
+        self::assertSame('110.80', $quote['amount']);
+        self::assertSame(['100.00', '10.80'], array_column($quote['components'], 'amount'));
+    }
+
+    public function testFixedSetPriceKeepsSixDecimals(): void
+    {
+        $definition = ProductSetDefinition::normalize([
+            'components' => [['item_id' => 1, 'quantity' => '1']],
+            'prices' => ['CZK' => ['mode' => 'fixed', 'fixed_price' => '0.0108'], 'EUR' => ['mode' => 'fixed', 'fixed_price' => '99.9']],
+        ]);
+        self::assertSame('0.0108', $definition['prices']['CZK']['fixed_price']);
+        self::assertSame('99.90', $definition['prices']['EUR']['fixed_price']);
+        $definitions = [10 => $definition];
+        $tree = (new ProductSetGraph())->expand(10, '1000', $definitions)['tree'];
+        self::assertSame('10.80', (new ProductSetQuoteCalculator())->calculate($tree, $definitions, [1 => '5'], 'CZK')['amount']);
+    }
+
     public function testRoundingRemainderHasDeterministicRecipient(): void
     {
         self::assertSame(['0.34', '0.33', '0.33'], ProductSetQuoteCalculator::allocate('1.00', ['1', '1', '1']));

@@ -178,7 +178,7 @@ function removeItem(id: number) {
 
 function addException() {
   if (exceptionItem.value === '' || !exceptionCurrency.value) return
-  if (exceptionOperation.value === 'set_fixed' && !/^\d+(?:[.,]\d{1,2})?$/.test(exceptionPrice.value.trim())) return
+  if (exceptionOperation.value === 'set_fixed' && !/^\d+(?:[.,]\d{1,6})?$/.test(exceptionPrice.value.trim())) return
   const next: PriceMatrixOverride = {
     item_id: Number(exceptionItem.value),
     currency_code: exceptionCurrency.value,

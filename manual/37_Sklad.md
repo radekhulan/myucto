@@ -661,6 +661,9 @@ Pole editoru nové karty:
 - **Měrná jednotka** (výchozí „ks“), **EAN**, **sazba DPH** (výchozí do řádku
   faktury), **prodejní cena bez DPH** (výchozí do řádku faktury) a **minimální
   zásoba**. Klesne-li stav pod ni, karta se v seznamu i sestavách zvýrazní.
+  Prodejní cenu, stejně jako zákaznické, akční a nákupní ceny a ceny cenových hladin,
+  lze zadat až na šest desetinných míst (například 0,004 Kč za kus). Cena v haléřích
+  se ukazuje na dvě místa, přesnější na tolik míst, kolik jich má.
   Má-li jednotka v číselníku nastavená **desetinná místa množství** (například `0`
   u kusů), ruční skladový doklad s touto kartou přesnější množství nepřijme, viz
   [§ 96.16.1](96_Nastaveni.md#96161-ciselniky-podrobnosti).
@@ -727,7 +730,8 @@ posune do viditelné části lišty.
 Kliknutím na řádek v seznamu otevřete **detail karty**: dlaždice s počátečním
 stavem, prodejní cenou, minimální zásobou a EAN. U plátce DPH má dlaždice prodejní
 ceny druhý řádek s **cenou s DPH** podle sazby karty, zaokrouhlenou stejně jako řádek
-faktury (DPH na haléře, pak součet). Bez sazby na kartě nebo u neplátce se cena s DPH
+faktury (DPH na haléře, pak součet). Cena pod haléř se s DPH počítá na šest desetinných
+míst, aby se nevynulovala. Bez sazby na kartě nebo u neplátce se cena s DPH
 neukazuje.
 
 Pod dlaždicemi je tabulka **Stav po skladech**: pro každý sklad s nenulovým stavem

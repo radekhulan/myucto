@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Abra;
 
+use MyInvoice\Service\Invoice\UnitPricePrecision;
+
 final class AbraCatalogMapper
 {
     /** @return array<string,mixed> */
@@ -40,7 +42,7 @@ final class AbraCatalogMapper
         if ($price === null || abs($price) > 9999999999.99) {
             $price = null;
             $warnings[] = 'catalog_price_invalid';
-        } elseif (abs($price - round($price, 2)) > 0.000001) {
+        } elseif (!UnitPricePrecision::isWithinPrecision($price)) {
             $warnings[] = 'catalog_price_rounded';
         }
         $stocked = AbraSource::bool($row['skladove'] ?? null);
@@ -57,7 +59,7 @@ final class AbraCatalogMapper
             'source_key' => $key, 'sku' => $sku, 'name' => $name, 'item_type' => $type,
             'unit' => $unit, 'tracking_mode' => AbraSource::bool($row['evidVyrCis'] ?? null) === true ? 'serial'
                 : ((AbraSource::bool($row['evidSarze'] ?? null) === true || AbraSource::bool($row['evidExpir'] ?? null) === true) ? 'lot' : 'none'),
-            'ean' => $ean === '' ? null : $ean, 'sale_price_without_vat' => $price === null ? null : number_format($price, 2, '.', ''),
+            'ean' => $ean === '' ? null : $ean, 'sale_price_without_vat' => $price === null ? null : self::unitPrice($price),
             'min_qty' => null, 'is_active' => !is_numeric($row['platiDo'] ?? null) || (int) $row['platiDo'] >= (int) date('Y'),
             'is_stocked' => $stocked ?? false, 'note' => $note === '' ? null : mb_substr($note, 0, 2000),
             'weight_g' => null, 'intrastat_cn8_code' => null, 'intrastat_net_mass_kg' => null,
@@ -87,6 +89,8 @@ final class AbraCatalogMapper
             if ($currency !== 'USD' && $sourceRate !== null && $sourceRate >= 0 && $sourceRate < 100) {
                 $legacyAmount /= 1 + $sourceRate / 100;
             }
+            // Tvar, který zapisovaly dřívější převody (na haléře); podle něj se uložená cena
+            // pozná jako nedotčená a smí se opravit.
             $legacyPriceRows[$currency] = number_format(round($legacyAmount, 2), 2, '.', '');
             if ($priceVatMode === 'typCeny.sDph') {
                 if ($sourceRate === null || $sourceRate < 0 || $sourceRate >= 100) {
@@ -98,10 +102,16 @@ final class AbraCatalogMapper
                 $warnings[] = 'catalog_currency_price_requires_review';
                 continue;
             }
-            $priceRows[$currency] = number_format(round($amount, 2), 2, '.', '');
+            $priceRows[$currency] = self::unitPrice($amount);
         }
         return ['card' => $card, 'source_key' => $key, 'source_hash' => AbraSource::hash($card),
             'price_rows' => $priceRows, 'legacy_price_rows' => $legacyPriceRows,
             'blockers' => $blocked, 'warnings' => $warnings];
+    }
+
+    /** Cena na šest desetinných míst ve tvaru, jaký vrací čtení z databáze („12.50", „0.0108"). */
+    private static function unitPrice(float $price): string
+    {
+        return (string) UnitPricePrecision::toDecimalString(number_format($price, UnitPricePrecision::DECIMALS, '.', ''));
     }
 }

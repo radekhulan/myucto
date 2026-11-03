@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
@@ -67,7 +68,7 @@ final class SmallAssetImporter
             }
             $quantity = max(1, (int) PohodaXml::num($row, 'Pocet'));
             $price = round(PohodaXml::num($row, 'Kc'), 2);
-            $unitPrice = round(PohodaXml::num($row, 'KcJedn'), 2);
+            $unitPrice = UnitPricePrecision::normalize(PohodaXml::num($row, 'KcJedn'));
             $disposed = PohodaXml::date($row, 'DatLikv');
             $vendor = PohodaXml::text($row, 'Firma');
             $note = PohodaXml::text($row, 'Pozn');
@@ -79,7 +80,7 @@ final class SmallAssetImporter
                 $date,
                 $date,
                 $quantity,
-                $unitPrice > 0 ? $unitPrice : round($price / $quantity, 2),
+                $unitPrice > 0 ? $unitPrice : UnitPricePrecision::normalize($price / $quantity),
                 $price,
                 $places[PohodaXml::text($row, 'RefIMmist')] ?? '',
                 $disposed,

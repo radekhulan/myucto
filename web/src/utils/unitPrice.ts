@@ -9,6 +9,12 @@ export function hasSubCentPrice(price: number | string | null | undefined): bool
   return Number.isFinite(value) && Math.abs(value - Math.round(value * 100) / 100) > 1e-7
 }
 
+/** Zaokrouhlí jednotkovou cenu na šest míst (half-up), jako server. */
+export function roundUnitPrice(price: number): number {
+  const scale = 10 ** UNIT_PRICE_DECIMALS
+  return Math.sign(price) * Math.round(Math.abs(price) * scale + 1e-6) / scale
+}
+
 /** Počet míst k zobrazení: 2, u ceny pod haléř tolik, kolik jich má (nejvýš 6). */
 export function unitPriceDecimals(price: number | string | null | undefined): number {
   const value = Number(price)

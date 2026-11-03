@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -553,7 +554,7 @@ final class StockItemRepository
                 'default_sale_unit'      => $r['default_sale_unit'] !== null ? (string) $r['default_sale_unit'] : null,
                 'tracking_mode'          => (string) $r['tracking_mode'],
                 'vat_rate_id'            => $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null,
-                'sale_price_without_vat' => $r['sale_price_without_vat'],
+                'sale_price_without_vat' => UnitPricePrecision::toDecimalString($r['sale_price_without_vat']),
                 'is_stocked'             => (bool) $r['is_stocked'],
                 'item_type'              => (string) $r['item_type'],
             ];
@@ -896,6 +897,9 @@ final class StockItemRepository
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['vat_rate_id'] = $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null;
         $r['is_active'] = (bool) $r['is_active'];
+        if (array_key_exists('sale_price_without_vat', $r)) {
+            $r['sale_price_without_vat'] = UnitPricePrecision::toDecimalString($r['sale_price_without_vat']);
+        }
         if (array_key_exists('row_version', $r)) {
             $r['row_version'] = (int) $r['row_version'];
         }

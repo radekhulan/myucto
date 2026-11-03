@@ -98,7 +98,26 @@ final class TimeBillingPdfPresenter
 
         $report['items'] = $items;
         $report['total_duration_display'] = $allExact ? self::duration($totalMinutes) : null;
+        $report['material_price_decimals'] = self::materialPriceDecimals((array) ($report['materials'] ?? []));
         return $report;
+    }
+
+    /**
+     * Míst u ceny za jednotku materiálu: celé ceny bez desetin, jinak dvě a víc jen
+     * tehdy, když některá cena skutečně má víc míst. Součty materiálu se řídí zvlášť.
+     *
+     * @param list<array<string,mixed>> $materials
+     */
+    private static function materialPriceDecimals(array $materials): int
+    {
+        $decimals = 0;
+        foreach ($materials as $material) {
+            $price = (float) ($material['unit_price'] ?? 0);
+            if ($price != round($price)) {
+                $decimals = max($decimals, UnitPricePrecision::decimalPlaces($price));
+            }
+        }
+        return $decimals;
     }
 
     private static function duration(int $minutes): string

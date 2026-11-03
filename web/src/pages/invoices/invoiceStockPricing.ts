@@ -1,4 +1,5 @@
 import type { StockQuotePriceLevel, StockQuotePriceSource } from '@/api/stock'
+import { UNIT_PRICE_DECIMALS } from '@/utils/unitPrice'
 
 /**
  * Balení a nacenění skladových řádků faktury (issue #17).
@@ -128,8 +129,8 @@ export function unitPriceForUnit(
   units: PackagingUnitLike[] | null | undefined,
 ): number {
   const ratio = packagingRatio(unit, baseUnit, units)
-  if (!ratio) return round(basePrice, 2)
-  return round(basePrice * ratio.numerator / ratio.denominator, 2)
+  if (!ratio) return round(basePrice, UNIT_PRICE_DECIMALS)
+  return round(basePrice * ratio.numerator / ratio.denominator, UNIT_PRICE_DECIMALS)
 }
 
 /** Množství do nacenění: kladné (dobropis má zápornou položku), prázdné = 1. */

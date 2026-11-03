@@ -28,6 +28,7 @@ use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Invoice\NewInvoiceVatClassification;
 use MyInvoice\Service\Invoice\ReceiptLinkService;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\Oss\OssItemPlanner;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -552,7 +553,7 @@ final class QuickReceiptService
             if ((float) $quantity <= 0 || (float) $quantity > 1000000) {
                 throw QuickReceiptException::validation('Množství položky č. ' . ($i + 1) . ' musí být kladné.', 'items.' . $i . '.quantity');
             }
-            $price = self::decimal($raw['unit_price'] ?? null, 'items.' . $i . '.unit_price', 2);
+            $price = self::decimal($raw['unit_price'] ?? null, 'items.' . $i . '.unit_price', UnitPricePrecision::DECIMALS);
             if ((float) $price < 0 || (float) $price >= 100000000) {
                 throw QuickReceiptException::validation('Cena položky č. ' . ($i + 1) . ' musí být nezáporná.', 'items.' . $i . '.unit_price');
             }

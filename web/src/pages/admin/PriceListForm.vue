@@ -12,6 +12,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { appIsoDate } from '@/utils/date'
+import { unitPriceText } from '@/utils/unitPrice'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -358,7 +359,7 @@ onMounted(async () => {
                 <tr v-for="(price, index) in form.prices" :key="price.currency_code">
                   <td class="px-3 py-2 font-mono">{{ price.currency_code }}</td>
                   <td class="px-3 py-2">
-                    <input v-model.number="price.unit_price" type="number" min="0" step="0.01" required class="h-9 w-40 px-3 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
+                    <input v-model.number="price.unit_price" type="number" min="0" step="any" required class="h-9 w-40 px-3 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
                   </td>
                   <td class="px-3 py-2">
                     <span v-if="price.currency_code === form.base_currency_code" class="status-badge bg-primary-50 text-primary-700">{{ t('price_list.base_price') }}</span>
@@ -394,10 +395,10 @@ onMounted(async () => {
             </button>
           </div>
           <div v-if="preview" class="mt-3 flex flex-wrap items-center gap-3 text-sm">
-            <span class="font-mono font-semibold">{{ preview.unit_price_without_vat.toFixed(2) }} {{ preview.target_currency_code }}</span>
+            <span class="font-mono font-semibold">{{ unitPriceText(preview.unit_price_without_vat) }} {{ preview.target_currency_code }}</span>
             <span class="status-badge bg-success-50 text-success-700">{{ priceSourceLabel(preview.catalog_price_source) }}</span>
             <span v-if="preview.catalog_exchange_rate" class="text-neutral-500">
-              {{ preview.catalog_source_unit_price }} {{ preview.catalog_source_currency_code }} · {{ preview.catalog_exchange_rate.toFixed(6) }} · {{ preview.catalog_exchange_rate_date }}
+              {{ unitPriceText(preview.catalog_source_unit_price) }} {{ preview.catalog_source_currency_code }} · {{ preview.catalog_exchange_rate.toFixed(6) }} · {{ preview.catalog_exchange_rate_date }}
             </span>
           </div>
         </div>
@@ -410,7 +411,7 @@ onMounted(async () => {
             <select v-model="overrideCurrency" class="h-10 px-3 border border-neutral-300 rounded-md bg-surface">
               <option v-for="currency in currencyOptions" :key="currency.code" :value="currency.code">{{ currency.code }}</option>
             </select>
-            <input v-model.number="overridePrice" type="number" min="0" step="0.01" :placeholder="t('price_list.unit_price')" class="h-10 px-3 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
+            <input v-model.number="overridePrice" type="number" min="0" step="any" :placeholder="t('price_list.unit_price')" class="h-10 px-3 border border-neutral-300 rounded-md bg-surface text-right font-mono" />
             <button type="button" :class="btnOutline('success')" :disabled="!overrideClientId || overridePrice === null" @click="saveOverride"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('common.add') }}</button>
           </div>
           <div v-if="item?.customer_overrides?.length" class="mt-3 overflow-x-auto border-y border-neutral-200">
@@ -419,7 +420,7 @@ onMounted(async () => {
                 <tr v-for="override in item.customer_overrides" :key="`${override.client_id}-${override.currency_code}`">
                   <td class="px-3 py-2">{{ override.client_name }}</td>
                   <td class="px-3 py-2 font-mono">{{ override.currency_code }}</td>
-                  <td class="px-3 py-2 text-right font-mono">{{ override.unit_price.toFixed(2) }}</td>
+                  <td class="px-3 py-2 text-right font-mono">{{ unitPriceText(override.unit_price) }}</td>
                   <td class="px-3 py-2 text-xs text-neutral-500">
                     {{ override.affected_template_count ? t('price_list.affected_templates', { count: override.affected_template_count }) : '' }}
                   </td>

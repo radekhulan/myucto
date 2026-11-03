@@ -300,9 +300,9 @@ final class StockPriceLevelService
             if ($currency === '') {
                 throw $fail('currency_code', 'Pevná cena musí mít měnu.');
             }
-            $fixed = StockItemCustomerPriceService::decimal($raw['fixed_price'] ?? null, 2);
-            if ($fixed === null || bccomp($fixed, '9999999999.99', 2) > 0) {
-                throw $fail('fixed_price', 'Pevná cena musí být nezáporné číslo s nejvýše dvěma desetinnými místy.');
+            $fixed = StockItemCustomerPriceService::unitPrice($raw['fixed_price'] ?? null);
+            if ($fixed === null) {
+                throw $fail('fixed_price', 'Pevná cena musí být nezáporné číslo s nejvýše šesti desetinnými místy.');
             }
         } else {
             $pct = self::adjustmentPct($raw['discount_pct'] ?? null);

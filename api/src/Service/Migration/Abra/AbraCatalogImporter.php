@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AbraImportRepository;
 use MyInvoice\Repository\StockCurrencyRepository;
 use MyInvoice\Repository\StockItemPriceRepository;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryException;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryWriter;
 
@@ -119,11 +120,19 @@ final class AbraCatalogImporter
             $existing = $this->prices->findByCurrency($supplierId, $itemId, $currency);
             if ($existing === null) {
                 $missing[$currency] = $amount;
-            } elseif ($existing['price_mode'] !== 'fixed' || $existing['fixed_price'] !== $amount
-                || $existing['computed_price'] !== $amount) {
-                if ($currency === 'CZK' || !isset($legacyPrices[$currency])
-                    || $existing['price_mode'] !== 'fixed' || $existing['fixed_price'] !== $legacyPrices[$currency]
-                    || $existing['computed_price'] !== $legacyPrices[$currency]
+            } elseif ($existing['price_mode'] !== 'fixed' || !self::samePrice($existing['fixed_price'], $amount)
+                || !self::samePrice($existing['computed_price'], $amount)) {
+                // Opravit se smí jen cena, kterou zapsal dřívější převod: cizoměnová podle
+                // starého výpočtu DPH, nebo jakákoli zaokrouhlená na haléře, dokud převody
+                // nedržely šest desetinných míst.
+                $previous = [number_format(round((float) $amount, 2), 2, '.', '')];
+                if ($currency !== 'CZK' && isset($legacyPrices[$currency])) $previous[] = $legacyPrices[$currency];
+                $written = false;
+                foreach ($previous as $candidate) {
+                    $written = $written || (self::samePrice($existing['fixed_price'], $candidate)
+                        && self::samePrice($existing['computed_price'], $candidate));
+                }
+                if (!$written || $existing['price_mode'] !== 'fixed'
                     || $existing['is_manual_override'] || $existing['use_pricing_rules']
                     || $existing['rounding'] !== 'none') return false;
                 $repairs[$currency] = [(int) $existing['id'], $amount];
@@ -147,6 +156,11 @@ final class AbraCatalogImporter
             $this->prices->updateComputed($supplierId, (int) $created['id'], $amount, null, null, date('Y-m-d H:i:s'));
         }
         return true;
+    }
+
+    private static function samePrice(mixed $stored, string $price): bool
+    {
+        return $stored !== null && is_numeric($stored) && bccomp((string) $stored, $price, UnitPricePrecision::DECIMALS) === 0;
     }
 
     private function ensureCurrency(int $supplierId, string $currency): void
