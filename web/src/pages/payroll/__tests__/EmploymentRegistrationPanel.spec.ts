@@ -976,6 +976,61 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.prepare).toHaveBeenCalledWith(5, 'production', 91)
   })
 
+  it('offers Prepare again instead of sending a stale REGZEC25 change', async () => {
+    m.events.mockResolvedValue([{
+      id: 91,
+      employment_id: 5,
+      environment: 'test',
+      interaction: 'change',
+      action_code: 3,
+      effective_on: '2026-12-01',
+      source_kind: 'verified_change',
+      source_reference: 'personnel-change-19',
+      snapshot_fingerprint: 'c'.repeat(64),
+      approved_at: '2026-12-10 09:00:00',
+      consumed: true,
+      created: false,
+    }])
+    m.preview.mockResolvedValue({ ...preview, agenda_code: 'REGZEC25', interaction: 'change', action_code: 3 })
+    const prepared = {
+      obligation_id: 22,
+      part_id: 23,
+      artifact_id: 24,
+      status: 'ready',
+      row_version: 1,
+      environment: 'production',
+      agenda_code: 'REGZEC25',
+      interaction: 'change',
+      artifact_sha256: 'd'.repeat(64),
+      deadline,
+    }
+    m.prepare
+      .mockResolvedValueOnce({ ...prepared, submission_id: 21, created: false, vintage_expired: true })
+      .mockResolvedValueOnce({ ...prepared, submission_id: 31, created: true, vintage_expired: false, replaced_submission_id: 21 })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-select"]').setValue('91')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="registration-vintage-expired"]').exists()).toBe(true)
+    const actions = wrapper.get('[data-test="registration-transport-actions"]')
+    expect(actions.text()).toContain('registration.reprepare')
+    expect(actions.text()).not.toContain('registration.send_production')
+
+    await actions.get('button').trigger('click')
+    await flushPromises()
+
+    expect(m.send).not.toHaveBeenCalled()
+    expect(m.prepare).toHaveBeenLastCalledWith(5, 'production', 91, 'auto', { replacesSubmissionId: 21 })
+    expect(wrapper.find('[data-test="registration-vintage-expired"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="registration-transport-actions"]').text())
+      .toContain('registration.send_production')
+  })
+
   it('creates an A5 source, selects it and previews the exact event', async () => {
     const event = {
       id: 92,

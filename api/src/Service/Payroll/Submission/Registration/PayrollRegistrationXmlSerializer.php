@@ -551,6 +551,12 @@ final class PayrollRegistrationXmlSerializer
             if ($action === 4 && isset($delta['contract_start_on'])) {
                 $job->setAttribute('contractfro', (string) $delta['contract_start_on']);
             }
+            // EDV 1.4.0.7 i 1.5.0.3, ID 10225: A4-OST s datem skončení nese
+            // i příznak skončení smrtí (PayrollRegistrationRegisteredEnd).
+            $death = $data['ended_by_death'] ?? null;
+            if ($action === 4 && is_bool($death)) {
+                $job->setAttribute('endbydeath', $death ? 'A' : 'N');
+            }
             $this->regzecDeltaJob($document, $namespace, $job, $delta);
             if ($job->hasAttribute('fro')) {
                 $job->setAttribute('fro', PayrollRegistrationSpecialStartDate::reported(
@@ -587,6 +593,9 @@ final class PayrollRegistrationXmlSerializer
                 $employee,
                 $this->eventObject($data, 'delta'),
                 $version,
+                $action === 4 && is_array($data['unemployment'] ?? null)
+                    ? $data['unemployment']
+                    : null,
             );
         }
         if ($action === 7 && $version === JmhzSpecVersion::V2027) {
@@ -856,10 +865,12 @@ final class PayrollRegistrationXmlSerializer
     }
 
     /**
-     * Části změny za `job` v pořadí `employeeType`: pens, insh, fact,
-     * nocitizen, forinreg.
+     * Části změny za `job` v pořadí `employeeType`: pens, insh, unemplcomp,
+     * fact, nocitizen, forinreg. Podklady pro podporu v nezaměstnanosti nese
+     * jen oprava A4 vztahu skončeného u ČSSZ.
      *
      * @param array<string,mixed> $delta
+     * @param array<string,mixed>|null $unemployment
      */
     private function regzecDeltaEmployeeData(
         DOMDocument $document,
@@ -867,6 +878,7 @@ final class PayrollRegistrationXmlSerializer
         DOMElement $employee,
         array $delta,
         JmhzSpecVersion $version = JmhzSpecVersion::V2026,
+        ?array $unemployment = null,
     ): void {
         if (is_array($delta['pension'] ?? null)) {
             $pension = $this->element($document, $namespace, 'pens');
@@ -883,7 +895,10 @@ final class PayrollRegistrationXmlSerializer
             $insurance->setAttribute('cnr', (string) $delta['health_insurance_code']);
             $employee->appendChild($insurance);
         }
-        $facts = is_array($delta['facts'] ?? null) ? $delta['facts'] : [];
+        if ($unemployment !== null) {
+            $this->appendUnemployment($document, $namespace, $employee, $unemployment, $version);
+        }
+        $facts =is_array($delta['facts'] ?? null) ? $delta['facts'] : [];
         if (isset($delta['highest_education_code'])) {
             $facts['highest_education_code'] = $delta['highest_education_code'];
         }
