@@ -100,13 +100,22 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         }
 
         // Firma vyžadující přihlášení u poskytovatele identity nepřijme sezení
-        // z hesla ani z passkey. API token se posuzuje při vydání, ne tady.
-        if ($access->supplierId > 0 && RequestAuthorization::isSessionAuth($request)) {
-            $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
+        // z hesla ani z passkey. Totéž platí pro API token a MCP grant: rozhoduje
+        // přihlášení, ze kterého byl token vydaný (api_tokens.issued_auth_method),
+        // jinak by si člověk z heslového sezení vyrobil token do zakázané firmy.
+        if ($access->supplierId > 0) {
+            $authMethod = null;
+            if (RequestAuthorization::isSessionAuth($request)) {
+                $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
+                $authMethod = isset($session['auth_method']) ? (string) $session['auth_method'] : null;
+            } elseif (RequestAuthorization::isBearerAuth($request)) {
+                $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
+                $authMethod = isset($token['issued_auth_method']) ? (string) $token['issued_auth_method'] : null;
+            }
             $roleKey = $user['role_summary']['system_key'] ?? null;
             if (!$this->loginPolicy->sessionAllowedForSupplier(
                 $access->supplierId,
-                isset($session['auth_method']) ? (string) $session['auth_method'] : null,
+                $authMethod,
                 is_string($roleKey) ? $roleKey : null,
             )) {
                 if (in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)) {

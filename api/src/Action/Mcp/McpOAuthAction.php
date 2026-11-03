@@ -290,6 +290,7 @@ final class McpOAuthAction
         }
         $code = $this->oauth->createCode(
             $clientId, (int) $user['id'], $target['supplier_id'], $redirect, $challenge, $grantScope, $resource,
+            ((array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []))['auth_method'] ?? null,
         );
         return $this->finishConsent($response, self::redirectWith($redirect, [
             'code' => $code, 'state' => $state,

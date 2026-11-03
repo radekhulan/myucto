@@ -1133,7 +1133,8 @@
         "2229_work_report_display_options.sql",
         "2230_journal_lines_cost_center_index.sql",
         "2231_unit_prices_six_decimals.sql",
-        "2232_oidc_external_identities.sql"
+        "2232_oidc_external_identities.sql",
+        "2233_api_token_issued_auth_method.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2428,6 +2429,7 @@
                 "eet_external_by_default": "tinyint(1) NOT NULL DEFAULT 0",
                 "expires_at": "datetime NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "issued_auth_method": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "last_used_at": "datetime NULL DEFAULT NULL",
                 "last_used_ip": "varbinary(16) NULL DEFAULT NULL",
                 "name": "varchar(100) NOT NULL",
@@ -8361,6 +8363,7 @@
                 "code_hash": "char(64) NOT NULL",
                 "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
                 "expires_at": "datetime NOT NULL",
+                "issued_auth_method": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "redirect_uri": "varchar(2048) NOT NULL",
                 "resource": "varchar(2048) NOT NULL",
                 "scope": "enum('read','read_write') NOT NULL",

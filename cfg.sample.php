@@ -274,7 +274,7 @@ return [
                     'tenant_id'     => '', // Directory (tenant) ID, GUID; ne common/organizations
                     'client_id'     => '', // Application (client) ID
                     'client_secret' => '', // ENV MYINVOICE_OIDC_ENTRA_CLIENT_SECRET
-                    'allow_guests'  => true, // B2B hosté tenantu
+                    'allow_guests'  => false, // true = smí i hosté B2B tenantu
                 ],
             ],
         ],

@@ -17,7 +17,7 @@ final class ConfigSnapshot
         'ba96ba9d57b895a5f31f66c83785248dc3a9cbff345f0edefaead0f472916105',
         '58f8c23bc5640b01812ebedd5793d5e66c56fe41bffd377b122c7fdd7e985bd5',
         // Výchozí hodnoty a ENV pro auth.oidc; DB, údaje ani runtime cesty beze změny.
-        '26fad13887f94c1425636abf07ca9a98d378a2555788d0a3d6102c28ba1a6480',
+        '6ff3d8436cb5d2fefb857b05066c933c9b3a331b8540e53c339ee04905ff1f9e',
     ];
 
     private static ?Config $config = null;

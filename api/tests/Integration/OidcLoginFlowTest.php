@@ -46,6 +46,7 @@ final class OidcLoginFlowTest extends TestCase
     private SessionManager $sessions;
     private LoginPolicyService $policy;
     private int $userId = 0;
+    private string $email = '';
     private int $supplierId = 0;
     private bool $createdMembership = false;
     /** @var array{login_policy:string,login_sso_provider:?string}|null */
@@ -152,6 +153,43 @@ final class OidcLoginFlowTest extends TestCase
         $this->expectOidcError(OidcException::INVITE_INVALID, fn () => $this->loginRoundTrip(self::guid(), invite: $token));
     }
 
+    public function testInviteIsRejectedForOtherEmailAndStaysValidForInvitee(): void
+    {
+        $token = $this->invites->issue($this->userId, 'entra', null);
+        $this->expectOidcError(
+            OidcException::IDENTITY_MISMATCH,
+            fn () => $this->loginRoundTrip(self::guid(), invite: $token, claims: ['preferred_username' => 'cizi@example.test']),
+        );
+        $result = $this->loginRoundTrip(self::guid(), invite: $token);
+        self::assertSame($this->userId, (int) $result->user['id']);
+    }
+
+    public function testStepUpWithoutFreshAuthTimeIsRejected(): void
+    {
+        $oid = self::guid();
+        $this->loginRoundTrip($oid, invite: $this->invites->issue($this->userId, 'entra', null));
+        $session = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::basic('password'));
+
+        $this->expectOidcError(OidcException::TOKEN_INVALID, fn () => $this->stepUpRoundTrip($session['token'], $oid, claims: []));
+        $this->expectOidcError(
+            OidcException::TOKEN_INVALID,
+            fn () => $this->stepUpRoundTrip($session['token'], $oid, claims: ['auth_time' => time() - 3600]),
+        );
+    }
+
+    public function testPasswordLoginStaysAllowedWhileUserHasNonEnforcedCompany(): void
+    {
+        $this->enforceOnSupplier();
+        $other = (int) $this->db->pdo()->query('SELECT MAX(id) FROM supplier')->fetchColumn();
+        if ($other === $this->supplierId) {
+            $this->markTestSkipped('Test DB má jen jednu firmu.');
+        }
+        $this->db->pdo()->prepare('INSERT IGNORE INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')
+            ->execute([$this->userId, $other]);
+        self::assertNull($this->policy->requiredProviderForUser($this->userId, null));
+        self::assertFalse($this->policy->sessionAllowedForSupplier($this->supplierId, 'password', null));
+    }
+
     public function testUnlinkedIdentityIsRejectedEvenWithMatchingEmail(): void
     {
         $email = (string) $this->db->pdo()->query('SELECT email FROM users WHERE id = ' . $this->userId)->fetchColumn();
@@ -253,11 +291,12 @@ final class OidcLoginFlowTest extends TestCase
             '/invoices',
             inviteToken: $invite,
         );
-        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce, $claims);
+        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce, $claims + ['preferred_username' => $this->email]);
         return $this->complete(self::queryParam($url, 'state'), $binding);
     }
 
-    private function stepUpRoundTrip(string $sessionToken, string $oid, ?string $callbackSession = null): \MyInvoice\Service\Auth\Oidc\OidcResult
+    /** @param array<string,mixed> $claims */
+    private function stepUpRoundTrip(string $sessionToken, string $oid, ?string $callbackSession = null, ?array $claims = null): \MyInvoice\Service\Auth\Oidc\OidcResult
     {
         $binding = OidcFlowStore::newBinding();
         $url = $this->service->start(
@@ -270,7 +309,8 @@ final class OidcLoginFlowTest extends TestCase
             MfaStepUpService::OPERATION_API_TOKEN_CREATE,
         );
         self::assertSame('login', self::queryParam($url, 'prompt'));
-        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce);
+        $claims ??= ['auth_time' => time()];
+        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce, $claims);
         return $this->complete(self::queryParam($url, 'state'), $binding, $callbackSession ?? $sessionToken);
     }
 
@@ -316,11 +356,12 @@ final class OidcLoginFlowTest extends TestCase
     private function createUser(): void
     {
         $pdo = $this->db->pdo();
+        $this->email = 'oidc-' . bin2hex(random_bytes(6)) . '@example.test';
         $pdo->prepare(
             'INSERT INTO users (email, password_hash, name, role_id, is_active)
              SELECT ?, ?, ?, id, 1 FROM roles WHERE system_key = ? LIMIT 1'
         )->execute([
-            'oidc-' . bin2hex(random_bytes(6)) . '@example.test',
+            $this->email,
             password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT),
             'OIDC test',
             'accountant',

@@ -87,7 +87,7 @@ final class UserExternalIdentityAdminAction
                 'name' => (string) ($user['name'] ?? ''),
                 'provider' => $provider->label,
                 'inviteLink' => $appUrl . '/api/auth/oidc/' . $provider->id . '/login?invite=' . $token,
-                'expiresIn' => $locale === 'en' ? '7 days' : '7 dní',
+                'expiresIn' => $locale === 'en' ? '3 days' : '3 dny',
             ]);
         } catch (\Throwable $e) {
             $this->activity->log('user.invite_mail_failed', isset($actor['id']) ? (int) $actor['id'] : null, 'user', $userId, [

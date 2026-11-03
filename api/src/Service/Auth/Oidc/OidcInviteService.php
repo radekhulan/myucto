@@ -13,7 +13,7 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 class OidcInviteService
 {
-    public const TTL_HOURS = 168;
+    public const TTL_HOURS = 72;
 
     public function __construct(private readonly Connection $db) {}
 

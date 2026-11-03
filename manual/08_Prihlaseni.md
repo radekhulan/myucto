@@ -40,6 +40,26 @@
 3. Má-li účet zapnuté silné vícefaktorové ověření, potvrďte passkey nebo zadejte
    kód z autentikátoru (**Ověřovací kód (2FA)**).
 
+### 8.3.3 Účtem organizace (Microsoft)
+
+Tlačítko **Přihlásit přes Microsoft** se zobrazí, jen když správce instalace
+přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](#10161-prihlaseni-pres-microsoft-entra-id-spravce)).
+
+1. Poprvé otevřete odkaz z pozvánky, kterou vám poslal správce e-mailem.
+   Přihlásíte se u Microsoftu a váš účet v MyÚčto se tím s účtem organizace
+   propojí. Odkaz platí 3 dny a jde použít jen jednou. Přihlásit se musíte účtem se stejnou e-mailovou adresou, na kterou pozvánka přišla.
+2. Příště klikněte na přihlašovací obrazovce na **Přihlásit přes Microsoft**.
+3. Přihlaste se u Microsoftu, včetně ověření, které vaše organizace vyžaduje.
+   Heslo ani kód z autentikátoru v MyÚčto nezadáváte.
+
+Propojit účet můžete i sami: **Profil → Zabezpečení → Přihlášení přes účet
+organizace → Propojit s Microsoft**. Před propojením potvrdíte svou totožnost
+heslem nebo druhým faktorem.
+
+Vyžaduje-li vaše firma přihlášení přes Microsoft, heslem ani přístupovým klíčem
+se nepřihlásíte. Aplikace vás pak na přihlašovací obrazovce na tlačítko
+Microsoftu upozorní.
+
 **Jak poznáte, že je hotovo:** otevře se [Přehled (dashboard)](10_Prehled.md).
 
 | Pole | Význam |

@@ -52,6 +52,11 @@ class OidcFlowStore
         if ($purpose !== self::PURPOSE_LOGIN && ($userId === null || $sessionToken === null)) {
             throw new \InvalidArgumentException('Propojení a ověření vyžadují přihlášeného uživatele.');
         }
+        // Zahájení je anonymní, takže tabulka roste s každým pokusem. Úklid se
+        // spouští průběžně, bez cronu.
+        if (random_int(1, 50) === 1) {
+            $this->purgeExpired();
+        }
         $state = bin2hex(random_bytes(32));
         $nonce = bin2hex(random_bytes(32));
         $verifier = Pkce::verifier();
@@ -102,7 +107,8 @@ class OidcFlowStore
         }
         $stmt = $pdo->prepare(
             'SELECT provider, purpose, nonce, code_verifier, return_to, user_id,
-                    session_id_hash, step_up_operation, invite_id
+                    session_id_hash, step_up_operation, invite_id,
+                    UNIX_TIMESTAMP(created_at) AS created_epoch
                FROM oidc_login_flows WHERE id = ?'
         );
         $stmt->execute([$id]);
@@ -120,6 +126,7 @@ class OidcFlowStore
             sessionIdHash: $row['session_id_hash'] !== null ? (string) $row['session_id_hash'] : null,
             stepUpOperation: $row['step_up_operation'] !== null ? (string) $row['step_up_operation'] : null,
             inviteId: $row['invite_id'] !== null ? (int) $row['invite_id'] : null,
+            createdAt: (int) $row['created_epoch'],
         );
     }
 

@@ -12,10 +12,10 @@ use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
  * Jediné místo, které rozhoduje, jakým přihlášením se smí do firmy.
  *
  * Firma s `login_policy = sso_required` připustí jen sezení vydané přihlášením
- * u `login_sso_provider`. Heslo, passkey, záložní kód ani sezení vlastní domény
- * odvozené z hesla tam neprojdou. Uživatel, který je členem aspoň jedné takové
- * firmy, se heslem nepřihlásí vůbec: jinak by heslo, které firma zakázala,
- * dál otevíralo jeho účet (profil, API tokeny, ostatní firmy).
+ * u `login_sso_provider`. Heslo, passkey, záložní kód, sezení vlastní domény
+ * odvozené z hesla ani API token vydaný z takového sezení tam neprojdou.
+ * Uživatel, jehož všechny firmy přihlášení u poskytovatele vyžadují, se heslem
+ * nepřihlásí vůbec.
  *
  * Výjimkou jsou role z `auth.oidc.break_glass_roles` (výchozí `instance_admin`),
  * aby šlo instalaci spravovat i při výpadku poskytovatele.
@@ -42,17 +42,26 @@ class LoginPolicyService
         if ($userId < 1 || $this->isBreakGlass($roleSystemKey) || !$this->providers->isEnabled()) {
             return null;
         }
+        // Celý účet se zamkne jen tehdy, když vynucení chtějí VŠECHNY jeho firmy.
+        // Správce jedné firmy jinak nesmí účetní, která pracuje i pro jiné firmy,
+        // vzít přihlášení heslem do nich. Do jeho firmy ji pak nepustí
+        // sessionAllowedForSupplier().
         $stmt = $this->db->pdo()->prepare(
-            "SELECT s.login_sso_provider
+            "SELECT COUNT(*) AS total,
+                    SUM(s.login_policy = 'sso_required' AND s.login_sso_provider IS NOT NULL) AS enforced,
+                    MIN(CASE WHEN s.login_policy = 'sso_required' THEN s.login_sso_provider END) AS provider,
+                    COUNT(DISTINCT CASE WHEN s.login_policy = 'sso_required' THEN s.login_sso_provider END) AS providers
                FROM user_suppliers us
                JOIN supplier s ON s.id = us.supplier_id
-              WHERE us.user_id = ? AND s.login_policy = 'sso_required'
-                AND s.login_sso_provider IS NOT NULL
-              ORDER BY s.id
-              LIMIT 1"
+              WHERE us.user_id = ?"
         );
         $stmt->execute([$userId]);
-        $provider = $stmt->fetchColumn();
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $total = (int) ($row['total'] ?? 0);
+        if ($total === 0 || (int) ($row['enforced'] ?? 0) !== $total || (int) ($row['providers'] ?? 0) !== 1) {
+            return null;
+        }
+        $provider = $row['provider'] ?? null;
         return is_string($provider) && $this->providers->get($provider) !== null ? $provider : null;
     }
 

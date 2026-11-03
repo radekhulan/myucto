@@ -19,5 +19,7 @@ final readonly class ExternalIdentity
         public ?string $name,
         public bool $isGuest = false,
         public ?int $authTime = null,
+        /** @var list<string> další adresy z tokenu (jen kontrola pozvánky) */
+        public array $alternateEmails = [],
     ) {}
 }

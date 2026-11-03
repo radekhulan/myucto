@@ -16,5 +16,6 @@ final readonly class OidcFlow
         public ?string $sessionIdHash,
         public ?string $stepUpOperation,
         public ?int $inviteId,
+        public int $createdAt = 0,
     ) {}
 }

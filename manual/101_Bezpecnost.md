@@ -120,6 +120,60 @@ klíče i autentikátoru zadáte kód na přihlašovací stránce místo druhéh
 **Jak poznáte, že je hotovo:** Nový uživatel po přihlášení heslem vidí
 `/setup-mfa` a do aplikace se dostane až po registraci klíče nebo zapnutí TOTP.
 
+### 101.6.1 Přihlášení přes Microsoft Entra ID (správce)
+
+Přihlášení přes Entra ID nahrazuje heslo i vícefaktorové ověření v MyÚčto.
+MFA vynucuje váš tenant (Conditional Access), MyÚčto se na druhý faktor už
+neptá. Aplikaci v Entra ID si registruje každá instalace sama.
+
+1. V Microsoft Entra admin center založte registraci aplikace: *single tenant*,
+   platforma **Web**, redirect URI `https://<adresa instalace>/api/auth/oidc/entra/callback`
+   (musí odpovídat `app.url`). Implicitní tokeny nechte vypnuté, oprávnění
+   stačí `openid`, `profile`, `email`. Vytvořte tajný klíč klienta.
+2. V Enterprise application zapněte **Assignment required** a přiřaďte
+   uživatele nebo skupinu, kteří se smí přihlásit.
+3. Nastavte instalaci (tajemství patří do proměnné prostředí, ne do souboru):
+
+   ```php
+   'auth' => [
+       'oidc' => [
+           'enabled' => true,
+           'providers' => [
+               'entra' => [
+                   'enabled'   => true,
+                   'tenant_id' => '<Directory (tenant) ID>',
+                   'client_id' => '<Application (client) ID>',
+               ],
+           ],
+       ],
+   ],
+   ```
+
+   V Dockeru: `MYINVOICE_OIDC_ENABLED=1`, `MYINVOICE_OIDC_ENTRA_ENABLED=1`,
+   `MYINVOICE_OIDC_ENTRA_TENANT_ID`, `MYINVOICE_OIDC_ENTRA_CLIENT_ID`,
+   `MYINVOICE_OIDC_ENTRA_CLIENT_SECRET`.
+4. Účty uživatelů zakládejte dál v **Nastavení → Uživatelé**. U uživatele
+   zvolte **Pozvat k přihlášení přes Microsoft**. Uživatel dostane e-mail
+   s odkazem a prvním přihlášením se jeho účet propojí s identitou v Entra ID.
+5. Až budou všichni propojení, přihlaste se sami přes Microsoft a v
+   **Nastavení → Přihlášení** zapněte **Vyžadovat přihlášení přes Microsoft**.
+
+| Pravidlo | Chování |
+|---|---|
+| Párování účtu | Podle ID objektu (`oid`) a tenantu (`tid`), nikdy jen podle e-mailu |
+| Pozvánka | Platí 3 dny, jednou; přijme ji jen účet se stejnou e-mailovou adresou jako pozvaný uživatel |
+| Neznámá identita | Přihlášení se odmítne, účet se nezakládá |
+| Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
+| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin |
+| Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení skončí nejpozději vypršením |
+| Firma vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód do firmy nepustí |
+| Nouzový přístup | Role `instance_admin` se přihlašuje dál heslem a MFA (`auth.oidc.break_glass_roles`) |
+| Citlivé operace | Potvrdíte novým přihlášením u Microsoftu místo hesla |
+
+Vynucení zapnete jen ze sezení přihlášeného přes Microsoft, jinak byste si
+firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a ukáže se
+v Diagnostice.
+
 ## 101.7 Krok za krokem: omezení přístupu IP allowlistem (správce)
 
 1. Do `cfg.php` zapište povolené IP adresy a rozsahy (příklad je v

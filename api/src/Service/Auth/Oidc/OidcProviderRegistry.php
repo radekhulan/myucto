@@ -134,7 +134,7 @@ final class OidcProviderRegistry
             clientSecret: $secret,
             scope: 'openid profile email',
             tenantId: $tenant,
-            allowGuests: (bool) ($s['allow_guests'] ?? true),
+            allowGuests: (bool) ($s['allow_guests'] ?? false),
         );
     }
 

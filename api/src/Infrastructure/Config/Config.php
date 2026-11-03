@@ -341,7 +341,7 @@ final class Config
                             'tenant_id' => '',
                             'client_id' => '',
                             'client_secret' => '',
-                            'allow_guests' => true,
+                            'allow_guests' => false,
                         ],
                     ],
                 ],

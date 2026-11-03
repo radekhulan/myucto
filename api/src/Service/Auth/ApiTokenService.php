@@ -143,7 +143,7 @@ final class ApiTokenService
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope, t.audience,
                     t.allow_payroll_submission_docs, t.eet_external_by_default,
-                    t.expires_at, t.revoked_at,
+                    t.expires_at, t.revoked_at, t.issued_auth_method,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
                     r.name AS user_role_name, r.role_type AS user_role_type,
                     r.is_active AS user_role_active, r.system_key AS user_role_system_key,

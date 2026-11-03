@@ -9,6 +9,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\Auth\MfaStepUpService;
 use MyInvoice\Service\Auth\SessionManager;
+use MyInvoice\Service\Auth\StepUpOperationException;
 
 /**
  * Přihlášení, propojení a ověření totožnosti přes poskytovatele identity.
@@ -21,6 +22,7 @@ class OidcLoginService
 {
     /** Čerstvost přihlášení u poskytovatele pro ověření citlivé operace. */
     private const STEP_UP_MAX_AUTH_AGE = 600;
+    private const AUTH_TIME_SKEW = 60;
 
     public function __construct(
         private readonly Connection $db,
@@ -89,8 +91,14 @@ class OidcLoginService
 
         $extra = ['prompt' => 'select_account'];
         if ($purpose === OidcFlowStore::PURPOSE_STEP_UP) {
-            // Vynutí nové zadání údajů u poskytovatele, ne jen tiché SSO.
-            $extra = ['prompt' => 'login', 'max_age' => '0'];
+            // Vynutí nové zadání údajů u poskytovatele, ne jen tiché SSO. Při
+            // `max_age` musí poskytovatel vrátit `auth_time` (OIDC Core 3.1.2.1),
+            // podle kterého se čerstvost ověří (completeStepUp).
+            $extra = [
+                'prompt' => 'login',
+                'max_age' => '0',
+                'claims' => '{"id_token":{"auth_time":{"essential":true}}}',
+            ];
         }
         if ($loginHint !== null && $loginHint !== '' && strlen($loginHint) <= 190) {
             $extra['login_hint'] = $loginHint;
@@ -149,24 +157,27 @@ class OidcLoginService
             );
         }
         $code = is_string($query['code'] ?? null) ? $query['code'] : '';
-        $idToken = $this->http->exchangeCode($provider, $code, $this->providers->redirectUri($provider), $flow->codeVerifier);
-        $identity = $this->verifier->verify($provider, $idToken, $flow->nonce);
-
+        $identity = null;
         try {
+            $idToken = $this->http->exchangeCode($provider, $code, $this->providers->redirectUri($provider), $flow->codeVerifier);
+            $identity = $this->verifier->verify($provider, $idToken, $flow->nonce);
             return match ($flow->purpose) {
                 OidcFlowStore::PURPOSE_LOGIN => $this->completeLogin($provider, $flow, $identity, $ip, $userAgent),
                 OidcFlowStore::PURPOSE_LINK => $this->completeLink($flow, $identity, $currentSessionToken, $ip, $userAgent),
                 OidcFlowStore::PURPOSE_STEP_UP => $this->completeStepUp($flow, $identity, $currentSessionToken, $ip, $userAgent),
                 default => throw new OidcException(OidcException::FLOW_INVALID),
             };
-        } catch (OidcException $e) {
+        } catch (OidcException | StepUpOperationException $e) {
+            $oidcError = $e instanceof OidcException
+                ? $e
+                : new OidcException(OidcException::FLOW_INVALID, 'Účel ověření už neplatí.');
             $this->activity->log('auth.login_failed', $flow->userId, $flow->userId !== null ? 'user' : null, $flow->userId, [
                 'login_method' => 'oidc:' . $provider->id,
                 'purpose' => $flow->purpose,
-                'reason' => $e->errorCode,
-                'email' => $identity->email,
+                'reason' => $oidcError->errorCode,
+                'email' => $identity?->email,
             ], $ip, $userAgent);
-            throw $e;
+            throw $oidcError;
         }
     }
 
@@ -205,6 +216,15 @@ class OidcLoginService
         $pdo->beginTransaction();
         try {
             $userId = $this->invites->consume($inviteId, $identity->provider);
+            $email = $this->lockUser($userId);
+            // Pozvánka je nosný token, ale přijme ji jen osoba, jejíž účet u
+            // poskytovatele nese stejnou adresu jako pozvaný účet. Párovacím
+            // klíčem e-mail není, jen brání tomu, aby přeposlanou nebo uniklou
+            // pozvánku použil kdokoli jiný z tenantu. Při neshodě se transakce
+            // vrátí a pozvánka zůstane platná pro správnou osobu.
+            if ($email === null || !$this->emailMatches($email, $identity)) {
+                throw new OidcException(OidcException::IDENTITY_MISMATCH, 'Pozvánka patří jinému účtu.');
+            }
             if ($this->identities->countForUser($userId, $identity->provider) > 0) {
                 // Pozvaný už má jinou identitu téhož poskytovatele. Druhou by mohl
                 // přidat jen ten, kdo drží pozvánku, a ne nutně majitel účtu.
@@ -234,15 +254,30 @@ class OidcLoginService
         string $userAgent,
     ): OidcResult {
         $userId = $this->assertSameSession($flow, $currentSessionToken);
-        $row = $this->identities->findBySubject($identity);
-        if ($row !== null && (int) $row['user_id'] !== $userId) {
-            throw new OidcException(OidcException::ALREADY_LINKED, 'Identita je propojená s jiným účtem.');
-        }
-        if ($row === null) {
-            if ($this->identities->countForUser($userId, $identity->provider) > 0) {
-                throw new OidcException(OidcException::ALREADY_LINKED, 'Účet už je propojený s jinou identitou.');
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->lockUser($userId);
+            $row = $this->identities->findBySubject($identity);
+            if ($row !== null && (int) $row['user_id'] !== $userId) {
+                throw new OidcException(OidcException::ALREADY_LINKED, 'Identita je propojená s jiným účtem.');
             }
-            $this->identities->link($userId, $identity, 'self');
+            $linked = false;
+            if ($row === null) {
+                if ($this->identities->countForUser($userId, $identity->provider) > 0) {
+                    throw new OidcException(OidcException::ALREADY_LINKED, 'Účet už je propojený s jinou identitou.');
+                }
+                $this->identities->link($userId, $identity, 'self');
+                $linked = true;
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+        if ($linked) {
             $this->activity->log('auth.oidc_linked', $userId, 'user', $userId, [
                 'provider' => $identity->provider, 'linked_by' => 'self', 'email' => $identity->email,
                 'guest' => $identity->isGuest,
@@ -263,7 +298,13 @@ class OidcLoginService
         if ($row === null || (int) $row['user_id'] !== $userId) {
             throw new OidcException(OidcException::IDENTITY_MISMATCH, 'Přihlásili jste se jiným účtem, než který je propojený.');
         }
-        if ($identity->authTime !== null && $identity->authTime < time() - self::STEP_UP_MAX_AUTH_AGE) {
+        // Ověření musí proběhnout až po zahájení step-upu. Bez `auth_time` nejde
+        // poznat, jestli poskytovatel jen tiše nepoužil staré přihlášení (stačí
+        // z adresy odstranit prompt=login), a proof by vznikl bez člověka u klávesnice.
+        if ($identity->authTime === null
+            || $identity->authTime < $flow->createdAt - self::AUTH_TIME_SKEW
+            || $identity->authTime < time() - self::STEP_UP_MAX_AUTH_AGE
+        ) {
             throw new OidcException(OidcException::TOKEN_INVALID, 'Poskytovatel nepotvrdil čerstvé přihlášení.');
         }
         $token = $this->stepUp->issue($userId, (string) $currentSessionToken, (string) $flow->stepUpOperation, 'oidc');
@@ -286,6 +327,26 @@ class OidcLoginService
             throw new OidcException(OidcException::FLOW_INVALID, 'Sezení už neplatí.');
         }
         return $flow->userId;
+    }
+
+    /** Zamkne řádek uživatele v aktivní transakci, vrátí jeho e-mail. */
+    private function lockUser(int $userId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT email FROM users WHERE id = ? FOR UPDATE');
+        $stmt->execute([$userId]);
+        $email = $stmt->fetchColumn();
+        return is_string($email) ? $email : null;
+    }
+
+    private function emailMatches(string $email, ExternalIdentity $identity): bool
+    {
+        $expected = mb_strtolower(trim($email));
+        foreach ([$identity->email, ...$identity->alternateEmails] as $candidate) {
+            if (is_string($candidate) && $expected !== '' && mb_strtolower(trim($candidate)) === $expected) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @return array<string,mixed>|null */

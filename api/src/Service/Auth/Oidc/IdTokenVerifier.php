@@ -122,6 +122,7 @@ class IdTokenVerifier
             name: self::shortString($claims['name'] ?? null),
             isGuest: $isGuest,
             authTime: $authTime,
+            alternateEmails: array_values(array_filter([self::shortString($claims['email'] ?? null)])),
         );
     }
 

@@ -269,6 +269,12 @@ final class CreateTokenAction
             $allowPayrollSubmissionDocs,
         );
 
+        // Firma vyžadující poskytovatele identity přijme jen token vydaný ze sezení
+        // tohoto poskytovatele (SupplierScopeMiddleware).
+        $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
+        $this->db->pdo()->prepare('UPDATE api_tokens SET issued_auth_method = ? WHERE id = ?')
+            ->execute([isset($session['auth_method']) ? (string) $session['auth_method'] : null, $out['id']]);
+
         $this->activity->log(
             'api_token.created',
             $userId,
