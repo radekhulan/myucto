@@ -177,7 +177,10 @@ se konfrontují v zaúčtované Kč hodnotě; obrazovka současně ukáže půvo
 
 Ostatní pohledávky a závazky se do sestavy dostanou až po zaúčtování. Sestava
 bere jejich skutečný zápis na účtu a při částečné úhradě odečte jen platby,
-které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Storno a
+které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Úhradu,
+kterou převod z jiného programu převzal jako uhrazenou mimo banku a pokladnu
+(například zápočtem nebo interním dokladem), odečte stejně jako detail položky,
+a to k jakémukoli dni, protože datum nenese. Storno a
 přeúčtování se projeví od dne příslušného účetního zápisu. Koncepty a
 potvrzené položky v daňové evidenci sem nepatří.
 

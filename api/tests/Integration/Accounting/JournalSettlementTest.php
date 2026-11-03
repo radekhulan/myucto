@@ -407,6 +407,22 @@ final class JournalSettlementTest extends BankPostingTestCase
         self::assertNull($this->remaining($this->block('321', self::YEAR . '-12-31'), 'purchase_invoice', $linked));
     }
 
+    public function testResidualItemCountsAmountSettledOutside(): void
+    {
+        $entry = $this->manual('311', 'debit', 700.0, self::YEAR . '-04-01', 'Převzatý zůstatek');
+        $id = (int) $this->settlements->createOtherItem($this->supplierId, [
+            'line_id' => $this->lineId($entry, '311'), 'amount' => 700.0, 'title' => 'Syntetický převzatý zůstatek',
+        ], $this->userId)['item']['id'];
+        $outside = $this->db->pdo()->prepare('UPDATE other_items SET settled_outside_amount = ? WHERE id = ? AND supplier_id = ?');
+        $asOf = self::YEAR . '-12-31';
+
+        $outside->execute([300, $id, $this->supplierId]);
+        self::assertEqualsWithDelta(400.0, $this->remaining($this->block('311', $asOf), 'other_item', $id), 0.001);
+
+        $outside->execute([700, $id, $this->supplierId]);
+        self::assertNull($this->remaining($this->block('311', $asOf), 'other_item', $id));
+    }
+
     public function testCancelledResidualItemDisappearsOnlyFromCancellationDayInOpenPeriod(): void
     {
         $entry = $this->manual('311', 'debit', 400.0, self::YEAR . '-03-01', 'Přeplatek bez dokladu');
