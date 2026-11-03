@@ -3680,7 +3680,23 @@
       },
       "revision": "revize {revision}",
       "reason_prompt": "Uveďte důvod změny:",
+      "reason_prompt_optional": "Poznámka do historie běhu (nepovinná)",
       "reason_required": "Důvod je povinný.",
+      "cancel_hint": "Zruší se rozpracovaný výpočet neschváleného běhu. Docházka, mzdové vstupy ani složky se nemažou a běh kdykoli vrátíte tlačítkem „Začít znovu“.",
+      "continue_steps": {
+        "title": "Jak pokračovat",
+        "intro_cancelled": "Běh je zrušený, protože ho nešlo schválit. Opravte podklady níže a běh vraťte posledním krokem - mzdy se rovnou spočítají. Kroky jdou udělat v libovolném pořadí.",
+        "intro": "Běh je spočítaný, ale schválit ho zatím nejde. Nic nerušte - stačí opravit podklady níže a běh obnovit. Kroky jdou udělat v libovolném pořadí.",
+        "time": "Schvalte docházku za měsíc. Kdo docházku nevede, odpracoval podle kalendáře celý fond - to obstará „Vyplnit pracovní dny“ a hromadné schválení.",
+        "time_action": "Otevřít docházku a schválit měsíc",
+        "inputs": "Schvalte rozpracované mzdové vstupy.",
+        "inputs_action": "Schválit všechny mzdové vstupy",
+        "components": "Doplňte mzdu (základní složku) těm, kdo ji v měsíci nemají. Pokud příjem opravdu nevznikl, zadejte 0 Kč.",
+        "components_action": "Otevřít měsíční vstupy",
+        "refresh": "Až bude hotovo, načtěte opravené podklady do běhu. Mzdy se rovnou přepočítají.",
+        "refresh_action": "Obnovit podklady a přepočítat",
+        "restart_action": "Začít znovu a spočítat"
+      },
       "cash_before": "Peněžní příjem před srážkou",
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
@@ -3760,11 +3776,11 @@
         }
       },
       "validation": {
-        "draft_inputs_one": "Jeden pracovní vztah má neschválené mzdové vstupy. Schvalte je v agendě Mzdové složky a potom otevřete novou revizi běhu.",
-        "draft_inputs_many": "Neschválené mzdové vstupy mají pracovní vztahy v počtu {count}. Schvalte je v agendě Mzdové složky a potom otevřete novou revizi běhu.",
+        "draft_inputs_one": "Jeden pracovní vztah má neschválené mzdové vstupy. Schvalte je tlačítkem Schválit vše (nebo v agendě Mzdové složky) a potom klikněte na Obnovit podklady.",
+        "draft_inputs_many": "Neschválené mzdové vstupy mají pracovní vztahy v počtu {count}. Schvalte je tlačítkem Schválit vše (nebo v agendě Mzdové složky) a potom klikněte na Obnovit podklady.",
         "enforcement_net_pay_one": "Exekuční srážku u jednoho zaměstnance zatím nelze spočítat, protože chybí vypočtená nebo ověřená čistá mzda. Nejprve dokončete zákonný výpočet; srážka se potom přepočítá automaticky.",
         "enforcement_net_pay_many": "Exekuční srážku u {count} zaměstnanců zatím nelze spočítat, protože chybí vypočtená nebo ověřená čistá mzda. Nejprve dokončete zákonný výpočet; srážky se potom přepočítají automaticky.",
-        "statutory_incomplete": "Zákonný výpočet pojistného, daně nebo čisté mzdy nebyl dokončen. Opravte mzdové složky a zákonné údaje zaměstnanců a potom otevřete novou revizi běhu.",
+        "statutory_incomplete": "Zákonný výpočet pojistného, daně nebo čisté mzdy nebyl dokončen. Opravte mzdové složky a zákonné údaje zaměstnanců a potom klikněte na Obnovit podklady.",
         "requires_attention": "Kontrola našla údaj, který je potřeba doplnit nebo ručně ověřit. Otevřete místo k opravě; technický detail zůstává uložený v auditní stopě.",
         "and_more": "a dalších {count}",
         "open_remediation": "Otevřít místo k opravě",
@@ -4195,11 +4211,13 @@
         "affected": "Týká se: {names}",
         "impact": {
           "blocking": "Bez tohohle se nedá počítat",
+          "approval": "Spočítat půjde, schválit ne",
           "revision": "Pozdější oprava znamená opravnou revizi",
           "anytime": "Doplní se kdykoli, běh to nezdrží"
         },
         "impact_hint": {
           "blocking": "Výpočet nemá z čeho vyjít. Tohle je potřeba vyřešit dřív než cokoli dalšího.",
+          "approval": "Běh se zahájí i spočítá, ale schválit ho nepůjde, dokud tohle nebude vyřešené. Nejjednodušší je vyřešit to hned - tlačítka jsou u nálezu.",
           "revision": "Zahájit běh jde i teď, ale tenhle údaj vstupuje do zmrazeného snímku - po zamknutí vstupů se opraví jen novou revizí.",
           "anytime": "Na mzdový výpočet to nemá vliv. Stačí doplnit, než se bude podávat."
         },
@@ -4208,11 +4226,12 @@
           "monthly": "Měsíční práce."
         },
         "title": "Kontrola před zahájením",
-        "subtitle": "Tohle uvidíte i po zahájení běhu - ukazujeme to teď, dokud jdou vstupy ještě opravit. Nic z toho mzdový běh neblokuje: spočítat se dá i s těmito nálezy.",
+        "subtitle": "Tohle uvidíte i po zahájení běhu - ukazujeme to teď, dokud jdou vstupy ještě opravit. Spočítat se dá i s těmito nálezy, červené ale zablokují schválení běhu - u každého je tlačítko, které ho vyřeší.",
         "clear": "Kontrola před zahájením nenašla nic, co by bránilo spočítat mzdy za tohle období.",
         "all_clear": "Kontrola už nic nenašla, můžete mzdy spočítat.",
         "confirm_title": "Opravdu zahájit mzdový běh?",
-        "confirm_intro": "Předběžná kontrola tohle našla dřív, než se cokoli zmrazí. Nic z toho běh neblokuje - rozhodněte se, jestli chcete pokračovat, nebo to nejdřív opravit.",
+        "confirm_intro": "Předběžná kontrola tohle našla dřív, než se cokoli zmrazí. Spočítat mzdy jde i tak - rozhodněte se, jestli chcete pokračovat, nebo to nejdřív opravit.",
+        "approval_first": "Červené nálezy by zablokovaly schválení běhu. Doporučujeme je vyřešit teď, potom klikněte na „Zkontrolovat znovu“:",
         "confirm_note": "Zahájením se zamknou vstupy a rovnou se spočítají mzdy. Co zapíšete potom, se do výpočtu nedostane, dokud běh znovu neotevřete.",
         "recheck": "Zkontrolovat znovu",
         "start_anyway": "Přesto zahájit"
@@ -5468,6 +5487,18 @@
       "search_placeholder": "Hledat jméno nebo kód…",
       "reload": "Obnovit",
       "add": "Přidat čas",
+      "absence_action": "Nepřítomnost",
+      "more_actions": "Další",
+      "guide": {
+        "title": "Jak zpracovat měsíc",
+        "work": "Odpracovaný čas zapište do mřížky níž. Kdo pracuje podle kalendáře, tomu stačí „Vyplnit pracovní dny“ a „Uložit mřížku“ - doplní se celý fond, svátky a víkendy se vynechají.",
+        "absence": "Dovolenou, nemoc, ošetřovné a jiné nepřítomnosti zadejte v Nepřítomnostech. Mřížka pak tyto dny sama vynechá.",
+        "absence_action": "Zadat nepřítomnost",
+        "approve": "Schvalte měsíc všem najednou. Schválená docházka je podklad pro mzdový běh.",
+        "approve_action": "Schválit měsíc všem ({count})",
+        "all_approved": "Všechny měsíce na stránce jsou schválené.",
+        "to_runs": "Pokračovat na mzdový běh"
+      },
       "load_failed": "Docházku se nepodařilo načíst.",
       "saved": "Časový záznam byl uložen.",
       "save_failed": "Časový záznam se nepodařilo uložit.",
@@ -5549,7 +5580,14 @@
           "title": "Hromadně se neschválí ({count}) - odbavte je jednotlivě",
           "absences": "měsíc obsahuje absence, takže odpověď na neodpracované hodiny a překážky je rozhodnutí, ne údaj z evidence",
           "no_preview": "chybí návrh souhrnu JMHZ",
-          "incomplete_suggestions": "návrh souhrnu JMHZ je neúplný"
+          "incomplete_suggestions": "návrh souhrnu JMHZ je neúplný",
+          "approve_single": "Schválit jednotlivě"
+        },
+        "under_fund": {
+          "title": "Odpracováno méně než fond a nepřítomnost není zapsaná ({count})",
+          "row": "odpracováno {worked} z {fund}",
+          "hint": "Schválit to jde i tak, do hlášení ČSSZ ale půjde méně odpracovaných hodin bez vysvětlení. Pokud tito lidé odpracovali celý měsíc podle kalendáře, doplňte chybějící dny. Pokud chyběli, zadejte nepřítomnost.",
+          "fill": "Doplnit chybějící pracovní dny podle kalendáře"
         }
       },
       "columns": {
@@ -5617,6 +5655,7 @@
       },
       "plan_shifts": {
         "action": "Rozvrhnout směny podle kalendáře",
+        "short_hint": "Naplánuje směny na pracovní dny. Potřebné jen pro náhradu mzdy při nemoci a dovolené u nepravidelné pracovní doby.",
         "hint": "Založí publikované směny na všechny pracovní dny měsíce podle pracovního kalendáře vztahu (bez kalendáře pondělí až pátek po 8 h). Dny, které už směnu mají, přeskočí. Směny potřebuje náhrada mzdy při DPN i za dovolenou.",
         "nothing": "Všechny pracovní dny měsíce už směnu mají.",
         "done": "Založeno směn: {count} ({name}).",
@@ -5674,19 +5713,21 @@
         "holiday_arrangement_missing": "Měsíc obsahuje práci ve svátek, ale u vztahu {name} není sjednaná zásada (náhradní volno, nebo příplatek). Bez ní se z evidence nedá spočítat mzda, takže ji schválení nepustí dál.",
         "difficulty_factors_missing": "Měsíc obsahuje práci ve ztíženém prostředí, ale u vztahu {name} chybí počet ztěžujících vlivů podle § 117.",
         "average_earning_missing": "Příplatek se u vztahu {name} počítá z průměrného výdělku a ten pro toto období není zjištěný.",
-        "inputs_locked": "Vstupy období jsou uzamčené mzdovým během, takže do nich schválení docházky nemůže zapsat příplatky.",
+        "inputs_locked": "Mzdový běh za tento měsíc už má zamčené vstupy, takže schválení docházky do nich nemůže zapsat příplatky. V mzdovém běhu klikněte na „Zrušit běh“ (docházka ani vstupy se nesmažou), vraťte se sem a měsíc schvalte. Potom v běhu klikněte na „Začít znovu a spočítat“.",
         "overtime_conflict": "Přesčas je u vztahu {name} zadaný dvakrát - v docházce i v rychlých vstupech. Nechte jen jednu evidenci.",
         "link": {
           "holiday_arrangement_missing": "Otevřít kartu zaměstnance a doplnit zásadu příplatků",
           "difficulty_factors_missing": "Otevřít kartu zaměstnance a doplnit ztěžující vlivy",
           "average_earning_missing": "Otevřít průměrné výdělky",
-          "inputs_locked": "Otevřít mzdové běhy",
+          "inputs_locked": "Otevřít mzdový běh za tento měsíc",
           "overtime_conflict": "Otevřít rychlé vstupy"
         }
       },
       "calendar": {
         "default_name": "Pravidelný pracovní týden",
         "create": "Založit kalendář",
+        "short_hint": "Pracovní týden po-pá 8 h od začátku měsíce. Bez kalendáře se fond odhaduje stejně.",
+        "new_version_hint": "Od 1. dne měsíce nastaví týden po-pá 8 h a nahradí dosavadní rozvrh. U zkráceného úvazku tím vzroste fond.",
         "new_version": "Nová verze kalendáře",
         "saved": "Historická verze pracovního kalendáře byla uložena.",
         "failed": "Kalendář se nepodařilo uložit."

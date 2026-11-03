@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { formatPeriod } from '@/composables/useFormat'
 
 const m = vi.hoisted(() => ({
@@ -20,6 +20,9 @@ const m = vi.hoisted(() => ({
   toastError: vi.fn(),
   revealField: vi.fn(),
 }))
+
+// Průvodce měsícem a akce řádků vedou odkazy do jiných agend.
+config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 
 vi.mock('@/utils/revealField', () => ({ revealField: m.revealField }))
 

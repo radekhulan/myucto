@@ -385,11 +385,22 @@ Pořadí je dané a nedá se přeskočit.
 | Čeká na opravu / Zrušeno | **Otevřít opravu** | nová revize nad opravenými vstupy |
 
 Vedle jsou méně časté akce **Vyžádat opravu** a **Zrušit běh** (červeně úplně
-vpravo).
+vpravo). Důvod se píše jen u **Vyžádat opravu** schváleného běhu. Zrušení
+neschváleného běhu stačí potvrdit, docházka ani vstupy se nemažou a běh vrátí
+**Začít znovu a spočítat**.
 
 **Kontrola před zahájením.** Každý nález má vyznačený dopad: **Bez tohohle se
-nedá počítat**, **Pozdější oprava znamená opravnou revizi**, nebo **Doplní se
-kdykoli, běh to nezdrží**.
+nedá počítat**, **Spočítat půjde, schválit ne** (červeně, například neschválená
+docházka, rozpracované vstupy nebo vztah bez mzdové složky), **Pozdější oprava
+znamená opravnou revizi**, nebo **Doplní se kdykoli, běh to nezdrží**. U
+červených nálezů jsou tlačítka, která je vyřeší rovnou: **Otevřít docházku
+a schválit měsíc**, **Schválit všechny mzdové vstupy** a **Otevřít měsíční
+vstupy**.
+
+**Běh nejde schválit.** Drží-li spočítaný běh neschválená docházka nebo
+rozpracované vstupy, karta běhu ukáže panel **Jak pokračovat** s očíslovanými
+kroky a tlačítkem u každého z nich. Běh nerušte: po opravě podkladů stačí
+kliknout na **Obnovit podklady a přepočítat**.
 
 **Uzamčení vstupů** vytvoří neměnný snímek zaměstnanců, vztahů, složek, data
 výplaty a podkladů srážek. Co zapíšete potom, se do výpočtu ani do hlášení
