@@ -182,8 +182,9 @@ export const FILE_TOOLS = [
   ),
   {
     name: 'upload_invoice_attachment',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['POST', '/api/invoices/{id}/attachments'],
+    ],
     title: 'Přiložit soubor k vydané faktuře',
     description:
       'Nahraje přílohu k vydané faktuře (posílá se odběrateli spolu s PDF). Povolené typy: '
@@ -241,8 +242,10 @@ export const FILE_TOOLS = [
   ),
   {
     name: 'upload_purchase_invoice_pdf',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/pdf'],
+    ],
     title: 'Nahrát PDF k přijaté faktuře',
     description:
       'Archivuje originál dokladu (PDF) u přijaté faktury. Fotku .jpg nebo .png aplikace '
@@ -289,8 +292,9 @@ export const FILE_TOOLS = [
   },
   {
     name: 'import_purchase_invoice_file',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['POST', '/api/purchase-invoices/import-structured'],
+    ],
     title: 'Založit přijatou fakturu ze souboru',
     description:
       'Založí přijatou fakturu ze strukturovaného souboru: ISDOC (.isdoc), balíčku ISDOCX '

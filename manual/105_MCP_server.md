@@ -146,6 +146,15 @@ zakázek a klientů; přidání práce navíc čtení nastavení firmy pro dohle
 Platí to i při přímém zadání ID faktury a sazby. Výkaz lze přes MCP upravovat
 pouze u konceptu faktury. Seznam sazeb DPH vyžaduje čtení nastavení firmy.
 
+Klientské připojení podporuje také seznam měn a nacenění položky ceníku pro
+odběratele, úpravy hlavičky a položek konceptu přijaté faktury a nahrávání
+příloh vydané faktury nebo PDF přijaté faktury. Úprava hlavičky přijatého
+konceptu vyžaduje také čtení klientů a přístup k číselníku měn. Nahrazení již
+archivovaného PDF vyžaduje výslovné potvrzení. Import přijaté faktury ze souboru
+zpracovává ISDOC, ISDOCX a PDF s vloženým ISDOC. K importu je potřeba právo
+vytvořit přijatou fakturu; k úpravám a nahrávání právo zápisu příslušné agendy.
+Všechny tyto zápisové nástroje vyžadují také token pro čtení a zápis.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou

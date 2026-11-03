@@ -33,6 +33,19 @@
       ]
     ]
   },
+  "add_purchase_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
   "add_work_report_entry": {
     "write": true,
     "api": [
@@ -446,6 +459,15 @@
       ]
     ]
   },
+  "import_purchase_invoice_file": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/purchase-invoices/import-structured"
+      ]
+    ]
+  },
   "issue_invoice": {
     "write": true,
     "api": [
@@ -461,6 +483,15 @@
       [
         "GET",
         "/api/bank-statements"
+      ]
+    ]
+  },
+  "list_currencies": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/currencies"
       ]
     ]
   },
@@ -695,6 +726,19 @@
       ]
     ]
   },
+  "remove_purchase_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
   "remove_work_report_entry": {
     "write": true,
     "api": [
@@ -722,6 +766,15 @@
       [
         "POST",
         "/api/recurring/{id}/reschedule"
+      ]
+    ]
+  },
+  "resolve_price_list_item": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/price-list-items/{id}/resolve"
       ]
     ]
   },
@@ -919,6 +972,40 @@
       ]
     ]
   },
+  "update_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/codebooks/currencies"
+      ],
+      [
+        "GET",
+        "/api/clients/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "update_purchase_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
   "update_recurring_invoice": {
     "write": true,
     "api": [
@@ -929,6 +1016,28 @@
       [
         "PUT",
         "/api/recurring/{id}"
+      ]
+    ]
+  },
+  "upload_invoice_attachment": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "upload_purchase_invoice_pdf": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/pdf"
       ]
     ]
   },

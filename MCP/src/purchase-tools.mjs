@@ -344,8 +344,12 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['GET', '/api/codebooks/currencies'],
+      ['GET', '/api/clients/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Upravit hlavičku konceptu přijaté faktury',
     description:
       'Změní hlavičku KONCEPTU přijaté faktury: dodavatele, číslo dokladu, data, měnu, druh dokladu, '
@@ -433,8 +437,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'add_purchase_invoice_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Přidat položku na koncept přijaté faktury',
     description:
       'Přidá položku na KONCEPT přijaté faktury. Existující položky zůstanou beze změny včetně '
@@ -473,8 +479,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Upravit položku konceptu přijaté faktury',
     description:
       'Změní jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row` '
@@ -542,8 +550,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'remove_purchase_invoice_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Odebrat položku z konceptu přijaté faktury',
     description:
       'Odebere jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row`. '
