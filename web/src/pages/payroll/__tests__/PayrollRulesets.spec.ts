@@ -228,28 +228,55 @@ describe('PayrollRulesets', () => {
     expect(wrapper.get('[data-test="ruleset-checksum-support"]').attributes('to')).toBe('/admin/support')
   })
 
-  it('shows how many parameters manual judgement actually affects', async () => {
+  it('names the parameters outside automatic calculation right on the domain card', async () => {
     const wrapper = await mountPage([
       group({
-        domain: 'social_insurance',
-        manual_review_parameter_count: 3,
-        parameter_count: 10,
-        versions: [summary({ ruleset_id: 'cz-payroll-2026.social-insurance.v1', domain: 'social_insurance' })],
+        status: 'ready',
+        calculation_ready: true,
+        manual_review_parameter_count: 2,
+        parameter_count: 37,
+        review_items: [
+          {
+            key: 'benefit_exemption.meal.per_shift',
+            label: 'Osvobozený příspěvek na stravování za jednu směnu',
+            category: 'pending_publication',
+            years: [2027],
+            why: 'Vyhláška o stravném pro rok 2027 ještě nevyšla.',
+            action: 'Částka přijde aktualizací aplikace.',
+            expected: '2026-12',
+            source_url: 'https://www.zakonyprolidi.cz/cs/2006-262#p189',
+            route: null,
+          },
+          {
+            key: 'credit.spouse.eligibility',
+            label: 'Nárok na slevu na manžela',
+            category: 'assessed_elsewhere',
+            years: [2025, 2026, 2027],
+            why: 'Nárok se dokládá k ročnímu zúčtování.',
+            action: 'Zapište ho v ročním zúčtování.',
+            expected: null,
+            source_url: null,
+            route: 'payroll-annual-settlement',
+          },
+        ],
       }),
-      group({
-        domain: 'codebooks',
-        status: 'manual_review',
-        manual_review_by_design: true,
-        manual_review_parameter_count: 1,
-        parameter_count: 1,
-        versions: [summary({ ruleset_id: 'cz-payroll-2026.codebooks.v1', domain: 'codebooks' })],
-      }),
+      group({ domain: 'health_insurance', status: 'ready', calculation_ready: true, review_items: [] }),
     ])
 
-    expect(wrapper.get('[data-test="ruleset-manual-share-social_insurance"]').text())
-      .toBe('payroll.rulesets.manual_review_share:{"manual":3,"total":10}')
-    expect(wrapper.get('[data-test="ruleset-manual-share-codebooks"]').text())
-      .toBe('payroll.rulesets.manual_review_all:{"total":1}')
+    const card = wrapper.get('[data-test="ruleset-review-items-income_tax"]')
+    expect(card.text()).not.toContain('manual_review_share')
+    expect(card.text()).toContain('Osvobozený příspěvek na stravování za jednu směnu')
+    expect(card.text()).toContain('Nárok na slevu na manžela')
+    expect(wrapper.get('[data-test="ruleset-review-category-benefit_exemption.meal.per_shift"]').text())
+      .toMatch(/^payroll\.rulesets\.review\.category\.pending_publication_expected:\{"month":"prosinec 2026"\}$/)
+    expect(wrapper.get('[data-test="ruleset-review-category-credit.spouse.eligibility"]').text())
+      .toBe('payroll.rulesets.review.category.assessed_elsewhere')
+    expect(wrapper.get('[data-test="ruleset-review-link-credit.spouse.eligibility"]').text())
+      .toContain('payroll.rulesets.review.go_to')
+    expect(card.text()).toContain('Zapište ho v ročním zúčtování.')
+    // Doména bez takových parametrů žádný výčet ani souhrnnou větu nemá.
+    expect(wrapper.find('[data-test="ruleset-review-items-health_insurance"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test^="ruleset-manual-share-"]').exists()).toBe(false)
   })
 
   it('keeps the domain tables aligned by using identical fixed column widths', async () => {

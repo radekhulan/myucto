@@ -2424,8 +2424,24 @@
         "coverage_issue": "Verze domény nepokrývají celé období, takže z ní výpočet nečerpá. Doplňte chybějící účinnost.",
         "missing": "Pro tuhle doménu není žádná verze."
       },
-      "manual_review_share": "Ruční posouzení se týká {manual} z {total} parametrů - zbytek se používá normálně.",
-      "manual_review_all": "Ruční posouzení se týká všech {total} parametrů domény.",
+      "review": {
+        "title": "Mimo automatický výpočet",
+        "category": {
+          "manual_review": "Aplikace nepočítá",
+          "pending_publication": "Čeká na vyhlášení",
+          "pending_publication_expected": "Čeká na vyhlášení (očekáváno {month})",
+          "assessed_elsewhere": "Posuzuje se jinde"
+        },
+        "years": "sada {years}",
+        "go_to": "Přejít na {agenda}",
+        "source": "Předpis",
+        "route": {
+          "payroll-annual-settlement": "Roční zúčtování",
+          "payroll-absences": "Nepřítomnosti",
+          "payroll-submissions": "Podání",
+          "payroll-travel": "Cestovní náhrady"
+        }
+      },
       "manual_review_badge": "Ruční posouzení",
       "manual_review_why": "Proč:",
       "manual_review_action": "Co s tím:",

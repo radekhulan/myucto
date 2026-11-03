@@ -46,6 +46,34 @@ export interface PayrollRuleParameter {
   note: string | null
   manual_review_why?: string | null
   manual_review_action?: string | null
+  /** Jen u parametru bez hodnoty: o jakou situaci jde (viz `PayrollRulesetReviewCategory`). */
+  review_category?: PayrollRulesetReviewCategory | null
+  /** Očekávaný měsíc vyhlášení `YYYY-MM` u `pending_publication`. */
+  review_expected?: string | null
+  review_source_url?: string | null
+  /** Název routy agendy, kde se nárok posuzuje. */
+  review_route?: string | null
+}
+
+/**
+ * Proč výpočet z parametru nečerpá:
+ * `pending_publication` = hodnota ještě nevyšla ve Sbírce,
+ * `assessed_elsewhere` = posuzuje se z dokladů v jiné agendě,
+ * `manual_review` = případ aplikace nepočítá a zbývá člověku.
+ */
+export type PayrollRulesetReviewCategory = 'pending_publication' | 'assessed_elsewhere' | 'manual_review'
+
+export interface PayrollRulesetReviewItem {
+  key: string
+  label: string | null
+  category: PayrollRulesetReviewCategory
+  /** Ročníky sady, ve kterých parametr hodnotu nemá. */
+  years: number[]
+  why: string | null
+  action: string | null
+  expected: string | null
+  source_url: string | null
+  route: string | null
 }
 
 export interface PayrollRulesetSource {
@@ -179,6 +207,8 @@ export interface PayrollRulesetDomainGroup {
   manual_review_by_design: boolean
   manual_review_explanation: string | null
   manual_review_parameter_count: number
+  /** Jmenovitý výčet parametrů bez hodnoty; starší API ho nemusí posílat. */
+  review_items?: PayrollRulesetReviewItem[]
   parameter_count: number
   coverage_issues: PayrollRulesetIssue[]
   versions: PayrollRulesetSummary[]

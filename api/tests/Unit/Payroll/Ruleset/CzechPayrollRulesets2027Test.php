@@ -321,18 +321,21 @@ final class CzechPayrollRulesets2027Test extends TestCase
     }
 
     /**
-     * Stravenkový paušál (70 % stravného 2027) a starý volnočasový koš (od 2027
-     * zrušený limit) jsou ruční posouzení: výpočet osvobození fail-closed
-     * selže, místo aby použil číslo roku 2026.
+     * Stravenkový paušál (70 % stravného 2027) čeká na vyhlášení: výpočet
+     * osvobození fail-closed selže, místo aby použil číslo roku 2026.
+     * Administrace ho ale nesmí ukazovat jako „ruční posouzení" bez termínu.
      */
     public function testUndocumentedBenefitLimitsFailClosed(): void
     {
         $version = CzechPayrollRulesets::provider()->forDate(PayrollRulesetDomain::IncomeTax, '2027-06-15');
-        foreach (['benefit_exemption.meal.per_shift', 'benefit_exemption.non_cash_leisure.yearly'] as $key) {
-            self::assertSame(PayrollRulesetCapability::ManualReview, $version->parameters[$key]->capability, $key);
-            self::assertStringContainsString('K OVĚŘENÍ', (string) $version->parameters[$key]->value, $key);
-            self::assertNotNull(PayrollRuleParameterCatalog::manualReview('income_tax', $key), $key);
-        }
+        $meal = $version->parameters['benefit_exemption.meal.per_shift'];
+        self::assertSame(PayrollRulesetCapability::ManualReview, $meal->capability);
+        self::assertStringContainsString('ČEKÁ NA VYHLÁŠENÍ', (string) $meal->value);
+        $explanation = PayrollRuleParameterCatalog::manualReview('income_tax', 'benefit_exemption.meal.per_shift');
+        self::assertNotNull($explanation);
+        self::assertSame(PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION, $explanation['category']);
+        self::assertSame('2026-12', $explanation['expected'] ?? null);
+        self::assertStringStartsWith('https://', $explanation['source_url'] ?? '');
 
         $baskets = new PayrollBenefitBasketService(CzechPayrollRulesets::provider());
         try {
@@ -349,6 +352,45 @@ final class CzechPayrollRulesets2027Test extends TestCase
             self::AVERAGE_WAGE_MINOR,
             $baskets->limitMinor(PayrollBenefitExemptionBasket::NonCashHealth, '2027-03-01'),
         );
+    }
+
+    /**
+     * § 6 odst. 9 písm. d) ZDP ve znění zák. č. 180/2026 Sb.: bod 2 (sport,
+     * kultura, vzdělávací a předškolní zařízení) od 1. 1. 2027 bez číselného
+     * limitu, bod 3 (rekreace a zájezd) do 20 000 Kč za zdaňovací období.
+     * Sada to musí říct hodnotou, ne ručním posouzením, a výpočet se podle
+     * toho musí chovat.
+     */
+    public function testLeisureBasketOf2027IsUnlimitedAndRecreationCapped(): void
+    {
+        $version = CzechPayrollRulesets::provider()->forDate(PayrollRulesetDomain::IncomeTax, '2027-06-15');
+        $leisure = $version->parameters['benefit_exemption.non_cash_leisure.yearly'];
+        self::assertSame(PayrollRulesetCapability::Supported, $leisure->capability);
+        self::assertSame(PayrollBenefitExemptionBasket::UNLIMITED_RULESET_VALUE, $leisure->value);
+        self::assertSame('bez číselného limitu', PayrollRuleParameterCatalog::valueLabel($leisure->value));
+
+        // Hodnota v sadě a zákonné pravidlo v kódu se nesmí rozejít v žádném ročníku.
+        $provider = CzechPayrollRulesets::provider();
+        foreach ([2025, 2026, 2027] as $year) {
+            $value = $provider->forDate(PayrollRulesetDomain::IncomeTax, "{$year}-12-31")
+                ->parameters['benefit_exemption.non_cash_leisure.yearly']->value;
+            self::assertSame(
+                PayrollBenefitExemptionBasket::NonCashLeisure->isUnlimited($year),
+                $value === PayrollBenefitExemptionBasket::UNLIMITED_RULESET_VALUE,
+                (string) $year,
+            );
+        }
+
+        $baskets = new PayrollBenefitBasketService($provider);
+        $leisureSplit = $baskets->split(PayrollBenefitExemptionBasket::NonCashLeisure, '2027-03-01', 0, 5_000_000);
+        self::assertNull($leisureSplit->limitMinor);
+        self::assertSame(5_000_000, $leisureSplit->exemptMinor);
+        self::assertSame(0, $leisureSplit->taxableMinor);
+
+        $recreationSplit = $baskets->split(PayrollBenefitExemptionBasket::Recreation, '2027-03-01', 0, 2_500_000);
+        self::assertSame(2_000_000, $recreationSplit->limitMinor);
+        self::assertSame(2_000_000, $recreationSplit->exemptMinor);
+        self::assertSame(500_000, $recreationSplit->taxableMinor);
     }
 
     /**

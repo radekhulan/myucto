@@ -10,7 +10,7 @@
   pravidel (bez ní mzdy od 1. ledna nespočítáte).
 - Vyšla novela s jinou sazbou, limitem nebo minimální mzdou dřív, než ji
   přinese nová verze aplikace.
-- Výpočet skončil v ručním posouzení kvůli nepotvrzené hodnotě.
+- Chcete vědět, které parametry výpočet nepoužívá a proč.
 - Chcete doložit, odkud hodnota pochází a kdo ji změnil.
 
 ## 92.2 Než začnete
@@ -84,7 +84,9 @@ Ruční úpravu zahodíte tlačítkem **Vrátit ověřenou hodnotu**.
 <!-- cols: 30 34 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Výpočet skončil v ručním posouzení, parametr má štítek **Ruční posouzení** | Hodnota není potvrzená (např. některé hodnoty roku 2025) | Doplňte ji podle ověřeného zdroje, nebo výpočet proveďte ručně; obrazovka u parametru vysvětlí proč a co s tím. |
+| Parametr má štítek **Čeká na vyhlášení** | Hodnota ještě nevyšla ve Sbírce (např. stravné pro příští rok) | Nic nevyplňujte, hodnota přijde aktualizací aplikace. Do té doby nejde schválit vstup, který ji potřebuje; ostatní mzda se počítá. |
+| Parametr má štítek **Posuzuje se jinde** | Nárok se dokládá u konkrétního zaměstnance nebo případu | Klikněte na odkaz u parametru (např. **Roční zúčtování**) a nárok zapište tam. |
+| Parametr má štítek **Aplikace nepočítá** | Zvláštní případ, který aplikace nepočítá (např. zahraniční cesta) nebo nepotvrzená hodnota roku 2025 | Týká se vás, jen když na takový případ narazíte; postup je u parametru v části **Co s tím**. |
 | Pravidla jsou jen ke čtení | Nejste superadmin | Změnu nechte provést superadmina. |
 | Akce verze je nedostupná s „Blokuje: …" | Mezera nebo překryv účinnosti, nebo neplatný kontrolní součet | Upravte účinnost podle důvodu; u kontrolního součtu kontaktujte podporu. |
 | **Neplatný kontrolní součet** | Neporušenost některé sady nejde ověřit | Obraťte se na podporu, která prověří instalaci. |
@@ -170,7 +172,40 @@ ani přepisovat. Schválí-li verzi tentýž člověk, který ji upravil, změna
 ale obrazovka na to upozorní. Jedna oprávněná osoba tak zvládne pravidlo založit,
 ověřit i použít bez druhé osoby, auditní stopa zůstává.
 
-### 92.8.4 Bezpečnost a časté chyby
+### 92.8.4 Parametry mimo automatický výpočet
+
+Několik parametrů záměrně nemá číslo, ze kterého by výpočet čerpal. Karta
+oblasti je vypisuje jménem v rámečku **Mimo automatický výpočet**, rovnou bez
+otevírání verze, a u každého uvádí **Proč** a **Co s tím**. Když oblast žádný
+takový parametr nemá, rámeček se nezobrazí. Ostatní parametry oblasti se
+používají normálně.
+
+Štítek říká, o jakou situaci jde:
+
+- **Čeká na vyhlášení (očekáváno …)**: zákon hodnotu dá, jen ještě nevyšla.
+  Typicky osvobozený příspěvek na stravování za směnu, který je 70 % horní
+  hranice stravného (§ 6 odst. 9 písm. b) ZDP); tu stanoví vyhláška podle § 189
+  zákoníku práce obvykle v prosinci. Hodnota přijde aktualizací aplikace. Do té
+  doby nejde schválit mzdový vstup s příspěvkem na stravování za období nového
+  roku a aplikace to u vstupu ohlásí. Ostatní mzda se počítá normálně.
+- **Posuzuje se jinde**: nárok se nedá posoudit ze sady pravidel, ale
+  z dokladů v jiné agendě, kam vede odkaz. Sleva na manžela se uplatňuje až
+  v **Ročním zúčtování** podle prohlášení a dokladů zaměstnance; nárok na
+  náhradu mzdy a průměrný výdělek se posuzují u konkrétní nepřítomnosti v agendě
+  **Nepřítomnosti**; termíny a odeslání hlášení řeší stránka **Podání**.
+- **Aplikace nepočítá**: zvláštní případ, který aplikace nepočítá, například
+  zahraniční pracovní cesty, sleva u zemědělské dohody o provedení práce nebo
+  nepotvrzené zvláštní sazby roku 2025. Týká se vás, jen když na takový případ
+  narazíte.
+
+U parametru je uvedené i to, které sady se týká (např. „sada 2027").
+
+Volnočasová plnění podle § 6 odst. 9 písm. d) bodu 2 ZDP (sport, kultura,
+vzdělávací a předškolní zařízení) jsou od roku 2027 osvobozená bez číselného
+limitu a sada to tak uvádí. Rekreace a zájezdy mají od roku 2027 vlastní limit
+20 000 Kč za rok podle bodu 3, viz [Koše benefitů](89_Kose_benefitu.md).
+
+### 92.8.5 Bezpečnost a časté chyby
 
 Chybějící nebo překrývající se účinnost výpočet zastaví nebo vyvolá kontrolu.
 Účinná verze neznamená automaticky právně ověřenou, rozhoduje zdroj. Odkaz na
