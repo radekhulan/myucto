@@ -366,6 +366,12 @@ jen zařazení, částky ani DPH se nepřepočítávají. Záloha se tu měnit n
 Po dokončení dávky ukáže souhrn počet úspěšných a chybných dokladů a tlačítko **Zobrazit v přijatých fakturách**, které otevře
 seznam vyfiltrovaný na tuto dávku. Tam lze vybraným dokladům změnit typ hromadně akcí **Nastavit typ**.
 
+**Jeden doklad ve více souborech.** Když máte jednu fakturu nebo účtenku rozdělenou do více souborů (třeba každou stranu
+jako samostatné PDF nebo fotku), použijte sekci **Spojit více PDF do jednoho dokladu** pod nahráváním. Je na stránce
+`Nákup → AI import` i `Prodej → AI import`. Nahrajte všechny části, šipkami je seřaďte a klikněte na **Spojit a importovat
+jako jeden doklad**. Části se v prohlížeči spojí do jednoho PDF a vytěží se jako jediný doklad, takže vznikne jeden koncept.
+Spojit lze PDF a fotky JPG, PNG a WebP. PDF chráněné heslem spojit nejde a spojený soubor smí mít nejvýš 32 MB.
+
 ### 25.9.12 Kontrola vytěžených dokladů: podrobnosti
 
 - Druh nákladu jde v okně změnit i u dokladu, který už koncept není, bez vynucené úpravy v editoru. Klient z portálu ho mění

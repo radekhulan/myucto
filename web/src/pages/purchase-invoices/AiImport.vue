@@ -14,6 +14,7 @@ import { canUsePurchaseAiExtraction } from '@/security/purchaseAiExtraction'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -266,6 +267,16 @@ async function runAiExtract() {
       if (version === contextVersion) aiExtracting.value = false
     }
   }
+}
+
+// Doklad spojený z více částí jde do stejného vytěžení jako jeden nahraný soubor.
+function importMerged(file: File) {
+  if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value) return
+  aiBatchQueue.value = []
+  aiBatchId.value = ''
+  aiPdfFile.value = file
+  aiResult.value = null
+  void runAiExtract()
 }
 
 /** Doklad jiné firmy: kde skončil (faktura v ní, nebo její příchozí doklady). */
@@ -535,6 +546,8 @@ watch(() => suppliers.currentSupplierId, () => {
         </details>
       </div>
     </div>
+    <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
+      :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" :only-flagged="!auth.isClientRole" @close="reviewIds = null" />
   </div>
 </template>

@@ -29142,7 +29142,23 @@
       "last_import": "Poslední import: {date} · {n} dokladů",
       "batch_summary": "Naimportováno {ok} dokladů, {failed} s chybou.",
       "show_in_list": "Zobrazit v přijatých fakturách",
-      "coming_hint": "—"
+      "coming_hint": "—",
+      "merge": {
+        "title": "Spojit více PDF do jednoho dokladu",
+        "hint": "Máte jednu fakturu nebo účtenku ve více souborech (každá strana zvlášť)? Nahrajte všechny části, seřaďte je a spojí se do jednoho PDF, které se vytěží jako jeden doklad.",
+        "drop": "Přetáhněte části dokladu sem nebo klikněte",
+        "formats": "PDF a fotky (JPG, PNG, WebP), alespoň dva soubory",
+        "parts_title": "Části dokladu ({n})",
+        "move_up": "Posunout výš",
+        "move_down": "Posunout níž",
+        "run": "Spojit a importovat jako jeden doklad",
+        "merging": "Spojuji soubory…",
+        "only_pdf_images": "Spojit lze jen PDF a fotky (JPG, PNG, WebP). Ostatní soubory byly vynechány.",
+        "error_encrypted": "Soubor {file} je chráněný heslem, nelze ho spojit.",
+        "error_unreadable": "Soubor {file} se nepodařilo načíst.",
+        "error_unsupported": "Soubor {file} nelze spojit, podporované jsou PDF a fotky.",
+        "error_too_large": "Spojené PDF je větší než 32 MB. Zmenšete fotky nebo nahrajte méně stran."
+      }
     },
     "salesAi": {
       "import_title": "AI import vydané faktury",

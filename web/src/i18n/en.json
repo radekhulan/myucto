@@ -29142,7 +29142,23 @@
       "last_import": "Last import: {date} · {n} documents",
       "batch_summary": "Imported {ok} documents, {failed} with errors.",
       "show_in_list": "Show in purchase invoices",
-      "coming_hint": "—"
+      "coming_hint": "—",
+      "merge": {
+        "title": "Merge several PDFs into one document",
+        "hint": "Got one invoice or receipt split across several files (one page each)? Upload all parts, put them in order and they are merged into one PDF that is extracted as a single document.",
+        "drop": "Drop the document parts here or click",
+        "formats": "PDFs and photos (JPG, PNG, WebP), at least two files",
+        "parts_title": "Document parts ({n})",
+        "move_up": "Move up",
+        "move_down": "Move down",
+        "run": "Merge and import as one document",
+        "merging": "Merging files…",
+        "only_pdf_images": "Only PDFs and photos (JPG, PNG, WebP) can be merged. Other files were skipped.",
+        "error_encrypted": "File {file} is password protected and cannot be merged.",
+        "error_unreadable": "File {file} could not be read.",
+        "error_unsupported": "File {file} cannot be merged, only PDFs and photos are supported.",
+        "error_too_large": "The merged PDF exceeds 32 MB. Use smaller photos or fewer pages."
+      }
     },
     "salesAi": {
       "import_title": "AI import of issued invoices",
