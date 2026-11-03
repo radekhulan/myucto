@@ -17,7 +17,7 @@ import {
   type PurchaseDocumentKind,
   type ImportBatch,
 } from '@/api/purchaseInvoices'
-import { formatMoney, formatMoneyWhole, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useToast } from '@/composables/useToast'
@@ -1652,7 +1652,7 @@ useWindowRefresh(refreshLoadedPages,
                         <tr v-for="(item, ii) in expandedItems" :key="item.id ?? ii" class="border-t border-neutral-200/70">
                           <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
-                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatUnitPrice(item.unit_price_without_vat, inv.currency) }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
                         </tr>
                       </tbody>

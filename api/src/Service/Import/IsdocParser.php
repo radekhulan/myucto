@@ -514,8 +514,7 @@ final class IsdocParser
 
         $unitPriceLocalRaw = $this->text($xpath, 'i:UnitPrice', $line) ?: '0';
         $unitPriceLocal = (float) $unitPriceLocalRaw;
-        $preciseTimeRate = $durationMinutes !== null
-            || (TimeBilling::isHourUnit($unit) && self::hasSubcentPrecision($unitPriceLocalRaw));
+        $preciseUnitPrice = $durationMinutes !== null || self::hasSubcentPrecision($unitPriceLocalRaw);
 
         // <LineExtensionAmount> = celková částka řádku bez DPH PO slevě. ISDOC 6.0.x
         // nemá na řádce dedikovaný discount element — sleva se promítá jen tím, že
@@ -528,7 +527,7 @@ final class IsdocParser
         if ($hasForeignCurrency) {
             // <UnitPrice> je dle ISDOC vždy v lokální měně (CZK), ne v měně faktury.
             // Legacy cizoměnovou jednotkovou cenu po slevě odvodíme z
-            // <LineExtensionAmountCurr> / qty. Přesný časový řádek může mít Curr total
+            // <LineExtensionAmountCurr> / qty. Řádek s přesnou cenou může mít Curr total
             // zaokrouhlený na haléře, proto u něj obnovíme sazbu z lokální UnitPrice
             // a kurzu, ale jen pokud z ní vyjde stejný řádkový total bez slevy.
             // Fallback na <UnitPrice> drží pro nekonformní exporty cizích systémů,
@@ -537,7 +536,7 @@ final class IsdocParser
             $unitPrice = ($lineAmountCurr !== '' && $quantity > 0.0)
                 ? (float) $lineAmountCurr / $quantity
                 : $unitPriceLocal;
-            if ($preciseTimeRate && $lineAmountCurr !== '' && $quantity != 0.0
+            if ($preciseUnitPrice && $lineAmountCurr !== '' && $quantity != 0.0
                 && $exchangeRate !== null && $exchangeRate > 0.0
             ) {
                 $rateFromLocalUnitPrice = round($unitPriceLocal / $exchangeRate, 6);
@@ -556,10 +555,10 @@ final class IsdocParser
             if ($lineAmount !== '' && $quantity > 0.0) {
                 $effective = (float) $lineAmount / $quantity;
                 // Legacy toleranci porovnání jednotkových cen držíme beze změny.
-                // Jen přesný časový řádek smí místo ní porovnat zaokrouhlený total,
-                // protože dělení haléřové částky krátkým časem zničí hodinovou sazbu.
+                // Jen řádek s přesnou cenou (čas, cena pod haléř) smí místo ní porovnat
+                // zaokrouhlený total, protože dělení haléřové částky zničí přesnou cenu.
                 $isDiscounted = abs($effective - $unitPriceLocal) > 0.005;
-                if ($preciseTimeRate) {
+                if ($preciseUnitPrice) {
                     $expectedLineAmount = TimeBilling::invoiceAmount([
                         'quantity' => $quantity,
                         'duration_minutes' => $durationMinutes,

@@ -386,11 +386,11 @@ final class PohodaXmlExporter
                 $block = $dom->createElementNS(self::NS_INV, $blockName);
                 // payVAT=false → unitPrice musí být BEZ DPH. V režimu „ceny s DPH" nese
                 // unit_price_without_vat brutto, proto dopočítáme netto z řádkového základu.
-                $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
+                $preciseUnitPrice = TimeBillingExport::usesPreciseUnitPrice($item);
                 $unitPriceNet = (!empty($invoice['prices_include_vat']) && $qtyItem != 0.0)
-                    ? round(((float) ($item['total_without_vat'] ?? 0)) / $qtyItem, $preciseTimeRate ? 6 : 2)
+                    ? round(((float) ($item['total_without_vat'] ?? 0)) / $qtyItem, $preciseUnitPrice ? 6 : 2)
                     : (float) $item['unit_price_without_vat'];
-                $unitPrice = TimeBillingExport::usesPreciseHourlyRate($item)
+                $unitPrice = TimeBillingExport::usesPreciseUnitPrice($item)
                     ? TimeBillingExport::formatRate($unitPriceNet)
                     : $this->fmt($unitPriceNet);
                 $this->el($dom, $block, self::NS_TYP, 'typ:unitPrice', $unitPrice);

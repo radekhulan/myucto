@@ -557,7 +557,8 @@ se nesčítá.
 (`Nastavení → Doklady`) má tabulka položek za cenou sloupec **Sleva %**, a to u skladového
 i ručně zadaného řádku. Zadejte slevu 0 až 100 % (nejvýš dvě desetinná místa, víc se
 zaokrouhlí, znak % můžete připsat). Cena za jednotku se přepočte z ceníkové ceny
-a zaokrouhlí půl nahoru na dvě desetinná místa, i u časové položky. U nízkých cen se proto
+a zaokrouhlí půl nahoru na dvě desetinná místa, i u časové položky. Ceníková cena pod haléř
+(například 0,004 za kus) se zaokrouhlí na šest míst, aby se nevynulovala. U nízkých cen se proto
 procento spočtené ze zaokrouhlené ceny může od zadaného lišit o setiny. Řádek bez ceníkové
 ceny ji převezme z aktuální ceny, takže „1 000,00 a sleva 10 %“ dá cenu 900,00. Ruční změna
 ceny slevu v poli přepočte. Opravíte-li u řádku bez skladové karty cenu nad ceníkovou (pole
@@ -838,14 +839,14 @@ cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 60 hodinách dává 20 000 Kč. Stejný způsob zadávání podporují přijaté faktury a šablony
 pravidelné fakturace.
 
-Šestimístnou sazbu lze zadat u ručních hodinových položek a ve výkazu práce. Položky navázané
-na ceník používají cenu z ceníku na dvě desetinná místa.
+Cenu za jednotku lze u každé položky zadat až na šest desetinných míst, ve výkazu práce
+také sazbu. Ceník a skladová karta vedou ceny na dvě desetinná místa a takovou cenu do
+řádku předvyplní, přesnější cenu pak můžete v řádku zadat ručně.
 
 Uložené desetinné hodiny se při otevření ani uložení bez změny času nepřevádějí na celé
 minuty. Například `0,33 h` zůstává `0,33 h`, nikoli 20 minut. Desetinné zadání, které
 neodpovídá celým minutám, zachovává původní přesnost: dvě desetinná místa ve výkazu a tři u
-množství fakturační položky. Pro přesné minutové účtování použijte zápis `H:MM`. Skladové
-řádky zachovávají běžné množství a cenu na dvě desetinná místa.
+množství fakturační položky. Pro přesné minutové účtování použijte zápis `H:MM`.
 
 **Druhá strana PDF** má formát:
 

@@ -586,9 +586,13 @@ dodavatele**. Starší zápisy si nechávají své číslo. Kontrolní hlášen�
 
 ### 23.11.6 Položky a druh výdaje
 
-U hodinových služeb lze zadat dobu jako `H:MM` a hodinovou sazbu až na šest desetinných míst, stejně jako u
+Cenu za jednotku lze zadat až na šest desetinných míst u každé položky, i u skladové. Levný materiál
+kupovaný po statisících kusů tak drží přesnou cenu: 250 000 ks × 0,0108 EUR dá řádek 2 700,00 EUR. Celkem
+za řádek, rekapitulace DPH i součet dokladu zůstávají na haléře. Detail, PDF a exporty ukazují víc než dvě
+místa jen u ceny, která je má.
+
+U hodinových služeb lze zadat dobu jako `H:MM`, stejně jako u
 [vystavené faktury](15_Faktura_editor.md#1596-vykaz-vicepraci). Čas a sazbu přepište podle dokladu dodavatele.
-Součty a rekapitulace DPH zůstávají v peněžních částkách. Skladové ceny mají nadále dvě desetinná místa.
 
 Tlačítkem **+ Přidat položku** přidáte řádek. U každého řádku se zadává:
 

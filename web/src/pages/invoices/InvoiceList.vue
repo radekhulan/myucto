@@ -8,7 +8,7 @@ import { useExpandableItems } from '@/composables/useExpandableItems'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
-import { formatMoney, formatMoneyWhole, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { isCalendarType } from '@/utils/invoiceCalendar'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
@@ -1779,7 +1779,7 @@ useWindowRefresh(refreshLoadedPages,
                         <template v-else>
                         <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                         <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
-                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatUnitPrice(item.unit_price_without_vat, inv.currency) }}</td>
                         <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
                         </template>
                       </tr>

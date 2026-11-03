@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Pdf;
 
 use MyInvoice\Service\Invoice\TimeBilling;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class TimeBillingPdfPresenter
 {
@@ -51,22 +52,20 @@ final class TimeBillingPdfPresenter
                 ? (float) ($item['quantity'] ?? 0)
                 : $minutes / 60;
             $rawUnitPrice = (float) ($item['unit_price_without_vat'] ?? 0);
-            $preciseStoredTimeRate = (!isset($item['stock_item_id']) || (int) $item['stock_item_id'] <= 0)
-                && TimeBilling::isHourUnit($item['unit'] ?? null)
-                && abs($rawUnitPrice - round($rawUnitPrice, 2)) > 0.0000001;
+            $isPrecise = $minutes !== null || UnitPricePrecision::hasSubCentPrecision($rawUnitPrice);
             $unitPrice = $rawUnitPrice;
             if ($pricesIncludeVat && $quantity != 0.0) {
                 $unitPrice = round(
                     (float) ($item['total_without_vat'] ?? 0) / $quantity,
-                    $minutes !== null || $preciseStoredTimeRate ? 6 : 2,
+                    $isPrecise ? UnitPricePrecision::DECIMALS : UnitPricePrecision::MIN_DISPLAY_DECIMALS,
                 );
             }
 
-            $isPreciseTimeRate = $minutes !== null
-                || $preciseStoredTimeRate;
             $item['duration_display'] = $minutes === null ? null : self::duration($minutes);
             $item['pdf_unit_price'] = $unitPrice;
-            $item['unit_price_decimals'] = $isPreciseTimeRate ? self::decimalPlaces($unitPrice) : 2;
+            $item['unit_price_decimals'] = $isPrecise
+                ? UnitPricePrecision::decimalPlaces($unitPrice)
+                : UnitPricePrecision::MIN_DISPLAY_DECIMALS;
         }
         unset($item);
 
@@ -85,7 +84,7 @@ final class TimeBillingPdfPresenter
             $item['duration_display'] = $minutes === null ? null : self::duration($minutes);
             $rate = (float) ($item['rate'] ?? 0);
             if (abs($rate - round($rate, 2)) > 0.0000001) {
-                $item['rate_decimals'] = self::decimalPlaces($rate);
+                $item['rate_decimals'] = UnitPricePrecision::decimalPlaces($rate);
             } else {
                 unset($item['rate_decimals']);
             }
@@ -107,11 +106,5 @@ final class TimeBillingPdfPresenter
         $sign = $minutes < 0 ? '-' : '';
         $absolute = abs($minutes);
         return sprintf('%s%d:%02d', $sign, intdiv($absolute, 60), $absolute % 60);
-    }
-
-    private static function decimalPlaces(float $value): int
-    {
-        $fraction = rtrim(substr(number_format(abs($value), 6, '.', ''), -6), '0');
-        return max(2, strlen($fraction));
     }
 }

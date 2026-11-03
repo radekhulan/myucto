@@ -30,7 +30,7 @@ import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useResultAccounts } from '@/composables/useResultAccounts'
-import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
+import { isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
 import { amountItems, isTextItem } from '@/utils/invoiceTextRow'
 
 const { t, tm, rt } = useI18n()
@@ -479,7 +479,7 @@ function vatBuckets(): Map<number, { rate: number; base: number; vat: number }> 
     const amount = round2(itemAmount(item))
     let base: number
     let vat: number
-    if (isPreciseTimeItem(item)) {
+    if (isPreciseUnitPrice(item)) {
       const totals = timeItemTotals(item, vatRate, pricesIncl)
       base = totals.base
       vat = totals.vat
@@ -1373,7 +1373,7 @@ async function submit() {
                   <option v-if="it.unit && !units.some(u => u.code === it.unit)" :value="it.unit">{{ it.unit }}</option>
                 </select>
               </td>
-              <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
+              <td class="py-1.5 pr-2"><input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-8 px-2 border rounded bg-surface text-right font-mono disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" /></td>
               <td v-if="supplierIsVatPayer" class="py-1.5 pr-2">
                 <select v-model.number="it.vat_rate_id" :disabled="priceListEnabled && !!it.price_list_item_id" class="w-full h-8 px-2 border border-neutral-300 rounded bg-surface disabled:bg-neutral-100">
                   <option v-for="r in vatRatesForItem(it)" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
@@ -1559,7 +1559,7 @@ async function submit() {
             <div :class="supplierIsVatPayer ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
+                <input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" :disabled="priceListEnabled && !!it.price_list_item_id" :class="['w-full h-10 px-3 border rounded bg-surface text-right font-mono text-sm disabled:bg-neutral-100', itemHasBothNegative(it) ? 'border-danger-400' : 'border-neutral-300']" />
               </div>
               <div v-if="supplierIsVatPayer">
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.items_table.vat') ?? 'DPH' }}</label>

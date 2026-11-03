@@ -20,10 +20,16 @@ function activeLocale(): string {
   return i18n.global.locale.value === 'en' ? 'en-US' : 'cs-CZ'
 }
 
+/** Jednotková cena: haléřová jako částka, přesnější (0,004 EUR/ks, sazba 333,333333) na svá místa, nejvýš šest. */
+export function formatUnitPrice(value: number | string, currency = 'CZK'): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount === Math.round(amount * 100) / 100) return formatMoney(value, currency)
+  const decimals = Math.max(defaultDecimals(currency), Math.min(6, (amount.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length))
+  return formatMoney(amount, currency, decimals)
+}
+
 export function formatHourlyRate(value: number, currency = 'CZK'): string {
-  if (value === Math.round(value * 100) / 100) return formatMoney(value, currency)
-  const decimals = Math.max(defaultDecimals(currency), Math.min(6, (value.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length))
-  return formatMoney(value, currency, decimals)
+  return formatUnitPrice(value, currency)
 }
 
 export function formatMoney(value: number | string | null | undefined, currency: string = 'CZK', decimals?: number): string {

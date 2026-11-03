@@ -360,9 +360,9 @@ final class IsdocExporter
             // proto jednotkové ceny dopočítáme z řádkových totálů (netto z base, s DPH z tot).
             $qtyItem = $qtyValue;
             $pricesInclVat = !empty($invoice['prices_include_vat']);
-            $preciseTimeRate = TimeBillingExport::usesPreciseHourlyRate($item);
+            $preciseUnitPrice = TimeBillingExport::usesPreciseUnitPrice($item);
             $unitPrice = ($pricesInclVat && $qtyItem != 0.0)
-                ? round($base / $qtyItem, $preciseTimeRate ? 6 : 2)
+                ? round($base / $qtyItem, $preciseUnitPrice ? 6 : 2)
                 : (float) $item['unit_price_without_vat'];
             // Jednotkovou cenu s DPH odvozujeme z řádkového total_with_vat (ne dopočtem
             // nominální sazbou). Řádkový total už zohledňuje reverse charge i osvobození
@@ -370,7 +370,7 @@ final class IsdocExporter
             // Dopočet unitPrice*(1+sazba/100) by u RC dal falešné brutto (sazba 21 %, ale
             // daň se nepřenáší → 0) a řádek by si protiřečil.
             $unitPriceInclVat = $qtyItem != 0.0
-                ? round($tot / $qtyItem, $preciseTimeRate ? 6 : 2)
+                ? round($tot / $qtyItem, $preciseUnitPrice ? 6 : 2)
                 : $unitPrice;
             $this->elAmountCurr($dom, $line, 'LineExtensionAmount', $base, true);
             $this->elAmountCurr($dom, $line, 'LineExtensionAmountTaxInclusive', $tot, true);
@@ -623,7 +623,7 @@ final class IsdocExporter
     private function elUnitPrice(\DOMDocument $dom, \DOMElement $parent, string $name, float $value, array $item): void
     {
         $localValue = $value * $this->exportRate;
-        $formatted = TimeBillingExport::usesPreciseHourlyRate($item)
+        $formatted = TimeBillingExport::usesPreciseUnitPrice($item)
             ? TimeBillingExport::formatRate($localValue)
             : $this->fmt($localValue);
         $this->el($dom, $parent, $name, $formatted);

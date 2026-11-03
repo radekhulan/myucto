@@ -47,9 +47,29 @@ export function itemQuantity(item: TimeItem): number {
   return isTimeItem(item) && item.duration_minutes != null ? item.duration_minutes / 60 : Number(item.quantity) || 0
 }
 
-export function isPreciseTimeItem(item: PricedTimeItem): boolean {
-  const rate = Number(item.unit_price_without_vat)
-  return isTimeItem(item) && (item.duration_minutes != null || rate !== Math.round(rate * 100) / 100)
+/** Jednotková cena se ukládá na 6 míst (zrcadlí UnitPricePrecision na serveru). */
+export const UNIT_PRICE_DECIMALS = 6
+
+export function hasSubCentPrice(price: number | string): boolean {
+  const value = Number(price)
+  return Number.isFinite(value) && Math.abs(value - Math.round(value * 100) / 100) > 1e-7
+}
+
+/** Přesný řádek: minutová časová položka nebo cena pod haléř (0,004 EUR/ks, sazba 333,333333). */
+export function isPreciseUnitPrice(item: PricedTimeItem): boolean {
+  return (isTimeItem(item) && item.duration_minutes != null) || hasSubCentPrice(item.unit_price_without_vat)
+}
+
+/**
+ * Jednotková cena dopočtená z řádkové částky. Haléřová cena zůstává, pokud
+ * po vynásobení množstvím vrátí stejnou částku; jinak (levné položky po
+ * statisících kusů, dělení třemi) se drží šest míst, aby se částka neztratila.
+ */
+export function unitPriceForAmount(amount: number, quantity: number): number {
+  const exact = amount / quantity
+  const cents = Math.round(exact * 100) / 100
+  if (Math.round(cents * quantity * 100) === Math.round(amount * 100)) return cents
+  return Math.round(exact * 10 ** UNIT_PRICE_DECIMALS) / 10 ** UNIT_PRICE_DECIMALS
 }
 
 export function timeItemTotals(item: PricedTimeItem, rate: number, gross: boolean): { base: number; vat: number; with: number } {

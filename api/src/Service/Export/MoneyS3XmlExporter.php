@@ -268,10 +268,10 @@ final class MoneyS3XmlExporter
         $souhrn = $node->appendChild($xml->createElement('SouhrnDPH'));
         $unitBase = $quantity != 0.0 ? $base / $quantity : $base;
         $rawUnitBase = (float) ($item['unit_price_without_vat'] ?? $unitBase);
-        if (!$pricesIncludeVat && TimeBillingExport::usesPreciseHourlyRate($item)) {
+        if (!$pricesIncludeVat && TimeBillingExport::usesPreciseUnitPrice($item)) {
             $unitBase = $rawUnitBase;
         }
-        $unitBaseFormatted = TimeBillingExport::usesPreciseHourlyRate($item)
+        $unitBaseFormatted = TimeBillingExport::usesPreciseUnitPrice($item)
             ? TimeBillingExport::formatRate($unitBase)
             : $this->fmt($unitBase);
         $unitVat = $quantity != 0.0 ? $vat / $quantity : $vat;

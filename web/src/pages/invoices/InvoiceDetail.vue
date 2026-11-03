@@ -27,8 +27,8 @@ import EetCreditNoteRefundDialog from '@/components/eet/EetCreditNoteRefundDialo
 import { eetApi, type EetCreditNoteRefundInfo, type EetInvoiceSummaryItem } from '@/api/eet'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { stockApi, type StockDocument } from '@/api/stock'
-import { formatMoney, formatHourlyRate, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
-import { durationTotal, formatDuration, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
+import { formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { durationTotal, formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { invoiceIssuedBy } from '@/pages/invoices/invoiceIssuedBy'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -159,7 +159,7 @@ let loadGeneration = 0
 // unit_price_without_vat už netto → vracíme ho beze změny.
 function displayUnitPriceNet(item: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(item.quantity)) {
-    if (isTimeItem(item) && (item.duration_minutes != null || item.unit_price_without_vat !== Math.round(item.unit_price_without_vat * 100) / 100)) {
+    if (isPreciseUnitPrice(item)) {
       return Math.round(((item.total_without_vat ?? 0) / itemQuantity(item)) * 1e6) / 1e6
     }
     return Math.round(((item.total_without_vat ?? 0) / Number(item.quantity)) * 100) / 100
@@ -2827,7 +2827,7 @@ useWindowRefresh(async () => {
               </td>
               <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity) }}</td>
               <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
-              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(item), invoice.currency) }}</td>
+              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : formatUnitPrice(displayUnitPriceNet(item), invoice.currency) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-center text-xs">{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-right font-mono">{{ formatMoney(item.total_without_vat ?? 0, invoice.currency) }}</td>
               <td class="px-4 py-2.5 text-right font-mono font-medium">{{ formatMoney(supplierIsVatPayer ? (item.total_with_vat ?? 0) : (item.total_without_vat ?? 0), invoice.currency) }}</td>
@@ -2865,7 +2865,7 @@ useWindowRefresh(async () => {
                 <span class="font-mono text-neutral-700">{{ isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity }}</span>
                 <span class="ml-1">{{ item.unit }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ (isTimeItem(item) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(item), invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(displayUnitPriceNet(item), invoice.currency) }}</span>
                 <template v-if="supplierIsVatPayer">
                   <span class="text-neutral-400 mx-1.5">·</span>
                   <span>{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</span>

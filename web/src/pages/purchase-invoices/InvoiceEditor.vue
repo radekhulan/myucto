@@ -77,7 +77,7 @@ import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.v
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import DurationInput from '@/components/ui/DurationInput.vue'
-import { isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, timeItemTotals, validateDurationInputs } from '@/utils/timeBilling'
+import { isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, timeItemTotals, unitPriceForAmount, validateDurationInputs } from '@/utils/timeBilling'
 
 const route = useRoute()
 const router = useRouter()
@@ -1104,7 +1104,7 @@ function itemVatRate(it: PurchaseInvoiceItem): number {
 function itemTotal(it: PurchaseInvoiceItem) {
   const amt = itemAmount(it)
   const rate = itemVatRate(it)
-  if (isPreciseTimeItem(it)) return timeItemTotals(it, rate, form.value.prices_include_vat)
+  if (isPreciseUnitPrice(it)) return timeItemTotals(it, rate, form.value.prices_include_vat)
   // Režim "ceny s DPH": unit_price_without_vat nese cenu S DPH (gross) → DPH shora.
   if (form.value.prices_include_vat) {
     const vat = round2(amt * rate / (100 + rate))
@@ -1128,13 +1128,13 @@ function setItemGross(it: PurchaseInvoiceItem, raw: string): void {
   if (qty === 0) return
   if (form.value.prices_include_vat) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    it.unit_price_without_vat = isTimeItem(it) ? round6(gross / qty) : round2(gross / qty)
+    it.unit_price_without_vat = isTimeItem(it) ? round6(gross / qty) : unitPriceForAmount(gross, qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u reverse-charge je sazba 0).
   const rate = itemVatRate(it)
   const net = gross / (1 + rate / 100)
-  it.unit_price_without_vat = isTimeItem(it) ? round6(net / qty) : round2(net / qty)
+  it.unit_price_without_vat = isTimeItem(it) ? round6(net / qty) : unitPriceForAmount(net, qty)
 }
 
 // Záhlaví sloupce jednotkové ceny — v režimu „ceny s DPH" je to cena včetně DPH.
@@ -2211,7 +2211,7 @@ useWindowTitle(
                 </select>
               </td>
               <td class="py-2 px-1">
-                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
               </td>
               <td class="py-2 px-1">
                 <select v-model.number="it.vat_rate_id" class="w-full h-9 px-1 border border-neutral-300 rounded bg-surface text-sm">
@@ -2391,7 +2391,7 @@ useWindowTitle(
             <div class="grid grid-cols-2 gap-2">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="it.unit_price_without_vat" v-math="isTimeItem(it) ? 6 : 2" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
+                <input v-model="it.unit_price_without_vat" v-math="6" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm text-right font-mono" />
               </div>
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('purchase_invoice.items.vat_rate') }}</label>

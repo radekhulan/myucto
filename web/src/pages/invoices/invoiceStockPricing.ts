@@ -141,7 +141,7 @@ export function quoteQuantity(quantity: number | string | null | undefined): str
 /** Je cena řádku pořád ta, kterou doplnil editor? Ruční přepis se nepřeceňuje. */
 export function isPriceStillAuto(state: StockQuoteState | null | undefined, currentPrice: number | string | null | undefined): boolean {
   if (!state || state.autoPrice === null) return false
-  return round(Number(currentPrice) || 0, 2) === round(state.autoPrice, 2)
+  return round(Number(currentPrice) || 0, 6) === round(state.autoPrice, 6)
 }
 
 export function canRepriceStockPrice(value: number | string | null | undefined): boolean {

@@ -15,6 +15,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
+import { hasSubCentPrice, UNIT_PRICE_DECIMALS } from '@/utils/timeBilling'
 import DateInput from '@/components/ui/DateInput.vue'
 import { FILLED, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 
@@ -84,6 +85,13 @@ function formatMoney(n: number, ccy: string): string {
   return n.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ' + ccy
 }
 
+function formatUnitPrice(n: number, ccy: string): string {
+  const decimals = hasSubCentPrice(n)
+    ? Math.min(UNIT_PRICE_DECIMALS, (n.toFixed(UNIT_PRICE_DECIMALS).replace(/0+$/, '').split('.')[1] ?? '').length)
+    : 2
+  return n.toLocaleString('cs-CZ', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + ' ' + ccy
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
@@ -117,7 +125,8 @@ function displayUnitPriceNet(it: { unit_price_without_vat: number; vat_rate_perc
   const gross = Number(it.unit_price_without_vat) || 0
   if (tpl.value?.prices_include_vat) {
     const rate = tpl.value.reverse_charge ? 0 : (Number(it.vat_rate_percent) || 0)
-    return round2(gross * 100 / (100 + rate))
+    const net = gross * 100 / (100 + rate)
+    return hasSubCentPrice(gross) ? Math.round(net * 10 ** UNIT_PRICE_DECIMALS) / 10 ** UNIT_PRICE_DECIMALS : round2(net)
   }
   return gross
 }
@@ -438,7 +447,7 @@ const recurringActions = computed<ActionItem[]>(() => {
               </td>
               <td class="px-4 py-2 text-right font-mono">{{ it.quantity }}</td>
               <td class="px-4 py-2">{{ it.unit }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ formatMoney(displayUnitPriceNet(it), tpl.currency ?? '') }}</td>
+              <td class="px-4 py-2 text-right font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), tpl.currency ?? '') }}</td>
               <td class="px-4 py-2 text-center text-neutral-600">{{ Number(it.vat_rate_percent) > 0 ? it.vat_rate_percent + ' %' : '—' }}</td>
               </template>
             </tr>

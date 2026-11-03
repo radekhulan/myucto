@@ -67,7 +67,7 @@ import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
 import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
-import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
+import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, unitPriceForAmount, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { amountItems, blankTextItem, isTextItem, textItemPayload } from '@/utils/invoiceTextRow'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey, stockSearchBadge } from './invoiceStockAvailability'
 import { unchangedRows, useUnitDecimals } from '@/composables/useUnitDecimals'
@@ -1984,7 +1984,7 @@ const computed_totals = computed(() => {
     const amount = round2(itemAmount(item))
     let base: number
     let vat: number
-    if (isPreciseTimeItem(item)) {
+    if (isPreciseUnitPrice(item)) {
       const totals = timeItemTotals(item, vatRate, pricesIncl)
       base = totals.base
       vat = totals.vat
@@ -2229,7 +2229,7 @@ function round6(n: number): number {
  * net základ + DPH je v souhrnu níže). U neplátce / reverse-charge je sazba 0 → = základ.
  */
 function itemTotal(item: InvoiceItem): number {
-  if (isPreciseTimeItem(item)) {
+  if (isPreciseUnitPrice(item)) {
     const rate = (form.value.reverse_charge || !supplierIsVatPayer.value)
       ? 0 : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
     return timeItemTotals(item, rate, !!form.value.prices_include_vat && supplierIsVatPayer.value).with
@@ -2258,7 +2258,7 @@ function setItemGross(item: InvoiceItem, raw: string): void {
   if (qty === 0) return
   if (form.value.prices_include_vat && supplierIsVatPayer.value) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : round2(gross / qty)
+    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : unitPriceForAmount(gross, qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u neplátce / RC je sazba 0).
@@ -2266,7 +2266,7 @@ function setItemGross(item: InvoiceItem, raw: string): void {
     ? 0
     : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
   const net = gross / (1 + vatRate / 100)
-  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : round2(net / qty)
+  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : unitPriceForAmount(net, qty)
 }
 
 // Přepínač „ceny s DPH" má smysl jen pro plátce DPH (u neplátce/RC je sazba 0 → gross = net).
@@ -3455,7 +3455,7 @@ useWindowTitle(
                 </select>
               </td>
               <td class="px-3 py-2">
-                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
@@ -3826,7 +3826,7 @@ useWindowTitle(
             <div :class="supplierIsVatPayer || showLineDiscountInput ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-10 px-3 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>

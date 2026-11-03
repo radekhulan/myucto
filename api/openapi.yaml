@@ -49160,7 +49160,7 @@ components:
         quantity: { type: number, format: float, description: "Může být záporné pro slevový řádek. Nesmí být 0." }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Přesná délka časové položky v celých minutách. Povoleno jen bez skladové vazby a s hodinovou měrnou jednotkou; NULL používá legacy `quantity`. Záporná hodnota je určena pro dobropis." }
         unit: { type: string, example: ks }
-        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena bez DPH. Hodinová časová položka podporuje až 6 desetinných míst; ostatní a skladové položky zůstávají na 2 místech. Může být záporná pro slevový řádek." }
+        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena bez DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek." }
         list_unit_price: { type: [number, "null"], format: double, description: "Ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat` (v režimu „ceny s DPH\" brutto). Informační údaj, částky dokladu z ní nevychází. NULL = neznámá." }
         line_discount_pct: { type: [number, "null"], format: double, description: "Sleva z ceníkové ceny v % (3 desetinná místa), dopočtená serverem z `list_unit_price` a `unit_price_without_vat`. Záporná = přirážka. NULL = bez slevy. S hlavičkovou slevou `discount_percent` nesouvisí." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
@@ -49235,7 +49235,7 @@ components:
         quantity: { type: number, format: float, description: "Nesmí být 0. Může být záporné pro slevový řádek, ale ne současně se zápornou cenou. Má-li jednotka v číselníku nastavené `quantity_decimals`, smí mít nejvýš tolik desetinných míst; jinak 400 `validation_failed` se seznamem `items` [{index, unit, decimals}]. Nic se nezaokrouhluje. Chybějící `unit` se kontroluje jako výchozí `ks`. Časové řádky se nekontrolují. U PUT se kontrolují jen nové a změněné řádky; řádek se stejnou jednotkou a množstvím jako uložený řádek dokladu (podle `id`, jinak podle dvojice jednotka + množství) projde beze změny." }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet z `quantity`. Nula není povolena." }
         unit: { type: string, default: "ks", description: "Kód jednotky, s číselníkem `/codebooks/units` se páruje bez ohledu na velikost písmen." }
-        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena BEZ DPH. Hodinová časová položka podporuje až 6 desetinných míst; ostatní a skladové položky 2 místa. Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
+        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena BEZ DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
         list_unit_price: { type: [number, "null"], format: double, description: "Volitelná ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat`. Kladné číslo, jinak se uloží NULL. Server z ní dopočítá `line_discount_pct`, poslané procento ignoruje. Při úpravě dokladu ji pošlete znovu (GET ji vrací), jinak se smaže." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
         order_index: { type: integer, description: "Pořadí v rámci faktury. Default = pozice v poli." }
@@ -49370,7 +49370,7 @@ components:
               quantity: { type: number, format: float, description: "Může být záporné pro slevový řádek. Nesmí být 0." }
               duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Přesná délka časové položky v minutách; NULL používá legacy `quantity`." }
               unit: { type: string }
-              unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní položky 2 místa. Může být záporná pro slevový řádek." }
+              unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek." }
               vat_rate_id: { type: integer }
               vat_rate_percent: { type: number, format: float }
               vat_classification_code:
@@ -49473,7 +49473,7 @@ components:
               quantity: { type: number, format: float, description: "Nesmí být 0. Může být záporné pro slevový řádek, ale ne současně se zápornou cenou." }
               duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a řádek bez skladové vazby; vynecháno/NULL zachová legacy výpočet." }
               unit: { type: string, default: ks }
-              unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní položky 2 místa. Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
+              unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
               vat_rate_id: { type: integer }
               vat_classification_code:
                 type: [string, "null"]
@@ -49622,7 +49622,7 @@ components:
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Přesná délka časové položky v minutách; NULL používá legacy `quantity`." }
         unit: { type: string }
-        unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní a skladové položky 2 místa." }
+        unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech)." }
         vat_rate_id: { type: integer }
         vat_rate_snapshot: { type: number }
         total_without_vat: { type: number }
@@ -49679,7 +49679,7 @@ components:
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet." }
         unit: { type: string, default: ks }
-        unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní a skladové položky 2 místa." }
+        unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech)." }
         vat_rate_id: { type: integer }
         order_index: { type: integer }
         vat_classification_code: { type: [string, "null"] }

@@ -11,7 +11,7 @@ import { codebooksApi, type Currency, type VatRate, type Unit } from '@/api/code
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import { formatMoney, formatDate } from '@/composables/useFormat'
+import { formatUnitPrice, formatDate } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
@@ -588,7 +588,7 @@ onMounted(async () => {
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ row.qty_confirmed ?? '—' }}</td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ row.qty_received }}</td>
                 <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ row.qty_remaining }}</td>
-                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(row.unit_price), currencyCode) }}</td>
+                <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatUnitPrice(Number(row.unit_price), currencyCode) }}</td>
               </tr>
             </tbody>
           </table>
