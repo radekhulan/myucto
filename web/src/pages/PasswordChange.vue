@@ -22,6 +22,8 @@ import KeyboardShortcuts from '@/pages/KeyboardShortcuts.vue'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpProof } from '@/security/oidc'
 import {
   advanceCanonicalDomainLoginSession,
   authorizePendingDomainLogin,
@@ -315,7 +317,23 @@ watch(tab, next => {
 })
 
 onMounted(() => {
-  loadTotpStatus()
+  // Návrat z ověření přes Microsoft: secret TOTP se vydá rovnou.
+  const ssoProof = takeSsoStepUpProof('totp.enable')
+  const status = loadTotpStatus()
+  if (ssoProof) {
+    void status.then(async () => {
+      if (!totpStatus.value || totpStatus.value.enabled) return
+      totpBusy.value = true
+      try {
+        totpSetup.value = await authApi.totpSetup({ step_up_token: ssoProof })
+        toast.info(t('sso.step_up_done'))
+      } catch (e: any) {
+        applyTotpSetupError(e)
+      } finally {
+        totpBusy.value = false
+      }
+    })
+  }
   if (tab.value === 'session-lock') {
     void loadLockPreference()
   }
@@ -523,6 +541,7 @@ onMounted(() => {
                 class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
           {{ totpBusy ? '…' : (totpRequiresPasskeyStepUp ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
         </button>
+        <SsoStepUpOption v-if="totpRequiresPasskeyStepUp" operation="totp.enable" :disabled="totpBusy" />
       </div>
 
       <div v-if="totpSetup" class="space-y-4 pt-2 border-t border-neutral-200">

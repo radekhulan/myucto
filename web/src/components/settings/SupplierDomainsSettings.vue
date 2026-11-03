@@ -9,6 +9,9 @@ import { useToast } from '@/composables/useToast'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
+import { takeSsoStepUpProof } from '@/security/oidc'
+import { useSsoStepUp } from '@/composables/useSsoStepUp'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -29,6 +32,7 @@ const mfaMethods = computed(() => auth.user?.mfa_methods || [])
 const canPasskey = computed(() => mfaMethods.value.includes('passkey') && isWebAuthnAvailable())
 const canTotp = computed(() => mfaMethods.value.includes('totp'))
 const canonicalBaseUrl = computed(() => auth.domainContext?.canonical_base_url || '')
+const ssoAvailable = useSsoStepUp('domain.activate').available
 
 async function load() {
   loading.value = true
@@ -42,7 +46,18 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // Návrat z ověření přes Microsoft: aktivace téže domény se dokončí rovnou.
+  for (const domain of domains.value) {
+    const proof = takeSsoStepUpProof(`domain.activate:${domain.id}`)
+    if (proof) {
+      openActivation(domain)
+      await activateWithProof(domain, proof)
+      return
+    }
+  }
+})
 watch(() => suppliers.currentSupplierId, load)
 
 async function createDomain() {
@@ -141,6 +156,19 @@ async function activateWithTotp() {
   try {
     const proof = await authApi.totpStepUp(operation, totpCode.value)
     replace(await domainsApi.activate(activation.value.id, proof, draftFor(activation.value).primary))
+    activation.value = null
+    toast.success(t('domains.activated'))
+  } catch (e: any) {
+    actionError.value = e?.response?.data?.error?.message || t('domains.activate_failed')
+  } finally {
+    busy.value = null
+  }
+}
+
+async function activateWithProof(domain: SupplierDomain, proof: string) {
+  busy.value = domain.id
+  try {
+    replace(await domainsApi.activate(domain.id, proof, draftFor(domain).primary))
     activation.value = null
     toast.success(t('domains.activated'))
   } catch (e: any) {
@@ -315,7 +343,9 @@ function statusClass(status: SupplierDomain['status']): string {
         </div>
         <button type="button" :class="btnOutline('neutral')" @click="activation = null"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
       </div>
-      <p v-if="!canPasskey && !canTotp" class="mt-3 text-sm text-warning-700">{{ t('domains.activate_no_mfa') }}</p>
+      <SsoStepUpOption :key="activation.id" class="mt-3" :operation="`domain.activate:${activation.id}`"
+        :disabled="busy === activation.id" />
+      <p v-if="!canPasskey && !canTotp && !ssoAvailable" class="mt-3 text-sm text-warning-700">{{ t('domains.activate_no_mfa') }}</p>
     </div>
   </section>
 </template>

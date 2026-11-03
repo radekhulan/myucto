@@ -26,6 +26,8 @@ import { cashApi, type CashRegister } from '@/api/cash'
 import { authApi } from '@/api/auth'
 import { apiErrorMessage } from '@/api/errors'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { takeSsoStepUpReturn } from '@/security/oidc'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 
@@ -107,7 +109,11 @@ async function load(silent = false) {
     loading.value = false
   }
 }
-onMounted(() => { void load() })
+onMounted(async () => {
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
+  await load()
+  if (ssoReturn) resumeSsoStepUp(ssoReturn)
+})
 onActivated(() => { if (settings.value) void load(true) })
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -349,6 +355,27 @@ const passkeySupported = isWebAuthnAvailable()
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true || (auth.user?.passkey_count ?? 0) > 0)
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+
+// Ověření přes Microsoft: po návratu se znovu otevře nahrání (soubor a heslo
+// k němu se zadají znovu), nebo deaktivace téhož certifikátu.
+const SSO_SCOPE = 'eet-certificates'
+const ssoProof = ref('')
+const ssoVerified = computed(() => stepPasskeyToken.value !== '' && stepPasskeyToken.value === ssoProof.value)
+function resumeSsoStepUp(returned: { token: string; detail: string }) {
+  if (returned.detail === 'upload') {
+    openCertUpload()
+  } else if (returned.detail.startsWith('deactivate:')) {
+    const id = Number(returned.detail.slice('deactivate:'.length))
+    const target = certificates.value.find(c => c.id === id)
+    if (!target) return
+    deactivateCertificate(target)
+  } else {
+    return
+  }
+  stepPasskeyToken.value = returned.token
+  ssoProof.value = returned.token
+  toast.info(t('sso.step_up_done'))
+}
 
 const stepUpMissing = computed(() => {
   if (stepPasskeyToken.value) return ''
@@ -1089,7 +1116,7 @@ const th = 'px-3 py-2 text-left font-medium'
         </div>
 
         <div class="grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">{{ t('eet.certificates.passkey_verified') }}</div>
             <template v-else-if="passkeySupported">
               <button type="button" :class="btnOutline('primary')" :disabled="passkeyBusy || certBusy" @click="verifyPasskey">
@@ -1100,6 +1127,9 @@ const th = 'px-3 py-2 text-left font-medium'
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('eet.certificates.passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified || !stepPasskeyToken" class="sm:col-span-2"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:upload`"
+            :verified="ssoVerified" :disabled="passkeyBusy || certBusy" />
           <template v-if="!stepPasskeyToken">
             <label class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}
@@ -1131,7 +1161,7 @@ const th = 'px-3 py-2 text-left font-medium'
           {{ t('eet.certificates.deactivate_confirm', { eic: deactivateTarget.eic, env: t(`eet.environment.${deactivateTarget.environment}`) }) }}
         </p>
         <div class="grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">{{ t('eet.certificates.passkey_verified') }}</div>
             <template v-else-if="passkeySupported">
               <button type="button" :class="btnOutline('primary')" :disabled="passkeyBusy || certBusy" @click="verifyPasskey">
@@ -1142,6 +1172,9 @@ const th = 'px-3 py-2 text-left font-medium'
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('eet.certificates.passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified || !stepPasskeyToken" class="sm:col-span-2"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:deactivate:${deactivateTarget.id}`"
+            :verified="ssoVerified" :disabled="passkeyBusy || certBusy" />
           <template v-if="!stepPasskeyToken">
             <label class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}

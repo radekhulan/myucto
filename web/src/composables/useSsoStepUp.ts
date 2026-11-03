@@ -1,5 +1,5 @@
-import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, inject, ref, toValue, type MaybeRefOrGetter } from 'vue'
+import { routeLocationKey } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { oidcApi, type ExternalIdentity } from '@/api/oidc'
 import {
@@ -43,9 +43,10 @@ export function invalidateSsoIdentities(list?: ExternalIdentity[]): void {
  * vede přes přesměrování k poskytovateli a zpět na stejnou stránku. Po návratu
  * stránka proof vyzvedne přes `takeProof()` a pokračuje v rozdělané akci.
  */
-export function useSsoStepUp(operation: string) {
+export function useSsoStepUp(operation: string, context: MaybeRefOrGetter<string> = '') {
   const auth = useAuthStore()
-  const route = useRoute()
+  // Stránky vložené do jiné obrazovky běží i bez routeru (např. mzdový archiv podání).
+  const route = inject(routeLocationKey, null)
   const busy = ref(false)
   const error = ref('')
 
@@ -59,9 +60,9 @@ export function useSsoStepUp(operation: string) {
     if (!enabled.value || busy.value) return
     busy.value = true
     error.value = ''
-    const path = ssoReturnPath(route.fullPath)
+    const path = ssoReturnPath(route?.fullPath ?? `${window.location.pathname}${window.location.search}`)
     try {
-      rememberPendingStepUp(operation, path)
+      rememberPendingStepUp(operation, path, Date.now(), toValue(context))
       const url = await oidcApi.stepUp(PROVIDER, operation, path)
       navigateFullPage(url)
     } catch (e: any) {
@@ -77,6 +78,6 @@ export function useSsoStepUp(operation: string) {
     /** Kód chyby zahájení (např. `sso_not_linked`), prázdné = bez chyby. */
     error,
     start,
-    takeProof: () => takeSsoStepUpProof(operation),
+    takeProof: () => takeSsoStepUpProof(operation, toValue(context)),
   }
 }

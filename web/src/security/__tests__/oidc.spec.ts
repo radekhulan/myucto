@@ -10,6 +10,7 @@ import {
   ssoReturnPath,
   takeSsoNotice,
   takeSsoStepUpProof,
+  takeSsoStepUpReturn,
 } from '../oidc'
 
 function fakeLocation(hash: string) {
@@ -37,6 +38,16 @@ describe('fragment návratu od poskytovatele identity', () => {
     expect(takeSsoStepUpProof('oidc.link')).toBeNull()
     expect(takeSsoStepUpProof('api_token.create')).toBe('tok')
     expect(takeSsoStepUpProof('api_token.create')).toBeNull()
+  })
+
+  it('proof s kontextem dialogu vydá jen stejnému kontextu a vrátí upřesnění', () => {
+    rememberPendingStepUp('epo.certificate', '/reports/submissions', 1000, 'tax-submissions:submit:12')
+    captureSsoFragment(fakeLocation('#sso_step_up=tok&sso_operation=epo.certificate'), { state: null, replaceState: vi.fn() }, 2000)
+    expect(takeSsoStepUpProof('epo.certificate')).toBeNull()
+    expect(takeSsoStepUpReturn('epo.certificate', 'tax')).toBeNull()
+    expect(takeSsoStepUpReturn('epo.certificate', 'payroll-signing')).toBeNull()
+    expect(takeSsoStepUpReturn('epo.certificate', 'tax-submissions')).toEqual({ token: 'tok', detail: 'submit:12' })
+    expect(takeSsoStepUpReturn('epo.certificate', 'tax-submissions')).toBeNull()
   })
 
   it('cizí nebo prošlý proof zahodí, fragment ale z adresy odstraní', () => {

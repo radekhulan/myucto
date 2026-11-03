@@ -8,7 +8,10 @@ import { isPasskeyTestable, testRegisteredPasskey, type PasskeyTestOutcome } fro
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import RecoveryCodes from '@/components/security/RecoveryCodes.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import { useSsoStepUp } from '@/composables/useSsoStepUp'
+import { takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
 const emit = defineEmits<{ registered: [] }>()
@@ -26,6 +29,11 @@ const busy = ref(false)
 const error = ref('')
 const notice = ref('')
 const passkeySupported = isWebAuthnAvailable()
+// Ověření přes Microsoft: proof k registraci čeká na další „Přidat", odebrání
+// klíče se po návratu dokončí samo. Nabízí se hlavně tomu, kdo klíč nemá po ruce.
+const ssoAvailable = useSsoStepUp('passkey.register').available
+const ssoRegisterProof = ref('')
+const ssoRevokeId = ref<number | null>(null)
 
 // Politika MFA ze serveru: `allowed_mfa_methods` říká, ČÍM se smí ověřovat, a
 // `require_mfa`, jestli je silný faktor povinný. Stránka to dřív ignorovala,
@@ -104,6 +112,11 @@ async function runTest(item: PasskeyCredential) {
 }
 
 async function stepUp(operation: string): Promise<string> {
+  if (operation === 'passkey.register' && ssoRegisterProof.value) {
+    const proof = ssoRegisterProof.value
+    ssoRegisterProof.value = ''
+    return proof
+  }
   if (recoveryCodeFilled.value) {
     const proof = await authApi.recoveryStepUp(operation, recoveryCode.value.trim())
     recoveryRemaining.value = proof.remaining
@@ -129,7 +142,7 @@ async function stepUp(operation: string): Promise<string> {
 
 async function add() {
   if (!label.value.trim() || !passkeySupported) return
-  if (totpRequired.value && !totpCodeValid.value && !recoveryCodeFilled.value) {
+  if (totpRequired.value && !totpCodeValid.value && !recoveryCodeFilled.value && !ssoRegisterProof.value) {
     error.value = t('passkeys.totp_required_error')
     return
   }
@@ -191,13 +204,18 @@ async function rename(item: PasskeyCredential) {
   }
 }
 
-async function revoke(item: PasskeyCredential) {
-  if (revokeBlocked.value || stepUpMethods.value.length === 0) return
+async function revoke(item: PasskeyCredential, ssoProof = '') {
+  if (revokeBlocked.value) return
+  if (!ssoProof && stepUpMethods.value.length === 0) {
+    if (ssoAvailable.value) ssoRevokeId.value = item.id
+    return
+  }
   if (!window.confirm(t('passkeys.revoke_confirm', { label: item.label }))) return
   busy.value = true
   error.value = ''
+  ssoRevokeId.value = null
   try {
-    const proof = await stepUp(`passkey.revoke:${item.id}`)
+    const proof = ssoProof || await stepUp(`passkey.revoke:${item.id}`)
     await authApi.passkeyRevoke(item.id, proof)
     totpCode.value = ''
     await auth.refresh()
@@ -219,13 +237,30 @@ async function revoke(item: PasskeyCredential) {
     } else {
       error.value = e?.response?.data?.error?.message || t('passkeys.operation_failed')
     }
+    if (ssoAvailable.value && !ssoProof) ssoRevokeId.value = item.id
   } finally {
     busy.value = false
   }
 }
 
+/** Návrat z ověření přes Microsoft: proof k registraci podrží, odebrání dokončí. */
+async function resumeSsoStepUp() {
+  const registerProof = takeSsoStepUpProof('passkey.register')
+  if (registerProof) {
+    ssoRegisterProof.value = registerProof
+    notice.value = t('sso.step_up_done')
+  }
+  for (const item of list.value) {
+    const proof = takeSsoStepUpProof(`passkey.revoke:${item.id}`)
+    if (proof) {
+      await revoke(item, proof)
+      return
+    }
+  }
+}
+
 onMounted(() => {
-  void load()
+  void load().then(resumeSsoStepUp)
   // Politika chodí z /me — po tvrdém reloadu stránky nemusí být ve storu ještě
   // načtená a stránka by se rozhodovala podle prázdného seznamu metod.
   if (auth.allowedMfaMethods.length === 0) void auth.refresh()
@@ -275,8 +310,10 @@ onMounted(() => {
           {{ t('passkeys.totp_required_hint') }}
         </p>
       </div>
+      <SsoStepUpOption v-if="list.length > 0 || auth.user?.totp_enabled" operation="passkey.register"
+                       :verified="ssoRegisterProof !== ''" :disabled="busy" />
       <button type="button" @click="add"
-              :disabled="busy || !label.trim() || !passkeySupported || (totpRequired && !totpCodeValid && !recoveryCodeFilled)"
+              :disabled="busy || !label.trim() || !passkeySupported || (totpRequired && !totpCodeValid && !recoveryCodeFilled && !ssoRegisterProof)"
               class="h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white rounded-md font-medium">
         {{ t('passkeys.add') }}
       </button>
@@ -304,13 +341,16 @@ onMounted(() => {
           </button>
           <button @click="rename(item)" class="text-primary-600 hover:underline">{{ t('passkeys.rename') }}</button>
           <button @click="revoke(item)"
-                  :disabled="busy || revokeBlocked || stepUpMethods.length === 0"
+                  :disabled="busy || revokeBlocked || (stepUpMethods.length === 0 && !ssoAvailable)"
                   :title="revokeBlocked ? t('passkeys.revoke_last_factor') : undefined"
                   class="text-danger-500 hover:underline disabled:text-neutral-400 disabled:no-underline">
             {{ t('passkeys.revoke') }}
           </button>
         </div>
       </div>
+
+      <SsoStepUpOption v-if="ssoRevokeId !== null" :key="ssoRevokeId"
+                       :operation="`passkey.revoke:${ssoRevokeId}`" :disabled="busy" />
 
       <!-- Čím se odebrání potvrzuje. Bez tohohle uživatel netušil, že po něm
            aplikace bude chtít step-up, ani že TOTP kód z pole nahoře je plnohodnotná

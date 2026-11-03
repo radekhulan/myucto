@@ -8,6 +8,8 @@ import { useAuthStore } from '@/stores/auth'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -133,7 +135,28 @@ async function activate() {
   }
 }
 
-onMounted(loadStatus)
+/**
+ * Návrat z ověření přes Microsoft: secret se vydá rovnou. Server proof přijme jen
+ * od účtu s passkey; účet bez silného faktoru se prokazuje heslem.
+ */
+async function setupWithSsoProof(proof: string) {
+  busy.value = true
+  error.value = ''
+  try {
+    setup.value = await authApi.totpSetup({ step_up_token: proof })
+    toast.info(t('sso.step_up_done'))
+  } catch (e: any) {
+    applySetupError(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+onMounted(async () => {
+  const proof = takeSsoStepUpProof('totp.enable')
+  await loadStatus()
+  if (proof && status.value && !status.value.enabled) await setupWithSsoProof(proof)
+})
 </script>
 
 <template>
@@ -219,6 +242,7 @@ onMounted(loadStatus)
         >
           {{ useRecovery ? t('passkeys.use_passkey_instead') : t('passkeys.use_recovery_instead') }}
         </button>
+        <SsoStepUpOption v-if="hasPasskey" operation="totp.enable" :disabled="busy" />
       </div>
 
       <div v-if="setup" class="space-y-4 pt-2 border-t border-neutral-200">

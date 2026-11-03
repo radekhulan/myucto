@@ -12,6 +12,8 @@ import { authApi, type RecoveryCodeStatus } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { takeSsoStepUpProof } from '@/security/oidc'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -55,8 +57,8 @@ async function stepUp(): Promise<string> {
   return authApi.passkeyStepUpVerify(flow.flow_token, OPERATION, credential)
 }
 
-async function generate() {
-  if (busy.value || !canGenerate.value) return
+async function generate(ssoProof = '') {
+  if (busy.value || (!ssoProof && !canGenerate.value)) return
   if (status.value && status.value.remaining > 0
       && !window.confirm(t('recovery_codes.regenerate_confirm'))) {
     return
@@ -64,7 +66,7 @@ async function generate() {
   busy.value = true
   error.value = ''
   try {
-    const result = await authApi.generateRecoveryCodes(await stepUp())
+    const result = await authApi.generateRecoveryCodes(ssoProof || await stepUp())
     codes.value = result.codes
     status.value = result
     totpCode.value = ''
@@ -119,7 +121,12 @@ function dismiss() {
   void loadStatus()
 }
 
-onMounted(() => void loadStatus())
+onMounted(async () => {
+  // Po návratu z ověření přes Microsoft se sada vygeneruje rovnou.
+  const proof = takeSsoStepUpProof(OPERATION)
+  await loadStatus()
+  if (proof) await generate(proof)
+})
 </script>
 
 <template>
@@ -169,11 +176,13 @@ onMounted(() => void loadStatus())
                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
       </div>
 
-      <button type="button" @click="generate"
+      <button type="button" @click="generate()"
               :disabled="busy || !canGenerate || (totpUsable && !passkeyUsable && !totpCodeValid)"
               class="h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white rounded-md font-medium">
         {{ status && status.total > 0 ? t('recovery_codes.regenerate') : t('recovery_codes.generate') }}
       </button>
+
+      <SsoStepUpOption v-if="canGenerate" :operation="OPERATION" :disabled="busy" />
 
       <p v-if="!canGenerate" class="text-xs text-warning-700">{{ t('recovery_codes.needs_factor') }}</p>
       <p v-else class="text-xs text-neutral-500">{{ t('recovery_codes.step_up_hint') }}</p>

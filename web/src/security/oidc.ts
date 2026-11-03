@@ -25,7 +25,7 @@ export const SSO_ERROR_CODES = [
 export type SsoErrorCode = typeof SSO_ERROR_CODES[number]
 
 export type SsoFragment =
-  | { kind: 'step_up'; token: string; operation: string }
+  | { kind: 'step_up'; token: string; operation: string; context?: string }
   | { kind: 'linked' }
   | { kind: 'error'; code: string }
 
@@ -97,6 +97,12 @@ interface PendingStepUp {
   operation: string
   path: string
   at: number
+  /**
+   * Který dialog na stránce o ověření požádal (např. `epo:submit:12`). Víc
+   * dialogů sdílí stejnou operaci, takže podle samotné operace by se po návratu
+   * nedalo poznat, který z nich otevřít.
+   */
+  context?: string
 }
 
 function readPending(): PendingStepUp | null {
@@ -105,6 +111,7 @@ function readPending(): PendingStepUp | null {
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<PendingStepUp>
     if (typeof parsed.operation !== 'string' || typeof parsed.path !== 'string' || typeof parsed.at !== 'number') return null
+    if (parsed.context !== undefined && typeof parsed.context !== 'string') return null
     return parsed as PendingStepUp
   } catch {
     return null
@@ -115,9 +122,9 @@ function clearPending(): void {
   try { sessionStorage.removeItem(PENDING_KEY) } catch { /* nedostupné úložiště */ }
 }
 
-export function rememberPendingStepUp(operation: string, path: string, now = Date.now()): void {
+export function rememberPendingStepUp(operation: string, path: string, now = Date.now(), context = ''): void {
   try {
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ operation, path, at: now }))
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ operation, path, at: now, context }))
   } catch { /* nedostupné úložiště: proof se pak nepřijme a uživatel ověří znovu */ }
 }
 
@@ -140,18 +147,36 @@ export function captureSsoFragment(
     if (pending === null || pending.operation !== fragment.operation || now - pending.at > PENDING_MAX_AGE_MS) {
       return null
     }
+    captured = { ...fragment, context: pending.context ?? '' }
+    return captured
   }
   if (fragment.kind === 'error') clearPending()
   captured = fragment
   return fragment
 }
 
-/** Proof z ověření přes poskytovatele pro danou operaci; vydá se jen jednou. */
-export function takeSsoStepUpProof(operation: string): string | null {
+/**
+ * Proof z ověření přes poskytovatele pro danou operaci; vydá se jen jednou.
+ *
+ * `scope` odpovídá kontextu, se kterým stránka ověření zahájila: vydá se jen
+ * stejnému kontextu (`epo`) nebo jeho upřesnění (`epo:submit:12`), v `detail`
+ * je pak zbytek za dvojtečkou. Bez kontextu se vydá jen bezkontextovému volajícímu,
+ * takže dvě komponenty se stejnou operací na jedné stránce si proof nevezmou.
+ */
+export function takeSsoStepUpReturn(operation: string, scope = ''): { token: string; detail: string } | null {
   if (captured?.kind !== 'step_up' || captured.operation !== operation) return null
+  const context = captured.context ?? ''
+  let detail: string
+  if (context === scope) detail = ''
+  else if (scope !== '' && context.startsWith(`${scope}:`)) detail = context.slice(scope.length + 1)
+  else return null
   const token = captured.token
   captured = null
-  return token
+  return { token, detail }
+}
+
+export function takeSsoStepUpProof(operation: string, scope = ''): string | null {
+  return takeSsoStepUpReturn(operation, scope)?.token ?? null
 }
 
 /** Výsledek propojení nebo chyba návratu, pro jednorázovou hlášku. */
