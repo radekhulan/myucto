@@ -4552,7 +4552,7 @@ export const TOOLS = [
     ],
     title: 'Seznam skladů',
     description:
-      'Sklady firmy s jejich ID a aktuální hodnotou zásob. ID se používá ve filtrech '
+      'Sklady firmy s jejich ID a aktuální hodnotou zásob (hodnotu vidí jen interní role). ID se používá ve filtrech '
       + 'ostatních skladových nástrojů a na skladových dokladech.',
     inputSchema: schema({ active_only: bool('Jen aktivní sklady.') }),
     write: false,
@@ -4564,7 +4564,7 @@ export const TOOLS = [
       ['GET', '/api/stock/warehouses/{id}'],
     ],
     title: 'Detail skladu',
-    description: 'Jeden sklad včetně aktuální hodnoty zásob.',
+    description: 'Jeden sklad včetně aktuální hodnoty zásob (hodnotu vidí jen interní role).',
     inputSchema: schema({ id: int('ID skladu.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/stock/warehouses/${seg(a.id)}`, null, tool),
@@ -4664,8 +4664,8 @@ export const TOOLS = [
     ],
     title: 'Dostupnost konkrétního zboží',
     description:
-      'Dostupné množství pro vyjmenované karty — na rozdíl od `stock_levels` počítá '
-      + 'i s rezervacemi. Pro dotazy „můžeme to hned expedovat?".',
+      'Množství vyjmenovaných karet ve skladech určených k prodeji. Rezervace neodečítá; '
+      + 'prodejné množství po rezervacích vrací `stock_quantities`.',
     inputSchema: schema({
       item_ids: {
         type: 'array',

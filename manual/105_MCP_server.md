@@ -160,8 +160,9 @@ Všechny tyto zápisové nástroje vyžadují také token pro čtení a zápis.
 S čtecím tokenem a právem čtení banky lze zobrazit také zůstatky bankovních
 účtů a návrhy párování výpisu. Návrhy server filtruje podle práv k dotčeným
 dokladům. Čtení pravidelné fakturace zpřístupňuje historii faktur vytvořených
-ze šablony. Čtení skladu umožňuje rychlé hledání zboží, dostupnost vybraných
-karet včetně rezervací a seznam nebo detail skladů.
+ze šablony. Čtení skladu umožňuje rychlé hledání zboží, množství vybraných karet
+ve skladech určených k prodeji (bez odečtení rezervací) a seznam nebo detail
+skladů. Hodnotu zásob skladu klientská role nevidí.
 
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
