@@ -39,9 +39,6 @@ final class CsrfMiddleware implements MiddlewareInterface
         '/api/auth/domain-login/exchange',
         '/api/auth/forgot',
         '/api/auth/reset',
-        // Apple vrací výsledek přihlášení POSTem ze svého webu (form_post). Akce
-        // nic nemění, jen přesměruje na GET návrat, kde se ověří state i vazba.
-        '/api/auth/oidc/apple/callback',
     ];
 
     public function __construct(
@@ -95,6 +92,14 @@ final class CsrfMiddleware implements MiddlewareInterface
         // Bez téhle výjimky odpoví instalace 403 `origin_mismatch` a licenci
         // nepřevezme — zaplacená instalace pak běží na zkušební období.
         if ($path === '/api/managed/license') {
+            return $handler->handle($request);
+        }
+
+        // Návrat přihlášení od Apple: prohlížeč ho POSTuje z appleid.apple.com
+        // (response_mode=form_post), Origin je tedy cizí z principu. Akce nic
+        // nemění a jen přesměruje na GET návrat, kde se ověří state i vazba
+        // na prohlížeč (OidcAction::formCallback).
+        if ($path === '/api/auth/oidc/apple/callback' && $method === 'POST') {
             return $handler->handle($request);
         }
 

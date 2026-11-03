@@ -95,7 +95,9 @@ class OidcLoginService
             $inviteId,
         );
 
-        $extra = ['prompt' => 'select_account'];
+        // Výběr účtu dokumentují jen Microsoft a Google; Apple a Seznam neznámé
+        // parametry přihlášení nepotřebují.
+        $extra = in_array($provider->id, ['entra', 'google'], true) ? ['prompt' => 'select_account'] : [];
         if ($purpose === OidcFlowStore::PURPOSE_STEP_UP) {
             // Vynutí nové zadání údajů u poskytovatele, ne jen tiché SSO. Při
             // `max_age` musí poskytovatel vrátit `auth_time` (OIDC Core 3.1.2.1),
