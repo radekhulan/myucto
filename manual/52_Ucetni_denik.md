@@ -475,7 +475,11 @@ Nad tabulkou je filtrační lišta:
   typu zdroje),
 - **Původ** - jen zápisy vytvořené **automaticky**, po **ručním potvrzení**, nebo
   **ručně** bez automatického návrhu,
-- **Účet od / Účet do** - omezí deník na rozsah kódů účtů,
+- **Účet od / Účet do** - omezí deník na zápisy s pohybem na účtech v rozsahu včetně krajů.
+  Zadat jde i začátek kódu: **5 až 5** vybere všechny nákladové účty, **501 až 518** rozsah
+  včetně analytik (i **518.100**) a **501.100 až 501.100** jednu analytiku. Mez je začátek
+  kódu, takže **311.1 až 311.1** zahrne i analytiky **311.10** až **311.19**, pokud je osnova má.
+  Neplatný rozsah (např. **6 až 5**) deník odmítne s hláškou,
 - **Částka od / Částka do** - omezí celkovou částku zápisu,
 - **Stav** - jen zaúčtované, jen koncepty, nebo vše,
 - **Storno** - stav stornování: **Stornované zápisy** (zápis, ke kterému existuje

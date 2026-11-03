@@ -13526,16 +13526,18 @@ paths:
           maxLength: 100
       - in: query
         name: account_from
-        description: Dolní mez rozsahu kódů účtů
+        description: Dolní mez rozsahu účtů nebo začátek kódu (např. 5, 501, 501.100). Rozsah je prefixový včetně krajů.
         schema:
           type: string
-          maxLength: 20
+          maxLength: 10
+          pattern: ^[0-9A-Za-z._/-]{0,10}$
       - in: query
         name: account_to
-        description: Horní mez rozsahu kódů účtů
+        description: Horní mez rozsahu účtů včetně analytik (5 až 5 = celá třída 5, 501 až 518 včetně 518.100)
         schema:
           type: string
-          maxLength: 20
+          maxLength: 10
+          pattern: ^[0-9A-Za-z._/-]{0,10}$
       - in: query
         name: amount_from
         description: Minimální částka účetního zápisu
@@ -15787,7 +15789,7 @@ paths:
 
         strany. Strop 5000 zápisů na jeden export — nad limit vrací 422 `too_many_rows`
 
-        (audit 2026-07).
+        (audit 2026-07); neplatný rozsah účtů vrací 422 `validation_failed`.
 
         '
       parameters:
@@ -15855,6 +15857,20 @@ paths:
         name: posted
         schema:
           type: boolean
+      - in: query
+        name: account_from
+        description: Dolní mez rozsahu účtů nebo začátek kódu, stejně jako v GET /accounting/journal
+        schema:
+          type: string
+          maxLength: 10
+          pattern: ^[0-9A-Za-z._/-]{0,10}$
+      - in: query
+        name: account_to
+        description: Horní mez rozsahu účtů včetně analytik, stejně jako v GET /accounting/journal
+        schema:
+          type: string
+          maxLength: 10
+          pattern: ^[0-9A-Za-z._/-]{0,10}$
       - in: query
         name: format
         required: true

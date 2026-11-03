@@ -183,10 +183,11 @@ async function load(reset = true): Promise<boolean> {
     total.value = r.total
     perPage.value = r.per_page
     return true
-  } catch (e) {
+  } catch (e: any) {
     if (seq === loadSeq && !disposed && supplierId === requestSupplierId()) {
       if (!reset) page.value--
-      toast.error(t('common.error'))
+      // Neplatný filtr (např. rozsah účtů 6 až 5) vrací server jako 422 s hláškou.
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
     }
     return false
   } finally {
