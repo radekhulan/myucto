@@ -60,7 +60,10 @@ nástroj přepíše. Jednotlivé změny i souhrn běhu zapisuje do protokolu akt
    Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte
    (kapitola [Multi supplier](95_Multi_supplier.md)). Firma, která zatím vede
    daňovou evidenci, se převodem přepne na podvojné účetnictví od začátku
-   převáděného roku.
+   převáděného roku. Převádí se jen agenda POHODY vedená v podvojném účetnictví;
+   agendu v daňové evidenci (peněžní deník) převod nepodporuje. Faktury z ní
+   převedete importem Pohoda XML ([§ 21.3](21_Importy.md#213-krok-za-krokem-import-vydanych-faktur-ze-souboru),
+   [§ 21.4](21_Importy.md#214-krok-za-krokem-import-prijatych-faktur-ze-souboru)).
 2. **Oprávnění.** Průvodce vidí a zkoušku nanečisto spouští uživatel
    s oprávněním k zápisu importů. Ostrý převod zapisuje účetní deník a mění
    nastavení firmy, proto vyžaduje navíc zápis do účetního deníku a do
