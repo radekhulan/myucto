@@ -113,3 +113,46 @@ test('klientské souborové nástroje posílají multipart ve své firmě a náh
     }
   }
 });
+
+test('provozní čtecí nástroje fungují s read tokenem, zachovají filtry a neobejdou katalog ani firmu', async () => {
+  const cases = [
+    { name: 'bank_account_balances', args: {}, path: '/bank-statements/account-balances', query: {} },
+    { name: 'list_bank_match_suggestions', args: { id: 7 }, path: '/bank-statements/7/match-suggestions', query: {} },
+    { name: 'recurring_invoice_history', args: { id: 7, page: 2, per_page: 5 }, path: '/recurring/7/invoices', query: { page: '2', per_page: '5' } },
+    { name: 'search_products', args: { query: 'Syntetické zboží', limit: 5 }, path: '/stock/items/search', query: { q: 'Syntetické zboží', limit: '5' } },
+    { name: 'stock_availability', args: { item_ids: [7, 8], warehouse_id: 9 }, path: '/stock/availability', query: { item_ids: '7,8', warehouse_id: '9' } },
+    { name: 'list_warehouses', args: { active_only: true }, path: '/stock/warehouses', query: { active: '1' } },
+    { name: 'get_warehouse', args: { id: 9 }, path: '/stock/warehouses/9', query: {} },
+  ];
+  const input = { boundSupplierId: 1, lockedSupplierId: 1, apiUrl: 'https://portal.example.test/api/v1',
+    token: 'synthetic-token', allowedTools: cases.map(entry => entry.name) };
+  for (const scope of ['read', 'read_write']) {
+    const list = await runHosted({ ...input, scope, operation: 'list' });
+    assert.deepEqual(list.tools.map(tool => tool.name).sort(), input.allowedTools.toSorted());
+    assert.ok(list.tools.every(tool => tool.annotations.readOnlyHint && !tool.annotations.destructiveHint));
+    for (const entry of cases) {
+      const calls = [];
+      const fetcher = async (url, options) => {
+        calls.push(options.method);
+        assert.equal(options.method, 'GET');
+        assert.equal(options.headers['X-Supplier-Id'], '1');
+        assert.equal(options.headers['X-MyUcto-Tool'], entry.name);
+        assert.equal(new URL(url).pathname, `/api/v1${entry.path}`);
+        assert.deepEqual(Object.fromEntries(new URL(url).searchParams), entry.query);
+        return new Response(JSON.stringify({ synthetic: true }));
+      };
+      const call = { ...input, scope, operation: 'call', name: entry.name, arguments: entry.args };
+      const result = await runHosted(call, fetcher);
+      assert.equal(result.isError, undefined, JSON.stringify(result));
+      assert.deepEqual(result.structuredContent, { synthetic: true });
+      assert.deepEqual(calls, ['GET']);
+      const denied = await runHosted({ ...call, allowedTools: [] }, fetcher);
+      assert.equal(denied.isError, true);
+      assert.match(denied.content[0].text, /nemáte oprávnění/);
+      const foreign = await runHosted({ ...call, arguments: { ...entry.args, supplier_id: 2 } }, fetcher);
+      assert.equal(foreign.isError, true);
+      assert.match(foreign.content[0].text, /původně schválenou firmu/);
+      assert.deepEqual(calls, ['GET']);
+    }
+  }
+});
