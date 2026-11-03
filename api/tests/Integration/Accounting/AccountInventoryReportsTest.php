@@ -250,7 +250,9 @@ final class AccountInventoryReportsTest extends TestCase
 
     public function testDisplayedCounterAccountsAgreeWithFilterInMixedEntry(): void
     {
-        // Zápis mísí běžné a červené řádky: 311 MD 100 proti 602 Dal 100 a 518 MD −50 (účinně Dal).
+        // Zápis mísí běžné a červené řádky: 311 MD 100 proti 602 Dal 100 a 518 MD −50 (účinně Dal)
+        // proti 321 Dal −50 (účinně MD). Obě dvojice mají shodné částky, takže každý řádek má
+        // za protiúčet jen svůj pár; zobrazení, filtr i součty se shodují.
         $entry = $this->post([['311', 'debit', 100.0], ['602', 'credit', 100.0], ['518', 'debit', 50.0], ['321', 'credit', 50.0]], '03-01');
         $this->db->pdo()->prepare('UPDATE journal_entry_lines SET is_red_storno = 1 WHERE entry_id = ? AND supplier_id = ? AND account_id IN (?, ?)')
             ->execute([$entry, $this->supplierId, $this->accountId('518'), $this->accountId('321')]);
@@ -258,12 +260,258 @@ final class AccountInventoryReportsTest extends TestCase
         $data = $this->statementOf('311');
         $totals = array_column($data['counter_totals'], null, 'account_code');
 
-        self::assertSame('518, 602', $data['items'][0]['counter_accounts'], 'Řádek ukazuje účty opačné účinné strany.');
-        self::assertSame(33.33, $totals['518']['md']);
-        self::assertSame(66.67, $totals['602']['md']);
+        self::assertSame('602', $data['items'][0]['counter_accounts'], 'Řádek ukazuje svůj pár na opačné účinné straně.');
+        self::assertSame(100.0, $totals['602']['md']);
+        self::assertArrayNotHasKey('518', $totals, '518 je účinně na opačné straně, ale v páru s 321.');
         self::assertArrayNotHasKey('321', $totals, '321 je účinně na stejné straně jako 311.');
         self::assertSame(0, $this->statementOf('311', $this->accountId('321'))['total']);
-        self::assertSame('311, 321', $this->statementOf('518')['items'][0]['counter_accounts'], 'Červený řádek je účinně na Dal.');
+        self::assertSame(0, $this->statementOf('311', $this->accountId('518'))['total']);
+        self::assertSame('321', $this->statementOf('518')['items'][0]['counter_accounts'], 'Červený řádek je účinně na Dal, pár má 321.');
+    }
+
+    public function testEntryOfPairsShowsFiltersAndTotalsEachPairOnItsOwnCounterAccount(): void
+    {
+        // Pokladní doklad o dvou položkách: 501 MD 300 / 211 D 300 a 513 MD 700 / 211 D 700.
+        $this->post([['501', 'debit', 300.0], ['211', 'credit', 300.0], ['513', 'debit', 700.0], ['211', 'credit', 700.0]], '07-31');
+
+        $data = $this->statementOf('211');
+        $byAmount = array_column($data['items'], 'counter_accounts', 'amount');
+        $totals = array_column($data['counter_totals'], null, 'account_code');
+
+        self::assertSame('501', $byAmount['300.00'] ?? $byAmount[300] ?? null);
+        self::assertSame('513', $byAmount['700.00'] ?? $byAmount[700] ?? null);
+        self::assertSame(300.0, $totals['501']['d']);
+        self::assertSame(700.0, $totals['513']['d']);
+        self::assertSame(self::cents($data['turnover_d']), array_sum(array_map(static fn (array $r): int => self::cents($r['d']), $data['counter_totals'])), 'Σ protiúčtů D == obrat D.');
+        $only513 = $this->statementOf('211', $this->accountId('513'));
+        self::assertSame(1, $only513['total'], 'Filtr na 513 nechá jen řádek jeho dvojice.');
+        self::assertSame(700.0, (float) $only513['items'][0]['amount']);
+        self::assertSame(700.0, $only513['counter_filter']['d']);
+        self::assertSame('211', $this->statementOf('513')['items'][0]['counter_accounts']);
+    }
+
+    public function testSeveralLinesOfTheSameAmountShareTheLineEvenly(): void
+    {
+        // Dvě stejné částky na obou stranách: pár nejde určit, řádek patří oběma rovným dílem.
+        $this->post([['501', 'debit', 100.0], ['513', 'debit', 100.0], ['211', 'credit', 100.0], ['211', 'credit', 100.0]], '08-01');
+
+        $data = $this->statementOf('211');
+        $totals = array_column($data['counter_totals'], null, 'account_code');
+
+        self::assertSame('501, 513', $data['items'][0]['counter_accounts']);
+        self::assertSame(100.0, $totals['501']['d']);
+        self::assertSame(100.0, $totals['513']['d']);
+        self::assertSame(2, $this->statementOf('211', $this->accountId('513'))['total']);
+    }
+
+    public function testDebitLineWithTwoEqualCounterLinesSplitsBetweenThem(): void
+    {
+        // MD 501 a MD 502 po 100 proti D 211 a D 221 po 100: dvojici nejde určit, každý protiúčet dostane polovinu.
+        $this->post([['501', 'debit', 100.0], ['502', 'debit', 100.0], ['211', 'credit', 100.0], ['221', 'credit', 100.0]], '08-02');
+
+        $data = $this->statementOf('501');
+        $totals = array_column($data['counter_totals'], null, 'account_code');
+
+        self::assertSame('211, 221', $data['items'][0]['counter_accounts']);
+        self::assertSame(50.0, $totals['211']['md']);
+        self::assertSame(50.0, $totals['221']['md']);
+    }
+
+    public function testPairDiffersFromProportionalSplitWhenPairsUseDifferentAccounts(): void
+    {
+        // 501 MD 300 / 211 D 300 a 513 MD 700 / 221 D 700: poměrné dělení by dalo 211 díl 513.
+        $this->post([['501', 'debit', 300.0], ['211', 'credit', 300.0], ['513', 'debit', 700.0], ['221', 'credit', 700.0]], '07-31');
+
+        $totals = array_column($this->statementOf('211')['counter_totals'], null, 'account_code');
+
+        self::assertSame(300.0, $totals['501']['d']);
+        self::assertArrayNotHasKey('513', $totals);
+        self::assertSame('211', $this->statementOf('501')['items'][0]['counter_accounts']);
+    }
+
+    public function testCounterFilterOnCompoundEntryWithoutPairKeepsWholeOppositeSide(): void
+    {
+        // Bez shodné částky zůstává protiúčtem celá protistrana (nulová regrese pro složené zápisy).
+        $this->post([['311', 'debit', 1210.0], ['602', 'credit', 1000.0], ['343', 'credit', 210.0]], '03-10');
+
+        self::assertSame('343, 602', $this->statementOf('311')['items'][0]['counter_accounts']);
+        self::assertSame(1, $this->statementOf('311', $this->accountId('343'))['total']);
+        self::assertSame(1, $this->statementOf('311', $this->accountId('602'))['total']);
+    }
+
+    public function testPairNextToCompoundVatLineKeepsBothParts(): void
+    {
+        // Pokladní doklad: dvojice 501 / 211 za 300 a položka s DPH 518 + 343 proti 211 za 1 210.
+        $this->post([['501', 'debit', 300.0], ['211', 'credit', 300.0], ['518', 'debit', 1000.0], ['343', 'debit', 210.0], ['211', 'credit', 1210.0]], '07-31');
+
+        $data = $this->statementOf('211');
+        $byAmount = array_column($data['items'], 'counter_accounts', 'amount');
+        $totals = array_column($data['counter_totals'], null, 'account_code');
+
+        self::assertSame('501', $byAmount[300]);
+        self::assertSame('343, 518', $byAmount[1210], 'Spárovaný řádek 501 se do zbytku zápisu nepočítá.');
+        self::assertSame(300.0, $totals['501']['d']);
+        self::assertSame(1000.0, $totals['518']['d']);
+        self::assertSame(210.0, $totals['343']['d']);
+        self::assertSame(1, $this->statementOf('211', $this->accountId('501'))['total']);
+        self::assertSame(1, $this->statementOf('211', $this->accountId('518'))['total']);
+        // Souměrnost: podíl 501 v opisu 211 = podíl 211 v opisu 501.
+        self::assertSame(300.0, array_column($this->statementOf('501')['counter_totals'], null, 'account_code')['211']['md']);
+        $this->assertRawCountersMatchTurnover('211', ['501' => 300.0, '518' => 1000.0, '343' => 210.0], 'd');
+    }
+
+    public function testUnequalCountOfEqualAmountsIsNotAPair(): void
+    {
+        // 211 D 100 dvakrát proti 501 MD 100, 513 MD 60 a 518 MD 40: 100 není dvojice (1 proti 2).
+        $this->post([['211', 'credit', 100.0], ['211', 'credit', 100.0], ['501', 'debit', 100.0], ['513', 'debit', 60.0], ['518', 'debit', 40.0]], '08-03');
+
+        $totals = array_column($this->statementOf('211')['counter_totals'], null, 'account_code');
+
+        self::assertSame(100.0, $totals['501']['d']);
+        self::assertSame(60.0, $totals['513']['d']);
+        self::assertSame(40.0, $totals['518']['d']);
+        self::assertSame(2, $this->statementOf('211', $this->accountId('513'))['total']);
+        self::assertSame('501, 513, 518', $this->statementOf('211')['items'][0]['counter_accounts']);
+    }
+
+    public function testPairOfThreeSplitsWithoutRoundingDrift(): void
+    {
+        $this->post([['501', 'debit', 100.0], ['513', 'debit', 100.0], ['518', 'debit', 100.0], ['211', 'credit', 100.0], ['211', 'credit', 100.0], ['211', 'credit', 100.0]], '08-04');
+
+        $this->assertRawCountersMatchTurnover('211', ['501' => 100.0, '513' => 100.0, '518' => 100.0], 'd');
+    }
+
+    public function testTransferWithinOneAccountKeepsItselfAsCounterAccount(): void
+    {
+        // 343 MD 210 / 343 D 210 (přeúčtování v rámci účtu) vedle dvojice 501 / 321 za 1 000.
+        $this->post([['343', 'debit', 210.0], ['343', 'credit', 210.0], ['501', 'debit', 1000.0], ['321', 'credit', 1000.0]], '08-05');
+
+        $data = $this->statementOf('343');
+        $totals = array_column($data['counter_totals'], null, 'account_code');
+
+        self::assertSame(['343', '343'], array_column($data['items'], 'counter_accounts'), 'Zobrazení se shoduje se součty a filtrem.');
+        self::assertSame(210.0, $totals['343']['md']);
+        self::assertSame(210.0, $totals['343']['d']);
+        self::assertSame(0, $this->statementOf('343', $this->accountId('501'))['total']);
+        self::assertSame(2, $this->statementOf('343', $this->accountId('343'))['total']);
+    }
+
+    public function testOwnAccountInPairIsShownLikeTotalsAndFilterCountIt(): void
+    {
+        // Dvojice za 210 se dvěma řádky na každé straně, jeden z nich na 343 na obou stranách:
+        // každý řádek 343 má polovinu proti sobě a polovinu proti druhému účtu dvojice.
+        $this->post([['343', 'debit', 210.0], ['343', 'credit', 210.0], ['501', 'debit', 210.0], ['321', 'credit', 210.0]], '08-06');
+
+        $data = $this->statementOf('343');
+        $bySide = array_column($data['items'], 'counter_accounts', 'side');
+
+        self::assertSame('321, 343', $bySide['debit']);
+        self::assertSame('343, 501', $bySide['credit']);
+        self::assertEquals(['321' => [105.0, 0.0], '343' => [105.0, 105.0], '501' => [0.0, 105.0]], $this->rawCounterTotals('343'));
+        self::assertSame(2, $this->statementOf('343', $this->accountId('343'))['total'], 'Filtr vlastního účtu najde oba řádky, které ho ukazují.');
+    }
+
+    public function testOwnAccountBesideOtherUnpairedCounterpartIsShownLikeTotalsAndFilterCountIt(): void
+    {
+        $this->post([['211', 'debit', 1000.0], ['211', 'credit', 400.0], ['602', 'credit', 600.0]], '08-11');
+
+        $data = $this->statementOf('211');
+        $byAmount = array_column($data['items'], 'counter_accounts', 'amount');
+
+        self::assertSame('211, 602', $byAmount[1000]);
+        self::assertSame('211', $byAmount[400]);
+        self::assertEquals(['211' => [400.0, 400.0], '602' => [600.0, 0.0]], $this->rawCounterTotals('211'));
+        self::assertSame(2, $this->statementOf('211', $this->accountId('211'))['total']);
+        self::assertSame(1, $this->statementOf('211', $this->accountId('602'))['total']);
+    }
+
+    public function testRawCounterTotalsKeepRedStornoOnItsWrittenSide(): void
+    {
+        // Dorovnání na obrat by chybnou stranu u jediného protiúčtu skrylo, proto surové součty.
+        $entry = $this->post([['311', 'debit', 100.0], ['602', 'credit', 100.0], ['311', 'debit', 50.0], ['648', 'credit', 50.0]], '08-08');
+        $this->db->pdo()->prepare('UPDATE journal_entry_lines SET is_red_storno = 1 WHERE entry_id = ? AND supplier_id = ?')->execute([$entry, $this->supplierId]);
+
+        $raw = $this->rawCounterTotals('311');
+
+        self::assertEquals(['602' => [-100.0, 0.0], '648' => [-50.0, 0.0]], $raw, 'Storno MD zůstává v MD se záporem.');
+    }
+
+    public function testRawCounterTotalsKeepOwnLineWithoutUnpairedCounterpartAsNull(): void
+    {
+        // 311 MD 100 / 602 D 100 je dvojice; 311 MD 50 nemá nespárovanou protistranu (jednostranný
+        // zbytek převzatého zápisu), jeho protiúčet je NULL.
+        $entry = $this->post([['311', 'debit', 100.0], ['602', 'credit', 100.0], ['311', 'debit', 50.0], ['648', 'credit', 50.0]], '08-09');
+        $this->db->pdo()->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ? AND supplier_id = ? AND account_id = ?')
+            ->execute([$entry, $this->supplierId, $this->accountId('648')]);
+
+        self::assertEquals(['' => [50.0, 0.0], '602' => [100.0, 0.0]], $this->rawCounterTotals('311'));
+        // Zobrazení i filtr s tím souhlasí: spárovaný 602 není protiúčtem řádku 50.
+        $byAmount = array_column($this->statementOf('311')['items'], 'counter_accounts', 'amount');
+        self::assertNull($byAmount[50]);
+        self::assertSame('602', $byAmount[100]);
+        self::assertSame(1, $this->statementOf('311', $this->accountId('602'))['total']);
+    }
+
+    public function testOneSidedEntryHintsOtherAccountsWithoutItself(): void
+    {
+        // Jednostranný zbytek převzatého zápisu: 311 MD 100, 311 MD 40, 335 MD 140 a nic na Dal.
+        // Protiúčet nemá; jako nápověda se ukážou ostatní účty zápisu, ne účet sám.
+        $entry = $this->post([['311', 'debit', 100.0], ['311', 'debit', 40.0], ['335', 'debit', 140.0], ['648', 'credit', 280.0]], '08-13');
+        $this->db->pdo()->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ? AND supplier_id = ? AND account_id = ?')
+            ->execute([$entry, $this->supplierId, $this->accountId('648')]);
+
+        self::assertSame(['335', '335'], array_column($this->statementOf('311')['items'], 'counter_accounts'));
+    }
+
+    public function testRawCounterTotalsOfSyntheticIncludeItsAnalytics(): void
+    {
+        $this->analytic('311', '311007', 'asset', 'debit');
+        $this->post([['311007', 'debit', 400.0], ['602', 'credit', 400.0]], '08-10');
+
+        self::assertEquals(['602' => [400.0, 0.0]], $this->rawCounterTotals('311'));
+    }
+
+    /**
+     * Surové součty po protiúčtech (před dorovnáním na obrat), NULL protiúčet pod klíčem ''.
+     *
+     * @return array<string,array{0:float,1:float}> kód protiúčtu => [MD, D]
+     */
+    private function rawCounterTotals(string $code): array
+    {
+        $out = [];
+        foreach (Bootstrap::buildContainer()->get(\MyInvoice\Repository\LedgerReportRepository::class)
+            ->accountCounterTotals($this->supplierId, $this->accountId($code), self::FROM, self::TO) as $r) {
+            $out[(string) $r['account_code']] = [round($r['md'], 2), round($r['d'], 2)];
+        }
+        ksort($out);
+        return $out;
+    }
+
+    public function testOwnLineIsFoundByIdEvenWithDuplicateLineNumbers(): void
+    {
+        // Převzaté zápisy mohou mít stejné line_no; vlastní řádek se proto hledá podle id.
+        $entry = $this->post([['501', 'debit', 300.0], ['211', 'credit', 300.0], ['513', 'debit', 700.0], ['211', 'credit', 700.0]], '08-07');
+        $this->db->pdo()->prepare('UPDATE journal_entry_lines SET line_no = 0 WHERE entry_id = ? AND supplier_id = ?')->execute([$entry, $this->supplierId]);
+
+        $byAmount = array_column($this->statementOf('211')['items'], 'counter_accounts', 'amount');
+
+        self::assertSame('501', $byAmount[300]);
+        self::assertSame('513', $byAmount[700]);
+    }
+
+    /**
+     * Surové součty z repozitáře (před dorovnáním na obrat) sedí na haléř.
+     *
+     * @param array<string,float> $expected kód protiúčtu => částka
+     */
+    private function assertRawCountersMatchTurnover(string $code, array $expected, string $side): void
+    {
+        $raw = Bootstrap::buildContainer()->get(\MyInvoice\Repository\LedgerReportRepository::class)
+            ->accountCounterTotals($this->supplierId, $this->accountId($code), self::FROM, self::TO);
+        $byCode = array_column($raw, $side, 'account_code');
+        foreach ($expected as $counter => $amount) {
+            self::assertEqualsWithDelta($amount, (float) ($byCode[$counter] ?? 0), 0.005, "Protiúčet {$counter} bez dorovnání.");
+        }
     }
 
     public function testForeignCounterAccountIsNotFound(): void

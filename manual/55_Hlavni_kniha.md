@@ -178,9 +178,15 @@ neobvyklé nejsou. Účty bez určené strany (261, 343, 395, 431) neobvyklou st
 nemají.
 
 **Filtr a součty podle protiúčtu.** Blok **Součty podle protiúčtu** rozděluje obrat
-MD a Dal na jednotlivé protiúčty a jeho součet se rovná obratu účtu. Složený zápis
-se dělí poměrem řádků protistrany: 311 MD 1 210 má protiúčty 602 za 1 000 a 343 za
-210. Výběrem v poli **Protiúčet** nebo kliknutím na řádek bloku opis vyfiltrujete.
+MD a Dal na jednotlivé protiúčty a jeho součet se rovná obratu účtu. Řádky se shodnou
+částkou tvoří dvojici, když jich je na obou stranách zápisu stejně: pokladní doklad
+501 MD 300 / 211 D 300 a 513 MD 700 / 211 D 700 má u řádku 300 protiúčet 501
+a u řádku 700 protiúčet 513. Ostatní řádky se dělí poměrem jen mezi ostatní řádky
+protistrany, takže 311 MD 1 210 má protiúčty 602 za 1 000 a 343 za 210 i tehdy, když je
+ve stejném zápisu ještě dvojice. Je-li na opačné straně zápisu i sám účet (převod v rámci
+účtu), je mezi protiúčty i on. Řádek, jehož protistrana je celá spárovaná s jinými řádky,
+protiúčet nemá a v součtech je bez protiúčtu. Výběrem v poli **Protiúčet** nebo kliknutím na řádek
+bloku opis vyfiltrujete.
 Řádek složeného zápisu se ukáže celý, sloupec **Zůstatek** dál ukazuje zůstatek
 celého účtu a filtr platí i pro export. Výběr syntetiky zahrne její analytiky.
 
@@ -197,7 +203,8 @@ Každý řádek dál ukazuje:
 
 - **Partner** a **VS** ze zdrojového dokladu (faktura, bankovní pohyb, pokladní
   doklad, u zápočtu hrazený doklad),
-- **Protiúčet**, tedy účty opačné strany téhož zápisu,
+- **Protiúčet**, tedy účty opačné strany téhož zápisu (u řádku z dvojice se shodnou
+  částkou jen jeho dvojice),
 - **Okruh**, pokud je řádek spárovaný (viz níže),
 - **Měnu**; u cizoměnového řádku i částku v cizí měně.
 
