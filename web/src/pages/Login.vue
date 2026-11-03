@@ -561,7 +561,10 @@ async function verifyPasskey() {
   error.value = ''
   try {
     const credential = await getCredential(flow.publicKey)
-    const result = await authApi.passkeyLoginVerify(flow.flowToken, credential)
+    const ticket = ssoTicket.value?.ticket
+    const result = ticket
+      ? await authApi.passkeyLoginVerify(flow.flowToken, credential, ticket)
+      : await authApi.passkeyLoginVerify(flow.flowToken, credential)
     recordCanonicalDomainLoginSession(result.csrf_token)
     await auth.refresh()
     if (await finishDomainLoginIfNeeded()) return

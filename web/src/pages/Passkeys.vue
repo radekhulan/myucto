@@ -11,11 +11,13 @@ import RecoveryCodes from '@/components/security/RecoveryCodes.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useSsoStepUp } from '@/composables/useSsoStepUp'
-import { takeSsoStepUpProof } from '@/security/oidc'
+import { hasStrongProvider, takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
 const emit = defineEmits<{ registered: [] }>()
 const auth = useAuthStore()
+// Volba ověření přes Microsoft jen tam, kde je silný poskytovatel zapnutý.
+const ssoStrongEnabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, 'entra'))
 const sessionSecurity = useSessionSecurityStore()
 const pageId = useId()
 const list = ref<PasskeyCredential[]>([])
@@ -152,7 +154,8 @@ async function add() {
   let registrationCompleted = false
   try {
     const authorization: { current_password?: string; step_up_token?: string } = {}
-    if (list.value.length > 0 || auth.user?.totp_enabled) {
+    // Účet bez faktoru se prokazuje heslem, nebo ověřením přes Microsoft (bez hesla).
+    if (list.value.length > 0 || auth.user?.totp_enabled || ssoRegisterProof.value) {
       authorization.step_up_token = await stepUp('passkey.register')
     } else {
       authorization.current_password = currentPassword.value
@@ -289,7 +292,7 @@ onMounted(() => {
                autocomplete="off" required :placeholder="t('passkeys.label_placeholder')"
                class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
       </div>
-      <div v-if="list.length === 0 && !auth.user?.totp_enabled">
+      <div v-if="list.length === 0 && !auth.user?.totp_enabled && !ssoRegisterProof">
         <label :for="`${pageId}-passkey-current-password`" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ t('auth.current_password') }} *
         </label>
@@ -310,7 +313,7 @@ onMounted(() => {
           {{ t('passkeys.totp_required_hint') }}
         </p>
       </div>
-      <SsoStepUpOption v-if="list.length > 0 || auth.user?.totp_enabled" operation="passkey.register"
+      <SsoStepUpOption v-if="ssoStrongEnabled" operation="passkey.register"
                        :verified="ssoRegisterProof !== ''" :disabled="busy" />
       <button type="button" @click="add"
               :disabled="busy || !label.trim() || !passkeySupported || (totpRequired && !totpCodeValid && !recoveryCodeFilled && !ssoRegisterProof)"

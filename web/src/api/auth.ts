@@ -409,10 +409,13 @@ export const authApi = {
       cf_turnstile_response: captchaToken,
     }).then(r => r.data),
 
-  passkeyLoginVerify: (flowToken: string, credential: Record<string, any>) =>
+  // `ssoTicket`: přihlášení přes Google, Apple či Seznam dokončené passkey;
+  // server lístek po vydání sezení spotřebuje.
+  passkeyLoginVerify: (flowToken: string, credential: Record<string, any>, ssoTicket?: string) =>
     api.post<AuthSessionContract>('/auth/webauthn/login/verify', {
       flow_token: flowToken,
       credential,
+      ...(ssoTicket ? { sso_ticket: ssoTicket } : {}),
     }).then(r => r.data),
 
   sessionStatus: () =>

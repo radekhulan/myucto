@@ -56,6 +56,7 @@ final class PasskeyAction
         private readonly MfaRecoveryCodeService $recoveryCodes,
         private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
         private readonly \MyInvoice\Security\UserRoleProfile $roleProfile,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcFlowStore $oidcFlows,
     ) {}
 
     public function credentials(Request $request, Response $response): Response
@@ -345,6 +346,13 @@ final class PasskeyAction
                     403,
                     ['provider' => $requiredProvider],
                 );
+            }
+            // Přihlášení přes Google, Apple či Seznam dokončené passkey: lístek,
+            // kterým prohlížeč prošel prvním krokem, se tím spotřebuje, ať po vydání
+            // sezení nezůstane platný v historii prohlížeče.
+            $ssoTicket = trim((string) ($body['sso_ticket'] ?? ''));
+            if (preg_match('/^[a-f0-9]{64}$/D', $ssoTicket) === 1) {
+                $this->oidcFlows->consumeTicket($ssoTicket);
             }
             return $this->loginIssuer->issuePrepared(
                 $response,

@@ -9,11 +9,13 @@ import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
-import { takeSsoStepUpProof } from '@/security/oidc'
+import { hasStrongProvider, takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+// Volba ověření přes Microsoft jen tam, kde je silný poskytovatel zapnutý.
+const ssoStrongEnabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, 'entra'))
 
 const status = ref<{ enabled: boolean } | null>(null)
 const recoveryCodes = ref<string[] | null>(null)
@@ -242,7 +244,7 @@ onMounted(async () => {
         >
           {{ useRecovery ? t('passkeys.use_passkey_instead') : t('passkeys.use_recovery_instead') }}
         </button>
-        <SsoStepUpOption v-if="hasPasskey" operation="totp.enable" :disabled="busy" />
+        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="busy" />
       </div>
 
       <div v-if="setup" class="space-y-4 pt-2 border-t border-neutral-200">

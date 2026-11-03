@@ -1135,7 +1135,8 @@
         "2231_unit_prices_six_decimals.sql",
         "2232_oidc_external_identities.sql",
         "2233_api_token_issued_auth_method.sql",
-        "2234_oidc_login_tickets.sql"
+        "2234_oidc_login_tickets.sql",
+        "2235_domain_login_external_identity.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26369,6 +26370,7 @@
                 "created_ip": "varbinary(16) NULL DEFAULT NULL",
                 "created_user_agent": "varchar(255) NULL DEFAULT NULL",
                 "expires_at": "timestamp(6) NOT NULL",
+                "external_identity_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "mfa_verified_at": "timestamp(6) NULL DEFAULT NULL",
                 "pkce_challenge": "char(43) NOT NULL COLLATE ascii_bin",

@@ -31498,6 +31498,11 @@
           }
         }
       },
+      "oidc_config": {
+        "label": "Přihlášení přes poskytovatele identity",
+        "impact": "Neúplně nastavený poskytovatel se nezapne a jeho tlačítko chybí. Bez prefixu __Host- u session cookie může sesterská subdoména vnutit prohlížeči přihlášení do cizího účtu.",
+        "fix": "Doplňte chybějící hodnoty poskytovatele podle chyby (auth.oidc.providers) a ponechte session.cookie_name s prefixem __Host-."
+      },
       "app_debug": {
         "label": "Ladicí režim",
         "impact": "V produkci by se detaily chyb mohly dostat do odpovědi serveru.",

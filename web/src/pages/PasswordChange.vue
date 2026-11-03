@@ -23,7 +23,7 @@ import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
-import { takeSsoStepUpProof } from '@/security/oidc'
+import { hasStrongProvider, takeSsoStepUpProof } from '@/security/oidc'
 import {
   advanceCanonicalDomainLoginSession,
   authorizePendingDomainLogin,
@@ -38,6 +38,8 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+// Volba ověření přes Microsoft jen tam, kde je silný poskytovatel zapnutý.
+const ssoStrongEnabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, 'entra'))
 const sessionSecurity = useSessionSecurityStore()
 const domainReturnPending = ref(hasPendingCanonicalDomainLogin())
 const domainReturnBusy = ref(false)
@@ -541,7 +543,7 @@ onMounted(() => {
                 class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
           {{ totpBusy ? '…' : (totpRequiresPasskeyStepUp ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
         </button>
-        <SsoStepUpOption v-if="totpRequiresPasskeyStepUp" operation="totp.enable" :disabled="totpBusy" />
+        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="totpBusy" />
       </div>
 
       <div v-if="totpSetup" class="space-y-4 pt-2 border-t border-neutral-200">

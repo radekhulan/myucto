@@ -450,6 +450,7 @@ final class LoginAction
             if (!$this->oidcFlows->consumeTicket($ssoTicketRaw)) {
                 return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
             }
+            $this->revokePresentedSession($request, (int) $user['id']);
         }
         return $this->loginIssuer->issue(
             $response,
@@ -479,6 +480,30 @@ final class LoginAction
             $methods[] = 'recovery';
         }
         return $methods;
+    }
+
+    /**
+     * Přihlášení přes poskytovatele nahrazuje sezení, se kterým prohlížeč přišel
+     * (typicky zamčené, odemknuté přes Google či Apple). Stejně jako návrat od
+     * Entra ID (OidcAction::callback) se zruší celá jeho lineage, jen pro téhož
+     * uživatele; cizí sezení zůstane na pokoji.
+     */
+    private function revokePresentedSession(Request $request, int $userId): void
+    {
+        $token = $request->getCookieParams()[(string) $this->config->get('session.cookie_name', '__Host-myinvoice_session')] ?? null;
+        if (!is_string($token) || preg_match('/^[a-f0-9]{64}$/D', $token) !== 1) {
+            return;
+        }
+        $family = $this->db->pdo()->prepare('SELECT session_family_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1');
+        $family->execute([$token, $userId]);
+        $familyId = $family->fetchColumn();
+        if (!is_string($familyId) || $familyId === '') {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            'UPDATE sessions SET revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP(6))
+              WHERE session_family_id = ? AND user_id = ?'
+        )->execute([$familyId, $userId]);
     }
 
     /**

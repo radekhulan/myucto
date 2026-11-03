@@ -177,7 +177,7 @@ final class SessionManager
                     s.auth_credential_id, s.last_user_activity_at, s.locked_at,
                     s.lock_reason, s.last_unlock_at, s.last_unlock_method,
                     HEX(s.session_family_id) AS session_family_id,
-                    s.generation, s.replaced_at, s.revoked_at,
+                    s.generation, s.replaced_at, s.revoked_at, s.external_identity_id,
                     UTC_TIMESTAMP(6) AS evaluated_at,
                     UNIX_TIMESTAMP(CURRENT_TIMESTAMP(6)) AS evaluated_at_epoch,
                     u.id AS account_id, u.email AS account_email,

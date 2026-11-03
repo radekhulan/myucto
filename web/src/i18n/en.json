@@ -31498,6 +31498,11 @@
           }
         }
       },
+      "oidc_config": {
+        "label": "Sign-in via identity provider",
+        "impact": "An incompletely configured provider is not enabled and its button is missing. Without the __Host- prefix on the session cookie a sibling subdomain can force a sign-in into a foreign account.",
+        "fix": "Fill in the provider values named in the error (auth.oidc.providers) and keep session.cookie_name with the __Host- prefix."
+      },
       "app_debug": {
         "label": "Debug mode",
         "impact": "In production error details could end up in the server response.",

@@ -173,7 +173,7 @@ final class DomainLoginService
                     SET authorized_by = ?, authorization_code_hash = ?,
                         code_expires_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? SECOND),
                         auth_method = ?, assurance_level = ?, mfa_verified_at = ?,
-                        auth_credential_id = ?
+                        auth_credential_id = ?, external_identity_id = ?
                   WHERE id = ? AND authorization_code_hash IS NULL AND used_at IS NULL'
             );
             $update->execute([
@@ -184,6 +184,9 @@ final class DomainLoginService
                 (string) ($session['assurance_level'] ?? 'legacy'),
                 self::nullableUtc($session['mfa_verified_at'] ?? null),
                 isset($session['auth_credential_id']) ? (int) $session['auth_credential_id'] ?: null : null,
+                // Sezení vlastní domény odvozené z přihlášení u poskytovatele nese
+                // stejnou identitu, aby ho její odpojení zrušilo.
+                isset($session['external_identity_id']) ? (int) $session['external_identity_id'] ?: null : null,
                 (int) $row['id'],
             ]);
             if ($update->rowCount() !== 1) {
@@ -390,6 +393,7 @@ final class DomainLoginService
                     ? new \DateTimeImmutable((string) $row['mfa_verified_at'], new \DateTimeZone('UTC'))
                     : null,
                 $row['auth_credential_id'] !== null ? (int) $row['auth_credential_id'] : null,
+                isset($row['external_identity_id']) ? (int) $row['external_identity_id'] ?: null : null,
             );
             // Výměnu volá hostname vlastní domény, tedy strana, která drží PKCE
             // verifier i výsledný token. Session proto platí jen na této doméně
