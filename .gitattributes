@@ -3,6 +3,9 @@
 *.ps1 text eol=crlf
 .githooks/* text eol=lf
 
+# Kontrola MCP manifestu porovnává deterministický výstup generátoru bajt po bajtu.
+MCP/src/tool-api.generated.json text eol=lf
+
 # PHP zdroják musí mít stejné konce řádků na Windows i na Linuxu — golden
 # heredocy v testech se jinak porovnávají proti CRLF verzi sebe sama.
 *.php text eol=lf

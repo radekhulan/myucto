@@ -21,6 +21,7 @@ export const dimensionQuery = (args) => ({
 });
 
 const read = (name, title, description, properties, required, run) => ({
+  api: false, apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
   name, title, description, inputSchema: schema(properties, required), write: false, run,
 });
 

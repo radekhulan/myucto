@@ -137,6 +137,15 @@ fakturace, kontaktů, zakázek, přijatých dokladů, pravidelné fakturace, kni
 ceníku a čtení skladových položek; konkrétní nabídka závisí na právech a rozsahu.
 Účetní a mzdové nástroje se klientským připojením nezpřístupňují.
 
+Dostupnost nástroje se odvozuje z jeho deklarovaných API operací podle stejných
+pravidel klientské domény a oprávnění role jako v aplikaci, s omezením rozsahem
+tokenu. Nástroj se nabídne jen tehdy, když máte práva ke všem jeho operacím,
+včetně pomocného dohledávání. U výkazů práce a materiálu potřebujete čtení nebo
+zápis vydaných faktur podle prováděné akce. Přidání řádku vyžaduje také čtení
+zakázek a klientů; přidání práce navíc čtení nastavení firmy pro dohledání sazby.
+Platí to i při přímém zadání ID faktury a sazby. Výkaz lze přes MCP upravovat
+pouze u konceptu faktury. Seznam sazeb DPH vyžaduje čtení nastavení firmy.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou

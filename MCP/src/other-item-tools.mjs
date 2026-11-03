@@ -223,6 +223,7 @@ function assertInstallments(item, rows) {
 }
 
 const read = (name, title, description, properties, path, query = () => null, required = []) => ({
+  api: false, apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
   name, title, description, inputSchema: schema(properties, required), write: false,
   run: (c, a, tool) => c.get(path(a), query(a), tool),
 });
@@ -284,6 +285,8 @@ export const OTHER_ITEM_TOOLS = [
 
   {
     name: 'create_other_item',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Založit koncept ostatní pohledávky nebo závazku',
     description:
       'Založí KONCEPT ostatní pohledávky nebo závazku, např. nájem, půjčku, úvěr, leasing, kauci nebo pojistné. '
@@ -313,6 +316,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'set_other_item_dimensions',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Nastavit dimenze konceptu ostatní položky',
     description:
       'Nastaví dimenze hlavičky KONCEPTU ostatní pohledávky nebo závazku (středisko, projekt, vozidlo, '
@@ -351,6 +356,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'update_other_item',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Upravit koncept ostatní pohledávky nebo závazku',
     description:
       'Upraví KONCEPT. Pošli jen pole, která se mají změnit; ostatní nástroj převezme ze současného stavu '
@@ -371,6 +378,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'delete_other_item',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Smazat koncept ostatní pohledávky nebo závazku',
     description:
       'Smaže KONCEPT (koncept z opakování se zruší). Potvrzený nebo zaúčtovaný doklad smazat nejde, '
@@ -387,6 +396,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'set_other_item_installments',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Nastavit splátkový kalendář',
     description:
       'Nastaví splátkový kalendář dokladu a NAHRADÍ JÍM CELÝ DOSAVADNÍ KALENDÁŘ; pošli vždy všechny splátky, '
@@ -420,6 +431,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'clear_other_item_installments',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Zrušit splátkový kalendář',
     description:
       'Zruší celý splátkový kalendář dokladu. Bez `confirm: true` jen vypíše, kolik splátek by zmizelo. '
@@ -439,6 +452,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'create_other_item_schedule',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Založit opakování ostatní položky',
     description:
       'Založí pravidelné opakování z existujícího dokladu (vzor se zkopíruje). Aplikace pak dopředu vytváří '
@@ -458,6 +473,8 @@ export const OTHER_ITEM_TOOLS = [
   },
   {
     name: 'set_other_item_schedule_status',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Pozastavit nebo obnovit opakování',
     description:
       'Pozastaví (paused) nebo obnoví (active) opakování ostatní položky. Obnovit lze jen opakování bez '

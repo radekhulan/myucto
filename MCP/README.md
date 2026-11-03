@@ -198,6 +198,27 @@ podle toho se nástroj skryje v režimu jen pro čtení a označí varováním v
 ve schématu a `confirmed()` / `requireConfirm()` v `run()`, které bez potvrzení
 místo zápisu vrátí náhled dotčeného záznamu.
 
+Každý nástroj má přímo u definice deklaraci `api`, například
+`api: [['GET', '/api/invoices/{id}'], ['PUT', '/api/invoices/{id}/work-report']]`.
+Uvádějte všechny operace včetně podmíněného dohledávání v pomocných funkcích;
+každá operace mimo GET vyžaduje `write: true`. Nástroje, které nejsou převedené
+do klientského katalogu nebo API této instalace nevolají, mají výslovné
+`api: false` a `apiReason`. Na klientské doméně se nikdy nenabídnou.
+
+`npm run generate:api` v `MCP/` vytvoří `src/tool-api.generated.json`; tento
+manifest se commituje a neupravuje ručně. PHP jej načítá bez Node a podle
+stávající mapy API oprávnění, pravidel klientské domény a role uživatele posoudí
+každou operaci. Chybějící nebo poškozený manifest znamená prázdný katalog.
+Rozsah tokenu dále omezí nabídku v serverovém MCP. Při běhu se všechna práva
+a vazba na firmu ověřují znovu v API.
+
+`npm test` kontroluje shodu manifestu s deklaracemi i skutečná volání nástrojů
+nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář
+v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným operacím a
+zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
+klientské nástroje, výkazy práce a sazby DPH; ostatní nástroje zůstávají výslovně
+vyloučené, dokud nebudou převedené se stejným ověřením závislostí.
+
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
 pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník
 stejného tvaru je tedy jeden objekt, ne pět nástrojů psaných ručně.

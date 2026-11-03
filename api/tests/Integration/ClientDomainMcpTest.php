@@ -296,6 +296,17 @@ final class ClientDomainMcpTest extends TestCase
         self::assertSame(401,$this->rpc($grant['access_token'],'tools/list')->getStatusCode());
     }
 
+    public function testLocallyHandledSupplierListCannotBypassToolPolicy(): void
+    {
+        $grant = $this->grant();
+        $this->pdo->prepare("DELETE FROM role_permissions WHERE role_id=? AND permission_key='profile'")->execute([$this->role]);
+        $names = array_column(self::json($this->rpc($grant['access_token'], 'tools/list'))['result']['tools'], 'name');
+        self::assertContains('whoami', $names);
+        self::assertNotContains('list_suppliers', $names);
+        $blocked = self::json($this->rpc($grant['access_token'], 'tools/call', ['name' => 'list_suppliers']));
+        self::assertTrue($blocked['result']['isError']);
+    }
+
     private function params(): array
     {
         return ['client_id'=>$this->client,'redirect_uri'=>'https://assistant.example.test/callback','response_type'=>'code',

@@ -26,7 +26,8 @@ const selected = (a, keys) => Object.fromEntries(
 const query = (a, keys, aliases = {}) => Object.fromEntries(
   Object.entries(selected(a, keys)).map(([key, value]) => [aliases[key] ?? key, value]),
 );
-const read = (name, title, description, properties, path, keys = Object.keys(properties), required = [], aliases = {}) => ({
+const read = (name, title, description, properties, path, keys = Object.keys(properties), required = [], aliases = {}, api = false) => ({
+  api, apiReason: api === false ? 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).' : undefined,
   name, title, description, inputSchema: schema(properties, required), write: false,
   run: (c, a, tool) => c.get(typeof path === 'function' ? path(a) : path,
     keys.length ? query(a, keys, aliases) : null, tool),
@@ -186,7 +187,7 @@ export const AUDIT_TOOLS = [
       counterparty_account: str('Protiúčet transakce.'), client_id: id('ID protistrany.'),
       posting_status: str('Jen výpisy s nezaúčtovanými pohyby.', { enum: ['unposted'] }),
       amount: num('Hledaná absolutní částka transakce.', { minimum: 0 }), page: PAGING.page,
-    }, '/bank-statements', []),
+    }, '/bank-statements', [], [], {}, [['GET', '/api/bank-statements']]),
     run: (c, a, tool) => c.get('/bank-statements', {
       ...selected(a, ['page']),
       filter: selected(a, ['year', 'month', 'account', 'bank_code', 'counterparty_account', 'client_id', 'posting_status', 'amount']),
@@ -197,7 +198,7 @@ export const AUDIT_TOOLS = [
       id: id('ID výpisu.'),
       status: str('Stav párování transakcí.', { enum: ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'] }),
       posting_status: str('Stav zaúčtování transakcí.', { enum: ['unposted', 'posted'] }), ...PAGING,
-    }, (a) => `/bank-statements/${seg(a.id)}`, ['status', 'posting_status', 'page', 'per_page'], ['id']),
+    }, (a) => `/bank-statements/${seg(a.id)}`, ['status', 'posting_status', 'page', 'per_page'], ['id'], {}, [['GET', '/api/bank-statements/{id}']]),
   read('bank_account_balances', 'Zůstatky bankovních účtů',
     'Zůstatky vlastních účtů ze skutečných výpisů a historie podle měn.', {}, '/bank-statements/account-balances'),
   read('list_bank_match_suggestions', 'Návrhy párování bankovního výpisu',
@@ -208,10 +209,10 @@ export const AUDIT_TOOLS = [
       client_id: id('ID odběratele.'), status: str('Stav šablony.'),
       sort: str('Řazení šablon.', { enum: ['client', 'next_run', 'amount_czk'] }),
       page: PAGING.page, per_page: int('Záznamů na stránce.', { minimum: 5, maximum: 200 }),
-    }, '/recurring'),
+    }, '/recurring', ['client_id', 'status', 'sort', 'page', 'per_page'], [], {}, [['GET', '/api/recurring']]),
   read('get_recurring_invoice', 'Detail šablony pravidelné fakturace',
     'Čte nastavení a řádky pravidelné fakturace. Fakturu nevytváří.',
-    { id: id('ID šablony.') }, (a) => `/recurring/${seg(a.id)}`, [], ['id']),
+    { id: id('ID šablony.') }, (a) => `/recurring/${seg(a.id)}`, [], ['id'], {}, [['GET', '/api/recurring/{id}']]),
   read('recurring_invoice_history', 'Faktury ze šablony', 'Vystavené faktury vygenerované jednou pravidelnou šablonou.',
     { id: id('ID šablony.'), ...PAGING }, (a) => `/recurring/${seg(a.id)}/invoices`, ['page', 'per_page'], ['id']),
   read('list_document_requests', 'Požadavky na podklady',
@@ -233,7 +234,10 @@ export const AUDIT_TOOLS = [
       page: PAGING.page, per_page: int('Záznamů na stránce.', { minimum: 1, maximum: 500 }),
     }, '/stock/reports/sales', ['date_from', 'date_to', 'client_id', 'category_id', 'warehouse_id', 'stock_item_id', 'query', 'group_by', 'page', 'per_page'], [], { query: 'q' }),
   {
-    name: 'intrastat_preview', title: 'Náhled hlášení Intrastat',
+    name: 'intrastat_preview',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    title: 'Náhled hlášení Intrastat',
     description: 'Čtecí náhled pohybů zboží mezi zeměmi EU pro InstatEvo, včetně chyb a varování. Hlášení neodesílá.',
     inputSchema: schema({
       period: str('Měsíc hlášení, nejdříve 2026-01.', { pattern: '^20[2-9][0-9]-(0[1-9]|1[0-2])$' }),

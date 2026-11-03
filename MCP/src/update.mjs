@@ -127,6 +127,8 @@ export async function checkUpdate({
 
 export const UPDATE_TOOL = {
   name: 'check_update',
+  api: false,
+  apiReason: 'Lokální kontrola vydání na GitHubu; nevolá API této firmy.',
   title: 'Zkontrolovat aktualizaci MCP serveru',
   description: 'Porovná verzi tohoto MCP serveru s posledním stabilním vydáním MyÚčta na GitHubu a vrátí odkaz na nový jednosouborový build.',
   write: false,

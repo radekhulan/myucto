@@ -329,6 +329,10 @@ export const INVOICE_TOOLS = [
   // ── Smazání, storno, dobropis ────────────────────────────────────────────
   {
     name: 'delete_invoice_draft',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}'],
+    ],
     title: 'Smazat koncept faktury',
     description:
       'Nevratně smaže KONCEPT vydaného dokladu i s položkami a výkazem práce. Vystavený '
@@ -351,6 +355,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'cancel_invoice',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices/{id}/cancel'],
+    ],
     title: 'Stornovat fakturu nebo založit dobropis',
     description:
       'Zruší VYSTAVENÝ doklad. NEVRATNÝ KROK S DAŇOVÝM DOPADEM: jen na výslovný pokyn uživatele.\n\n'
@@ -393,6 +401,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'uncancel_invoice',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Zrušit interní storno',
     description:
       'Vrátí omylem interně stornovanou fakturu nebo zálohu do stavu před stornem. Doklad se '
@@ -415,6 +425,9 @@ export const INVOICE_TOOLS = [
   // ── Kopie a záloha ───────────────────────────────────────────────────────
   {
     name: 'clone_invoice',
+    api: [
+      ['POST', '/api/invoices/{id}/clone'],
+    ],
     title: 'Kopie dokladu jako nový koncept',
     description:
       'Založí nový KONCEPT jako kopii existujícího dokladu (odběratel, zakázka, položky). Nic '
@@ -434,6 +447,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_final_invoice_from_proforma',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Finální faktura ze zálohy',
     description:
       'Ze zaplacené (i částečně) zálohové faktury založí KONCEPT finálního daňového dokladu: '
@@ -455,6 +470,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_invoice_advance_drawdown_candidates',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Zálohy k postupnému čerpání',
     description:
       'Ke KONCEPTU faktury vrátí zálohové faktury téhož odběratele a měny, které mají vystavený '
@@ -466,6 +483,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'apply_invoice_advance_drawdown',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Odečíst část zálohy na faktuře',
     description:
       'Postupné čerpání zálohy (smlouva s milníky): na KONCEPT běžné faktury s vlastními položkami '
@@ -487,6 +506,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'remove_invoice_advance_drawdown',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Odebrat čerpání zálohy z faktury',
     description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu.',
     inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
@@ -495,6 +516,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_invoice_advance_candidates',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Zálohy k propojení s fakturou',
     description:
       'K faktuře vrátí nespárované zálohové faktury téhož odběratele (nejdřív stejná měna '
@@ -505,6 +528,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_proforma_final_candidates',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Faktury k propojení se zálohou',
     description:
       'K zálohové faktuře vrátí nepropojené faktury téhož odběratele. Propojení pak udělá '
@@ -515,6 +540,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'link_invoice_advance',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Propojit fakturu se zálohou',
     description:
       'Ručně propojí fakturu se zálohovou fakturou téhož odběratele a měny. Nemá-li faktura '
@@ -530,6 +557,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unlink_invoice_advance',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Zrušit propojení faktury se zálohou',
     description:
       'Zruší propojení faktury se zálohovou fakturou. Odečtená záloha (`advance_paid_amount`) '
@@ -543,6 +572,8 @@ export const INVOICE_TOOLS = [
   // ── Penále ───────────────────────────────────────────────────────────────
   {
     name: 'preview_invoice_penalty',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Výpočet úroku z prodlení',
     description:
       'Spočítá zákonný úrok z prodlení (NV č. 351/2013 Sb.) k vystavené faktuře po splatnosti: '
@@ -557,6 +588,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_invoice_penalty',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Založit penalizační fakturu',
     description:
       'Založí KONCEPT penalizační faktury na úrok z prodlení (mimo předmět DPH) k vystavené '
@@ -574,6 +607,9 @@ export const INVOICE_TOOLS = [
   // ── Úhrady ───────────────────────────────────────────────────────────────
   {
     name: 'add_invoice_payment',
+    api: [
+      ['POST', '/api/invoices/{id}/payments'],
+    ],
     title: 'Zaevidovat úhradu (i částečnou)',
     description:
       'Zaeviduje úhradu dokladu v jeho měně, i částečnou. Když platby pokryjí celou částku, '
@@ -600,6 +636,11 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'delete_invoice_payment',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/payments/{item_id}'],
+      ['GET', '/api/invoices/{id}/payments'],
+    ],
     title: 'Smazat úhradu',
     description:
       'Nevratně smaže evidovanou úhradu dokladu (ID z `list_invoice_payments`). Když pak doklad '
@@ -632,6 +673,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_payment_tax_document',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Daňový doklad k přijaté platbě',
     description:
       'K přijaté platbě zálohové faktury založí KONCEPT daňového dokladu k přijaté úplatě '
@@ -646,6 +689,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unmark_invoice_paid',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices/{id}/unmark-paid'],
+    ],
     title: 'Zrušit úhradu dokladu',
     description:
       'Vrátí zaplacený doklad do stavu vystaveno nebo odesláno a SMAŽE všechny jeho evidované '
@@ -668,6 +715,8 @@ export const INVOICE_TOOLS = [
   // ── Platební kalendář ────────────────────────────────────────────────────
   {
     name: 'set_invoice_payment_schedule',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Rozpis plateb kalendáře',
     description:
       'Nastaví rozpis plateb KONCEPTU kalendáře: `rent_calendar` je splátkový kalendář k nájmu '
@@ -724,6 +773,9 @@ export const INVOICE_TOOLS = [
   // ── Export a odeslání ────────────────────────────────────────────────────
   {
     name: 'get_invoice_isdoc',
+    api: [
+      ['GET', '/api/invoices/{id}/isdoc'],
+    ],
     title: 'ISDOC vystavené faktury',
     description:
       'Vrátí ISDOC XML vystaveného dokladu jako text (strojově čitelný formát pro účetní '
@@ -738,6 +790,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'get_invoice_recipients',
+    api: [
+      ['GET', '/api/invoices/{id}/recipients'],
+    ],
     title: 'Příjemci dokladu',
     description:
       'Komu by aplikace doklad poslala: adresy To/Cc/Bcc z kontaktů odběratele a zakázky '
@@ -751,6 +806,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'send_invoice_reminders_bulk',
+    api: false,
+    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
     title: 'Hromadně poslat upomínky',
     description:
       'Pošle upomínky k více fakturám po splatnosti naráz (nejvýš 50). Každá upomínka je e-mail '
@@ -789,6 +846,9 @@ export const INVOICE_TOOLS = [
   // ── Pravidelná fakturace ─────────────────────────────────────────────────
   {
     name: 'create_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring'],
+    ],
     title: 'Založit pravidelnou fakturaci',
     description:
       'Založí šablonu pravidelné fakturace: z ní aplikace podle rozvrhu generuje faktury. '
@@ -802,6 +862,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'update_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['PUT', '/api/recurring/{id}'],
+    ],
     title: 'Upravit pravidelnou fakturaci',
     description:
       'Změní šablonu pravidelné fakturace. Zadaná pole se změní, ostatní zůstanou; nástroj '
@@ -824,6 +888,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'delete_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['DELETE', '/api/recurring/{id}'],
+    ],
     title: 'Smazat pravidelnou fakturaci',
     description:
       'Nevratně smaže šablonu pravidelné fakturace; další faktury z ní už nevzniknou. Už '
@@ -844,6 +912,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'pause_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring/{id}/pause'],
+    ],
     title: 'Pozastavit pravidelnou fakturaci',
     description: 'Pozastaví šablonu; dokud se neobnoví, žádné faktury z ní nevzniknou.',
     inputSchema: schema({ id: id('ID šablony.') }, ['id']),
@@ -852,6 +923,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'resume_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring/{id}/resume'],
+    ],
     title: 'Obnovit pravidelnou fakturaci',
     description:
       'Obnoví pozastavenou šablonu. Příští faktura vznikne v den `next_run_date` ze šablony; '
@@ -862,6 +936,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'reschedule_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['POST', '/api/recurring/{id}/reschedule'],
+    ],
     title: 'Přeplánovat příští fakturu',
     description:
       'Posune datum příští faktury ze šablony (`next_run_date`). Datum musí být od dneška '
@@ -881,6 +959,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'run_recurring_invoice_now',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['POST', '/api/recurring/{id}/run-now'],
+    ],
     title: 'Vygenerovat fakturu ze šablony hned',
     description:
       'Vygeneruje fakturu ze šablony hned, mimo rozvrh, a standardně posune rozvrh na další '
