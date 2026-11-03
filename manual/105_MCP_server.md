@@ -166,9 +166,9 @@ skladů. Hodnotu zásob skladu klientská role nevidí.
 
 Čtení skladu zpřístupňuje také množství po odečtení rezervací přes
 `stock_quantities`, skladové lokace, balení a převody jednotek a aktuální
-zásobu šarží nebo sériových čísel včetně expirace. Klientská odpověď neobsahuje
-zdrojové objednávky, nabídky dodavatelů ani historii pohybů šarží a sériových
-čísel. S právem čtení přijatých faktur lze zobrazit platební údaje dokladu;
+zásobu šarží nebo sériových čísel včetně expirace. Klientská odpověď obsahuje
+jen souhrnná množství na cestě a u dodavatelů, ne zdrojové objednávky, nabídky
+dodavatelů ani historii pohybů šarží a sériových čísel. S právem čtení přijatých faktur lze zobrazit platební údaje dokladu;
 MCP vrací údaje bez obrázku QR kódu a platbu neprovádí. Seznam kategorií
 nákladů vyžaduje čtení nastavení firmy.
 
