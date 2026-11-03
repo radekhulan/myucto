@@ -129,6 +129,15 @@
       ]
     ]
   },
+  "bank_account_balances": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements/account-balances"
+      ]
+    ]
+  },
   "cancel_invoice": {
     "write": true,
     "api": [
@@ -450,6 +459,15 @@
       ]
     ]
   },
+  "get_warehouse": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/warehouses/{id}"
+      ]
+    ]
+  },
   "get_work_report": {
     "write": false,
     "api": [
@@ -474,6 +492,15 @@
       [
         "POST",
         "/api/invoices/{id}/issue"
+      ]
+    ]
+  },
+  "list_bank_match_suggestions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements/{id}/match-suggestions"
       ]
     ]
   },
@@ -642,6 +669,15 @@
       ]
     ]
   },
+  "list_warehouses": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/warehouses"
+      ]
+    ]
+  },
   "logbook_summary": {
     "write": false,
     "api": [
@@ -710,6 +746,15 @@
       [
         "POST",
         "/api/purchase-invoices/{id}/transition"
+      ]
+    ]
+  },
+  "recurring_invoice_history": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}/invoices"
       ]
     ]
   },
@@ -877,6 +922,15 @@
       ]
     ]
   },
+  "search_products": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/search"
+      ]
+    ]
+  },
   "send_invoice": {
     "write": true,
     "api": [
@@ -901,6 +955,15 @@
       [
         "POST",
         "/api/purchase-invoices/{id}/project"
+      ]
+    ]
+  },
+  "stock_availability": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/availability"
       ]
     ]
   },

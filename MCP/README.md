@@ -218,7 +218,9 @@ v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným opera
 zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
 klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpravy
 přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
-strukturovaný import. Ostatní nástroje zůstávají výslovně vyloučené, dokud
+strukturovaný import. Ke čtení jsou také zůstatky bankovních účtů, návrhy
+párování výpisů, historie faktur ze šablony, hledání zboží, jeho dostupnost
+a seznam/detail skladů. Ostatní nástroje zůstávají výslovně vyloučené, dokud
 nebudou převedené se stejným ověřením závislostí.
 
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —

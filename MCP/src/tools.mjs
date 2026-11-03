@@ -3467,8 +3467,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'search_products',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/items/search'],
+    ],
     title: 'Rychlé hledání zboží',
     description:
       'Našeptávač nad skladovými kartami — hledá podle názvu, kódu/SKU a EAN. '
@@ -4546,8 +4547,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_warehouses',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/warehouses'],
+    ],
     title: 'Seznam skladů',
     description:
       'Sklady firmy s jejich ID a aktuální hodnotou zásob. ID se používá ve filtrech '
@@ -4558,8 +4560,9 @@ export const TOOLS = [
   },
   {
     name: 'get_warehouse',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/warehouses/{id}'],
+    ],
     title: 'Detail skladu',
     description: 'Jeden sklad včetně aktuální hodnoty zásob.',
     inputSchema: schema({ id: int('ID skladu.') }, ['id']),
@@ -4656,8 +4659,9 @@ export const TOOLS = [
   },
   {
     name: 'stock_availability',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/availability'],
+    ],
     title: 'Dostupnost konkrétního zboží',
     description:
       'Dostupné množství pro vyjmenované karty — na rozdíl od `stock_levels` počítá '

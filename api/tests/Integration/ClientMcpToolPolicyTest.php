@@ -23,6 +23,10 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 final class ClientMcpToolPolicyTest extends TestCase
 {
     private const DOCUMENT_READ_TOOLS = ['list_currencies', 'resolve_price_list_item'];
+    private const OPERATIONAL_READ_TOOLS = [
+        'bank_account_balances', 'list_bank_match_suggestions', 'recurring_invoice_history',
+        'search_products', 'stock_availability', 'list_warehouses', 'get_warehouse',
+    ];
     private const DOCUMENT_WRITE_TOOLS = [
         'update_purchase_invoice', 'add_purchase_invoice_item', 'update_purchase_invoice_item', 'remove_purchase_invoice_item',
         'upload_invoice_attachment', 'upload_purchase_invoice_pdf', 'import_purchase_invoice_file',
@@ -32,7 +36,7 @@ final class ClientMcpToolPolicyTest extends TestCase
     #[TestWith(['client_write'])]
     #[TestWith(['accountant'])]
     #[TestWith(['admin'])]
-    public function testCatalogAddsOnlyWorkReportsAndDocumentWorkflow(string $preset): void
+    public function testCatalogAddsOnlyDeclaredClientTools(string $preset): void
     {
         // Zmrazená nabídka původního client-tools.json nad b939f31a7; není zdrojem produkčních práv.
         $baseline = json_decode(file_get_contents(__DIR__ . '/../Fixtures/Mcp/client-catalog-baseline.json'), true, flags: JSON_THROW_ON_ERROR);
@@ -41,13 +45,36 @@ final class ClientMcpToolPolicyTest extends TestCase
         foreach (['read', 'read_write'] as $scope) {
             $actual = array_values(array_filter($allowed, fn ($name) => $scope === 'read_write' || !$manifest[$name]['write']));
             sort($actual);
-            $additions = ['get_work_report', 'list_vat_rates', ...self::DOCUMENT_READ_TOOLS];
+            $additions = ['get_work_report', 'list_vat_rates', ...self::DOCUMENT_READ_TOOLS, ...self::OPERATIONAL_READ_TOOLS];
             if ($scope === 'read_write' && $preset !== 'client_read') {
                 array_push($additions, 'add_work_report_entry', 'add_work_report_material', 'remove_work_report_entry', ...self::DOCUMENT_WRITE_TOOLS);
             }
             $expected = [...$baseline[$preset][$scope], ...$additions];
             sort($expected);
             self::assertSame($expected, $actual, $preset . ' / ' . $scope);
+        }
+    }
+
+    #[TestWith(['bank', ['bank_account_balances', 'list_bank_match_suggestions']])]
+    #[TestWith(['recurring', ['recurring_invoice_history']])]
+    #[TestWith(['stock', ['search_products', 'stock_availability', 'list_warehouses', 'get_warehouse']])]
+    public function testOperationalReadToolsRequireTheirOwnAgenda(string $key, array $expected): void
+    {
+        sort($expected);
+        foreach ([0, 1, 2] as $level) {
+            $allowed = $this->catalog('client_none', overrides: [$key => $level]);
+            $actual = array_values(array_intersect(self::OPERATIONAL_READ_TOOLS, $allowed));
+            sort($actual);
+            self::assertSame($level === 0 ? [] : $expected, $actual, $key . ': ' . $level);
+        }
+    }
+
+    public function testReadToolsDoNotExposeEshopOrInternalOperations(): void
+    {
+        $allowed = $this->catalog('client_write');
+        foreach (['get_product', 'get_product_prices', 'create_warehouse', 'create_product', 'create_stock_document',
+            'post_stock_document', 'trial_balance', 'list_payroll_people', 'get_tax_return'] as $name) {
+            self::assertNotContains($name, $allowed);
         }
     }
 

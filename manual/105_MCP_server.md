@@ -157,6 +157,12 @@ zpracovává ISDOC, ISDOCX a PDF s vloženým ISDOC. K importu je potřeba práv
 vytvořit přijatou fakturu; k úpravám a nahrávání právo zápisu příslušné agendy.
 Všechny tyto zápisové nástroje vyžadují také token pro čtení a zápis.
 
+S čtecím tokenem a právem čtení banky lze zobrazit také zůstatky bankovních
+účtů a návrhy párování výpisu. Návrhy server filtruje podle práv k dotčeným
+dokladům. Čtení pravidelné fakturace zpřístupňuje historii faktur vytvořených
+ze šablony. Čtení skladu umožňuje rychlé hledání zboží, dostupnost vybraných
+karet včetně rezervací a seznam nebo detail skladů.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou
