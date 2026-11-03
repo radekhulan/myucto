@@ -327,6 +327,24 @@ final class Config
                 'passwordless_login'  => [
                     'enabled' => false,
                 ],
+                // Přihlášení přes poskytovatele identity (OpenID Connect). Registrace
+                // aplikace u poskytovatele je vždy vlastní pro každou instalaci, proto
+                // je všechno vypnuté a bez hodnot. Viz OidcProviderRegistry.
+                'oidc' => [
+                    'enabled' => false,
+                    'session_lifetime_hours' => 12,
+                    'break_glass_roles' => ['instance_admin'],
+                    'providers' => [
+                        'entra' => [
+                            'enabled' => false,
+                            'label' => 'Microsoft',
+                            'tenant_id' => '',
+                            'client_id' => '',
+                            'client_secret' => '',
+                            'allow_guests' => true,
+                        ],
+                    ],
+                ],
             ],
             'app' => [
                 'name'   => 'MyÚčto.cz',
@@ -481,6 +499,14 @@ final class Config
             'MYINVOICE_AUTH_REQUIRE_MFA'     => ['auth.require_mfa', 'bool'],
             'MYINVOICE_AUTH_MFA_METHODS'     => ['auth.allowed_mfa_methods', 'csv'],
             'MYINVOICE_AUTH_PASSWORDLESS_LOGIN' => ['auth.passwordless_login.enabled', 'bool'],
+            'MYINVOICE_OIDC_ENABLED'                 => ['auth.oidc.enabled', 'bool'],
+            'MYINVOICE_OIDC_SESSION_LIFETIME_HOURS'  => ['auth.oidc.session_lifetime_hours', 'int'],
+            'MYINVOICE_OIDC_ENTRA_ENABLED'           => ['auth.oidc.providers.entra.enabled', 'bool'],
+            'MYINVOICE_OIDC_ENTRA_LABEL'             => ['auth.oidc.providers.entra.label', 'string'],
+            'MYINVOICE_OIDC_ENTRA_TENANT_ID'         => ['auth.oidc.providers.entra.tenant_id', 'string'],
+            'MYINVOICE_OIDC_ENTRA_CLIENT_ID'         => ['auth.oidc.providers.entra.client_id', 'string'],
+            'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET'     => ['auth.oidc.providers.entra.client_secret', 'string'],
+            'MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS'      => ['auth.oidc.providers.entra.allow_guests', 'bool'],
             'MYINVOICE_DEMO_ENABLED'         => ['demo.enabled', 'bool'],
             'MYINVOICE_EPO_TEST'             => ['epo_test', 'bool'],
             'MYINVOICE_EPO_TEST_RECEIPT_SIGNER_FINGERPRINTS_SHA256'

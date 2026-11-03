@@ -27159,6 +27159,7 @@
       "document_request_reminder": "Missing document reminder",
       "purchase_invoice_approval": "Received document approval (cost centre manager)",
       "user_invite": "New user invitation",
+      "user_sso_invite": "Invitation to sign in with your organisation account",
       "payroll_document_secure_link": "Secure link to payroll document",
       "payroll_document_access_code": "Verification code for payroll document"
     },

@@ -30,6 +30,7 @@ final class UserAdminAction
         'saved_filters', 'sessions', 'trusted_devices', 'user_preferences',
         'user_suppliers', 'webauthn_ceremonies', 'webauthn_credentials',
         'user_technical_access', 'user_technical_suppliers', 'instance_smtp_test_attempts',
+        'user_external_identities', 'oidc_link_invites', 'oidc_login_flows',
     ];
 
     /**

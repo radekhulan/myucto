@@ -34,6 +34,8 @@ final class PermissionMiddleware implements MiddlewareInterface
         '/api/auth/logout', '/api/auth/me', '/api/auth/api-me', '/api/auth/forgot', '/api/auth/reset',
         '/api/auth/change-password', '/api/auth/totp/status', '/api/auth/totp/setup',
         '/api/auth/totp/enable', '/api/csrf-token',
+        '/api/auth/oidc/entra/login', '/api/auth/oidc/entra/callback',
+        '/api/auth/oidc/identities', '/api/auth/oidc/entra/link', '/api/auth/oidc/entra/step-up',
         '/mcp', '/.well-known/oauth-protected-resource',
         '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server',
         '/oauth/register', '/oauth/authorize', '/oauth/token', '/api/mcp/settings', '/api/mcp/grants',

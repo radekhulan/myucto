@@ -9,7 +9,7 @@ use PDO;
 
 final class MfaStepUpProofStore
 {
-    private const AUTH_METHODS = ['passkey', 'totp'];
+    private const AUTH_METHODS = ['passkey', 'totp', 'oidc'];
 
     public function __construct(
         private readonly Connection $db,

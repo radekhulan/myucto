@@ -43,6 +43,8 @@ final class SessionLockMiddleware implements MiddlewareInterface
             '/api/scalar',
             '/api/auth/setup-status',
             '/api/auth/setup-preflight',
+            '/api/auth/oidc/entra/login',
+            '/api/auth/oidc/entra/callback',
         ],
         'POST' => [
             '/api/auth/setup',

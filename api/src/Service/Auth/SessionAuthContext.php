@@ -13,6 +13,9 @@ final readonly class SessionAuthContext
         public string $assuranceLevel,
         public ?\DateTimeImmutable $mfaVerifiedAt = null,
         public ?int $authCredentialId = null,
+        // Sezení z přihlášení u poskytovatele identity nese odkaz na identitu,
+        // jejíž odpojení sezení zruší. Kratší platnost řeší SessionManager.
+        public ?int $externalIdentityId = null,
     ) {
         if ($authMethod === '' || strlen($authMethod) > 32) {
             throw new \InvalidArgumentException('Neplatná metoda autentizace session.');
@@ -26,6 +29,27 @@ final readonly class SessionAuthContext
         if ($authCredentialId !== null && $authCredentialId <= 0) {
             throw new \InvalidArgumentException('Neplatné interní ID passkey.');
         }
+        if ($externalIdentityId !== null && $externalIdentityId <= 0) {
+            throw new \InvalidArgumentException('Neplatné ID externí identity.');
+        }
+        if (str_starts_with($authMethod, self::EXTERNAL_PREFIX) && $assuranceLevel !== 'strong') {
+            throw new \InvalidArgumentException('Session z poskytovatele identity musí být strong.');
+        }
+    }
+
+    public const EXTERNAL_PREFIX = 'oidc:';
+
+    public static function externalIdentity(
+        string $provider,
+        \DateTimeImmutable $verifiedAt,
+        int $externalIdentityId,
+    ): self {
+        return new self(self::EXTERNAL_PREFIX . $provider, 'strong', $verifiedAt, null, $externalIdentityId);
+    }
+
+    public static function isExternalMethod(?string $authMethod): bool
+    {
+        return $authMethod !== null && str_starts_with($authMethod, self::EXTERNAL_PREFIX);
     }
 
     public static function legacy(): self

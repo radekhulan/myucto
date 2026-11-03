@@ -280,7 +280,7 @@ final class Mailer
 
         $vars['locale'] = $locale;
         $managedSystemMail = (new ManagedModeGuard($this->config))->isManaged()
-            && in_array($code, ['password_reset', 'user_invite', 'login_otp'], true);
+            && in_array($code, ['password_reset', 'user_invite', 'user_sso_invite', 'login_otp'], true);
         if ($managedSystemMail) {
             $vars['supplier'] = null;
         } elseif (!isset($vars['supplier'])) {

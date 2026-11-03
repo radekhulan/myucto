@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Sign in with your organisation account
+--------------------------------------
+
+Hello{% if name %} {{ name }}{% endif %},
+
+you will sign in to MyÚčto.cz with your organisation account ({{ provider }}).
+You do not need a MyÚčto password.
+
+Use this link for your first sign-in (valid for {{ expiresIn|default('7 days') }}, single use).
+It links your account with your organisation account:
+
+{{ inviteLink }}
+
+After that, sign in with the "{{ provider }}" button on the sign-in page.
+{% endblock %}

@@ -48,6 +48,7 @@ final class LoginAction
         private readonly LoginSessionIssuer $loginIssuer,
         private readonly ClockInterface $clock,
         private readonly \MyInvoice\Service\Auth\MfaRecoveryCodeService $recoveryCodes,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function passkeyOptions(Request $request, Response $response): Response
@@ -184,6 +185,25 @@ final class LoginAction
                 'email' => $email, 'reason' => 'wrong_password',
             ], $ip, $userAgent);
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
+        }
+
+        // Až po ověření hesla, aby odpověď neprozradila, kdo má vynucené přihlášení
+        // u poskytovatele. Platí i pro záložní kód níž.
+        $requiredProvider = $this->loginPolicy->requiredProviderForUser(
+            (int) $user['id'],
+            isset($user['system_key']) ? (string) $user['system_key'] : null,
+        );
+        if ($requiredProvider !== null) {
+            $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
+                'email' => $email, 'reason' => 'sso_required', 'provider' => $requiredProvider,
+            ], $ip, $userAgent);
+            return Json::error(
+                $response,
+                'sso_required',
+                'Váš účet se přihlašuje přes poskytovatele identity organizace.',
+                403,
+                ['provider' => $requiredProvider],
+            );
         }
 
         $totpActive = (int) $user['totp_enabled'] === 1 && !empty($user['totp_secret']);

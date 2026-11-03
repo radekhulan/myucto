@@ -54,6 +54,8 @@ final class PasskeyAction
         private readonly PasskeySessionTransitionService $sessionTransitions,
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly MfaRecoveryCodeService $recoveryCodes,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly \MyInvoice\Security\UserRoleProfile $roleProfile,
     ) {}
 
     public function credentials(Request $request, Response $response): Response
@@ -319,6 +321,28 @@ final class PasskeyAction
                 );
             $verifiedUserId = (int) $completed['user']['id'];
             $this->bruteForce->recordPasskeySuccess($verifiedUserId);
+            // Passkey bez hesla je taky místní přihlášení a nesmí obejít firmu,
+            // která vyžaduje poskytovatele identity. Sezení už vzniklo v transakci
+            // ceremonie, proto se hned zruší.
+            $requiredProvider = $this->loginPolicy->requiredProviderForUser($verifiedUserId, null);
+            if ($requiredProvider !== null
+                && $this->loginPolicy->isBreakGlass($this->roleProfile->forUser($verifiedUserId)['system_key'] ?? null)
+            ) {
+                $requiredProvider = null;
+            }
+            if ($requiredProvider !== null) {
+                $this->sessions->destroy((string) $completed['session']['token']);
+                $this->logger->log('auth.login_failed', $verifiedUserId, 'user', $verifiedUserId, [
+                    'reason' => 'sso_required', 'provider' => $requiredProvider, 'login_method' => 'passkey',
+                ], $this->clientIp($request), $request->getHeaderLine('User-Agent'));
+                return Json::error(
+                    $response,
+                    'sso_required',
+                    'Váš účet se přihlašuje přes poskytovatele identity organizace.',
+                    403,
+                    ['provider' => $requiredProvider],
+                );
+            }
             return $this->loginIssuer->issuePrepared(
                 $response,
                 $completed['user'],

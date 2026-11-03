@@ -27159,6 +27159,7 @@
       "document_request_reminder": "Připomínka chybějícího dokladu",
       "purchase_invoice_approval": "Schválení přijatého dokladu (manažer střediska)",
       "user_invite": "Pozvánka nového uživatele",
+      "user_sso_invite": "Pozvánka k přihlášení účtem organizace",
       "payroll_document_secure_link": "Zabezpečený odkaz na mzdový dokument",
       "payroll_document_access_code": "Ověřovací kód pro mzdový dokument"
     },

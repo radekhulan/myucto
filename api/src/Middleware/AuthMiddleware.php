@@ -56,6 +56,8 @@ final class AuthMiddleware implements MiddlewareInterface
         '/api/auth/domain-context',
         '/api/auth/domain-login/start',
         '/api/auth/domain-login/exchange',
+        '/api/auth/oidc/entra/login',
+        '/api/auth/oidc/entra/callback',
         '/api/auth/forgot',
         '/api/auth/reset',
         // ⚠️ Doručení licence do spravované instalace volá licenční server,
@@ -87,6 +89,10 @@ final class AuthMiddleware implements MiddlewareInterface
         'GET' => [
             '/api/auth/setup-status',
             '/api/auth/domain-context',
+            // Návrat od poskytovatele si sezení (u propojení a ověření) čte
+            // a ověřuje sám; přihlášení staré sezení nahrazuje.
+            '/api/auth/oidc/entra/login',
+            '/api/auth/oidc/entra/callback',
         ],
         'POST' => [
             '/api/auth/login',

@@ -461,6 +461,15 @@ final class Routes
             $g->post('/domain-login/authorize', [\MyInvoice\Action\Auth\DomainLoginAction::class, 'authorize']);
             $g->post('/domain-login/exchange',  [\MyInvoice\Action\Auth\DomainLoginAction::class, 'exchange']);
             $g->post('/webauthn/login/options', [LoginAction::class, 'passkeyOptions']);
+            // Přihlášení přes poskytovatele identity (OpenID Connect), viz OidcAction.
+            // Cesty jsou doslovné kvůli seznamům veřejných a self-service cest; další
+            // poskytovatel přidá vlastní řádky (a do OidcProviderRegistry::PROVIDERS).
+            $g->get   ('/oidc/entra/login',    [\MyInvoice\Action\Auth\OidcAction::class, 'login'])->setArgument('provider', 'entra');
+            $g->get   ('/oidc/entra/callback', [\MyInvoice\Action\Auth\OidcAction::class, 'callback'])->setArgument('provider', 'entra');
+            $g->post  ('/oidc/entra/link',     [\MyInvoice\Action\Auth\OidcAction::class, 'link'])->setArgument('provider', 'entra');
+            $g->post  ('/oidc/entra/step-up',  [\MyInvoice\Action\Auth\OidcAction::class, 'stepUp'])->setArgument('provider', 'entra');
+            $g->get   ('/oidc/identities',                [\MyInvoice\Action\Auth\OidcAction::class, 'identities']);
+            $g->delete('/oidc/identities/{id:[0-9]+}',    [\MyInvoice\Action\Auth\OidcAction::class, 'unlink']);
             $g->post('/logout',          LogoutAction::class);
             $g->get ('/me',              MeAction::class);
             $g->get ('/api-me',          ApiMeAction::class);  // connection-test pro bearer i session
@@ -3655,6 +3664,9 @@ final class Routes
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);
         $app->post   ('/api/admin/users/{id:[0-9]+}/password-link', [UserAdminAction::class, 'sendPasswordSetup']);
+        $app->get    ('/api/admin/users/{id:[0-9]+}/identities', [\MyInvoice\Action\Admin\UserExternalIdentityAdminAction::class, 'list']);
+        $app->post   ('/api/admin/users/{id:[0-9]+}/identities/invite', [\MyInvoice\Action\Admin\UserExternalIdentityAdminAction::class, 'invite']);
+        $app->delete ('/api/admin/users/{id:[0-9]+}/identities/{identityId:[0-9]+}', [\MyInvoice\Action\Admin\UserExternalIdentityAdminAction::class, 'unlink']);
         $app->delete ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'delete']);
         $app->delete ('/api/admin/users/{id:[0-9]+}/permanent', [UserAdminAction::class, 'purge']);
         // Epic F0 — membership uživatel ↔ supplier (fine-grained tenant přístup)
@@ -3688,6 +3700,8 @@ final class Routes
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
         $app->get ('/api/settings/tax-offices',             [\MyInvoice\Action\Settings\TaxOfficeCatalogAction::class, 'list']);
+        $app->get    ('/api/settings/login-policy', [\MyInvoice\Action\Settings\LoginPolicyAction::class, 'show']);
+        $app->put    ('/api/settings/login-policy', [\MyInvoice\Action\Settings\LoginPolicyAction::class, 'update']);
         $app->get    ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'list']);
         $app->post   ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'create']);
         $app->put    ('/api/settings/domains/{id:[0-9]+}',              [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'update']);

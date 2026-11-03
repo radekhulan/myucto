@@ -7,6 +7,7 @@ namespace MyInvoice\Middleware;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Cache\SupplierWriteGenerations;
 use MyInvoice\Http\RequestPath;
+use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use MyInvoice\Security\InstanceAdminRoutePolicy;
 use MyInvoice\Security\RequestAuthorization;
@@ -40,6 +41,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
     public function __construct(
         private readonly SupplierAccessResolver $resolver,
         private readonly ResponseFactory $responseFactory,
+        private readonly LoginPolicyService $loginPolicy,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -95,6 +97,29 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             }
             $response = $this->responseFactory->createResponse(403);
             return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+        }
+
+        // Firma vyžadující přihlášení u poskytovatele identity nepřijme sezení
+        // z hesla ani z passkey. API token se posuzuje při vydání, ne tady.
+        if ($access->supplierId > 0 && RequestAuthorization::isSessionAuth($request)) {
+            $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
+            $roleKey = $user['role_summary']['system_key'] ?? null;
+            if (!$this->loginPolicy->sessionAllowedForSupplier(
+                $access->supplierId,
+                isset($session['auth_method']) ? (string) $session['auth_method'] : null,
+                is_string($roleKey) ? $roleKey : null,
+            )) {
+                if (in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)) {
+                    return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
+                }
+                return Json::error(
+                    $this->responseFactory->createResponse(403),
+                    'sso_required',
+                    'Do této firmy se lze přihlásit jen přes poskytovatele identity.',
+                    403,
+                    ['provider' => $this->loginPolicy->requiredProviderForSupplier($access->supplierId)],
+                );
+            }
         }
 
         SupplierWriteGenerations::setRequestSupplier($access->supplierId);

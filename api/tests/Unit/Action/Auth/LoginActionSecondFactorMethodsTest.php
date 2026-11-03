@@ -178,6 +178,7 @@ final class LoginActionSecondFactorMethodsTest extends TestCase
             $issuer,
             $this->createMock(ClockInterface::class),
             $recoveryCodes,
+            $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
 
         $request = (new ServerRequestFactory())

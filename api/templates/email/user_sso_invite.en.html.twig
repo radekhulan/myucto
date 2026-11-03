@@ -1,0 +1,33 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#18181b;">Sign in with your organisation account</h1>
+
+<p style="margin:0 0 16px;">Hello{% if name %} {{ name }}{% endif %},</p>
+
+<p style="margin:0 0 16px;">you will sign in to <strong>MyÚčto.cz</strong> with your organisation account
+(<strong>{{ provider }}</strong>). You do not need a MyÚčto password. Use the button below for your
+first sign-in, it links your account with your organisation account:</p>
+
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ inviteLink }}" style="display:inline-block;background:{{ accent }};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 28px;border-radius:6px;font-size:15px;">
+    Sign in
+  </a>
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#71717a;">
+  The link is valid for <strong>{{ expiresIn|default('7 days') }}</strong> and can be used only once.
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#71717a;">
+  If the button does not work, copy this address into your browser:
+</p>
+
+<p style="margin:0;font-size:12px;color:#52525b;word-break:break-all;background:#f4f4f5;padding:10px;border-radius:6px;font-family:monospace;">
+  {{ inviteLink }}
+</p>
+
+<p style="margin:24px 0 0;font-size:13px;color:#71717a;">
+  After that, sign in with the "{{ provider }}" button on the sign-in page.
+</p>
+{% endblock %}

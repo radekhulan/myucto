@@ -1132,7 +1132,8 @@
         "2228_other_item_kinds.sql",
         "2229_work_report_display_options.sql",
         "2230_journal_lines_cost_center_index.sql",
-        "2231_unit_prices_six_decimals.sql"
+        "2231_unit_prices_six_decimals.sql",
+        "2232_oidc_external_identities.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10004,6 +10005,57 @@
                 "fk_oa_partner": "(partner_id) -> clients (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_oa_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
+            "checks": []
+        },
+        "oidc_link_invites": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "expires_at": "datetime(6) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "provider": "varchar(32) NOT NULL COLLATE ascii_bin",
+                "token_hash": "char(64) NOT NULL COLLATE ascii_bin",
+                "used_at": "datetime(6) NULL DEFAULT NULL",
+                "user_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_oidc_invite_user": "BTREE (user_id, provider)",
+                "uq_oidc_invite_token": "UNIQUE BTREE (token_hash)"
+            },
+            "foreign_keys": {
+                "fk_oidc_invite_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "oidc_login_flows": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "browser_binding": "char(64) NOT NULL COLLATE ascii_bin",
+                "code_verifier": "varchar(128) NOT NULL COLLATE ascii_bin",
+                "consumed_at": "datetime(6) NULL DEFAULT NULL",
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "expires_at": "datetime(6) NOT NULL",
+                "id": "char(64) NOT NULL COLLATE ascii_bin",
+                "invite_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "nonce": "char(64) NOT NULL COLLATE ascii_bin",
+                "provider": "varchar(32) NOT NULL COLLATE ascii_bin",
+                "purpose": "varchar(16) NOT NULL COLLATE ascii_bin",
+                "return_to": "varchar(512) NULL DEFAULT NULL",
+                "session_id_hash": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "step_up_operation": "varchar(190) NULL DEFAULT NULL COLLATE ascii_bin",
+                "user_id": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_oidc_flows_expires": "BTREE (expires_at)"
+            },
+            "foreign_keys": [],
             "checks": []
         },
         "oss_filing_evidence": {
@@ -23610,6 +23662,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "csrf_token": "char(64) NOT NULL",
                 "expires_at": "timestamp NOT NULL",
+                "external_identity_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "generation": "int(10) unsigned NOT NULL DEFAULT 1",
                 "id": "char(64) NOT NULL",
                 "ip": "varbinary(16) NOT NULL",
@@ -23632,6 +23685,7 @@
                 "idx_sess_user": "BTREE (user_id, expires_at)",
                 "idx_sessions_family_revocation": "BTREE (session_family_id, revoked_at)",
                 "idx_sessions_user_revocation": "BTREE (user_id, revoked_at, expires_at)",
+                "ix_sessions_external_identity": "BTREE (external_identity_id)",
                 "uq_sessions_family_generation": "UNIQUE BTREE (session_family_id, generation)"
             },
             "foreign_keys": {
@@ -26106,6 +26160,8 @@
                 "is_identified": "tinyint(1) NOT NULL DEFAULT 0",
                 "is_vat_payer": "tinyint(1) NOT NULL DEFAULT 1",
                 "legal_form": "varchar(3) NULL DEFAULT NULL",
+                "login_policy": "enum('any','sso_required') NOT NULL DEFAULT 'any'",
+                "login_sso_provider": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "logo_path": "varchar(255) NULL DEFAULT NULL",
                 "ollama_api_key_enc": "varbinary(512) NULL DEFAULT NULL",
                 "ollama_base_url": "varchar(255) NULL DEFAULT NULL",
@@ -28461,6 +28517,33 @@
             "checks": {
                 "quantity_decimals": "`quantity_decimals` is null or `quantity_decimals` <= 3"
             }
+        },
+        "user_external_identities": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "display_name": "varchar(190) NULL DEFAULT NULL",
+                "email_at_link": "varchar(190) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "issuer": "varchar(255) NOT NULL COLLATE ascii_bin",
+                "last_used_at": "datetime(6) NULL DEFAULT NULL",
+                "linked_by": "enum('self','admin','invite') NOT NULL",
+                "provider": "varchar(32) NOT NULL COLLATE ascii_bin",
+                "subject": "varchar(255) NOT NULL COLLATE ascii_bin",
+                "tenant_id": "varchar(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "user_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_external_identity_user": "BTREE (user_id, provider)",
+                "uq_external_identity": "UNIQUE BTREE (provider, issuer, subject)"
+            },
+            "foreign_keys": {
+                "fk_external_identity_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "user_favorites": {
             "type": "BASE TABLE",
