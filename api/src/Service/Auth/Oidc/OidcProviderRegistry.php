@@ -247,7 +247,9 @@ final class OidcProviderRegistry
             userinfoUrl: 'https://login.szn.cz/api/v1/user',
             responseMode: '',
             tokenRequestJson: true,
-            supportsPkce: false,
+            // Bez id_tokenu a nonce drží výměnu kódu jen PKCE: uniklý kód pak nejde
+            // podstrčit do cizího přihlášení. Vypnout jen kdyby ho Seznam odmítal.
+            supportsPkce: (bool) ($s['pkce'] ?? true),
         );
     }
 

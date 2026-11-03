@@ -263,6 +263,9 @@ final class LoginAction
             // ve faktorech udělal, a `basic` session by ho při povinném MFA uvěznila
             // v enrollmentu, kde ztracený klíč odebrat nejde. Jednorázovost kódu,
             // zámek pokusů a auditní stopa jsou to, co tuhle výjimku drží v mezích.
+            if ($ssoTicket !== null && !$this->oidcFlows->consumeTicket($ssoTicketRaw)) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
             return $this->loginIssuer->issue(
                 $response,
                 $user,
@@ -435,7 +438,18 @@ final class LoginAction
 
         $this->rehashPasswordIfNeeded($user, $password);
         if ($ssoTicket !== null) {
-            $this->oidcFlows->consumeTicket($ssoTicketRaw);
+            // Sezení si nese identitu, ze které přihlášení vzniklo, i když ho
+            // dokončil TOTP nebo e-mailový kód: odpojení identity ho pak zruší.
+            $authContext = new SessionAuthContext(
+                $authContext->authMethod,
+                $authContext->assuranceLevel,
+                $authContext->mfaVerifiedAt,
+                $authContext->authCredentialId,
+                $ssoTicket['external_identity_id'],
+            );
+            if (!$this->oidcFlows->consumeTicket($ssoTicketRaw)) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
         }
         return $this->loginIssuer->issue(
             $response,
@@ -444,8 +458,9 @@ final class LoginAction
             $userAgent,
             $authContext,
             $issueTrustedTd,
-            // Zřízení TOTP bez dalšího ověření dovoluje jen čerstvě ověřené heslo.
-            $ssoTicket === null ? (string) $user['password_hash'] : null,
+            // Lístek je rovnocenný ověřenému heslu: bez enrollment tokenu by uživatel
+            // jen s Googlem při povinném MFA nezřídil první faktor a zůstal v setupu.
+            (string) $user['password_hash'],
         );
     }
 

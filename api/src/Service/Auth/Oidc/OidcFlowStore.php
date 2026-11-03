@@ -183,10 +183,12 @@ class OidcFlowStore
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT provider, user_id, external_identity_id, return_to
-               FROM oidc_login_flows
-              WHERE id = ? AND purpose = ? AND browser_binding = ?
-                AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)
+            'SELECT f.provider, f.user_id, f.external_identity_id, f.return_to
+               FROM oidc_login_flows f
+               JOIN user_external_identities x
+                 ON x.id = f.external_identity_id AND x.user_id = f.user_id AND x.provider = f.provider
+              WHERE f.id = ? AND f.purpose = ? AND f.browser_binding = ?
+                AND f.consumed_at IS NULL AND f.expires_at > UTC_TIMESTAMP(6)
               LIMIT 1'
         );
         $stmt->execute([hash('sha256', $ticket), self::PURPOSE_TICKET, hash('sha256', (string) $browserBinding)]);
@@ -202,12 +204,15 @@ class OidcFlowStore
         ];
     }
 
-    public function consumeTicket(#[\SensitiveParameter] string $ticket): void
+    /** Atomicky spotřebuje lístek; false = už ho spotřeboval souběžný požadavek. */
+    public function consumeTicket(#[\SensitiveParameter] string $ticket): bool
     {
-        $this->db->pdo()->prepare(
+        $stmt = $this->db->pdo()->prepare(
             'UPDATE oidc_login_flows SET consumed_at = UTC_TIMESTAMP(6)
-              WHERE id = ? AND purpose = ? AND consumed_at IS NULL'
-        )->execute([hash('sha256', $ticket), self::PURPOSE_TICKET]);
+              WHERE id = ? AND purpose = ? AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)'
+        );
+        $stmt->execute([hash('sha256', $ticket), self::PURPOSE_TICKET]);
+        return $stmt->rowCount() === 1;
     }
 
     public function purgeExpired(): int

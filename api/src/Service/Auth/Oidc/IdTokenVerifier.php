@@ -148,7 +148,8 @@ class IdTokenVerifier
 
     /**
      * Seznam nevydává id_token. Identita přichází z userinfo přes TLS po výměně
-     * kódu, kterou drží PKCE a tajemství klienta. Párovací klíč je `advert_user_id`.
+     * kódu s tajemstvím klienta a PKCE (auth.oidc.providers.seznam.pkce).
+     * Párovací klíč je `advert_user_id`.
      *
      * @param array<string,mixed> $userinfo
      */

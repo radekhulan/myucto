@@ -62,8 +62,8 @@ final class LoginActionSsoTicketTest extends TestCase
         self::assertSame('oidc:google', $captured['context']->authMethod);
         self::assertSame('basic', $captured['context']->assuranceLevel);
         self::assertSame(5, $captured['context']->externalIdentityId);
-        // Bez ověřeného hesla nesmí vzniknout oprávnění zřídit TOTP bez dalšího ověření.
-        self::assertNull($captured['password_hash']);
+        // Lístek je rovnocenný ověřenému heslu, takže smí vzniknout oprávnění zřídit TOTP.
+        self::assertSame('synthetic-hash', $captured['password_hash']);
         self::assertTrue($captured['consumed']);
     }
 
@@ -114,8 +114,10 @@ final class LoginActionSsoTicketTest extends TestCase
         $flows->method('peekTicket')->willReturnCallback(
             static fn (string $t, ?string $b): ?array => $t === self::TICKET && $b === self::BINDING ? $ticket : null,
         );
-        $flows->method('consumeTicket')->willReturnCallback(static function () use (&$captured): void {
+        $flows->method('consumeTicket')->willReturnCallback(static function () use (&$captured): bool {
+            $wasConsumed = $captured['consumed'];
             $captured['consumed'] = true;
+            return !$wasConsumed;
         });
         $issuer = $this->createMock(LoginSessionIssuer::class);
         $issuer->method('issue')->willReturnCallback(

@@ -215,6 +215,11 @@ final class OidcLoginFlowTest extends TestCase
         $flows->consumeTicket($ticket);
         self::assertNull($flows->peekTicket($ticket, $binding));
 
+        // Po odpojení identity už nevydá sezení ani dřív vydaný lístek.
+        $second = $flows->createTicket('google', $binding, $this->userId, (int) $result->externalIdentityId, null);
+        $this->identities->unlink($this->userId, (int) $result->externalIdentityId);
+        self::assertNull($flows->peekTicket($second, $binding));
+
         // Lístek nejde podstrčit jako state návratu od poskytovatele.
         $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->service->complete(
             FakeOidcIdp::googleProvider(), ['state' => $ticket, 'code' => 'c'], $binding, null, self::IP, self::UA,

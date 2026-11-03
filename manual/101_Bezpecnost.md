@@ -175,6 +175,38 @@ Vynucení zapnete jen ze sezení přihlášeného přes Microsoft, jinak byste s
 firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a ukáže se
 v Diagnostice.
 
+### 101.6.2 Přihlášení přes Google, Apple a Seznam (správce)
+
+Google, Apple a Seznam nahrazují jen heslo. Má-li uživatel přístupový klíč
+nebo TOTP, ověří ho po návratu od poskytovatele stejně jako po hesle, a při
+`auth.require_mfa` se bez silného faktoru do aplikace nedostane. Citlivé
+operace přes tyto poskytovatele potvrdit nejde a firma je nemůže vynutit.
+Účty se nezakládají; uživatel se propojí pozvánkou nebo v profilu.
+
+Návratová adresa je u všech `https://<adresa instalace>/api/auth/oidc/<poskytovatel>/callback`
+(`google`, `apple`, `seznam`) a musí odpovídat `app.url`.
+
+| Poskytovatel | Kde zaregistrovat | Do konfigurace |
+|---|---|---|
+| Google | Google Cloud Console → APIs & Services → Credentials → OAuth client ID, typ *Web application*, Authorized redirect URI dle výše; OAuth consent screen s rozsahy `openid`, `email`, `profile` | `client_id`, `client_secret`; volitelně `allowed_hosted_domains` (jen účty Google Workspace těchto domén) |
+| Apple | Apple Developer → Identifiers: App ID se *Sign in with Apple* a Services ID (to je `client_id` webu) s doménou instalace a Return URL dle výše; Keys: klíč se *Sign in with Apple* (.p8) | `team_id`, `key_id`, `services_id`, `private_key` (obsah .p8) nebo `private_key_file` mimo webroot |
+| Seznam | vyvojari.seznam.cz → registrace OAuth aplikace s návratovou adresou dle výše | `client_id`, `client_secret` |
+
+V Dockeru: `MYINVOICE_OIDC_GOOGLE_ENABLED`, `MYINVOICE_OIDC_GOOGLE_CLIENT_ID`,
+`MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET`, `MYINVOICE_OIDC_GOOGLE_HOSTED_DOMAINS`,
+`MYINVOICE_OIDC_APPLE_ENABLED`, `MYINVOICE_OIDC_APPLE_TEAM_ID`, `MYINVOICE_OIDC_APPLE_KEY_ID`,
+`MYINVOICE_OIDC_APPLE_SERVICES_ID`, `MYINVOICE_OIDC_APPLE_PRIVATE_KEY`,
+`MYINVOICE_OIDC_SEZNAM_ENABLED`, `MYINVOICE_OIDC_SEZNAM_CLIENT_ID`,
+`MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET`. Vždy také `MYINVOICE_OIDC_ENABLED=1`.
+
+| Pravidlo | Chování |
+|---|---|
+| Párování účtu | Google a Apple podle `sub`, Seznam podle `advert_user_id`; nikdy podle e-mailu |
+| E-mail z Googlu | Použije se jen ověřený; neověřený pozvánku nepřijme |
+| Apple a skrytý e-mail | Adresa `…@privaterelay.appleid.com` pozvánku nepřijme, propojte účet z profilu |
+| Druhý faktor | Po návratu se ověří passkey, TOTP nebo e-mailový kód stejně jako po hesle |
+| Firma vyžaduje Microsoft | Přihlášení přes Google, Apple ani Seznam do firmy nepustí |
+
 ## 101.7 Krok za krokem: omezení přístupu IP allowlistem (správce)
 
 1. Do `cfg.php` zapište povolené IP adresy a rozsahy (příklad je v
