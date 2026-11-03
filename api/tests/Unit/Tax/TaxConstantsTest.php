@@ -66,6 +66,48 @@ final class TaxConstantsTest extends TestCase
         self::assertSame(293802, $c['health_min_base']);         // 50 % × 48 967 × 12
     }
 
+    /**
+     * Rok 2027 podle znění účinného od 1. 1. 2027 a průměrné mzdy 51 663 Kč
+     * (nař. vlády č. 177/2026 Sb.). Bez sady by repository tiše spadlo na rok 2026.
+     */
+    public function testVerified2027Values(): void
+    {
+        $c = TaxConstants::forYear(2027);
+        self::assertSame(2027, $c['year']);
+        self::assertSame(array_keys(TaxConstants::forYear(2026)), array_keys($c));
+        self::assertSame(
+            [['from' => '2027-01-01', 'band1' => 9661, 'band2' => 16745, 'band3' => 27139]],
+            $c['pausal_monthly'],
+        );
+        self::assertSame(115932, $c['pausal_annual']['band1']);  // 12× 9 661
+        self::assertSame(1859868, $c['tax_high_threshold']);     // 36× 51 663
+        self::assertSame(154989, $c['advance_tax_high_threshold']); // 3× 51 663, z rulesetu
+        self::assertSame(24900, $c['minimum_wage']);             // z rulesetu
+        self::assertSame(5000, $c['sickness_participation_threshold']);
+        self::assertSame(12500, $c['dpp_withholding_limit']);
+        self::assertSame(216996, $c['social_min_base_main']);    // 18 083 × 12
+        self::assertSame(68196, $c['social_min_base_secondary']); // 5 683 × 12
+        self::assertSame(2479824, $c['social_max_base']);        // 48× 51 663
+        self::assertSame(123991, $c['social_secondary_participation_threshold']);
+        self::assertSame(309978, $c['health_min_base']);         // 12 × 25 831,50
+        self::assertSame(10000, $c['sickness_min_monthly_base']); // 2× 5 000
+        self::assertSame(149400, $c['child_bonus_min_income']);  // 6× 24 900
+        self::assertSame(100000, $c['filing_duty_income_limit']);
+        self::assertSame(40000, $c['filing_duty_other_income_limit']);
+        // Zvýšený strop darů (zák. č. 24/2025 Sb.) končí rokem 2026.
+        self::assertSame(0.15, $c['donation_cap_fo_pct']);
+        self::assertSame(0.10, $c['donation_cap_po_pct']);
+        // § 46 odst. 1 písm. i) ZDPH ve znění zák. č. 180/2026 Sb.
+        self::assertSame(20000, $c['bad_debt_small_receivable_limit']);
+        self::assertSame(100000, $c['bad_debt_small_receivable_debtor_year_limit']);
+        self::assertSame(3, $c['bad_debt_small_receivable_months']);
+        self::assertSame(30840, $c['credit_taxpayer']);
+        self::assertSame([15204, 22320, 27840], $c['child_credits']);
+        self::assertSame(0.21, $c['corporate_tax_rate']);
+        self::assertSame(2000000, $c['vat_limit_low']);
+        self::assertSame(2536500, $c['vat_limit_high']);
+    }
+
     public function testIncomeTaxReturnKeys(): void
     {
         // Epic DP (issue #18) — klíče pro DPPO + odvody OSVČ musí být pro všechny roky.
@@ -285,7 +327,8 @@ final class TaxConstantsTest extends TestCase
         self::assertContains(2024, TaxConstants::availableYears());
         self::assertContains(2025, TaxConstants::availableYears());
         self::assertContains(2026, TaxConstants::availableYears());
-        foreach ([2018, 2027, 9999] as $year) {
+        self::assertContains(2027, TaxConstants::availableYears());
+        foreach ([2018, 2028, 9999] as $year) {
             try {
                 TaxConstants::forYear($year);
                 self::fail('Neznámý rok ' . $year . ' musí být odmítnut.');
@@ -325,7 +368,7 @@ final class TaxConstantsTest extends TestCase
     public function testUnknownYearThrowsInsteadOfSilentlyFallingBack(): void
     {
         $this->expectException(\OutOfRangeException::class);
-        TaxConstants::forYear(2027);
+        TaxConstants::forYear(2028);
     }
 
     /**
@@ -334,9 +377,9 @@ final class TaxConstantsTest extends TestCase
      */
     public function testCarriedOverScheduleIsAnchoredToRequestedYear(): void
     {
-        $c = TaxConstants::withDerived(TaxConstants::forYear(2026), 2027);
+        $c = TaxConstants::withDerived(TaxConstants::forYear(2026), 2028);
         self::assertSame(
-            [['from' => '2027-01-01', 'band1' => 9162, 'band2' => 16745, 'band3' => 27139]],
+            [['from' => '2028-01-01', 'band1' => 9162, 'band2' => 16745, 'band3' => 27139]],
             $c['pausal_monthly']
         );
         self::assertSame(109944, $c['pausal_annual']['band1']); // 12× 9 162
