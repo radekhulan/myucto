@@ -1131,7 +1131,8 @@
         "2227_purchase_document_presence_indexes.sql",
         "2228_other_item_kinds.sql",
         "2229_work_report_display_options.sql",
-        "2230_journal_lines_cost_center_index.sql"
+        "2230_journal_lines_cost_center_index.sql",
+        "2231_unit_prices_six_decimals.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6039,7 +6040,7 @@
                 "station": "varchar(150) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "unit": "varchar(10) NOT NULL DEFAULT 'l'",
-                "unit_price": "decimal(12,4) NULL DEFAULT NULL",
+                "unit_price": "decimal(16,6) NULL DEFAULT NULL",
                 "vendor_id": "bigint(20) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
@@ -20741,7 +20742,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "price_list_item_id": "bigint(20) unsigned NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "unit_price": "decimal(12,2) NOT NULL",
+                "unit_price": "decimal(16,6) NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
             "indexes": {
@@ -20769,7 +20770,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "price_list_item_id": "bigint(20) unsigned NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "unit_price": "decimal(12,2) NOT NULL",
+                "unit_price": "decimal(16,6) NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },
             "indexes": {
@@ -22975,7 +22976,7 @@
                 "catalog_policy": "varchar(24) NOT NULL DEFAULT 'fixed'",
                 "catalog_price_source": "varchar(32) NULL DEFAULT NULL",
                 "catalog_source_currency_code": "char(3) NULL DEFAULT NULL",
-                "catalog_source_unit_price": "decimal(12,2) NULL DEFAULT NULL",
+                "catalog_source_unit_price": "decimal(16,6) NULL DEFAULT NULL",
                 "description": "varchar(500) NOT NULL",
                 "description_source": "varchar(16) NOT NULL DEFAULT 'template'",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
@@ -23969,7 +23970,7 @@
                 "sold_at": "date NULL DEFAULT NULL",
                 "status": "enum('in_use','disposed','sold') NOT NULL DEFAULT 'in_use'",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "unit_price": "decimal(14,2) NOT NULL DEFAULT 0.00",
+                "unit_price": "decimal(16,6) NOT NULL DEFAULT 0.000000",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "useful_months": "smallint(5) unsigned NULL DEFAULT NULL",
                 "vendor_client_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -24613,7 +24614,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "currency_code": "char(3) NOT NULL",
                 "discount_pct": "decimal(6,3) NULL DEFAULT NULL",
-                "fixed_price": "decimal(12,2) NULL DEFAULT NULL",
+                "fixed_price": "decimal(16,6) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "price_type": "enum('fixed','discount_pct') NOT NULL",
@@ -24706,14 +24707,14 @@
                 "computed_context": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "computed_cost_source": "varchar(40) NULL DEFAULT NULL",
                 "computed_percentage": "decimal(7,3) NULL DEFAULT NULL",
-                "computed_price": "decimal(12,2) NULL DEFAULT NULL",
+                "computed_price": "decimal(16,6) NULL DEFAULT NULL",
                 "computed_profile_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "computed_rate": "decimal(14,6) NULL DEFAULT NULL",
                 "computed_rate_date": "date NULL DEFAULT NULL",
                 "computed_rate_source": "varchar(40) NULL DEFAULT NULL",
                 "computed_rule_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "currency_code": "char(3) NOT NULL",
-                "fixed_price": "decimal(12,2) NULL DEFAULT NULL",
+                "fixed_price": "decimal(16,6) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_manual_override": "tinyint(1) NOT NULL DEFAULT 0",
                 "markup_pct": "decimal(7,3) NULL DEFAULT NULL",
@@ -24748,7 +24749,7 @@
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "label": "varchar(60) NULL DEFAULT NULL",
                 "note": "varchar(255) NULL DEFAULT NULL",
-                "promo_price": "decimal(12,2) NOT NULL",
+                "promo_price": "decimal(16,6) NOT NULL",
                 "qty_limit": "decimal(14,3) NULL DEFAULT NULL",
                 "qty_mode": "enum('stock','limited','unlimited') NOT NULL DEFAULT 'stock'",
                 "stock_item_id": "bigint(20) unsigned NOT NULL",
@@ -24891,7 +24892,7 @@
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "package_qty": "decimal(14,3) NULL DEFAULT NULL",
                 "price_valid_to": "date NULL DEFAULT NULL",
-                "purchase_price": "decimal(12,2) NULL DEFAULT NULL",
+                "purchase_price": "decimal(16,6) NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NOT NULL",
                 "stock_qty": "decimal(14,3) NULL DEFAULT NULL",
                 "stock_qty_updated_at": "datetime NULL DEFAULT NULL",
@@ -24944,7 +24945,7 @@
                 "retired_at": "timestamp NULL DEFAULT NULL",
                 "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
-                "sale_price_without_vat": "decimal(12,2) NULL DEFAULT NULL",
+                "sale_price_without_vat": "decimal(16,6) NULL DEFAULT NULL",
                 "sku": "varchar(50) NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tracking_mode": "enum('none','lot','serial') NOT NULL DEFAULT 'none'",
@@ -25120,7 +25121,7 @@
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "currency_code": "char(3) NULL DEFAULT NULL",
                 "discount_pct": "decimal(6,3) NULL DEFAULT NULL",
-                "fixed_price": "decimal(12,2) NULL DEFAULT NULL",
+                "fixed_price": "decimal(16,6) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "match_id": "bigint(20) unsigned NOT NULL",
                 "match_type": "enum('product','category','manufacturer') NOT NULL",
@@ -29143,7 +29144,7 @@
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
                 "total_amount": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "unit": "varchar(20) NOT NULL DEFAULT 'ks'",
-                "unit_price": "decimal(12,2) NOT NULL DEFAULT 0.00",
+                "unit_price": "decimal(16,6) NOT NULL DEFAULT 0.000000",
                 "work_report_id": "bigint(20) unsigned NOT NULL"
             },
             "indexes": {

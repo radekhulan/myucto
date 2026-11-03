@@ -1,3 +1,5 @@
+import { hasSubCentPrice, UNIT_PRICE_DECIMALS } from './unitPrice'
+
 type TimeItem = { unit?: string | null; stock_item_id?: number | null; duration_minutes?: number | null; quantity?: number | string }
 type WorkItem = { hours: number | string; rate?: number | string; duration_minutes?: number | null }
 type PricedTimeItem = TimeItem & { unit_price_without_vat: number | string }
@@ -47,13 +49,7 @@ export function itemQuantity(item: TimeItem): number {
   return isTimeItem(item) && item.duration_minutes != null ? item.duration_minutes / 60 : Number(item.quantity) || 0
 }
 
-/** Jednotková cena se ukládá na 6 míst (zrcadlí UnitPricePrecision na serveru). */
-export const UNIT_PRICE_DECIMALS = 6
-
-export function hasSubCentPrice(price: number | string): boolean {
-  const value = Number(price)
-  return Number.isFinite(value) && Math.abs(value - Math.round(value * 100) / 100) > 1e-7
-}
+export { hasSubCentPrice, UNIT_PRICE_DECIMALS }
 
 /** Přesný řádek: minutová časová položka nebo cena pod haléř (0,004 EUR/ks, sazba 333,333333). */
 export function isPreciseUnitPrice(item: PricedTimeItem): boolean {
