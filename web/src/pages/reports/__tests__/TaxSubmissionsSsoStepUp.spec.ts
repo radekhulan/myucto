@@ -1,0 +1,183 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import type { EpoAttempt, TaxSubmission } from '@/api/epoSubmissions'
+import { captureSsoFragment, rememberPendingStepUp, resetSsoState } from '@/security/oidc'
+
+/**
+ * Účet přihlášený přes Microsoft Entra ID nemá heslo. Přímé podání do EPO proto
+ * musí jít potvrdit i ověřením přes účet organizace: po návratu se otevře týž
+ * dialog a proof odejde jako `step_up_token`.
+ */
+
+const m = vi.hoisted(() => ({
+  list: vi.fn(),
+  credentials: vi.fn(),
+  settings: vi.fn(),
+  submitDirect: vi.fn(),
+  identities: vi.fn(),
+  stepUp: vi.fn(),
+  navigate: vi.fn(),
+}))
+
+vi.mock('@/api/epoSubmissions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/epoSubmissions')>()
+  return {
+    ...actual,
+    epoSubmissionsApi: {
+      list: m.list,
+      credentials: m.credentials,
+      settings: m.settings,
+      submitDirect: m.submitDirect,
+      xmlUrl: (id: number) => `/api/reports/submissions/${id}/xml`,
+      artifactDownloadUrl: (id: number) => `/api/documents/${id}`,
+    },
+  }
+})
+
+vi.mock('@/api/oidc', () => ({ oidcApi: { identities: m.identities, stepUp: m.stepUp } }))
+vi.mock('@/workspace/fullPageNavigation', () => ({ navigateFullPage: m.navigate }))
+vi.mock('@/api/auth', () => ({ authApi: {} }))
+vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
+vi.mock('@/security/webauthn', () => ({
+  getCredential: vi.fn(),
+  isWebAuthnAvailable: () => false,
+}))
+vi.mock('@/composables/useToast', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
+}))
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}|${JSON.stringify(params)}` : key,
+    locale: { value: 'cs' },
+  }),
+}))
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    isClientRole: false,
+    // Účet jen s přihlášením přes organizaci: žádná passkey, žádné TOTP.
+    user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] },
+    setupStatus: { sso_providers: [{ id: 'entra' }] },
+    canWrite: () => true,
+    canRead: () => true,
+  }),
+}))
+vi.mock('@/stores/supplier', () => ({
+  useSupplierStore: () => ({ currentSupplierId: 1 }),
+}))
+
+import TaxSubmissions from '@/pages/reports/TaxSubmissions.vue'
+import { invalidateSsoIdentities } from '@/composables/useSsoStepUp'
+
+const passedTest = {
+  id: 15,
+  channel: 'epo_direct',
+  status: 'test_passed',
+  epo_environment: 'production',
+  test_passed: true,
+  test_messages: [],
+  requested_at: '2026-08-20T21:00:00Z',
+  updated_at: '2026-08-20T21:00:00Z',
+  handoff_expires_at: null,
+  status_query_available: false,
+  refresh_available: false,
+  confirmation_recovery_available: false,
+} as unknown as EpoAttempt
+
+const submission = {
+  id: 1103,
+  form_code: 'dphkh1',
+  period_year: 2026,
+  period_month: 7,
+  period_quarter: null,
+  xml_size_bytes: 2048,
+  xml_sha256: 'ab'.repeat(32),
+  validation_status: 'passed',
+  validation_errors: [],
+  status: 'downloaded',
+  submitted_at: null,
+  submission_ref: null,
+  summary: null,
+  generated_at: '2026-08-20T20:00:00Z',
+  notes: null,
+  attempts: [passedTest],
+  artifacts: [],
+  deletable: true,
+  delete_blocker: null,
+  delete_needs_acknowledgement: false,
+} as unknown as TaxSubmission
+
+describe('TaxSubmissions.vue — přímé podání ověřené přes Microsoft', () => {
+  beforeEach(() => {
+    resetSsoState()
+    localStorage.clear()
+    for (const fn of [m.list, m.credentials, m.settings, m.submitDirect, m.identities, m.stepUp, m.navigate]) fn.mockReset()
+    m.list.mockResolvedValue({
+      data: [submission],
+      meta: { total: 1, limit: 50, offset: 0, stats: { total: 1, waiting: 0, submitted: 0, problems: 0 }, form_codes: [] },
+    })
+    m.credentials.mockResolvedValue([])
+    m.settings.mockResolvedValue({ epo_environment: 'production' })
+    m.identities.mockResolvedValue([{ id: 3, provider: 'entra' }])
+    invalidateSsoIdentities()
+  })
+
+  afterEach(() => {
+    resetSsoState()
+    vi.restoreAllMocks()
+  })
+
+  it('s propojenou identitou nabídne v dialogu podání ověření přes Microsoft a zapamatuje si dialog', async () => {
+    m.stepUp.mockResolvedValue('https://login.microsoftonline.com/synthetic')
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.openSubmitModal(submission)
+    await flushPromises()
+
+    const option = wrapper.find('[data-testid="sso-step-up"]')
+    expect(option.exists()).toBe(true)
+    await option.find('button').trigger('click')
+    await flushPromises()
+
+    expect(m.stepUp).toHaveBeenCalledWith('entra', 'epo.certificate', expect.any(String))
+    expect(m.navigate).toHaveBeenCalledWith('https://login.microsoftonline.com/synthetic')
+    const pending = JSON.parse(sessionStorage.getItem('myucto.sso_step_up_pending') ?? '{}')
+    expect(pending).toMatchObject({ operation: 'epo.certificate', context: 'tax-submissions:submit:1103' })
+  })
+
+  it('po návratu otevře týž dialog a proof odešle jako step_up_token', async () => {
+    rememberPendingStepUp('epo.certificate', '/reports/submissions', Date.now(), 'tax-submissions:submit:1103')
+    captureSsoFragment(
+      { hash: '#sso_step_up=sso-proof&sso_operation=epo.certificate', pathname: '/reports/submissions', search: '' },
+      { state: null, replaceState: vi.fn() },
+    )
+    m.submitDirect.mockResolvedValue({ status: 'submitted', environment: 'production' })
+
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+
+    expect(vm.submitModalOpen).toBe(true)
+    expect(vm.submitAttemptId).toBe(15)
+    expect(wrapper.find('[data-testid="sso-step-up-verified"]').exists()).toBe(true)
+    expect(vm.submitStepUpReady).toBe(true)
+
+    await vm.submitDirect()
+    expect(m.submitDirect).toHaveBeenCalledWith(
+      1103,
+      15,
+      expect.objectContaining({ step_up_token: 'sso-proof', password: undefined }),
+      false,
+    )
+  })
+
+  it('bez propojené identity volbu nenabídne', async () => {
+    m.identities.mockResolvedValue([])
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    ;(wrapper.vm as any).openSubmitModal(submission)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sso-step-up"]').exists()).toBe(false)
+  })
+})

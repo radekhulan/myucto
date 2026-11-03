@@ -25,6 +25,8 @@ import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/butt
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierUrgency from '@/components/supplier/SupplierUrgency.vue'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -127,10 +129,17 @@ watch(() => route.query, (q) => {
 })
 
 onMounted(async () => {
+  const ssoReturn = takeSsoStepUpProof('epo.certificate', SSO_CONTEXT)
   await loadSuppliers()
   // Onboarding gate (#151): dashboard sem posílá s ?create=supplier → rovnou otevři
   // formulář pro vytvoření prvního dodavatele.
-  if (route.query.create === 'supplier') newSupplier()
+  if (route.query.create === 'supplier' || ssoReturn) newSupplier()
+  // Návrat z ověření přes Microsoft: údaje firmy se přesměrováním ztratily, proof ne.
+  if (ssoReturn) {
+    carryOverStepPasskeyToken.value = ssoReturn
+    ssoProof.value = ssoReturn
+    toast.info(t('sso.step_up_done'))
+  }
 })
 
 // ─── Suppliers (multi-tenant firmy) ───────────────────────────────────────
@@ -230,6 +239,11 @@ const carryOverStepTotp = ref('')
 const carryOverStepPasskeyToken = ref('')
 const carryOverPasskeyBusy = ref(false)
 const passkeySupported = isWebAuthnAvailable()
+const SSO_CONTEXT = 'suppliers-carry-over'
+const ssoProof = ref('')
+const carryOverSsoVerified = computed(() =>
+  carryOverStepPasskeyToken.value !== '' && carryOverStepPasskeyToken.value === ssoProof.value,
+)
 let carryOverRun = 0
 
 const hasPasskey = computed(() =>
@@ -746,7 +760,7 @@ async function switchSupplier(id: number) {
 
               <div v-if="carryOverNeedsStepUp" class="mt-3 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-3"
                 data-testid="carry-over-step-up">
-                <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+                <div v-if="hasPasskey && !carryOverSsoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
                   <div v-if="carryOverStepPasskeyToken" class="text-sm font-medium text-success-600">
                     ✓ {{ t('settings.certificate_vault_passkey_verified') }}
                   </div>
@@ -760,6 +774,9 @@ async function switchSupplier(id: number) {
                   </template>
                   <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
+                <SsoStepUpOption v-if="carryOverSsoVerified || !carryOverStepPasskeyToken" class="sm:col-span-2"
+                  operation="epo.certificate" :context="SSO_CONTEXT"
+                  :verified="carryOverSsoVerified" :disabled="carryOverPasskeyBusy" />
                 <template v-if="!carryOverStepPasskeyToken">
                   <label class="text-xs text-neutral-600">
                     {{ t('settings.certificate_vault_step_up_password') }}
