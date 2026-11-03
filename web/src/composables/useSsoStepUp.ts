@@ -3,7 +3,7 @@ import { routeLocationKey } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { oidcApi, type ExternalIdentity } from '@/api/oidc'
 import {
-  hasProvider,
+  hasStrongProvider,
   rememberPendingStepUp,
   ssoReturnPath,
   takeSsoStepUpProof,
@@ -50,7 +50,8 @@ export function useSsoStepUp(operation: string, context: MaybeRefOrGetter<string
   const busy = ref(false)
   const error = ref('')
 
-  const enabled = computed(() => hasProvider(auth.setupStatus?.sso_providers, PROVIDER))
+  // Ověřit operaci smí jen silný poskytovatel; Google, Apple a Seznam jsou jen první faktor.
+  const enabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, PROVIDER))
   const available = computed(() => enabled.value
     && (identities.value ?? []).some(identity => identity.provider === PROVIDER))
 

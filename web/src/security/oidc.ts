@@ -89,6 +89,60 @@ export function hasProvider(providers: Array<{ id: string }> | null | undefined,
   return Array.isArray(providers) && providers.some(p => p.id === id)
 }
 
+/** Poskytovatel smí potvrzovat citlivé operace jen tehdy, když ho backend označí jako silný. */
+export function hasStrongProvider(
+  providers: Array<{ id: string; strong?: boolean }> | null | undefined,
+  id: string,
+): boolean {
+  return Array.isArray(providers) && providers.some(p => p.id === id && p.strong === true)
+}
+
+// ── Lístek z přihlášení přes poskytovatele, který je jen prvním faktorem ──
+
+/**
+ * Google, Apple a Seznam sezení nezakládají: backend vrátí na `/login` fragment
+ * `#sso_ticket=…&sso_provider=…&return_to=…` a přihlášení dokončí
+ * `POST /api/auth/login` se `sso_ticket` místo e-mailu a hesla.
+ */
+export interface SsoLoginTicket {
+  ticket: string
+  provider: string
+  returnTo: string | null
+}
+
+let capturedTicket: SsoLoginTicket | null = null
+
+export function parseSsoLoginTicket(hash: string): SsoLoginTicket | null {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash
+  if (!raw.includes('sso_ticket=')) return null
+  const params = new URLSearchParams(raw)
+  const ticket = params.get('sso_ticket') ?? ''
+  const provider = params.get('sso_provider') ?? ''
+  if (!/^[0-9a-f]{64}$/i.test(ticket) || !/^[a-z0-9_-]{1,32}$/.test(provider)) return null
+  const returnTo = ssoReturnPath(params.get('return_to'), '')
+  return { ticket, provider, returnTo: returnTo === '' || returnTo.startsWith('/login') ? null : returnTo }
+}
+
+/** Přečte lístek z adresy a hned ho z ní odstraní, aby nezůstal v historii ani v záložce. */
+export function captureSsoLoginTicket(
+  location: Pick<Location, 'hash' | 'pathname' | 'search'>,
+  history: Pick<History, 'replaceState' | 'state'>,
+): SsoLoginTicket | null {
+  const hash = location.hash
+  if (!hash.includes('sso_ticket=')) return null
+  const ticket = parseSsoLoginTicket(hash)
+  history.replaceState(history.state, '', `${location.pathname}${location.search}`)
+  if (ticket !== null) capturedTicket = ticket
+  return ticket
+}
+
+/** Lístek se vydá jen jednou. */
+export function takeSsoLoginTicket(): SsoLoginTicket | null {
+  const ticket = capturedTicket
+  capturedTicket = null
+  return ticket
+}
+
 // ── Stav mezi odchodem k poskytovateli a návratem ─────────────────────────
 
 let captured: SsoFragment | null = null
@@ -190,5 +244,6 @@ export function takeSsoNotice(): Exclude<SsoFragment, { kind: 'step_up' }> | nul
 /** Jen pro testy. */
 export function resetSsoState(): void {
   captured = null
+  capturedTicket = null
   clearPending()
 }

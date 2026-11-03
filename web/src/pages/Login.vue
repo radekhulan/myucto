@@ -37,9 +37,16 @@ import {
   clientDomainCanonicalHandoffPath,
   isClientDomainAuthenticatedPath,
 } from '@/security/clientRoutePolicy'
-import { ssoErrorCode, ssoLoginUrl } from '@/security/oidc'
+import {
+  captureSsoLoginTicket,
+  ssoErrorCode,
+  ssoLoginUrl,
+  takeSsoLoginTicket,
+  type SsoLoginTicket,
+} from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
-import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
+import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
+import { ssoButtonClass } from '@/components/security/ssoProviderStyles'
 
 const router = useRouter()
 const route = useRoute()
@@ -60,6 +67,40 @@ const ssoButtons = computed(() => ssoRequired.value === null
 
 function startSsoLogin(provider: string) {
   navigateFullPage(ssoLoginUrl(provider, requestedReturnPath('/')))
+}
+
+// Návrat od poskytovatele, který je jen prvním faktorem (Google, Apple, Seznam):
+// lístek ve fragmentu nahrazuje e-mail a heslo, druhý faktor běží stejně jako
+// po hesle. main.ts fragment čte už před startem routeru, tady je pojistka.
+captureSsoLoginTicket(window.location, window.history)
+const ssoTicket = ref<SsoLoginTicket | null>(takeSsoLoginTicket())
+const ssoTicketLabel = computed(() => {
+  const ticket = ssoTicket.value
+  if (ticket === null) return ''
+  return ssoProviders.value.find(p => p.id === ticket.provider)?.label ?? ticket.provider
+})
+
+function loginReturnPath(fallback: string): string {
+  return ssoTicket.value?.returnTo ?? requestedReturnPath(fallback)
+}
+
+function resetSecondFactor() {
+  cancelActiveWebAuthnCeremony()
+  passkeyFlow.value = null
+  mfaMethods.value = []
+  totpRequired.value = false
+  recoveryRequired.value = false
+  emailOtpRequired.value = false
+  totp.value = ''
+  recoveryCode.value = ''
+  emailOtp.value = ''
+  otpInfo.value = ''
+}
+
+function cancelSsoTicket() {
+  ssoTicket.value = null
+  resetSecondFactor()
+  error.value = ''
 }
 
 // Štítek pro „zapamatovat zařízení". Odpovídá cfg.auth.email_otp.trusted_device_days
@@ -185,7 +226,8 @@ onMounted(async () => {
   if (!freshDomainLogin) await auth.refresh()
   // Sezení z hesla, které firma s vynuceným přihlášením přes organizaci odmítla,
   // je platné, ale nepoužitelné: automatický návrat by skončil ve smyčce.
-  if (!freshDomainLogin && auth.isAuthenticated && !ssoRequiredFromQuery) {
+  // Rozdělané přihlášení přes poskytovatele má přednost před starým sezením.
+  if (!freshDomainLogin && auth.isAuthenticated && !ssoRequiredFromQuery && ssoTicket.value === null) {
     if (await finishDomainLoginIfNeeded()) return
     router.replace(postLoginTarget(auth.domainContext?.locked
       ? requestedDomainReturnPath()
@@ -193,10 +235,11 @@ onMounted(async () => {
     return
   }
   if (auth.domainContext?.locked) {
+    ssoTicket.value = null
     if (!portalLoggedOut.value) await startPortalLogin()
     return
   }
-  if (!hasPendingCanonicalDomainLogin() && demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
+  if (ssoTicket.value === null && !hasPendingCanonicalDomainLogin() && demo?.auto_login && demo.email && demo.password && demoLoginCanRun()) {
     try {
       await auth.login(demo.email, demo.password)
       if (await finishDomainLoginIfNeeded()) return
@@ -220,6 +263,7 @@ onMounted(async () => {
       await turnstile.render(captchaSiteKey.value, captchaScriptUrl.value, 'login')
     }
   }
+  if (ssoTicket.value !== null) await submit()
 })
 
 /**
@@ -374,7 +418,8 @@ async function submit() {
   // Guard: pokud captcha vyžadovaná a token chybí, nepouštět request.
   // (button má `:disabled` ale Enter v inputu submitne form i s disabled buttonem
   //  → bez tohoto guardu by 1. pokus šel s prázdným tokenem → 400 captcha_failed.)
-  if (captchaRequired.value && !turnstile.token.value) {
+  const ticket = ssoTicket.value?.ticket
+  if (!ticket && captchaRequired.value && !turnstile.token.value) {
     error.value = t('auth.captcha_loading')
     return
   }
@@ -382,15 +427,22 @@ async function submit() {
   otpInfo.value = ''
   mfaMethods.value = []
   try {
-    await auth.login(email.value.trim(), password.value, turnstile.token.value || undefined, totp.value || undefined, {
-      emailOtp: emailOtp.value || undefined,
-      recoveryCode: recoveryCode.value || undefined,
-      rememberDevice: rememberDevice.value,
-    })
+    await auth.login(
+      ticket ? '' : email.value.trim(),
+      ticket ? '' : password.value,
+      ticket ? undefined : turnstile.token.value || undefined,
+      totp.value || undefined,
+      {
+        emailOtp: emailOtp.value || undefined,
+        recoveryCode: recoveryCode.value || undefined,
+        rememberDevice: rememberDevice.value,
+        ssoTicket: ticket,
+      },
+    )
     // Ruční přihlášení uspělo — počítadlo odrazů už nemá co hlídat.
     clearLoginBounces()
     if (await finishDomainLoginIfNeeded()) return
-    router.push(postLoginTarget(requestedReturnPath(auth.isClientRole ? '/portal' : '/')))
+    router.push(postLoginTarget(loginReturnPath(auth.isClientRole ? '/portal' : '/')))
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
     const msg  = e?.response?.data?.error?.message
@@ -449,9 +501,15 @@ async function submit() {
     } else if (code === 'too_many_attempts') {
       error.value = msg || t('auth.too_many_attempts')
     } else if (code === 'sso_required') {
+      if (ticket) cancelSsoTicket()
       ssoRequired.value = typeof data?.provider === 'string' && data.provider !== '' ? data.provider : 'entra'
       error.value = ''
       password.value = ''
+      turnstile.reset()
+    } else if (code === 'sso_flow_invalid' && ticket) {
+      // Lístek vypršel nebo patří jinému prohlížeči: zpět na běžný formulář.
+      cancelSsoTicket()
+      error.value = t('sso.errors.sso_flow_invalid')
       turnstile.reset()
     } else {
       error.value = msg || t('auth.login_failed')
@@ -507,7 +565,7 @@ async function verifyPasskey() {
     recordCanonicalDomainLoginSession(result.csrf_token)
     await auth.refresh()
     if (await finishDomainLoginIfNeeded()) return
-    router.push(postLoginTarget(requestedReturnPath('/')))
+    router.push(postLoginTarget(loginReturnPath('/')))
   } catch (e: any) {
     // Verify endpoint spotřebuje flow už při prvním pokusu. Po browser cancelu
     // jej také zahodíme, protože klient bezpečně nepozná, zda request odešel.
@@ -552,12 +610,17 @@ async function resendCode() {
   if (otpResendCooldown.value > 0) return
   error.value = ''
   otpInfo.value = ''
+  const ticket = ssoTicket.value?.ticket
   try {
-    await auth.login(email.value.trim(), password.value, turnstile.token.value || undefined, undefined, {
-      resendOtp: true,
-    })
+    await auth.login(
+      ticket ? '' : email.value.trim(),
+      ticket ? '' : password.value,
+      ticket ? undefined : turnstile.token.value || undefined,
+      undefined,
+      { resendOtp: true, ssoTicket: ticket },
+    )
     // Úspěch by tu být neměl (kód je vyžadovaný), ale pro jistotu:
-    router.push(postLoginTarget(requestedReturnPath('/')))
+    router.push(postLoginTarget(loginReturnPath('/')))
   } catch (e: any) {
     const data = e?.response?.data?.error
     if (data?.code === 'email_otp_required') {
@@ -637,12 +700,24 @@ async function resendCode() {
                class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
             {{ ssoErrorMessage }}
           </div>
-          <div v-if="ssoButtons.length > 0 && !secondFactorPending" class="space-y-3" data-testid="sso-login">
+          <div v-if="ssoTicket" role="status" data-testid="sso-ticket"
+               class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800 flex flex-wrap items-center justify-between gap-2">
+            <span class="inline-flex items-center gap-2">
+              <SsoProviderLogo :provider="ssoTicket.provider" />
+              {{ t('sso.ticket_notice', { provider: ssoTicketLabel }) }}
+            </span>
+            <button type="button" :class="[BTN_BASE, OUTLINE.neutral]" data-testid="sso-ticket-cancel"
+                    :disabled="auth.loading || passkeyBusy" @click="cancelSsoTicket">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              {{ t('sso.ticket_cancel') }}
+            </button>
+          </div>
+          <div v-if="ssoButtons.length > 0 && !secondFactorPending && !ssoTicket" class="flex flex-col gap-3" data-testid="sso-login">
             <button v-for="provider in ssoButtons" :key="provider.id" type="button"
-                    :class="[BTN_BASE, provider.id === ssoRequired ? FILLED.primary : OUTLINE.neutral, 'w-full justify-center']"
+                    :class="ssoButtonClass(provider.id, provider.id === ssoRequired)"
                     :data-testid="`sso-login-${provider.id}`"
                     @click="startSsoLogin(provider.id)">
-              <MicrosoftLogo v-if="provider.id === 'entra'" />
+              <SsoProviderLogo :provider="provider.id" />
               {{ t('sso.login_with', { provider: provider.label }) }}
             </button>
             <div v-if="!auth.setupStatus?.passwordless_login_enabled" class="flex items-center gap-3" aria-hidden="true">
@@ -651,7 +726,7 @@ async function resendCode() {
               <span class="h-px flex-1 bg-neutral-200"></span>
             </div>
           </div>
-          <div v-if="auth.setupStatus?.passwordless_login_enabled && !secondFactorPending" class="space-y-3">
+          <div v-if="auth.setupStatus?.passwordless_login_enabled && !secondFactorPending && !ssoTicket" class="space-y-3">
             <button
               v-if="passkeySupported"
               type="button"
@@ -675,6 +750,7 @@ async function resendCode() {
             </div>
           </div>
 
+          <template v-if="!ssoTicket">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.email') }}</label>
             <input
@@ -697,6 +773,7 @@ async function resendCode() {
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
             />
           </div>
+          </template>
 
           <div v-if="totpRequired">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.totp_code') }}</label>
@@ -787,7 +864,7 @@ async function resendCode() {
 
           <!-- Turnstile container — vždy v DOM. Lokální template ref + watch
                v setup, který přiřadí do composable a vyrenderuje widget. -->
-          <div v-show="captchaRequired" class="flex justify-center py-2">
+          <div v-show="captchaRequired && !ssoTicket" class="flex justify-center py-2">
             <div ref="turnstileEl"></div>
           </div>
 
@@ -797,7 +874,7 @@ async function resendCode() {
 
           <button
             type="submit"
-            :disabled="auth.loading || passwordlessBusy || !!passkeyFlow || (captchaRequired && !turnstile.token.value)"
+            :disabled="auth.loading || passwordlessBusy || !!passkeyFlow || (!ssoTicket && captchaRequired && !turnstile.token.value)"
             class="w-full h-10 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition"
           >
             {{ auth.loading ? '…' : t('auth.login') }}

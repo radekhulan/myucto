@@ -103,6 +103,11 @@ export interface SupplierBrief {
 export interface SsoProvider {
   id: string
   label: string
+  /**
+   * Plné přihlášení včetně MFA u poskytovatele (Entra ID): smí potvrzovat citlivé
+   * operace a firma ho může vynutit. Ostatní poskytovatelé jsou jen první faktor.
+   */
+  strong?: boolean
 }
 
 export interface SetupStatus {
@@ -146,8 +151,10 @@ export interface DomainContext {
 }
 
 export interface LoginPayload {
-  email: string
-  password: string
+  email?: string
+  password?: string
+  /** Lístek z návratu od poskytovatele, který je jen prvním faktorem; nahrazuje e-mail a heslo. */
+  sso_ticket?: string
   totp?: string
   email_otp?: string
   /** Záložní jednorázový kód — break-glass při ztraceném silném faktoru. */

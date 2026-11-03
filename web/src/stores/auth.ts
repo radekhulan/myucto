@@ -208,22 +208,24 @@ export const useAuthStore = defineStore('auth', () => {
     password: string,
     captchaToken?: string,
     totp?: string,
-    opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean; recoveryCode?: string },
+    opts?: { emailOtp?: string; rememberDevice?: boolean; resendOtp?: boolean; recoveryCode?: string; ssoTicket?: string },
   ) {
     ++refreshGeneration
     permissionsLoading.value = false
     rememberTotpEnrollment(null)
     loading.value = true
     try {
+      // Lístek od poskytovatele nahrazuje e-mail, heslo i captchu.
+      const credentials = opts?.ssoTicket
+        ? { sso_ticket: opts.ssoTicket }
+        : { email, password, cf_turnstile_response: captchaToken }
       const data = await authApi.login({
-        email,
-        password,
+        ...credentials,
         totp: totp || undefined,
         recovery_code: opts?.recoveryCode || undefined,
         email_otp: opts?.emailOtp || undefined,
         remember_device: opts?.rememberDevice || undefined,
         resend_otp: opts?.resendOtp || undefined,
-        cf_turnstile_response: captchaToken,
       })
       recordCanonicalDomainLoginSession(data.csrf_token)
       user.value = data.user
