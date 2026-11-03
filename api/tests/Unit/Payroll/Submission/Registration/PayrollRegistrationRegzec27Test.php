@@ -355,6 +355,81 @@ final class PayrollRegistrationRegzec27Test extends TestCase
         self::assertSame('2027-01-05', PayrollRegistrationSchemaCatalog::decisiveDate(2, '2027-01-05', null));
     }
 
+    /**
+     * ČSSZ, Otázky a odpovědi k NV2027, odpovědi 4, 5 a 13: u A3/A4 rozhoduje
+     * výhradně 10224. Prázdné znamená REGZEC27, ten ale ostrá ČSSZ přijímá až
+     * od 23. 12. 2026, do té doby jde věta jako REGZEC25.
+     */
+    public function testChangeVintageFollowsOnlyEndDateAndWithoutItThePreparationDay(): void
+    {
+        $active = ['delta' => ['title_prefix' => 'Mgr.']];
+        self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-15', $active, '2027-01-05'));
+        self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(4, '2026-06-01', $active, '2027-01-05'));
+        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-10'));
+        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-22'));
+        self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-12-01', $active, '2026-12-23'));
+
+        $ended2026 = ['delta' => ['employment' => ['end_on' => '2026-11-30']]];
+        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(3, '2026-11-20', $ended2026, '2027-01-05'));
+        $ended2027 = ['delta' => ['employment' => ['end_on' => '2027-01-31']]];
+        self::assertSame(JmhzSpecVersion::V2027, PayrollRegistrationSchemaCatalog::versionFor(3, '2027-01-20', $ended2027, '2027-02-05'));
+
+        // Ostatní akce den vyhotovení nezajímá.
+        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(5, '2026-12-15', [], '2027-01-05'));
+        self::assertSame(JmhzSpecVersion::V2026, PayrollRegistrationSchemaCatalog::versionFor(2, '2026-12-31', null, '2027-01-05'));
+    }
+
+    /** Pojistka ve validátoru drží stejnou volbu jako služba podání. */
+    public function testChangeOfActiveEmploymentFrom2026PreparedIn2027PassesAsRegzec27Only(): void
+    {
+        $data = [
+            'activity_code' => '1',
+            'relationship_detail_code' => '1',
+            'birth_number' => '9152031234',
+            'delta' => ['health_insurance_code' => '201'],
+        ];
+        $xml = self::validated(self::eventPayload(3, $data, preparedOn: '2027-01-05', effectiveOn: '2026-12-15'));
+        self::assertStringContainsString('xmlns="' . self::NS . '"', $xml);
+        self::assertStringContainsString('fro="2026-12-15"', $xml);
+
+        self::assertCode(
+            'registration_spec_version_mismatch',
+            self::eventPayload(3, $data, preparedOn: '2027-01-05', version: JmhzSpecVersion::V2026, effectiveOn: '2026-12-15'),
+        );
+        self::assertCode(
+            'registration_spec_version_mismatch',
+            self::eventPayload(3, $data, preparedOn: '2026-12-10', effectiveOn: '2026-12-01'),
+        );
+        self::validated(self::eventPayload(3, $data, preparedOn: '2026-12-23', effectiveOn: '2026-12-01'));
+    }
+
+    /** Odpověď 4: změna u skončeného vztahu nese 10224 a ročník podle něj. */
+    public function testChangeOfEndedEmploymentCarriesEndDateInItsVintage(): void
+    {
+        $data = [
+            'activity_code' => '1',
+            'relationship_detail_code' => '1',
+            'birth_number' => '9152031234',
+            'delta' => [
+                'health_insurance_code' => '201',
+                'employment' => ['end_on' => '2026-11-30'],
+            ],
+        ];
+        $xml2025 = self::validated(self::eventPayload(
+            3,
+            $data,
+            preparedOn: '2027-01-05',
+            version: JmhzSpecVersion::V2026,
+            effectiveOn: '2026-11-20',
+        ));
+        self::assertStringContainsString('http://schemas.cssz.cz/REGZEC/2025', $xml2025);
+        self::assertStringContainsString(' to="2026-11-30"', $xml2025);
+
+        $data['delta']['employment']['end_on'] = '2027-01-31';
+        $xml2027 = self::validated(self::eventPayload(3, $data, preparedOn: '2027-02-05', effectiveOn: '2027-01-20'));
+        self::assertStringContainsString(' to="2027-01-31"', $xml2027);
+    }
+
     /** Obálka: `eType` REGZEC27 z jmenného prostoru zmrazené věty, Class beze změny. */
     public function testEnvelopeTypeFollowsTheFrozenSentence(): void
     {

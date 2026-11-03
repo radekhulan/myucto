@@ -693,16 +693,24 @@ final readonly class PayrollRegistrationSubmissionService
             $effectiveOn,
         );
         // Ročník formuláře určuje rozhodné datum události (nástup, skončení,
-        // platnost změny), ne den odeslání: od 1. 1. 2027 REGZEC27. PREZEC
-        // ročník nemění (viz PayrollRegistrationSchemaCatalog::documentTypeFor()).
+        // platnost změny): od 1. 1. 2027 REGZEC27. U A3/A4 bez data skončení
+        // rozhoduje den vyhotovení (PayrollRegistrationSchemaCatalog::versionFor()).
+        // PREZEC ročník nemění (viz PayrollRegistrationSchemaCatalog::documentTypeFor()).
+        $eventData = is_array($event['data'] ?? null) ? $event['data'] : null;
         $decisiveOn = PayrollRegistrationSchemaCatalog::decisiveDate(
             $interaction->actionCode,
             $effectiveOn,
-            is_array($event['data'] ?? null) ? $event['data'] : null,
+            $eventData,
         );
         $form = (new PayrollRegistrationSchemaCatalog())->documentTypeFor(
             $interaction->documentType,
             $decisiveOn,
+            PayrollRegistrationSchemaCatalog::versionFor(
+                $interaction->actionCode,
+                $effectiveOn,
+                $eventData,
+                $this->today(),
+            ),
         );
         $specVersion = $form === 'REGZEC27'
             ? JmhzSpecVersion::V2027
@@ -989,19 +997,18 @@ final readonly class PayrollRegistrationSubmissionService
     }
 
     /**
-     * REGZEC27 přijímá ostrá ČSSZ až od 1. 1. 2027 („Zahájení ostrého
-     * provozu: 1. 1. 2027 – REGZEC", developers.mpsv.cz, JMHZ 1.5.0,
-     * stránka Testování). REGZEC25 s rozhodným datem od 1. 1. 2027 ČSSZ
-     * zamítne (EDV 1.4.0.7, Slovník, záhlaví REGZEC 2025), takže přihlášku
-     * s nástupem 1. až 8. 1. 2027 nejde podat dřív než 1. 1. 2027, ani když
-     * by to pravidlo osmi dnů jinak dovolilo. Testovací prostředí ČSSZ
-     * přijímá REGZEC27 už teď (fáze 2 od 2. 11. 2026).
+     * REGZEC27 přijímá ostrá ČSSZ od 23. 12. 2026 (ČSSZ, Otázky a odpovědi
+     * k NV2027, odpověď 5: „REGZEC 2027 tak bude umožněno posílat již ode dne
+     * 23. 12. 2026", aby šlo přihlásit před nástupem 1. 1. 2027). REGZEC25
+     * s rozhodným datem od 1. 1. 2027 ČSSZ zamítne (EDV 1.4.0.7, Slovník,
+     * záhlaví REGZEC 2025), takže dřív takovou událost podat nejde vůbec.
+     * Testovací prostředí ČSSZ přijímá REGZEC27 už teď (fáze 2 od 2. 11. 2026).
      */
     private function assertFormAccepted(string $form, string $environment, string $decisiveOn): void
     {
         if ($form !== 'REGZEC27'
             || $environment !== 'production'
-            || $this->today() >= JmhzSpecVersion::FIRST_2027_EVENT_DATE
+            || $this->today() >= JmhzSpecVersion::FIRST_REGZEC27_ACCEPTED_ON
         ) {
             return;
         }
@@ -1009,16 +1016,16 @@ final readonly class PayrollRegistrationSubmissionService
             'registration_regzec27_not_yet_accepted',
             "Událost s rozhodným datem {$decisiveOn} se hlásí formulářem REGZEC27"
                 . ' (specifikace JMHZ 2027), který ostrá ČSSZ přijímá až od'
-                . ' 1. 1. 2027. Starší formulář REGZEC25 ČSSZ pro takovou událost'
-                . ' odmítne. Podání připravte a odešlete 1. 1. 2027 nebo později;'
+                . ' 23. 12. 2026. Starší formulář REGZEC25 ČSSZ pro takovou událost'
+                . ' odmítne. Podání připravte a odešlete 23. 12. 2026 nebo později;'
                 . ' přihlášku s nástupem v lednu 2027 stihnete i tak, pokud ji'
                 . ' podáte nejpozději před nástupem. Chcete-li přihlásit'
-                . ' zaměstnance s českým občanstvím už v prosinci, podejte'
-                . ' částečné přihlášení PREZEC (nejdřív osm dnů před nástupem).'
+                . ' zaměstnance s českým občanstvím dřív, podejte částečné'
+                . ' přihlášení PREZEC (nejdřív osm dnů před nástupem).'
                 . ' U zahraničního zaměstnance částečné přihlášení nelze'
                 . ' (§ 19 odst. 2 zákona č. 323/2025 Sb.): přihlášku podejte'
-                . ' 1. 1. 2027 nebo později, vždy před nástupem, při nástupu'
-                . ' 1. 1. 2027 téhož dne před začátkem práce.',
+                . ' 23. 12. 2026 nebo později, vždy před nástupem, při nástupu'
+                . ' 1. 1. 2027 nejpozději téhož dne před začátkem práce.',
         );
     }
 

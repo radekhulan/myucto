@@ -638,6 +638,9 @@ final readonly class PayrollRegistrationEventService
         };
 
         $relation = $this->relationIdentity($context);
+        if ($interaction === 'change') {
+            $data['delta'] = $this->withRegisteredEnd($data['delta'], $context, $relation);
+        }
         if ($interaction === 'change' || $interaction === 'correction') {
             $this->assertDeltaMatchesVariant(
                 $interaction === 'change' ? 3 : 4,
@@ -669,6 +672,55 @@ final readonly class PayrollRegistrationEventService
         }
 
         return $data + $relation;
+    }
+
+    /**
+     * Změna (A3-OST) u vztahu, který už skončil, nese datum skončení 10224.
+     *
+     * ČSSZ, Otázky a odpovědi k NV2027 (developers.mpsv.cz), odpověď 4: A3/A4
+     * k vztahu, který je u ČSSZ skončený, musí nést 10224, jinak jde
+     * k ručnímu zpracování na OSSZ jako možný požadavek na výmaz data
+     * skončení. Podle 10224 se pak volí i ročník věty
+     * ({@see PayrollRegistrationSchemaCatalog::versionFor()}), takže změna
+     * u vztahu skončeného v roce 2026 jde jako REGZEC25 i v roce 2027.
+     * Skončený vztah pozná aplikace podle data skončení, které už nastalo
+     * (odhláška A2 má lhůtu osm dnů, stejně to bere dohlášení
+     * {@see PayrollRegistrationProfileCompletion::delta()}). Varianty 10
+     * a SPEC 10224 v A3 nesmí nést (EDV 1.4.0.6, ID 10224, „/"), proto jen OST.
+     *
+     * Oprava A4 se tu nedoplňuje: A4-OST s 10224 vyžaduje i podklady pro
+     * podporu v nezaměstnanosti a příznak skončení smrtí (EDV 1.4.0.6,
+     * ř. R84, R113 až R125), které oprava v aplikaci nenese.
+     *
+     * @param array<string,mixed> $delta
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $relation
+     * @return array<string,mixed>
+     */
+    private function withRegisteredEnd(array $delta, array $context, array $relation): array
+    {
+        $endOn = $context['end_date'] ?? null;
+        if (!is_string($endOn)
+            || $endOn === ''
+            || $endOn > PayrollSubmissionCalendar::today($this->clock->now())
+        ) {
+            return $delta;
+        }
+        $variant = PayrollRegistrationBusinessMatrix::requireActionVariant(
+            3,
+            is_string($relation['activity_code'] ?? null) ? $relation['activity_code'] : null,
+            is_string($relation['relationship_detail_code'] ?? null)
+                ? $relation['relationship_detail_code']
+                : null,
+        );
+        if ($variant !== PayrollRegistrationBusinessMatrix::VARIANT_OST) {
+            return $delta;
+        }
+        $employment = is_array($delta['employment'] ?? null) ? $delta['employment'] : [];
+        $employment['end_on'] = $endOn;
+        $delta['employment'] = $employment;
+
+        return $delta;
     }
 
     /**
