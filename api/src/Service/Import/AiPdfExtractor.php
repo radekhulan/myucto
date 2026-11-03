@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
@@ -1632,6 +1633,15 @@ final class AiPdfExtractor
             return [$qty, $unitPrice]; // 0 částka → nic spolehlivého k dosazení
         }
         if (round($qty * $unitPrice, 2) !== round($lineTotal, 2)) {
+            // Doklad vytiskl jednotkovou cenu zaokrouhlenou na haléře (víčka 0,01 EUR
+            // místo 0,0108 × 250 000 ks). Přesná cena z řádkové částky se od vytištěné
+            // liší méně než o půl haléře → množství zůstane a dosadí se přesná cena.
+            if ($qty != 0.0) {
+                $exact = UnitPricePrecision::normalize($lineTotal / $qty);
+                if (abs($exact - $unitPrice) < 0.005 && round($qty * $exact, 2) === round($lineTotal, 2)) {
+                    return [$qty, $exact];
+                }
+            }
             return [1.0, $lineTotal];
         }
         return [$qty, $unitPrice];
