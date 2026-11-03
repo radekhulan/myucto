@@ -36,6 +36,11 @@ api/resources/payroll/jmhz/**/*.json text eol=lf
 api/resources/payroll/cz-isco/SHA256SUMS text eol=lf
 api/resources/payroll/cz-isco/**/*.json text eol=lf
 
+# Klasifikace NKPZ (ČSÚ 80145) stejně: export ČSÚ se pinuje bajt po bajtu.
+api/resources/payroll/nkpz/SHA256SUMS text eol=lf
+api/resources/payroll/nkpz/**/*.json text eol=lf
+api/resources/payroll/nkpz/**/*.csv -text -diff
+
 # Otevřená data ČSSZ (sazby pojistného) se pinují otiskem staženého souboru —
 # ten má CRLF. Bez -text je git při commitu normalizoval na LF, takže otisk
 # seděl jen na Windows checkoutu a v Linuxovém CI padal na koncích řádků.

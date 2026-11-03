@@ -244,14 +244,42 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
         $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
         $method = new \ReflectionMethod(PayrollRegistrationEventService::class, 'employmentChange');
 
-        self::assertSame(['profession_code' => '24111'], $method->invoke($service, ['profession_code' => '24111']));
+        self::assertSame(
+            ['profession_code' => '24111'],
+            $method->invoke($service, ['profession_code' => '24111'], '2026-08-05'),
+        );
         try {
-            $method->invoke($service, ['profession_code' => '2411']);
+            $method->invoke($service, ['profession_code' => '2411'], '2026-08-05');
             self::fail('Čtyřmístný kód CZ-ISCO nesmí do A3 projít.');
         } catch (\InvalidArgumentException $exception) {
             self::assertStringContainsString('pětimístný kód CZ-ISCO', $exception->getMessage());
             self::assertStringEndsWith('(employment.profession_code)', $exception->getMessage());
         }
+    }
+
+    /**
+     * Postavení v zaměstnání v A3/A4 se kontroluje proti číselníku ročníku
+     * věty podle dne platnosti: REGZEC 2025 slovník 1.4.1.6 (2119),
+     * REGZEC 2027 ČSÚ (2219).
+     */
+    public function testEmploymentChangeChecksStatusAgainstVintageCodebook(): void
+    {
+        $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(PayrollRegistrationEventService::class, 'employmentChange');
+        $rejected = static function (array $employment, string $effectiveOn) use ($method, $service): bool {
+            try {
+                $method->invoke($service, $employment, $effectiveOn);
+                return false;
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringEndsWith('(employment.employment_status_code)', $exception->getMessage());
+                return true;
+            }
+        };
+
+        self::assertFalse($rejected(['employment_status_code' => '2119'], '2026-12-10'));
+        self::assertTrue($rejected(['employment_status_code' => '2219'], '2026-12-10'));
+        self::assertFalse($rejected(['employment_status_code' => '2219'], '2027-01-10'));
+        self::assertTrue($rejected(['employment_status_code' => '2119'], '2027-01-10'));
     }
 
     private function messageFrom(string $method, array $arguments): string

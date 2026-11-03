@@ -1583,7 +1583,7 @@ final readonly class PayrollRegistrationEventService
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function change(string $effectiveOn, array $input): array
     {
-        $data = $this->delta($input, false);
+        $data = $this->delta($input, false, $effectiveOn);
         if (array_key_exists('relationship_detail_code', $data['delta'])) {
             throw new PayrollRegistrationXmlException(
                 'registration_a3_activity_explanation_attachment_required',
@@ -1769,7 +1769,7 @@ final readonly class PayrollRegistrationEventService
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */
-    private function delta(array $input, bool $correction): array
+    private function delta(array $input, bool $correction, string $effectiveOn): array
     {
         $listPath = $correction ? 'corrections' : 'changes';
         $raw = $this->object($input[$listPath] ?? null, $listPath);
@@ -1828,7 +1828,7 @@ final readonly class PayrollRegistrationEventService
                 'contact_address' => $this->contactAddress($value),
                 'permanent_address' => $this->permanentAddress($value),
                 'foreign_worker' => $this->foreignWorkerChange($value),
-                'employment' => $this->employmentChange($value),
+                'employment' => $this->employmentChange($value, $effectiveOn),
                 'identity' => $this->identityChange($value),
                 'pension' => $this->pensionChange($value),
                 'facts' => $this->factsChange($value),
@@ -1895,7 +1895,7 @@ final readonly class PayrollRegistrationEventService
             $effectiveOn,
             $employmentExternalIdentifier,
         );
-        $data = $this->delta($input, true);
+        $data = $this->delta($input, true, $effectiveOn);
         $delta = $data['delta'];
         $this->assertTaxResidencyAddress($delta);
         if (isset($delta['employment']['actual_start_on'])) {
@@ -2870,7 +2870,7 @@ final readonly class PayrollRegistrationEventService
      *
      * @return array<string,string|bool>
      */
-    private function employmentChange(mixed $value): array
+    private function employmentChange(mixed $value, string $effectiveOn): array
     {
         $raw = $this->object($value, 'employment');
         $fields = PayrollRegistrationChangeDeltaPlanner::EMPLOYMENT_FIELDS;
@@ -2898,7 +2898,11 @@ final readonly class PayrollRegistrationEventService
         }
         if (isset($result['employment_status_code'])) {
             $code = (string) $result['employment_status_code'];
-            if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code)) {
+            // Číselník podle ročníku věty. Pracovní údaje změny skončení
+            // nenesou, rozhodným datem je tedy den platnosti změny
+            // (PayrollRegistrationSchemaCatalog::decisiveDate).
+            $version = PayrollRegistrationEmploymentStatusCodebook::versionForDate($effectiveOn);
+            if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code, $version)) {
                 throw new \InvalidArgumentException($this->say(
                     'employment.employment_status_code',
                     'musí být čtyřmístný kód z číselníku Klasifikace postavení '

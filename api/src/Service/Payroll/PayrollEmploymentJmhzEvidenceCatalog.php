@@ -227,6 +227,10 @@ final class PayrollEmploymentJmhzEvidenceCatalog
                 ],
                 $pick('duvod_ukonceni_sluz_pomeru'),
             ),
+            // Slovník 1.5.0.3 NKPZ nevkládá, nabídka 2027 jde z číselníku ČSÚ.
+            'employment_status_codes' => PayrollRegistrationEmploymentStatusCodebook::options(
+                JmhzSpecVersion::V2027,
+            ),
         ];
     }
 
