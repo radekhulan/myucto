@@ -22254,7 +22254,7 @@
       "sso_already_linked": "Tento účet organizace je už propojený s jiným uživatelem.",
       "sso_invite_invalid": "Pozvánka je neplatná nebo vypršela. Požádejte správce o novou.",
       "sso_user_inactive": "Účet v aplikaci je deaktivovaný.",
-      "sso_identity_mismatch": "Přihlásili jste se jiným účtem organizace, než který je propojený.",
+      "sso_identity_mismatch": "Přihlásili jste se jiným účtem organizace, než pro který je pozvánka nebo propojení.",
       "sso_cancelled": "Přihlášení bylo zrušeno."
     }
   },

@@ -22254,7 +22254,7 @@
       "sso_already_linked": "This organisation account is already linked to another user.",
       "sso_invite_invalid": "The invitation is invalid or has expired. Ask your administrator for a new one.",
       "sso_user_inactive": "The application account is deactivated.",
-      "sso_identity_mismatch": "You signed in with a different organisation account than the linked one.",
+      "sso_identity_mismatch": "You signed in with a different organisation account than the one invited or linked.",
       "sso_cancelled": "The sign-in was cancelled."
     }
   },

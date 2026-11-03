@@ -43,7 +43,7 @@
 ### 8.3.3 Účtem organizace (Microsoft)
 
 Tlačítko **Přihlásit přes Microsoft** se zobrazí, jen když správce instalace
-přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](#10161-prihlaseni-pres-microsoft-entra-id-spravce)).
+přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](101_Bezpecnost.md#10161-prihlaseni-pres-microsoft-entra-id-spravce)).
 
 1. Poprvé otevřete odkaz z pozvánky, kterou vám poslal správce e-mailem.
    Přihlásíte se u Microsoftu a váš účet v MyÚčto se tím s účtem organizace
@@ -52,8 +52,8 @@ přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](#10161-prihlaseni-p
 3. Přihlaste se u Microsoftu, včetně ověření, které vaše organizace vyžaduje.
    Heslo ani kód z autentikátoru v MyÚčto nezadáváte.
 
-Propojit účet můžete i sami: **Profil → Zabezpečení → Přihlášení přes účet
-organizace → Propojit s Microsoft**. Před propojením potvrdíte svou totožnost
+Propojit účet můžete i sami: **Profil → Přihlášení přes účet organizace →
+Propojit s Microsoft**. Před propojením potvrdíte svou totožnost
 heslem nebo druhým faktorem.
 
 Vyžaduje-li vaše firma přihlášení přes Microsoft, heslem ani přístupovým klíčem

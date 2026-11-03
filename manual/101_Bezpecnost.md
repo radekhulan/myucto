@@ -153,10 +153,11 @@ neptá. Aplikaci v Entra ID si registruje každá instalace sama.
    `MYINVOICE_OIDC_ENTRA_TENANT_ID`, `MYINVOICE_OIDC_ENTRA_CLIENT_ID`,
    `MYINVOICE_OIDC_ENTRA_CLIENT_SECRET`.
 4. Účty uživatelů zakládejte dál v **Nastavení → Uživatelé**. U uživatele
-   zvolte **Pozvat k přihlášení přes Microsoft**. Uživatel dostane e-mail
+   v části **Propojené identity** zvolte **Pozvat k přihlášení přes Microsoft**. Uživatel dostane e-mail
    s odkazem a prvním přihlášením se jeho účet propojí s identitou v Entra ID.
 5. Až budou všichni propojení, přihlaste se sami přes Microsoft a v
-   **Nastavení → Přihlášení** zapněte **Vyžadovat přihlášení přes Microsoft**.
+   **Nastavení → Údaje firmy → Přihlášení** zvolte **Jen přes účet organizace**
+   a klikněte na **Uložit přihlášení**.
 
 | Pravidlo | Chování |
 |---|---|
