@@ -7,9 +7,10 @@ import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { isWebAuthnAvailable } from '@/security/webauthn'
 import { beginDomainLogin } from '@/security/domainLogin'
 import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
-import { hasProvider, ssoLoginUrl } from '@/security/oidc'
+import { ssoLoginUrl } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
-import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
+import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
+import { APPLE_BUTTON } from '@/components/security/ssoProviderStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -30,11 +31,12 @@ const visible = computed(() => security.privacyCurtain && privateRoute.value)
 const hasPasskey = computed(() => security.state?.unlock_methods.includes('passkey') === true)
 const centralDomainUnlock = computed(() => auth.domainContext?.locked === true)
 const automaticLockEnabled = computed(() => (security.state?.lock_after_minutes ?? 0) > 0)
-// Odemčení přes účet organizace vydá nové sezení a zamčené zruší (OidcAction::callback).
-const ssoUnlock = computed(() => !centralDomainUnlock.value
-  && hasProvider(auth.setupStatus?.sso_providers, 'entra'))
-function unlockWithSso() {
-  navigateFullPage(ssoLoginUrl('entra', route.fullPath))
+// Odemčení přes poskytovatele vydá nové sezení a zamčené zruší (OidcAction::callback).
+// Poskytovatel, který je jen prvním faktorem, vede přes lístek a přihlašovací stránku.
+const ssoUnlockProviders = computed(() => centralDomainUnlock.value ? [] : (auth.setupStatus?.sso_providers ?? []))
+const ssoUnlock = computed(() => ssoUnlockProviders.value.length > 0)
+function unlockWithSso(provider: string) {
+  navigateFullPage(ssoLoginUrl(provider, route.fullPath))
 }
 const canUnlock = computed(() => centralDomainUnlock.value
   || (hasPasskey.value && passkeySupported && security.error !== 'session_status_failed'))
@@ -240,12 +242,16 @@ onUnmounted(() => {
               class="mt-5 w-full h-11 rounded-md bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-400 text-white font-medium">
         {{ security.busy ? t('session_lock.unlocking') : t('session_lock.unlock') }}
       </button>
-      <button v-if="ssoUnlock" type="button" :disabled="security.busy" data-testid="session-unlock-sso"
-              @click="unlockWithSso"
-              class="mt-3 w-full h-11 rounded-md border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 text-neutral-800 font-medium inline-flex items-center justify-center gap-2">
-        <MicrosoftLogo />
-        {{ t('sso.unlock_button') }}
-      </button>
+      <div v-if="ssoUnlock" class="mt-3 flex flex-col gap-3">
+        <button v-for="provider in ssoUnlockProviders" :key="provider.id" type="button" :disabled="security.busy"
+                :data-testid="provider.id === 'entra' ? 'session-unlock-sso' : `session-unlock-sso-${provider.id}`"
+                @click="unlockWithSso(provider.id)"
+                :class="['w-full h-11 rounded-md font-medium inline-flex items-center justify-center gap-2 disabled:opacity-50',
+                         provider.id === 'apple' ? APPLE_BUTTON : 'border border-neutral-300 hover:bg-neutral-50 text-neutral-800']">
+          <SsoProviderLogo :provider="provider.id" />
+          {{ t('sso.unlock_with', { provider: provider.label }) }}
+        </button>
+      </div>
       <p v-if="!security.state && security.error !== 'logout_failed'"
          class="mt-3 text-xs text-neutral-500">{{ t('session_lock.status_failed') }}</p>
       <p v-else-if="!centralDomainUnlock && !hasPasskey && !ssoUnlock"

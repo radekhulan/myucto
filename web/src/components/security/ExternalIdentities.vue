@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * Profil → Přihlášení přes účet organizace: propojené identity (OpenID Connect),
+ * Profil → Propojené účty: identity u poskytovatelů (OpenID Connect),
  * propojení s poskytovatelem a odpojení. Obojí je citlivá operace (`oidc.link`)
- * a potvrzuje se stejně jako vydání API tokenu: passkey, účtem organizace,
- * nebo heslem (+ kód z autentikátoru).
+ * a potvrzuje se stejně jako vydání API tokenu: passkey, účtem organizace
+ * (jen silný poskytovatel), nebo heslem (+ kód z autentikátoru).
  */
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -17,7 +17,7 @@ import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security
 import { ssoReturnPath, takeSsoStepUpProof } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
-import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
+import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 
 const OPERATION = 'oidc.link'
@@ -226,7 +226,7 @@ async function confirm() {
            data-testid="sso-identity">
         <div class="min-w-0">
           <div class="font-medium inline-flex items-center gap-2">
-            <MicrosoftLogo v-if="identity.provider === 'entra'" />
+            <SsoProviderLogo :provider="identity.provider" />
             {{ providerLabel(identity.provider) }}
           </div>
           <div class="text-sm text-neutral-700 break-all">{{ identity.email || identity.display_name || '—' }}</div>

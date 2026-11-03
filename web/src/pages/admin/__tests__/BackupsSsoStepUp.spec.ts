@@ -36,7 +36,7 @@ vi.mock('@/composables/useFormat', () => ({ formatDateTime: (value: string) => v
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] },
-    setupStatus: { sso_providers: [{ id: 'entra' }] },
+    setupStatus: { sso_providers: [{ id: 'entra', strong: true }] },
   }),
 }))
 

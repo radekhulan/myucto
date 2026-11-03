@@ -190,4 +190,17 @@ describe('obnova oprávnění v auth store', () => {
     expect(useSupplierStore().currentSupplierId).toBe(0)
   })
 
+  it('s lístkem od poskytovatele pošle jen sso_ticket a druhý faktor, bez e-mailu, hesla a captchy', async () => {
+    mocks.login.mockResolvedValue(session())
+    mocks.me.mockResolvedValue(session())
+    const ticket = 'ab'.repeat(32)
+    await useAuthStore().login('ignored@example.test', 'ignored-password', 'captcha-token', '123456', { ssoTicket: ticket })
+    const payload = mocks.login.mock.calls.at(-1)![0]
+    expect(payload.sso_ticket).toBe(ticket)
+    expect(payload.totp).toBe('123456')
+    expect(payload).not.toHaveProperty('email')
+    expect(payload).not.toHaveProperty('password')
+    expect(payload).not.toHaveProperty('cf_turnstile_response')
+  })
+
 })

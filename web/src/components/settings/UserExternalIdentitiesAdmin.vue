@@ -1,12 +1,12 @@
 <script setup lang="ts">
-/** Správa uživatelů → propojené identity účtu a pozvánka k přihlášení přes organizaci. */
+/** Správa uživatelů → propojené identity účtu a pozvánka k přihlášení přes každého zapnutého poskytovatele. */
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { SsoProvider } from '@/api/auth'
 import { oidcApi, type ExternalIdentity } from '@/api/oidc'
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
-import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
+import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
 
 const props = defineProps<{ userId: number; email: string }>()
 
@@ -94,7 +94,7 @@ watch(() => props.userId, load)
            class="border border-neutral-200 rounded-md p-3 flex flex-wrap items-center gap-2">
         <div class="flex-1 min-w-40">
           <div class="font-medium inline-flex items-center gap-2">
-            <MicrosoftLogo v-if="identity.provider === 'entra'" />
+            <SsoProviderLogo :provider="identity.provider" />
             {{ providerLabel(identity.provider) }}
           </div>
           <div class="text-xs text-neutral-500 break-all">{{ identity.email || identity.display_name || '—' }}</div>

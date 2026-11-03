@@ -52,13 +52,32 @@ přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](101_Bezpecnost.md#1
 3. Přihlaste se u Microsoftu, včetně ověření, které vaše organizace vyžaduje.
    Heslo ani kód z autentikátoru v MyÚčto nezadáváte.
 
-Propojit účet můžete i sami: **Profil → Přihlášení přes účet organizace →
-Propojit s Microsoft**. Před propojením potvrdíte svou totožnost
-heslem nebo druhým faktorem.
+Propojit účet můžete i sami: **Profil → Propojené účty → Propojit s Microsoft**.
+Před propojením potvrdíte svou totožnost heslem nebo druhým faktorem.
 
 Vyžaduje-li vaše firma přihlášení přes Microsoft, heslem ani přístupovým klíčem
 se nepřihlásíte. Aplikace vás pak na přihlašovací obrazovce na tlačítko
 Microsoftu upozorní.
+
+### 8.3.4 Účtem Google, Apple nebo Seznam
+
+Tlačítka **Přihlásit se přes Google**, **Přihlásit se přes Apple** a
+**Přihlásit se přes Seznam** se zobrazí jen u poskytovatelů, které správce
+instalace zapnul.
+
+1. Poprvé si účet propojte: přihlaste se heslem a otevřete **Profil →
+   Propojené účty → Propojit s …**, nebo otevřete odkaz z pozvánky od správce.
+2. Příště klikněte na přihlašovací obrazovce na tlačítko poskytovatele a
+   přihlaste se u něj.
+3. Po návratu aplikace ukáže **Přihlašujete se přes …**. Máte-li zapnuté
+   vícefaktorové ověření, potvrďte passkey nebo zadejte kód z autentikátoru,
+   případně kód z e-mailu. E-mail ani heslo už nezadáváte.
+
+Účet Google, Apple ani Seznam nahrazuje jen heslo, druhý faktor dál ověřuje
+MyÚčto. Proto jím nejde potvrzovat citlivé operace a firma ho nemůže vyžadovat
+místo hesla. Tlačítkem **Přihlásit se jinak** se vrátíte k běžnému formuláři.
+Vyprší-li přihlášení (po zhruba 10 minutách nebo v jiném prohlížeči), začněte
+znovu tlačítkem poskytovatele.
 
 **Jak poznáte, že je hotovo:** otevře se [Přehled (dashboard)](10_Prehled.md).
 
