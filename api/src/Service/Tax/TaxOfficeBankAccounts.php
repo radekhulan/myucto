@@ -27,23 +27,23 @@ final class TaxOfficeBankAccounts
     public const PREFIX_EMPLOYMENT = '713';
     public const PREFIX_WITHHOLDING = '7720';
 
-    /** kód FÚ → [matrika, název úřadu] */
+    /** kód FÚ → matrika; název úřadu je v TaxOfficeCatalog */
     private const OFFICES = [
-        '451' => ['77628031', 'Finanční úřad pro hlavní město Prahu'],
-        '452' => ['77628111', 'Finanční úřad pro Středočeský kraj'],
-        '453' => ['77627231', 'Finanční úřad pro Jihočeský kraj'],
-        '454' => ['77627311', 'Finanční úřad pro Plzeňský kraj'],
-        '455' => ['77629341', 'Finanční úřad pro Karlovarský kraj'],
-        '456' => ['77621411', 'Finanční úřad pro Ústecký kraj'],
-        '457' => ['77628461', 'Finanční úřad pro Liberecký kraj'],
-        '458' => ['77626511', 'Finanční úřad pro Královéhradecký kraj'],
-        '459' => ['77622561', 'Finanční úřad pro Pardubický kraj'],
-        '460' => ['67626681', 'Finanční úřad pro Kraj Vysočina'],
-        '461' => ['77628621', 'Finanční úřad pro Jihomoravský kraj'],
-        '462' => ['47623811', 'Finanční úřad pro Olomoucký kraj'],
-        '463' => ['77621761', 'Finanční úřad pro Moravskoslezský kraj'],
-        '464' => ['47620661', 'Finanční úřad pro Zlínský kraj'],
-        '13' => ['77620021', 'Specializovaný finanční úřad'],
+        '451' => '77628031',
+        '452' => '77628111',
+        '453' => '77627231',
+        '454' => '77627311',
+        '455' => '77629341',
+        '456' => '77621411',
+        '457' => '77628461',
+        '458' => '77626511',
+        '459' => '77622561',
+        '460' => '67626681',
+        '461' => '77628621',
+        '462' => '47623811',
+        '463' => '77621761',
+        '464' => '47620661',
+        '13' => '77620021',
     ];
 
     /**
@@ -58,7 +58,8 @@ final class TaxOfficeBankAccounts
         if ($office === null) {
             return null;
         }
-        [$number, $name] = $office;
+        $number = $office;
+        $name = (string) TaxOfficeCatalog::officeName($code);
         $accountNumber = $prefix . '-' . $number;
 
         return [

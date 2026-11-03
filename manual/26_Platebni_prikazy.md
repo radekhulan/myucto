@@ -320,7 +320,7 @@ Tabulka **Daně finančnímu úřadu** nabízí daně firmy, které se platí fi
 
 - **účet** je předčíslí podle druhu daně (705 DPH, 7704 daň z příjmů právnických osob,
   721 fyzických osob) a číslo finančního úřadu. U DPH se úřad bere z podaného přiznání,
-  u záloh z **kódu finančního úřadu** v nastavení firmy. Bez něj záloha vybrat nejde,
+  u záloh z **finančního úřadu** vybraného v nastavení firmy. Bez něj záloha vybrat nejde,
 - **variabilní symbol** je DIČ bez předpony CZ,
 - **částka** je daň k úhradě, u částečně uhrazené DPH zbývající část.
 

@@ -4,45 +4,27 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Regzel;
 
+use MyInvoice\Service\Tax\TaxOfficeCatalog;
+
 final class RegzelTaxOfficeCode
 {
-    /** @var array<string,list<string>> */
-    private const WORKPLACES_BY_OFFICE = [
-        '2000' => [
-            '2001', '2002', '2003', '2004', '2005', '2006', '2007',
-            '2008', '2009', '2010', '2011', '2012',
-        ],
-        '2100' => [
-            '2101', '2102', '2103', '2104', '2105', '2106', '2109',
-            '2110', '2111', '2112', '2113', '2114', '2115', '2118',
-            '2119', '2120', '2121', '2122', '2124', '2125',
-        ],
-        '2200' => ['2201', '2203', '2205', '2208', '2209', '2211', '2212'],
-        '2300' => ['2301', '2302', '2303', '2305', '2308', '2312', '2313'],
-        '2400' => ['2401', '2403', '2407'],
-        '2500' => [
-            '2501', '2503', '2504', '2505', '2507', '2509', '2510',
-            '2512', '2513', '2514', '2515',
-        ],
-        '2600' => ['2601', '2602', '2604', '2607', '2609'],
-        '2700' => ['2701', '2707', '2709', '2712', '2713'],
-        '2800' => ['2801', '2804', '2808', '2809', '2810', '2811'],
-        '2900' => ['2901', '2903', '2910', '2912', '2913', '2914'],
-        '3000' => [
-            '3001', '3002', '3003', '3004', '3005', '3006', '3007',
-            '3008', '3010', '3011', '3013', '3018', '3019', '3020',
-        ],
-        '3100' => [
-            '3101', '3102', '3103', '3106', '3107', '3108', '3109', '3110',
-        ],
-        '3200' => [
-            '3201', '3202', '3203', '3205', '3207', '3210', '3212',
-            '3213', '3214', '3215', '3216', '3218',
-        ],
-        '3300' => [
-            '3301', '3304', '3306', '3307', '3308', '3309', '3310', '3312',
-        ],
-    ];
+    /**
+     * REGZEL kód úřadu → kódy jeho územních pracovišť, odvozené z číselníku FÚ.
+     * Specializovaný FÚ (4000) pracoviště nemá.
+     *
+     * @return array<string,list<string>>
+     */
+    private static function workplacesByOffice(): array
+    {
+        static $byOffice = null;
+        if ($byOffice !== null) return $byOffice;
+        $byOffice = [];
+        foreach (TaxOfficeCatalog::offices() as $office) {
+            if ($office['code'] === TaxOfficeCatalog::SPECIALIZED_OFFICE) continue;
+            $byOffice[$office['regzel_code']] = array_column(TaxOfficeCatalog::workplaces($office['code']), 'code');
+        }
+        return $byOffice;
+    }
 
     public static function required(mixed $value): string
     {
@@ -93,14 +75,14 @@ final class RegzelTaxOfficeCode
     public static function isValidOffice(string $code): bool
     {
         return $code === '4000'
-            || array_key_exists($code, self::WORKPLACES_BY_OFFICE);
+            || array_key_exists($code, self::workplacesByOffice());
     }
 
     /** @return list<string> */
     public static function officeCodes(): array
     {
         return [
-            ...array_map('strval', array_keys(self::WORKPLACES_BY_OFFICE)),
+            ...array_map('strval', array_keys(self::workplacesByOffice())),
             '4000',
         ];
     }
@@ -108,12 +90,12 @@ final class RegzelTaxOfficeCode
     /** @return list<string> */
     public static function workplacesForOffice(string $taxOfficeCode): array
     {
-        return self::WORKPLACES_BY_OFFICE[$taxOfficeCode] ?? [];
+        return self::workplacesByOffice()[$taxOfficeCode] ?? [];
     }
 
     public static function isValidWorkplace(string $code): bool
     {
-        foreach (self::WORKPLACES_BY_OFFICE as $workplaces) {
+        foreach (self::workplacesByOffice() as $workplaces) {
             if (in_array($code, $workplaces, true)) {
                 return true;
             }

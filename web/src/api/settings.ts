@@ -1087,8 +1087,29 @@ export interface PdfSignatureOutputSettingsBatchResult {
   output_settings: PdfSignatureOutputSetting[]
 }
 
+export type TaxOfficeAccountKind = 'vat' | 'dppo' | 'dpfo' | 'employment' | 'withholding'
+
+export interface TaxOffice {
+  code: string
+  name: string
+  data_box: string | null
+  accounts: Partial<Record<TaxOfficeAccountKind, string>>
+}
+
+export interface TaxOfficeWorkplace {
+  code: string
+  name: string
+  office_code: string
+}
+
+export interface TaxOfficeCatalog {
+  offices: TaxOffice[]
+  workplaces: TaxOfficeWorkplace[]
+}
+
 export const settingsApi = {
   getSupplier: () => api.get<Supplier>('/settings/supplier').then(r => r.data),
+  taxOffices: () => api.get<TaxOfficeCatalog>('/settings/tax-offices').then(r => r.data),
   updateSupplier: (payload: Partial<Supplier>) => api.put<Supplier>('/settings/supplier', payload).then(r => r.data),
   updateAccountingFramework: (id: number, framework: AccountingFramework, effectiveFrom: string) =>
     api.put<Supplier>(`/suppliers/${id}`, {

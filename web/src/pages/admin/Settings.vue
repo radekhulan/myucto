@@ -24,6 +24,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
 import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 import AccountingFrameworkSettings from '@/components/settings/AccountingFrameworkSettings.vue'
+import TaxOfficeFields from '@/components/settings/TaxOfficeFields.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 
@@ -2006,17 +2007,7 @@ async function confirmTaxRepDelete() {
               </select>
               <p class="text-xs text-neutral-500 mt-1">{{ t('settings.flat_tax_hint') }}</p>
             </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.financial_office_code') }}</label>
-              <input v-model="supplier.financial_office_code" type="text" maxlength="8" placeholder="451"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.financial_office_hint') }}</p>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.workplace_code') }}</label>
-              <input v-model="supplier.workplace_code" type="text" maxlength="8"
-                class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-            </div>
+            <TaxOfficeFields v-model:office="supplier.financial_office_code" v-model:workplace="supplier.workplace_code" />
             <!-- Přiznání k dani z příjmů — údaje, které aplikace z účetnictví odvodit
                  neumí (migrace 1782). Blokují přiznání, které by o poplatníkovi tvrdilo
                  nepravdu; nálezy se ukazují u přiznání (UnsupportedCaseDetector). -->
