@@ -15,7 +15,12 @@ final class BankConnectionService
 {
     private const INITIAL_DAYS = 14;
     private const OVERLAP_DAYS = 3;
-    private const MAX_AUTOMATIC_DAYS = 89;
+    /**
+     * Nejdelší období jednoho stažení ve dnech (ruční je kratší, MAX_MANUAL_DAYS). Pohyb dne
+     * proto může poprvé přinést jen stažení končící nejvýš tolik dní po něm, viz
+     * {@see \MyInvoice\Service\Bank\StatementBalanceService} (doplnění zůstatku na konec dne).
+     */
+    public const MAX_AUTOMATIC_DAYS = 89;
     private const MAX_MANUAL_DAYS = 31;
 
     public function __construct(

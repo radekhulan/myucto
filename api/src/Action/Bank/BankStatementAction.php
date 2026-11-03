@@ -1259,21 +1259,28 @@ final class BankStatementAction
             $closings = [];
             foreach ($rows as $r) {
                 $reported = $r['bal'] !== null;
+                $confirmed = false;
                 if ($r['bal'] === null) {
                     $calculation = $balanceSummaries[(int) $r['id']];
                     if (!in_array($calculation['status'], ['calculated', 'confirmed'], true)) continue;
                     $r['bal'] = $calculation['confirmed_closing'] ?? $calculation['closing'];
                     if ($r['bal'] === null) continue;
+                    $confirmed = $calculation['status'] === 'confirmed';
                 }
+                // Potvrzený měsíc z API nese zůstatek banky doplněný na konec dne. Stažený
+                // výpis téhož dne může nést jen stav z rána (StatementBalanceService::withDayEndBalances).
                 $previous = $closings[(string) $r['ym']] ?? null;
                 if ($previous !== null && $previous['date'] === (string) $r['sdate']
                     && $r['src'] === 'bank_api'
-                    && (in_array($previous['src'], ['gpc', 'pdf'], true) || ($previous['reported'] && !$reported))) continue;
+                    && (in_array($previous['src'], ['gpc', 'pdf'], true)
+                        || ($previous['reported'] && !$reported && !$confirmed)
+                        || ($previous['confirmed'] && $reported))) continue;
                 $closings[(string) $r['ym']] = [
                     'bal' => (float) $r['bal'],
                     'date' => (string) $r['sdate'],
                     'src' => (string) $r['src'],
                     'reported' => $reported,
+                    'confirmed' => $confirmed,
                 ];
             }
             foreach ($emailRows as $r) {

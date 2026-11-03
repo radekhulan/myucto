@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
+use MyInvoice\Service\Bank\Connector\BankConnectionService;
 use PDO;
 
 final class StatementBalanceService
@@ -52,6 +53,7 @@ final class StatementBalanceService
                 }
                 $key = $selected['key'];
                 if (!isset($transactions[$key])) {
+                    $groups[$key] = $this->withDayEndBalances($groups[$key], $periods[$key]['from'], $periods[$key]['to']);
                     $ids = array_column($groups[$key], 'id');
                     $query = $pdo->prepare("SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount, bt.currency
                         FROM bank_transactions bt WHERE bt.statement_id IN (" . implode(',', array_map('intval', $ids)) . ")
@@ -111,7 +113,7 @@ final class StatementBalanceService
     private function loadStatements(int $supplierId): array
     {
         $query = $this->db->pdo()->prepare("SELECT bs.id, bs.source, bs.account_number, bs.bank_code, bs.currency,
-            bs.statement_date, bs.prev_balance, bs.credit_total, bs.debit_total, bs.curr_balance,
+            bs.statement_date, bs.prev_balance, bs.credit_total, bs.debit_total, bs.curr_balance, bs.imported_at,
             (bs.pdf_content IS NOT NULL) AS has_pdf, (bs.file_content IS NOT NULL) AS has_file,
             CASE WHEN bs.source = 'bank_api' AND bs.file_name LIKE 'csob-advice-%.json' AND JSON_VALID(bs.file_content)
                  THEN JSON_UNQUOTE(JSON_EXTRACT(bs.file_content, '$.advice.reference')) END AS advice_reference,
@@ -245,6 +247,89 @@ final class StatementBalanceService
     }
 
     /**
+     * Doplní konečný zůstatek výpisu staženého z API v průběhu dne na stav konce dne.
+     *
+     * Automatická synchronizace stahuje období do dneška a banka (Fio) vrací jako konečný
+     * zůstatek stav v okamžiku stažení. Pohyb, který přijde později téhož dne, už v něm
+     * není: dva výpisy téhož dne pak nesly různý „konečný“ stav (konflikt) a jediný ranní
+     * stav nesouhlasil s pohyby celého dne (falešný rozdíl). Pohyb se ukládá k výpisu, ve
+     * kterém se objevil poprvé, a stažení přibývají s rostoucím id. Pohyb dne výpisu, který
+     * poprvé přineslo až pozdější STAŽENÍ, proto ve staženém stavu chybí a přičte se k němu.
+     * Jen pohyb téhož dne: dřívější pohyb mohlo poprvé přinést pozdější stažení delšího
+     * období (ruční synchronizace), i když ho stav kratšího stažení už obsahoval. Nahrané
+     * GPC/PDF se nepřičítá: jeho pohyb mohl v API chybět, i když ho banka do stavu už
+     * započetla, a rozdíl má zůstat vidět.
+     *
+     * Doplňují se jen výpisy, které výpočet období `$from`–`$to` použije: od poslední kotvy
+     * před ním.
+     *
+     * @param list<array<string,mixed>> $statements výpisy jednoho účtu
+     * @return list<array<string,mixed>>
+     */
+    private function withDayEndBalances(array $statements, string $from, string $to): array
+    {
+        $start = $from;
+        foreach ($statements as $row) {
+            $date = substr((string) $row['statement_date'], 0, 10);
+            if ($date < $from && self::isAnchorRow($row) && $row['curr_balance'] !== null) $start = $date;
+        }
+        $intraday = [];
+        foreach ($statements as $index => $row) {
+            $date = substr((string) $row['statement_date'], 0, 10);
+            if ($date >= $start && $date <= $to && self::isIntradayDownload($row)) $intraday[$index] = $date;
+        }
+        if ($intraday === []) return $statements;
+        $firstId = min(array_map(static fn (int $index): int => (int) $statements[$index]['id'], array_keys($intraday)));
+        // Pozdější stažení, než dovoluje délka období synchronizace, pohyb období nepřinese.
+        $last = (new \DateTimeImmutable($to))->modify('+' . BankConnectionService::MAX_AUTOMATIC_DAYS . ' days')->format('Y-m-d');
+        $downloads = [];
+        foreach ($statements as $row) {
+            $date = substr((string) $row['statement_date'], 0, 10);
+            if ((int) $row['id'] > $firstId && (string) $row['source'] === 'bank_api' && !empty($row['has_file'])
+                && $date >= $start && $date <= $last) {
+                $downloads[] = (int) $row['id'];
+            }
+        }
+        if ($downloads === []) return $statements;
+        $query = $this->db->pdo()->prepare('SELECT bt.statement_id, bt.posted_at, SUM(bt.amount) AS amount
+            FROM bank_transactions bt
+            WHERE bt.statement_id IN (' . implode(',', $downloads) . ") AND bt.source = 'statement'
+              AND bt.posted_at >= ? AND bt.posted_at <= ?
+            GROUP BY bt.statement_id, bt.posted_at");
+        $query->execute([$start, $to]);
+        $later = $query->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($intraday as $index => $date) {
+            $id = (int) $statements[$index]['id'];
+            $balance = self::cents($statements[$index]['curr_balance']);
+            foreach ($later as $row) {
+                if ((int) $row['statement_id'] > $id && substr((string) $row['posted_at'], 0, 10) === $date) {
+                    $balance += self::cents($row['amount']);
+                }
+            }
+            $statements[$index]['curr_balance'] = number_format($balance / 100, 2, '.', '');
+        }
+        return $statements;
+    }
+
+    /**
+     * Stáhl se výpis z bankovního API se zůstatkem dřív, než jeho poslední den skončil?
+     *
+     * Výpis s vlastními obraty od banky se nedoplňuje: jeho rovnici zůstatků hlídá výpočet.
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function isIntradayDownload(array $row): bool
+    {
+        $importedAt = (string) ($row['imported_at'] ?? '');
+        return (string) $row['source'] === 'bank_api'
+            && !empty($row['has_file'])
+            && $row['curr_balance'] !== null
+            && $row['credit_total'] === null && $row['debit_total'] === null
+            && $importedAt !== ''
+            && substr($importedAt, 0, 10) <= substr((string) $row['statement_date'], 0, 10);
+    }
+
+    /**
      * Leží v měsíci pohyb PŘED tímhle výpisem, který výpis sám nepokrývá?
      *
      * Počáteční zůstatek výpisu platí k začátku JEHO období, ne nutně k prvnímu dni
@@ -280,6 +365,8 @@ final class StatementBalanceService
         $statements = array_values(array_filter($statements, static fn (array $row): bool =>
             $row['currency'] === $selected['currency'] && BankStatementSource::isStatement((string) $row['source'])
             && AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) === $key));
+        $to = substr((string) $selected['statement_date'], 0, 10);
+        $statements = $this->withDayEndBalances($statements, substr($to, 0, 7) . '-01', $to);
         return $this->calculateSnapshot($selected, $statements, null, $this->adviceMemberships($statements));
     }
 
