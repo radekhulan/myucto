@@ -147,8 +147,10 @@ Platí to i při přímém zadání ID faktury a sazby. Výkaz lze přes MCP upr
 pouze u konceptu faktury. Seznam sazeb DPH vyžaduje čtení nastavení firmy.
 
 Klientské připojení podporuje také seznam měn a nacenění položky ceníku pro
-odběratele, úpravy hlavičky a položek konceptu přijaté faktury a nahrávání
-příloh vydané faktury nebo PDF přijaté faktury. Úprava hlavičky přijatého
+odběratele, úpravy hlavičky a položek konceptu přijaté faktury, nahrávání
+příloh vydané faktury nebo PDF přijaté faktury a import přijaté faktury ze
+souboru. Seznam měn vyžaduje čtení nastavení firmy, ceníku, skladu nebo zakázek;
+nacenění položky čtení ceníku, vydaných faktur nebo opakované fakturace. Úprava hlavičky přijatého
 konceptu vyžaduje také čtení klientů a přístup k číselníku měn. Nahrazení již
 archivovaného PDF vyžaduje výslovné potvrzení. Import přijaté faktury ze souboru
 zpracovává ISDOC, ISDOCX a PDF s vloženým ISDOC. K importu je potřeba právo
