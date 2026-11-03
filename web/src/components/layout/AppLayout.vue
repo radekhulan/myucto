@@ -44,6 +44,7 @@ import { getWindowManager } from '@/workspace/windowRegistry'
 import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { useToast } from '@/composables/useToast'
+import { ssoErrorCode, takeSsoNotice } from '@/security/oidc'
 import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/composables/useKeyboardShortcuts'
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
@@ -1620,6 +1621,10 @@ function demoReadOnly(): void {
 }
 
 onMounted(async () => {
+  // Jednorázová hláška po návratu od poskytovatele identity (propojení / chyba).
+  const ssoNotice = takeSsoNotice()
+  if (ssoNotice?.kind === 'linked') toast.success(t('sso.linked_toast'))
+  else if (ssoNotice?.kind === 'error') toast.error(t(`sso.errors.${ssoErrorCode(ssoNotice.code)}`))
   void ensurePrefsLoaded()   // F5: prefetch per-user UI stavu (filtry + preference tabulek)
   void keyboardShortcuts.load()
   window.addEventListener('keydown', onGlobalShortcut)

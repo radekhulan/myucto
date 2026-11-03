@@ -100,6 +100,11 @@ export interface SupplierBrief {
   payroll_enabled?: boolean
 }
 
+export interface SsoProvider {
+  id: string
+  label: string
+}
+
 export interface SetupStatus {
   needs_setup: boolean
   version: string
@@ -118,6 +123,8 @@ export interface SetupStatus {
     password: string
   }
   passwordless_login_enabled: boolean
+  /** Poskytovatelé identity (OpenID Connect); prázdné = přihlášení přes organizaci vypnuté. */
+  sso_providers?: SsoProvider[]
   captcha: {
     provider: 'turnstile' | 'none'
     site_key: string

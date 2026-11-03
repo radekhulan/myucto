@@ -7,10 +7,13 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
+import UserExternalIdentitiesAdmin from '@/components/settings/UserExternalIdentitiesAdmin.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+// Identity cizích účtů spravuje jen superadmin (canManageExternalIdentities).
+const ssoEnabled = computed(() => auth.isSuperadmin && (auth.setupStatus?.sso_providers ?? []).length > 0)
 
 /**
  * Limit aktivních účtů je varování: správce může stále založit účet
@@ -306,6 +309,8 @@ onMounted(load)
           </button>
           <p v-if="linkSent" class="mt-1 text-xs text-success-700">{{ t('users.password_link_sent') }}</p>
         </div>
+
+        <UserExternalIdentitiesAdmin v-if="form.id !== null && ssoEnabled" :user-id="form.id" :email="form.email" />
 
         <section v-if="!selectedIsSuperadmin" class="border-t border-neutral-200 pt-4 space-y-3">
           <div><h3 class="font-medium">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope' : 'users.suppliers_title') }}<RequiredMark v-if="!selectedIsInstanceAdmin" /></h3><p class="text-xs text-neutral-500">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope_hint' : 'users.suppliers_hint') }}</p></div>
