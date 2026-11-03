@@ -8149,7 +8149,10 @@
           "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
           "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
           "select_placeholder": "Select…"
-        }
+        },
+        "reprepare": "Prepare again",
+        "reprepare_failed": "The filing could not be prepared again.",
+        "vintage_expired": "The filing was prepared in the REGZEC25 format; from 23 December 2026 ČSSZ accepts changes to an active employment only as REGZEC27. Prepare it again."
       },
       "dimensions": {
         "title": "Payroll dimensions of this relation",
@@ -13588,7 +13591,15 @@
       "zp_transport_envelope_undocumented": "No documented transport envelope format exists for automated dispatch to this health insurer. The application prepares the file, but you must send it manually through a documented channel (data box or the insurer's portal).",
       "zp_xml_serialization_failed": "The health insurer data record could not be built.",
       "zp_xml_snapshot_mismatch": "The data record does not match the exact source snapshot.",
-      "zp_xsd_validation_failed": "The data record did not pass validation against the pinned XSD schema."
+      "zp_xsd_validation_failed": "The data record did not pass validation against the pinned XSD schema.",
+      "registration_regzec25_change_stale": "The filing was prepared in the REGZEC25 format; from 23 December 2026 ČSSZ accepts changes to an active employment only as REGZEC27. Prepare it again.",
+      "registration_reprepare_not_needed": "This filing does not need to be prepared again: it is not a prepared change or correction whose format ČSSZ would reject today.",
+      "registration_reprepare_not_applicable": "Only a change or correction from an approved event can be prepared again.",
+      "registration_registered_end_mismatch": "The end date on the employment card differs from the date in the sent deregistration. A change or correction of an ended employment must carry the date held by ČSSZ. Correct the date on the employment card.",
+      "registration_a4_termination_source_missing": "A correction for an employment that has ended at ČSSZ also carries data from the deregistration (death, unemployment benefit data). No approved deregistration was found for this employment: approve the deregistration first, or settle the correction with ČSSZ outside the application.",
+      "registration_a4_termination_source_variant_mismatch": "The approved deregistration belongs to a different activity type than the correction. Check the activity type in the agreed terms of the employment.",
+      "registration_a4_termination_source_incomplete": "The approved deregistration does not have complete unemployment benefit data. Approve the deregistration again with the data filled in.",
+      "registration_a4_unemployment_forbidden": "Unemployment benefit data can be sent in a correction only for a regular employment that has already ended at ČSSZ."
     },
     "remediation": {
       "actions": {

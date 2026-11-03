@@ -10,9 +10,12 @@ use DOMXPath;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
+use Psr\Clock\ClockInterface;
 
 /**
  * Překlad zmrazené PREZEC/REGZEC datové věty do existující cesty VREP/APEP.
@@ -50,6 +53,7 @@ final readonly class PayrollRegistrationTransportService
         private PayrollSubmissionTransportAttemptRepository $attempts,
         private JmhzFrozenPayloadReader $frozen,
         private JmhzDispatchService $dispatch,
+        private ClockInterface $clock,
     ) {}
 
     /** @return array<string,mixed> */
@@ -61,12 +65,15 @@ final readonly class PayrollRegistrationTransportService
         ?int $actorUserId,
     ): array {
         $context = $this->context($supplierId, $environment, $submissionId, []);
+        $existing = $this->attempts->findByIdempotencyKey($idempotencyKey);
+        // Ročník věty se hlídá jen u nového odeslání. Opakovaný požadavek
+        // vrací pokus, který už proběhl, a ten den odeslání nezmění.
         $payload = $this->payload(
             $this->frozen->bytes($supplierId, $environment, $submissionId),
             $context['agenda_code'],
             true,
+            $existing === null && $context['status'] === 'ready',
         );
-        $existing = $this->attempts->findByIdempotencyKey($idempotencyKey);
         if ($existing !== null) {
             $this->assertReplayScope(
                 $existing,
@@ -340,6 +347,7 @@ final readonly class PayrollRegistrationTransportService
         string $bytes,
         string $agendaCode,
         bool $sending = false,
+        bool $checkVintage = false,
     ): array {
         $document = self::DOCUMENTS[$agendaCode];
         $dom = new DOMDocument();
@@ -403,6 +411,24 @@ final readonly class PayrollRegistrationTransportService
                     . 'pokud se hláška vrátí, jde o chybu aplikace '
                     . 'a odesílat se nesmí.',
                 );
+            }
+            if ($checkVintage && $agendaCode === 'REGZEC25' && in_array((int) $action, [3, 4], true)) {
+                // Ročník se čte ze zmrazené věty, ne z události: odchází
+                // právě tahle věta, s jejím jmenným prostorem a 10224.
+                $job = $xpath->query('r:job', $employee)->item(0);
+                if (PayrollRegistrationSchemaCatalog::changeVintageExpired(
+                    (int) $action,
+                    $job instanceof DOMElement && trim($job->getAttribute('to')) !== '',
+                    $root->namespaceURI === PayrollRegistrationSchemaCatalog::NS_REGZEC_2027
+                        ? JmhzSpecVersion::V2027
+                        : JmhzSpecVersion::V2026,
+                    PayrollSubmissionCalendar::today($this->clock->now()),
+                )) {
+                    throw new JmhzTransportException(
+                        PayrollRegistrationSchemaCatalog::STALE_CHANGE_CODE,
+                        PayrollRegistrationSchemaCatalog::staleChangeMessage(),
+                    );
+                }
             }
             if ($agendaCode === 'REGZEC25' && (int) $action === 1) {
                 // Druh činnosti a bližší určení se čtou ze zmrazené věty

@@ -471,9 +471,13 @@ final class PayrollRegistrationSubmissionRepository
     }
 
     /**
+     * `xsd_version` je formulář zmrazené věty (`REGZEC25`, `REGZEC27`,
+     * `PREZEC26`), `source_snapshot_hash` otisk události, ze které vznikla.
+     *
      * @return array{
      *   submission_id:int,agenda_code:string,status:string,
-     *   created_at:string,artifact_sha256:?string
+     *   created_at:string,artifact_sha256:?string,xsd_version:?string,
+     *   source_snapshot_hash:string,row_version:int
      * }|null
      */
     public function registrationBySubmission(
@@ -487,7 +491,10 @@ final class PayrollRegistrationSubmissionRepository
                     part.agenda_code,
                     submission.status,
                     submission.created_at,
-                    artifact.artifact_sha256
+                    submission.source_snapshot_hash,
+                    submission.row_version,
+                    artifact.artifact_sha256,
+                    artifact.xsd_version
                FROM payroll_submission_parts part
                JOIN payroll_submissions submission
                  ON submission.supplier_id = part.supplier_id
@@ -521,6 +528,9 @@ final class PayrollRegistrationSubmissionRepository
             'status' => (string) $row['status'],
             'created_at' => (string) $row['created_at'],
             'artifact_sha256' => $this->nullableString($row['artifact_sha256']),
+            'xsd_version' => $this->nullableString($row['xsd_version']),
+            'source_snapshot_hash' => (string) $row['source_snapshot_hash'],
+            'row_version' => (int) $row['row_version'],
         ];
     }
 

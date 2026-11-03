@@ -77,6 +77,9 @@ final class PayrollRegistrationSpecVersionRules
             self::assertA1($payload);
         } elseif (in_array($action, [3, 4], true)) {
             self::assertDelta($payload, $action, self::array($data['delta'] ?? null));
+            if ($action === 4) {
+                self::assertUnemployment(self::array($data['unemployment'] ?? null));
+            }
         } elseif ($action === 2) {
             self::assertUnemployment(self::array($data['unemployment'] ?? null));
         } elseif ($action === 7) {

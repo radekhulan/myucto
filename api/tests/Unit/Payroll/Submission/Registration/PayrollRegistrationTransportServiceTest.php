@@ -13,6 +13,8 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Clock\ClockInterface;
+use Symfony\Component\Clock\MockClock;
 
 final class PayrollRegistrationTransportServiceTest extends TestCase
 {
@@ -74,6 +76,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         ))->send(
             self::SUPPLIER,
             'test',
@@ -105,6 +108,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -142,6 +146,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -173,6 +178,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -210,6 +216,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -244,6 +251,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -290,6 +298,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -321,6 +330,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -371,6 +381,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'complete-a1', 7);
 
         self::assertSame('CSSZ_REGZEC', $result['submission_class']);
@@ -408,6 +419,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'regzec27-a1', 7);
 
         $wrong = $this->createStub(JmhzFrozenPayloadReader::class);
@@ -418,6 +430,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $wrong,
             $this->createStub(JmhzDispatchService::class),
+            self::clock(),
         ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'regzec27-wrong', 7);
     }
 
@@ -437,6 +450,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'unknown-activity', 7);
     }
 
@@ -470,6 +484,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $attempts,
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $service->poll(self::SUPPLIER, 'test', 5);
@@ -517,6 +532,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $attempts,
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $first = $service->send(
@@ -559,6 +575,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $attempts,
             $frozen,
             $dispatch,
+            self::clock(),
         ))->send(
             self::SUPPLIER,
             'test',
@@ -586,6 +603,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $attempts,
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(JmhzTransportException::class);
@@ -611,6 +629,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $frozen,
             $dispatch,
+            self::clock(),
         );
 
         $this->expectException(\DomainException::class);
@@ -652,6 +671,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
             $attempts,
             $this->createStub(JmhzFrozenPayloadReader::class),
             $dispatch,
+            self::clock(),
         ))->status(self::SUPPLIER, 'test', self::SUBMISSION);
 
         self::assertSame('PREZEC26', $result['agenda_code']);
@@ -678,6 +698,78 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         ]);
 
         return $repository;
+    }
+
+    /**
+     * Změna A3 připravená jako REGZEC25 bez data skončení: od 23. 12. 2026
+     * ji ČSSZ přijme jen jako REGZEC27 (odpovědi 4, 5 a 13 k NV2027), proto
+     * se neodešle a účetní ji připraví znovu.
+     */
+    public function testStaleRegzec25ChangeWithoutEndIsNotSentFrom23December(): void
+    {
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn(self::regzecChangeXml(null));
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+
+        try {
+            (new PayrollRegistrationTransportService(
+                $this->repository('REGZEC25'),
+                $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+                $frozen,
+                $dispatch,
+                self::clock('2026-12-23'),
+            ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'stale-a3', 7);
+            self::fail('Zastaralá změna REGZEC25 se nesmí odeslat.');
+        } catch (JmhzTransportException $exception) {
+            self::assertSame('registration_regzec25_change_stale', $exception->errorCode);
+            self::assertStringContainsString('Připravte ho znovu', $exception->getMessage());
+        }
+    }
+
+    /** Den před otevřením příjmu REGZEC27 a změna s 10224 odejdou beze změny. */
+    #[DataProvider('acceptedChanges')]
+    public function testRegzec25ChangeIsSentBefore23DecemberOrWithEndDate(?string $endOn, string $today): void
+    {
+        $xml = self::regzecChangeXml($endOn);
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($xml);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::once())
+            ->method('send')
+            ->willReturn(new JmhzDispatchOutcome(self::attemptRow() + [
+                'request_sha256' => hash('sha256', $xml),
+            ]));
+
+        $result = (new PayrollRegistrationTransportService(
+            $this->repository('REGZEC25'),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+            self::clock($today),
+        ))->send(self::SUPPLIER, 'test', self::SUBMISSION, 'fresh-a3', 7);
+
+        self::assertSame(hash('sha256', $xml), $result['payload_sha256']);
+    }
+
+    /** @return iterable<string,array{?string,string}> */
+    public static function acceptedChanges(): iterable
+    {
+        yield 'bez 10224 22. 12. 2026' => [null, '2026-12-22'];
+        yield 'skončený vztah v roce 2026, odesláno 2027' => ['2026-11-30', '2027-01-05'];
+    }
+
+    private static function regzecChangeXml(?string $endOn): string
+    {
+        return '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
+            . '<employee sqnr="1" act="3" fro="2026-12-01"><comp vs="1234567890"/>'
+            . '<job oid="1" rel="1" relDetail="1"' . ($endOn === null ? '' : ' to="' . $endOn . '"') . '/>'
+            . '</employee></employees></REGZEC>';
+    }
+
+    private static function clock(string $today = '2026-11-04'): ClockInterface
+    {
+        return new MockClock(new \DateTimeImmutable($today . ' 12:00:00', new \DateTimeZone('Europe/Prague')));
     }
 
     private static function regzecA1Xml(string $activity = '1'): string

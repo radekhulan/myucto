@@ -8149,7 +8149,10 @@
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
           "select_placeholder": "Vyberte…"
-        }
+        },
+        "reprepare": "Připravit znovu",
+        "reprepare_failed": "Podání se nepodařilo připravit znovu.",
+        "vintage_expired": "Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026 ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27. Připravte ho znovu."
       },
       "dimensions": {
         "title": "Mzdové dimenze vztahu",
@@ -13588,7 +13591,15 @@
       "zp_transport_envelope_undocumented": "Pro tuto zdravotní pojišťovnu není doložený formát obálky pro automatizované odeslání. Aplikace soubor připraví, ale odeslat ho musíte ručně doloženou cestou (datovou schránkou nebo portálem pojišťovny).",
       "zp_xml_serialization_failed": "Datovou větu zdravotní pojišťovny se nepodařilo sestavit.",
       "zp_xml_snapshot_mismatch": "Datová věta neodpovídá přesnému zdrojovému snapshotu.",
-      "zp_xsd_validation_failed": "Datová věta neprošla připnutým XSD schématem."
+      "zp_xsd_validation_failed": "Datová věta neprošla připnutým XSD schématem.",
+      "registration_regzec25_change_stale": "Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026 ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27. Připravte ho znovu.",
+      "registration_reprepare_not_needed": "Tohle podání se znovu připravovat nemusí: není to připravená změna nebo oprava, jejíž formát by ČSSZ dnes odmítla.",
+      "registration_reprepare_not_applicable": "Znovu se připravuje jen změna nebo oprava ze schválené události.",
+      "registration_registered_end_mismatch": "Datum skončení na kartě pracovního vztahu se liší od data v odeslané odhlášce. Změna i oprava skončeného vztahu musí nést datum, které vede ČSSZ. Opravte datum na kartě vztahu.",
+      "registration_a4_termination_source_missing": "Oprava u vztahu, který u ČSSZ skončil, nese i údaje z odhlášky (úmrtí, podklady pro podporu v nezaměstnanosti). Schválenou odhlášku k tomuto vztahu aplikace nenašla: nejdřív schvalte odhlášku, nebo opravu vyřiďte s ČSSZ mimo aplikaci.",
+      "registration_a4_termination_source_variant_mismatch": "Schválená odhláška patří k jinému druhu činnosti než oprava. Zkontrolujte druh činnosti ve sjednaných podmínkách vztahu.",
+      "registration_a4_termination_source_incomplete": "Schválená odhláška nemá úplné podklady pro podporu v nezaměstnanosti. Schvalte odhlášku znovu s vyplněnými podklady.",
+      "registration_a4_unemployment_forbidden": "Podklady pro podporu v nezaměstnanosti jde v opravě poslat jen u běžného pracovního vztahu, který už u ČSSZ skončil."
     },
     "remediation": {
       "actions": {

@@ -2080,6 +2080,180 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringContainsString(' to="2027-01-31"', $ended2027);
     }
 
+    /**
+     * ČSSZ, odpověď 4 k NV2027 a EDV 1.4.0.7 (ID 10224, 10225, 10376 až
+     * 10534): oprava A4-OST u vztahu skončeného u ČSSZ nese datum skončení
+     * z odeslané odhlášky a s ním i příznak úmrtí a podklady pro podporu
+     * v nezaměstnanosti, převzaté z téže odhlášky. Skončení v roce 2026 =
+     * REGZEC25 i při opravě v roce 2027.
+     */
+    public function testA4OfEmploymentEnded2026CarriesEndDateAndUnemploymentFromTheA2(): void
+    {
+        $source = $this->acceptedTermination('2026-11-30', '2026-12-01');
+        $approved = $this->approveA4($source, '2026-12-01', '2027-01-05', 'synthetic-a4-ended-2026');
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $xml = $this->preparedEventXml((int) $this->json($approved)['id']);
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2026 . '"', $xml);
+        self::assertStringContainsString(' act="4"', $xml);
+        self::assertMatchesRegularExpression('/<job [^>]*to="2026-11-30"/', $xml);
+        self::assertMatchesRegularExpression('/<job [^>]*endbydeath="N"/', $xml);
+        self::assertMatchesRegularExpression('/<unemplcomp [^>]*avgmonear="25000"/', $xml);
+        self::assertMatchesRegularExpression('/<unemplcomp [^>]*rsnterempl="2"/', $xml);
+        self::assertStringContainsString('<pensionperiod fro="2026-03-01" to="2026-11-30"', $xml);
+    }
+
+    public function testA4OfEmploymentEnded2027CarriesEndDateAndIsRegzec27(): void
+    {
+        $source = $this->acceptedTermination('2027-01-31', '2027-02-02');
+        $approved = $this->approveA4($source, '2027-02-02', '2027-02-05', 'synthetic-a4-ended-2027');
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $xml = $this->preparedEventXml((int) $this->json($approved)['id']);
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2027 . '"', $xml);
+        self::assertMatchesRegularExpression('/<job [^>]*to="2027-01-31"/', $xml);
+        self::assertMatchesRegularExpression('/<unemplcomp [^>]*avgmonear="25000"/', $xml);
+    }
+
+    /**
+     * Bez odhlášky v aplikaci (vztah odhlášený jinde) podklady pro podporu
+     * nejsou: oprava A4-OST skončeného vztahu se odmítne srozumitelnou
+     * hláškou, ne chybou serveru.
+     */
+    public function testA4OfEndedEmploymentWithoutA2IsAValidationError(): void
+    {
+        $source = $this->preparedA3('2026-11-10', '2026-11-15', 'synthetic-a4-no-a2-source');
+        $this->markRegistrationAccepted($source['submission_id']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-11-30", status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = $this->approveA4(
+            $source['submission_id'],
+            '2026-11-15',
+            '2026-12-05',
+            'synthetic-a4-no-a2',
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a4_termination_source_missing',
+            $this->json($response)['error']['code'],
+        );
+        self::assertStringContainsString('odhlášku', $this->json($response)['error']['message']);
+    }
+
+    /**
+     * GitHub MPSV #380: 10224 musí být shodné s datem skončení, které vede
+     * ČSSZ, tedy z odeslané odhlášky. Jiné datum na kartě vztahu je rozpor,
+     * který se ohlásí, ne tiše přepíše.
+     */
+    public function testChangeOfEndedEmploymentRejectsCardEndDateDifferentFromTheSentA2(): void
+    {
+        $source = $this->acceptedTermination('2026-11-30', '2026-12-01');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-11-29"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $response = $this->approveA4($source, '2026-12-01', '2026-12-10', 'synthetic-a4-end-mismatch');
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_registered_end_mismatch', $this->json($response)['error']['code']);
+    }
+
+    /**
+     * GitHub MPSV #552: dodatečně přiznané odstupné po odhlášce se hlásí
+     * opravou A4 s datem skončení a opravenými podklady pro podporu.
+     */
+    public function testA4AfterA2CorrectsUnemploymentDataOnly(): void
+    {
+        $source = $this->acceptedTermination('2026-11-30', '2026-12-01');
+        $approved = $this->approveA4($source, '2026-12-01', '2026-12-10', 'synthetic-a4-severance', [
+            'unemployment' => [
+                'mode' => 'provided',
+                'average_net_earnings' => 27_000,
+                'pension_periods' => [['from' => '2026-03-01', 'to' => '2026-11-30']],
+                'employment_type' => '1',
+                'termination_reason' => '2',
+            ],
+        ]);
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+
+        $xml = $this->preparedEventXml((int) $this->json($approved)['id']);
+        self::assertMatchesRegularExpression('/<job [^>]*to="2026-11-30"/', $xml);
+        self::assertMatchesRegularExpression('/<unemplcomp [^>]*avgmonear="27000"/', $xml);
+    }
+
+    /**
+     * Změna připravená 10. 12. 2026 jako REGZEC25 bez 10224 se od 23. 12.
+     * neodesílá; „Připravit znovu" ze stejné události vyrobí REGZEC27
+     * a původní podání zruší. Den předtím přepříprava není potřeba.
+     */
+    public function testStaleRegzec25ChangeIsPreparedAgainAsRegzec27(): void
+    {
+        $stale = $this->preparedA3('2026-12-01', '2026-12-10', 'synthetic-a3-stale');
+        $reprepare = function (string $today) use ($stale): \Psr\Http\Message\ResponseInterface {
+            self::$todayOverride = $today;
+            $this->action = $this->buildAction($this->container, true);
+
+            return ($this->action)->prepare(
+                $this->request('POST')->withParsedBody([
+                    'environment' => 'test',
+                    'event_id' => $stale['event_id'],
+                    'replaces_submission_id' => $stale['submission_id'],
+                ]),
+                new Response(),
+                ['employmentId' => (string) $this->employmentId],
+            );
+        };
+
+        $tooEarly = $reprepare('2026-12-22');
+        self::assertSame(422, $tooEarly->getStatusCode(), (string) $tooEarly->getBody());
+        self::assertSame('registration_reprepare_not_needed', $this->json($tooEarly)['error']['code']);
+
+        self::$todayOverride = '2026-12-23';
+        $this->action = $this->buildAction($this->container, true);
+        $replay = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $stale['event_id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        self::assertSame($stale['submission_id'], $replay['submission_id']);
+        self::assertTrue($replay['vintage_expired']);
+
+        $again = $reprepare('2026-12-23');
+        self::assertSame(201, $again->getStatusCode(), (string) $again->getBody());
+        $body = $this->json($again);
+        self::assertNotSame($stale['submission_id'], $body['submission_id']);
+        self::assertSame($stale['submission_id'], $body['replaced_submission_id']);
+        self::assertStringContainsString(
+            'xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2027 . '"',
+            $this->storedArtifactXml((int) $body['submission_id']),
+        );
+        $status = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_submissions WHERE supplier_id = ? AND id = ?',
+        );
+        $status->execute([$this->supplierId, $stale['submission_id']]);
+        self::assertSame('cancelled_in_time', $status->fetchColumn());
+
+        // Opakovaná příprava téže události vrací novou větu, ne zrušenou.
+        $replayAfter = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $stale['event_id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        self::assertSame($body['submission_id'], $replayAfter['submission_id']);
+        self::assertFalse($replayAfter['vintage_expired']);
+    }
+
     /** A7: ukončení českých právních předpisů vyžaduje identifikátor nositele. */
     public function testA7CzechLegislationEndIsValidatedAndFrozenForTransport(): void
     {
@@ -5819,6 +5993,23 @@ final class PayrollRegistrationActionTest extends TestCase
         string $reference,
         ?string $endOn = null,
     ): string {
+        return $this->storedArtifactXml(
+            $this->preparedA3($effectiveOn, $today, $reference, $endOn)['submission_id'],
+        );
+    }
+
+    /**
+     * Totéž co {@see self::preparedA3Xml()}, vrací ale čísla události
+     * a podání.
+     *
+     * @return array{event_id:int,submission_id:int}
+     */
+    private function preparedA3(
+        string $effectiveOn,
+        string $today,
+        string $reference,
+        ?string $endOn = null,
+    ): array {
         self::$todayOverride = $today;
         $this->action = $this->buildAction($this->container, true);
         $this->employmentActiveSince('2026-03-01');
@@ -5845,6 +6036,103 @@ final class PayrollRegistrationActionTest extends TestCase
             $this->request('POST')->withParsedBody([
                 'environment' => 'test',
                 'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+
+        return [
+            'event_id' => (int) $this->json($approved)['id'],
+            'submission_id' => (int) $this->json($prepared)['submission_id'],
+        ];
+    }
+
+    /**
+     * Běžný pracovní vztah (A2-OST) skončený `$endOn` s odhláškou schválenou
+     * a přijatou `$a2Day`. Vrací číslo podání odhlášky; to je zároveň
+     * původní podání, které oprava A4 opravuje (datum podání = `$a2Day`).
+     */
+    private function acceptedTermination(string $endOn, string $a2Day): int
+    {
+        self::$todayOverride = $a2Day;
+        $this->action = $this->buildAction($this->container, true);
+        $this->employmentActiveSince('2026-03-01');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = ?, status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$endOn, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => $endOn,
+                'identifiers_verified_in_cssz_list' => true,
+                'ended_by_death' => false,
+                'unemployment' => [
+                    'mode' => 'provided',
+                    'average_net_earnings' => 25_000,
+                    'pension_periods' => [['from' => '2026-03-01', 'to' => $endOn]],
+                    'employment_type' => '1',
+                    'termination_reason' => '2',
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $this->json($approved)['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $submissionId = (int) $this->json($prepared)['submission_id'];
+        $this->markRegistrationAccepted($submissionId);
+
+        return $submissionId;
+    }
+
+    /**
+     * Oprava A4 původního podání vyhotoveného `$filedOn`, schválená
+     * `$today`.
+     *
+     * @param array<string,mixed> $extra
+     */
+    private function approveA4(
+        int $sourceSubmissionId,
+        string $filedOn,
+        string $today,
+        string $reference,
+        array $extra = ['corrections' => ['title_prefix' => 'Mgr.']],
+    ): \Psr\Http\Message\ResponseInterface {
+        self::$todayOverride = $today;
+        $this->action = $this->buildAction($this->container, true);
+
+        return ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'correction',
+                'effective_on' => $filedOn,
+                'discovered_on' => $today,
+                'source_reference' => $reference,
+                'source_submission_id' => $sourceSubmissionId,
+            ] + $extra),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+    }
+
+    private function preparedEventXml(int $eventId): string
+    {
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $eventId,
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],

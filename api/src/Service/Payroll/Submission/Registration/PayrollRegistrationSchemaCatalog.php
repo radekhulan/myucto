@@ -89,6 +89,63 @@ final class PayrollRegistrationSchemaCatalog
         );
     }
 
+    /** Kód blokace odeslání změny bez 10224, která zastarala na REGZEC25. */
+    public const STALE_CHANGE_CODE = 'registration_regzec25_change_stale';
+
+    /**
+     * Zmrazená změna nebo oprava (A3, A4) bez data skončení 10224, jejíž
+     * ročník už neodpovídá dni odeslání. Typicky REGZEC25 připravená před
+     * 23. 12. 2026 a odesílaná 23. 12. 2026 nebo později: tehdy už ČSSZ
+     * změnu aktivního vztahu přijímá jen jako REGZEC27 (Otázky a odpovědi
+     * k NV2027, odpovědi 4, 5 a 13). Opačný případ nenastane, REGZEC27 bez
+     * 10224 se před 23. 12. 2026 nepřipraví. Jediné pravidlo pro bránu
+     * odeslání i pro seznam podání.
+     */
+    public static function changeVintageExpired(
+        int $actionCode,
+        bool $carriesEndOn,
+        JmhzSpecVersion $frozen,
+        string $sendOn,
+    ): bool {
+        return in_array($actionCode, [3, 4], true)
+            && !$carriesEndOn
+            && $frozen !== JmhzSpecVersion::forRegistrationChangeWithoutEnd($sendOn);
+    }
+
+    /**
+     * Ročník zmrazené změny nebo opravy podle formuláře v archivu
+     * (`xsd_version` artefaktu) a dat události. Neznámý formulář = false:
+     * o odeslání pak rozhoduje brána přenosu nad samotnou větou.
+     *
+     * @param array<string,mixed>|null $eventData `data` zmrazené události
+     */
+    public static function frozenChangeVintageExpired(
+        int $actionCode,
+        ?array $eventData,
+        ?string $frozenForm,
+        string $sendOn,
+    ): bool {
+        $frozen = match ($frozenForm) {
+            'REGZEC25' => JmhzSpecVersion::V2026,
+            'REGZEC27' => JmhzSpecVersion::V2027,
+            default => null,
+        };
+
+        return $frozen !== null && self::changeVintageExpired(
+            $actionCode,
+            self::changeEndOn($actionCode, $eventData) !== null,
+            $frozen,
+            $sendOn,
+        );
+    }
+
+    public static function staleChangeMessage(): string
+    {
+        return 'Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026'
+            . ' ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27.'
+            . ' Připravte ho znovu.';
+    }
+
     /** @param array<string,mixed>|null $eventData */
     private static function changeEndOn(int $actionCode, ?array $eventData): ?string
     {

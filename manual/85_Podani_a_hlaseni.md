@@ -1862,8 +1862,23 @@ jen datum skončení pracovního vztahu: u vztahu skončeného do 31. 12. 2026 j
 REGZEC25, u trvajícího vztahu nebo skončeného později REGZEC27, a to i tehdy,
 když změna platí už od roku 2026. Ostrá ČSSZ přijímá REGZEC27 od 23. 12. 2026;
 změnu trvajícího vztahu připravenou dřív proto aplikace pošle ještě jako
-REGZEC25, od 23. 12. 2026 jako REGZEC27. Změna u vztahu, který už skončil, nese
-datum skončení, jinak by ji ČSSZ předala k ručnímu zpracování. Plnou registraci
+REGZEC25, od 23. 12. 2026 jako REGZEC27. Takovou změnu nebo opravu připravenou
+ve formátu REGZEC25, která do 22. 12. 2026 neodešla, aplikace od 23. 12. 2026
+neodešle: v kartě podání místo tlačítka odeslání nabídne **Připravit znovu**,
+které ze stejné schválené události připraví REGZEC27 a původní podání zruší.
+
+Změna i oprava u vztahu, který už skončil, nese datum skončení, jinak by ji
+ČSSZ předala k ručnímu zpracování. Datum musí být stejné jako to, které vede
+ČSSZ: aplikace ho bere z odeslané odhlášky (A2), a jen když žádná odhláška
+z aplikace neodešla, z karty pracovního vztahu. Liší-li se datum na kartě od
+odeslané odhlášky, změnu ani opravu neschválí; datum na kartě opravte. Opravu
+samotného data skončení (s písemným vysvětlením) aplikace nepodává, vyřiďte ji
+s ČSSZ. Oprava (A4) běžného pracovního vztahu s datem skončení nese navíc údaj
+o skončení úmrtím a podklady pro podporu v nezaměstnanosti; aplikace je převezme
+ze schválené odhlášky. Bez schválené odhlášky aplikace opravu skončeného
+vztahu odmítne a napíše proč.
+
+Plnou registraci
 s nástupem v lednu 2027 aplikace připraví nejdřív 23. 12. 2026 a vždy nejvýš
 osm dnů před nástupem. Částečné přihlášení PREZEC se ročníkem nemění.
 U cizince ze státu mimo EHP chce REGZEC27 navíc platnost pobytu (od a do)
