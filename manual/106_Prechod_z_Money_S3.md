@@ -509,6 +509,14 @@ kterou Money vede pod symbolem dobropisu, převod spáruje se zálohou. Deník s
 nemění. Vazbu na zálohu nebo čerpání, které jste v MyÚčtu zadali nebo smazali
 (i čerpání ze saldokonta), převod nepřepíše.
 
+Stejně převod páruje čerpání přijatých záloh (proformy na účtu 324) vydanými
+konečnými fakturami: podle položky odpočtu v dokladu Money, čísla zálohy v textu
+zápisu a párovacího symbolu řádku na 324 (číslo proformy nebo jeho číslice), jinak
+po odběrateli od nejstarší zaplacené zálohy. Jedna faktura tak může čerpat víc
+záloh, i když je Money vede pod symbolem jen jedné z nich. Úhrada na zálohovém
+účtu se symbolem proformy patří proformě; konečnou fakturu, kterou záloha pokryla
+celou, převod úhradou zálohy nevyrovnává, vyrovná ji čerpání.
+
 Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
 nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
@@ -586,6 +594,10 @@ Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, pro
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
 v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
 a ponechanou v MyÚčtu; upravte ji ručně.
+
+Daňovou uznatelnost nákladových účtů převezme převod z osnovy Money jen u účtů,
+které zakládá, a při prvním převodu firmy. Opakovaný převod ji u existujících
+účtů nemění, takže úprava v `Účetnictví → Účtová osnova` zůstane.
 
 Převádíte-li firmu znovu od začátku (firmu smažete a převedete znovu), ztratí
 se s ní i nastavení, které převod nezakládá: výjimky mapování výkazů, volby

@@ -144,6 +144,22 @@ final class IssuedPaymentRecorder
         $ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, 'issued_payments_adjusted');
     }
 
+    /**
+     * Smaže evidovanou bankovní úhradu faktury z pohybu, kterou zapsal převod (poznámka
+     * převodu). Úhradu zadanou v MyÚčtu nemění. Uhrazenou částku převzatou z Money nesnižuje.
+     */
+    public function releaseBank(ImportContext $ctx, int $invoiceId, int $txId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "DELETE FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ? AND bank_transaction_id = ? AND source = 'bank' AND note LIKE ?"
+        );
+        $stmt->execute([$ctx->supplierId, $invoiceId, $txId, self::NOTE_PREFIX . '%']);
+        if ($stmt->rowCount() > 0) {
+            unset($this->invoices[$invoiceId]);
+            $ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, 'issued_payments_released', $stmt->rowCount());
+        }
+    }
+
     private static function note(string $kind, string $paymentNo): string
     {
         return self::NOTE_PREFIX . match ($kind) {

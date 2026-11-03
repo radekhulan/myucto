@@ -193,7 +193,177 @@ final class PairingSymbolMatcher
                 }
             }
         }
+        $this->payAdvancesBySymbol($groups, $best);
         $this->recordInternalSettlements();
+    }
+
+    /**
+     * Úhrady zálohy na zálohovém účtu (314, 324) se symbolem zálohového dokladu, který v deníku
+     * Money řádek nemá (proforma ani zálohová faktura se nezaúčtovávají): skupina symbolu
+     * vlastní doklad nemá a úhrada by zůstala nespárovaná. Symbol určí zálohu podle čísla
+     * (shodné číslo, nebo jeho číslice bez úvodních nul; jen jediná záloha té strany).
+     *
+     * Dřívější převod takovou úhradu přiřazoval konečné faktuře, která zálohu v téže skupině
+     * čerpá (faktura, kterou záloha pokryla celou, se do skupiny zálohového účtu zařadila,
+     * {@see homes()}). Párování úhrady s takovou fakturou, které vytvořil převod, se proto
+     * uvolní a úhrada přejde na zálohu; párování zadané uživatelem zůstává.
+     *
+     * @param array<string,array<string,mixed>> $groups
+     * @param array<string,array{0:string}> $best
+     */
+    private function payAdvancesBySymbol(array $groups, array $best): void
+    {
+        $index = $this->advanceIndex();
+        $plan = [];
+        foreach ($groups as $gk => $g) {
+            [$sym, $account] = explode('|', (string) $gk, 2);
+            if (preg_match('/^3[12]4/', $account) !== 1 || $g['pay'] === []) {
+                continue;
+            }
+            $type = str_starts_with($account, '32') ? 'invoice' : 'purchase_invoice';
+            // Konečná faktura, kterou záloha pokryla celou, úhradu zálohy nepotřebuje: na účtu
+            // dokladu (311, 321) má v deníku nulu, takže patří do skupiny zálohového účtu,
+            // nebo má nulovou částku dokladu.
+            $covered = fn (array $d): bool => $d['type'] === $type && ($this->state['info'][$type][$d['id']]['kind'] ?? '') === 'invoice'
+                && (($best[$d['type'] . ':' . $d['id']][0] ?? null) === $gk || ($this->state['info'][$type][$d['id']]['total'] ?? 1.0) < 0.01);
+            $home = array_filter($g['docs'], static fn (array $d, string $ref): bool => ($best[$ref][0] ?? null) === $gk && abs($d['net']) >= 0.01 && !$covered($d), ARRAY_FILTER_USE_BOTH);
+            if ($home !== []) {
+                continue;
+            }
+            $advanceId = $index[$type][self::symbolKey($sym)] ?? null;
+            if ($advanceId === null) {
+                continue;
+            }
+            // Přijatá záloha přichází na dal 324, poskytnutá odchází na má dáti 314.
+            $pays = array_filter($g['pay'], static fn (array $pay): bool => $type === 'invoice' ? $pay['net'] <= -0.01 : $pay['net'] >= 0.01);
+            if ($pays === []) {
+                continue;
+            }
+            $finals = [];
+            foreach ($g['docs'] as $ref => $d) {
+                if ($d['id'] !== $advanceId && $covered($d)) {
+                    $finals[$d['id']] = true;
+                }
+            }
+            $plan[] = ['type' => $type, 'advance' => $advanceId, 'pays' => $pays, 'finals' => $finals];
+        }
+        if ($plan === []) {
+            return;
+        }
+        // Párování z tohoto běhu (krok výše) musí být ve stavu jako párování převodu.
+        $this->state = $this->state($this->ctx, $this->movements);
+        $released = 0;
+        foreach ($plan as $item) {
+            foreach ($item['pays'] as $pay) {
+                $released += $this->releaseFinalMatch($pay, $item['type'], $item['finals']);
+            }
+        }
+        if ($released > 0) {
+            $this->state = $this->state($this->ctx, $this->movements);
+            $this->ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, 'advance_payment_released', $released);
+        }
+        foreach ($plan as $item) {
+            $type = $item['type'];
+            $info = $this->state['info'][$type][$item['advance']] ?? null;
+            if ($info === null) {
+                continue;
+            }
+            $ref = $type . ':' . $item['advance'];
+            $foreign = $info['currency'] !== 'CZK';
+            $totalCzk = $foreign ? $info['total'] * ($info['rate'] ?? 0.0) : $info['total'];
+            $this->capacity[$ref] = max(0.0, $totalCzk - ($this->state['allocated'][$ref] ?? 0.0));
+            $doc = ['type' => $type, 'id' => $item['advance'], 'net' => $totalCzk, 'fnet' => $foreign ? $info['total'] : 0.0,
+                'mena' => $info['currency'], 'date' => '', 'ico' => ''];
+            $pays = $item['pays'];
+            uasort($pays, static fn (array $a, array $b): int => $a['date'] <=> $b['date']);
+            foreach ($pays as $pay) {
+                if ($this->pay($pay, [$ref => $doc]) > 0) {
+                    $this->ctx->protocol->count(DocumentLinker::STEP_PAYMENTS, 'paired_advance_symbol');
+                }
+            }
+        }
+    }
+
+    /**
+     * Uvolní párování bankovní úhrady zálohy s konečnou fakturou skupiny, které vytvořil převod
+     * (i evidovanou úhradu vydané faktury). Vrací počet uvolněných párování.
+     *
+     * @param array<string,mixed> $pay
+     * @param array<int,true> $finals
+     */
+    private function releaseFinalMatch(array $pay, string $type, array $finals): int
+    {
+        if ($pay['zdroj'] !== 'BK' || $finals === []) {
+            return 0;
+        }
+        $movementId = $this->resolve($pay);
+        $m = is_int($movementId) ? ($this->movements[$movementId] ?? null) : null;
+        if ($m === null || !$m['taken'] || ($m['user_matches'] ?? 1) !== 0) {
+            return 0;
+        }
+        $ctx = $this->ctx;
+        $pdo = $this->db->pdo();
+        $column = $type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id';
+        $rows = $pdo->prepare("SELECT id, {$column} AS doc_id, amount FROM payment_matches WHERE supplier_id = ? AND bank_transaction_id = ? AND {$column} IS NOT NULL");
+        $rows->execute([$ctx->supplierId, $movementId]);
+        $released = 0;
+        foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $docId = (int) $r['doc_id'];
+            if (!isset($finals[$docId]) || !isset($this->state['own'][(int) $r['id']])) {
+                continue;
+            }
+            // Řádek mapy úhrad zůstává: další běh pak párování s fakturou znovu nezaloží.
+            $pdo->prepare('DELETE FROM payment_matches WHERE id = ? AND supplier_id = ?')->execute([(int) $r['id'], $ctx->supplierId]);
+            if ($type === 'invoice') {
+                $this->issuedPayments->releaseBank($ctx, $docId, $movementId);
+            }
+            $pdo->prepare(
+                "UPDATE bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                    SET t.matched_invoice_id = NULL
+                  WHERE t.id = ? AND s.supplier_id = ? AND t.matched_invoice_id = ?"
+            )->execute([$movementId, $ctx->supplierId, $type === 'invoice' ? $docId : -1]);
+            $this->movements[$movementId]['matched'] = max(0.0, $this->movements[$movementId]['matched'] - abs((float) $r['amount']));
+            $released++;
+        }
+        return $released;
+    }
+
+    /**
+     * Zálohové doklady (proformy, zálohové faktury přijaté) podle klíče symbolu; klíč, který
+     * sdílí víc záloh téže strany, se vynechá.
+     *
+     * @return array<string,array<string,int>> strana => klíč => id zálohy
+     */
+    private function advanceIndex(): array
+    {
+        $out = [];
+        $dup = [];
+        foreach (['invoice' => 'proforma', 'purchase_invoice' => 'advance'] as $type => $kind) {
+            foreach ($this->state['info'][$type] ?? [] as $id => $info) {
+                if ($info['kind'] !== $kind) {
+                    continue;
+                }
+                foreach (array_unique([self::symbolKey($info['number']), mb_strtoupper(trim($info['number']))]) as $key) {
+                    if ($key === '' || strlen($key) < 4) {
+                        continue;
+                    }
+                    if (isset($out[$type][$key]) && $out[$type][$key] !== $id) {
+                        $dup[$type][$key] = true;
+                    }
+                    $out[$type][$key] = (int) $id;
+                }
+            }
+            foreach (array_keys($dup[$type] ?? []) as $key) {
+                unset($out[$type][$key]);
+            }
+        }
+        return $out;
+    }
+
+    /** Číslice symbolu bez úvodních nul („ZV025212" i „25212" => „25212"). */
+    private static function symbolKey(string $symbol): string
+    {
+        return ltrim((string) preg_replace('/\D+/', '', $symbol), '0');
     }
 
     /**
@@ -1290,7 +1460,7 @@ final class PairingSymbolMatcher
             while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
                 $state['info'][$type][(int) $r['id']] = [
                     'kind' => (string) $r['kind'], 'currency' => (string) $r['code'], 'number' => (string) $r['varsymbol'],
-                    'negative' => (float) $r['total_with_vat'] < 0,
+                    'negative' => (float) $r['total_with_vat'] < 0, 'total' => abs((float) $r['total_with_vat']),
                     'rate' => $r['exchange_rate'] !== null && (float) $r['exchange_rate'] > 0 ? (float) $r['exchange_rate'] : null,
                 ];
             }
