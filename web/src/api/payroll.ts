@@ -2071,6 +2071,8 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
     employment_types: Array<{ code: string; label: string }>
     free_access_reason_codes: Array<{ code: string; label: string }>
     service_termination_reasons: Array<{ code: string; label: string; employment_types: string[] }>
+    /** Čtyřmístné kódy NKPZ podle číselníku ČSÚ 80145 (slovník 1.5.0.3 je nevkládá). */
+    employment_status_codes?: Array<{ code: string; label: string }>
   }
 }
 

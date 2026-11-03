@@ -129,6 +129,10 @@ function jmhzOptions() {
         { code: '7', label: '§ 42 odst. 1 písm. h)', employment_types: ['3'] },
         { code: '15', label: '§ 18 písm. d)', employment_types: ['4'] },
       ],
+      employment_status_codes: [
+        { code: '1111', label: 'Zaměstnanci v pracovním poměru na dobu neurčitou' },
+        { code: '2219', label: 'Zaměstnavatelé – fyzické osoby jinde neuvedené' },
+      ],
     },
   }
 }
@@ -1525,6 +1529,29 @@ describe('EmploymentRegistrationPanel', () => {
     const after = await openForeignA1('2027-01-04')
     expect(after.text()).toContain('zvláštní dlouhodobý pobyt')
     expect(after.text()).toContain('vyslání zaměstnavatelem')
+  })
+
+  it('offers employment status codes from the ČSÚ codebook for a start from 1 January 2027', async () => {
+    const statusCodes = async (startOn: string) => {
+      const suggested = a1Suggested()
+      m.a1Profile.mockResolvedValue(a1View({
+        suggested: { ...suggested, employment: { ...suggested.employment, actual_start_on: startOn } },
+      }))
+      const wrapper = mountPanel()
+      await flushPromises()
+      await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+      await flushPromises()
+      return wrapper.get('[data-test="a1-employment-status-code"]').findAll('option')
+        .map(option => option.attributes('value'))
+    }
+
+    const before = await statusCodes('2026-12-31')
+    expect(before).toContain('1341')
+    expect(before).not.toContain('2219')
+
+    const after = await statusCodes('2027-01-04')
+    expect(after).toContain('2219')
+    expect(after).not.toContain('1341')
   })
 
   it('keeps the A2 prefill disabled without a termination record', async () => {

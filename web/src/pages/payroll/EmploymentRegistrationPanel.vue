@@ -569,12 +569,16 @@ const a1InsurerOptions = computed(() => {
  * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
  * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
  * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
- * první uložení tiše nesmazalo.
+ * první uložení tiše nesmazalo. Nástup od 1. 1. 2027 bere číselník ČSÚ
+ * (REGZEC 2027), dřívější vložený ze slovníku 1.4.1.6.
  */
 const a1EmploymentStatusOptions = computed(() => {
   const activity = a1Form.value.employment.activity_code
   const restricted = activity === '15' || activity === '16' ? ['1341', '1342'] : null
-  const options = (jmhzOptions.value?.employment_status_codes ?? [])
+  const source = a1FromNextVintage.value
+    ? jmhzOptions.value?.from_2027?.employment_status_codes
+    : jmhzOptions.value?.employment_status_codes
+  const options = (source ?? [])
     .filter(option => restricted === null || restricted.includes(option.code))
     .map(option => ({ code: option.code, label: `${option.code} · ${option.label}` }))
   const current = a1Form.value.employment.employment_status_code?.trim() ?? ''
