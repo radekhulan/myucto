@@ -1134,7 +1134,8 @@
         "2230_journal_lines_cost_center_index.sql",
         "2231_unit_prices_six_decimals.sql",
         "2232_oidc_external_identities.sql",
-        "2233_api_token_issued_auth_method.sql"
+        "2233_api_token_issued_auth_method.sql",
+        "2234_oidc_login_tickets.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10044,6 +10045,7 @@
                 "consumed_at": "datetime(6) NULL DEFAULT NULL",
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "expires_at": "datetime(6) NOT NULL",
+                "external_identity_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "char(64) NOT NULL COLLATE ascii_bin",
                 "invite_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "nonce": "char(64) NOT NULL COLLATE ascii_bin",

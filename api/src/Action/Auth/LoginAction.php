@@ -13,6 +13,7 @@ use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\EmailOtpService;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\Oidc\OidcFlowStore;
 use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -49,6 +50,7 @@ final class LoginAction
         private readonly ClockInterface $clock,
         private readonly \MyInvoice\Service\Auth\MfaRecoveryCodeService $recoveryCodes,
         private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly OidcFlowStore $oidcFlows,
     ) {}
 
     public function passkeyOptions(Request $request, Response $response): Response
@@ -126,7 +128,26 @@ final class LoginAction
         $ip        = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $userAgent = $request->getHeaderLine('User-Agent');
 
-        if ($email === '' || $password === '') {
+        // Lístek z přihlášení u poskytovatele, který nahrazuje jen heslo (Google,
+        // Apple, Seznam). Platí místo e-mailu a hesla; zbytek přihlášení (druhý
+        // faktor, vynucené MFA, politika firmy) běží stejně jako po hesle.
+        $ssoTicketRaw = isset($body['sso_ticket']) ? trim((string) $body['sso_ticket']) : '';
+        $ssoTicket = null;
+        if ($ssoTicketRaw !== '') {
+            $binding = $request->getCookieParams()[OidcFlowStore::bindingCookieName(
+                (string) $this->config->get('session.cookie_name', '__Host-myinvoice_session'),
+            )] ?? null;
+            $ssoTicket = $this->oidcFlows->peekTicket($ssoTicketRaw, is_string($binding) ? $binding : null);
+            if ($ssoTicket === null) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
+            $emailStmt = $this->db->pdo()->prepare('SELECT email FROM users WHERE id = ? LIMIT 1');
+            $emailStmt->execute([$ssoTicket['user_id']]);
+            $email = (string) ($emailStmt->fetchColumn() ?: '');
+            $password = '';
+        }
+
+        if ($email === '' || ($password === '' && $ssoTicket === null)) {
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
         }
 
@@ -149,7 +170,8 @@ final class LoginAction
 
         // Turnstile vždy aktivní — Cloudflare sám rozhoduje (auto-pass nebo interactive challenge).
         // No-op pokud captcha.provider != 'turnstile' nebo chybí secret_key (TurnstileVerifier).
-        if (!$this->turnstile->verify($turnstileToken ?? '', $ip, 'login')) {
+        // Lidskost už ověřil poskytovatel identity; lístek se navíc nedá hádat.
+        if ($ssoTicket === null && !$this->turnstile->verify($turnstileToken ?? '', $ip, 'login')) {
             $this->logger->log('auth.captcha_failed', null, null, null, [
                 'email' => $email, 'ip' => $ip,
             ], $ip, $userAgent);
@@ -179,7 +201,10 @@ final class LoginAction
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
         }
 
-        if (!$this->hasher->verify($password, (string) $user['password_hash'])) {
+        if ($ssoTicket !== null && (int) $user['id'] !== $ssoTicket['user_id']) {
+            return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+        }
+        if ($ssoTicket === null && !$this->hasher->verify($password, (string) $user['password_hash'])) {
             $this->bf->recordFailure($email, $ip);
             $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
                 'email' => $email, 'reason' => 'wrong_password',
@@ -300,7 +325,13 @@ final class LoginAction
         // instalace (jinak by se uživatelům bez TOTP náhle vyžadoval e-mailový kód).
         $emailOtpOn     = (bool) $this->config->get('auth.email_otp.enabled', false);
         $issueTrustedTd = false;  // vystavit trusted-device cookie po úspěšném loginu?
-        $authContext = SessionAuthContext::basic('password');
+        $authContext = $ssoTicket !== null
+            ? new SessionAuthContext(
+                SessionAuthContext::EXTERNAL_PREFIX . $ssoTicket['provider'],
+                'basic',
+                externalIdentityId: $ssoTicket['external_identity_id'],
+            )
+            : SessionAuthContext::basic('password');
 
         // Uživatele s passkey nesmí prosté heslo pustit dovnitř jen proto, že se
         // WebAuthn stal nedostupným (rozbité app.url) nebo že správce metodu
@@ -403,6 +434,9 @@ final class LoginAction
         }
 
         $this->rehashPasswordIfNeeded($user, $password);
+        if ($ssoTicket !== null) {
+            $this->oidcFlows->consumeTicket($ssoTicketRaw);
+        }
         return $this->loginIssuer->issue(
             $response,
             $user,
@@ -410,7 +444,8 @@ final class LoginAction
             $userAgent,
             $authContext,
             $issueTrustedTd,
-            (string) $user['password_hash'],
+            // Zřízení TOTP bez dalšího ověření dovoluje jen čerstvě ověřené heslo.
+            $ssoTicket === null ? (string) $user['password_hash'] : null,
         );
     }
 
@@ -436,6 +471,9 @@ final class LoginAction
      */
     private function rehashPasswordIfNeeded(array &$user, string $password): void
     {
+        if ($password === '') {
+            return;
+        }
         if (!$this->hasher->needsRehash((string) $user['password_hash'])) {
             return;
         }

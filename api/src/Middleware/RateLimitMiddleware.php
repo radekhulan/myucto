@@ -276,6 +276,9 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:oidc:' . sha1($path) . ':ip:' . $this->ipBucket($ip),
                 (int) ($rl['login_per_min_per_ip'] ?? 10) * 2, 60];
         }
+        if ($path === '/api/auth/oidc/apple/callback' && $method === 'POST') {
+            return ['rl:oidc-form:ip:' . $this->ipBucket($ip), (int) ($rl['login_per_min_per_ip'] ?? 10) * 2, 60];
+        }
         if (str_starts_with($path, '/api/auth/oidc/') && $method !== 'GET' && $userId > 0) {
             return ['rl:oidc-self:' . sha1($path) . ':user:' . $userId, 20, 60];
         }

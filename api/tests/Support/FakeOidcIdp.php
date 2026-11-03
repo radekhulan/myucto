@@ -63,6 +63,66 @@ final class FakeOidcIdp extends OidcHttpClient
         );
     }
 
+    public const GOOGLE_CLIENT = '1234567890-testclient.apps.googleusercontent.com';
+
+    /** @param list<string> $hostedDomains */
+    public static function googleProvider(array $hostedDomains = []): OidcProvider
+    {
+        return new OidcProvider(
+            id: 'google',
+            label: 'Google',
+            issuer: 'https://accounts.google.com',
+            authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+            tokenUrl: 'https://oauth2.googleapis.com/token',
+            jwksUrl: 'https://www.googleapis.com/oauth2/v3/certs',
+            clientId: self::GOOGLE_CLIENT,
+            clientSecret: 'test-secret',
+            scope: 'openid email profile',
+            tenantId: null,
+            allowGuests: true,
+            assurance: OidcProvider::FIRST_FACTOR,
+            responseMode: '',
+            issuerAliases: ['accounts.google.com'],
+            allowedHostedDomains: $hostedDomains,
+        );
+    }
+
+    public static function appleProvider(): OidcProvider
+    {
+        return new OidcProvider(
+            id: 'apple',
+            label: 'Apple',
+            issuer: 'https://appleid.apple.com',
+            authorizeUrl: 'https://appleid.apple.com/auth/authorize',
+            tokenUrl: 'https://appleid.apple.com/auth/token',
+            jwksUrl: 'https://appleid.apple.com/auth/keys',
+            clientId: 'cz.example.ucto.web',
+            clientSecret: '',
+            scope: 'openid email',
+            tenantId: null,
+            allowGuests: true,
+            assurance: OidcProvider::FIRST_FACTOR,
+            responseMode: 'form_post',
+        );
+    }
+
+    /** @param array<string,mixed> $override */
+    public function googleClaims(string $sub, string $nonce, array $override = []): array
+    {
+        $now = time();
+        return array_merge([
+            'iss' => 'https://accounts.google.com',
+            'aud' => self::GOOGLE_CLIENT,
+            'exp' => $now + 3600,
+            'iat' => $now,
+            'nonce' => $nonce,
+            'sub' => $sub,
+            'email' => 'tester@example.test',
+            'email_verified' => true,
+            'name' => 'Test Tester',
+        ], $override);
+    }
+
     /** @param array<string,mixed> $override */
     public function claims(string $oid, string $nonce, array $override = []): array
     {
@@ -101,12 +161,12 @@ final class FakeOidcIdp extends OidcHttpClient
         return parent::authorizationUrl($provider, $redirectUri, $state, $nonce, $codeVerifier, $extra);
     }
 
-    public function exchangeCode(OidcProvider $provider, string $code, string $redirectUri, string $codeVerifier): string
+    public function exchangeCode(OidcProvider $provider, string $code, string $redirectUri, string $codeVerifier): array
     {
         if ($this->nextToken !== null) {
-            return $this->nextToken;
+            return ['id_token' => $this->nextToken, 'access_token' => 'access'];
         }
-        return $this->sign(array_merge(['nonce' => $this->lastNonce], $this->nextClaims));
+        return ['id_token' => $this->sign(array_merge(['nonce' => $this->lastNonce], $this->nextClaims)), 'access_token' => 'access'];
     }
 
     public function fetchJwks(string $url): array

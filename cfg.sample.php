@@ -276,6 +276,28 @@ return [
                     'client_secret' => '', // ENV MYINVOICE_OIDC_ENTRA_CLIENT_SECRET
                     'allow_guests'  => false, // true = smí i hosté B2B tenantu
                 ],
+                // Google, Apple a Seznam nahrazují jen heslo. Druhý faktor (passkey,
+                // TOTP) se po návratu ověří v MyÚčto stejně jako po hesle, citlivé
+                // operace je potvrdit nemohou a firma je nemůže vynutit.
+                'google' => [
+                    'enabled'       => false,
+                    'client_id'     => '', // …apps.googleusercontent.com
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET
+                    'allowed_hosted_domains' => [], // jen účty Google Workspace těchto domén
+                ],
+                'apple' => [
+                    'enabled'          => false,
+                    'team_id'          => '', // Team ID (10 znaků)
+                    'key_id'           => '', // Key ID klíče Sign in with Apple
+                    'services_id'      => '', // Services ID = client_id webu
+                    'private_key'      => '', // obsah .p8, ENV MYINVOICE_OIDC_APPLE_PRIVATE_KEY
+                    'private_key_file' => '', // nebo cesta k .p8 mimo webroot
+                ],
+                'seznam' => [
+                    'enabled'       => false,
+                    'client_id'     => '',
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET
+                ],
             ],
         ],
     ],

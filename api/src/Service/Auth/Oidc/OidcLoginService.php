@@ -69,13 +69,19 @@ class OidcLoginService
             }
         }
         if ($purpose === OidcFlowStore::PURPOSE_STEP_UP) {
+            // Proof citlivé operace vydá jen poskytovatel, kterému instalace svěřuje
+            // celé přihlášení včetně MFA. Google, Apple ani Seznam druhý faktor
+            // nezaručují, takže by přihlášení u nich nahradilo passkey.
+            if (!$provider->isStrong()) {
+                throw new OidcException(OidcException::PROVIDER_DISABLED, 'Tento poskytovatel ověření citlivé operace neumí.');
+            }
             if ($userId === null || $stepUpOperation === null
                 || $this->identities->countForUser($userId, $provider->id) === 0
             ) {
                 throw new OidcException(OidcException::NOT_LINKED, 'Účet není propojený s poskytovatelem.');
             }
             // Ověří účel dřív, než uživatele pošleme k poskytovateli.
-            $this->stepUp->assertAllowed($userId, $stepUpOperation, 'oidc');
+            $this->stepUp->assertAllowed((int) $userId, (string) $stepUpOperation, 'oidc');
         }
 
         $flow = $this->flows->create(
@@ -159,8 +165,10 @@ class OidcLoginService
         $code = is_string($query['code'] ?? null) ? $query['code'] : '';
         $identity = null;
         try {
-            $idToken = $this->http->exchangeCode($provider, $code, $this->providers->redirectUri($provider), $flow->codeVerifier);
-            $identity = $this->verifier->verify($provider, $idToken, $flow->nonce);
+            $tokens = $this->http->exchangeCode($provider, $code, $this->providers->redirectUri($provider), $flow->codeVerifier);
+            $identity = $provider->protocol === 'oauth2'
+                ? $this->verifier->seznamIdentity($provider, $this->http->userinfo($provider, (string) $tokens['access_token']))
+                : $this->verifier->verify($provider, (string) $tokens['id_token'], $flow->nonce);
             return match ($flow->purpose) {
                 OidcFlowStore::PURPOSE_LOGIN => $this->completeLogin($provider, $flow, $identity, $ip, $userAgent),
                 OidcFlowStore::PURPOSE_LINK => $this->completeLink($flow, $identity, $currentSessionToken, $ip, $userAgent),

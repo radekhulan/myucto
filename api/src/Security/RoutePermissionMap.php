@@ -23,6 +23,9 @@ final class RoutePermissionMap
         '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
         // Přihlášení u poskytovatele identity: navigace prohlížeče bez session.
         '/api/auth/oidc/entra/login', '/api/auth/oidc/entra/callback',
+        '/api/auth/oidc/google/login', '/api/auth/oidc/google/callback',
+        '/api/auth/oidc/apple/login', '/api/auth/oidc/apple/callback',
+        '/api/auth/oidc/seznam/login', '/api/auth/oidc/seznam/callback',
         // ⚠️ „Public" jen ve smyslu BEZ SESSION. Doručení licence do spravované
         // instalace volá licenční server, který se sem přihlásit nemá čím;
         // autentizace je Ed25519 podpis obálky ověřený zabudovaným veřejným
@@ -59,6 +62,7 @@ final class RoutePermissionMap
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
         // Vlastní propojení s poskytovatelem identity a ověření přes něj.
         '/api/auth/oidc/identities', '/api/auth/oidc/entra/link', '/api/auth/oidc/entra/step-up',
+        '/api/auth/oidc/google/link', '/api/auth/oidc/apple/link', '/api/auth/oidc/seznam/link',
     ];
 
     /**

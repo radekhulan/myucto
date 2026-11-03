@@ -60,7 +60,7 @@ class IdTokenVerifier
             JWT::$timestamp = $previousTimestamp;
         }
 
-        if (($claims['iss'] ?? null) !== $provider->issuer) {
+        if (!in_array($claims['iss'] ?? null, [$provider->issuer, ...$provider->issuerAliases], true)) {
             throw self::invalid('Token vydal jiný vydavatel.');
         }
         $aud = $claims['aud'] ?? null;
@@ -85,8 +85,95 @@ class IdTokenVerifier
 
         return match ($provider->id) {
             'entra' => $this->entraIdentity($provider, $claims, $authTime),
+            'google' => $this->googleIdentity($provider, $claims, $authTime),
+            'apple' => $this->appleIdentity($provider, $claims, $authTime),
             default => throw self::invalid('Neznámý poskytovatel.'),
         };
+    }
+
+    /**
+     * Google: párovací klíč je `sub`. E-mail se bere jen ověřený (`email_verified`);
+     * u neověřeného by šlo pozvánku přijmout cizí adresou. Omezení na doménu
+     * Google Workspace se hlídá claimem `hd`, ne doménou e-mailu.
+     *
+     * @param array<string,mixed> $claims
+     */
+    private function googleIdentity(OidcProvider $provider, array $claims, ?int $authTime): ExternalIdentity
+    {
+        $sub = $claims['sub'] ?? null;
+        if (!is_string($sub) || preg_match('/^[0-9]{1,64}$/D', $sub) !== 1) {
+            throw self::invalid('Token nemá identifikátor uživatele.');
+        }
+        if ($provider->allowedHostedDomains !== []) {
+            $hd = is_string($claims['hd'] ?? null) ? strtolower($claims['hd']) : '';
+            if (!in_array($hd, $provider->allowedHostedDomains, true)) {
+                throw new OidcException(OidcException::NOT_LINKED, 'Účet Google není z povolené domény.');
+            }
+        }
+        $verified = ($claims['email_verified'] ?? false) === true || ($claims['email_verified'] ?? null) === 'true';
+        return new ExternalIdentity(
+            provider: $provider->id,
+            issuer: $provider->issuer,
+            tenantId: null,
+            subject: $sub,
+            email: $verified ? self::shortString($claims['email'] ?? null) : null,
+            name: self::shortString($claims['name'] ?? null),
+            authTime: $authTime,
+        );
+    }
+
+    /**
+     * Apple: párovací klíč je `sub` (stabilní pro tým vývojáře). E-mail může být
+     * anonymizační adresa privaterelay.appleid.com; jméno Apple v tokenu neposílá.
+     *
+     * @param array<string,mixed> $claims
+     */
+    private function appleIdentity(OidcProvider $provider, array $claims, ?int $authTime): ExternalIdentity
+    {
+        $sub = $claims['sub'] ?? null;
+        if (!is_string($sub) || preg_match('/^[A-Za-z0-9.\-_]{1,128}$/D', $sub) !== 1) {
+            throw self::invalid('Token nemá identifikátor uživatele.');
+        }
+        $verified = ($claims['email_verified'] ?? false) === true || ($claims['email_verified'] ?? null) === 'true';
+        return new ExternalIdentity(
+            provider: $provider->id,
+            issuer: $provider->issuer,
+            tenantId: null,
+            subject: $sub,
+            email: $verified ? self::shortString($claims['email'] ?? null) : null,
+            name: null,
+            authTime: $authTime,
+        );
+    }
+
+    /**
+     * Seznam nevydává id_token. Identita přichází z userinfo přes TLS po výměně
+     * kódu, kterou drží PKCE a tajemství klienta. Párovací klíč je `advert_user_id`.
+     *
+     * @param array<string,mixed> $userinfo
+     */
+    public function seznamIdentity(OidcProvider $provider, array $userinfo): ExternalIdentity
+    {
+        $id = $userinfo['advert_user_id'] ?? null;
+        if (is_int($id)) {
+            $id = (string) $id;
+        }
+        if (!is_string($id) || preg_match('/^[A-Za-z0-9\-_]{1,128}$/D', $id) !== 1) {
+            throw self::invalid('Seznam nevrátil identifikátor uživatele.');
+        }
+        $email = self::shortString($userinfo['email'] ?? null);
+        if ($email === null && is_string($userinfo['username'] ?? null) && is_string($userinfo['domain'] ?? null)) {
+            $email = self::shortString($userinfo['username'] . '@' . $userinfo['domain']);
+        }
+        $name = trim((string) ($userinfo['firstname'] ?? '') . ' ' . (string) ($userinfo['lastname'] ?? ''));
+        return new ExternalIdentity(
+            provider: $provider->id,
+            issuer: $provider->issuer,
+            tenantId: null,
+            subject: $id,
+            email: $email,
+            name: $name !== '' ? mb_substr($name, 0, 190) : null,
+        );
     }
 
     /** @param array<string,mixed> $claims */

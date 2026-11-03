@@ -468,6 +468,13 @@ final class Routes
             $g->get   ('/oidc/entra/callback', [\MyInvoice\Action\Auth\OidcAction::class, 'callback'])->setArgument('provider', 'entra');
             $g->post  ('/oidc/entra/link',     [\MyInvoice\Action\Auth\OidcAction::class, 'link'])->setArgument('provider', 'entra');
             $g->post  ('/oidc/entra/step-up',  [\MyInvoice\Action\Auth\OidcAction::class, 'stepUp'])->setArgument('provider', 'entra');
+            // Google, Apple a Seznam nahrazují jen heslo: přihlášení a propojení, ověření citlivé operace ne.
+            foreach (['google', 'apple', 'seznam'] as $oidcProvider) {
+                $g->get ('/oidc/' . $oidcProvider . '/login',    [\MyInvoice\Action\Auth\OidcAction::class, 'login'])->setArgument('provider', $oidcProvider);
+                $g->get ('/oidc/' . $oidcProvider . '/callback', [\MyInvoice\Action\Auth\OidcAction::class, 'callback'])->setArgument('provider', $oidcProvider);
+                $g->post('/oidc/' . $oidcProvider . '/link',     [\MyInvoice\Action\Auth\OidcAction::class, 'link'])->setArgument('provider', $oidcProvider);
+            }
+            $g->post  ('/oidc/apple/callback', [\MyInvoice\Action\Auth\OidcAction::class, 'formCallback'])->setArgument('provider', 'apple');
             $g->get   ('/oidc/identities',                [\MyInvoice\Action\Auth\OidcAction::class, 'identities']);
             $g->delete('/oidc/identities/{id:[0-9]+}',    [\MyInvoice\Action\Auth\OidcAction::class, 'unlink']);
             $g->post('/logout',          LogoutAction::class);

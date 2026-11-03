@@ -94,9 +94,10 @@ final class SessionManager
         $familyId = random_bytes(32);
         $lifetimeSeconds = $lifetimeDays * 86400;
         // Uživatele zablokovaného u poskytovatele identity nemáme jak odhlásit,
-        // takže sezení z jeho přihlášení platí kratší dobu. Platí i pro sezení
+        // takže sezení, kterým poskytovatel nahradil celé přihlášení (Entra ID),
+        // platí kratší dobu. U Googlu a dalších rozhoduje i místní druhý faktor. Platí i pro sezení
         // vlastní domény odvozené z canonical sezení (DomainLoginService).
-        if (SessionAuthContext::isExternalMethod($authContext->authMethod)) {
+        if (SessionAuthContext::isExternalMethod($authContext->authMethod) && $authContext->assuranceLevel === 'strong') {
             $lifetimeSeconds = min($lifetimeSeconds, $this->externalSessionLifetimeSeconds());
         }
         $expiresAt = $cutoff->epochSeconds + $lifetimeSeconds;

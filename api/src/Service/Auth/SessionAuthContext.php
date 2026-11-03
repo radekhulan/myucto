@@ -32,9 +32,6 @@ final readonly class SessionAuthContext
         if ($externalIdentityId !== null && $externalIdentityId <= 0) {
             throw new \InvalidArgumentException('Neplatné ID externí identity.');
         }
-        if (str_starts_with($authMethod, self::EXTERNAL_PREFIX) && $assuranceLevel !== 'strong') {
-            throw new \InvalidArgumentException('Session z poskytovatele identity musí být strong.');
-        }
     }
 
     public const EXTERNAL_PREFIX = 'oidc:';

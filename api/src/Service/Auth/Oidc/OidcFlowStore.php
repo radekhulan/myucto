@@ -17,6 +17,7 @@ class OidcFlowStore
     public const PURPOSE_LOGIN = 'login';
     public const PURPOSE_LINK = 'link';
     public const PURPOSE_STEP_UP = 'stepup';
+    public const PURPOSE_TICKET = 'ticket';
 
     private const PURPOSES = [self::PURPOSE_LOGIN, self::PURPOSE_LINK, self::PURPOSE_STEP_UP];
     private const TTL_SECONDS = 600;
@@ -26,6 +27,12 @@ class OidcFlowStore
     public static function isBindingShape(?string $value): bool
     {
         return is_string($value) && preg_match('/^[a-f0-9]{64}$/D', $value) === 1;
+    }
+
+    /** Cookie s vazbou rozběhnutého přihlášení na prohlížeč. */
+    public static function bindingCookieName(string $sessionCookieName): string
+    {
+        return str_starts_with($sessionCookieName, '__Host-') ? '__Host-myinvoice_oidc' : 'myinvoice_oidc';
     }
 
     public static function newBinding(): string
@@ -98,10 +105,10 @@ class OidcFlowStore
         $update = $pdo->prepare(
             'UPDATE oidc_login_flows
                 SET consumed_at = UTC_TIMESTAMP(6)
-              WHERE id = ? AND provider = ? AND browser_binding = ?
+              WHERE id = ? AND provider = ? AND browser_binding = ? AND purpose <> ?
                 AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)'
         );
-        $update->execute([$id, $provider, hash('sha256', (string) $browserBinding)]);
+        $update->execute([$id, $provider, hash('sha256', (string) $browserBinding), self::PURPOSE_TICKET]);
         if ($update->rowCount() !== 1) {
             throw new OidcException(OidcException::FLOW_INVALID, 'Přihlášení vypršelo nebo bylo zahájeno v jiném prohlížeči.');
         }
@@ -128,6 +135,79 @@ class OidcFlowStore
             inviteId: $row['invite_id'] !== null ? (int) $row['invite_id'] : null,
             createdAt: (int) $row['created_epoch'],
         );
+    }
+
+    /**
+     * Lístek po přihlášení u poskytovatele, který nahrazuje jen heslo. Platí
+     * deset minut a jen v prohlížeči, který přihlášení zahájil. Během té doby
+     * ho přihlášení použije opakovaně (heslo → passkey nebo TOTP), spotřebuje
+     * se až vydáním sezení ({@see consumeTicket()}).
+     */
+    public function createTicket(
+        string $provider,
+        #[\SensitiveParameter] string $browserBinding,
+        int $userId,
+        int $externalIdentityId,
+        ?string $returnTo,
+    ): string {
+        if (!self::isBindingShape($browserBinding) || $userId < 1 || $externalIdentityId < 1) {
+            throw new \InvalidArgumentException('Neplatný lístek přihlášení.');
+        }
+        $ticket = bin2hex(random_bytes(32));
+        $this->db->pdo()->prepare(
+            'INSERT INTO oidc_login_flows
+                (id, provider, purpose, nonce, code_verifier, browser_binding, return_to,
+                 user_id, external_identity_id, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6),
+                     UTC_TIMESTAMP(6) + INTERVAL ' . self::TTL_SECONDS . ' SECOND)'
+        )->execute([
+            hash('sha256', $ticket),
+            $provider,
+            self::PURPOSE_TICKET,
+            bin2hex(random_bytes(32)),
+            '-',
+            hash('sha256', $browserBinding),
+            $returnTo,
+            $userId,
+            $externalIdentityId,
+        ]);
+        return $ticket;
+    }
+
+    /**
+     * @return array{provider:string,user_id:int,external_identity_id:int,return_to:?string}|null
+     */
+    public function peekTicket(#[\SensitiveParameter] string $ticket, #[\SensitiveParameter] ?string $browserBinding): ?array
+    {
+        if (preg_match('/^[a-f0-9]{64}$/D', $ticket) !== 1 || !self::isBindingShape($browserBinding)) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT provider, user_id, external_identity_id, return_to
+               FROM oidc_login_flows
+              WHERE id = ? AND purpose = ? AND browser_binding = ?
+                AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6)
+              LIMIT 1'
+        );
+        $stmt->execute([hash('sha256', $ticket), self::PURPOSE_TICKET, hash('sha256', (string) $browserBinding)]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false || $row['user_id'] === null || $row['external_identity_id'] === null) {
+            return null;
+        }
+        return [
+            'provider' => (string) $row['provider'],
+            'user_id' => (int) $row['user_id'],
+            'external_identity_id' => (int) $row['external_identity_id'],
+            'return_to' => $row['return_to'] !== null ? (string) $row['return_to'] : null,
+        ];
+    }
+
+    public function consumeTicket(#[\SensitiveParameter] string $ticket): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE oidc_login_flows SET consumed_at = UTC_TIMESTAMP(6)
+              WHERE id = ? AND purpose = ? AND consumed_at IS NULL'
+        )->execute([hash('sha256', $ticket), self::PURPOSE_TICKET]);
     }
 
     public function purgeExpired(): int

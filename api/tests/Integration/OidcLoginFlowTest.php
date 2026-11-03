@@ -190,6 +190,51 @@ final class OidcLoginFlowTest extends TestCase
         self::assertFalse($this->policy->sessionAllowedForSupplier($this->supplierId, 'password', null));
     }
 
+    public function testGoogleLoginLinksByInviteAndYieldsBrowserBoundTicket(): void
+    {
+        $invite = $this->invites->issue($this->userId, 'google', null);
+        $binding = OidcFlowStore::newBinding();
+        $url = $this->service->start(FakeOidcIdp::googleProvider(), OidcFlowStore::PURPOSE_LOGIN, $binding, '/invoices', inviteToken: $invite);
+        $this->idp->nextClaims = $this->idp->googleClaims('424242', (string) $this->idp->lastNonce, ['email' => $this->email]);
+        $result = $this->service->complete(
+            FakeOidcIdp::googleProvider(),
+            ['state' => self::queryParam($url, 'state'), 'code' => 'c'],
+            $binding,
+            null,
+            self::IP,
+            self::UA,
+        );
+        self::assertSame($this->userId, (int) $result->user['id']);
+
+        $flows = new OidcFlowStore($this->db);
+        $ticket = $flows->createTicket('google', $binding, $this->userId, (int) $result->externalIdentityId, '/invoices');
+        self::assertNull($flows->peekTicket($ticket, OidcFlowStore::newBinding()), 'Lístek z cizího prohlížeče.');
+        self::assertSame($this->userId, $flows->peekTicket($ticket, $binding)['user_id'] ?? null);
+        // Opakované čtení je povolené (heslo → druhý faktor), spotřebuje ho až vydání sezení.
+        self::assertNotNull($flows->peekTicket($ticket, $binding));
+        $flows->consumeTicket($ticket);
+        self::assertNull($flows->peekTicket($ticket, $binding));
+
+        // Lístek nejde podstrčit jako state návratu od poskytovatele.
+        $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->service->complete(
+            FakeOidcIdp::googleProvider(), ['state' => $ticket, 'code' => 'c'], $binding, null, self::IP, self::UA,
+        ));
+    }
+
+    public function testFirstFactorProviderCannotStartStepUp(): void
+    {
+        $session = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::basic('password'));
+        $this->expectOidcError(OidcException::PROVIDER_DISABLED, fn () => $this->service->start(
+            FakeOidcIdp::googleProvider(),
+            OidcFlowStore::PURPOSE_STEP_UP,
+            OidcFlowStore::newBinding(),
+            '/settings',
+            $this->userId,
+            $session['token'],
+            MfaStepUpService::OPERATION_EPO_CERTIFICATE,
+        ));
+    }
+
     public function testUnlinkedIdentityIsRejectedEvenWithMatchingEmail(): void
     {
         $email = (string) $this->db->pdo()->query('SELECT email FROM users WHERE id = ' . $this->userId)->fetchColumn();

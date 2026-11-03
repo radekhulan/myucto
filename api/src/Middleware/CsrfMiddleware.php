@@ -39,6 +39,9 @@ final class CsrfMiddleware implements MiddlewareInterface
         '/api/auth/domain-login/exchange',
         '/api/auth/forgot',
         '/api/auth/reset',
+        // Apple vrací výsledek přihlášení POSTem ze svého webu (form_post). Akce
+        // nic nemění, jen přesměruje na GET návrat, kde se ověří state i vazba.
+        '/api/auth/oidc/apple/callback',
     ];
 
     public function __construct(

@@ -62,7 +62,7 @@ class LoginPolicyService
             return null;
         }
         $provider = $row['provider'] ?? null;
-        return is_string($provider) && $this->providers->get($provider) !== null ? $provider : null;
+        return is_string($provider) && $this->providers->get($provider)?->isStrong() === true ? $provider : null;
     }
 
     /**
@@ -83,7 +83,7 @@ class LoginPolicyService
             $this->supplierCache[$supplierId] = is_string($provider) ? $provider : null;
         }
         $provider = $this->supplierCache[$supplierId];
-        return $provider !== null && $this->providers->get($provider) !== null ? $provider : null;
+        return $provider !== null && $this->providers->get($provider)?->isStrong() === true ? $provider : null;
     }
 
     /**

@@ -57,6 +57,7 @@ final class OidcAction
         private readonly Config $config,
         private readonly ClockInterface $clock,
         private readonly ResponseFactory $responses,
+        private readonly OidcFlowStore $flows,
     ) {}
 
     /** GET /api/auth/oidc/{provider}/login */
@@ -126,6 +127,26 @@ final class OidcAction
             );
         }
 
+        // Poskytovatel, který nahrazuje jen heslo: sezení ještě nevzniká. Prohlížeč
+        // dostane jednorázový lístek a projde s ním běžné přihlášení, kde se ověří
+        // passkey, TOTP nebo vynucené MFA stejně jako po hesle (LoginAction).
+        // Lístek je ve fragmentu (do logů se nedostane) a platí jen s vazbou
+        // na tento prohlížeč, proto se vazební cookie tady nemaže.
+        if (!$provider->isStrong()) {
+            $ticket = $this->flows->createTicket(
+                $provider->id,
+                (string) $binding,
+                (int) ($result->user['id'] ?? 0),
+                (int) $result->externalIdentityId,
+                $result->returnTo,
+            );
+            $fragment = 'sso_ticket=' . $ticket . '&sso_provider=' . rawurlencode($provider->id);
+            if ($result->returnTo !== null) {
+                $fragment .= '&return_to=' . rawurlencode($result->returnTo);
+            }
+            return $this->redirect(self::ERROR_PATH . '#' . $fragment, [$this->bindingCookie((string) $binding)]);
+        }
+
         // Přihlášení nahrazuje sezení, se kterým prohlížeč přišel (zamčené,
         // z hesla, cizího uživatele). Staré se zruší, ať nezůstane viset.
         if ($sessionToken !== null) {
@@ -144,6 +165,33 @@ final class OidcAction
             ),
         );
         return $this->redirect($result->returnTo ?? '/', [...$issued->getHeader('Set-Cookie'), $clearBinding]);
+    }
+
+    /**
+     * POST /api/auth/oidc/apple/callback — Apple vrací výsledek POSTem
+     * (`response_mode=form_post`). Cross-site POST nenese cookie se SameSite=Lax,
+     * takže vazbu na prohlížeč tady ověřit nejde. Odpověď jen přesměruje na GET
+     * návrat se stejnými parametry, kde už cookie přijde a proběhne celé ověření.
+     * Kód je jednorázový a bez PKCE verifieru i tajemství klienta nepoužitelný,
+     * stejně jako u poskytovatelů, kteří ho posílají přímo v query.
+     */
+    public function formCallback(Request $request, Response $response, array $args): Response
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $query = [];
+        foreach (['state', 'code', 'error'] as $key) {
+            $value = $body[$key] ?? null;
+            if (is_string($value) && $value !== '' && strlen($value) <= 8192
+                && preg_match('/[\x00-\x1f\x7f]/', $value) !== 1
+            ) {
+                $query[$key] = $value;
+            }
+        }
+        $provider = preg_replace('/[^a-z]/', '', (string) ($args['provider'] ?? ''));
+        return $this->responses->createResponse(303)
+            ->withHeader('Location', '/api/auth/oidc/' . $provider . '/callback?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986))
+            ->withHeader('Cache-Control', 'no-store')
+            ->withHeader('Referrer-Policy', 'no-referrer');
     }
 
     /** POST /api/auth/oidc/{provider}/link — vrací adresu poskytovatele */
@@ -323,7 +371,7 @@ final class OidcAction
 
     private function bindingCookieName(): string
     {
-        return str_starts_with($this->sessionCookieName(), '__Host-') ? '__Host-myinvoice_oidc' : 'myinvoice_oidc';
+        return OidcFlowStore::bindingCookieName($this->sessionCookieName());
     }
 
     private function sessionCookieName(): string
