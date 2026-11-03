@@ -344,8 +344,12 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['GET', '/api/codebooks/currencies'],
+      ['GET', '/api/clients/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Upravit hlavičku konceptu přijaté faktury',
     description:
       'Změní hlavičku KONCEPTU přijaté faktury: dodavatele, číslo dokladu, data, měnu, druh dokladu, '
@@ -433,8 +437,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'add_purchase_invoice_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Přidat položku na koncept přijaté faktury',
     description:
       'Přidá položku na KONCEPT přijaté faktury. Existující položky zůstanou beze změny včetně '
@@ -473,8 +479,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Upravit položku konceptu přijaté faktury',
     description:
       'Změní jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row` '
@@ -542,8 +550,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'remove_purchase_invoice_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Odebrat položku z konceptu přijaté faktury',
     description:
       'Odebere jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row`. '
@@ -773,8 +783,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_purchase_advance_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k vyúčtování přijaté faktury',
     description:
       'Nespárované zálohové faktury a samostatné daňové doklady k záloze od stejného dodavatele, '
@@ -785,8 +796,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_settlement_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/settlement-candidates'],
+    ],
     title: 'Faktury k vyúčtování zálohy',
     description: 'Opačný směr: z detailu zálohy nepropojené konečné faktury stejného dodavatele.',
     inputSchema: schema({ id: id('ID zálohové faktury.') }, ['id']),
@@ -840,8 +852,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_purchase_invoice_payment',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/payment-qr'],
+    ],
     title: 'Platební údaje přijaté faktury',
     description:
       'Účet dodavatele, částka k úhradě, měna a variabilní symbol pro zaplacení přijaté faktury. '
@@ -1017,8 +1030,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_expense_categories',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/expense-categories'],
+    ],
     title: 'Kategorie nákladů',
     description: 'Číselník kategorií nákladů s jejich ID pro `expense_category_id` přijaté faktury.',
     inputSchema: schema({ include_archived: bool('Vrátit i archivované kategorie.') }),

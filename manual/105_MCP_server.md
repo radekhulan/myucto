@@ -146,6 +146,40 @@ zakázek a klientů; přidání práce navíc čtení nastavení firmy pro dohle
 Platí to i při přímém zadání ID faktury a sazby. Výkaz lze přes MCP upravovat
 pouze u konceptu faktury. Seznam sazeb DPH vyžaduje čtení nastavení firmy.
 
+Klientské připojení podporuje také seznam měn a nacenění položky ceníku pro
+odběratele, úpravy hlavičky a položek konceptu přijaté faktury, nahrávání
+příloh vydané faktury nebo PDF přijaté faktury a import přijaté faktury ze
+souboru. Seznam měn vyžaduje čtení nastavení firmy, ceníku, skladu nebo zakázek;
+nacenění položky čtení ceníku, vydaných faktur nebo opakované fakturace. Úprava hlavičky přijatého
+konceptu vyžaduje také čtení klientů a přístup k číselníku měn. Nahrazení již
+archivovaného PDF vyžaduje výslovné potvrzení. Import přijaté faktury ze souboru
+zpracovává ISDOC, ISDOCX a PDF s vloženým ISDOC. K importu je potřeba právo
+vytvořit přijatou fakturu; k úpravám a nahrávání právo zápisu příslušné agendy.
+Všechny tyto zápisové nástroje vyžadují také token pro čtení a zápis.
+
+S čtecím tokenem a právem čtení banky lze zobrazit také zůstatky bankovních
+účtů a návrhy párování výpisu. Návrhy server filtruje podle práv k dotčeným
+dokladům. Čtení pravidelné fakturace zpřístupňuje historii faktur vytvořených
+ze šablony. Čtení skladu umožňuje rychlé hledání zboží, množství vybraných karet
+ve skladech určených k prodeji (bez odečtení rezervací) a seznam nebo detail
+skladů. Hodnotu zásob skladu klientská role nevidí.
+
+Čtení skladu zpřístupňuje také množství po odečtení rezervací přes
+`stock_quantities`, skladové lokace, balení a převody jednotek a aktuální
+zásobu šarží nebo sériových čísel včetně expirace. Klientská odpověď obsahuje
+jen souhrnná množství na cestě a u dodavatelů, ne zdrojové objednávky, nabídky
+dodavatelů ani historii pohybů šarží a sériových čísel. S právem čtení přijatých faktur lze zobrazit platební údaje dokladu;
+MCP vrací údaje bez obrázku QR kódu a platbu neprovádí. Seznam kategorií
+nákladů vyžaduje čtení nastavení firmy.
+
+Čtení vydaných faktur zpřístupňuje přehled záloh vhodných k propojení s fakturou,
+konečných faktur vhodných k propojení se zálohou a záloh s částkou dostupnou
+k postupnému čerpání na konceptu faktury. Umožňuje také náhled úroku z prodlení
+k vydané faktuře. Čtení přijatých faktur zpřístupňuje obdobné přehledy záloh
+a vyúčtovacích faktur od dodavatele. Tyto nástroje pouze zobrazují podklady;
+propojení dokladů, čerpání zálohy a vytvoření penalizační faktury se přes ně
+neprovádí.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou

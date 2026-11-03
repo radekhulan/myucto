@@ -2240,8 +2240,9 @@ export const TOOLS = [
   },
   {
     name: 'list_currencies',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/codebooks/currencies'],
+    ],
     title: 'Měny dokladů',
     description:
       'Měny firmy s jejich ID. `currency_id` z tohoto seznamu patří do objednávek '
@@ -3466,8 +3467,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'search_products',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/items/search'],
+    ],
     title: 'Rychlé hledání zboží',
     description:
       'Našeptávač nad skladovými kartami — hledá podle názvu, kódu/SKU a EAN. '
@@ -3932,8 +3934,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_product_packaging',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/items/{id}/packaging'],
+    ],
     title: 'Balení zboží',
     description:
       'Nadřazené jednotky karty (karton, paleta) — kód balení, poměr k základní jednotce '
@@ -4545,11 +4548,12 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_warehouses',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/warehouses'],
+    ],
     title: 'Seznam skladů',
     description:
-      'Sklady firmy s jejich ID a aktuální hodnotou zásob. ID se používá ve filtrech '
+      'Sklady firmy s jejich ID a aktuální hodnotou zásob (hodnotu vidí jen interní role). ID se používá ve filtrech '
       + 'ostatních skladových nástrojů a na skladových dokladech.',
     inputSchema: schema({ active_only: bool('Jen aktivní sklady.') }),
     write: false,
@@ -4557,10 +4561,11 @@ export const TOOLS = [
   },
   {
     name: 'get_warehouse',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/warehouses/{id}'],
+    ],
     title: 'Detail skladu',
-    description: 'Jeden sklad včetně aktuální hodnoty zásob.',
+    description: 'Jeden sklad včetně aktuální hodnoty zásob (hodnotu vidí jen interní role).',
     inputSchema: schema({ id: int('ID skladu.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/stock/warehouses/${seg(a.id)}`, null, tool),
@@ -4655,12 +4660,13 @@ export const TOOLS = [
   },
   {
     name: 'stock_availability',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/availability'],
+    ],
     title: 'Dostupnost konkrétního zboží',
     description:
-      'Dostupné množství pro vyjmenované karty — na rozdíl od `stock_levels` počítá '
-      + 'i s rezervacemi. Pro dotazy „můžeme to hned expedovat?".',
+      'Množství vyjmenovaných karet ve skladech určených k prodeji. Rezervace neodečítá; '
+      + 'prodejné množství po rezervacích vrací `stock_quantities`.',
     inputSchema: schema({
       item_ids: {
         type: 'array',
@@ -4718,21 +4724,24 @@ export const TOOLS = [
   },
   {
     name: 'get_product_tracking',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/items/{id}/tracking'],
+    ],
     title: 'Šarže a sériová čísla zboží',
     description:
       'Režim sledování karty (`none`, `lot` šarže, `serial` sériová čísla), převodní jednotky '
       + 'šarží, aktuální rozpis zásoby po šaržích a sériových číslech včetně expirace a úplná '
-      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali".',
+      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali". '
+      + 'Klientská role dostane režim, jednotky a aktuální zásobu; historie pohybů je pro ni prázdná.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/tracking`, null, tool),
   },
   {
     name: 'list_stock_locations',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/locations'],
+    ],
     title: 'Skladové lokace',
     description: 'Lokace (regály, pozice) uvnitř skladů firmy, volitelně jen jednoho skladu.',
     inputSchema: schema({ warehouse_id: int('Jen lokace tohoto skladu.', { minimum: 1 }) }),
@@ -4884,15 +4893,17 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'stock_quantities',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/stock/quantities'],
+    ],
     title: 'Množství ve třech dimenzích',
     description:
       'Pro každé zboží vrátí `on_hand` (skladem), `reserved` (drží vystavená faktura), '
       + '`sellable` = skladem − rezervováno, `in_transit` (objednáno a na cestě), '
       + '`at_vendor` (co hlásí dodavatelé) a `available_to_promise` = skladem − '
       + 'rezervováno + na cestě. K tomu rozpad po skladech, seznam objednávek, '
-      + 'které zboží vezou, a nabídky dodavatelů.\n\n'
+      + 'které zboží vezou, a nabídky dodavatelů. Klientská role nedostane seznam '
+      + 'zdrojových objednávek ani nabídky dodavatelů.\n\n'
       + 'Zákazníkovi slibuj `sellable`, ne `on_hand` — jinak prodáš kus, který už '
       + 'někdo koupil. `available_to_promise` je interní číslo pro plánování nákupu, '
       + 'protože zahrnuje i to, co teprve dorazí; může vyjít i záporně (prodalo se '
@@ -5827,8 +5838,9 @@ export const TOOLS = [
   },
   {
     name: 'resolve_price_list_item',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/price-list-items/{id}/resolve'],
+    ],
     title: 'Cena položky ceníku pro odběratele',
     description:
       'Výsledná jednotková cena jedné položky ceníku v měně dokladu: individuální cena '

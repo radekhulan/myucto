@@ -30,22 +30,23 @@ test('neúplná deklarace ani zápis označený jako čtení neprojdou', () => {
 
 /** Jen syntetické odpovědi; každé volání se zaznamená i tehdy, když run zachytí jeho chybu. */
 class RecordingClient {
-  constructor(name, { status = 'draft', projectRate = 1200, clientRate = 1100, previousRate = 1000 } = {}) {
+  constructor(name, { status = 'draft', projectRate = 1200, clientRate = 1100, previousRate = 1000, pdfPath = null } = {}) {
     this.name = name;
     this.calls = [];
     this.status = status;
     this.projectRate = projectRate;
     this.clientRate = clientRate;
     this.previousRate = previousRate;
+    this.pdfPath = pdfPath;
   }
 
   async call(method, path) {
     this.calls.push([method, `/api${path}`]);
     const item = { id: 7, description: 'Syntetická položka', quantity: 2, unit: 'ks', unit_price_without_vat: 100, vat_rate_id: 7 };
     const row = { id: 7, name: 'Syntetický projekt', company_name: 'Syntetický klient', status: this.status,
-      invoice_type: 'invoice', document_kind: 'invoice', client_id: 7, project_id: 7, issue_date: '2026-01-01',
+      invoice_type: 'invoice', document_kind: 'invoice', client_id: 7, vendor_id: 7, project_id: 7, issue_date: '2026-01-01',
       items: [item, { ...item, id: 8 }], next_run_date: '2026-02-01', currency: 'CZK', currency_id: 7,
-      ic: '00000000', hourly_rate: this.projectRate };
+      ic: '00000000', hourly_rate: this.projectRate, pdf_path: this.pdfPath };
     if (method !== 'GET') return row;
     if (path === '/clients') return { data: [{ ...row, ic: '', dic: '' }] };
     if (path === '/projects') return { data: [row] };
@@ -67,6 +68,7 @@ class RecordingClient {
   patch(path) { return this.call('PATCH', path); }
   del(path) { return this.call('DELETE', path); }
   postRead(path) { return this.call('POST', path); }
+  upload(path) { return this.call('POST', path); }
   async download(path) {
     await this.call('GET', path);
     return { filename: 'synthetic.pdf', content_type: 'application/pdf', size: 3, content_base64: 'UERG' };
@@ -89,7 +91,8 @@ function basicArgs(tool) {
     street: 'Syntetická 1', city: 'Praha', zip: '11000', currency: 'CZK', hours: 2, rate: 1500,
     quantity: 2, unit_price_without_vat: 100, unit_price: 100, vat_rate_id: 7, client_id: 7,
     payment_due_days: 14, registration: 'SYNTHETIC', car_id: 7, trip_date: '2026-01-01', category_id: 7,
-    distance_km: 10, fueled_date: '2026-01-01', amount_with_vat: 100 };
+    distance_km: 10, fueled_date: '2026-01-01', amount_with_vat: 100,
+    filename: 'synthetic.pdf', content_base64: Buffer.from('%PDF-synthetic').toString('base64') };
   return { ...sample(tool.inputSchema), ...Object.fromEntries(Object.entries(common).filter(([key]) => key in tool.inputSchema.properties)) };
 }
 
@@ -114,6 +117,19 @@ function scenarios(tool) {
   if (tool.name === 'create_client') cases.push({ args: { ...args, ic: '00000000', dic: 'CZ00000000' } });
   if (tool.name === 'update_client') cases.push({ args: { ...args, refresh_from_ares: true } });
   if (tool.name === 'create_purchase_invoice') cases.push({ args: { ...args, currency: 'EUR' } });
+  if (tool.name === 'update_purchase_invoice') {
+    cases.push({ args: { id: args.id, note: 'Syntetická poznámka' } });
+    cases.push({ args: { id: args.id, currency_id: 8 } });
+    cases.push({ args: { id: args.id, vendor_id: 9 } });
+  }
+  if (['update_purchase_invoice_item', 'remove_purchase_invoice_item'].includes(tool.name)) {
+    const { item_id: unused, ...rest } = args;
+    cases.push({ args: rest });
+  }
+  if (tool.name === 'upload_purchase_invoice_pdf') cases.push({ args, options: { pdfPath: 'synthetic.pdf' } });
+  if (tool.name === 'import_purchase_invoice_file') cases.push({ args: {
+    filename: 'synthetic.isdoc', content_base64: Buffer.from('<Invoice/>').toString('base64'),
+  } });
   if (tool.name === 'add_work_report_entry') {
     const { rate: unused, ...rest } = args;
     for (const options of [{}, { previousRate: 0 }, { previousRate: 0, projectRate: 0 }, { previousRate: 0, projectRate: 0, clientRate: 0 }]) {

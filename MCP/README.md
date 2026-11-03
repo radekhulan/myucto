@@ -216,8 +216,21 @@ a vazba na firmu ověřují znovu v API.
 nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář
 v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným operacím a
 zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
-klientské nástroje, výkazy práce a sazby DPH; ostatní nástroje zůstávají výslovně
-vyloučené, dokud nebudou převedené se stejným ověřením závislostí.
+klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpravy
+přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
+strukturovaný import. Ke čtení jsou také zůstatky bankovních účtů, návrhy
+párování výpisů, historie faktur ze šablony, hledání zboží, jeho dostupnost
+a seznam/detail skladů. Čtení skladu zpřístupňuje i `stock_quantities`, lokace,
+balení a sledování šarží/sériových čísel. Server klientovi nevrací zdrojové
+objednávky, nabídky dodavatelů ani historii pohybů šarží/sériových čísel.
+Platební údaje přijaté faktury vyžadují její čtení; obrázek QR se do MCP
+nepředává. Kategorie nákladů vyžadují čtení nastavení firmy.
+Čtení vydaných faktur zpřístupňuje i přehledy kandidátů k propojení záloh,
+konečných faktur, záloh k postupnému čerpání a náhled úroku z prodlení. Čtení
+přijatých faktur zpřístupňuje jejich kandidáty záloh a vyúčtování. Jde pouze
+o GET; zápisové nástroje pro vazby, čerpání a vytvoření penalizace nejsou převedené.
+Ostatní nástroje zůstávají výslovně vyloučené, dokud
+nebudou převedené se stejným ověřením závislostí.
 
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
 pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník
