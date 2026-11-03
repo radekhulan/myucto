@@ -57,7 +57,7 @@ test('login and the router guard agree on what "authenticated" means', () => {
   assert.match(router, /if \(requiresAuth && !auth\.isAuthenticated\) \{[\s\S]*?await auth\.refresh\(\)[\s\S]*?if \(!auth\.isAuthenticated\) \{[\s\S]*?name: 'login'/)
   assert.match(
     login,
-    /const freshDomainLogin = hasPendingCanonicalDomainLogin\(\) && !canonicalDomainLoginSessionCsrf\(\)\s+if \(!freshDomainLogin\) await auth\.refresh\(\)\s+if \(!freshDomainLogin && auth\.isAuthenticated\) \{/,
+    /const freshDomainLogin = hasPendingCanonicalDomainLogin\(\) && !canonicalDomainLoginSessionCsrf\(\)\s+if \(!freshDomainLogin\) await auth\.refresh\(\)\s+(?:\/\/[^\n]*\n\s*)*if \(!freshDomainLogin && auth\.isAuthenticated(?: && !ssoRequiredFromQuery && ssoTicket\.value === null)?\) \{/,
   )
   assert.doesNotMatch(login, /const stillAuthed = await auth\.refresh\(\)/)
 })
@@ -123,7 +123,7 @@ test('a redirect loop between / and /login is broken instead of spinning forever
   assert.match(login, /if \(loginRedirectLoopDetected\(\)\) \{[\s\S]*?error\.value = t\('auth\.redirect_loop_detected'\)[\s\S]*?return/)
   // Pojistka musí stát PŘED automatickým návratem na `/`, jinak neutne nic.
   assert.ok(
-    login.indexOf('loginRedirectLoopDetected()') < login.indexOf('if (!freshDomainLogin && auth.isAuthenticated) {'),
+    login.indexOf('loginRedirectLoopDetected()') < login.indexOf('if (!freshDomainLogin && auth.isAuthenticated'),
     'kontrola smyčky musí předcházet automatickému redirectu',
   )
   assert.match(
