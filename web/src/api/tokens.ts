@@ -10,6 +10,7 @@ export interface ApiToken {
   scope: 'read' | 'read_write'
   /** Smí v Dokumentech vidět evidenci mzdových podání (doručenky, protokoly). */
   allow_payroll_submission_docs: boolean
+  allow_bank_account_write?: boolean
   /** Úhrady faktur z tokenu bez okolností platby eviduje EET externí systém (e-shop). */
   eet_external_by_default?: boolean
   last_used_at: string | null
@@ -87,6 +88,7 @@ export interface CreateTokenPayload {
    * exekuce, insolvence, výplatní pásky — zůstává jen pro přihlášenou relaci.
    */
   allow_payroll_submission_docs?: boolean
+  allow_bank_account_write?: boolean
   totp_code?: string
   step_up_token?: string
 }

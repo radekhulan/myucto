@@ -69,6 +69,7 @@ final class DeleteTokenAction
                 'prefix' => $deleted['prefix'],
                 'scope'  => $deleted['scope'],
                 'allow_payroll_submission_docs' => $deleted['allow_payroll_submission_docs'],
+                'allow_bank_account_write' => $deleted['allow_bank_account_write'],
                 // Mazání aktivního tokenu je zároveň jeho odstřižením — integrace
                 // přestane fungovat okamžitě a v přehledu po ní nezbyde stopa.
                 'was_revoked' => $deleted['revoked_at'] !== null,

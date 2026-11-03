@@ -1132,7 +1132,8 @@
         "2228_other_item_kinds.sql",
         "2229_work_report_display_options.sql",
         "2230_journal_lines_cost_center_index.sql",
-        "2231_unit_prices_six_decimals.sql"
+        "2231_unit_prices_six_decimals.sql",
+        "2232_api_token_bank_account_write.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2421,6 +2422,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "allow_bank_account_write": "tinyint(1) NOT NULL DEFAULT 0",
                 "allow_payroll_submission_docs": "tinyint(1) NOT NULL DEFAULT 0",
                 "audience": "enum('api','mcp') NOT NULL DEFAULT 'api'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",

@@ -38,6 +38,7 @@ const form = ref({
   // Least-privilege i tady: mzdovou evidenci podání token nedostane, dokud
   // ji člověk vědomě nezaškrtne.
   allow_payroll_submission_docs: false,
+  allow_bank_account_write: false,
   totp_code: '',
 })
 
@@ -61,6 +62,8 @@ const needsTotp = computed(() => auth.user?.totp_enabled === true)
 const canManageTokens = computed(() => auth.canWrite('profile.tokens'))
 // Token bez expirace smí razit jen superadmin (CreateTokenAction) — ostatním
 // volbu vůbec nenabízíme, ať nedostanou 403 až po step-up ověření.
+// Změnu bankovního spojení tokenem smí udělit jen správce firmy (backend: isCompanyAdmin).
+const canGrantBankAccountWrite = computed(() => auth.isCompanyAdminRole === true)
 const canNeverExpire = computed(() => auth.user?.is_superadmin === true)
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true
@@ -90,6 +93,7 @@ function openCreate() {
     expires_at: '',
     never_expires: false,
     allow_payroll_submission_docs: false,
+    allow_bank_account_write: false,
     totp_code: '',
   }
   createError.value = ''
@@ -158,6 +162,10 @@ async function submitCreate() {
       expires_at: form.value.expires_at || null,
       never_expires: canNeverExpire.value && !form.value.expires_at && form.value.never_expires,
       allow_payroll_submission_docs: form.value.allow_payroll_submission_docs,
+      // Jen read_write a jen správce firmy — backend obojí ověří znovu.
+      allow_bank_account_write: canGrantBankAccountWrite.value
+        && form.value.scope === 'read_write'
+        && form.value.allow_bank_account_write,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
     })
@@ -401,6 +409,11 @@ onMounted(load)
                   :title="t('api_tokens.payroll_docs_desc')">
                   {{ t('api_tokens.payroll_docs_badge') }}
                 </span>
+                <span v-if="tk.allow_bank_account_write"
+                  class="px-2 py-0.5 rounded text-xs font-medium bg-danger-50 text-danger-600"
+                  :title="t('api_tokens.bank_account_write_desc')" data-token-bank-account-badge>
+                  {{ t('api_tokens.bank_account_write_badge') }}
+                </span>
                 <button v-if="canManageTokens && !tk.is_revoked && tk.scope === 'read_write'" type="button"
                   @click="toggleEetExternal(tk)" data-token-eet-external
                   class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap"
@@ -582,6 +595,19 @@ onMounted(load)
             <span>
               <strong>{{ t('api_tokens.payroll_docs') }}</strong>
               <span class="text-neutral-500"> - {{ t('api_tokens.payroll_docs_desc') }}</span>
+            </span>
+          </label>
+
+          <!-- ⚠️ Výchozí stav je VYPNUTO: token bankovní spojení firmy jen čte.
+               Zaškrtnutím token smí měnit číslo účtu / IBAN / BIC měnových účtů
+               (PUT /api/v1/settings/currencies/{id}); každá změna jde do auditu
+               a vlastníkovi tokenu přijde e-mail. -->
+          <label v-if="canGrantBankAccountWrite" class="flex items-start gap-2 text-sm">
+            <input type="checkbox" v-model="form.allow_bank_account_write" class="mt-0.5"
+              :disabled="form.scope !== 'read_write'" data-token-bank-account-write />
+            <span>
+              <strong>{{ t('api_tokens.bank_account_write') }}</strong>
+              <span class="text-neutral-500"> - {{ t('api_tokens.bank_account_write_desc') }}</span>
             </span>
           </label>
 

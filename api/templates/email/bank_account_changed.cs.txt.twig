@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Změna bankovního spojení firmy
+------------------------------
+
+Dobrý den{% if name %} {{ name }}{% endif %},
+
+API token {{ token_name }}{% if token_prefix %} ({{ token_prefix }}…){% endif %} právě změnil bankovní spojení měnového účtu {{ currency_code }}. Nové údaje se budou tisknout na faktury a do QR platby.
+
+{% for row in changes %}
+- {{ row.field }}: {{ row.before|default('—') }} → {{ row.after|default('—') }}
+{% endfor %}
+
+Čas změny: {{ changed_at }}{% if ip %} · IP adresa: {{ ip }}{% endif %}
+
+Pokud jste změnu neprováděli, token ihned zrušte v sekci API tokeny a bankovní účet opravte v Peníze → Bankovní účty.
+{% endblock %}

@@ -210,6 +210,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // Měnové účty nesou bankovní spojení firmy (číslo účtu, IBAN, BIC), které
         // se tiskne na faktury a do QR platby. Token je smí jen číst; změnu
         // příjemce plateb dělá správce ve webovém rozhraní (openapi: mutace jen přes UI).
+        // Jedinou výjimkou je výslovně udělená schopnost tokenu
+        // `allow_bank_account_write` — viz isBankAccountWriteGrant().
         '#^/api/settings/currencies(/|$)#',
         '#^/api/bank-transactions/[0-9]+/unmatch$#',
         '#^/api/accounting(/|$)#',
@@ -283,6 +285,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['PUT', '#^/api/accounting/dimensions/documents/other-items/[0-9]+$#'],
     ];
 
+    /** Jediná cesta, kterou otevírá {@see self::isBankAccountWriteGrant()}. */
+    private const BANK_ACCOUNT_WRITE_PATH = '#^/api/settings/currencies/[0-9]+$#';
+
     public function __construct(
         private readonly ResponseFactory $responseFactory,
     ) {}
@@ -337,7 +342,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // 2a) Účetní / daňová vrstva — zápis přes token nikdy, ani se `read_write`.
         //     Kontrola je PŘED scope kontrolou schválně: token s právem zápisu by
         //     jinak prošel a hláška „nemáte scope" by lhala o důvodu odmítnutí.
-        if ($this->isReadOnlyForBearer($path) && !$this->isBearerWriteException($method, $path)) {
+        if ($this->isReadOnlyForBearer($path) && !$this->isBearerWriteException($method, $path)
+            && !$this->isBankAccountWriteGrant($request, $method, $path)) {
             $response = $this->responseFactory->createResponse(403);
             return Json::error(
                 $response,
@@ -388,6 +394,22 @@ final class ApiScopeMiddleware implements MiddlewareInterface
             }
         }
         return false;
+    }
+
+    /**
+     * Výslovně udělená schopnost tokenu změnit bankovní spojení firmy
+     * (`api_tokens.allow_bank_account_write`). Výchozí ochrana měnových účtů
+     * z {@see self::BEARER_READ_ONLY} zůstává: bez příznaku je cesta dál jen
+     * ke čtení. S příznakem se otevře JEDINÁ dvojice metoda + cesta
+     * (`PUT /api/settings/currencies/{id}`) — založení ani smazání účtu ne.
+     * Scope `read_write` se ověřuje níž jako u každého zápisu; správce firmy,
+     * omezení těla na bankovní pole, audit a e-mail hlídá akce.
+     */
+    private function isBankAccountWriteGrant(Request $request, string $method, string $path): bool
+    {
+        return $method === 'PUT'
+            && preg_match(self::BANK_ACCOUNT_WRITE_PATH, $path) === 1
+            && RequestAuthorization::tokenAllowsBankAccountWrite($request);
     }
 
     private function isBearerWriteException(string $method, string $path): bool

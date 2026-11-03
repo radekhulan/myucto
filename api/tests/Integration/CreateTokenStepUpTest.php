@@ -133,7 +133,7 @@ final class CreateTokenStepUpTest extends TestCase
     }
 
     /** @param array<string,mixed> $body */
-    private function request(array $body): ServerRequestInterface
+    private function request(array $body, string $role = 'accountant'): ServerRequestInterface
     {
         return (new ServerRequestFactory())
             ->createServerRequest('POST', 'http://localhost/api/auth/tokens', ['REMOTE_ADDR' => self::TEST_IP])
@@ -143,14 +143,88 @@ final class CreateTokenStepUpTest extends TestCase
                 'id' => $this->userId,
                 'email' => $this->email,
                 // 'accountant' = staff, ne klient a ne superadmin.
-                'role' => 'accountant',
+                'role' => $role,
                 'is_superadmin' => false,
             ]);
     }
 
-    private function invoke(array $body): ResponseInterface
+    private function invoke(array $body, string $role = 'accountant'): ResponseInterface
     {
-        return ($this->action())($this->request($body), (new ResponseFactory())->createResponse());
+        return ($this->action())($this->request($body, $role), (new ResponseFactory())->createResponse());
+    }
+
+    /** Schopnost měnit bankovní spojení nedává smysl bez zápisu — odmítne se dřív, než vznikne token. */
+    public function testBankAccountWriteRequiresReadWriteScope(): void
+    {
+        $res = $this->invoke([
+            'name' => 'banka jen čtení', 'scope' => 'read', 'password' => self::PASSWORD,
+            'allow_bank_account_write' => true,
+        ], 'admin');
+
+        self::assertSame(400, $res->getStatusCode());
+        self::assertArrayHasKey('allow_bank_account_write', $this->decode($res)['error']['fields'] ?? []);
+        self::assertSame(0, $this->tokenCount());
+    }
+
+    /** Token, který smí přesměrovat platby, smí vydat jen správce firmy. */
+    public function testBankAccountWriteTokenOnlyForCompanyAdmin(): void
+    {
+        $res = $this->invoke([
+            'name' => 'banka účetní', 'scope' => 'read_write', 'password' => self::PASSWORD,
+            'allow_bank_account_write' => true,
+        ], 'accountant');
+
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame(0, $this->tokenCount());
+    }
+
+    public function testAdminCanCreateBankAccountWriteTokenAndFlagReachesValidation(): void
+    {
+        $res = $this->invoke([
+            'name' => 'banka správce', 'scope' => 'read_write', 'password' => self::PASSWORD,
+            'allow_bank_account_write' => true,
+        ], 'admin');
+
+        self::assertSame(201, $res->getStatusCode(), json_encode($this->decode($res)));
+        $plaintext = (string) ($this->decode($res)['token'] ?? $this->decode($res)['plaintext'] ?? '');
+        self::assertNotSame('', $plaintext);
+
+        $validated = (new ApiTokenService($this->db, new RedisFactory($this->config)))->validate($plaintext);
+        self::assertIsArray($validated);
+        self::assertTrue($validated['allow_bank_account_write'] ?? null,
+            'Příznak musí dojít až do atributu requestu, jinak middleware nic neotevře');
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT payload FROM activity_log WHERE action = 'api_token.created' AND user_id = ? ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$this->userId]);
+        $payload = (array) json_decode((string) $stmt->fetchColumn(), true);
+        self::assertTrue($payload['allow_bank_account_write'] ?? false, 'Udělení schopnosti musí být v auditu');
+    }
+
+    /** Výchozí stav beze změny: bez zaškrtnutí token schopnost nemá. */
+    public function testTokenWithoutExplicitGrantHasNoBankAccountWrite(): void
+    {
+        $res = $this->invoke(['name' => 'běžný rw', 'scope' => 'read_write', 'password' => self::PASSWORD], 'admin');
+        self::assertSame(201, $res->getStatusCode());
+
+        $stmt = $this->db->pdo()->prepare('SELECT allow_bank_account_write FROM api_tokens WHERE user_id = ?');
+        $stmt->execute([$this->userId]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    public function testServiceRefusesBankAccountWriteWithoutReadWrite(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        (new ApiTokenService($this->db, new RedisFactory($this->config)))
+            ->generate($this->userId, null, 'servis', 'read', null, false, true);
+    }
+
+    private function tokenCount(): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM api_tokens WHERE user_id = ?');
+        $stmt->execute([$this->userId]);
+        return (int) $stmt->fetchColumn();
     }
 
     /** @return array<string,mixed> */

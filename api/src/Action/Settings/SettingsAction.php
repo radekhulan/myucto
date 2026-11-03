@@ -154,6 +154,9 @@ final class SettingsAction
         private readonly AccountingFrameworkService $accountingFramework,
         private readonly AccountingDecreeService $accountingDecree,
         private readonly WorkReportRepository $workReports,
+        // Upozornění vlastníka tokenu na změnu bankovního spojení přes API.
+        private readonly \MyInvoice\Service\Settings\BankAccountChangeNotifier $bankAccountNotifier,
+        private readonly \MyInvoice\Service\Payment\IbanValidator $ibanValidator,
     ) {}
 
     /**
@@ -1895,6 +1898,19 @@ final class SettingsAction
         $code = (string) $row['code'];
 
         $body = (array) ($request->getParsedBody() ?? []);
+
+        // API token sem projde jen s výslovně udělenou schopností
+        // `allow_bank_account_write` (ApiScopeMiddleware). Kontrola se tu opakuje
+        // schválně: akce nesmí spoléhat na to, že ji někdo nezavolá jinou cestou.
+        $tokenBankWrite = null;
+        if (RequestAuthorization::isBearerAuth($request)) {
+            $rejected = $this->rejectTokenBankAccountWrite($request, $response, $body);
+            if ($rejected !== null) {
+                return $rejected;
+            }
+            $tokenBankWrite = $this->bankFieldsSnapshot($id);
+        }
+
         if (($claimed = $this->rejectForeignBankAccount($request, $response, $sid, $body)) !== null) {
             return $claimed;
         }
@@ -1964,7 +1980,156 @@ final class SettingsAction
             'pdf_invalidated' => $invalidated,
         ]);
 
+        if ($tokenBankWrite !== null) {
+            $this->auditAndNotifyTokenBankAccountWrite($request, $sid, $id, $code, $tokenBankWrite);
+        }
+
         return $this->respondCurrencyById($response, $id);
+    }
+
+    /** Bankovní pole měnového účtu, která smí změnit token s `allow_bank_account_write`. */
+    private const TOKEN_BANK_FIELDS = ['account_number', 'bank_code', 'bank_name', 'iban', 'bic'];
+
+    /**
+     * Brána pro změnu bankovního spojení API tokenem. Bez výslovné schopnosti
+     * tokenu platí původní ochrana (jen ke čtení). S ní token musí patřit správci
+     * firmy, tělo smí obsahovat jen bankovní pole a hodnoty musí projít validací —
+     * chybný IBAN by jinak odešel na každou další fakturu.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function rejectTokenBankAccountWrite(Request $request, Response $response, array $body): ?Response
+    {
+        if (!RequestAuthorization::tokenAllowsBankAccountWrite($request)) {
+            return Json::error($response, 'token_write_forbidden',
+                'Bankovní spojení firmy lze přes API token jen číst. Změnu dělá správce ve webovém rozhraní, '
+                . 'nebo token s výslovně udělenou schopností allow_bank_account_write.', 403);
+        }
+        if (!RequestAuthorization::isCompanyAdmin($request)) {
+            return Json::error($response, 'forbidden',
+                'Bankovní spojení smí přes API token měnit jen správce firmy.', 403);
+        }
+
+        $fields = [];
+        $extra = array_values(array_diff(array_keys($body), self::TOKEN_BANK_FIELDS));
+        foreach ($extra as $key) {
+            $fields[(string) $key] = ['Přes API token lze měnit jen bankovní pole ('
+                . implode(', ', self::TOKEN_BANK_FIELDS) . ').'];
+        }
+        if ($body === []) {
+            $fields['body'] = ['Zadejte aspoň jedno bankovní pole.'];
+        }
+        foreach (self::TOKEN_BANK_FIELDS as $f) {
+            if (!array_key_exists($f, $body) || $body[$f] === null || $body[$f] === '') {
+                continue;
+            }
+            if (!is_string($body[$f])) {
+                $fields[$f] = ['Hodnota musí být text.'];
+                continue;
+            }
+            $v = trim($body[$f]);
+            $ok = match ($f) {
+                'account_number' => preg_match('/^(?:[0-9]{1,6}-)?[0-9]{1,10}$/', $v) === 1,
+                'bank_code'      => preg_match('/^[0-9]{4}$/', $v) === 1,
+                'bank_name'      => mb_strlen($v) <= 100,
+                'iban'           => $this->ibanValidator->isValid($v),
+                'bic'            => $this->ibanValidator->isValidBic($v),
+            };
+            if (!$ok) {
+                $fields[$f] = [match ($f) {
+                    'account_number' => 'Neplatné číslo účtu (formát [předčíslí-]číslo).',
+                    'bank_code'      => 'Kód banky má 4 číslice.',
+                    'bank_name'      => 'Název banky může mít nejvýš 100 znaků.',
+                    'iban'           => 'Neplatný IBAN (kontrolní součet).',
+                    'bic'            => 'Neplatný BIC/SWIFT.',
+                }];
+            }
+        }
+        if ($fields !== []) {
+            return Json::error($response, 'validation_failed', 'Neplatná změna bankovního spojení.', 422,
+                ['fields' => $fields]);
+        }
+        return null;
+    }
+
+    /** @return array<string,?string> */
+    private function bankFieldsSnapshot(int $currencyId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT account_number, bank_code, bank_name, iban, bic FROM currencies WHERE id = ?'
+        );
+        $stmt->execute([$currencyId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $out = [];
+        foreach (self::TOKEN_BANK_FIELDS as $f) {
+            $out[$f] = isset($row[$f]) ? (string) $row[$f] : null;
+        }
+        return $out;
+    }
+
+    /**
+     * Audit (původní i nové hodnoty, token) a e-mail vlastníkovi tokenu.
+     * Upozornění jde mimo API kanál, aby uniklý token nestačil na tiché
+     * přesměrování plateb.
+     *
+     * @param array<string,?string> $before
+     */
+    private function auditAndNotifyTokenBankAccountWrite(
+        Request $request,
+        int $sid,
+        int $currencyId,
+        string $code,
+        array $before,
+    ): void {
+        $after = $this->bankFieldsSnapshot($currencyId);
+        $changedBefore = [];
+        $changedAfter = [];
+        foreach (self::TOKEN_BANK_FIELDS as $f) {
+            if (($before[$f] ?? null) !== ($after[$f] ?? null)) {
+                $changedBefore[$f] = $before[$f] ?? null;
+                $changedAfter[$f] = $after[$f] ?? null;
+            }
+        }
+        $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+
+        $notified = false;
+        if ($changedAfter !== []) {
+            $notified = $this->bankAccountNotifier->notify(
+                [
+                    'email'  => (string) ($token['user_email'] ?? $user['email'] ?? ''),
+                    'name'   => isset($token['user_name']) ? (string) $token['user_name'] : ($user['name'] ?? null),
+                    'locale' => isset($token['user_locale']) ? (string) $token['user_locale'] : null,
+                ],
+                [
+                    'supplier_id'   => $sid,
+                    'currency_id'   => $currencyId,
+                    'currency_code' => $code,
+                    'token_name'    => isset($token['name']) ? (string) $token['name'] : null,
+                    'token_prefix'  => isset($token['prefix']) ? (string) $token['prefix'] : null,
+                    'ip'            => $ip !== '' ? $ip : null,
+                    'changed_at'    => (new \DateTimeImmutable())->format('Y-m-d H:i:s'),
+                    'before'        => $changedBefore,
+                    'after'         => $changedAfter,
+                ],
+            );
+        }
+
+        // ActivityLogger plné bankovní údaje rediguje (REDACT_KEYS). Audit proto nese
+        // změněná pole a poslední 4 znaky před/po — dost na dohledání, bez kopie účtu.
+        $tail = static fn (?string $v): ?string => $v === null || $v === '' ? null : '…' . mb_substr($v, -4);
+        $changes = [];
+        foreach (array_keys($changedAfter) as $f) {
+            $changes[] = ['field' => $f, 'before_tail' => $tail($changedBefore[$f]), 'after_tail' => $tail($changedAfter[$f])];
+        }
+        $this->log($request, 'currency.bank_account_changed_via_token', $currencyId, [
+            'code'         => $code,
+            'token_id'     => isset($token['id']) ? (int) $token['id'] : null,
+            'token_prefix' => $token['prefix'] ?? null,
+            'changes'      => $changes,
+            'notified'     => $notified,
+        ]);
     }
 
     private function respondCurrencyById(Response $response, int $id): Response

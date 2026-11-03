@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Company bank account changed
+----------------------------
+
+Hello{% if name %} {{ name }}{% endif %},
+
+API token {{ token_name }}{% if token_prefix %} ({{ token_prefix }}…){% endif %} has just changed the bank details of the {{ currency_code }} currency account. The new details will be printed on invoices and in the QR payment.
+
+{% for row in changes %}
+- {{ row.field }}: {{ row.before|default('—') }} → {{ row.after|default('—') }}
+{% endfor %}
+
+Changed at: {{ changed_at }}{% if ip %} · IP address: {{ ip }}{% endif %}
+
+If you did not make this change, revoke the token immediately in the API tokens section and fix the account in Money → Bank accounts.
+{% endblock %}

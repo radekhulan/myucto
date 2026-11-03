@@ -603,6 +603,50 @@ final class ApiScopeMiddlewareTest extends TestCase
     }
 
     /**
+     * Výslovně udělená schopnost `allow_bank_account_write` otevře JEN
+     * `PUT /api/settings/currencies/{id}` a jen se scope read_write. Založení
+     * a smazání účtu zůstávají zavřené, stejně jako tokeny bez příznaku.
+     */
+    public function testBankAccountWriteGrantOpensOnlyCurrencyUpdate(): void
+    {
+        $granted = fn (string $method, string $path, string $scope = 'read_write') => $this->middleware()->process(
+            $this->bearer($method, $path, $scope)->withAttribute(
+                AuthMiddleware::ATTR_API_TOKEN,
+                ['scope' => $scope, 'allow_bank_account_write' => true],
+            ),
+            $this->okHandler(),
+        );
+
+        self::assertSame(204, $granted('PUT', '/api/settings/currencies/5')->getStatusCode());
+        foreach ([
+            ['POST', '/api/settings/currencies'],
+            ['DELETE', '/api/settings/currencies/5'],
+            ['PATCH', '/api/settings/currencies/5'],
+            ['PUT', '/api/settings/currencies'],
+            ['PUT', '/api/settings/currencies/5/extra'],
+        ] as [$method, $path]) {
+            $r = $granted($method, $path);
+            self::assertSame(403, $r->getStatusCode(), "granted bearer $method $path");
+        }
+        // Příznak na tokenu jen pro čtení nic neotevírá.
+        $r = $granted('PUT', '/api/settings/currencies/5', 'read');
+        self::assertSame(403, $r->getStatusCode());
+        self::assertSame('token_write_forbidden', $this->errorCode($r));
+        // Příznak 0 (výchozí stav) = původní ochrana.
+        $r = $this->middleware()->process(
+            $this->bearer('PUT', '/api/settings/currencies/5', 'read_write')->withAttribute(
+                AuthMiddleware::ATTR_API_TOKEN,
+                ['scope' => 'read_write', 'allow_bank_account_write' => false],
+            ),
+            $this->okHandler(),
+        );
+        self::assertSame(403, $r->getStatusCode());
+        self::assertSame('token_write_forbidden', $this->errorCode($r));
+        // Příznak nepřenáší zápis na jiné read-only cesty.
+        self::assertSame(403, $granted('POST', '/api/accounting/journal')->getStatusCode());
+    }
+
+    /**
      * Daňová přiznání byla přes token nedostupná omylem: `#^/api/tax(/|$)#`
      * vyžaduje po „tax" lomítko, takže `/api/tax-return/...` nikdy nechytil.
      * Čtení přiznání je přitom to, kvůli čemu se integrace staví.

@@ -62,6 +62,28 @@ final class RequestAuthorization
     }
 
     /**
+     * Smí tenhle token změnit bankovní spojení firmy na měnovém účtu?
+     *
+     * ⚠️ Výjimka z pravidla, že měnové účty jsou pro token jen ke čtení
+     * (ApiScopeMiddleware::BEARER_READ_ONLY). Platí VÝHRADNĚ pro
+     * `PUT /api/settings/currencies/{id}` a jen pro bankovní pole; o zbytku
+     * rozhoduje akce. Schopnost se zapíná výslovně při vytváření tokenu, které
+     * je samo chráněné relací, heslem a MFA. Session tento příznak neřeší.
+     */
+    public static function tokenAllowsBankAccountWrite(Request $request): bool
+    {
+        if (!self::isBearerAuth($request)) {
+            return false;
+        }
+        $token = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN);
+
+        return is_array($token)
+            && (($token['allow_bank_account_write'] ?? false) === true
+                || (int) ($token['allow_bank_account_write'] ?? 0) === 1)
+            && (string) ($token['scope'] ?? '') === 'read_write';
+    }
+
+    /**
      * Firma, na kterou je požadavek pevně vázaný: API token vydaný pro jednu firmu,
      * nebo vlastní doména firmy. NULL = požadavek vázaný není.
      *

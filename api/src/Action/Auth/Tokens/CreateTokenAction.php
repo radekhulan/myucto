@@ -28,6 +28,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/auth/tokens — vytvoří nový API token.
  *
  * Body: { name, password, supplier_id?, scope: 'read'|'read_write',
+ *         allow_payroll_submission_docs?, allow_bank_account_write?,
  *         expires_at?, never_expires?, totp_code? }
  *
  * Vyžaduje:
@@ -97,6 +98,10 @@ final class CreateTokenAction
         // ji člověk výslovně nezaškrtne. Zbytek mzdové evidence nejde odemknout
         // vůbec — viz RequestAuthorization::tokenAllowsPayrollSubmissionDocs().
         $allowPayrollSubmissionDocs = !empty($body['allow_payroll_submission_docs']);
+        // ⚠️ Least-privilege i pro bankovní spojení firmy: změnu čísla účtu / IBAN
+        // na měnovém účtu token dostane jen výslovným zaškrtnutím, jen se scope
+        // `read_write` a jen pro správce firmy (ověřuje se i při každém požadavku).
+        $allowBankAccountWrite = ($body['allow_bank_account_write'] ?? false) === true;
         $expiresRaw = trim((string) ($body['expires_at'] ?? ''));
         $neverExpires = ($body['never_expires'] ?? false) === true;
         $totpCode = trim((string) ($body['totp_code'] ?? ''));
@@ -107,6 +112,15 @@ final class CreateTokenAction
         }
         if (!in_array($scope, ['read', 'read_write'], true)) {
             return Json::error($response, 'validation_failed', 'Neplatný scope.', 400);
+        }
+        if ($allowBankAccountWrite && $scope !== 'read_write') {
+            return Json::error($response, 'validation_failed',
+                'Změna bankovního spojení vyžaduje token se scope read_write.', 400,
+                ['fields' => ['allow_bank_account_write' => ['Vyžaduje scope read_write.']]]);
+        }
+        if ($allowBankAccountWrite && !RequestAuthorization::isCompanyAdmin($request)) {
+            return Json::error($response, 'forbidden',
+                'Token pro změnu bankovního spojení smí vytvořit jen správce firmy.', 403);
         }
 
         $ip = $this->ipMatcher->clientIp($request->getServerParams(), [], 'X-Forwarded-For');
@@ -194,6 +208,7 @@ final class CreateTokenAction
                     $scope,
                     $expiresAt,
                     $allowPayrollSubmissionDocs,
+                    $allowBankAccountWrite,
                 );
             } catch (OneTimeTokenException|StepUpOperationException) {
                 return Json::error(
@@ -267,6 +282,7 @@ final class CreateTokenAction
             $scope,
             $expiresAt,
             $allowPayrollSubmissionDocs,
+            $allowBankAccountWrite,
         );
 
         $this->activity->log(
@@ -282,6 +298,7 @@ final class CreateTokenAction
                 'expires_at' => $expiresAt?->format('Y-m-d H:i:s'),
                 'never_expires' => $expiresAt === null,
                 'allow_payroll_submission_docs' => $allowPayrollSubmissionDocs,
+                'allow_bank_account_write' => $allowBankAccountWrite,
             ],
             $ip,
             $userAgent,

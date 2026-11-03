@@ -7619,10 +7619,75 @@ paths:
       summary: Měny nakonfigurované pro aktuálního dodavatele
       description: |
         Per-supplier override hlavního codebooku — obsahuje i bank-accounts
-        per currency. Mutace (POST/PUT/DELETE) jsou jen přes UI, ne přes API.
+        per currency. Založení a smazání měnového účtu (POST/DELETE) jsou jen
+        přes UI. Bankovní spojení existujícího účtu může API token změnit jen
+        s výslovně udělenou schopností `allow_bank_account_write` — viz
+        `PUT /api/v1/settings/currencies/{id}`.
       responses:
         '200':
           description: OK
+
+  /api/v1/settings/currencies/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    put:
+      tags: [Settings]
+      summary: Změní bankovní spojení měnového účtu (API token jen s allow_bank_account_write)
+      description: |
+        **Výchozí stav: API token bankovní spojení firmy jen čte.** Kdo může změnit
+        účet příjemce plateb, může tiše přesměrovat platby za všechny další
+        faktury, proto je to pro tokeny zavřené (`token_write_forbidden`).
+
+        Výjimkou je token, kterému správce firmy při vytvoření výslovně zaškrtl
+        schopnost `allow_bank_account_write` (jde jen se scope `read_write`).
+        Takový token smí na tomto endpointu měnit **jen** pole `account_number`,
+        `bank_code`, `bank_name`, `iban` a `bic`; jiné pole vrátí `422`. Token
+        musí patřit správci firmy (jinak `403 forbidden`) a hodnoty se validují
+        (číslo účtu `[předčíslí-]číslo`, kód banky 4 číslice, IBAN kontrolním
+        součtem mod-97, BIC formátem).
+
+        Každá změna tokenem se zapíše do aktivity
+        (`currency.bank_account_changed_via_token` — změněná pole a poslední
+        4 znaky před/po, token) a vlastník tokenu dostane e-mail s původními
+        a novými hodnotami. Faktury bez snapshotu bankovního spojení dostanou
+        nové PDF; vystavené faktury se snapshotem si původní účet ponechají.
+
+        Ve webovém rozhraní (session) se endpoint chová beze změny
+        (Peníze → Bankovní účty → Měny a účty → Upravit).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              minProperties: 1
+              properties:
+                account_number: { type: [string, "null"], pattern: '^(?:[0-9]{1,6}-)?[0-9]{1,10}$', example: "123456789" }
+                bank_code: { type: [string, "null"], pattern: '^[0-9]{4}$', example: "0100" }
+                bank_name: { type: [string, "null"], maxLength: 100 }
+                iban: { type: [string, "null"], example: "CZ6508000000192000145399" }
+                bic: { type: [string, "null"], example: "GIBACZPX" }
+      responses:
+        '200':
+          description: Uložený měnový účet
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Currency' }
+        '403':
+          description: |
+            `token_write_forbidden` — token nemá schopnost `allow_bank_account_write`
+            (nebo má jen scope `read`). `forbidden` — token nepatří správci firmy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { description: currency_not_found }
+        '422':
+          description: "`validation_failed` — pole mimo bankovní spojení, prázdné tělo nebo neplatný formát (`error.fields`)."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/settings/vat-rates:
     parameters:
@@ -45976,6 +46041,13 @@ components:
                     pojišťoven). `false` = takové dokumenty výpis přeskočí
                     a detail vrátí 404 — zavřený kanál, ne prázdná data.
                     Nastavuje se jen při vytváření tokenu.
+                allow_bank_account_write:
+                  type: boolean
+                  description: |
+                    Smí token měnit bankovní spojení měnových účtů firmy
+                    (`PUT /api/v1/settings/currencies/{id}`). Výchozí `false`
+                    = bankovní spojení jen ke čtení. Udělit ji může jen správce
+                    firmy, jen se scope `read_write` a jen při vytváření tokenu.
                 expires_at: { type: [string, "null"], format: date-time }
             - { type: "null" }
 

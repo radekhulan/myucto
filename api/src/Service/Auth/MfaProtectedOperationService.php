@@ -105,7 +105,8 @@ final class MfaProtectedOperationService
      * větev tiše zahodí. Uživatel s passkey chodí VŽDY tudy, takže zapomenutý
      * parametr znamená, že zaškrtnuté políčko ve formuláři nemá žádný účinek —
      * token vznikne, vypadá správně a jen se chová, jako by ho nikdo nezaškrtl.
-     * Přesně to potkalo `allow_payroll_submission_docs`.
+     * Přesně to potkalo `allow_payroll_submission_docs`; totéž platí pro
+     * `allow_bank_account_write`.
      *
      * @return array{plaintext:string,prefix:string,id:int}
      */
@@ -118,6 +119,7 @@ final class MfaProtectedOperationService
         string $scope,
         ?\DateTimeImmutable $expiresAt,
         bool $allowPayrollSubmissionDocs = false,
+        bool $allowBankAccountWrite = false,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
@@ -141,6 +143,7 @@ final class MfaProtectedOperationService
                 $scope,
                 $expiresAt,
                 $allowPayrollSubmissionDocs,
+                $allowBankAccountWrite,
             );
             $pdo->commit();
             return $token;

@@ -1,0 +1,23 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">Company bank account changed</h1>
+<p style="margin:0 0 16px;">Hello{% if name %} {{ name }}{% endif %},</p>
+<p style="margin:0 0 16px;">API token <strong>{{ token_name }}</strong>{% if token_prefix %} ({{ token_prefix }}…){% endif %} has just changed the bank details of the <strong>{{ currency_code }}</strong> currency account. The new details will be printed on invoices and in the QR payment.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 16px;font-size:14px;">
+  <tr>
+    <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #E4E2EA;">Field</th>
+    <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #E4E2EA;">Before</th>
+    <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #E4E2EA;">After</th>
+  </tr>
+  {% for row in changes %}
+  <tr>
+    <td style="padding:6px 8px;border-bottom:1px solid #F1F0F4;">{{ row.field }}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #F1F0F4;font-family:monospace;">{{ row.before|default('—') }}</td>
+    <td style="padding:6px 8px;border-bottom:1px solid #F1F0F4;font-family:monospace;">{{ row.after|default('—') }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<p style="margin:0 0 16px;font-size:13px;color:#7A748C;">Changed at: {{ changed_at }}{% if ip %} · IP address: {{ ip }}{% endif %}</p>
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;"><strong>If you did not make this change</strong>, revoke the token immediately in the API tokens section and fix the account in Money → Bank accounts.</p>
+{% endblock %}
