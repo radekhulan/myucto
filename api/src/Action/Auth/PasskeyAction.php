@@ -108,7 +108,10 @@ final class PasskeyAction
         $hasStrongFactor = (int) $user['totp_enabled'] === 1
             || $this->credentials->countActiveForUser($context['user_id']) > 0;
         $requireNoActivePasskey = false;
-        if ($hasStrongFactor) {
+        // Účet bez silného faktoru se prokazuje heslem, nebo proofem z přihlášení
+        // u poskytovatele identity (uživatel přihlášený přes Entra heslo nemá).
+        $proofSupplied = trim((string) ($body['step_up_token'] ?? '')) !== '';
+        if ($hasStrongFactor || $proofSupplied) {
             try {
                 $proof = $this->stepUp->consume(
                     trim((string) ($body['step_up_token'] ?? '')),
