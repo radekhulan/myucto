@@ -2424,8 +2424,24 @@
         "coverage_issue": "The domain versions do not cover the whole period, so the calculation does not read from it. Fill in the missing effectivity.",
         "missing": "There is no version for this domain."
       },
-      "manual_review_share": "Manual judgement applies to {manual} of {total} parameters — the rest is used normally.",
-      "manual_review_all": "Manual judgement applies to all {total} parameters of this domain.",
+      "review": {
+        "title": "Outside automatic calculation",
+        "category": {
+          "manual_review": "Not calculated by the app",
+          "pending_publication": "Awaiting publication",
+          "pending_publication_expected": "Awaiting publication (expected {month})",
+          "assessed_elsewhere": "Assessed elsewhere"
+        },
+        "years": "{years} set",
+        "go_to": "Go to {agenda}",
+        "source": "Legal basis",
+        "route": {
+          "payroll-annual-settlement": "Annual tax settlement",
+          "payroll-absences": "Absences",
+          "payroll-submissions": "Submissions",
+          "payroll-travel": "Travel expenses"
+        }
+      },
       "manual_review_badge": "Manual judgement",
       "manual_review_why": "Why:",
       "manual_review_action": "What to do:",
