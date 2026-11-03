@@ -70,7 +70,7 @@ final class CustomerPriceResolverTest extends StockTestCase
         self::assertSame('1000.00', $other['unit_price'], 'Cena jednoho odběratele nesmí platit pro jiného.');
     }
 
-    public function testDiscountIsComputedFromStandardPriceOnSixDecimals(): void
+    public function testDiscountIsComputedFromStandardPriceAndRoundedToHaler(): void
     {
         $sid = $this->createSupplier();
         $item = $this->pricedItem($sid, 'CP-DISC');
@@ -81,7 +81,7 @@ final class CustomerPriceResolverTest extends StockTestCase
         self::assertSame('875.00', $r['unit_price']);
         self::assertSame('customer_discount', $r['price_source']);
 
-        self::assertSame('666.663333', EffectivePriceResolver::customerBaseline('999.99', ['price_type' => 'discount_pct', 'discount_pct' => '33.333', 'fixed_price' => null]));
+        self::assertSame('666.66', EffectivePriceResolver::customerBaseline('999.99', ['price_type' => 'discount_pct', 'discount_pct' => '33.333', 'fixed_price' => null]));
         self::assertSame('0.009', EffectivePriceResolver::customerBaseline('0.01', ['price_type' => 'discount_pct', 'discount_pct' => '10', 'fixed_price' => null]));
         self::assertSame('850.00', EffectivePriceResolver::customerBaseline('1000.00', ['price_type' => 'fixed', 'discount_pct' => null, 'fixed_price' => '850.000000']));
         self::assertNull(EffectivePriceResolver::customerBaseline(null, ['price_type' => 'discount_pct', 'discount_pct' => '10.000', 'fixed_price' => null]));

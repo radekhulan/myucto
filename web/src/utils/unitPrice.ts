@@ -15,6 +15,16 @@ export function roundUnitPrice(price: number): number {
   return Math.sign(price) * Math.round(Math.abs(price) * scale + 1e-6) / scale
 }
 
+/**
+ * Cena vypočtená procentem nebo kurzem (zrcadlí UnitPricePrecision::roundDerived):
+ * na haléře, pokud tím neztratí víc než 1 % hodnoty, jinak na šest míst.
+ */
+export function roundDerivedPrice(price: number): number {
+  const exact = roundUnitPrice(price)
+  const cents = Math.sign(price) * Math.round(Math.abs(price) * 100 + 1e-6) / 100
+  return Math.abs(exact - cents) * 100 > Math.abs(exact) ? exact : cents
+}
+
 /** Počet míst k zobrazení: 2, u ceny pod haléř tolik, kolik jich má (nejvýš 6). */
 export function unitPriceDecimals(price: number | string | null | undefined): number {
   const value = Number(price)

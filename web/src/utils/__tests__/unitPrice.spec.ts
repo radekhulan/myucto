@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { formatMoney, formatUnitPrice } from '@/composables/useFormat'
-import { hasSubCentPrice, roundUnitPrice, unitPriceDecimals, unitPriceText } from '@/utils/unitPrice'
+import { hasSubCentPrice, roundDerivedPrice, roundUnitPrice, unitPriceDecimals, unitPriceText } from '@/utils/unitPrice'
 
 describe('unitPriceText', () => {
   it('haléřovou cenu z DECIMAL(16,6) vrátí na dvě místa', () => {
@@ -28,6 +28,18 @@ describe('roundUnitPrice', () => {
     expect(roundUnitPrice(0.0000005)).toBe(0.000001)
     expect(roundUnitPrice(-0.0000005)).toBe(-0.000001)
     expect(roundUnitPrice(10 / 3)).toBe(3.333333)
+  })
+})
+
+describe('roundDerivedPrice', () => {
+  it('vypočtenou cenu nechá v haléřích, pokud ji nezkreslí', () => {
+    expect(roundDerivedPrice(400 / 3)).toBe(133.33)
+    expect(roundDerivedPrice(999.99 * 0.95)).toBe(949.99)
+  })
+
+  it('levnou položku drží na šest míst', () => {
+    expect(roundDerivedPrice(0.0108)).toBe(0.0108)
+    expect(roundDerivedPrice(0.004 * 0.95)).toBe(0.0038)
   })
 })
 

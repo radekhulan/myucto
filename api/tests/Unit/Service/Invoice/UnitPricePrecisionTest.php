@@ -35,6 +35,23 @@ final class UnitPricePrecisionTest extends TestCase
         self::assertSame('abc', UnitPricePrecision::toDecimalString('abc'));
     }
 
+    public static function derivedPrices(): iterable
+    {
+        yield 'běžná přirážka zůstane v haléřích' => ['133.3333333333', '133.33'];
+        yield 'sleva 5 % z 999,99' => ['949.9905', '949.99'];
+        yield 'přirážka z průměrné nákupní ceny' => ['40.0000004', '40.00'];
+        yield 'levná položka by se zkreslila' => ['0.0108', '0.0108'];
+        yield 'na haléře by se vynulovala' => ['0.0038', '0.0038'];
+        yield 'polovina haléře nahoru' => ['0.125', '0.125'];
+        yield 'nula' => ['0', '0.00'];
+    }
+
+    #[DataProvider('derivedPrices')]
+    public function testDerivedPriceKeepsCentsUnlessTheyDistortIt(string $raw, string $expected): void
+    {
+        self::assertSame($expected, UnitPricePrecision::roundDerived($raw));
+    }
+
     public function testInputPrecisionIsLimitedToSixPlaces(): void
     {
         self::assertTrue(UnitPricePrecision::isWithinPrecision('0.004'));

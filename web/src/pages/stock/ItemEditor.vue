@@ -48,7 +48,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import { formatUnitPrice } from '@/composables/useFormat'
-import { roundUnitPrice, unitPriceText } from '@/utils/unitPrice'
+import { roundDerivedPrice, unitPriceText } from '@/utils/unitPrice'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
@@ -720,7 +720,7 @@ function customerPricePreview(r: CustomerPriceRow): number | null {
   const pct = normalizeDecimal(r.discount_pct)
   const standard = standardPriceFor(r.currency_code)
   if (standard === null || pct === '' || !Number.isFinite(Number(pct))) return null
-  return roundUnitPrice(standard * (1 - Number(pct) / 100))
+  return roundDerivedPrice(standard * (1 - Number(pct) / 100))
 }
 function validateCustomerPrices(): string | null {
   const seen = new Set<string>()
@@ -916,7 +916,7 @@ function priceLevelInheritedPrice(r: StockItemPriceLevelRow): number | null | un
 function discountedPrice(standard: string | null, pctRaw: string): number | null {
   const pct = normalizeDecimal(pctRaw)
   if (standard === null || pct === '' || !Number.isFinite(Number(pct))) return null
-  return roundUnitPrice(Number(standard) * (1 - Number(pct) / 100))
+  return roundDerivedPrice(Number(standard) * (1 - Number(pct) / 100))
 }
 /**
  * Náhled výsledné ceny: výjimka měny → sleva pro produkt → zděděná cena.

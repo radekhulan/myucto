@@ -45,8 +45,8 @@ final class CatalogPricingPolicyTest extends StockTestCase
             ['currency_code' => 'EUR', 'price_mode' => 'markup', 'use_pricing_rules' => true],
         ]);
         $prices = $this->container->get(StockItemPriceRepository::class);
-        self::assertSame('133333333.333333', $prices->findByCurrency($supplierId, $itemId, 'CZK')['computed_price']);
-        self::assertSame('5797101.449275', $prices->findByCurrency($supplierId, $itemId, 'EUR')['computed_price']);
+        self::assertSame('133333333.33', $prices->findByCurrency($supplierId, $itemId, 'CZK')['computed_price']);
+        self::assertSame('5797101.45', $prices->findByCurrency($supplierId, $itemId, 'EUR')['computed_price']);
     }
 
     public function testProductMarginRuleWinsAndUsesDifferentMathThanMarkup(): void
@@ -67,7 +67,7 @@ final class CatalogPricingPolicyTest extends StockTestCase
             'use_pricing_rules' => true,
         ]]);
 
-        self::assertSame('133.333333', $prices[0]['computed_price']);
+        self::assertSame('133.33', $prices[0]['computed_price']);
         self::assertSame('target_margin', $prices[0]['computed_calculation_mode']);
         self::assertSame($productRule, $prices[0]['computed_rule_id']);
         self::assertSame($margin, $prices[0]['computed_profile_id']);

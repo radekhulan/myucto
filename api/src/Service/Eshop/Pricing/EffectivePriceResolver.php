@@ -50,7 +50,7 @@ use PDO;
  * S `$clientId` se nejdřív hledá zákaznická cena karty platná k `$onDate`
  * v téže měně (`stock_item_customer_prices`). Ta NAHRAZUJE standardní cenu jako
  * základ: pevná cena → `fixed_price`, sleva → standardní cena × (1 − pct/100)
- * na šest desetinných míst jako cena karty. Akční cena se pak použije jen tehdy,
+ * na haléře (šest míst jen u levné položky, kterou by haléře zkreslily). Akční cena se pak použije jen tehdy,
  * když je levnější než tento základ (stejná `not_cheaper` logika) — zákazník
  * dostane lepší z obou. Bez klienta se chování nemění. Množstevní stropy akcí se posuzují v ZÁKLADNÍCH
  * jednotkách karty (`$qty` musí volající převést přes StockUnitConverter).
@@ -114,7 +114,8 @@ final class EffectivePriceResolver
 
     /**
      * Cena za základní jednotku podle řádku zákaznické ceny: pevná cena, nebo
-     * standardní cena ponížená o slevu (šest míst, half-up). Záporná sleva je přirážka
+     * standardní cena ponížená o slevu ({@see UnitPricePrecision::roundDerived}: na haléře,
+     * šest míst jen když by haléře cenu zkreslily). Záporná sleva je přirážka
      * (cenové hladiny); výsledek je i tak vždy nezáporný, protože sleva je nejvýš 100 %.
      * Sleva bez standardní ceny nemá z čeho počítat → null.
      *
@@ -130,7 +131,7 @@ final class EffectivePriceResolver
         }
         $factor = bcsub('100', (string) $row['discount_pct'], 6);
         $raw = bcdiv(bcmul($standardPrice, $factor, 10), '100', 10);
-        return self::unitPrice(bcadd($raw, '0.0000005', self::PRICE_SCALE));
+        return UnitPricePrecision::roundDerived($raw);
     }
 
     /**

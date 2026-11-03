@@ -56,6 +56,36 @@ final class UnitPricePrecision
         return ($m[1] === '-' && trim($result, '0.') !== '') ? '-' . $result : $result;
     }
 
+    /**
+     * Cena VYPOČTENÁ (přirážka, marže, procentní sleva, přepočet kurzem): na haléře
+     * jako dřív, pokud tím neztratí víc než 1 % své hodnoty, jinak na šest míst.
+     * Běžná cena 133,333 tak zůstane 133,33, levná položka 0,0108 se nezkreslí
+     * na 0,01 a 0,004 se nevynuluje. Ručně zadaná cena tudy nejde, drží šest míst.
+     */
+    public static function roundDerived(string $value): string
+    {
+        $value = str_replace(',', '.', trim($value));
+        if ($value === '' || !is_numeric($value)) {
+            return '0.00';
+        }
+        $negative = str_starts_with($value, '-');
+        $abs = $negative ? substr($value, 1) : $value;
+        $cents = self::roundHalfUp($abs, self::MIN_DISPLAY_DECIMALS);
+        $exact = self::roundHalfUp($abs, self::DECIMALS);
+        $loss = bcsub($exact, $cents, self::DECIMALS);
+        if (str_starts_with($loss, '-')) {
+            $loss = substr($loss, 1);
+        }
+        $result = bccomp(bcmul($loss, '100', self::DECIMALS), $exact, self::DECIMALS) > 0 ? $exact : $cents;
+        $formatted = (string) self::toDecimalString($result);
+        return $negative && bccomp($result, '0', self::DECIMALS) !== 0 ? '-' . $formatted : $formatted;
+    }
+
+    private static function roundHalfUp(string $abs, int $scale): string
+    {
+        return bcadd($abs, '0.' . str_repeat('0', $scale) . '5', $scale);
+    }
+
     /** Vstup ceny má nejvýš šest desetinných míst (víc by databáze tiše zaokrouhlila). */
     public static function isWithinPrecision(mixed $value): bool
     {

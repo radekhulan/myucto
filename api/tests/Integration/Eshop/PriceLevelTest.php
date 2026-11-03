@@ -157,7 +157,7 @@ final class PriceLevelTest extends StockTestCase
         self::assertSame('price_level_fixed', $fixed['price_source']);
     }
 
-    public function testProductAndDefaultDiscountKeepSixDecimals(): void
+    public function testProductAndDefaultDiscountRoundToHaler(): void
     {
         $sid = $this->createSupplier();
         $discounted = $this->pricedItem($sid, 'PL-DISC', '999.99');
@@ -170,7 +170,7 @@ final class PriceLevelTest extends StockTestCase
         $this->rule($sid, $gold, 'product', $excluded, 'discount_pct', '0', null, null);
 
         $r = $this->resolver->resolveMany($sid, [$discounted, $plain, $excluded], 'CZK', '1', self::TODAY, $client);
-        self::assertSame(['666.663333', 'price_level_discount', '33.333'], [$r[$discounted]['unit_price'], $r[$discounted]['price_source'], $r[$discounted]['discount_pct']]);
+        self::assertSame(['666.66', 'price_level_discount', '33.333'], [$r[$discounted]['unit_price'], $r[$discounted]['price_source'], $r[$discounted]['discount_pct']]);
         self::assertSame(['900.00', 'price_level_discount', '10.000'], [$r[$plain]['unit_price'], $r[$plain]['price_source'], $r[$plain]['discount_pct']]);
         self::assertSame(['1000.00', '0.000'], [$r[$excluded]['unit_price'], $r[$excluded]['discount_pct']], 'Nulová sleva produktu přebije výchozí slevu.');
     }
@@ -255,11 +255,11 @@ final class PriceLevelTest extends StockTestCase
         $this->rule($sid, $urgent, 'product', $excluded, 'discount_pct', '0', null, null);
 
         $r = $this->resolver->resolveMany($sid, [$plain, $excluded], 'CZK', '1', self::TODAY, $client);
-        self::assertSame(['1049.9895', '-5.000'], [$r[$plain]['unit_price'], $r[$plain]['discount_pct']], 'Výchozí přirážka hladiny se použije.');
+        self::assertSame(['1049.99', '-5.000'], [$r[$plain]['unit_price'], $r[$plain]['discount_pct']], 'Výchozí přirážka hladiny se použije.');
         self::assertSame(['999.99', '0.000'], [$r[$excluded]['unit_price'], $r[$excluded]['discount_pct']], 'Nula u produktu vyřadí kartu i z výchozí přirážky.');
     }
 
-    public function testMarkupKeepsSixDecimals(): void
+    public function testMarkupRoundsToHaler(): void
     {
         $sid = $this->createSupplier();
         $item = $this->pricedItem($sid, 'PL-MARKUP-ROUND', '999.99');
@@ -268,7 +268,7 @@ final class PriceLevelTest extends StockTestCase
         $this->assign($client, $level);
         $this->rule($sid, $level, 'product', $item, 'discount_pct', '-15', null, null);
 
-        self::assertSame('1149.9885', $this->unitPrice($sid, $item, $client), '999,99 × 1,15 = 1 149,9885, cena za jednotku drží šest míst');
+        self::assertSame('1149.99', $this->unitPrice($sid, $item, $client), '999,99 × 1,15 = 1 149,9885 → 1 149,99');
     }
 
     public function testPromoBelowMarkedUpPriceApplies(): void
