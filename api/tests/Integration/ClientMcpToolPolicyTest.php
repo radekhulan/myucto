@@ -31,6 +31,10 @@ final class ClientMcpToolPolicyTest extends TestCase
         'stock_quantities', 'list_stock_locations', 'get_product_packaging', 'get_product_tracking',
         'get_purchase_invoice_payment', 'list_expense_categories',
     ];
+    private const ADVANCE_READ_TOOLS = [
+        'list_invoice_advance_candidates', 'list_proforma_final_candidates', 'list_invoice_advance_drawdown_candidates',
+        'list_purchase_advance_candidates', 'list_purchase_settlement_candidates', 'preview_invoice_penalty',
+    ];
     private const DOCUMENT_WRITE_TOOLS = [
         'update_purchase_invoice', 'add_purchase_invoice_item', 'update_purchase_invoice_item', 'remove_purchase_invoice_item',
         'upload_invoice_attachment', 'upload_purchase_invoice_pdf', 'import_purchase_invoice_file',
@@ -50,7 +54,7 @@ final class ClientMcpToolPolicyTest extends TestCase
             $actual = array_values(array_filter($allowed, fn ($name) => $scope === 'read_write' || !$manifest[$name]['write']));
             sort($actual);
             $additions = ['get_work_report', 'list_vat_rates', ...self::DOCUMENT_READ_TOOLS,
-                ...self::OPERATIONAL_READ_TOOLS, ...self::DETAIL_READ_TOOLS];
+                ...self::OPERATIONAL_READ_TOOLS, ...self::DETAIL_READ_TOOLS, ...self::ADVANCE_READ_TOOLS];
             if ($scope === 'read_write' && $preset !== 'client_read') {
                 array_push($additions, 'add_work_report_entry', 'add_work_report_material', 'remove_work_report_entry', ...self::DOCUMENT_WRITE_TOOLS);
             }
@@ -88,13 +92,29 @@ final class ClientMcpToolPolicyTest extends TestCase
         }
     }
 
+    #[TestWith(['invoices', ['list_invoice_advance_candidates', 'list_proforma_final_candidates',
+        'list_invoice_advance_drawdown_candidates', 'preview_invoice_penalty']])]
+    #[TestWith(['purchase_invoices', ['list_purchase_advance_candidates', 'list_purchase_settlement_candidates']])]
+    public function testAdvanceAndPenaltyReadsRequireTheirOwnAgenda(string $key, array $expected): void
+    {
+        sort($expected);
+        foreach ([0, 1, 2] as $level) {
+            $allowed = $this->catalog('client_none', overrides: [$key => $level]);
+            $actual = array_values(array_intersect(self::ADVANCE_READ_TOOLS, $allowed));
+            sort($actual);
+            self::assertSame($level === 0 ? [] : $expected, $actual, $key . ': ' . $level);
+        }
+    }
+
     public function testReadToolsDoNotExposeEshopOrInternalOperations(): void
     {
         $allowed = $this->catalog('client_write');
         foreach (['get_product', 'get_product_prices', 'create_warehouse', 'create_product', 'create_stock_document',
             'post_stock_document', 'trial_balance', 'list_payroll_people', 'get_tax_return',
             'get_product_customer_prices', 'quote_product_prices', 'lookup_company_in_ares', 'stock_in_transit',
-            'list_purchase_payment_orders', 'list_invoice_advance_candidates', 'link_invoice_advance'] as $name) {
+            'list_purchase_payment_orders', 'link_invoice_advance', 'unlink_invoice_advance', 'create_final_invoice_from_proforma',
+            'apply_invoice_advance_drawdown', 'remove_invoice_advance_drawdown', 'link_purchase_advance',
+            'unlink_purchase_advance', 'create_invoice_penalty'] as $name) {
             self::assertNotContains($name, $allowed);
         }
     }

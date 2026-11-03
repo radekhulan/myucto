@@ -471,8 +471,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_invoice_advance_drawdown_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/invoices/{id}/advance-drawdown'],
+    ],
     title: 'Zálohy k postupnému čerpání',
     description:
       'Ke KONCEPTU faktury vrátí zálohové faktury téhož odběratele a měny, které mají vystavený '
@@ -517,8 +518,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_invoice_advance_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k propojení s fakturou',
     description:
       'K faktuře vrátí nespárované zálohové faktury téhož odběratele (nejdřív stejná měna '
@@ -529,8 +531,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_proforma_final_candidates',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/invoices/{id}/final-candidates'],
+    ],
     title: 'Faktury k propojení se zálohou',
     description:
       'K zálohové faktuře vrátí nepropojené faktury téhož odběratele. Propojení pak udělá '
@@ -573,8 +576,9 @@ export const INVOICE_TOOLS = [
   // ── Penále ───────────────────────────────────────────────────────────────
   {
     name: 'preview_invoice_penalty',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/invoices/{id}/penalty/preview'],
+    ],
     title: 'Výpočet úroku z prodlení',
     description:
       'Spočítá zákonný úrok z prodlení (NV č. 351/2013 Sb.) k vystavené faktuře po splatnosti: '
