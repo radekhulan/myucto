@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>{{ meta.title }}</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 7.5pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; }
+    .header-period { text-align: center; font-size: 9pt; margin-top: 1mm; }
+    .selection { width: 60%; border-collapse: collapse; margin-bottom: 3mm; }
+    .selection td { font-size: 7.5pt; padding: 0.4mm 1.5mm 0.4mm 0; vertical-align: top; }
+    .selection-title { font-size: 8pt; font-weight: bold; margin-bottom: 1mm; }
+    .selection-label { color: #555; width: 30%; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; }
+    table.book thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: left; padding: 1mm 1.2mm; border-bottom: 0.3pt solid #999; }
+    table.book thead th.num { text-align: right; }
+    table.book tbody td { padding: 0.7mm 1.2mm; font-size: 7.5pt; border-bottom: 0.2pt solid #e5e5e5; vertical-align: top; }
+    .num { text-align: right; }
+    .muted { color: #888; }
+    .flag { font-size: 6.5pt; color: #b91c1c; }
+    .totals-title { font-size: 9pt; font-weight: bold; margin: 4mm 0 1mm 0; }
+    table.totals { width: 100%; border-collapse: collapse; }
+    table.totals th { font-size: 7pt; font-weight: normal; color: #555; text-align: right; padding: 1mm 1.5mm; border-bottom: 0.3pt solid #999; }
+    table.totals th.thl { text-align: left; }
+    table.totals td { padding: 1mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #e5e5e5; }
+    .note { font-size: 6.5pt; color: #555; margin-top: 2mm; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">{{ meta.supplier.company_name }}</div>
+            {% if meta.supplier.ic %}<div class="header-meta">IČ: {{ meta.supplier.ic }}</div>{% endif %}
+            {% if meta.supplier.dic %}<div class="header-meta">DIČ: {{ meta.supplier.dic }}</div>{% endif %}
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">{{ meta.title }}</div>
+            <div class="header-period">Období: {{ meta.period_label }}</div>
+        </td>
+        <td style="width:30%; text-align:right;">
+            <div class="header-meta">Datum tisku: {{ meta.printed_at|date('d.m.Y H:i') }}</div>
+        </td>
+    </tr>
+</table>
+
+{% if meta.selection is not empty %}
+<div class="selection-title">Nastavení výběru</div>
+<table class="selection">
+    {% for item in meta.selection %}
+    <tr><td class="selection-label">{{ item.label }}</td><td>{{ item.value }}</td></tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<table class="book">
+    <thead>
+        <tr>
+            <th style="width:10%;">Doklad</th>
+            <th style="width:7%;">Datum vyst.</th>
+            <th style="width:7%;">Datum splat.</th>
+            <th style="width:7%;">DUZP</th>
+            <th class="num" style="width:10%;">Částka</th>
+            <th class="num" style="width:10%;">Zbývá uhradit</th>
+            <th style="width:17%;">{{ partner_label }}</th>
+            <th style="width:9%;">Variabilní symbol</th>
+            <th style="width:23%;">Popis</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in book.rows() %}
+        <tr>
+            <td{% if not row.counted %} class="muted"{% endif %}>{{ row.number }}{% if row.cancelled %} <span class="flag">storno</span>{% elseif row.draft %} <span class="flag">koncept</span>{% endif %}</td>
+            <td>{{ row.issue_date|cz_date }}</td>
+            <td>{{ row.due_date|cz_date }}</td>
+            <td>{{ row.duzp|cz_date }}</td>
+            <td class="num">{{ row.amount|cz_money }}{% if row.currency != book.domesticCurrency %} {{ row.currency }}{% endif %}</td>
+            <td class="num">{{ row.remaining|cz_money }}{% if row.currency != book.domesticCurrency %} {{ row.currency }}{% endif %}</td>
+            <td>{{ row.partner_name|slice(0, 45) }}</td>
+            <td>{{ row.variable_symbol }}</td>
+            <td>{{ row.description }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% set totals = book.totals() %}
+<div class="totals-title">Součty</div>
+{% if totals is empty %}
+    <p class="muted">Výběru neodpovídá žádný doklad, který by vstupoval do součtů.</p>
+{% else %}
+<table class="totals">
+    <thead>
+        <tr>
+            <th class="thl" style="width:10%;">Měna</th>
+            <th style="width:10%;">Počet dokladů</th>
+            <th style="width:16%;">Celkem k úhradě</th>
+            <th style="width:16%;">Zbývá uhradit (faktury)</th>
+            <th style="width:16%;">Zbývá uhradit (dobropisy)</th>
+            <th style="width:16%;">Daňové doklady k přijaté platbě</th>
+            <th style="width:16%;">Celkem doklady</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in totals %}
+        <tr>
+            <td>{{ t.currency }}</td>
+            <td class="num">{{ t.count }}</td>
+            <td class="num">{{ t.to_pay|cz_money }}</td>
+            <td class="num">{{ t.remaining_invoices|cz_money }}</td>
+            <td class="num">{{ t.remaining_credit_notes|cz_money }}</td>
+            <td class="num">{{ t.tax_documents|cz_money }}</td>
+            <td class="num">{{ t.total|cz_money }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+<div class="note">Součty jsou v měně dokladů, bez přepočtu kurzem. Koncepty a stornované doklady jsou v přehledu označené a do součtů nevstupují. Celkem k úhradě je po odpočtu záloh, Celkem doklady včetně nich.</div>
+
+</body>
+</html>

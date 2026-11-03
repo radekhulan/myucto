@@ -23763,6 +23763,13 @@
     "bulk_pdf_download": "Stáhnout PDF",
     "bulk_pdf_done": "PDF export připraven ({n} faktur).",
     "bulk_pdf_failed": "PDF export selhal",
+    "book_issued": "Kniha vystavených faktur",
+    "book_received": "Kniha přijatých faktur",
+    "book_hint": "Sestava dokladů podle aktuálního filtru seznamu se součty",
+    "book_scope": "Všechny doklady odpovídající aktuálnímu filtru, bez stránkování",
+    "book_pdf": "PDF na šířku",
+    "book_xlsx": "Tabulka XLSX",
+    "book_failed": "Knihu faktur se nepodařilo vytvořit",
     "oss": {
       "enabled": "OSS",
       "country": "Země",

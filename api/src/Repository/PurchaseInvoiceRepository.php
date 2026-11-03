@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -833,9 +834,28 @@ final class PurchaseInvoiceRepository
      */
     public function listGroupedByMonth(array $filters = [], int $page = 1, int $perPage = 0, ?DocumentViewerContext $documentViewer = null): array
     {
-        $supplierId = (int) ($filters['supplier_id'] ?? 0);
-        if ($supplierId === 0) {
+        if ((int) ($filters['supplier_id'] ?? 0) === 0) {
             return ['data' => [], 'meta' => ['total' => 0]];
+        }
+
+        [$whereSql, $params] = $this->listWhere($filters, $documentViewer);
+
+        return $this->listGroupedRows($whereSql, $params, $filters, $page, $perPage);
+    }
+
+    /**
+     * WHERE seznamu přijatých faktur nad aliasy `pi` (purchase_invoices), `c` (clients)
+     * a `cur` (currencies). Sdílí ho seznam i kniha přijatých faktur, aby export vybral
+     * totéž co obrazovka. Bez firmy nevybere nic.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:list<mixed>}
+     */
+    public function listWhere(array $filters, ?DocumentViewerContext $documentViewer = null): array
+    {
+        $supplierId = (int) ($filters['supplier_id'] ?? 0);
+        if ($supplierId <= 0) {
+            return ['1=0', []];
         }
 
         $where = ['pi.supplier_id = ?'];
@@ -1054,8 +1074,15 @@ final class PurchaseInvoiceRepository
             $params[] = '%' . $q . '%';
         }
 
-        $whereSql = implode(' AND ', $where);
+        return [implode(' AND ', $where), $params];
+    }
 
+    /**
+     * @param list<mixed> $params
+     * @param array<string,mixed> $filters
+     */
+    private function listGroupedRows(string $whereSql, array $params, array $filters, int $page, int $perPage): array
+    {
         // MariaDB 10.2+ window function — COUNT(*) OVER() vrací total v každém řádku.
         // Místo 2 query (COUNT + SELECT s LIMIT) jeden round-trip, žádný race condition
         // mezi count a paginated select, žádný duplicate WHERE / JOIN parsing.
@@ -1221,6 +1248,86 @@ final class PurchaseInvoiceRepository
         }
 
         return ['data' => array_values($grouped), 'meta' => $meta];
+    }
+
+    /**
+     * Dávka knihy přijatých faktur: WHERE seznamu ({@see listWhere()}) jen pro doklady
+     * s číslem (koncept bez čísla do knihy nepatří), seřazená podle čísla dokladu. Stránkuje se klíčem (číslo, id), ne OFFSETem,
+     * takže celý rok dokladů nikdy neskončí v jednom poli.
+     *
+     * @param array<string,mixed> $filters
+     * @param array{0:string, 1:int}|null $after klíč posledního řádku předchozí dávky
+     * @return list<array<string,mixed>>
+     */
+    public function listBookBatch(array $filters, ?DocumentViewerContext $documentViewer, ?array $after, int $limit): array
+    {
+        [$whereSql, $params] = $this->listWhere($filters, $documentViewer);
+        $whereSql .= " AND pi.varsymbol IS NOT NULL AND pi.varsymbol <> ''";
+        if ($after !== null) {
+            $whereSql .= ' AND (pi.varsymbol > ? OR (pi.varsymbol = ? AND pi.id > ?))';
+            array_push($params, $after[0], $after[0], $after[1]);
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pi.id, pi.varsymbol, pi.varsymbol AS number, pi.vendor_invoice_number, pi.payment_variable_symbol,
+                    pi.document_kind, pi.status, pi.issue_date, pi.tax_date, pi.due_date,
+                    cur.code AS currency, cur.decimals AS currency_decimals,
+                    pi.total_with_vat, pi.amount_to_pay,
+                    (" . PurchaseSettledExpr::remainingAmount('pi') . ") AS remaining_amount,
+                    pi.note_above_items, c.company_name AS partner_name
+               FROM purchase_invoices pi
+               JOIN clients c ON c.id = pi.vendor_id
+               JOIN currencies cur ON cur.id = pi.currency_id
+              WHERE $whereSql
+              ORDER BY pi.varsymbol, pi.id
+              LIMIT " . max(1, $limit)
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return [];
+        }
+
+        $main = $this->mainItemDescriptions(array_map(static fn (array $r): int => (int) $r['id'], $rows));
+        foreach ($rows as &$row) {
+            $row['id'] = (int) $row['id'];
+            $row['type'] = (string) ($row['document_kind'] ?? 'invoice');
+            $row['variable_symbol'] = VariableSymbolNormalizer::forPurchasePayment($row);
+            $row['main_item'] = $main[$row['id']] ?? null;
+        }
+        unset($row);
+
+        return $rows;
+    }
+
+    /**
+     * Text hlavní položky dokladu: položka s nejvyšší částkou s DPH (v absolutní hodnotě,
+     * dobropis má řádky záporné), při shodě ta dřívější.
+     *
+     * @param list<int> $ids
+     * @return array<int,string>
+     */
+    private function mainItemDescriptions(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $place = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT purchase_invoice_id, description FROM (
+                SELECT pii.purchase_invoice_id, pii.description,
+                       ROW_NUMBER() OVER (PARTITION BY pii.purchase_invoice_id
+                                          ORDER BY ABS(pii.total_with_vat) DESC, pii.order_index, pii.id) AS rn
+                  FROM purchase_invoice_items pii
+                 WHERE pii.purchase_invoice_id IN ($place) AND TRIM(pii.description) <> ''
+             ) ranked WHERE rn = 1"
+        );
+        $stmt->execute($ids);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['purchase_invoice_id']] = (string) $r['description'];
+        }
+        return $out;
     }
 
     /**

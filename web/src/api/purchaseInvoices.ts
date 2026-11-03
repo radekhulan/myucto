@@ -843,41 +843,47 @@ export interface PurchaseRenumberPlan {
   blocked: PurchaseRenumberRow[]
 }
 
+/** Query seznamu bez stránkování, řazení a doplňkových sloupců: stejný výběr, jaký čte kniha faktur. */
+function purchaseListFilterParams(filters: PurchaseListFilters): Record<string, string | number> {
+  const params: Record<string, string | number> = {}
+  if (filters.q) params.q = filters.q
+  if (filters.status) {
+    params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
+  }
+  if (filters.document_kind) {
+    params['filter[document_kind]'] = Array.isArray(filters.document_kind)
+      ? filters.document_kind.join(',')
+      : filters.document_kind
+  }
+  if (filters.vendor_id)   params['filter[vendor_id]']   = filters.vendor_id
+  if (filters.project_id)  params['filter[project_id]']  = filters.project_id
+  if (filters.year)        params['filter[year]']        = filters.year
+  if (filters.month)       params['filter[month]']       = filters.month
+  if (filters.date_from)   params['filter[date_from]']   = filters.date_from
+  if (filters.date_to)     params['filter[date_to]']     = filters.date_to
+  if (filters.currency)    params['filter[currency]']    = filters.currency
+  if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
+  if (filters.overdue)      params['filter[overdue]']      = 1
+  if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
+  if (filters.unmatched)    params['filter[unmatched]']    = 1
+  if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
+  if (filters.needs_review) params['filter[needs_review]'] = 1
+  if (filters.approval_status) {
+    // Smlouva říká jen „filtr approval_status"; ostatní filtry jedou přes filter[...], proto obě podoby.
+    params['filter[approval_status]'] = filters.approval_status
+    params.approval_status = filters.approval_status
+  }
+  if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
+  if (filters.booked)      params['filter[booked]']      = filters.booked
+  if (filters.has_visual_document !== undefined) params['filter[has_visual_document]'] = filters.has_visual_document
+  if (filters.has_structured_source !== undefined) params['filter[has_structured_source]'] = filters.has_structured_source
+  if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
+  return params
+}
+
 export const purchaseInvoicesApi = {
   listGrouped: (filters: PurchaseListFilters = {}) => {
-    const params: Record<string, string | number> = {}
-    if (filters.q) params.q = filters.q
-    if (filters.status) {
-      params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
-    }
-    if (filters.document_kind) {
-      params['filter[document_kind]'] = Array.isArray(filters.document_kind)
-        ? filters.document_kind.join(',')
-        : filters.document_kind
-    }
-    if (filters.vendor_id)   params['filter[vendor_id]']   = filters.vendor_id
-    if (filters.project_id)  params['filter[project_id]']  = filters.project_id
-    if (filters.year)        params['filter[year]']        = filters.year
-    if (filters.month)       params['filter[month]']       = filters.month
-    if (filters.date_from)   params['filter[date_from]']   = filters.date_from
-    if (filters.date_to)     params['filter[date_to]']     = filters.date_to
-    if (filters.currency)    params['filter[currency]']    = filters.currency
-    if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
-    if (filters.overdue)      params['filter[overdue]']      = 1
-    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
-    if (filters.unmatched)    params['filter[unmatched]']    = 1
-    if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
-    if (filters.needs_review) params['filter[needs_review]'] = 1
-    if (filters.approval_status) {
-      // Smlouva říká jen „filtr approval_status"; ostatní filtry jedou přes filter[...], proto obě podoby.
-      params['filter[approval_status]'] = filters.approval_status
-      params.approval_status = filters.approval_status
-    }
-    if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
-    if (filters.booked)      params['filter[booked]']      = filters.booked
-    if (filters.has_visual_document !== undefined) params['filter[has_visual_document]'] = filters.has_visual_document
-    if (filters.has_structured_source !== undefined) params['filter[has_structured_source]'] = filters.has_structured_source
-    if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
+    const params = purchaseListFilterParams(filters)
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     if (filters.sort_key)    params.sort_key               = filters.sort_key
@@ -1145,5 +1151,12 @@ export const purchaseInvoicesApi = {
     }
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/purchase-invoices/export?${params.toString()}`
+  },
+
+  /** Kniha přijatých faktur nad filtrem seznamu (bez stránkování). */
+  bookUrl: (filters: PurchaseListFilters, format: 'pdf' | 'xlsx') => {
+    const query = new URLSearchParams({ format })
+    for (const [key, value] of Object.entries(purchaseListFilterParams(filters))) query.set(key, String(value))
+    return `/api/purchase-invoices/book?${query.toString()}`
   },
 }

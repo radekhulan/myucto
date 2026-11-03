@@ -793,34 +793,40 @@ export interface OssBulkFailure {
   pdf_not_invalidated: number[]
 }
 
+/** Query seznamu bez stránkování, řazení a doplňkových sloupců: stejný výběr, jaký čte kniha faktur. */
+function listFilterParams(filters: ListFilters): Record<string, string | number> {
+  const params: Record<string, string | number> = {}
+  if (filters.q) params.q = filters.q
+  if (filters.status) {
+    params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
+  }
+  if (filters.type) {
+    params['filter[type]'] = Array.isArray(filters.type) ? filters.type.join(',') : filters.type
+  }
+  if (filters.client_id)   params['filter[client_id]']   = filters.client_id
+  if (filters.project_id)  params['filter[project_id]']  = filters.project_id
+  if (filters.year)        params['filter[year]']        = filters.year
+  if (filters.month)       params['filter[month]']       = filters.month
+  if (filters.date_from)   params['filter[date_from]']   = filters.date_from
+  if (filters.date_to)     params['filter[date_to]']     = filters.date_to
+  if (filters.currency)    params['filter[currency]']    = filters.currency
+  if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
+  if (filters.overdue)     params['filter[overdue]']     = 1
+  if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
+  if (filters.booked)      params['filter[booked]']      = filters.booked
+  if (filters.oss_review)  params['filter[oss_review]']  = filters.oss_review
+  if (filters.revenue_category_id?.length) {
+    params['filter[revenue_category_id]'] = filters.revenue_category_id.join(',')
+  }
+  if (filters.revenue_category_exclude?.length) {
+    params['filter[revenue_category_exclude]'] = filters.revenue_category_exclude.join(',')
+  }
+  return params
+}
+
 export const invoicesApi = {
   listGrouped: (filters: ListFilters = {}) => {
-    const params: Record<string, string | number> = {}
-    if (filters.q) params.q = filters.q
-    if (filters.status) {
-      params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
-    }
-    if (filters.type) {
-      params['filter[type]'] = Array.isArray(filters.type) ? filters.type.join(',') : filters.type
-    }
-    if (filters.client_id)   params['filter[client_id]']   = filters.client_id
-    if (filters.project_id)  params['filter[project_id]']  = filters.project_id
-    if (filters.year)        params['filter[year]']        = filters.year
-    if (filters.month)       params['filter[month]']       = filters.month
-    if (filters.date_from)   params['filter[date_from]']   = filters.date_from
-    if (filters.date_to)     params['filter[date_to]']     = filters.date_to
-    if (filters.currency)    params['filter[currency]']    = filters.currency
-    if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
-    if (filters.overdue)     params['filter[overdue]']     = 1
-    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
-    if (filters.booked)      params['filter[booked]']      = filters.booked
-    if (filters.oss_review)  params['filter[oss_review]']  = filters.oss_review
-    if (filters.revenue_category_id?.length) {
-      params['filter[revenue_category_id]'] = filters.revenue_category_id.join(',')
-    }
-    if (filters.revenue_category_exclude?.length) {
-      params['filter[revenue_category_exclude]'] = filters.revenue_category_exclude.join(',')
-    }
+    const params = listFilterParams(filters)
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     if (filters.sort_key)    params.sort_key               = filters.sort_key
@@ -862,6 +868,13 @@ export const invoicesApi = {
       type: ['invoice', 'proforma'],
       per_page: limit,
     }).then(r => r.data.flatMap(g => g.invoices)),
+
+  /** Kniha vystavených faktur nad filtrem seznamu (bez stránkování). */
+  bookUrl: (filters: ListFilters, format: 'pdf' | 'xlsx') => {
+    const query = new URLSearchParams({ format })
+    for (const [key, value] of Object.entries(listFilterParams(filters))) query.set(key, String(value))
+    return `/api/invoices/book?${query.toString()}`
+  },
 
   exportSelectedPdf: (ids: number[], signPdf = false) =>
     api.get<Blob>('/invoices/export.pdf', {

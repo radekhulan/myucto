@@ -23763,6 +23763,13 @@
     "bulk_pdf_download": "Download PDF",
     "bulk_pdf_done": "PDF export ready ({n} invoices).",
     "bulk_pdf_failed": "PDF export failed",
+    "book_issued": "Issued invoice book",
+    "book_received": "Received invoice book",
+    "book_hint": "Report of documents matching the current list filter, with totals",
+    "book_scope": "All documents matching the current filter, without paging",
+    "book_pdf": "Landscape PDF",
+    "book_xlsx": "XLSX spreadsheet",
+    "book_failed": "The invoice book could not be created",
     "oss": {
       "enabled": "OSS",
       "country": "Country",

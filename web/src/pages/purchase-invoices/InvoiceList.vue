@@ -28,6 +28,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
@@ -721,6 +722,7 @@ async function refreshLoadedPages() {
 // při listování za hranici načtených řádků (useListNavigation).
 type PurchaseListParams = NonNullable<Parameters<typeof purchaseInvoicesApi.listGrouped>[0]>
 let loadedParams: PurchaseListParams = {}
+const purchaseBookUrl = (format: 'pdf' | 'xlsx') => purchaseInvoicesApi.bookUrl(listParams(), format)
 function listParams(): PurchaseListParams {
   return {
     status:        statusFilter.value || undefined,
@@ -1105,6 +1107,12 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           {{ t('purchase_invoice.extraction_review.open_count', { count: reviewableIds.length }) }}
         </button>
+        <InvoiceBookMenu
+          v-if="auth.canRead('purchase_invoices')"
+          :label="t('invoice.book_received')"
+          :url-for="purchaseBookUrl"
+          fallback-filename="kniha-prijatych-faktur"
+        />
         <RouterLink
           v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
           to="/purchase-invoices/new"

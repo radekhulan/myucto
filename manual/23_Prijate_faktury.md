@@ -360,6 +360,12 @@ Otevřete-li detail ze seznamu přijatých faktur, vlevo od odkazu **Zpět na se
 faktury (zkratky `[` a `]`), které listují v pořadí a s filtry seznamu, ze kterého jste přišli; detail otevřený
 přímým odkazem šipky nemá.
 
+**Kniha přijatých faktur.** Tlačítko vpravo nahoře v seznamu stáhne sestavu všech dokladů odpovídajících
+aktuálnímu filtru jako PDF na šířku nebo tabulku XLSX, seřazenou podle čísla dokladu. Sloupce, pravidla pro
+koncepty a storna i součty po měnách jsou stejné jako u knihy vystavených faktur
+([§ 14.7.1](14_Faktury.md#1471-kniha-vystavenych-faktur)); místo odběratele uvádí dodavatele a variabilní symbol
+bere z platebního VS, jinak z čísla dokladu dodavatele.
+
 ### 23.11.2 Stavy přijaté faktury
 
 <!-- cols: 22 44 34 -->
