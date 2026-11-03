@@ -51,6 +51,42 @@ function move(index: number, delta: number) {
   ;[next[index], next[target]] = [next[target], next[index]]
   parts.value = next
 }
+// Přeřazení tažením řádku. Soubory přetažené z počítače na seznam se jen přidají na konec.
+const dragIndex = ref<number | null>(null)
+const dropIndex = ref<number | null>(null)
+function onRowDragStart(e: DragEvent, index: number) {
+  if (merging.value) { e.preventDefault(); return }
+  dragIndex.value = index
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(index))
+  }
+}
+function onRowDragOver(e: DragEvent, index: number) {
+  e.preventDefault()
+  if (dragIndex.value === null) return
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropIndex.value = index
+}
+function onRowDrop(e: DragEvent, index: number) {
+  e.preventDefault()
+  const from = dragIndex.value
+  onRowDragEnd()
+  if (from === null) {
+    add(Array.from(e.dataTransfer?.files ?? []))
+    return
+  }
+  if (from === index) return
+  const next = [...parts.value]
+  const [moved] = next.splice(from, 1)
+  next.splice(index, 0, moved)
+  parts.value = next
+}
+function onRowDragEnd() {
+  dragIndex.value = null
+  dropIndex.value = null
+}
+
 function remove(index: number) {
   parts.value = parts.value.filter((_, i) => i !== index)
 }
@@ -104,7 +140,20 @@ async function mergeAndImport() {
           </button>
         </div>
         <ol class="border border-neutral-200 rounded-md divide-y divide-neutral-100 text-xs">
-          <li v-for="(file, idx) in parts" :key="`${idx}-${file.name}`" data-test="ai-merge-part" class="flex items-center gap-2 px-2 py-1.5">
+          <li v-for="(file, idx) in parts" :key="`${idx}-${file.name}`" data-test="ai-merge-part"
+              :draggable="!merging" :title="t('integrations.ai.merge.drag_hint')"
+              class="flex items-center gap-2 px-2 py-1.5 transition-colors"
+              :class="[
+                merging ? '' : 'cursor-grab active:cursor-grabbing',
+                dragIndex === idx ? 'opacity-40' : '',
+                dropIndex === idx && dragIndex !== null && dragIndex > idx ? 'bg-primary-50 shadow-[inset_0_2px_0_var(--color-primary-500)]' : '',
+                dropIndex === idx && dragIndex !== null && dragIndex < idx ? 'bg-primary-50 shadow-[inset_0_-2px_0_var(--color-primary-500)]' : '',
+              ]"
+              @dragstart="onRowDragStart($event, idx)" @dragover="onRowDragOver($event, idx)"
+              @drop="onRowDrop($event, idx)" @dragend="onRowDragEnd">
+            <svg class="w-4 h-4 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" aria-hidden="true">
+              <path stroke-linecap="round" d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />
+            </svg>
             <span class="w-5 text-right text-neutral-400 shrink-0">{{ idx + 1 }}.</span>
             <span class="font-mono truncate flex-1 min-w-0" :title="file.name">{{ file.name }}</span>
             <span class="text-neutral-400 whitespace-nowrap">{{ Math.round(file.size / 1024) }} kB</span>

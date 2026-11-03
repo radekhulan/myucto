@@ -29145,11 +29145,12 @@
       "coming_hint": "—",
       "merge": {
         "title": "Merge several PDFs into one document",
-        "hint": "Got one invoice or receipt split across several files (one page each)? Upload all parts, put them in order and they are merged into one PDF that is extracted as a single document.",
+        "hint": "Got one invoice or receipt split across several files (one page each)? Upload all parts, put them in order by dragging or with the arrows and they are merged into one PDF that is extracted as a single document.",
         "drop": "Drop the document parts here or click",
         "formats": "PDFs and photos (JPG, PNG, WebP), at least two files",
         "parts_title": "Document parts ({n})",
         "move_up": "Move up",
+        "drag_hint": "Drag to change the order",
         "move_down": "Move down",
         "run": "Merge and import as one document",
         "merging": "Merging files…",

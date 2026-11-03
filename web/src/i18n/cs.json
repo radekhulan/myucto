@@ -29145,11 +29145,12 @@
       "coming_hint": "—",
       "merge": {
         "title": "Spojit více PDF do jednoho dokladu",
-        "hint": "Máte jednu fakturu nebo účtenku ve více souborech (každá strana zvlášť)? Nahrajte všechny části, seřaďte je a spojí se do jednoho PDF, které se vytěží jako jeden doklad.",
+        "hint": "Máte jednu fakturu nebo účtenku ve více souborech (každá strana zvlášť)? Nahrajte všechny části, seřaďte je přetažením nebo šipkami a spojí se do jednoho PDF, které se vytěží jako jeden doklad.",
         "drop": "Přetáhněte části dokladu sem nebo klikněte",
         "formats": "PDF a fotky (JPG, PNG, WebP), alespoň dva soubory",
         "parts_title": "Části dokladu ({n})",
         "move_up": "Posunout výš",
+        "drag_hint": "Přetažením změníte pořadí",
         "move_down": "Posunout níž",
         "run": "Spojit a importovat jako jeden doklad",
         "merging": "Spojuji soubory…",
