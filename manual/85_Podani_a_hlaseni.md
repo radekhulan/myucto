@@ -1525,7 +1525,12 @@ zablokuje; revizi přepočtěte opravným během po schválení nemoci.
 **Pracující důchodce** nemá v hlášení údaje pro evidenční list (třída, dny
 a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
 pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
-pracujícího důchodce v zákonné evidenci osoby.
+pracujícího důchodce v zákonné evidenci osoby. Měsíc, od kterého mu náleží
+výplata starobního důchodu v plné výši, ale hlášení ještě vykazuje s údaji
+pro evidenční list, i když v něm sleva už náleží (důchod od 1. dne měsíce):
+údaje se vyplňují do tohoto měsíce včetně, stejně jako roční evidenční list.
+Jen interval pojištění s nulou dnů se hlásí až od následujícího měsíce. Měsíc
+výplaty aplikace bere ze sekce **Pobíraný důchod** zákonné evidence osoby.
 
 **Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
 důchodce: kód ELDP v hlášení nese druhý znak `D` (například `1D+`) od dne

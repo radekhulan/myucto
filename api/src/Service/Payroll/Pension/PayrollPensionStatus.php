@@ -179,6 +179,42 @@ final class PayrollPensionStatus
         ];
     }
 
+    /**
+     * Vede se za měsíc ještě údaje ELDP, nebo už je osoba poživatelem
+     * starobního důchodu v plné výši, za kterého se nevedou?
+     *
+     * ELDP se vyplňuje „pouze do měsíce, od něhož náleží výplata starobního
+     * důchodu v plné výši" včetně tohoto měsíce (Metodická pomůcka ELDP,
+     * příklad 8a; odpověď MPSV/ČSSZ v diskusi JMHZ #363 ze 16. 4. 2026).
+     * Platí to stejně pro důchod přiznaný od prvního dne měsíce jako uprostřed
+     * měsíce: první měsíc bez ELDP je až následující. Jediné pravidlo pro
+     * roční evidenční list, měsíční hlášení JMHZ i odečtené doby.
+     *
+     * @param ?string $fullPensionPaidFrom měsíc RRRR-MM (`full_pension_paid_from`)
+     * @param string $periodStart libovolný den vykazovaného měsíce RRRR-MM-DD
+     */
+    public static function eldpKeptInMonth(?string $fullPensionPaidFrom, string $periodStart): bool
+    {
+        return $fullPensionPaidFrom === null || substr($periodStart, 0, 7) <= $fullPensionPaidFrom;
+    }
+
+    /**
+     * První den prvního měsíce, za který se ELDP kvůli starobnímu důchodu
+     * v plné výši už nevede ({@see eldpKeptInMonth()}); `null` bez důchodu.
+     *
+     * @param ?string $fullPensionPaidFrom měsíc RRRR-MM
+     */
+    public static function eldpNotKeptFrom(?string $fullPensionPaidFrom): ?string
+    {
+        if ($fullPensionPaidFrom === null) {
+            return null;
+        }
+
+        return (new DateTimeImmutable($fullPensionPaidFrom . '-01'))
+            ->modify('first day of next month')
+            ->format('Y-m-d');
+    }
+
     /** @param array{age:?array<string,mixed>,pensions:list<array<string,mixed>>} $evidence */
     public static function isEmpty(array $evidence): bool
     {

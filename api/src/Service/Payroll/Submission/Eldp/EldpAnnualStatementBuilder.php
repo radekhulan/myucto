@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverMonth;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
@@ -107,7 +108,9 @@ use Psr\Clock\ClockInterface;
  *   základ, který výpočet za část měsíce nevede, a proto blokuje
  *   (`eldp_pension_age_mid_month_unsupported`).
  *
- * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí.
+ * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí
+ * až od měsíce, který následuje po měsíci, od něhož výplata náleží; ten ještě
+ * vykazuje stejně jako list ({@see PayrollPensionStatus::eldpKeptInMonth()}).
  * Kód D pro ostatní (po dovršení důchodového věku bez plného důchodu) se skládá
  * tímtéž pravidlem ({@see EldpPensionAgeCode}) i v hlášení
  * ({@see JmhzEldpEvidenceBuilder}), pokud zdroj nese potvrzené důchodové údaje.
@@ -2428,22 +2431,18 @@ final class EldpAnnualStatementBuilder
      * Zaměstnavatel vede list „do měsíce, od něhož pojištěnci náleží výplata
      * starobního důchodu v plné výši" včetně tohoto měsíce (Metodická pomůcka
      * ELDP, příklad 8a: důchod od 1. 5., list do 31. 5.). Nevede se tedy až od
-     * následujícího měsíce.
+     * následujícího měsíce; pravidlo sdílí s měsíčním hlášením
+     * ({@see PayrollPensionStatus::eldpNotKeptFrom()}).
      *
      * @param array{full_pension_paid_from:?string,foreign_insurance:bool} $pension
      */
     private static function fullPensionNotKeptFrom(int $year, array $pension): ?string
     {
-        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR
-            || $pension['full_pension_paid_from'] === null
-            || $pension['foreign_insurance']
-        ) {
+        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR || $pension['foreign_insurance']) {
             return null;
         }
 
-        return (new \DateTimeImmutable($pension['full_pension_paid_from'] . '-01'))
-            ->modify('first day of next month')
-            ->format('Y-m-d');
+        return PayrollPensionStatus::eldpNotKeptFrom($pension['full_pension_paid_from']);
     }
 
     /**
