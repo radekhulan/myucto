@@ -2,6 +2,7 @@ import './styles/main.css'
 import { captureInitialDomainLogin } from '@/security/domainLoginContext'
 import { parseWindowFrameBootstrap } from '@/workspace/frameProtocol'
 import { initPwaInstall } from '@/composables/usePwaInstall'
+import { captureSsoFragment } from '@/security/oidc'
 
 // Nasazení nové verze uklidí assety předchozích vydání a záložka se starou verzí pak
 // chunk nedotáhne. Načte se znovu (nový index.html má nové chunky), nejvýš jednou za 30 s.
@@ -16,6 +17,9 @@ window.addEventListener('vite:preloadError', (event) => {
 })
 
 captureInitialDomainLogin(window.location)
+// Návrat od poskytovatele identity nese výsledek ve fragmentu; před startem
+// routeru se přečte a z adresy zmizí.
+captureSsoFragment(window.location, window.history)
 
 const frame = parseWindowFrameBootstrap(window.location.search, window.parent !== window)
 

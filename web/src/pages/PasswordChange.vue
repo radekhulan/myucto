@@ -4,6 +4,7 @@
  *   - Heslo  (změna hesla, self-service)
  *   - 2FA    (TOTP setup, status, aktivace)
  *   - Passkeys (registrace a správa přístupových klíčů)
+ *   - Účet organizace (propojení s poskytovatelem identity, jen když je zapnutý)
  *   - Zámek aplikace (osobní interval nečinnosti)
  *   - Klávesové zkratky (osobní ovládání aplikace)
  */
@@ -16,6 +17,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import Passkeys from '@/pages/Passkeys.vue'
+import ExternalIdentities from '@/components/security/ExternalIdentities.vue'
 import KeyboardShortcuts from '@/pages/KeyboardShortcuts.vue'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
@@ -58,9 +60,11 @@ async function returnToClientDomain() {
   }
 }
 
-type Tab = 'password' | 'totp' | 'passkeys' | 'session-lock' | 'shortcuts'
+type Tab = 'password' | 'totp' | 'passkeys' | 'sso' | 'session-lock' | 'shortcuts'
+const ssoEnabled = computed(() => (auth.setupStatus?.sso_providers ?? []).length > 0)
 function tabFromQuery(value: unknown): Tab {
   return value === 'totp' || value === 'passkeys' || value === 'session-lock' || (value === 'shortcuts' && !auth.isInstanceAdmin)
+    || (value === 'sso' && ssoEnabled.value)
     ? value
     : 'password'
 }
@@ -349,6 +353,7 @@ onMounted(() => {
       <option value="password">{{ t('auth.change_password_title') }}</option>
       <option value="totp">{{ t('auth.totp_tab') }}</option>
       <option value="passkeys">{{ t('passkeys.title') }}</option>
+      <option v-if="ssoEnabled" value="sso">{{ t('sso.profile_tab') }}</option>
       <option value="session-lock">{{ t('session_lock.preference_tab') }}</option>
       <option v-if="!auth.isInstanceAdmin" value="shortcuts">{{ t('keyboard_shortcuts.title') }}</option>
     </select>
@@ -378,6 +383,13 @@ onMounted(() => {
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('passkeys.title') }}
+      </button>
+      <button v-if="ssoEnabled" type="button" @click="setTab('sso')"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
+        :class="tab === 'sso'
+          ? 'border-primary-600 text-primary-700 font-medium'
+          : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('sso.profile_tab') }}
       </button>
       <button type="button" @click="setTab('session-lock')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
@@ -552,6 +564,9 @@ onMounted(() => {
 
     <!-- ── Passkeys ── -->
     <Passkeys v-else-if="tab === 'passkeys'" @registered="returnToClientDomain" />
+
+    <!-- ── Přihlášení přes účet organizace ── -->
+    <ExternalIdentities v-else-if="tab === 'sso'" />
 
     <!-- ── Automatický zámek ── -->
     <form v-else-if="tab === 'session-lock'" @submit.prevent="saveLockPreference"

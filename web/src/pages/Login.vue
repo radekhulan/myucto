@@ -37,10 +37,30 @@ import {
   clientDomainCanonicalHandoffPath,
   isClientDomainAuthenticatedPath,
 } from '@/security/clientRoutePolicy'
+import { ssoErrorCode, ssoLoginUrl } from '@/security/oidc'
+import { navigateFullPage } from '@/workspace/fullPageNavigation'
+import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+
+// Přihlášení přes účet organizace (OpenID Connect). `sso_required` přichází
+// z odmítnutého hesla nebo z interceptoru, když firma vyžaduje přihlášení přes
+// poskytovatele; `sso_error` z neúspěšného návratu od poskytovatele.
+const ssoProviders = computed(() => auth.setupStatus?.sso_providers ?? [])
+const ssoRequiredFromQuery = typeof route.query.sso_required === 'string' && route.query.sso_required !== ''
+const ssoRequired = ref<string | null>(ssoRequiredFromQuery ? String(route.query.sso_required) : null)
+const ssoErrorMessage = computed(() => typeof route.query.sso_error === 'string' && route.query.sso_error !== ''
+  ? t(`sso.errors.${ssoErrorCode(route.query.sso_error)}`)
+  : '')
+const ssoButtons = computed(() => ssoRequired.value === null
+  ? ssoProviders.value
+  : [...ssoProviders.value].sort((a, b) => Number(b.id === ssoRequired.value) - Number(a.id === ssoRequired.value)))
+
+function startSsoLogin(provider: string) {
+  navigateFullPage(ssoLoginUrl(provider, requestedReturnPath('/')))
+}
 
 // Štítek pro „zapamatovat zařízení". Odpovídá cfg.auth.email_otp.trusted_device_days
 // (default 30) — čistě informativní, vlastní platnost řídí backend.
@@ -163,7 +183,9 @@ onMounted(async () => {
   // je nekonečná smyčka `/` ↔ `/login`: guard by nás poslal sem, my zpátky na `/`.
   const freshDomainLogin = hasPendingCanonicalDomainLogin() && !canonicalDomainLoginSessionCsrf()
   if (!freshDomainLogin) await auth.refresh()
-  if (!freshDomainLogin && auth.isAuthenticated) {
+  // Sezení z hesla, které firma s vynuceným přihlášením přes organizaci odmítla,
+  // je platné, ale nepoužitelné: automatický návrat by skončil ve smyčce.
+  if (!freshDomainLogin && auth.isAuthenticated && !ssoRequiredFromQuery) {
     if (await finishDomainLoginIfNeeded()) return
     router.replace(postLoginTarget(auth.domainContext?.locked
       ? requestedDomainReturnPath()
@@ -426,6 +448,11 @@ async function submit() {
       error.value = t('auth.captcha_failed')
     } else if (code === 'too_many_attempts') {
       error.value = msg || t('auth.too_many_attempts')
+    } else if (code === 'sso_required') {
+      ssoRequired.value = typeof data?.provider === 'string' && data.provider !== '' ? data.provider : 'entra'
+      error.value = ''
+      password.value = ''
+      turnstile.reset()
     } else {
       error.value = msg || t('auth.login_failed')
       turnstile.reset()
@@ -456,6 +483,9 @@ async function loginWithPasskey() {
       error.value = t('auth.captcha_failed')
     } else if (code === 'too_many_attempts') {
       error.value = e?.response?.data?.error?.message || t('auth.too_many_attempts')
+    } else if (code === 'sso_required') {
+      const provider = e?.response?.data?.error?.provider
+      ssoRequired.value = typeof provider === 'string' && provider !== '' ? provider : 'entra'
     } else {
       const ceremonyError = webAuthnErrorKey(e)
       error.value = ceremonyError !== null ? t(ceremonyError) : t('auth.passwordless_passkey_failed')
@@ -599,6 +629,28 @@ async function resendCode() {
           </div>
         </div>
         <form v-else @submit.prevent="submit" class="space-y-4">
+          <div v-if="ssoRequired" role="status" data-testid="sso-required"
+               class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800">
+            {{ t('sso.required_notice') }}
+          </div>
+          <div v-if="ssoErrorMessage" role="alert" data-testid="sso-error"
+               class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
+            {{ ssoErrorMessage }}
+          </div>
+          <div v-if="ssoButtons.length > 0 && !secondFactorPending" class="space-y-3" data-testid="sso-login">
+            <button v-for="provider in ssoButtons" :key="provider.id" type="button"
+                    :class="[BTN_BASE, provider.id === ssoRequired ? FILLED.primary : OUTLINE.neutral, 'w-full justify-center']"
+                    :data-testid="`sso-login-${provider.id}`"
+                    @click="startSsoLogin(provider.id)">
+              <MicrosoftLogo v-if="provider.id === 'entra'" />
+              {{ t('sso.login_with', { provider: provider.label }) }}
+            </button>
+            <div v-if="!auth.setupStatus?.passwordless_login_enabled" class="flex items-center gap-3" aria-hidden="true">
+              <span class="h-px flex-1 bg-neutral-200"></span>
+              <span class="text-xs text-neutral-500">{{ t('auth.or_password_login') }}</span>
+              <span class="h-px flex-1 bg-neutral-200"></span>
+            </div>
+          </div>
           <div v-if="auth.setupStatus?.passwordless_login_enabled && !secondFactorPending" class="space-y-3">
             <button
               v-if="passkeySupported"
