@@ -515,6 +515,71 @@ final class VarsymbolGenerator
     }
 
     /**
+     * Číslo, které skutečně dostane PŘÍŠTÍ vystavený doklad dané řady, bez zápisu
+     * (pro pole „Příští číslo" v nastavení). Na rozdíl od preview() napodobuje celé
+     * next(): srovnání počítadla dolů na max(nejvyšší použité, ruční začátek) jako
+     * NumberSeriesGapGuard a přeskok obsazených čísel. Jinak by UI ukazovalo číslo,
+     * které vystavení nakonec nepoužije.
+     *
+     * @return array{next_number:int, counter:int, period:string, preview:string,
+     *               client_id:int, revenue_category_id:int}|null
+     *         null = řada bez šablony nebo bez čítače ({C+})
+     */
+    public function peek(
+        int $supplierId,
+        string $invoiceType,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): ?array {
+        if ($supplierId <= 0) return null;
+        $invoiceType = self::normalizeType($invoiceType);
+        if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) return null;
+
+        [$template, $period, $counterClientId, $counterCategoryId, $invoiceType] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
+        if ($template === '' || !$this->hasCounterPlaceholder($template)) return null;
+
+        $for       = $for ?? new \DateTimeImmutable('today');
+        $periodKey = $this->makePeriodKey($period, $for);
+
+        $floorColumn = $this->db->hasColumn('invoice_counters', 'floor_number') ? 'floor_number' : '0';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT last_number, {$floorColumn} AS floor_number FROM invoice_counters
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?"
+        );
+        $stmt->execute([$supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey]);
+        $row     = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stored  = $row === false ? 0 : (int) $row['last_number'];
+        $floor   = $row === false ? 0 : (int) $row['floor_number'];
+        $highest = $this->highestUsedCounter($supplierId, $template, $for);
+
+        $counter = $stored;
+        if ($row !== false && $counter > $floor) {
+            $counter = min($counter, max($highest, $floor));
+        }
+
+        $next = $counter + 1;
+        if ($this->varsymbolExists($supplierId, $this->render($template, $for, $next)) && $highest >= $next) {
+            $next = $highest + 1;
+        }
+        $attempts = 0;
+        while ($this->varsymbolExists($supplierId, $this->render($template, $for, $next))) {
+            if (++$attempts > self::MAX_SKIP) break;
+            $next++;
+        }
+
+        return [
+            'next_number'         => $next,
+            'counter'             => $stored,
+            'period'              => $periodKey,
+            'preview'             => $this->render($template, $for, $next),
+            'client_id'           => $counterClientId,
+            'revenue_category_id' => $counterCategoryId,
+        ];
+    }
+
+    /**
      * Pokud je daná faktura "poslední" ve své counter scope (její varsymbol odpovídá
      * aktuální hodnotě counteru), dekrementuj counter — to umožní, aby další vystavená
      * faktura ve stejné scope dostala stejné číslo.

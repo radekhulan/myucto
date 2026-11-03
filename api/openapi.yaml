@@ -7109,6 +7109,38 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/settings/supplier/invoice-counter:
+    get:
+      tags: [Settings]
+      summary: Příští číslo číselné řady dokladů
+      description: |
+        Vrátí číslo, které dostane **příští vystavený doklad** řady, bez zápisu.
+        Počítá stejně jako vystavení: srovná počítadlo na nejvyšší použité číslo
+        (nebo ruční začátek řady) a přeskočí obsazená čísla. U řady bez čítače
+        vrací `next_number: null`.
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [invoice, proforma, credit_note, simplified], default: invoice } }
+        - { name: client_id, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: revenue_category_id, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: Příští číslo řady
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string }
+                  next_number: { type: integer, nullable: true }
+                  counter: { type: integer }
+                  period: { type: string }
+                  preview: { type: string }
+                  client_id: { type: integer }
+                  revenue_category_id: { type: integer }
+        '400':
+          description: Neplatný typ, kombinace os nebo id mimo firmu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     put:
       tags: [Settings]
       summary: Nastavení counteru číselné řady dokladů

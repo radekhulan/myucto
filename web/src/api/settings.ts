@@ -461,6 +461,9 @@ export interface InvoiceCounterResult {
   revenue_category_id: number
 }
 
+/** Odpověď GET /settings/supplier/invoice-counter. */
+export type InvoiceCounterPeek = InvoiceCounterResult | { type: InvoiceCounterType; next_number: null }
+
 export interface NumberSeriesSide {
   type: 'invoice' | 'proforma' | 'credit_note' | 'simplified'
   client_id: number | null
@@ -1115,6 +1118,15 @@ export const settingsApi = {
       ...(date ? { date } : {}),
       ...(clientId ? { client_id: clientId } : {}),
       ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
+    }).then(r => r.data),
+  /** Číslo, které dostane PŘÍŠTÍ vystavený doklad řady (bez zápisu). `next_number: null` = řada bez čítače. */
+  getInvoiceCounter: (type: InvoiceCounterType, clientId = 0, revenueCategoryId = 0) =>
+    api.get<InvoiceCounterPeek>('/settings/supplier/invoice-counter', {
+      params: {
+        type,
+        ...(clientId ? { client_id: clientId } : {}),
+        ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
+      },
     }).then(r => r.data),
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
   updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
