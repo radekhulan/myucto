@@ -5,6 +5,7 @@
 
 # Kontrola MCP manifestu porovnává deterministický výstup generátoru bajt po bajtu.
 MCP/src/tool-api.generated.json text eol=lf
+api/tests/Fixtures/Mcp/*.json text eol=lf
 
 # PHP zdroják musí mít stejné konce řádků na Windows i na Linuxu — golden
 # heredocy v testech se jinak porovnávají proti CRLF verzi sebe sama.

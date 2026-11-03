@@ -15,6 +15,7 @@
  * v PHP, jinak by soubor zastavil most (hlídá test).
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import {
   contentTypeForFilename, extensionOf, normalizeContentType, sanitizeFilename,
 } from './client.mjs';
@@ -126,7 +127,7 @@ function download(name, title, description, properties, required, path, { query,
   return {
     name,
     api,
-    apiReason: api === false ? 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).' : undefined,
+    ...(api === false ? { apiReason: NOT_IN_CLIENT_CATALOG } : {}),
     title,
     description: `${description} ${SIZE_NOTE}`,
     inputSchema: schema({ ...properties, format: FORMAT }, required),
@@ -182,7 +183,7 @@ export const FILE_TOOLS = [
   {
     name: 'upload_invoice_attachment',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přiložit soubor k vydané faktuře',
     description:
       'Nahraje přílohu k vydané faktuře (posílá se odběrateli spolu s PDF). Povolené typy: '
@@ -201,7 +202,7 @@ export const FILE_TOOLS = [
   {
     name: 'delete_invoice_attachment',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat přílohu vydané faktury',
     description:
       'Smaže přílohu vydané faktury včetně souboru. Bez `confirm: true` jen vypíše, '
@@ -241,7 +242,7 @@ export const FILE_TOOLS = [
   {
     name: 'upload_purchase_invoice_pdf',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nahrát PDF k přijaté faktuře',
     description:
       'Archivuje originál dokladu (PDF) u přijaté faktury. Fotku .jpg nebo .png aplikace '
@@ -267,7 +268,7 @@ export const FILE_TOOLS = [
   {
     name: 'delete_purchase_invoice_pdf',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat PDF přijaté faktury',
     description:
       'Odebere archivovaný originál dokladu od přijaté faktury. Samotná faktura zůstane. '
@@ -289,7 +290,7 @@ export const FILE_TOOLS = [
   {
     name: 'import_purchase_invoice_file',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit přijatou fakturu ze souboru',
     description:
       'Založí přijatou fakturu ze strukturovaného souboru: ISDOC (.isdoc), balíčku ISDOCX '
@@ -313,7 +314,7 @@ export const FILE_TOOLS = [
   {
     name: 'upload_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nahrát soubor do Dokumentů',
     description:
       'Uloží soubor do sekce Dokumenty (volitelně do složky), doplní název, popis a tagy '
@@ -385,7 +386,7 @@ export const FILE_TOOLS = [
   {
     name: 'upload_product_media',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nahrát obrázek ke zboží',
     description:
       'Přidá obrázek (.jpg, .png, .webp, .gif) nebo PDF přílohu ke kartě zboží. Popisky, pořadí '

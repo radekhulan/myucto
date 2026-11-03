@@ -1,3 +1,6 @@
+/** Zdůvodnění `api: false` u nástrojů, které se zatím na klientské doméně nenabízejí. */
+export const NOT_IN_CLIENT_CATALOG = 'Dosud nepřevedeno do klientského katalogu.';
+
 /** Ověří jedinou ručně spravovanou deklaraci operací přímo u nástroje. */
 export function apiManifest(tools) {
   const manifest = {};

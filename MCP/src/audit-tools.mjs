@@ -1,3 +1,4 @@
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { seg } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -27,7 +28,7 @@ const query = (a, keys, aliases = {}) => Object.fromEntries(
   Object.entries(selected(a, keys)).map(([key, value]) => [aliases[key] ?? key, value]),
 );
 const read = (name, title, description, properties, path, keys = Object.keys(properties), required = [], aliases = {}, api = false) => ({
-  api, apiReason: api === false ? 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).' : undefined,
+  api, ...(api === false ? { apiReason: NOT_IN_CLIENT_CATALOG } : {}),
   name, title, description, inputSchema: schema(properties, required), write: false,
   run: (c, a, tool) => c.get(typeof path === 'function' ? path(a) : path,
     keys.length ? query(a, keys, aliases) : null, tool),
@@ -236,7 +237,7 @@ export const AUDIT_TOOLS = [
   {
     name: 'intrastat_preview',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Náhled hlášení Intrastat',
     description: 'Čtecí náhled pohybů zboží mezi zeměmi EU pro InstatEvo, včetně chyb a varování. Hlášení neodesílá.',
     inputSchema: schema({

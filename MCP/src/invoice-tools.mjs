@@ -16,6 +16,7 @@
  * (CONFIRM) jsou v `tool-shared.mjs`, který nic dalšího neimportuje.
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { CONFIRM, requireConfirm, confirmed, changed, merged, seg } from './tool-shared.mjs';
 import {
   invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
@@ -402,7 +403,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'uncancel_invoice',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zrušit interní storno',
     description:
       'Vrátí omylem interně stornovanou fakturu nebo zálohu do stavu před stornem. Doklad se '
@@ -448,7 +449,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'create_final_invoice_from_proforma',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Finální faktura ze zálohy',
     description:
       'Ze zaplacené (i částečně) zálohové faktury založí KONCEPT finálního daňového dokladu: '
@@ -471,7 +472,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'list_invoice_advance_drawdown_candidates',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zálohy k postupnému čerpání',
     description:
       'Ke KONCEPTU faktury vrátí zálohové faktury téhož odběratele a měny, které mají vystavený '
@@ -484,7 +485,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'apply_invoice_advance_drawdown',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odečíst část zálohy na faktuře',
     description:
       'Postupné čerpání zálohy (smlouva s milníky): na KONCEPT běžné faktury s vlastními položkami '
@@ -507,7 +508,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'remove_invoice_advance_drawdown',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odebrat čerpání zálohy z faktury',
     description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu.',
     inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
@@ -517,7 +518,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'list_invoice_advance_candidates',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zálohy k propojení s fakturou',
     description:
       'K faktuře vrátí nespárované zálohové faktury téhož odběratele (nejdřív stejná měna '
@@ -529,7 +530,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'list_proforma_final_candidates',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Faktury k propojení se zálohou',
     description:
       'K zálohové faktuře vrátí nepropojené faktury téhož odběratele. Propojení pak udělá '
@@ -541,7 +542,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'link_invoice_advance',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Propojit fakturu se zálohou',
     description:
       'Ručně propojí fakturu se zálohovou fakturou téhož odběratele a měny. Nemá-li faktura '
@@ -558,7 +559,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'unlink_invoice_advance',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zrušit propojení faktury se zálohou',
     description:
       'Zruší propojení faktury se zálohovou fakturou. Odečtená záloha (`advance_paid_amount`) '
@@ -573,7 +574,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'preview_invoice_penalty',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výpočet úroku z prodlení',
     description:
       'Spočítá zákonný úrok z prodlení (NV č. 351/2013 Sb.) k vystavené faktuře po splatnosti: '
@@ -589,7 +590,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'create_invoice_penalty',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit penalizační fakturu',
     description:
       'Založí KONCEPT penalizační faktury na úrok z prodlení (mimo předmět DPH) k vystavené '
@@ -674,7 +675,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'create_payment_tax_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Daňový doklad k přijaté platbě',
     description:
       'K přijaté platbě zálohové faktury založí KONCEPT daňového dokladu k přijaté úplatě '
@@ -716,7 +717,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'set_invoice_payment_schedule',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozpis plateb kalendáře',
     description:
       'Nastaví rozpis plateb KONCEPTU kalendáře: `rent_calendar` je splátkový kalendář k nájmu '
@@ -807,7 +808,7 @@ export const INVOICE_TOOLS = [
   {
     name: 'send_invoice_reminders_bulk',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hromadně poslat upomínky',
     description:
       'Pošle upomínky k více fakturám po splatnosti naráz (nejvýš 50). Každá upomínka je e-mail '

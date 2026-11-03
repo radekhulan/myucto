@@ -39,6 +39,7 @@
  *                      (viz {@see confirmed}) a hlásí se jako destructiveHint.
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { ACCOUNTING_CONTEXT_TOOLS } from './accounting-context-tools.mjs';
 import { PROPERTY_ACCOUNTING_READ_TOOLS } from './property-accounting-read-tools.mjs';
 import { PROPERTY_UNIT_LEGAL_ROLE_TOOLS } from './property-unit-legal-role-tools.mjs';
@@ -583,7 +584,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     {
       name: names.list,
       api: false,
-      apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.list,
       description: descriptions.list,
       inputSchema: schema({
@@ -596,7 +597,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     {
       name: names.get,
       api: false,
-      apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.get,
       description: descriptions.get,
       inputSchema: schema({ id: idField }, ['id']),
@@ -606,7 +607,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     {
       name: names.create,
       api: false,
-      apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.create,
       description: descriptions.create,
       inputSchema: schema(fields, required),
@@ -616,7 +617,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     {
       name: names.update,
       api: false,
-      apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.update,
       description: descriptions.update,
       inputSchema: schema({ id: idField, ...fields }, ['id']),
@@ -626,7 +627,7 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     {
       name: names.delete,
       api: false,
-      apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.delete,
       description: descriptions.delete,
       inputSchema: schema({ id: idField, confirm: CONFIRM }, ['id']),
@@ -695,7 +696,7 @@ export const TOOLS = [
   {
     name: 'list_payroll_people',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam zaměstnanců',
     description:
       'Najde zaměstnance a vrátí lehký přehled jejich pracovních vztahů. '
@@ -717,7 +718,7 @@ export const TOOLS = [
   {
     name: 'create_payroll_person',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit zaměstnance',
     description:
       'Založí osobu i její první pracovní vztah. Slouží k onboardingu z jiné '
@@ -756,7 +757,7 @@ export const TOOLS = [
   {
     name: 'get_payroll_person',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail zaměstnance a sjednané mzdy',
     description:
       'Vrátí osobu a všechny pracovní vztahy. `monthly_gross_minor` je aktuálně '
@@ -768,7 +769,7 @@ export const TOOLS = [
   {
     name: 'change_payroll_salary',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit sjednanou mzdu',
     description:
       'Změní měsíční hrubou mzdu pracovního vztahu. `new_terms` založí novou verzi '
@@ -807,7 +808,7 @@ export const TOOLS = [
   {
     name: 'list_payroll_components',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam mzdových složek',
     description:
       'Vrátí mzdové složky a jejich ID pro zadání odměny, srážky nebo jiného měsíčního vstupu.',
@@ -818,7 +819,7 @@ export const TOOLS = [
   {
     name: 'list_payroll_inputs',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Měsíční mzdové vstupy',
     description: 'Rozpracované, schválené i uzamčené vstupy mzdy za měsíc. Nástroj je pouze čte.',
     inputSchema: schema({
@@ -848,7 +849,7 @@ export const TOOLS = [
   {
     name: 'create_payroll_input',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zadat mzdový vstup',
     description:
       'Založí odměnu, srážku nebo jinou mzdovou složku jako koncept. ID složky zjisti přes '
@@ -880,7 +881,7 @@ export const TOOLS = [
   {
     name: 'update_payroll_input',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit mzdový vstup',
     description:
       'Upraví existující mzdový vstup ve stavu `draft`. Po schválení nebo uzamčení ho server odmítne.',
@@ -915,7 +916,7 @@ export const TOOLS = [
   {
     name: 'list_payroll_runs',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam mzdových běhů',
     description:
       'Najde mzdové běhy a jejich aktuální revize. Pouze čtení: MCP neumí běh vytvořit, '
@@ -935,7 +936,7 @@ export const TOOLS = [
   {
     name: 'get_payroll_salary_result',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výsledek mzdy zaměstnance',
     description:
       'Vrátí vypočtený rozpad mzdy konkrétního zaměstnance. Lze zadat přímo `revision_id`, '
@@ -969,7 +970,7 @@ export const TOOLS = [
   {
     name: 'get_payroll_time_month',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Docházka za měsíc',
     description: 'Vrátí směny, zápisy docházky, součty a stav přesčasových limitů. Nic neschvaluje.',
     inputSchema: schema({
@@ -991,7 +992,7 @@ export const TOOLS = [
   {
     name: 'save_payroll_time_entry',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zadat docházku nebo přesčas',
     description:
       'Uloží versionovaný záznam docházky. Pro přesčas nastav `category: overtime`. '
@@ -1029,7 +1030,7 @@ export const TOOLS = [
   {
     name: 'list_payroll_absences',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam absencí',
     description: 'Absence, dovolené a DPN v zadaném období.',
     inputSchema: schema({
@@ -1051,7 +1052,7 @@ export const TOOLS = [
   {
     name: 'list_payroll_average_earnings',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Průměrné výdělky pro náhrady',
     description:
       'Vrátí snapshoty průměrného hodinového výdělku. Jejich ID je povinné pro DPN, '
@@ -1063,7 +1064,7 @@ export const TOOLS = [
   {
     name: 'create_payroll_absence',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zadat absenci nebo neschopenku',
     description:
       'Založí absenci ve stavu `requested`. Pro neschopenku použij `dpn`. DPN, dovolená '
@@ -1135,7 +1136,7 @@ export const TOOLS = [
   {
     name: 'lookup_company_in_ares',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Vyhledat firmu v ARES',
     description:
       'Načte údaje firmy z rejstříku ARES podle IČO — název, adresu, DIČ, právní formu '
@@ -2240,7 +2241,7 @@ export const TOOLS = [
   {
     name: 'list_currencies',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Měny dokladů',
     description:
       'Měny firmy s jejich ID. `currency_id` z tohoto seznamu patří do objednávek '
@@ -2258,7 +2259,7 @@ export const TOOLS = [
   {
     name: 'dashboard_summary',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Souhrn nástěnky',
     description:
       'Rychlý přehled: tržby, pohledávky, doklady po splatnosti, stav za aktuální období. '
@@ -2270,7 +2271,7 @@ export const TOOLS = [
   {
     name: 'revenue_overview',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přehled tržeb a zisku',
     description: 'Souhrnné ukazatele obratu, nákladů a zisku za aktuální měsíc, minulý měsíc a od začátku roku.',
     inputSchema: schema(),
@@ -2280,7 +2281,7 @@ export const TOOLS = [
   {
     name: 'revenue_monthly',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Tržby po měsících',
     description: 'Časová řada obratu a zisku po měsících — pro trendy a meziroční srovnání.',
     inputSchema: schema({
@@ -2293,7 +2294,7 @@ export const TOOLS = [
   {
     name: 'top_clients',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nejvýznamnější odběratelé',
     description: 'Žebříček odběratelů podle obratu za období — kdo dělá tržby.',
     inputSchema: schema({
@@ -2307,7 +2308,7 @@ export const TOOLS = [
   {
     name: 'aging_receivables',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Pohledávky podle stáří',
     description:
       'Rozpad neuhrazených pohledávek do pásem po splatnosti (do 30 / 30–60 / 60–90 / 90+ dní). '
@@ -2319,7 +2320,7 @@ export const TOOLS = [
   {
     name: 'cash_flow_forecast',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výhled cash flow',
     description: 'Očekávané příjmy a výdaje podle splatností vystavených a přijatých dokladů.',
     inputSchema: schema(),
@@ -2329,7 +2330,7 @@ export const TOOLS = [
   {
     name: 'payment_punctuality',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Platební morálka odběratelů',
     description: 'Jak rychle kdo platí — průměrné zpoždění a podíl včasných úhrad.',
     inputSchema: schema({ months: int('Počet posledních měsíců.', { minimum: 1, maximum: 36 }) }),
@@ -2339,7 +2340,7 @@ export const TOOLS = [
   {
     name: 'revenue_yearly',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Tržby po letech',
     description: 'Meziroční srovnání obratu, nákladů a zisku.',
     inputSchema: schema({ currency: str('Měna výstupu, například CZK.') }),
@@ -2349,7 +2350,7 @@ export const TOOLS = [
   {
     name: 'revenue_breakdown',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozpad tržeb podle kategorií',
     description: 'Z čeho se skládá obrat — podle kategorií tržeb.',
     inputSchema: schema({
@@ -2362,7 +2363,7 @@ export const TOOLS = [
   {
     name: 'expense_breakdown',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozpad nákladů podle kategorií',
     description: 'Za co utrácíme — náklady po kategoriích. Pro dotazy „kde nám utíkají peníze".',
     inputSchema: schema({
@@ -2375,7 +2376,7 @@ export const TOOLS = [
   {
     name: 'top_vendors',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Největší dodavatelé',
     description: 'Žebříček dodavatelů podle objemu nákupů za období.',
     inputSchema: schema({
@@ -2389,7 +2390,7 @@ export const TOOLS = [
   {
     name: 'aging_payables',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Závazky podle stáří',
     description: 'Neuhrazené přijaté faktury v pásmech po splatnosti — komu dlužíme my.',
     inputSchema: schema(),
@@ -2399,7 +2400,7 @@ export const TOOLS = [
   {
     name: 'dso_dpo',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Doba inkasa a doba splatnosti (DSO / DPO)',
     description:
       'DSO = za jak dlouho v průměru inkasujeme pohledávky, DPO = za jak dlouho platíme závazky. '
@@ -2414,7 +2415,7 @@ export const TOOLS = [
   {
     name: 'client_concentration',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Koncentrace odběratelů a dodavatelů',
     description:
       'Jak moc obrat závisí na několika málo partnerech — riziko koncentrace na obou stranách.',
@@ -2428,7 +2429,7 @@ export const TOOLS = [
   {
     name: 'churn_risk',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odběratelé s rizikem odchodu',
     description: 'Zákazníci, kteří přestali objednávat oproti svému zvyku.',
     inputSchema: schema({ days: int('Dní bez nového odběru.', { minimum: 7, maximum: 365 }), limit: int('Počet výsledků.', { minimum: 1, maximum: 100 }) }),
@@ -2438,7 +2439,7 @@ export const TOOLS = [
   {
     name: 'late_payment_risk',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Riziko pozdní úhrady',
     description: 'Odhad, které vystavené faktury se pravděpodobně zaplatí pozdě.',
     inputSchema: schema(),
@@ -2448,7 +2449,7 @@ export const TOOLS = [
   {
     name: 'reminder_effectiveness',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účinnost upomínek',
     description: 'Kolik upomínek vede k úhradě a jak rychle — má smysl upomínat?',
     inputSchema: schema(),
@@ -2458,7 +2459,7 @@ export const TOOLS = [
   {
     name: 'payment_time_histogram',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozložení doby úhrady',
     description: 'Histogram — za kolik dní od vystavení nám kdo platí.',
     inputSchema: schema(),
@@ -2468,7 +2469,7 @@ export const TOOLS = [
   {
     name: 'action_items',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Na co si dát pozor',
     description:
       'Automaticky odvozené položky k řešení — nezaplacené doklady, blížící se termíny, '
@@ -2480,7 +2481,7 @@ export const TOOLS = [
   {
     name: 'tax_calendar',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Daňový kalendář',
     description: 'Blížící se daňové termíny a povinnosti firmy.',
     inputSchema: schema({ max_days_ahead: int('Výhled v počtu dnů.', { minimum: 1, maximum: 365 }) }),
@@ -2490,7 +2491,7 @@ export const TOOLS = [
   {
     name: 'purchase_summary',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Souhrn nákupů',
     description: 'Přehled přijatých faktur — objem, závazky, stav úhrad.',
     inputSchema: schema(),
@@ -2504,7 +2505,7 @@ export const TOOLS = [
   {
     name: 'search',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Globální vyhledávání',
     description:
       'Prohledá najednou odběratele, vystavené faktury a přijaté faktury. '
@@ -2603,7 +2604,7 @@ export const TOOLS = [
   {
     name: 'list_documents',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam dokumentů',
     description:
       'Dokumenty a podsložky ve vybrané složce DMS. Vrací metadata, ne bajty souboru. '
@@ -2628,7 +2629,7 @@ export const TOOLS = [
   {
     name: 'search_documents',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hledat v dokumentech',
     description:
       'Fulltextově hledá v názvu, popisu i vytěženém textu dokumentů. '
@@ -2640,7 +2641,7 @@ export const TOOLS = [
   {
     name: 'get_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail a text dokumentu',
     description:
       'Vrátí metadata, tagy, vazby a přílohy dokumentu. S `include_text: true` přidá '
@@ -2665,7 +2666,7 @@ export const TOOLS = [
   {
     name: 'list_entity_documents',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dokumenty připojené k záznamu',
     description:
       'Vrátí dokumenty navázané na odběratele, fakturu, přijatou fakturu, zakázku, '
@@ -2681,7 +2682,7 @@ export const TOOLS = [
   {
     name: 'update_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit metadata dokumentu',
     description:
       'Změní jen zadaný název, popis nebo kompletní sadu tagů dokumentu. '
@@ -2698,7 +2699,7 @@ export const TOOLS = [
   {
     name: 'link_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Připojit dokument k záznamu',
     description:
       'Přidá vazbu existujícího dokumentu na záznam stejné firmy, např. smlouvu k ostatní '
@@ -2717,7 +2718,7 @@ export const TOOLS = [
   {
     name: 'unlink_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odpojit dokument od záznamu',
     description:
       'Odstraní jen vazbu dokumentu na záznam; dokument ani cílový záznam nemaže. '
@@ -3008,7 +3009,7 @@ export const TOOLS = [
   {
     name: 'vat_return_preview',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odhad DPH za období',
     description:
       'Náhled přiznání k DPH za zvolené období — jednotlivé řádky i výsledná daňová '
@@ -3030,7 +3031,7 @@ export const TOOLS = [
   {
     name: 'vat_trend',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Vývoj DPH po měsících',
     description: 'Časová řada daňové povinnosti a odpočtů — kolik DPH odvádíme v čase.',
     inputSchema: schema({
@@ -3042,7 +3043,7 @@ export const TOOLS = [
   {
     name: 'vat_drafts_prediction',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dopad konceptů na DPH',
     description:
       'O kolik se změní DPH, až se vystaví doklady, které jsou zatím v konceptu. '
@@ -3057,7 +3058,7 @@ export const TOOLS = [
   {
     name: 'vat_control_statement_preview',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Náhled kontrolního hlášení',
     description: 'Kontrolní hlášení za období po sekcích (A1–A5, B1–B3) — náhled, ne podání.',
     inputSchema: schema({
@@ -3073,7 +3074,7 @@ export const TOOLS = [
   {
     name: 'vat_ledger',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Záznamní evidence DPH',
     description:
       'Doklady, ze kterých se DPH za období skládá — na dohledání, proč vychází taková částka. '
@@ -3098,7 +3099,7 @@ export const TOOLS = [
   {
     name: 'vat_summary_report_preview',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Náhled souhrnného hlášení',
     description: 'Souhrnné hlášení k plnění do EU za období — náhled, ne podání.',
     inputSchema: schema({
@@ -3114,7 +3115,7 @@ export const TOOLS = [
   {
     name: 'income_tax_analysis',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odhad daně z příjmů',
     description:
       'Rozbor základu daně a odhad daňové povinnosti za rok, včetně záloh. '
@@ -3128,7 +3129,7 @@ export const TOOLS = [
   {
     name: 'list_tax_submissions',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Historie daňových podání',
     description: 'Odeslaná i připravená podání (DPH, KH, SH) s jejich stavem.',
     inputSchema: schema({
@@ -3146,7 +3147,7 @@ export const TOOLS = [
   {
     name: 'list_accounting_periods',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účetní období',
     description:
       'Seznam účetních období s jejich ID a stavem (otevřené / uzavřené). '
@@ -3158,7 +3159,7 @@ export const TOOLS = [
   {
     name: 'trial_balance',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Obratová předvaha',
     description:
       'Obratovka za období — počáteční stavy, obraty MD/D a konečné zůstatky po účtech. '
@@ -3184,7 +3185,7 @@ export const TOOLS = [
   {
     name: 'balance_sheet',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozvaha',
     description: 'Aktiva a pasiva k datu — majetek firmy a jak je financovaný.',
     inputSchema: schema({
@@ -3201,7 +3202,7 @@ export const TOOLS = [
   {
     name: 'income_statement',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výsledovka',
     description: 'Výkaz zisku a ztráty — výnosy, náklady a hospodářský výsledek za období.',
     inputSchema: schema({
@@ -3218,7 +3219,7 @@ export const TOOLS = [
   {
     name: 'general_ledger',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hlavní kniha',
     description: 'Zápisy po účtech za období — pro dohledání, z čeho se zůstatek účtu skládá.',
     inputSchema: schema({
@@ -3248,7 +3249,7 @@ export const TOOLS = [
   {
     name: 'account_statement',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výpis z účtu',
     description: 'Všechny pohyby na jednom účtu účtové osnovy za období.',
     inputSchema: schema({
@@ -3269,7 +3270,7 @@ export const TOOLS = [
   {
     name: 'saldo',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Saldo (nespárované pohledávky a závazky)',
     description:
       'Saldokonto — nevyrovnané zůstatky vůči odběratelům a dodavatelům podle účetnictví. '
@@ -3288,7 +3289,7 @@ export const TOOLS = [
   {
     name: 'chart_of_accounts',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účtová osnova',
     description: 'Účty firmy s jejich ID a názvy — potřeba pro `account_statement` a `update_analytic_account`. '
       + 'Chybí-li analytika, založ ji nástrojem `create_analytic_account`.',
@@ -3299,7 +3300,7 @@ export const TOOLS = [
   {
     name: 'create_analytic_account',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit analytický účet',
     description:
       'Založí analytický účet v účtové osnově pod existujícím syntetickým účtem, např. 378.800 Zápůjčka '
@@ -3329,7 +3330,7 @@ export const TOOLS = [
   {
     name: 'update_analytic_account',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přejmenovat nebo deaktivovat analytický účet',
     description:
       'Změní název analytického účtu nebo ho deaktivuje (is_active=false) či znovu aktivuje. Číslo účtu se '
@@ -3352,7 +3353,7 @@ export const TOOLS = [
   {
     name: 'list_journal_entries',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účetní deník',
     description:
       'Účetní zápisy s filtry na období, datum, zdrojový doklad a text. '
@@ -3405,7 +3406,7 @@ export const TOOLS = [
   {
     name: 'get_journal_entry',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail účetního zápisu',
     description: 'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad.',
     inputSchema: schema({ id: int('ID účetního zápisu.') }, ['id']),
@@ -3415,7 +3416,7 @@ export const TOOLS = [
   {
     name: 'cash_journal',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Peněžní deník (daňová evidence)',
     description:
       'Peněžní deník OSVČ v daňové evidenci — příjmy a výdaje na hotovostní bázi. '
@@ -3433,7 +3434,7 @@ export const TOOLS = [
   {
     name: 'get_vat_status_history',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Historie plátcovství DPH firmy',
     description:
       'Historie plátcovství DPH vlastní firmy (tabulka supplier_vat_status_history) — '
@@ -3466,7 +3467,7 @@ export const TOOLS = [
   {
     name: 'search_products',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rychlé hledání zboží',
     description:
       'Našeptávač nad skladovými kartami — hledá podle názvu, kódu/SKU a EAN. '
@@ -3521,7 +3522,7 @@ export const TOOLS = [
   {
     name: 'get_product',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Karta zboží',
     description:
       'Kompletní e-shopová karta zboží — popis, kategorie, výrobce, parametry, štítky a média. '
@@ -3534,7 +3535,7 @@ export const TOOLS = [
   {
     name: 'get_catalog_facets',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Počty hodnot katalogových filtrů',
     description: 'Vrací počty výrobců, dodavatelů, kategorií, štítků a dostupnosti v celé filtrované množině. Každá faseta uvádí případné omezení počtu hodnot příznakem truncated.',
     inputSchema: schema({
@@ -3556,7 +3557,7 @@ export const TOOLS = [
   {
     name: 'get_catalog_job',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Průběh katalogové úlohy',
     description: 'Načte průběh a souhrnný výsledek katalogové úlohy v aktuální firmě. Dostupnost závisí na oprávnění pro konkrétní druh úlohy.',
     inputSchema: schema({ id: int('ID úlohy.', { minimum: 1 }) }, ['id']),
@@ -3566,7 +3567,7 @@ export const TOOLS = [
   {
     name: 'get_products_batch',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dávkový detail zboží',
     description:
       'Načte vybraná pole až 500 karet v jednom čtecím požadavku. Položky odpovědi '
@@ -3618,7 +3619,7 @@ export const TOOLS = [
   {
     name: 'create_product',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit zboží',
     description:
       'Založí novou skladovou kartu. Pro e-shopové zboží nech `item_type` na `goods`.\n\n'
@@ -3647,7 +3648,7 @@ export const TOOLS = [
   {
     name: 'update_product',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit skladovou identitu zboží',
     description:
       'Změní SKU, název, měrnou jednotku, EAN, sazbu DPH, minimální zásobu nebo aktivitu karty. '
@@ -3678,7 +3679,7 @@ export const TOOLS = [
   {
     name: 'delete_product',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat zboží',
     description:
       'Smaže skladovou kartu i s jejím e-shopovým obsahem, cenami a médii.\n\n'
@@ -3700,7 +3701,7 @@ export const TOOLS = [
   {
     name: 'product_movements',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Skladová kniha zboží',
     description:
       'Pohyby jedné karty (příjmy, výdeje, převody, inventurní rozdíly) s běžnou bilancí '
@@ -3724,7 +3725,7 @@ export const TOOLS = [
   {
     name: 'update_product_card',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit e-shopový obsah zboží',
     description:
       'Uloží e-shopovou část karty: výrobce, záruku, dodací lhůtu, hmotnost, publikaci do '
@@ -3801,7 +3802,7 @@ export const TOOLS = [
   {
     name: 'get_product_i18n',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Jazykové verze zboží',
     description:
       'Překlady karty zboží po jazycích — název, popisy a SEO. Načti je před úpravou '
@@ -3817,7 +3818,7 @@ export const TOOLS = [
   {
     name: 'get_product_prices',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cenotvorba zboží',
     description:
       'Prodejní ceny zboží po měnách — režim (přirážka / pevná cena), procento přirážky, '
@@ -3829,7 +3830,7 @@ export const TOOLS = [
   {
     name: 'get_product_prices_batch',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dávkové efektivní ceny zboží',
     description:
       'Vrátí efektivní prodejní cenu až 500 položek pro požadované množství. '
@@ -3863,7 +3864,7 @@ export const TOOLS = [
   {
     name: 'set_product_prices',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit ceny zboží',
     description:
       'Uloží cenotvorbu zboží a hned ji přepočítá. MĚNÍ PRODEJNÍ CENY V OSTRÉM E-SHOPU.\n\n'
@@ -3880,7 +3881,7 @@ export const TOOLS = [
   {
     name: 'recompute_product_prices',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přepočítat ceny zboží',
     description:
       'Vynutí přepočet prodejních cen z aktuální pořizovací ceny a nastavené přirážky. '
@@ -3893,7 +3894,7 @@ export const TOOLS = [
   {
     name: 'get_product_vendors',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dodavatelé zboží',
     description:
       'Dodavatelé jednoho zboží s nákupní cenou, kódem u dodavatele, dodací lhůtou '
@@ -3905,7 +3906,7 @@ export const TOOLS = [
   {
     name: 'set_product_vendors',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit dodavatele zboží',
     description:
       'Uloží seznam dodavatelů zboží. Seznam je ÚPLNÝ — dodavatel, který v něm chybí, '
@@ -3932,7 +3933,7 @@ export const TOOLS = [
   {
     name: 'get_product_packaging',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Balení zboží',
     description:
       'Nadřazené jednotky karty (karton, paleta) — kód balení, poměr k základní jednotce '
@@ -3945,7 +3946,7 @@ export const TOOLS = [
   {
     name: 'get_product_customer_prices',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Individuální ceny zákazníků u zboží',
     description:
       'Smluvní ceny jednotlivých odběratelů na kartě: pevná cena nebo sleva v %, měna, '
@@ -3959,7 +3960,7 @@ export const TOOLS = [
   {
     name: 'get_product_price_levels',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Ceny zboží v cenových hladinách',
     description:
       'Cena karty v každé aktivní cenové hladině a měně: standardní cena, výsledná cena '
@@ -3973,7 +3974,7 @@ export const TOOLS = [
   {
     name: 'quote_product_prices',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nacenit zboží pro odběratele',
     description:
       'Spočítá prodejní cenu řádků přesně tak, jak je nacení faktura: pro zadaného '
@@ -4010,7 +4011,7 @@ export const TOOLS = [
   {
     name: 'list_price_levels',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cenové hladiny odběratelů',
     description:
       'Číselník cenových hladin (např. Bronze / Silver / Gold) s výchozí slevou nebo přirážkou '
@@ -4024,7 +4025,7 @@ export const TOOLS = [
   {
     name: 'get_price_level',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail cenové hladiny',
     description:
       'Jedna cenová hladina i s pravidly: sleva v % (záporná = přirážka) nebo pevná cena podle '
@@ -4044,7 +4045,7 @@ export const TOOLS = [
   {
     name: 'list_packaging_units',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Číselník balení',
     description:
       'Kódy nadřazených jednotek firmy (KT = karton, PAL = paleta) s počtem karet, které je '
@@ -4056,7 +4057,7 @@ export const TOOLS = [
   {
     name: 'list_sales_currencies',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Prodejní měny zboží',
     description:
       'Měny, ve kterých má zboží prodejní a akční ceny (číselník e-shopu). Nezaměňovat '
@@ -4068,7 +4069,7 @@ export const TOOLS = [
   {
     name: 'list_eshop_locales',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Jazyky zboží',
     description:
       'Jazykové mutace karet zboží a kategorií. Kód jazyka patří do `locale` '
@@ -4087,7 +4088,7 @@ export const TOOLS = [
   {
     name: 'list_product_media',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Média zboží',
     description:
       'Obrázky a přílohy karty zboží s jejich id, pořadím a příznakem hlavního obrázku.',
@@ -4098,7 +4099,7 @@ export const TOOLS = [
   {
     name: 'update_product_media',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit médium zboží',
     description:
       'Změní popisky média (`title`, `alt_text`), pořadí, publikaci do e-shopu, nebo ho '
@@ -4120,7 +4121,7 @@ export const TOOLS = [
   {
     name: 'reorder_product_media',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přeuspořádat média zboží',
     description:
       'Nastaví pořadí médií karty. Pošli id médií v pořadí, v jakém se mají zobrazovat; '
@@ -4140,7 +4141,7 @@ export const TOOLS = [
   {
     name: 'delete_product_media',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat médium zboží',
     description:
       'Odebere obrázek nebo přílohu z karty zboží. Nevratné — soubor se z aplikace '
@@ -4174,7 +4175,7 @@ export const TOOLS = [
   {
     name: 'list_categories',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Kategorie e-shopu',
     description:
       'Celý strom kategorií zboží. Zanoření je v `path` a `depth`, takže se z plochého '
@@ -4186,7 +4187,7 @@ export const TOOLS = [
   {
     name: 'get_category',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail kategorie',
     description: 'Jedna kategorie včetně jazykových verzí.',
     inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
@@ -4196,7 +4197,7 @@ export const TOOLS = [
   {
     name: 'create_category',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit kategorii',
     description:
       'Vytvoří kategorii pod zadaným rodičem, nebo v kořeni (bez `parent_id`). '
@@ -4217,7 +4218,7 @@ export const TOOLS = [
   {
     name: 'update_category',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit kategorii',
     description:
       'Změní kód, název, pořadí, publikaci nebo archivaci kategorie. Uveď jen to, co se '
@@ -4239,7 +4240,7 @@ export const TOOLS = [
   {
     name: 'move_category',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přesunout kategorii',
     description:
       'Přeřadí kategorii pod jiného rodiče i s celým jejím podstromem. Bez `parent_id` '
@@ -4257,7 +4258,7 @@ export const TOOLS = [
   {
     name: 'delete_category',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat kategorii',
     description:
       'Smaže kategorii. Zvaž místo toho archivaci (`update_category` s `archived: true`) — '
@@ -4277,7 +4278,7 @@ export const TOOLS = [
   {
     name: 'get_category_i18n',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Jazykové verze kategorie',
     description: 'Překlady názvu, popisu a URL kategorie po jazycích.',
     inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
@@ -4287,7 +4288,7 @@ export const TOOLS = [
   {
     name: 'set_category_i18n',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uložit jazykové verze kategorie',
     description:
       'Uloží překlady kategorie. Uvedené jazyky se založí nebo přepíšou, ostatní zůstanou. '
@@ -4463,7 +4464,7 @@ export const TOOLS = [
   {
     name: 'list_attribute_options',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hodnoty parametru',
     description:
       'Výčet hodnot parametru typu `enum` (např. u parametru „Barva" hodnoty červená, modrá). '
@@ -4475,7 +4476,7 @@ export const TOOLS = [
   {
     name: 'create_attribute_option',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přidat hodnotu parametru',
     description: 'Přidá další volitelnou hodnotu k parametru typu `enum`.',
     inputSchema: schema({
@@ -4492,7 +4493,7 @@ export const TOOLS = [
   {
     name: 'update_attribute_option',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit hodnotu parametru',
     description:
       'Přejmenuje hodnotu parametru. Pošli jen to, co měníš; vynechané pole zůstane beze změny.',
@@ -4510,7 +4511,7 @@ export const TOOLS = [
   {
     name: 'delete_attribute_option',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat hodnotu parametru',
     description:
       'Odebere jednu volitelnou hodnotu parametru typu `enum`. Zboží, které tuhle hodnotu '
@@ -4545,7 +4546,7 @@ export const TOOLS = [
   {
     name: 'list_warehouses',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam skladů',
     description:
       'Sklady firmy s jejich ID a aktuální hodnotou zásob. ID se používá ve filtrech '
@@ -4557,7 +4558,7 @@ export const TOOLS = [
   {
     name: 'get_warehouse',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail skladu',
     description: 'Jeden sklad včetně aktuální hodnoty zásob.',
     inputSchema: schema({ id: int('ID skladu.') }, ['id']),
@@ -4567,7 +4568,7 @@ export const TOOLS = [
   {
     name: 'create_warehouse',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit sklad',
     description:
       'Vytvoří nový sklad. Kód musí být v rámci firmy unikátní (jinak 409). '
@@ -4587,7 +4588,7 @@ export const TOOLS = [
   {
     name: 'update_warehouse',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit sklad',
     description: 'Změní kód, název, výchozí příznak, aktivitu nebo poznámku skladu. Uveď jen to, co se má změnit.',
     inputSchema: schema({
@@ -4607,7 +4608,7 @@ export const TOOLS = [
   {
     name: 'delete_warehouse',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat sklad',
     description:
       'Smaže sklad. Server to dovolí jen u skladu s nulovým stavem a bez jediného pohybu '
@@ -4631,7 +4632,7 @@ export const TOOLS = [
   {
     name: 'stock_levels',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Stav zásob',
     description:
       'Aktuální množství po dvojicích karta × sklad, s filtrem na sklad, typ karty '
@@ -4655,7 +4656,7 @@ export const TOOLS = [
   {
     name: 'stock_availability',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dostupnost konkrétního zboží',
     description:
       'Dostupné množství pro vyjmenované karty — na rozdíl od `stock_levels` počítá '
@@ -4677,7 +4678,7 @@ export const TOOLS = [
   {
     name: 'stock_status_report',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Sestava stavu zásob',
     description:
       'Sestava „stav zásob" — množství a hodnota po kartách, se stejnými filtry jako '
@@ -4701,7 +4702,7 @@ export const TOOLS = [
   {
     name: 'stock_valuation',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Ocenění skladu',
     description:
       'Hodnota zásob k datu — pro otázky „kolik máme uloženo ve skladu". Ocenění '
@@ -4718,7 +4719,7 @@ export const TOOLS = [
   {
     name: 'get_product_tracking',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Šarže a sériová čísla zboží',
     description:
       'Režim sledování karty (`none`, `lot` šarže, `serial` sériová čísla), převodní jednotky '
@@ -4731,7 +4732,7 @@ export const TOOLS = [
   {
     name: 'list_stock_locations',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Skladové lokace',
     description: 'Lokace (regály, pozice) uvnitř skladů firmy, volitelně jen jednoho skladu.',
     inputSchema: schema({ warehouse_id: int('Jen lokace tohoto skladu.', { minimum: 1 }) }),
@@ -4754,7 +4755,7 @@ export const TOOLS = [
   {
     name: 'vendor_offers_list',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nabídky dodavatelů',
     description:
       'Dvojice zboží × dodavatel: nákupní cena a měna, kód u dodavatele, dodací lhůta, '
@@ -4790,7 +4791,7 @@ export const TOOLS = [
   {
     name: 'vendor_offer_upsert',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uložit nabídku dodavatele',
     description:
       'Založí nebo upraví nabídku pro dvojici zboží × dodavatel. Jestli už dvojice '
@@ -4847,7 +4848,7 @@ export const TOOLS = [
   {
     name: 'vendor_offer_delete',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat nabídku dodavatele',
     description:
       'Odebere nabídku dodavatele u zboží. Většinou stačí `vendor_offer_upsert` '
@@ -4884,7 +4885,7 @@ export const TOOLS = [
   {
     name: 'stock_quantities',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Množství ve třech dimenzích',
     description:
       'Pro každé zboží vrátí `on_hand` (skladem), `reserved` (drží vystavená faktura), '
@@ -4913,7 +4914,7 @@ export const TOOLS = [
   {
     name: 'stock_in_transit',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zboží na cestě',
     description:
       'Kolik kusů je objednáno u dodavatelů a ještě nedorazilo, s rozpadem na konkrétní '
@@ -4936,7 +4937,7 @@ export const TOOLS = [
   {
     name: 'stock_reservations',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rezervované zboží',
     description:
       'Kusy, které jsou fyzicky skladem, ale drží je vystavená faktura bez zaúčtované '
@@ -4960,7 +4961,7 @@ export const TOOLS = [
   {
     name: 'replenishment_suggest',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Co objednat',
     description:
       'Zboží pod minimální zásobou i s návrhem, kolik ho doobjednat:\n\n'
@@ -5004,7 +5005,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_list',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Objednávky dodavatelům',
     description:
       'Objednávky vydané dodavatelům s dodavatelem, skladem, termínem, stavem '
@@ -5045,7 +5046,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_get',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail objednávky',
     description:
       'Jedna objednávka včetně řádků a plnění. U každého řádku je `qty_ordered` '
@@ -5060,7 +5061,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_create',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit objednávku',
     description:
       'Vytvoří objednávku jako ROZPRACOVANOU (draft): číslo zatím nedostane a do '
@@ -5105,7 +5106,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_update',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit objednávku',
     description:
       'Přepíše rozpracovanou (draft) objednávku VČETNĚ ŘÁDKŮ — pošli je všechny, '
@@ -5151,7 +5152,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_send',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odeslat objednávku',
     description:
       'Přepne rozpracovanou objednávku na odeslanou, přidělí jí číslo z řady OBJ '
@@ -5167,7 +5168,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_confirm',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Potvrdit objednávku dodavatelem',
     description:
       'Zaznamená, že dodavatel objednávku potvrdil — volitelně s JINÝM množstvím '
@@ -5197,7 +5198,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_close',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uzavřít nedodaný zbytek',
     description:
       'Uzavře objednávku s tím, že co nedorazilo, už nedorazí: nedodaný zbytek se '
@@ -5228,7 +5229,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_cancel',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Stornovat objednávku',
     description:
       'Stornuje objednávku a vyřadí ji z „na cestě". Jde to JEN dokud se z ní nic '
@@ -5257,7 +5258,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_reopen',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Znovu otevřít objednávku',
     description:
       'Vrátí uzavřenou objednávku zpět mezi živé: vynuluje uzavřený zbytek a stav '
@@ -5269,7 +5270,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_delete',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat objednávku',
     description:
       'Smaže objednávku i s řádky. Server to dovolí jen u ROZPRACOVANÉ (draft) '
@@ -5290,7 +5291,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_receipt',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Příjem z objednávky na sklad',
     description:
       'Založí PŘÍJEMKU z objednávky — jako DRAFT, takže se stavem skladu zatím nic '
@@ -5347,7 +5348,7 @@ export const TOOLS = [
   {
     name: 'purchase_orders_bulk_create',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hromadně objednat',
     description:
       'Z plochého seznamu „tohle zboží v tomhle množství" založí objednávky '
@@ -5395,7 +5396,7 @@ export const TOOLS = [
   {
     name: 'list_stock_documents',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Skladové doklady',
     description:
       'Příjemky, výdejky a převodky s filtry na typ, stav, původ, sklad a období.',
@@ -5431,7 +5432,7 @@ export const TOOLS = [
   {
     name: 'get_stock_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail skladového dokladu',
     description: 'Hlavička a řádky jednoho skladového dokladu včetně ocenění.',
     inputSchema: schema({ id: int('ID skladového dokladu.') }, ['id']),
@@ -5441,7 +5442,7 @@ export const TOOLS = [
   {
     name: 'create_stock_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit skladový doklad',
     description:
       'Založí ROZPRACOVANÝ skladový doklad (draft). Stav zásob se tím ještě NEMĚNÍ — '
@@ -5470,7 +5471,7 @@ export const TOOLS = [
   {
     name: 'update_stock_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit skladový doklad',
     description:
       'Přepíše rozpracovaný doklad. Zaúčtovaný ani stornovaný doklad upravit NEJDE (422) — '
@@ -5494,7 +5495,7 @@ export const TOOLS = [
   {
     name: 'post_stock_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zaúčtovat skladový doklad',
     description:
       'Provede pohyb: naskladní, vyskladní, nebo převede zboží, přidělí dokladu číslo '
@@ -5510,7 +5511,7 @@ export const TOOLS = [
   {
     name: 'reverse_stock_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Stornovat skladový doklad',
     description:
       'Vystaví ke zaúčtovanému dokladu opačný protidoklad v původních cenách a rovnou ho '
@@ -5537,7 +5538,7 @@ export const TOOLS = [
   {
     name: 'delete_stock_document',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat skladový doklad',
     description:
       'Smaže ROZPRACOVANÝ doklad. Zaúčtovaný doklad smazat nejde (422) — na ten je '
@@ -5561,7 +5562,7 @@ export const TOOLS = [
   {
     name: 'list_stock_takes',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam inventur',
     description: 'Inventury s filtrem na sklad a fázi (rozpracovaná / počítá se / uzavřená).',
     inputSchema: schema({
@@ -5578,7 +5579,7 @@ export const TOOLS = [
   {
     name: 'get_stock_take',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail inventury',
     description:
       'Inventura i s řádky: očekávané množství, napočítané množství a rozdíl. '
@@ -5590,7 +5591,7 @@ export const TOOLS = [
   {
     name: 'create_stock_take',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit inventuru',
     description:
       'Založí rozpracovanou inventuru skladu. Odpovědné osoby jsou povinné, protože '
@@ -5617,7 +5618,7 @@ export const TOOLS = [
   {
     name: 'start_stock_take',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Spustit inventuru',
     description:
       'Přepne inventuru do fáze počítání a udělá snímek očekávaných stavů všech aktivních '
@@ -5630,7 +5631,7 @@ export const TOOLS = [
   {
     name: 'set_stock_take_counts',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zapsat napočítané množství',
     description:
       'Zapíše skutečně napočítané množství na řádky inventury. Jde to jen ve fázi počítání.\n\n'
@@ -5662,7 +5663,7 @@ export const TOOLS = [
   {
     name: 'close_stock_take',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uzavřít inventuru',
     description:
       'Uzavře inventuru: spočítá rozdíly proti očekávání a vygeneruje rozdílové skladové '
@@ -5698,7 +5699,7 @@ export const TOOLS = [
   {
     name: 'list_sales_orders',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Prodejní objednávky',
     description:
       'Objednávky odběratelů s odděleným obchodním, platebním a expedičním stavem. '
@@ -5729,7 +5730,7 @@ export const TOOLS = [
   {
     name: 'get_sales_order',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail prodejní objednávky',
     description: 'Objednávka i s řádky (neměnné snapshoty ceny a názvu) a zbývajícími rezervacemi zásoby.',
     inputSchema: schema({ id: int('ID prodejní objednávky.') }, ['id']),
@@ -5739,7 +5740,7 @@ export const TOOLS = [
   {
     name: 'sales_order_shortages',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Objednávky čekající na zboží',
     description:
       'Fronta řádků prodejních objednávek, na které chybí zásoba — od nejstarší. '
@@ -5751,7 +5752,7 @@ export const TOOLS = [
   {
     name: 'list_cycle_counts',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cyklické inventury',
     description:
       'Poslední průběžné (cyklické) inventury části skladu se stavem přípravy. '
@@ -5763,7 +5764,7 @@ export const TOOLS = [
   {
     name: 'get_cycle_count',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail cyklické inventury',
     description: 'Stav přípravy, okamžik uzamčení stavu (cutoff) a řádky s očekávaným a napočítaným množstvím.',
     inputSchema: schema({ id: int('ID cyklické inventury.') }, ['id']),
@@ -5827,7 +5828,7 @@ export const TOOLS = [
   {
     name: 'resolve_price_list_item',
     api: false,
-    apiReason: 'Dosud nepřevedeno do klientského katalogu; zachovává stávající rozsah (FR #285).',
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cena položky ceníku pro odběratele',
     description:
       'Výsledná jednotková cena jedné položky ceníku v měně dokladu: individuální cena '
