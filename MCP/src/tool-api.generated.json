@@ -116,6 +116,15 @@
       ]
     ]
   },
+  "apply_invoice_advance_drawdown": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/advance-drawdown"
+      ]
+    ]
+  },
   "archive_project": {
     "write": true,
     "api": [
@@ -190,12 +199,30 @@
       ]
     ]
   },
+  "create_final_invoice_from_proforma": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/issue-final"
+      ]
+    ]
+  },
   "create_invoice": {
     "write": true,
     "api": [
       [
         "POST",
         "/api/invoices"
+      ]
+    ]
+  },
+  "create_payment_tax_document": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/payments/{payment_id}/tax-document"
       ]
     ]
   },
@@ -519,6 +546,28 @@
       [
         "POST",
         "/api/invoices/{id}/issue"
+      ]
+    ]
+  },
+  "link_invoice_advance": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/link-advance"
+      ]
+    ]
+  },
+  "link_purchase_advance": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/link-advance"
       ]
     ]
   },
@@ -857,6 +906,19 @@
       ]
     ]
   },
+  "remove_invoice_advance_drawdown": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/invoices/{id}/advance-drawdown"
+      ]
+    ]
+  },
   "remove_invoice_item": {
     "write": true,
     "api": [
@@ -1072,6 +1134,32 @@
       [
         "GET",
         "/api/stock/quantities"
+      ]
+    ]
+  },
+  "unlink_invoice_advance": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/invoices/{id}/link-advance"
+      ]
+    ]
+  },
+  "unlink_purchase_advance": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/link-advance"
       ]
     ]
   },

@@ -228,7 +228,27 @@ nepředává. Kategorie nákladů vyžadují čtení nastavení firmy.
 Čtení vydaných faktur zpřístupňuje i přehledy kandidátů k propojení záloh,
 konečných faktur, záloh k postupnému čerpání a náhled úroku z prodlení. Čtení
 přijatých faktur zpřístupňuje jejich kandidáty záloh a vyúčtování. Jde pouze
-o GET; zápisové nástroje pro vazby, čerpání a vytvoření penalizace nejsou převedené.
+o GET. Zápisový token navíc umožňuje propojování a odpojování vydaných i přijatých
+záloh, postupné čerpání a jeho odebrání, vytvoření finální faktury ze zálohy
+a ručního daňového dokladu k platbě. Vazby a čerpání vyžadují zápis příslušné
+agendy; `create_final_invoice_from_proforma` právo `invoices.issue`
+a `create_payment_tax_document` právo `invoices.mark_paid`. Obecný zápis
+vydaných faktur tato dvě samostatná práva nenahrazuje.
+
+V ručním režimu dokladu k platbě vyber platbu přes `list_invoice_payments`,
+založ její koncept přes `create_payment_tax_document` a po kontrole jej vystav
+přes `issue_invoice`. Poté lze zálohu čerpat na konceptu běžné faktury přes
+`apply_invoice_advance_drawdown`, nebo založit finální koncept přes
+`create_final_invoice_from_proforma`. Vystavení finálu je samostatný krok.
+Opakované vytvoření dokladu k téže platbě nebo finálu vrací existující doklad;
+opakované čerpání na témže konceptu nahrazuje dosavadní odpočet. Čerpání
+vyžaduje vystavený doklad k platbě, stejnou protistranu a měnu, dostupný zůstatek
+a nepodporuje OSS. Nadále platí serverové zámky období a dokladů.
+
+Obě odpojení vazby a odebrání čerpání vyžadují `confirm: true`; bez něj
+zobrazí pouze náhled. Samotné odpojení vazby ponechá `advance_paid_amount`
+na dokladu. Odebrání čerpání naopak odstraní i odpočtové řádky konceptu.
+Vytvoření penalizační faktury zůstává mimo klientský katalog.
 Ostatní nástroje zůstávají výslovně vyloučené, dokud
 nebudou převedené se stejným ověřením závislostí.
 
