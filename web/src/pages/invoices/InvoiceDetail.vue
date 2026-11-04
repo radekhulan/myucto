@@ -2068,7 +2068,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canAdminEdit.value, disabled: b, run: editIssued },
     { key: 'unmark-paid', label: t('invoice.unmark_paid'), icon: 'uturn', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && inv.status === 'paid', disabled: b, loading: busy.value === 'unmark-paid', run: unmarkPaid },
-    { key: 'isdoc', label: t('invoice.download_isdoc'), icon: 'inbox', tier: 'advanced', variant: 'neutral',
+    { key: 'isdoc', label: t('invoice.download_isdoc'), icon: 'download', tier: 'advanced', variant: 'neutral',
       show: !isDraft.value && inv.status !== 'cancelled',
       href: invoicesApi.isdocUrl(inv.id), download: true },
     { key: 'rebuild-snapshots', label: t('invoice.rebuild_snapshots'), icon: 'cycle', tier: 'advanced', variant: 'warning',
