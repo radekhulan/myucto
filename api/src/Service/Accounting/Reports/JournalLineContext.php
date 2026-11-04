@@ -78,6 +78,28 @@ final class JournalLineContext
     }
 
     /**
+     * Jen protiúčty, bez dokladů a párování z {@see enrich()}: rozpis hlavní knihy
+     * je jinak nepoužije a u celého roku by stály tisíce dotazů navíc.
+     * Položka nese entry_id, line_id, account_code, side a is_red_storno základního řádku (účinná strana protiúčtu).
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    public function withCounterAccounts(int $supplierId, array $items): array
+    {
+        if ($items === []) {
+            return [];
+        }
+        $entryIds = array_values(array_unique(array_map(static fn (array $i): int => (int) $i['entry_id'], $items)));
+        $entryLines = $this->entryLines($supplierId, $entryIds);
+        foreach ($items as &$it) {
+            $it['counter_accounts'] = $this->counterAccounts($entryLines[(int) $it['entry_id']] ?? [], $it);
+        }
+        unset($it);
+        return $items;
+    }
+
+    /**
      * Protiúčty řádku: účty opačné ÚČINNÉ strany téhož zápisu (včetně vlastního účtu,
      * je-li na opačné straně); u zápisu bez opačné strany ostatní účty zápisu. Zápis
      * složený z dvojic (pokladní doklad 501 / 211 a 513 / 211) se páruje podle částky:

@@ -6,6 +6,8 @@ const m = vi.hoisted(() => ({
   listPeriods: vi.fn(),
   getGeneralLedger: vi.fn(),
   replace: vi.fn(),
+  exportReport: vi.fn(),
+  toastError: vi.fn(),
 }))
 
 const defaultRouteQuery = {
@@ -31,8 +33,13 @@ vi.mock('@/api/accounting', () => ({
   accountingApi: {
     listPeriods: m.listPeriods,
     getGeneralLedger: m.getGeneralLedger,
-    exportReport: vi.fn(),
+    exportReport: m.exportReport,
     getAccountStatement: vi.fn(),
+    listAccounts: vi.fn().mockResolvedValue([
+      { id: 50, account_code: '501', name: 'Spotřeba materiálu', is_active: true, parent_id: null },
+      { id: 51, account_code: '501.100', name: 'Materiál kancelář', is_active: true, parent_id: 50 },
+      { id: 60, account_code: '602', name: 'Tržby z prodeje služeb', is_active: true, parent_id: null },
+    ]),
   },
 }))
 
@@ -46,9 +53,10 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
-vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn() }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: { download: 'M0 0' }, btnOutline: () => '' }))
+vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: { download: 'M0 0' }, btnOutline: () => '', btnFilled: () => '' }))
+vi.mock('@/components/ui/Modal.vue', () => ({ default: { props: ['title'], template: '<div role="dialog"><h2>{{ title }}</h2><slot /><slot name="footer" /></div>' } }))
 vi.mock('@/composables/usePaneDom', () => ({ usePaneDom: () => document }))
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@/composables/useTablePrefs', () => ({
@@ -73,6 +81,7 @@ vi.mock('@/composables/useSavedFilters', () => ({
   }),
 }))
 
+import { accountingApi } from '@/api/accounting'
 import GeneralLedger from '@/pages/accounting/GeneralLedger.vue'
 
 function report(periodId: number) {
@@ -114,12 +123,224 @@ function allPeriodsReport() {
 }
 
 describe('GeneralLedger period navigation', () => {
+  it('exportuje celý zvolený rozsah účtů s doklady a zachová ostatní filtry', async () => {
+    m.exportReport.mockResolvedValue({ data: new Blob(['test']) });
+    URL.createObjectURL = vi.fn(() => 'blob:test');
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const wrapper = mount(GeneralLedger, { global: { stubs: {
+      ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true,
+      DensityToggle: true, EmptyState: true,
+    } } });
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    // Rozsah účtů je filtr knihy: použije se po potvrzení pole a export ho převezme z obrazovky.
+    const range = wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]');
+    expect(range).toHaveLength(2);
+    // setValue odešle input i change, tedy potvrzené pole.
+    await range[0].setValue('5');
+    await range[1].setValue('5');
+    await flushPromises();
+    expect(m.getGeneralLedger).toHaveBeenLastCalledWith(expect.objectContaining({ account_from: '5', account_to: '5' }));
+    expect(m.replace).toHaveBeenLastCalledWith({ query: expect.objectContaining({ account_from: '5', account_to: '5' }) });
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    expect(wrapper.get('[role="dialog"]').text()).toContain('accounting.general_ledger.export_accounts');
+    const label = wrapper.findAll('label').find(l => l.text().includes('accounting.general_ledger.export_detail'))!;
+    await label.get('input').setValue(true);
+    const button = wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_submit')!;
+    await button.trigger('click');
+    await flushPromises();
+    expect(m.exportReport).toHaveBeenCalledWith('/accounting/reports/general-ledger/export', expect.objectContaining({
+      period_id: 3, analytics: 1, include_documents: 1, account_from: '5', account_to: '5', format: 'pdf',
+    }));
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    wrapper.unmount();
+    vi.restoreAllMocks();
+  });
+  it('souhrnný XLSX exportuje zobrazenou knihu, ne rozepsaný filtr ani rozepsaný rozsah účtů', async () => {
+    m.exportReport.mockResolvedValue({ data: new Blob(['test']) });
+    URL.createObjectURL = vi.fn(() => 'blob:test');
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    // Dodavatel rozepsaný bez Enteru na obrazovce neplatí, a tak nesmí platit ani v exportu.
+    await wrapper.get('input[placeholder="accounting.general_ledger.filter_vendor_placeholder"]').setValue('Rozepsaný dodavatel');
+    // Rozepsaný rozsah účtů (bez potvrzení pole, tedy bez `change`) knihu nenačte a do exportu nepatří.
+    const typedRange = wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]')[0];
+    (typedRange.element as HTMLInputElement).value = '6';
+    await typedRange.trigger('input');
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    const dialog = wrapper.get('[role="dialog"]');
+    expect(dialog.text()).toContain('2026-01-01');
+    expect(dialog.text()).toContain('accounting.general_ledger.filter_analytics');
+    expect(dialog.text()).not.toContain('Rozepsaný dodavatel');
+    expect(dialog.find('input[type="checkbox"]').exists()).toBe(false);
+    expect(dialog.text()).not.toContain('accounting.general_ledger.export_accounts');
+    await wrapper.get('input[value="xlsx"]').setValue(true);
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_submit')!.trigger('click');
+    await flushPromises();
+    const params = m.exportReport.mock.calls.at(-1)![1];
+    expect(params).toEqual(expect.objectContaining({ analytics: 1, include_documents: 0, format: 'xlsx' }));
+    expect(params.account_from).toBeUndefined();
+    expect(params.vendor).toBeUndefined();
+    wrapper.unmount();
+    vi.restoreAllMocks();
+  });
+  it('dokud se kniha s novým rozsahem načítá, export z dialogu nejde spustit', async () => {
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    // Pojistka: export z otevřeného dialogu nesmí běžet, dokud se načítá nová kniha (jinak by vzal starou).
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    let finish: (v: unknown) => void = () => {};
+    m.getGeneralLedger.mockReturnValueOnce(new Promise(resolve => { finish = resolve }));
+    await wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]')[0].setValue('6');
+    const submit = () => wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_submit')!;
+    expect(submit().attributes('disabled')).toBeDefined();
+    finish(report(3));
+    await flushPromises();
+    expect(submit().attributes('disabled')).toBeUndefined();
+    wrapper.unmount();
+  });
+  it('pomalejší starší načtení nepřepíše novější knihu ani adresu', async () => {
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    const pending: Array<(v: unknown) => void> = [];
+    m.getGeneralLedger.mockImplementation(() => new Promise(resolve => { pending.push(resolve) }));
+    const range = wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]');
+    await range[0].setValue('5');
+    await range[0].setValue('6');
+    expect(pending).toHaveLength(2);
+    m.replace.mockClear();
+    pending[1]({ ...report(3), accounts: [] });
+    await flushPromises();
+    pending[0](report(3));
+    await flushPromises();
+    // Platí druhé (novější) načtení: prázdná kniha a adresa s rozsahem od 6.
+    expect(wrapper.text()).not.toContain('accounting.general_ledger.totals');
+    expect(m.replace).toHaveBeenCalledTimes(1);
+    expect(m.replace).toHaveBeenLastCalledWith({ query: expect.objectContaining({ account_from: '6' }) });
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    expect(wrapper.get('[role="dialog"]').text()).toContain('accounting.general_ledger.export_accounts');
+    wrapper.unmount();
+  });
+  it('pozdní chyba staršího načtení nesmaže novější knihu ani nevypne načítání novějšího', async () => {
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    const pending: Array<{ resolve: (v: unknown) => void, reject: (e: unknown) => void }> = [];
+    m.getGeneralLedger.mockImplementation(() => new Promise((resolve, reject) => { pending.push({ resolve, reject }) }));
+    const range = wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]');
+    await range[0].setValue('5');
+    await range[0].setValue('6');
+    // Starší požadavek selže, zatímco novější ještě běží: tlačítko exportu musí zůstat zakázané.
+    pending[0].reject({ response: { data: { error: { message: 'Stará chyba' } } } });
+    await flushPromises();
+    expect(m.toastError).not.toHaveBeenCalled();
+    const exportButton = () => wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!;
+    expect(exportButton().attributes('disabled')).toBeDefined();
+    pending[1].resolve(report(3));
+    await flushPromises();
+    expect(wrapper.text()).toContain('accounting.general_ledger.totals');
+    expect(exportButton().attributes('disabled')).toBeUndefined();
+    wrapper.unmount();
+  });
+  it('rozpis s doklady nabízí jen PDF', async () => {
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    await wrapper.get('input[value="xlsx"]').setValue(true);
+    expect((wrapper.get('input[value="xlsx"]').element as HTMLInputElement).disabled).toBe(false);
+    await wrapper.findAll('label').find(l => l.text().includes('accounting.general_ledger.export_detail'))!.get('input').setValue(true);
+    expect((wrapper.get('input[value="xlsx"]').element as HTMLInputElement).disabled).toBe(true);
+    expect((wrapper.get('input[value="pdf"]').element as HTMLInputElement).checked).toBe(true);
+    expect(wrapper.text()).toContain('accounting.general_ledger.export_detail_pdf_only');
+    wrapper.unmount();
+  });
+  it('během exportu ukáže, že se soubor připravuje', async () => {
+    let finish: (v: unknown) => void = () => {};
+    m.exportReport.mockReturnValue(new Promise(resolve => { finish = resolve }));
+    URL.createObjectURL = vi.fn(() => 'blob:test');
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_submit')!.trigger('click');
+    const busy = wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_preparing')!;
+    expect(busy.attributes('disabled')).toBeDefined();
+    expect(busy.find('svg.animate-spin').exists()).toBe(true);
+    expect(wrapper.get('[role="status"]').text()).toBe('accounting.general_ledger.export_preparing_hint');
+    finish({ data: new Blob(['test']) });
+    await flushPromises();
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    wrapper.unmount();
+    vi.restoreAllMocks();
+  });
+  it('ukáže hlášku serveru i z chybové odpovědi stahování (Blob)', async () => {
+    m.exportReport.mockRejectedValue({ response: { status: 422, data: new Blob([JSON.stringify({ error: { code: 'export_too_large', message: 'Rozpis je příliš velký.' } })], { type: 'application/json' }) } });
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_submit')!.trigger('click');
+    await flushPromises();
+    expect(m.toastError).toHaveBeenCalledWith('Rozpis je příliš velký.');
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(true);
+    wrapper.unmount();
+  });
+  it('upozorní, že analytická mez bez rozpadu na obrazovce vybere celou syntetiku', async () => {
+    for (const analytics of ['1', '0']) {
+      routeQuery.analytics = analytics
+      const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+      await flushPromises();
+      expect(wrapper.text()).not.toContain('accounting.general_ledger.range_analytics_hint')
+      const from = wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]')[0]
+      // Rozepsaná mez bez potvrzení knihu nenačte, upozornění proto ještě neplatí.
+      ;(from.element as HTMLInputElement).value = '501100'
+      await from.trigger('input')
+      expect(wrapper.text()).not.toContain('accounting.general_ledger.range_analytics_hint')
+      await from.setValue('501100')
+      await flushPromises()
+      expect(wrapper.text().includes('accounting.general_ledger.range_analytics_hint')).toBe(analytics === '0')
+      await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.export_open')!.trigger('click');
+      expect(wrapper.get('[role="dialog"]').text().includes('accounting.general_ledger.export_without_analytics')).toBe(analytics === '0')
+      wrapper.unmount();
+    }
+  });
+  it('dokud se osnova načítá, mez rozsahu nehlásí, že na ni žádný účet nezačíná', async () => {
+    let finish: (v: unknown) => void = () => {}
+    vi.mocked(accountingApi.listAccounts).mockReturnValueOnce(new Promise(resolve => { finish = resolve }) as never)
+    Object.assign(routeQuery, { account_from: '501' })
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('accounting.template.account_prefix_none')
+    finish([{ id: 60, account_code: '602', name: 'Tržby z prodeje služeb', is_active: true, parent_id: null }])
+    await flushPromises();
+    expect(wrapper.text()).toContain('accounting.template.account_prefix_none')
+    wrapper.unmount();
+  });
+  it('převezme rozsah účtů z adresy a smaže ho s ostatními filtry', async () => {
+    Object.assign(routeQuery, { account_from: '501', account_to: '602' })
+    const wrapper = mount(GeneralLedger, { global: { stubs: { ActivationBanner: true, SavedFiltersMenu: true, ColumnPicker: true, DensityToggle: true, EmptyState: true } } });
+    await flushPromises();
+    expect(m.getGeneralLedger).toHaveBeenLastCalledWith(expect.objectContaining({ account_from: '501', account_to: '602' }));
+    const range = wrapper.findAll('input[placeholder="accounting.general_ledger.filter_account_placeholder"]');
+    expect((range[0].element as HTMLInputElement).value).toBe('501');
+    expect(wrapper.text()).toContain('Spotřeba materiálu');
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.general_ledger.reset_filters')!.trigger('click');
+    await flushPromises();
+    const params = m.getGeneralLedger.mock.calls.at(-1)![0];
+    expect(params.account_from).toBeUndefined();
+    expect(params.account_to).toBeUndefined();
+    wrapper.unmount();
+  });
   beforeEach(() => {
     for (const key of Object.keys(routeQuery)) delete routeQuery[key]
     Object.assign(routeQuery, defaultRouteQuery)
     m.listPeriods.mockReset()
     m.getGeneralLedger.mockReset()
     m.replace.mockReset()
+    m.exportReport.mockReset()
+    m.toastError.mockReset()
     m.listPeriods.mockResolvedValue([
       { id: 3, fiscal_year: 2026, starts_on: '2026-01-01', ends_on: '2026-12-31', status: 'closed' },
       { id: 4, fiscal_year: 2027, starts_on: '2027-01-01', ends_on: '2027-12-31', status: 'open' },

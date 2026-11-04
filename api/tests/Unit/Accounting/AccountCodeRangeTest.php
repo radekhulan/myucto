@@ -21,6 +21,23 @@ final class AccountCodeRangeTest extends TestCase
         self::assertSame(['5', '5ZZZZZZZZZZ'], AccountCodeRange::parse('5', '5')->sqlBounds());
     }
 
+    public function testLowercaseCodeMatchesUppercaseBound(): void
+    {
+        self::assertTrue(AccountCodeRange::parse('221.KB', '221.KB')->contains('221.kb'));
+        self::assertFalse(AccountCodeRange::parse('221.KB', '221.KB')->contains('221.kc'));
+        // Syntetika s písmenem pod analytickou dolní mezí: porovnání začátku také bez ohledu na velikost.
+        self::assertTrue(AccountCodeRange::parse('2a1.100', '')->contains('2a1', syntheticOnly: true));
+    }
+
+    public function testSyntheticOnlyLowerAnalyticBoundKeepsItsSynthetic(): void
+    {
+        $range = AccountCodeRange::parse('501.100', '518.200');
+        self::assertFalse($range->contains('501'));
+        self::assertTrue($range->contains('501', syntheticOnly: true));
+        self::assertTrue($range->contains('518', syntheticOnly: true));
+        self::assertFalse($range->contains('519', syntheticOnly: true));
+    }
+
     /** @return iterable<string,array{string,string}> */
     public static function valid(): iterable
     {

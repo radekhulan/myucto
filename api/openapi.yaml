@@ -14704,6 +14704,8 @@ paths:
         - { in: query, name: vendor, schema: { type: string, maxLength: 100 } }
         - { in: query, name: client, schema: { type: string, maxLength: 100 } }
         - { in: query, name: item, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: account_from, description: "Dolní mez účtu nebo prefixu (např. 5, 501, 501.100); prefixový rozsah včetně krajů po seskupení dle analytics, totals se přepočtou", schema: { type: string, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{0,10}$" } }
+        - { in: query, name: account_to, description: "Horní mez účtu nebo prefixu včetně analytik", schema: { type: string, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{0,10}$" } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GeneralLedgerReport' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -14713,7 +14715,11 @@ paths:
     get:
       tags: [Accounting]
       summary: Export hlavní knihy (PDF / XLSX)
+      description: "Volitelný rozpis všech zaúčtovaných řádků po účtech s počátečním stavem, průběžným zůstatkem, obraty a konečným zůstatkem. Neobsahuje přílohy dokladů. Rozsah účtů je prefixový včetně krajů a aplikuje se po seskupení dle analytics; 5 až 5 vybere celou třídu 5. Ostatní filtry platí pro souhrn i rozpis. Rozpis (include_documents=1) je jen ve formátu pdf, xlsx vrací 422. Má limit 10 000 řádků včetně 6 řádků za záhlaví a součty každého účtu; nad ním vrací 422 `export_too_large`."
       parameters:
+        - { in: query, name: include_documents, description: "1 = všechny řádky dokladů po účtech (jen format=pdf); 0 = souhrn", schema: { type: integer, enum: [0, 1], default: 0 } }
+        - { in: query, name: account_from, description: "Dolní mez účtu nebo prefixu (např. 5, 501, 501.100)", schema: { type: string, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{0,10}$" } }
+        - { in: query, name: account_to, description: "Horní mez účtu nebo prefixu včetně analytik", schema: { type: string, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{0,10}$" } }
         - $ref: '#/components/parameters/SupplierIdHeader'
         - $ref: '#/components/parameters/DimensionValueId'
         - $ref: '#/components/parameters/DimensionDescendants'
@@ -14730,6 +14736,7 @@ paths:
       responses:
         '200': { description: Soubor sestavy, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Rozpis dokladů nesouhlasí se souhrnem hlavní knihy (`ledger_detail_mismatch`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/reports/trial-balance:
@@ -60041,6 +60048,12 @@ components:
       - accounts
       - totals
       properties:
+        account_from:
+          type: string
+          description: Použitá dolní mez rozsahu účtů (prázdná = bez omezení)
+        account_to:
+          type: string
+          description: Použitá horní mez rozsahu účtů (prázdná = bez omezení)
         period:
           anyOf:
           - $ref: '#/components/schemas/ReportPeriod'

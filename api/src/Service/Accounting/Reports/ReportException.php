@@ -15,6 +15,8 @@ final class ReportException extends \RuntimeException
         public readonly string $errorCode,
         string $message,
         public readonly int $httpStatus = 422,
+        /** @var array<string,mixed> kontext pro log (bez dat pro klienta) */
+        public readonly array $context = [],
     ) {
         parent::__construct($message);
     }

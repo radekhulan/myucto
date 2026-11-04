@@ -926,6 +926,9 @@ export interface LedgerReportParams {
   client?: string
   /** Hledání dle textu položky faktury (vydané i přijaté) — jen General ledger. */
   item?: string
+  /** Rozsah účtů (prefixový včetně krajů, např. 5 až 5 = třída 5) — jen General ledger. */
+  account_from?: string
+  account_to?: string
   /**
    * Stav PO uzavření knih. Výchozí (nezadáno) je stav PŘED uzavřením — po uzavření
    * jsou rozvahové účty převedené na 702 a konečné stavy vycházejí nulové, takže
@@ -979,6 +982,9 @@ export interface GeneralLedgerReport {
   vendor?: string | null
   client?: string | null
   item?: string | null
+  /** Použitý rozsah účtů (prázdný = bez omezení). */
+  account_from?: string
+  account_to?: string
   draft_count: number
   months: string[]
   accounts: GeneralLedgerAccount[]

@@ -1,0 +1,10 @@
+<table class="detail">
+{% for item in items %}
+<tr{% if (offset + loop.index0) is odd %} class="stripe"{% endif %}><td class="date">{{ item.entry_date|cz_date }}</td><td class="doc">{{ item.document_no }}{% if item.account_code != account.account_code %}<br><span class="meta">{{ item.account_code }}</span>{% endif %}</td><td class="text">{{ item.description }}</td><td class="counter">{{ item.counter_accounts }}</td><td class="money">{% if item.side == 'debit' %}{{ item.amount|cz_money }}{% endif %}</td><td class="money">{% if item.side == 'credit' %}{{ item.amount|cz_money }}{% endif %}</td><td class="money">{{ item.balance|cz_money }}</td></tr>
+{% endfor %}
+{% if last %}
+<tr class="summary"><td class="date"></td><td class="doc"></td><td class="text">Obrat celkem</td><td class="counter"></td><td class="money">{{ account.turnover_md|cz_money }}</td><td class="money">{{ account.turnover_d|cz_money }}</td><td class="money"></td></tr>
+<tr class="summary"><td class="date"></td><td class="doc"></td><td class="text">Saldo obratů (MD − D)</td><td class="counter"></td><td class="money"></td><td class="money"></td><td class="money">{{ (account.turnover_md - account.turnover_d)|cz_money }}</td></tr>
+<tr class="summary"><td class="date"></td><td class="doc"></td><td class="text">Konečný zůstatek</td><td class="counter"></td><td class="money">{{ account.closing_md|cz_money }}</td><td class="money">{{ account.closing_d|cz_money }}</td><td class="money">{{ (account.closing_md - account.closing_d)|cz_money }}</td></tr>
+{% endif %}
+</table>

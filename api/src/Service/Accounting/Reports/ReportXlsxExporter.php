@@ -49,6 +49,12 @@ final class ReportXlsxExporter
         if (!empty($data['analytics'])) {
             $sub .= ' (rozpad po analytikách)';
         }
+        // Kód „0“ (třída 0) je platná mez, proto porovnání s prázdným řetězcem, ne empty().
+        $accountFrom = (string) ($data['account_from'] ?? '');
+        $accountTo = (string) ($data['account_to'] ?? '');
+        if ($accountFrom !== '' || $accountTo !== '') {
+            $sub .= ' · Účty: ' . ($accountFrom !== '' ? $accountFrom : '…') . ' - ' . ($accountTo !== '' ? $accountTo : '…');
+        }
         $sheet->setCellValue('A2', $sub);
         if ((int) ($data['draft_count'] ?? 0) > 0) {
             $sheet->setCellValue('A3', 'V rozsahu je ' . (int) $data['draft_count'] . ' nezaúčtovaných konceptů — nejsou zahrnuty.');

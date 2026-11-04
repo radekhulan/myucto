@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 /**
- * Rozsah účtů „od – do“ ve filtru deníku. Meze jsou prefixové včetně krajů:
+ * Rozsah účtů „od – do“ ve filtru deníku a hlavní knihy. Meze jsou prefixové včetně krajů:
  * 5 až 5 = celá třída 5, 501 až 518 včetně analytik 518.xxx, 501.100 až 501.100
  * = analytika 501.100 (a případné kódy, které na ni začínají). Prázdná mez = bez omezení.
  *
@@ -43,6 +43,19 @@ final class AccountCodeRange
             throw new AccountCodeRangeException('Počáteční účet nesmí být větší než koncový.');
         }
         return new self($from, $to);
+    }
+
+    /**
+     * Patří účet do rozsahu? Vybírá totéž co sqlBounds() v databázi. `$syntheticOnly` =
+     * porovnávají se jen syntetiky (hlavní kniha bez rozpadu po analytikách): dolní mez
+     * s analytikou (501.100) pak vybere celou syntetiku 501, jinak by ji vyřadila,
+     * i když její analytika do rozsahu patří.
+     */
+    public function contains(string $code, bool $syntheticOnly = false): bool
+    {
+        $code = strtoupper($code);
+        return ($this->from === '' || self::compare($code, $this->from) >= 0 || ($syntheticOnly && str_starts_with($this->from, $code)))
+            && ($this->to === '' || self::compare(substr($code, 0, strlen($this->to)), $this->to) <= 0);
     }
 
     /**
