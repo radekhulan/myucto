@@ -38,6 +38,9 @@ use PDO;
  */
 final class BankPostingBackfill
 {
+    /** Strop jmenovitého seznamu přeskočených pohybů v reportu; počítadla jdou dál. */
+    private const MAX_REPORTED_ITEMS = 200;
+
     public function __construct(
         private readonly Connection $db,
         private readonly BankPostingService $service,
@@ -58,7 +61,9 @@ final class BankPostingBackfill
      *   candidates:int, posted:int, suggested:int, skipped:int,
      *   reconciled_legacy:int, normalized_full:int,
      *   skip_reasons:array<string,int>, suggest_reasons:array<string,int>,
-     *   errors:list<array{tx_id:int, reason:string, message:string}>
+     *   errors:list<array{tx_id:int, reason:string, message:string}>,
+     *   items:list<array{tx_id:int, statement_id:int, posted_at:string, amount:float, currency:string,
+     *     counterparty_name:string, variable_symbol:string, reason:string, message:string}>
      * }
      */
     public function run(
@@ -99,6 +104,7 @@ final class BankPostingBackfill
             'skip_reasons'     => [],
             'suggest_reasons'  => [],
             'errors'           => [],
+            'items'            => [],
         ];
 
         // Dry-run: engine zapisuje, na konci vše zahodíme. Nested-safe: pokud žádná
@@ -124,18 +130,18 @@ final class BankPostingBackfill
 
                 // Bez --rules jen spárované platby (applyRules větev se přeskočí).
                 if (!$isMatched && !$withRules) {
-                    $this->tallySkip($report, 'rules_disabled');
+                    $this->tallySkip($report, 'rules_disabled', $row);
                     continue;
                 }
 
                 // Zavřené / neexistující období → skip bez suggestion (frontu nezaplavit).
                 $period = $this->periods->findForDate($supplierId, (string) $row['posted_at']);
                 if ($period === null) {
-                    $this->tallySkip($report, 'no_period');
+                    $this->tallySkip($report, 'no_period', $row);
                     continue;
                 }
                 if ((string) ($period['status'] ?? 'open') !== 'open') {
-                    $this->tallySkip($report, 'period_closed');
+                    $this->tallySkip($report, 'period_closed', $row);
                     continue;
                 }
 
@@ -165,7 +171,7 @@ final class BankPostingBackfill
                     if (($reconciled || $normalized) && $res['action'] !== 'posted') {
                         $reason = (string) ($res['reason'] ?? 'unknown');
                         $this->finishCandidateTransaction($candidateTx, false);
-                        $this->tallySkip($report, 'reconcile_not_posted:' . $reason);
+                        $this->tallySkip($report, 'reconcile_not_posted:' . $reason, $row, (string) ($res['message'] ?? ''));
                         $this->tallyError($report, $txId, $reason, (string) ($res['message'] ?? ''));
                         continue;
                     }
@@ -175,7 +181,7 @@ final class BankPostingBackfill
                         throw $e;
                     }
                     $this->finishCandidateTransaction($candidateTx, false);
-                    $this->tallySkip($report, 'reconcile_error');
+                    $this->tallySkip($report, 'reconcile_error', $row, $e->getMessage());
                     $this->tallyError($report, $txId, 'reconcile_error', $e->getMessage());
                     continue;
                 }
@@ -188,7 +194,7 @@ final class BankPostingBackfill
                         $report['normalized_full']++;
                     }
                 }
-                $this->tally($report, $res, $txId);
+                $this->tally($report, $res, $txId, $row);
             }
         } catch (\Throwable $e) {
             TransactionFailure::rollbackIfAborted($pdo, $e);
@@ -213,7 +219,9 @@ final class BankPostingBackfill
     {
         $hasFrom = $from !== null && $from !== '';
         $fromSql = $hasFrom ? ' AND bt.posted_at >= ?' : '';
-        $sql = "SELECT bt.id, bt.amount, bt.match_status, bt.posted_at,
+        $sql = "SELECT bt.id, bt.amount, bt.match_status, bt.posted_at, bt.statement_id,
+                       COALESCE(NULLIF(bt.currency, ''), bs.currency) AS currency,
+                       bt.counterparty_name, bt.variable_symbol,
                        (EXISTS (SELECT 1 FROM invoice_payments alloc_ip
                                  WHERE alloc_ip.supplier_id = ? AND alloc_ip.bank_transaction_id = bt.id)
                         OR EXISTS (SELECT 1 FROM payment_matches alloc_pm
@@ -442,7 +450,7 @@ final class BankPostingBackfill
      * @param array{action:string, reason?:string, message?:string} $res
      * @param array<string,mixed> $report
      */
-    private function tally(array &$report, array $res, int $txId): void
+    private function tally(array &$report, array $res, int $txId, array $row): void
     {
         switch ($res['action']) {
             case 'posted':
@@ -455,16 +463,36 @@ final class BankPostingBackfill
                 break;
             default:
                 $reason = (string) ($res['reason'] ?? 'unknown');
-                $this->tallySkip($report, $reason);
+                $this->tallySkip($report, $reason, $row, (string) ($res['message'] ?? ''));
                 $this->tallyError($report, $txId, $reason, (string) ($res['message'] ?? ''));
         }
     }
 
-    /** @param array<string,mixed> $report */
-    private function tallySkip(array &$report, string $reason): void
+    /**
+     * Vedle počítadla se přeskočený pohyb uloží i jmenovitě (bez `already_posted`, ten
+     * je v pořádku), aby report ukázal, KTERÝ pohyb zůstal nezaúčtovaný a proč.
+     *
+     * @param array<string,mixed> $report
+     * @param array<string,mixed>|null $row kandidát z {@see candidates()}
+     */
+    private function tallySkip(array &$report, string $reason, ?array $row = null, string $message = ''): void
     {
         $report['skipped']++;
         $report['skip_reasons'][$reason] = ($report['skip_reasons'][$reason] ?? 0) + 1;
+        if ($row === null || count($report['items']) >= self::MAX_REPORTED_ITEMS) {
+            return;
+        }
+        $report['items'][] = [
+            'tx_id'             => (int) $row['id'],
+            'statement_id'      => (int) ($row['statement_id'] ?? 0),
+            'posted_at'         => substr((string) ($row['posted_at'] ?? ''), 0, 10),
+            'amount'            => (float) ($row['amount'] ?? 0),
+            'currency'          => (string) ($row['currency'] ?? ''),
+            'counterparty_name' => mb_substr(trim((string) ($row['counterparty_name'] ?? '')), 0, 120),
+            'variable_symbol'   => (string) ($row['variable_symbol'] ?? ''),
+            'reason'            => $reason,
+            'message'           => mb_substr($message, 0, 300),
+        ];
     }
 
     /**

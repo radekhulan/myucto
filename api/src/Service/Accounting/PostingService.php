@@ -496,12 +496,7 @@ final class PostingService
             // z dokladů, ne z deníku, takže ho tyto zápisy nemění. Flag nastavuje jen ClosingService.
             $closingStepInLock = $dateLocked && $allowClosing;
             if ($dateLocked && !$taxNeutralRewrite && !$closingStepInLock) {
-                throw new PostingException(
-                    'date_locked',
-                    'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
-                        . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
-                        . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
-                );
+                throw self::dateLockedException($entryDate, (string) $lockedUntil);
             }
 
             $resolved = $batchDocument['resolved_lines'] ?? $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true);
@@ -3114,6 +3109,27 @@ final class PostingService
             $this->lockedUntilCache[$supplierId] = ($v === false || $v === null) ? null : (string) $v;
         }
         return $this->lockedUntilCache[$supplierId];
+    }
+
+    /**
+     * Zámek k datu bez cache — pro kontrolu nanečisto, která má narazit na tentýž
+     * zámek jako ostrý zápis ({@see postDocument}), aniž by cokoli zamykala.
+     */
+    public function currentLockedUntil(int $supplierId): ?string
+    {
+        unset($this->lockedUntilCache[$supplierId]);
+        return $this->lockedUntil($supplierId);
+    }
+
+    /** Odmítnutí zápisu do zamčeného data; text sdílí ostrý zápis i kontrola nanečisto. */
+    public static function dateLockedException(string $entryDate, string $lockedUntil): PostingException
+    {
+        return new PostingException(
+            'date_locked',
+            'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
+                . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
+                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
+        );
     }
 
     private function lockedUntilForUpdate(int $supplierId): ?string

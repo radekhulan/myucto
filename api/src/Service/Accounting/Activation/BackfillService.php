@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingBackfillJobRepository;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingBackfill;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
 
 final class BackfillService
@@ -48,6 +49,7 @@ final class BackfillService
             'phases' => [],
             'skip_reasons' => [],
             'document_issues' => [],
+            'bank_issues' => [],
             'balance' => ['debit_cents' => 0, 'credit_cents' => 0, 'balanced' => true],
             'document_coverage' => [],
             'failed_total' => 0,
@@ -98,10 +100,17 @@ final class BackfillService
                 'purchase_invoice' => $docReport['purchase_invoice'],
             ];
             $report['document_issues'] = $docReport['document_issues'];
+            // Kontrola úplnosti: každý doklad, který počítadlo hlásí jako čekající (bez
+            // aktivního zápisu), musel projít během — zaúčtovaný, přeskočený i chybný.
+            // Doklady, které už zápis mají, průvodce jen přepisuje; do porovnání nepatří.
+            // Dřív se sem sčítalo posted+skipped+failed bez ohledu na existující zápis, takže
+            // opakovaná aktivace nad zaúčtovanou historií v zamčeném období hlásila všechny
+            // přeskočené přepisy jako „navíc" a aktivaci zablokovala.
             foreach (['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices'] as $type => $countKey) {
                 $phase = $docReport[$type];
+                $coverage = $docReport['coverage'][$type];
                 $expected = (int) $counts[$countKey];
-                $handled = (int) $phase['posted'] + (int) $phase['skipped'] + (int) $phase['failed'];
+                $handled = (int) $coverage['pending'];
                 $missing = max(0, $expected - $handled);
                 $unexpected = max(0, $handled - $expected);
                 $complete = $missing === 0 && $unexpected === 0;
@@ -111,6 +120,7 @@ final class BackfillService
                     'skipped' => (int) $phase['skipped'],
                     'failed' => (int) $phase['failed'],
                     'handled' => $handled,
+                    'already_posted' => (int) $coverage['already_posted'],
                     'missing' => $missing,
                     'unexpected' => $unexpected,
                     'complete' => $complete,
@@ -139,7 +149,8 @@ final class BackfillService
             $cashReport = $this->cash->run($supplierId, $startsOn, null, $dryRun, $log, $cancelled);
             $processed += (int) $cashReport['processed'];
             $this->jobs->updateProgress($jobId, 'cash', $processed);
-            $report['phases']['cash'] = array_diff_key($cashReport, ['processed' => true, 'cancelled' => true]);
+            $report['phases']['cash'] = array_diff_key($cashReport, ['processed' => true, 'cancelled' => true, 'issues' => true]);
+            $report['document_issues'] = array_merge($report['document_issues'], $cashReport['issues']);
             $report['skip_reasons'] = $this->mergeReasons($report['skip_reasons'], $cashReport['skip_reasons']);
             $report['failed_total'] += $cashReport['failed'];
             if ($cashReport['cancelled'] || $cancelled()) {
@@ -158,7 +169,8 @@ final class BackfillService
             );
             $processed += (int) ($bankReport['candidates'] ?? 0);
             $this->jobs->updateProgress($jobId, 'bank', $processed);
-            $report['phases']['bank'] = $bankReport;
+            $report['phases']['bank'] = array_diff_key($bankReport, ['items' => true]);
+            $report['bank_issues'] = (array) ($bankReport['items'] ?? []);
             $report['skip_reasons'] = $this->mergeReasons($report['skip_reasons'], (array) ($bankReport['skip_reasons'] ?? []));
             $this->jobs->appendLog($jobId, sprintf(
                 'Banka: kandidátů %d, zaúčtováno %d, návrhů %d, přeskočeno %d.',
@@ -241,8 +253,15 @@ final class BackfillService
             }
 
             $report['balance'] = $this->journalBalance($supplierId);
+            $force = (array) ($params['force'] ?? []);
+            if ($report['failed_total'] !== 0 && $report['balance']['balanced'] && !$dryRun && $force !== []) {
+                // Vynucené dokončení potvrdil správce už při spuštění (počet a seznam chyb
+                // z kontroly nanečisto). Nevyrovnaný deník ani fatální chyba se tím
+                // neobchází: obojí zůstává o větev níž / v catch.
+                $report['forced'] = self::forcedRecord($report, (int) ($force['by'] ?? $userId), (string) ($force['reason'] ?? ''));
+            }
             $this->jobs->saveReport($jobId, $report);
-            if ($report['failed_total'] !== 0 || !$report['balance']['balanced']) {
+            if (($report['failed_total'] !== 0 && !isset($report['forced'])) || !$report['balance']['balanced']) {
                 $this->jobs->markFailed($jobId, 'Kontrola našla chyby nebo nevyvážený deník.');
                 if (!$dryRun) {
                     $this->db->pdo()->prepare("UPDATE supplier SET accounting_activation_status = 'failed' WHERE id = ?")
@@ -256,49 +275,7 @@ final class BackfillService
                 return;
             }
 
-            $pdo = $this->db->pdo();
-            // Byla jednotka v podvojném účetnictví UŽ PŘED tímhle během? Odpověď musí
-            // padnout před UPDATE níž — potom už je nerozeznatelný první průchod
-            // průvodcem od opakovaného po neúspěchu, a výchozí nastavení by přepsalo,
-            // co si účetní mezitím nastavila ({@see AutoPostingPolicyService::applyAccountingUnitDefaults()}).
-            $wasDoubleEntry = $pdo->prepare(
-                "SELECT 1 FROM supplier WHERE id = ? AND accounting_mode = 'double_entry'"
-            );
-            $wasDoubleEntry->execute([$supplierId]);
-            $isFirstActivation = $wasDoubleEntry->fetchColumn() === false;
-
-            $ownTx = !$pdo->inTransaction();
-            if ($ownTx) $pdo->beginTransaction();
-            try {
-                // `accounting_enabled` se zapíná spolu s režimem: kdo doběhl
-                // aktivací a nechal si doúčtovat historii, ten účetnictví vede.
-                // S vypnutou nadstavbou by po dokončení průvodce nebylo v menu
-                // nic z toho, co právě vzniklo — a uživatel by ji musel dohledat
-                // v nastavení (u převodu z MyInvoice je vypnutá záměrně).
-                $pdo->prepare(
-                    "UPDATE supplier
-                        SET accounting_mode = 'double_entry', accounting_enabled = 1,
-                            accounting_activation_status = 'completed'
-                      WHERE id = ?"
-                )->execute([$supplierId]);
-                if ($isFirstActivation) {
-                    $this->autoPosting->applyAccountingUnitDefaults($supplierId, $userId);
-                }
-                $this->accountingModes->record($supplierId, $startsOn, 'double_entry');
-                $this->logger->log(
-                    'supplier.accounting_activated',
-                    $userId,
-                    'supplier',
-                    $supplierId,
-                    $report,
-                    supplierId: $supplierId,
-                );
-                $this->jobs->markCompleted($jobId);
-                if ($ownTx) $pdo->commit();
-            } catch (\Throwable $e) {
-                if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
-                throw $e;
-            }
+            $this->complete($jobId, $supplierId, $startsOn, $userId, $report);
         } catch (\Throwable $e) {
             $report['failed_total'] = max(1, (int) $report['failed_total']);
             $report['fatal_error'] = $e instanceof \MyInvoice\Service\Accounting\PostingException
@@ -310,6 +287,139 @@ final class BackfillService
                 $this->db->pdo()->prepare("UPDATE supplier SET accounting_activation_status = 'failed' WHERE id = ?")
                     ->execute([$supplierId]);
             }
+            throw $e;
+        }
+    }
+
+    /**
+     * Dokončí aktivaci nad doúčtováním, které skončilo chybami, po výslovném rozhodnutí
+     * správce. Tvrdé brány zůstávají: běh nesmí skončit fatální chybou (otevírací rozvaha
+     * nevyrovnaná nebo nezapsaná, přerušený běh), deník musí být vyrovnaný TEĎ, otevírací
+     * rozvaha i datum zahájení se od běhu nesmí změnit a nesmí běžet jiné doúčtování.
+     * Co zůstalo nedoúčtované, se dá dorovnat akcí „Doúčtovat chybějící zápisy".
+     *
+     * @return array<string,mixed> report doplněný o `forced`
+     */
+    public function forceComplete(int $jobId, int $supplierId, int $userId, string $reason): array
+    {
+        $job = $this->jobs->find($jobId, $supplierId);
+        if ($job === null) {
+            throw new PostingException('not_found', 'Doúčtování nebylo nalezeno.', 404);
+        }
+        $last = $this->jobs->lastForTenant($supplierId);
+        if ($job['kind'] !== 'execute' || $job['status'] !== 'failed' || (int) ($last['id'] ?? 0) !== $jobId) {
+            throw new PostingException('activation_force_wrong_state', 'Vynutit lze jen poslední neúspěšné doúčtování.', 409);
+        }
+        if ($this->jobs->activeForTenant($supplierId) !== null) {
+            throw new PostingException('job_already_running', 'Doúčtování už běží.', 409);
+        }
+        $report = is_array($job['report_json'] ?? null) ? $job['report_json'] : null;
+        if ($report === null || isset($report['fatal_error'])) {
+            throw new PostingException(
+                'activation_force_fatal',
+                'Doúčtování skončilo dřív, než prošlo všechny zdroje. Opravte příčinu a spusťte ho znovu.',
+                409,
+            );
+        }
+        $params = (array) ($job['params'] ?? []);
+        $state = $this->db->pdo()->prepare('SELECT accounting_starts_on, accounting_activation_status FROM supplier WHERE id = ?');
+        $state->execute([$supplierId]);
+        $supplier = $state->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $startsOn = (string) ($params['starts_on'] ?? '');
+        $opening = $this->opening->draft($supplierId);
+        if (!$opening['totals']['balanced']) {
+            throw new PostingException('opening_unbalanced', 'Otevírací rozvaha není vyrovnaná.', 422);
+        }
+        if ($startsOn === '' || (string) ($supplier['accounting_starts_on'] ?? '') !== $startsOn
+            || ($supplier['accounting_activation_status'] ?? null) !== 'failed'
+            || $opening['hash'] !== (string) ($params['opening_hash'] ?? '')) {
+            throw new PostingException('dry_run_required', 'Po změnách spusťte znovu kontrolu nanečisto.', 409);
+        }
+        $balance = $this->journalBalance($supplierId);
+        if (!$balance['balanced']) {
+            throw new PostingException('journal_unbalanced', 'Deník není vyrovnaný - aktivaci nelze dokončit.', 409);
+        }
+
+        $report['balance'] = $balance;
+        $report['forced'] = self::forcedRecord($report, $userId, $reason);
+        $this->jobs->saveReport($jobId, $report);
+        $this->complete($jobId, $supplierId, $startsOn, $userId, $report);
+        return $report;
+    }
+
+    /** @return array{by:int, at:string, reason:string, failed_total:int} */
+    private static function forcedRecord(array $report, int $userId, string $reason): array
+    {
+        return [
+            'by' => $userId,
+            'at' => date('Y-m-d H:i:s'),
+            'reason' => $reason,
+            'failed_total' => (int) ($report['failed_total'] ?? 0),
+        ];
+    }
+
+    private function complete(int $jobId, int $supplierId, string $startsOn, int $userId, array $report): void
+    {
+        $pdo = $this->db->pdo();
+        // Byla jednotka v podvojném účetnictví UŽ PŘED tímhle během? Odpověď musí
+        // padnout před UPDATE níž — potom už je nerozeznatelný první průchod
+        // průvodcem od opakovaného po neúspěchu, a výchozí nastavení by přepsalo,
+        // co si účetní mezitím nastavila ({@see AutoPostingPolicyService::applyAccountingUnitDefaults()}).
+        $wasDoubleEntry = $pdo->prepare(
+            "SELECT 1 FROM supplier WHERE id = ? AND accounting_mode = 'double_entry'"
+        );
+        $wasDoubleEntry->execute([$supplierId]);
+        $isFirstActivation = $wasDoubleEntry->fetchColumn() === false;
+
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            // `accounting_enabled` se zapíná spolu s režimem: kdo doběhl
+            // aktivací a nechal si doúčtovat historii, ten účetnictví vede.
+            // S vypnutou nadstavbou by po dokončení průvodce nebylo v menu
+            // nic z toho, co právě vzniklo — a uživatel by ji musel dohledat
+            // v nastavení (u převodu z MyInvoice je vypnutá záměrně).
+            $pdo->prepare(
+                "UPDATE supplier
+                    SET accounting_mode = 'double_entry', accounting_enabled = 1,
+                        accounting_activation_status = 'completed'
+                  WHERE id = ?"
+            )->execute([$supplierId]);
+            if ($isFirstActivation) {
+                $this->autoPosting->applyAccountingUnitDefaults($supplierId, $userId);
+            }
+            $this->accountingModes->record($supplierId, $startsOn, 'double_entry');
+            $this->logger->log(
+                'supplier.accounting_activated',
+                $userId,
+                'supplier',
+                $supplierId,
+                $report,
+                supplierId: $supplierId,
+            );
+            if (isset($report['forced'])) {
+                $this->logger->log(
+                    'supplier.accounting_activation_forced',
+                    (int) $report['forced']['by'],
+                    'supplier',
+                    $supplierId,
+                    [
+                        'job_id' => $jobId,
+                        'reason' => $report['forced']['reason'],
+                        'failed_total' => $report['forced']['failed_total'],
+                        'document_issues' => array_slice(array_values(array_filter(
+                            (array) ($report['document_issues'] ?? []),
+                            static fn (array $issue): bool => ($issue['severity'] ?? '') === 'failed',
+                        )), 0, 50),
+                        'document_coverage' => $report['document_coverage'] ?? [],
+                    ],
+                    supplierId: $supplierId,
+                );
+            }
+            $this->jobs->markCompleted($jobId);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }
