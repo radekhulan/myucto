@@ -8,10 +8,12 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\BankPostingRuleRepository;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\StatementOverrideRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingRuleValidator;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateValidator;
 use MyInvoice\Service\Accounting\Dimension\DimensionAccountMask;
@@ -24,7 +26,6 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\StatementOverrideService;
-use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook;
 use MyInvoice\Service\Supplier\SupplierPersonTitle;
 use PDO;
@@ -885,23 +886,19 @@ final class CompanyProfileImporter
     }
 
     /**
-     * Vlastní bankovní účet firmy podle čísla účtu a kódu banky. Obojí se převede do tvaru,
-     * ve kterém je drží registr (`account_canonical`, `bank_code_norm`).
+     * Vlastní bankovní účet firmy podle čísla účtu a kódu banky, stejně jako ho najde
+     * zaúčtování pohybu ({@see SupplierBankAccountRepository::matchCounterparty()}): číslo
+     * i kód banky se kanonizují a účet registru bez kódu banky se spáruje taky. Neaktivní
+     * účet se najde, jeho nastavení se přenáší jako ostatní vlastnosti účtu.
      *
      * @param array<string,mixed> $key
      */
     private function bankAccountId(int $supplierId, array $key): ?int
     {
-        $account = AccountNumberNormalizer::canonical((string) ($key['account'] ?? ''));
-        if ($account === null) {
-            return null;
-        }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id FROM supplier_bank_accounts WHERE supplier_id = ? AND account_canonical = ? AND bank_code_norm = ?'
-        );
-        $stmt->execute([$supplierId, $account, AccountNumberNormalizer::canonicalBankCode((string) ($key['bank_code'] ?? '')) ?? '']);
-        $id = $stmt->fetchColumn();
-        return $id === false ? null : (int) $id;
+        $bank = trim((string) ($key['bank_code'] ?? ''));
+        $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+            ->matchCounterparty($supplierId, (string) ($key['account'] ?? ''), $bank === '' ? null : $bank, true);
+        return $account === null ? null : (int) $account['id'];
     }
 
     /** @param array<string,mixed> $project */

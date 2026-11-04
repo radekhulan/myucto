@@ -400,9 +400,10 @@ nepřepíše.
 
 Výchozí hodnota účtu se doplní všem řádkům zápisu pohybu, které typ nemají,
 tedy i řádku banky, saldokonta hrazeného dokladu bez dané dimenze a u převodu
-mezi vlastními účty řádku 261. Nastavit ji lze i úvěrovému účtu kreditní karty.
-Účet vypnutý v poli **Aktivní** své výchozí dimenze nepoužije, stejně jako se na
-jeho analytiku pohyby nepřesměrují. Změna výchozích dimenzí účtu se do už
+mezi vlastními účty řádku 261. Účet vypnutý v poli **Aktivní** své výchozí
+dimenze nepoužije, stejně jako se na jeho analytiku pohyby nepřesměrují.
+Nastavit je lze i úvěrovému účtu kreditní karty; ten je používá i po archivaci
+na stránce Kreditní karty, stejně jako se jeho pohyby dál účtují na 231. Změna výchozích dimenzí účtu se do už
 zaúčtovaného pohybu promítne, až když se jeho dimenze znovu orazítkují (uložení
 dimenzí pohybu nebo hrazeného dokladu).
 
@@ -886,7 +887,8 @@ pracovat, dokud nebude licence znovu platná.
 Číselník dimenzí a výběry na dokladech vidí uživatel s právem číst účetnictví,
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří
 k nastavení firmy, skupinu firem spravuje správce firmy. Výchozí dimenze klienta
-a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku.
+a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku. Výchozí
+dimenze bankovního účtu smí měnit uživatel s právem zápisu do účetnictví.
 Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
 odeslání ke schválení a jeho zrušení patří ke změně stavu přijaté faktury.
 
@@ -923,7 +925,8 @@ převezme z původního zápisu. Pevné systémové hodnoty nelze
 přejmenovat ani ukončit. Tato přísnější pravidla nemění správu vlastních dimenzí.
 
 Přiřazení uchovává známý původ hodnoty, například přímý výběr, výchozí hodnotu
-klienta, zakázky nebo produktu, konkrétní účetní pravidlo či účetní modul. Kopie a
+klienta, zakázky, produktu nebo bankovního účtu, konkrétní účetní pravidlo či
+účetní modul. Kopie a
 storno zachovají původ převzatého přiřazení. U starších přiřazení bez doloženého
 původu zůstává původ neznámý; opětovné uložení stejné hodnoty jej nedoplňuje
 odhadem.

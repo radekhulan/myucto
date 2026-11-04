@@ -238,6 +238,17 @@ final class CompanyProfileRoundTripTest extends TestCase
         $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$b]);
         $imported = $this->importer->import($b, $profile, false, null, $this->userId);
         self::assertSame(1, $imported['changed'], 'Číslo s předčíslím z nul a kód banky bez nuly se spárují s registrem.');
+
+        // Účet registru bez kódu banky se spáruje stejně jako při zaúčtování pohybu.
+        $pdo->prepare("UPDATE supplier_bank_accounts SET bank_code = NULL, bank_code_norm = '' WHERE supplier_id = ?")->execute([$b]);
+        $pdo->prepare('DELETE FROM dimension_defaults WHERE supplier_id = ?')->execute([$b]);
+        $withoutBank = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(1, $withoutBank['changed'], 'Účet bez kódu banky se najde i podle profilu s kódem.');
+
+        $profile['sections']['dimension_defaults'][0]['bank_account'] = ['account' => '1000000005', 'bank_code' => '0100'];
+        $missing = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(0, $missing['changed']);
+        self::assertStringContainsString('Bankovní účet 1000000005/0100 ve firmě není', implode("\n", $missing['sections']['dimension_defaults']['warnings']));
     }
 
     public function testInvalidItemRollsBackWholeImport(): void

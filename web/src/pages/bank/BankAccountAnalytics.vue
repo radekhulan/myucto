@@ -130,63 +130,72 @@ function toggleDimensions(id: number) {
   dimensionsOpen.value = { ...dimensionsOpen.value, [id]: !dimensionsOpen.value[id] }
 }
 
+/** Chyba polí účtu, kterou odhalí už klient (řada, analytika), jinak null. */
+function fieldsError(a: SupplierBankAccount): string | null {
+  const d = drafts.value[a.id]
+  const series = normalizeSeries(d.document_series)
+  if (!SERIES_PATTERN.test(series)) {
+    return t('bank.analytics.series_invalid', { account: accountLabel(a) })
+  }
+  const seriesClash = accounts.value.find(
+    (o) => o.id !== a.id && normalizeSeries(drafts.value[o.id]?.document_series ?? '') === series,
+  )
+  if (seriesClash) {
+    return t('bank.analytics.series_taken', { series, account: accountLabel(seriesClash) })
+  }
+  if (d.analytic_suffix !== '' && !/^[0-9]{1,6}$/.test(d.analytic_suffix)) {
+    return t('bank.analytics.suffix_invalid', { account: accountLabel(a) })
+  }
+  // Analytiku nelze zrušit — účet ji mít musí, jinak se jeho pohyby vrátí na ploché 221.
+  if (d.analytic_suffix === '' && (a.analytic_suffix ?? '') !== '') {
+    return t('bank.analytics.suffix_required', { account: accountLabel(a) })
+  }
+  // Dvě čísla na jednom účtu = promíchaný zůstatek; server to odmítne taky.
+  const clash = accounts.value.find(
+    (o) => o.id !== a.id && (drafts.value[o.id]?.analytic_suffix ?? '') === d.analytic_suffix && d.analytic_suffix !== '',
+  )
+  if (clash) {
+    return t('bank.analytics.suffix_taken', { suffix: BANK_PREFIX + d.analytic_suffix, account: accountLabel(clash) })
+  }
+  return null
+}
+
 async function saveAll() {
   if (!canWrite.value || saving.value || dirtyCount.value === 0) return
+  const dirty = accounts.value.filter(isDirty)
+  // Nejdřív zkontrolovat všechny řádky: chyba v jednom nesmí nechat jiné napůl uložené.
+  for (const a of dirty.filter(fieldsDirty)) {
+    const error = fieldsError(a)
+    if (error) {
+      toast.error(error)
+      return
+    }
+  }
   saving.value = true
   let renumbered = 0
   try {
-    for (const a of accounts.value.filter(isDirty)) {
-      if (!fieldsDirty(a)) {
-        await dimensionsApi.saveDefaults('accounting/bank-accounts', a.id, dimensionDrafts.value[a.id])
-        continue
+    for (const a of dirty) {
+      if (fieldsDirty(a)) {
+        const d = drafts.value[a.id]
+        const series = normalizeSeries(d.document_series)
+        // Úvěrový účet kreditní karty: druh, analytiku (231) i archivaci spravuje stránka
+        // Kreditní karty; vypnout ho tu nejde (pohyby by spadly na 221).
+        const seriesPatch = series !== (a.document_series ?? '') ? { document_series: series } : {}
+        const saved = await bankPostingApi.updateAccount(a.id, a.kind === 'credit_card'
+          ? { label: d.label.trim() || null, ...seriesPatch }
+          : {
+              kind: d.kind,
+              label: d.label.trim() || null,
+              analytic_suffix: d.analytic_suffix.trim() || null,
+              is_active: d.is_active,
+              ...seriesPatch,
+            })
+        renumbered += saved.renumbered_entries ?? 0
       }
-      const d = drafts.value[a.id]
-      const series = normalizeSeries(d.document_series)
-      if (!SERIES_PATTERN.test(series)) {
-        toast.error(t('bank.analytics.series_invalid', { account: accountLabel(a) }))
-        return
-      }
-      const seriesClash = accounts.value.find(
-        (o) => o.id !== a.id && normalizeSeries(drafts.value[o.id]?.document_series ?? '') === series,
-      )
-      if (seriesClash) {
-        toast.error(t('bank.analytics.series_taken', { series, account: accountLabel(seriesClash) }))
-        return
-      }
-      if (d.analytic_suffix !== '' && !/^[0-9]{1,6}$/.test(d.analytic_suffix)) {
-        toast.error(t('bank.analytics.suffix_invalid', { account: accountLabel(a) }))
-        return
-      }
-      // Analytiku nelze zrušit — účet ji mít musí, jinak se jeho pohyby vrátí na ploché 221.
-      if (d.analytic_suffix === '' && (a.analytic_suffix ?? '') !== '') {
-        toast.error(t('bank.analytics.suffix_required', { account: accountLabel(a) }))
-        return
-      }
-      // Dvě čísla na jednom účtu = promíchaný zůstatek; server to odmítne taky.
-      const clash = accounts.value.find(
-        (o) => o.id !== a.id && (drafts.value[o.id]?.analytic_suffix ?? '') === d.analytic_suffix && d.analytic_suffix !== '',
-      )
-      if (clash) {
-        toast.error(t('bank.analytics.suffix_taken', { suffix: BANK_PREFIX + d.analytic_suffix, account: accountLabel(clash) }))
-        return
-      }
-      // Výchozí dimenze až po kontrole polí účtu, ať chyba v řadě nebo analytice neuloží půlku řádku.
+      // Výchozí dimenze až po polích účtu: když server pole odmítne, dimenze zůstanou neuložené.
       if (dimensionsDirty(a)) {
         await dimensionsApi.saveDefaults('accounting/bank-accounts', a.id, dimensionDrafts.value[a.id])
       }
-      // Úvěrový účet kreditní karty: druh, analytiku (231) i archivaci spravuje stránka
-      // Kreditní karty; vypnout ho tu nejde (pohyby by spadly na 221).
-      const seriesPatch = series !== (a.document_series ?? '') ? { document_series: series } : {}
-      const saved = await bankPostingApi.updateAccount(a.id, a.kind === 'credit_card'
-        ? { label: d.label.trim() || null, ...seriesPatch }
-        : {
-            kind: d.kind,
-            label: d.label.trim() || null,
-            analytic_suffix: d.analytic_suffix.trim() || null,
-            is_active: d.is_active,
-            ...seriesPatch,
-          })
-      renumbered += saved.renumbered_entries ?? 0
     }
     toast.success(t('bank.analytics.saved'))
     if (renumbered > 0) toast.success(t('bank.analytics.series_renumbered', { count: renumbered }))

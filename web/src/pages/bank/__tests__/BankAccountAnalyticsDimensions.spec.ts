@@ -78,6 +78,35 @@ describe('bank account default dimensions', () => {
     wrapper.unmount()
   })
 
+  it('saves nothing when another row fails validation', async () => {
+    const wrapper = shallowMount(BankAccountAnalytics)
+    await flushPromises()
+    await wrapper.findAll('[data-test="bank-account-dimensions-toggle"]')[0].trigger('click')
+    wrapper.findComponent(DimensionFields).vm.$emit('update:modelValue', { 7: 71 })
+    await wrapper.findAll('input[placeholder="BCR"]')[1].setValue('B 2!')
+    await wrapper.find('button.bg-primary-600').trigger('click')
+    await flushPromises()
+    expect(mocks.error).toHaveBeenCalledWith('bank.analytics.series_invalid')
+    expect(mocks.saveDefaults).not.toHaveBeenCalled()
+    expect(mocks.updateAccount).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps dimensions unsaved when the server rejects the account fields', async () => {
+    mocks.updateAccount.mockRejectedValue(new Error('suffix taken'))
+    const wrapper = shallowMount(BankAccountAnalytics)
+    await flushPromises()
+    await wrapper.findAll('[data-test="bank-account-dimensions-toggle"]')[1].trigger('click')
+    wrapper.findComponent(DimensionFields).vm.$emit('update:modelValue', { 7: 71 })
+    await wrapper.findAll('input[placeholder="BCR"]')[1].setValue('B22')
+    await wrapper.find('button.bg-primary-600').trigger('click')
+    await flushPromises()
+    expect(mocks.updateAccount).toHaveBeenCalledTimes(1)
+    expect(mocks.saveDefaults).not.toHaveBeenCalled()
+    expect(mocks.error).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('hides the column and skips loading when dimensions are off', async () => {
     dims.enabled = ref(false)
     const wrapper = shallowMount(BankAccountAnalytics)

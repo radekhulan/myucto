@@ -434,8 +434,8 @@ final class DimensionDefaults
         if (!$withOrigins) {
             return $header;
         }
-        $origins = self::commonOrigins($documents, $common, 'bank:' . $transactionId)
-            + array_diff_key($account['origins'], $common);
+        // commonOrigins() má původ pro každý typ dokladů, účet doplní jen zbylé typy.
+        $origins = self::commonOrigins($documents, $common, 'bank:' . $transactionId) + $account['origins'];
         ksort($origins);
         return ['header' => $header, 'splits' => [], 'origins' => $origins, 'split_origins' => []];
     }
@@ -455,22 +455,17 @@ final class DimensionDefaults
      */
     private function bankAccountDefaults(int $supplierId, ?array $statementAccount): array
     {
-        $number = trim((string) ($statementAccount['number'] ?? ''));
-        if ($number === '') {
-            return ['header' => [], 'origins' => []];
-        }
-        $bank = trim((string) ($statementAccount['bank'] ?? ''));
+        // Výpis bez čísla účtu: matchCounterparty() vrátí null ještě před dotazem.
         $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
-            ->matchCounterparty($supplierId, $number, $bank === '' ? null : $bank);
+            ->matchCounterparty($supplierId, (string) ($statementAccount['number'] ?? ''), $statementAccount['bank'] ?? null);
         if ($account === null) {
             return ['header' => [], 'origins' => []];
         }
         $accountId = (int) $account['id'];
-        $own = (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', $accountId);
-        if ($own === []) {
-            return ['header' => [], 'origins' => []];
-        }
-        $merged = $this->merge($supplierId, ['bank_account:' . $accountId => $own]);
+        // Účet bez výchozích dimenzí: merge() prázdnou vrstvu vrátí bez dalšího dotazu.
+        $merged = $this->merge($supplierId, [
+            'bank_account:' . $accountId => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', $accountId),
+        ]);
         return ['header' => $merged['header'], 'origins' => $merged['origins']];
     }
 

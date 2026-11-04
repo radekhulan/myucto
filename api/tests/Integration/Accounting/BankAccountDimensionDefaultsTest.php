@@ -20,6 +20,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\System\GlobalSeedTables;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -152,6 +153,29 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         $taxEvidence = $this->action->getBankAccount($this->request('GET', $this->supplierId, ['accounting' => 1]), $this->response(), ['id' => (string) $account]);
         self::assertSame(403, $taxEvidence->getStatusCode());
         self::assertSame('wrong_accounting_mode', $this->json($taxEvidence)['error']['code'] ?? null);
+        $taxEvidenceSave = $this->action->saveBankAccount($this->request('PUT', $this->supplierId, ['accounting' => 2], ['dimensions' => []]), $this->response(), ['id' => (string) $account]);
+        self::assertSame(403, $taxEvidenceSave->getStatusCode(), 'V daňové evidenci se výchozí dimenze účtu neukládají.');
+        self::assertSame('wrong_accounting_mode', $this->json($taxEvidenceSave)['error']['code'] ?? null);
+        self::assertSame([$this->centerType => $center], $this->dimensions->entityDefaults($this->supplierId, 'bank_account', $account));
+    }
+
+    public function testResetKeepingSupplierKeepsBankAccountDefaultsOnly(): void
+    {
+        $account = $this->ownAccount(self::SAVINGS);
+        $vendor = (int) $this->db->pdo()->query('SELECT vendor_id FROM purchase_invoices WHERE id = ' . $this->advancePurchase('BA-RESET', 100.00))->fetchColumn();
+        $center = $this->value($this->centerType, 'BA-RST');
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $account, [$this->centerType => $center]);
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'client', $vendor, [$this->centerType => $center]);
+
+        $mode = GlobalSeedTables::resetKeepUsersSupplier(false);
+        self::assertNotContains('dimension_defaults', $mode['keep'], 'Výchozí dimenze klienta reset maže.');
+        self::assertArrayHasKey('dimension_defaults', $mode['partial'], 'Výchozí dimenze ponechaného účtu reset nesmaže celé.');
+        // reset.php maže smíšenou tabulku přes všechny firmy; tady jen nad testovací firmou.
+        $this->db->pdo()->prepare("DELETE FROM dimension_defaults WHERE supplier_id = ? AND ({$mode['partial']['dimension_defaults']})")
+            ->execute([$this->supplierId]);
+
+        self::assertSame([$this->centerType => $center], $this->dimensions->entityDefaults($this->supplierId, 'bank_account', $account));
+        self::assertSame([], $this->dimensions->entityDefaults($this->supplierId, 'client', $vendor));
     }
 
     // ── účtování ─────────────────────────────────────────────────────────────
@@ -295,6 +319,17 @@ final class BankAccountDimensionDefaultsTest extends TestCase
             'Neaktivní účet se nepáruje stejně jako u analytiky 221, jeho výchozí dimenze se nepoužijí.');
     }
 
+    public function testArchivedCreditCardAccountStillAppliesItsDefaults(): void
+    {
+        $card = $this->ownAccount(self::SAVINGS, 'credit_card');
+        $center = $this->value($this->centerType, 'BA-CC');
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $card, [$this->centerType => $center]);
+        $this->db->pdo()->prepare('UPDATE supplier_bank_accounts SET is_active = 0 WHERE id = ?')->execute([$card]);
+
+        self::assertSame([$center], $this->centersOf($this->postInterest($this->transaction(self::SAVINGS, 120.00))),
+            'Úvěrový účet kreditní karty se páruje i archivovaný (jako analytika 231), jeho výchozí dimenze platí dál.');
+    }
+
     public function testRestampAfterPaidDocumentChangeKeepsAccountDefault(): void
     {
         $account = $this->ownAccount(self::SAVINGS);
@@ -325,14 +360,14 @@ final class BankAccountDimensionDefaultsTest extends TestCase
 
     // ── pomocné ──────────────────────────────────────────────────────────────
 
-    private function ownAccount(string $number): int
+    private function ownAccount(string $number, string $kind = 'savings'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             "INSERT INTO supplier_bank_accounts
                 (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
-             VALUES (?, ?, ?, '0100', '0100', 'CZK', ?, 'savings', 'manual', 1)"
-        )->execute([$this->supplierId, 'Účet ' . $number, $number, ltrim($number, '0')]);
+             VALUES (?, ?, ?, '0100', '0100', 'CZK', ?, ?, 'manual', 1)"
+        )->execute([$this->supplierId, 'Účet ' . $number, $number, ltrim($number, '0'), $kind]);
         return (int) $pdo->lastInsertId();
     }
 
