@@ -2049,6 +2049,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: isDraft.value && canDeletePermission && !(auth.isClientRole && draftDeletionLockedForClient(inv.locked,
         payments.value.length > 0 || bankTransactions.value.length > 0 || !!inv.cash_documents?.length, paymentsLoaded.value)), disabled: b, run: deleteInvoice },
     // ── spodní panel „Více akcí" → pod „Pokročilé" (test/odeslání, admin, storno/destrukce) ──
+    { key: 'isdoc', label: t('invoice.download_isdoc'), icon: 'inbox', tier: 'advanced', variant: 'neutral',
+      show: !isDraft.value && inv.status !== 'cancelled',
+      href: invoicesApi.isdocUrl(inv.id), download: true },
     { key: 'client', label: t('invoice.client_detail'), icon: 'user', tier: 'advanced', variant: 'neutral',
       to: `/clients/${inv.client_id}` },
     { key: 'send-test', label: t('invoice.send_test'), icon: 'send', tier: 'advanced', variant: 'primary',

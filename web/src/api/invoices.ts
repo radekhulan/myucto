@@ -1029,6 +1029,15 @@ export const invoicesApi = {
     return `/api/invoices/${id}/pdf${qs ? '?' + qs : ''}`
   },
 
+  /** Samostatný ISDOC; přímý odkaz potřebuje firmu okna místo axios hlavičky. */
+  isdocUrl: (id: number) => {
+    const sid = requestSupplierId()
+    const params = new URLSearchParams()
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    const qs = params.toString()
+    return `/api/invoices/${id}/isdoc${qs ? '?' + qs : ''}`
+  },
+
   importedPdfUrl: (id: number, inline: boolean = false) => {
     // Přímá navigace / iframe / <a href> neposílá X-Supplier-Id header (na rozdíl od
     // axios) — proto přidáváme supplier_id jako query param (middleware ho čte jako fallback).
