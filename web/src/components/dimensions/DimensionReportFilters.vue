@@ -72,20 +72,21 @@ function removeRow(index: number) {
               data-test="dimension-report-filters-remove" @click="removeRow(index)">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
       </button>
-    </div>
-    <div class="flex flex-wrap items-center gap-3">
-      <button v-if="!atLimit" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-              :disabled="!canAdd" :title="canAdd ? undefined : t('dimensions.filter_add_hint')"
-              data-test="dimension-report-filters-add" @click="addRow">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-        {{ t('dimensions.filter_add') }}
-      </button>
-      <label v-if="valueIds.length > 0" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
-        <input type="checkbox" :checked="descendants" class="rounded border-neutral-300"
-               @change="emit('update:descendants', ($event.target as HTMLInputElement).checked)" />
-        {{ t('dimensions.filter_descendants') }}
-      </label>
-      <span v-if="valueIds.length > 1" class="text-xs text-neutral-500">{{ t('dimensions.filter_combined_hint') }}</span>
+      <!-- Přidání další dimenze a volby filtru stojí hned za posledním výběrem, ne na vlastním řádku. -->
+      <template v-if="index === rows.length - 1">
+        <button v-if="!atLimit" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                :disabled="!canAdd" :title="canAdd ? undefined : t('dimensions.filter_add_hint')"
+                data-test="dimension-report-filters-add" @click="addRow">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('dimensions.filter_add') }}
+        </button>
+        <label v-if="valueIds.length > 0" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
+          <input type="checkbox" :checked="descendants" class="rounded border-neutral-300"
+                 @change="emit('update:descendants', ($event.target as HTMLInputElement).checked)" />
+          {{ t('dimensions.filter_descendants') }}
+        </label>
+        <span v-if="valueIds.length > 1" class="self-center text-xs text-neutral-500">{{ t('dimensions.filter_combined_hint') }}</span>
+      </template>
     </div>
   </div>
 </template>
