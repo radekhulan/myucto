@@ -354,6 +354,67 @@ final class PayrollRunPersistenceTest extends TestCase
     }
 
     /**
+     * Zrušení neschváleného běhu bez účtárny nesmí odemknout vstupy, které
+     * drží schválená revize běhu jiné účtárny za totéž období. Dřív se
+     * odemykalo podle období a účtárny (u běhu bez účtárny `1 = 1`).
+     */
+    public function testCancelOfRunWithoutOfficeKeepsInputsOfApprovedOfficeRun(): void
+    {
+        $officeRun = $this->approveInitialRun($this->employmentOfficeId());
+        self::assertSame('approved', $officeRun->run['status']);
+        self::assertSame('locked', $this->inputStatus());
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-sibling-scope',
+            $this->actors[0],
+        );
+        $cancelled = $this->service->cancel(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'cancel-sibling-scope',
+            $this->actors[0],
+            '',
+        );
+
+        self::assertSame('cancelled', $cancelled->run['status']);
+        self::assertSame('locked', $this->inputStatus());
+    }
+
+    /**
+     * Opravná revize odemyká jen vstupy svého běhu: vstup, který drží
+     * schválená revize běhu jiné účtárny, zůstává zamčený.
+     */
+    public function testCorrectionOfRunWithoutOfficeKeepsInputsOfApprovedOfficeRun(): void
+    {
+        $this->approveInitialRun($this->employmentOfficeId());
+        $approved = $this->approveInitialRun();
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            (int) $approved->run['id'],
+            (int) $approved->run['row_version'],
+            'request-sibling-correction',
+            $this->actors[0],
+            'Syntetická oprava',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            (int) $approved->run['id'],
+            (int) $requested->run['row_version'],
+            'reopen-sibling-correction',
+            $this->actors[0],
+            'Syntetická oprava',
+        );
+
+        self::assertSame('reopened', $reopened->run['status']);
+        self::assertSame('locked', $this->inputStatus());
+    }
+
+    /**
      * Zakládací formulář dřív nabízel natvrdo patnáctého následujícího měsíce
      * a sjednanou mzdovou politiku ignoroval. Návrh počítá server, protože
      * posun na pracovní den musí znát státní svátky.
@@ -3216,48 +3277,69 @@ final class PayrollRunPersistenceTest extends TestCase
         self::fail("Běh {$runId} v seznamu chybí.");
     }
 
-    private function createRun(): array
+    private function createRun(?int $officeId = null): array
     {
         return $this->service->createRun(
             $this->supplierId,
             '2026-06-01',
             '2026-07-15',
-            null,
+            $officeId,
             $this->actors[0],
         );
     }
 
-    private function approveInitialRun(): \MyInvoice\Service\Payroll\Run\PayrollRunCommandResult
+    private function approveInitialRun(?int $officeId = null): \MyInvoice\Service\Payroll\Run\PayrollRunCommandResult
     {
-        $run = $this->createRun();
+        $run = $this->createRun($officeId);
+        $suffix = $officeId === null ? '' : "-office-{$officeId}";
         $locked = $this->service->lockInputs(
             $this->supplierId,
             (int) $run['id'],
             (int) $run['row_version'],
-            'lock-for-correction',
+            'lock-for-correction' . $suffix,
             $this->actors[0],
         );
         $calculated = $this->service->calculate(
             $this->supplierId,
             (int) $run['id'],
             (int) $locked->run['row_version'],
-            'calculate-for-correction',
+            'calculate-for-correction' . $suffix,
             $this->actors[0],
         );
         $reviewed = $this->service->review(
             $this->supplierId,
             (int) $run['id'],
             (int) $calculated->run['row_version'],
-            'review-for-correction',
+            'review-for-correction' . $suffix,
             $this->actors[1],
         );
         return $this->service->approve(
             $this->supplierId,
             (int) $run['id'],
             (int) $reviewed->run['row_version'],
-            'approve-for-correction',
+            'approve-for-correction' . $suffix,
             $this->actors[2],
         );
+    }
+
+    private function employmentOfficeId(): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT office_id FROM payroll_employments WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+
+        return (int) $statement->fetchColumn();
+    }
+
+    private function inputStatus(): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_inputs WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $this->inputId]);
+
+        return (string) $statement->fetchColumn();
     }
 
     private function createActor(string $suffix): int
