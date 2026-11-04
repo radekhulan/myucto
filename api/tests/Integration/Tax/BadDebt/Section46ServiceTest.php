@@ -211,6 +211,31 @@ final class Section46ServiceTest extends TestCase
         $this->service->registerCorrection($this->supplierId, $third, 'small_receivable', '2025-08-20', null, null, $this->userId);
     }
 
+    /**
+     * Od 1. 1. 2027 (zák. č. 180/2026 Sb.) je malá pohledávka do 20 000 Kč a stačí
+     * 3 měsíce po splatnosti. O znění rozhoduje rok opravy (§ 33 bod 2 téhož zákona),
+     * takže 12 100 Kč tři měsíce po splatnosti projde v lednu 2027, ale ne v prosinci 2026.
+     */
+    public function testSmallReceivableFollows2027LimitsByCorrectionYear(): void
+    {
+        $id = $this->seed('2026101', '2026-09-15', vat: 2100.0, withVat: 12100.0);
+
+        try {
+            $this->service->registerCorrection(
+                $this->supplierId, $id, 'small_receivable', '2026-12-20', null, null, $this->userId
+            );
+            self::fail('V roce 2026 platí limit 10 000 Kč a lhůta 6 měsíců.');
+        } catch (\RuntimeException $e) {
+            self::assertMatchesRegularExpression('/nejvýše 10 000/u', $e->getMessage());
+        }
+
+        $res = $this->service->registerCorrection(
+            $this->supplierId, $id, 'small_receivable', '2027-01-20', null, null, $this->userId
+        );
+
+        self::assertSame(2100.0, $res['vat_amount']);
+    }
+
     // ── obnova po úhradě (§ 46e) ─────────────────────────────────────────────
 
     /** Bez úhrady není co obnovovat. */

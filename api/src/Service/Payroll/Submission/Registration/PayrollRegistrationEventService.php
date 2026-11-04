@@ -156,7 +156,10 @@ final readonly class PayrollRegistrationEventService
          */
         $sourceOn = $effectiveOn;
         $endDate = is_array($context) ? ($context['end_date'] ?? null) : null;
-        if ($completion !== null
+        // Totéž u opravy A4 podání vyhotoveného po skončení (typicky opravy
+        // odhlášky A2 kvůli dodatečnému odstupnému, GitHub MPSV #552): 10009
+        // nese den původního podání, údaje platí ke dni skončení.
+        if (($completion !== null || $interaction === 'correction')
             && is_string($endDate)
             && $endDate !== ''
             && $effectiveOn > $endDate
@@ -223,14 +226,24 @@ final readonly class PayrollRegistrationEventService
                 $input,
                 (string) ($employmentExternal['value'] ?? ''),
             )
-            : $this->profileCompletion(
+            // Dohlášení je taky změna A3: datum skončení podle téhož pravidla
+            // (odeslaná odhláška, jinak karta vztahu) jako u ostatních změn.
+            : $this->withRegisteredEnd(
+                3,
+                $this->profileCompletion(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $context,
+                    $completion,
+                    $sourceOn,
+                ) + $this->relationIdentity($context),
                 $supplierId,
                 $environment,
                 $employmentId,
                 $context,
-                $completion,
-                $sourceOn,
-            ) + $this->relationIdentity($context);
+                $this->relationIdentity($context),
+            );
         $this->assertEffectiveOnNotBeforeStart($definition[0], $effectiveOn, $context, $data);
         if ($interaction === 'termination' && is_array($identity['provenance'] ?? null)) {
             // Doklad, o co se odhláška opírá: protokol, přijaté A3, export
@@ -639,6 +652,27 @@ final readonly class PayrollRegistrationEventService
 
         $relation = $this->relationIdentity($context);
         if ($interaction === 'change' || $interaction === 'correction') {
+            $data = $this->withRegisteredEnd(
+                $interaction === 'change' ? 3 : 4,
+                $data,
+                $supplierId,
+                $environment,
+                $employmentId,
+                $context,
+                $relation,
+            );
+        }
+        if ($interaction === 'correction') {
+            $data = $this->correctedUnemployment(
+                $data,
+                $input,
+                $supplierId,
+                $employmentId,
+                $context,
+                $relation,
+            );
+        }
+        if ($interaction === 'change' || $interaction === 'correction') {
             $this->assertDeltaMatchesVariant(
                 $interaction === 'change' ? 3 : 4,
                 $relation,
@@ -669,6 +703,258 @@ final readonly class PayrollRegistrationEventService
         }
 
         return $data + $relation;
+    }
+
+    /**
+     * Změna (A3) a oprava (A4) u vztahu, který už u ČSSZ skončil, nese datum
+     * skončení 10224; kdy a u které varianty, rozhoduje
+     * {@see PayrollRegistrationRegisteredEnd}. Podle 10224 se pak volí
+     * i ročník věty ({@see PayrollRegistrationSchemaCatalog::versionFor()}),
+     * takže oprava u vztahu skončeného v roce 2026 jde jako REGZEC25 i v roce
+     * 2027.
+     *
+     * 10224 je datum skončení, které vede ČSSZ: z odeslané odhlášky A2, bez
+     * ní z karty vztahu ({@see PayrollRegistrationRegisteredEnd::endOn()}).
+     * Formulář ho nenese, oprava samotného data skončení jde s přílohou
+     * k ručnímu zpracování OSSZ (GitHub MPSV #304) a aplikace ji nepodává.
+     *
+     * Oprava A4-OST a A4-SPEC k 10224 přebírá části odhlášky (skončení
+     * smrtí, podklady pro podporu v nezaměstnanosti, důvod předčasného
+     * ukončení) z odeslané, jinak schválené odhlášky A2 s týmž datem
+     * skončení. Opravit je jde jen výslovně
+     * ({@see self::correctedUnemployment()}).
+     *
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $relation
+     * @return array<string,mixed>
+     */
+    private function withRegisteredEnd(
+        int $actionCode,
+        array $data,
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        array $context,
+        array $relation,
+    ): array {
+        $variant = PayrollRegistrationBusinessMatrix::requireActionVariant(
+            $actionCode,
+            is_string($relation['activity_code'] ?? null) ? $relation['activity_code'] : null,
+            is_string($relation['relationship_detail_code'] ?? null)
+                ? $relation['relationship_detail_code']
+                : null,
+        );
+        if (!PayrollRegistrationRegisteredEnd::allowsEndOn($actionCode, $variant)) {
+            return $data;
+        }
+        $terminations = $this->terminationEvents($supplierId, $environment, $employmentId);
+        $sentEndOn = $terminations['sent']['end_on'] ?? null;
+        $cardEndOn = is_string($context['end_date'] ?? null) && $context['end_date'] !== ''
+            ? $context['end_date']
+            : null;
+        $endOn = PayrollRegistrationRegisteredEnd::endOn(
+            $actionCode,
+            $variant,
+            is_string($sentEndOn) ? $sentEndOn : null,
+            $cardEndOn,
+            PayrollSubmissionCalendar::today($this->clock->now()),
+        );
+        if ($endOn === null) {
+            return $data;
+        }
+        // Datum na kartě a v odeslané odhlášce musí sedět, jinak by 10224
+        // tvrdilo jiné skončení, než vede ČSSZ. Části odhlášky se berou
+        // z odeslané odhlášky, jinak ze schválené se stejným datem skončení.
+        if ($cardEndOn !== $endOn) {
+            throw new PayrollRegistrationXmlException(
+                'registration_registered_end_mismatch',
+                $this->actionName($actionCode) . ' u skončeného vztahu nese datum'
+                    . ' skončení, které vede ČSSZ, a s ním se musí přesně shodovat'
+                    . ' i datum na kartě. Na kartě pracovního vztahu je '
+                    . ($cardEndOn ?? 'bez data skončení')
+                    . ', odeslaná odhláška (' . $this->actionName(2) . ') má '
+                    . $endOn . '. Opravte datum skončení na kartě pracovního vztahu.'
+                    . ' Je-li chybné datum v odhlášce, opravu data skončení'
+                    . ' (oprava s písemným vysvětlením) vyřiďte s ČSSZ mimo'
+                    . ' aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference('end_on'),
+            );
+        }
+        $delta = is_array($data['delta'] ?? null) ? $data['delta'] : [];
+        $employment = is_array($delta['employment'] ?? null) ? $delta['employment'] : [];
+        $employment['end_on'] = $endOn;
+        $delta['employment'] = $employment;
+        $data['delta'] = $delta;
+        if (!PayrollRegistrationRegisteredEnd::carriesTerminationParts($actionCode, $variant)) {
+            return $data;
+        }
+
+        $termination = $terminations['sent'] ?? $terminations['approved'];
+        if (($termination['end_on'] ?? null) !== $endOn) {
+            $termination = null;
+        }
+        if ($termination === null
+            && $variant === PayrollRegistrationBusinessMatrix::VARIANT_SPEC
+            && !$this->earlyTerminationApplies($supplierId, $employmentId, $endOn)
+        ) {
+            return $data;
+        }
+        $missing = $this->actionName(4) . " u vztahu, který u ČSSZ skončil {$endOn},"
+            . ' musí nést datum skončení a s ním i údaje z odhlášky: '
+            . ($variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
+                ? 'zda vztah skončil úmrtím a podklady pro podporu v nezaměstnanosti.'
+                : 'důvod předčasného ukončení zaměstnání cizince.')
+            . ' Aplikace je přebírá ze schválené odhlášky (' . $this->actionName(2) . ')'
+            . ' se stejným datem skončení.';
+        if ($termination === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a4_termination_source_missing',
+                $missing . ' Takovou odhlášku u tohoto vztahu a prostředí'
+                    . ' nenašla. V registraci na kartě pracovního vztahu'
+                    . ' nejdřív schvalte odhlášku a opravu pak zopakujte.'
+                    . ' Byl-li vztah odhlášen mimo aplikaci, opravu vyřiďte'
+                    . ' s ČSSZ mimo aplikaci.'
+                    . PayrollRegistrationFieldVocabulary::reference('unemployment'),
+            );
+        }
+        if (($termination['a2_scenario'] ?? null) !== $variant) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a4_termination_source_variant_mismatch',
+                $missing . ' Schválená odhláška ale patří k jinému druhu'
+                    . ' činnosti (varianta ' . (string) ($termination['a2_scenario'] ?? '?')
+                    . ', oprava je varianta ' . $variant . '). Zkontrolujte druh'
+                    . ' činnosti ve sjednaných podmínkách na kartě pracovního'
+                    . ' vztahu, případně schvalte odhlášku znovu.'
+                    . PayrollRegistrationFieldVocabulary::reference('activity_code'),
+            );
+        }
+        $endedByDeath = $termination['ended_by_death'] ?? null;
+        $unemployment = is_array($termination['unemployment'] ?? null)
+            ? $termination['unemployment']
+            : null;
+        if ($variant === PayrollRegistrationBusinessMatrix::VARIANT_OST) {
+            if (!is_bool($endedByDeath) || (!$endedByDeath && $unemployment === null)) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_a4_termination_source_incomplete',
+                    $missing . ' Schválená odhláška je ale nemá úplné.'
+                        . ' Schvalte odhlášku znovu s vyplněnými podklady'
+                        . ' a opravu pak zopakujte.'
+                        . PayrollRegistrationFieldVocabulary::reference('unemployment'),
+                );
+            }
+            $data['ended_by_death'] = $endedByDeath;
+        }
+        if ($unemployment !== null) {
+            $data['unemployment'] = $unemployment;
+        }
+
+        return $data;
+    }
+
+    /**
+     * `data` poslední odhlášky A2, kterou ČSSZ má (odeslané a nezamítnuté
+     * podání, `sent`), a poslední schválené, dosud neodeslané (`approved`).
+     * Seznam je seřazený od nejnovějšího data události.
+     *
+     * @return array{sent:?array<string,mixed>,approved:?array<string,mixed>}
+     */
+    private function terminationEvents(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): array {
+        $sent = null;
+        $approved = null;
+        foreach ($this->events->listForEmployment($supplierId, $environment, $employmentId) as $row) {
+            if ((int) ($row['action_code'] ?? 0) !== 2) {
+                continue;
+            }
+            if ((int) ($row['sent'] ?? 0) === 1) {
+                $sent ??= $row;
+            } else {
+                $approved ??= $row;
+            }
+        }
+        $data = function (?array $row) use ($supplierId, $environment, $employmentId): ?array {
+            if ($row === null) {
+                return null;
+            }
+            $event = $this->load($supplierId, $environment, $employmentId, (int) $row['id']);
+
+            return is_array($event['data'] ?? null) ? $event['data'] : null;
+        };
+
+        return ['sent' => $data($sent), 'approved' => $data($approved)];
+    }
+
+    /**
+     * Oprava podkladů pro podporu v nezaměstnanosti po odhlášce (GitHub MPSV
+     * #552, typicky dodatečně přiznané odstupné): A4-OST k vztahu skončenému
+     * u ČSSZ nese podklady s 10224, a když je formulář pošle v `unemployment`,
+     * nahradí ty převzaté z odhlášky. Validují se stejně jako v odhlášce
+     * a musí sedět se záznamem Skončení vztahu. Bez skončeného vztahu nebo
+     * u jiné varianty než OST je EDV zakazuje („/").
+     *
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $context
+     * @param array<string,mixed> $relation
+     * @return array<string,mixed>
+     */
+    private function correctedUnemployment(
+        array $data,
+        array $input,
+        int $supplierId,
+        int $employmentId,
+        array $context,
+        array $relation,
+    ): array {
+        if (!array_key_exists('unemployment', $input) || $input['unemployment'] === null) {
+            return $data;
+        }
+        $endOn = $data['delta']['employment']['end_on'] ?? null;
+        $activityCode = is_string($relation['activity_code'] ?? null) ? $relation['activity_code'] : '';
+        $variant = PayrollRegistrationBusinessMatrix::requireActionVariant(
+            4,
+            $activityCode,
+            is_string($relation['relationship_detail_code'] ?? null)
+                ? $relation['relationship_detail_code']
+                : null,
+        );
+        if (!is_string($endOn) || $variant !== PayrollRegistrationBusinessMatrix::VARIANT_OST) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a4_unemployment_forbidden',
+                'Podklady pro podporu v nezaměstnanosti jde v opravě ('
+                    . $this->actionName(4) . ') poslat jen u běžného pracovního'
+                    . ' vztahu (varianta OST), který už u ČSSZ skončil. Nechte'
+                    . ' je ve formuláři prázdné.'
+                    . PayrollRegistrationFieldVocabulary::reference('unemployment'),
+            );
+        }
+        $endedByDeath = is_bool($data['ended_by_death'] ?? null) ? $data['ended_by_death'] : null;
+        $unemployment = $this->unemployment(
+            $input['unemployment'],
+            $variant,
+            $activityCode,
+            $endedByDeath,
+            $context,
+            $this->earlyTerminationApplies($supplierId, $employmentId, $endOn),
+            $endOn,
+        );
+        $this->assertMatchesTerminationRecord(
+            $supplierId,
+            $employmentId,
+            $endedByDeath,
+            $unemployment,
+            (string) ($context['relation_type'] ?? ''),
+        );
+        unset($data['unemployment']);
+        if ($unemployment !== null) {
+            $data['unemployment'] = $unemployment;
+        }
+
+        return $data;
     }
 
     /**
@@ -871,7 +1157,7 @@ final readonly class PayrollRegistrationEventService
                 ? $relation['relationship_detail_code']
                 : null,
         );
-        $forbidden = PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta);
+        $forbidden = PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta, $actionCode);
         if ($forbidden === []) {
             return;
         }
@@ -1583,7 +1869,7 @@ final readonly class PayrollRegistrationEventService
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function change(string $effectiveOn, array $input): array
     {
-        $data = $this->delta($input, false);
+        $data = $this->delta($input, false, $effectiveOn);
         if (array_key_exists('relationship_detail_code', $data['delta'])) {
             throw new PayrollRegistrationXmlException(
                 'registration_a3_activity_explanation_attachment_required',
@@ -1769,9 +2055,17 @@ final readonly class PayrollRegistrationEventService
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */
-    private function delta(array $input, bool $correction): array
+    private function delta(array $input, bool $correction, string $effectiveOn): array
     {
         $listPath = $correction ? 'corrections' : 'changes';
+        if ($correction
+            && ($input[$listPath] ?? []) === []
+            && is_array($input['unemployment'] ?? null)
+        ) {
+            // Oprava jen podkladů pro podporu v nezaměstnanosti po odhlášce
+            // (correctedUnemployment()); delta nese jen datum skončení.
+            return ['delta' => []];
+        }
         $raw = $this->object($input[$listPath] ?? null, $listPath);
         if ($correction && array_key_exists('contract_start_on', $raw)) {
             throw new PayrollRegistrationXmlException(
@@ -1828,7 +2122,7 @@ final readonly class PayrollRegistrationEventService
                 'contact_address' => $this->contactAddress($value),
                 'permanent_address' => $this->permanentAddress($value),
                 'foreign_worker' => $this->foreignWorkerChange($value),
-                'employment' => $this->employmentChange($value),
+                'employment' => $this->employmentChange($value, $effectiveOn),
                 'identity' => $this->identityChange($value),
                 'pension' => $this->pensionChange($value),
                 'facts' => $this->factsChange($value),
@@ -1895,7 +2189,7 @@ final readonly class PayrollRegistrationEventService
             $effectiveOn,
             $employmentExternalIdentifier,
         );
-        $data = $this->delta($input, true);
+        $data = $this->delta($input, true, $effectiveOn);
         $delta = $data['delta'];
         $this->assertTaxResidencyAddress($delta);
         if (isset($delta['employment']['actual_start_on'])) {
@@ -1991,7 +2285,11 @@ final readonly class PayrollRegistrationEventService
         $root = $document->documentElement;
         if (!$loaded || !$root instanceof DOMElement
             || $root->localName !== 'REGZEC'
-            || $root->namespaceURI !== 'http://schemas.cssz.cz/REGZEC/2025'
+            // Opravuje se i podání ročníku 2027 (odhláška skončení od 1. 1. 2027).
+            || !in_array($root->namespaceURI, [
+                PayrollRegistrationSchemaCatalog::NS_REGZEC_2026,
+                PayrollRegistrationSchemaCatalog::NS_REGZEC_2027,
+            ], true)
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_source_artifact_invalid',
@@ -2870,7 +3168,7 @@ final readonly class PayrollRegistrationEventService
      *
      * @return array<string,string|bool>
      */
-    private function employmentChange(mixed $value): array
+    private function employmentChange(mixed $value, string $effectiveOn): array
     {
         $raw = $this->object($value, 'employment');
         $fields = PayrollRegistrationChangeDeltaPlanner::EMPLOYMENT_FIELDS;
@@ -2898,7 +3196,17 @@ final readonly class PayrollRegistrationEventService
         }
         if (isset($result['employment_status_code'])) {
             $code = (string) $result['employment_status_code'];
-            if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code)) {
+            // Číselník podle ročníku věty, tedy podle téže volby jako schéma
+            // (PayrollRegistrationSchemaCatalog::versionFor). U A3 bez data
+            // skončení rozhoduje podle odpovědi ČSSZ 13 den vyhotovení, ne den
+            // platnosti změny; datum skončení doplní až withRegisteredEnd().
+            $version = PayrollRegistrationSchemaCatalog::versionFor(
+                3,
+                $effectiveOn,
+                null,
+                PayrollSubmissionCalendar::today($this->clock->now()),
+            );
+            if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code, $version)) {
                 throw new \InvalidArgumentException($this->say(
                     'employment.employment_status_code',
                     'musí být čtyřmístný kód z číselníku Klasifikace postavení '

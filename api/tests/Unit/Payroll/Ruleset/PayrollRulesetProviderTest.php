@@ -117,7 +117,7 @@ final class PayrollRulesetProviderTest extends TestCase
             ->forDate(PayrollRulesetDomain::SocialInsurance, '2026-06-30');
 
         $this->expectException(PayrollRulesetException::class);
-        $this->expectExceptionMessage('requires manual review');
+        $this->expectExceptionMessage('nemá hodnotu pro výpočet');
         $ruleset->parameter('employee.discount.agriculture_dpp');
     }
 

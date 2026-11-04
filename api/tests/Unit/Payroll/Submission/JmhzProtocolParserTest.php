@@ -153,6 +153,29 @@ final class JmhzProtocolParserTest extends TestCase
     }
 
     /**
+     * Diskuse JMHZ #190: ČSSZ vrací GUID velkými písmeny, ale velikost písmen
+     * GUID nic neznamená. Parser ho sjednotí na verzálky, tvar, ve kterém GUID
+     * formulářů ukládáme, takže párování nezávisí na tom, jak ho ČSSZ napíše.
+     */
+    public function testFormGuidFromProtocolIsMatchedRegardlessOfLetterCase(): void
+    {
+        $report = $this->parser()->parse(JmhzTransportSample::completenessProtocol(
+            '4',
+            'Hlášení je částečně přijato',
+            failures: [[
+                'kod' => '40042',
+                'popis' => 'Nesoulad počtu součástí s registrem.',
+                'typChyby' => 'zpracovani',
+                'castPodani' => 'form',
+                'idFormulare' => strtolower(JmhzTransportSample::FORM_GUID),
+            ]],
+        ));
+
+        self::assertSame(strtoupper(JmhzTransportSample::FORM_GUID), $report->parts[0]->formGuid);
+        self::assertCount(1, $report->errorsForForm(strtoupper(JmhzTransportSample::FORM_GUID)));
+    }
+
+    /**
      * Obecná vada zamítá celé dílčí podání bez ohledu na to, kolikátou položku
      * ČSSZ vypsala. Hledat ji na prvním indexu znamenalo, že přeházené pořadí
      * změkčilo zamítnutí na částečné přijetí.

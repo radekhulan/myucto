@@ -17,6 +17,8 @@ import {
   type PayrollRulesetImpactPreview,
   type PayrollRulesetOutlookSeverity,
   type PayrollRulesetOverview,
+  type PayrollRulesetReviewCategory,
+  type PayrollRulesetReviewItem,
   type PayrollRulesetSource,
   type PayrollRulesetSummary,
   type PayrollRulesetYearOutlook,
@@ -29,7 +31,7 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -157,18 +159,57 @@ function domainStatus(group: PayrollRulesetDomainGroup): PayrollRulesetDomainSta
   return group.status ?? (group.calculation_ready ? 'ready' : 'awaiting_activation')
 }
 
-/** Kolika parametrů se ruční posouzení v doméně týká — a kolika ne. */
-function manualReviewShare(group: PayrollRulesetDomainGroup): string | null {
-  const manual = group.manual_review_parameter_count ?? 0
-  const total = group.parameter_count ?? 0
-  if (manual === 0 || total === 0) return null
-  return manual >= total
-    ? t('payroll.rulesets.manual_review_all', { total })
-    : t('payroll.rulesets.manual_review_share', { manual, total })
+/**
+ * Parametry, ze kterých výpočet nečerpá, jmenovitě. Dřív tu stála jen věta
+ * „ruční posouzení se týká N z M" a účetní nevěděla, o které jde, ani jestli
+ * s nimi má něco dělat.
+ */
+function reviewItems(group: PayrollRulesetDomainGroup): PayrollRulesetReviewItem[] {
+  return group.review_items ?? []
+}
+
+/** `2026-12` → „prosinec 2026" v jazyce rozhraní. */
+function expectedMonth(expected: string | null | undefined): string {
+  if (!expected) return ''
+  const [year, month] = expected.split('-').map(Number)
+  if (!year || !month) return expected
+  return new Date(year, month - 1, 1).toLocaleDateString(locale.value, { month: 'long', year: 'numeric' })
+}
+
+function reviewCategoryLabel(category: PayrollRulesetReviewCategory | null | undefined, expected?: string | null): string {
+  if (category === 'pending_publication') {
+    return expected
+      ? t('payroll.rulesets.review.category.pending_publication_expected', { month: expectedMonth(expected) })
+      : t('payroll.rulesets.review.category.pending_publication')
+  }
+  return t(`payroll.rulesets.review.category.${category ?? 'manual_review'}`)
+}
+
+const reviewCategoryClass: Record<PayrollRulesetReviewCategory, string> = {
+  manual_review: 'bg-warning-50 text-warning-700',
+  pending_publication: 'bg-primary-50 text-primary-700',
+  assessed_elsewhere: 'bg-neutral-100 text-neutral-600',
+}
+
+function reviewYears(item: PayrollRulesetReviewItem): string {
+  return item.years.length ? t('payroll.rulesets.review.years', { years: item.years.join(', ') }) : ''
 }
 
 function isManualReview(parameter: PayrollRuleParameter): boolean {
   return parameter.capability === 'manual_review' || parameter.type === 'manual_review'
+}
+
+/** Štítek místo hodnoty: kategorie z katalogu, u starší odpovědi obecné „ruční posouzení". */
+function parameterBadge(parameter: PayrollRuleParameter): string {
+  return parameter.review_category
+    ? reviewCategoryLabel(parameter.review_category, parameter.review_expected)
+    : t('payroll.rulesets.manual_review_badge')
+}
+
+function parameterBadgeClass(parameter: PayrollRuleParameter): string {
+  return parameter.review_category
+    ? reviewCategoryClass[parameter.review_category]
+    : 'bg-neutral-100 text-neutral-600'
 }
 
 /**
@@ -695,13 +736,63 @@ onMounted(load)
         <span v-if="group.manual_review_explanation">{{ group.manual_review_explanation }}</span>
       </p>
 
-      <p
-        v-if="manualReviewShare(group)"
-        class="mt-1 text-xs text-neutral-500"
-        :data-test="`ruleset-manual-share-${group.domain}`"
+      <!--
+        Parametry bez hodnoty jmenovitě, rovnou na kartě: co to je, proč tu
+        hodnota není a co s tím. Výpočet ostatních parametrů tím netrpí, proto
+        neutrální rám, ne výstraha.
+      -->
+      <section
+        v-if="reviewItems(group).length"
+        class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2"
+        :data-test="`ruleset-review-items-${group.domain}`"
       >
-        {{ manualReviewShare(group) }}
-      </p>
+        <h3 class="text-xs font-medium text-neutral-600">
+          {{ t('payroll.rulesets.review.title') }}
+        </h3>
+        <ul class="mt-1 divide-y divide-neutral-200">
+          <li
+            v-for="item in reviewItems(group)"
+            :key="`${group.domain}-${item.key}`"
+            class="py-2 text-xs text-neutral-500"
+            :data-test="`ruleset-review-item-${item.key}`"
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium text-neutral-800">{{ item.label ?? item.key }}</span>
+              <span
+                class="whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium"
+                :class="reviewCategoryClass[item.category] ?? reviewCategoryClass.manual_review"
+                :data-test="`ruleset-review-category-${item.key}`"
+              >
+                {{ reviewCategoryLabel(item.category, item.expected) }}
+              </span>
+              <span v-if="reviewYears(item)" class="whitespace-nowrap text-neutral-400">{{ reviewYears(item) }}</span>
+            </div>
+            <p v-if="item.why" class="mt-1">
+              <strong class="font-medium text-neutral-600">{{ t('payroll.rulesets.manual_review_why') }}</strong>
+              {{ item.why }}
+            </p>
+            <p v-if="item.action" class="mt-1">
+              <strong class="font-medium text-neutral-600">{{ t('payroll.rulesets.manual_review_action') }}</strong>
+              {{ item.action }}
+            </p>
+            <div v-if="item.route || item.source_url" class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+              <RouterLink
+                v-if="item.route"
+                :to="{ name: item.route }"
+                class="text-primary-700 underline decoration-dotted underline-offset-2"
+                :data-test="`ruleset-review-link-${item.key}`"
+              >{{ t('payroll.rulesets.review.go_to', { agenda: t(`payroll.rulesets.review.route.${item.route}`) }) }}</RouterLink>
+              <a
+                v-if="item.source_url"
+                :href="item.source_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary-700 underline decoration-dotted underline-offset-2"
+              >{{ t('payroll.rulesets.review.source') }}</a>
+            </div>
+          </li>
+        </ul>
+      </section>
 
       <ul v-if="group.coverage_issues.length" class="mt-3 space-y-1">
         <li
@@ -1070,9 +1161,10 @@ onMounted(load)
                     </template>
                     <span
                       v-else-if="isManualReview(parameter)"
-                      class="rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600"
+                      class="rounded-full px-2 py-1 text-xs font-medium"
+                      :class="parameterBadgeClass(parameter)"
                     >
-                      {{ t('payroll.rulesets.manual_review_badge') }}
+                      {{ parameterBadge(parameter) }}
                     </span>
                     <span v-else class="text-neutral-700">{{ displayValue(parameter) }}</span>
                   </td>
@@ -1140,9 +1232,10 @@ onMounted(load)
             </div>
             <p
               v-else-if="isManualReview(parameter)"
-              class="mt-2 inline-block rounded-full bg-neutral-100 px-2 py-1 text-xs font-medium text-neutral-600"
+              class="mt-2 inline-block rounded-full px-2 py-1 text-xs font-medium"
+              :class="parameterBadgeClass(parameter)"
             >
-              {{ t('payroll.rulesets.manual_review_badge') }}
+              {{ parameterBadge(parameter) }}
             </p>
             <p v-else class="mt-1 text-sm text-neutral-700">{{ displayValue(parameter) }}</p>
             <template v-if="parameter.manual_review_why || parameter.manual_review_action">

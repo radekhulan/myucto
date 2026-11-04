@@ -2071,6 +2071,8 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
     employment_types: Array<{ code: string; label: string }>
     free_access_reason_codes: Array<{ code: string; label: string }>
     service_termination_reasons: Array<{ code: string; label: string; employment_types: string[] }>
+    /** Čtyřmístné kódy NKPZ podle číselníku ČSÚ 80145 (slovník 1.5.0.3 je nevkládá). */
+    employment_status_codes?: Array<{ code: string; label: string }>
   }
 }
 
@@ -4697,6 +4699,8 @@ export type PayrollRegistrationMode = 'auto' | 'full'
  */
 export interface PayrollRegistrationOptions {
   startNotKnownInAdvance?: boolean
+  /** Připravit znovu: nová věta ze stejné události místo zastaralého podání. */
+  replacesSubmissionId?: number | null
 }
 
 export interface PayrollRegistrationCurrent {
@@ -4722,6 +4726,13 @@ export interface PayrollRegistrationSubmission {
   interaction: string
   artifact_sha256: string
   created: boolean
+  /**
+   * Připravená změna nebo oprava bez data skončení ve formátu REGZEC25, kterou
+   * ČSSZ od 23. 12. 2026 odmítne. Místo odeslání se nabízí Připravit znovu.
+   */
+  vintage_expired?: boolean
+  /** Podání, které nová věta nahradila (zrušené jako `cancelled_in_time`). */
+  replaced_submission_id?: number | null
   deadline: PayrollRegistrationDeadline
   before_start_choice?: boolean
 }
@@ -9233,6 +9244,7 @@ export const payrollApi = {
       ...(eventId == null ? {} : { event_id: eventId }),
       ...(mode === 'full' ? { registration_mode: 'full' } : {}),
       ...(options.startNotKnownInAdvance === true ? { start_not_known_in_advance: true } : {}),
+      ...(options.replacesSubmissionId == null ? {} : { replaces_submission_id: options.replacesSubmissionId }),
     },
   ).then(response => response.data),
   employmentRegistrationA1Profile: (

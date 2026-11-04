@@ -21,7 +21,11 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSchemaC
  *   skončení, platnost změny): od 1. 1. 2027 REGZEC27 (EDV 1.5.0.2,
  *   řádky 276 až 278 - 10223, 10009 a 10224 nejdřív 1. 1. 2027).
  *
- * Datum odeslání do volby nevstupuje nikde: proto žádná metoda nebere hodiny.
+ * Jediná výjimka je změna a oprava (A3, A4) bez data skončení 10224: tu ČSSZ
+ * podle 10224 hlásí jako REGZEC27, jenže ostrá ČSSZ přijímá REGZEC27 až od
+ * {@see self::FIRST_REGZEC27_ACCEPTED_ON}. Do té doby jde taková věta jako
+ * REGZEC25 ({@see self::forRegistrationChangeWithoutEnd()}). Den vyhotovení
+ * se předává parametrem, hodiny nebere žádná metoda.
  *
  * Kódy agend v evidenci povinností (`payroll_obligations.agenda_code`) se
  * s verzí NEMĚNÍ: `JMHZ25` a `REGZEC25` jsou jména agendy, ne ročník
@@ -41,6 +45,15 @@ enum JmhzSpecVersion: string
 
     /** První den události, od kterého se registrační podání řídí verzí 2027. */
     public const FIRST_2027_EVENT_DATE = '2027-01-01';
+
+    /**
+     * První den, kdy ostrá ČSSZ přijímá REGZEC27. Nejde o rozhodné datum
+     * ročníku ({@see self::FIRST_2027_EVENT_DATE}), ale o otevření příjmu:
+     * ČSSZ, Otázky a odpovědi k NV2027 (developers.mpsv.cz), odpověď 5:
+     * „REGZEC 2027 tak bude umožněno posílat již ode dne 23. 12. 2026", aby
+     * šlo přihlásit před nástupem 1. 1. 2027.
+     */
+    public const FIRST_REGZEC27_ACCEPTED_ON = '2026-12-23';
 
     /** Kódy agendy měsíčního hlášení s ročníkem; všechny znamenají totéž hlášení. */
     public const MONTHLY_AGENDA_CODES = ['JMHZ25', 'JMHZ27'];
@@ -121,6 +134,21 @@ enum JmhzSpecVersion: string
         }
 
         return $eventDate < self::FIRST_2027_EVENT_DATE ? self::V2026 : self::V2027;
+    }
+
+    /**
+     * Změna nebo oprava (A3, A4) bez data skončení 10224. ČSSZ, Otázky
+     * a odpovědi k NV2027, odpovědi 4 a 13: rozhoduje výhradně 10224, prázdné
+     * znamená REGZEC27 bez ohledu na platnost 10009 i na datum opravovaného
+     * oznámení. REGZEC27 ale ostrá ČSSZ přijímá až od 23. 12. 2026 (odpověď 5),
+     * takže věta vyhotovená dřív jde jako REGZEC25. Tohle je jediné místo,
+     * kde o ročníku rozhoduje den vyhotovení (`YYYY-MM-DD`).
+     */
+    public static function forRegistrationChangeWithoutEnd(string $preparedOn): self
+    {
+        self::forRegistrationEventDate($preparedOn);
+
+        return $preparedOn < self::FIRST_REGZEC27_ACCEPTED_ON ? self::V2026 : self::V2027;
     }
 
     /**

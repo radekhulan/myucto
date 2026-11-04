@@ -244,8 +244,31 @@ final class PayrollRegistrationAction
                 $this->eventId($request),
                 $this->fullRegistrationRequested($request),
                 $this->startNotKnownInAdvance($request),
+                $this->replacesSubmissionId($request),
             );
         }, 201);
+    }
+
+    /**
+     * „Připravit znovu": připravená změna, jejíž ročník zastaral, se nahradí
+     * novou větou ze stejné události.
+     */
+    private function replacesSubmissionId(Request $request): ?int
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $value = $body['replaces_submission_id'] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if ((!is_int($value) && !is_string($value))
+            || preg_match('/^[1-9][0-9]*$/D', (string) $value) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'replaces_submission_id musí být kladné celé číslo.',
+            );
+        }
+
+        return (int) $value;
     }
 
     /**

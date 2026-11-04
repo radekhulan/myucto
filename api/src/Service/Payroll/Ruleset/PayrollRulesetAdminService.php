@@ -73,7 +73,7 @@ final class PayrollRulesetAdminService
                 foreach ($entry['version']->parameters as $key => $parameter) {
                     $parameterKeys[$key] = true;
                     if ($parameter->capability === PayrollRulesetCapability::ManualReview) {
-                        $manualKeys[$key] = true;
+                        $manualKeys[$key][(int) substr($entry['version']->effectiveFrom, 0, 4)] = true;
                     }
                 }
             }
@@ -98,6 +98,9 @@ final class PayrollRulesetAdminService
                 'manual_review_by_design' => $manualByDesign,
                 'manual_review_explanation' => PayrollRuleParameterCatalog::domainManualReview($domain->value),
                 'manual_review_parameter_count' => count($manualKeys),
+                // Jmenovitý výčet místo „N z M": účetní z počtu nepozná, o které
+                // parametry jde, ani jestli s nimi má něco dělat.
+                'review_items' => self::reviewItems($domain->value, $manualKeys),
                 'parameter_count' => count($parameterKeys),
                 'coverage_issues' => $coverageIssues,
                 'versions' => array_map(fn (array $entry): array => $this->summary($entry), $domainEntries),
@@ -609,17 +612,32 @@ final class PayrollRulesetAdminService
         }
 
         if ($manual !== []) {
+            $domain = $version->domain->value;
+            $byCategory = [];
+            foreach ($manual as $key) {
+                $byCategory[PayrollRuleParameterCatalog::reviewCategory($domain, $key)][] =
+                    PayrollRuleParameterCatalog::label($domain, $key) ?? $key;
+            }
+            $sentences = [];
+            if (isset($byCategory[PayrollRuleParameterCatalog::REVIEW_MANUAL])) {
+                $sentences[] = 'Aplikace nepočítá: '
+                    . implode(', ', $byCategory[PayrollRuleParameterCatalog::REVIEW_MANUAL])
+                    . '. Týká se to jen zvláštních případů, hodnotu doplňte, až na takový narazíte.';
+            }
+            if (isset($byCategory[PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION])) {
+                $sentences[] = 'Čeká na vyhlášení: '
+                    . implode(', ', $byCategory[PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION])
+                    . '. Hodnota přijde aktualizací aplikace.';
+            }
+            if (isset($byCategory[PayrollRuleParameterCatalog::REVIEW_ASSESSED_ELSEWHERE])) {
+                $sentences[] = 'Posuzuje se jinde z dokladů: '
+                    . implode(', ', $byCategory[PayrollRuleParameterCatalog::REVIEW_ASSESSED_ELSEWHERE])
+                    . '.';
+            }
             $warnings[] = [
                 'code' => 'manual_review_parameters',
-                'message' => sprintf(
-                    'Ruční posouzení vyžadují %d z %d parametrů — u nich aplikace vědomě nedosazuje '
-                    . 'žádné číslo a výpočet z nich nečerpá. Zbylých %d se používá normálně. '
-                    . 'Nemusíte nic odklikávat: hodnotu doplňte jen tehdy, když na takový případ '
-                    . 'skutečně narazíte.',
-                    count($manual),
-                    $total,
-                    $total - count($manual),
-                ),
+                'message' => implode(' ', $sentences)
+                    . ' Ostatní parametry se používají normálně a nic se tu neodklikává.',
                 'context' => [
                     'parameters' => $manual,
                     'manual_review_count' => count($manual),
@@ -1040,6 +1058,47 @@ final class PayrollRulesetAdminService
         return $reason;
     }
 
+    /**
+     * Parametry domény, ze kterých výpočet nečerpá, se jménem, kategorií
+     * a vysvětlením. Pořadí: nejdřív to, co zbývá člověku, pak čekající na
+     * vyhlášení, nakonec to, co se posuzuje jinde.
+     *
+     * @param array<string, array<int, true>> $manualKeys klíč => ročníky, kde je bez hodnoty
+     * @return list<array<string, mixed>>
+     */
+    private static function reviewItems(string $domain, array $manualKeys): array
+    {
+        $order = [
+            PayrollRuleParameterCatalog::REVIEW_MANUAL => 0,
+            PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION => 1,
+            PayrollRuleParameterCatalog::REVIEW_ASSESSED_ELSEWHERE => 2,
+        ];
+        $items = [];
+        foreach ($manualKeys as $key => $years) {
+            $explanation = PayrollRuleParameterCatalog::manualReview($domain, $key);
+            $yearList = array_keys($years);
+            sort($yearList);
+            $items[] = [
+                'key' => $key,
+                'label' => PayrollRuleParameterCatalog::label($domain, $key),
+                'category' => PayrollRuleParameterCatalog::reviewCategory($domain, $key),
+                'years' => $yearList,
+                'why' => $explanation['why'] ?? null,
+                'action' => $explanation['action'] ?? null,
+                'expected' => $explanation['expected'] ?? null,
+                'source_url' => $explanation['source_url'] ?? null,
+                'route' => $explanation['route'] ?? null,
+            ];
+        }
+        usort(
+            $items,
+            static fn (array $a, array $b): int =>
+                [$order[$a['category']] ?? 0, $a['key']] <=> [$order[$b['category']] ?? 0, $b['key']],
+        );
+
+        return $items;
+    }
+
     /** @return list<string> klíče parametrů, u kterých aplikace vědomě netvrdí hodnotu */
     private static function manualReviewKeys(PayrollRulesetVersion $version): array
     {
@@ -1098,6 +1157,12 @@ final class PayrollRulesetAdminService
                 'note' => $value['note'] ?? null,
                 'manual_review_why' => $explanation['why'] ?? null,
                 'manual_review_action' => $explanation['action'] ?? null,
+                'review_category' => ($value['capability'] ?? null) === PayrollRulesetCapability::ManualReview->value
+                    ? PayrollRuleParameterCatalog::reviewCategory($domain, $key)
+                    : null,
+                'review_expected' => $explanation['expected'] ?? null,
+                'review_source_url' => $explanation['source_url'] ?? null,
+                'review_route' => $explanation['route'] ?? null,
             ];
         }
         usort($parameters, static fn (array $a, array $b): int => (string) $a['key'] <=> (string) $b['key']);

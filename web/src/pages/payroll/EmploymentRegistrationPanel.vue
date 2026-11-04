@@ -105,7 +105,9 @@ const showXml = ref(false)
 const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const transport =ref<PayrollJmhzTransportPoll | null>(null)
-const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
+const transportBusy = ref<'send' | 'poll' | 'close' | 'reprepare' | null>(null)
+/** Odeslání odmítlo zastaralý formát věty (REGZEC25 od 23. 12. 2026). */
+const staleSendRejected = ref(false)
 const transportMessage = ref('')
 const changeDetection = ref<PayrollRegistrationChangeDetection | null>(null)
 const changesBusy = ref(false)
@@ -569,12 +571,16 @@ const a1InsurerOptions = computed(() => {
  * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
  * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
  * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
- * první uložení tiše nesmazalo.
+ * první uložení tiše nesmazalo. Nástup od 1. 1. 2027 bere číselník ČSÚ
+ * (REGZEC 2027), dřívější vložený ze slovníku 1.4.1.6.
  */
 const a1EmploymentStatusOptions = computed(() => {
   const activity = a1Form.value.employment.activity_code
   const restricted = activity === '15' || activity === '16' ? ['1341', '1342'] : null
-  const options = (jmhzOptions.value?.employment_status_codes ?? [])
+  const source = a1FromNextVintage.value
+    ? jmhzOptions.value?.from_2027?.employment_status_codes
+    : jmhzOptions.value?.employment_status_codes
+  const options = (source ?? [])
     .filter(option => restricted === null || restricted.includes(option.code))
     .map(option => ({ code: option.code, label: `${option.code} · ${option.label}` }))
   const current = a1Form.value.employment.employment_status_code?.trim() ?? ''
@@ -1459,17 +1465,39 @@ const canSend = computed(() => transportAttempt.value === null || [
   'expired',
 ].includes(transportAttempt.value.status))
 
+/**
+ * Změna nebo oprava připravená ve formátu REGZEC25, kterou ČSSZ od 23. 12. 2026
+ * nepřijme: místo odeslání se nabízí Připravit znovu.
+ */
+const vintageExpired = computed(() => submission.value !== null
+  && transportAttempt.value === null
+  && (submission.value.vintage_expired === true || staleSendRejected.value))
+
 const transportActions = computed<ActionItem[]>(() => {
   if (!submission.value) return []
 
   return [
+    {
+      key: 'registration-reprepare',
+      label: t('payroll.people.registration.reprepare'),
+      icon: 'cycle',
+      tier: 'primary',
+      variant: 'warning',
+      show: vintageExpired.value,
+      disabled: !props.canWrite || transportBusy.value !== null,
+      disabledReason: !props.canWrite
+        ? t('payroll.people.registration.write_required')
+        : undefined,
+      loading: transportBusy.value === 'reprepare',
+      run: reprepare,
+    },
     {
       key: 'registration-send',
       label: t(`payroll.people.registration.send_${environment.value}`),
       icon: 'send',
       tier: 'primary',
       variant: 'primary',
-      show: canSend.value,
+      show: canSend.value && !vintageExpired.value,
       disabled: !props.canWrite || transportBusy.value !== null,
       disabledReason: !props.canWrite
         ? t('payroll.people.registration.write_required')
@@ -1511,6 +1539,7 @@ const transportActions = computed<ActionItem[]>(() => {
 function resetPreparedFiling(): void {
   preview.value = null
   submission.value = null
+  staleSendRejected.value = false
   transport.value = null
   transportMessage.value = ''
   showXml.value = false
@@ -2092,6 +2121,7 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
   error.value = ''
   errorCode.value = ''
   errorProblems.value = []
+  staleSendRejected.value = false
   try {
     if (action === 'preview') {
       submission.value = null
@@ -2203,9 +2233,38 @@ async function send(): Promise<void> {
       report: null,
     }
   } catch (exception) {
+    if (apiErrorCode(exception) === 'registration_regzec25_change_stale') {
+      staleSendRejected.value = true
+    }
     error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.send_failed'),
+    )
+  } finally {
+    transportBusy.value = null
+  }
+}
+
+/** Nová věta REGZEC27 ze stejné události; zastaralé podání server zruší. */
+async function reprepare(): Promise<void> {
+  if (!submission.value || !props.canWrite || selectedEventId.value === null) return
+  transportBusy.value = 'reprepare'
+  error.value = ''
+  transportMessage.value = ''
+  try {
+    submission.value = await payrollApi.prepareEmploymentRegistration(
+      props.employmentId,
+      environment.value,
+      selectedEventId.value,
+      'auto',
+      { replacesSubmissionId: submission.value.submission_id },
+    )
+    staleSendRejected.value = false
+    transport.value = null
+  } catch (exception) {
+    error.value = serverErrorMessage(
+      exception,
+      t('payroll.people.registration.reprepare_failed'),
     )
   } finally {
     transportBusy.value = null
@@ -4905,6 +4964,14 @@ async function copyXml(): Promise<void> {
       </p>
       <p class="mt-1 break-all font-mono text-xs text-success-700">
         {{ submission.artifact_sha256.slice(0, 16) }}…
+      </p>
+      <p
+        v-if="vintageExpired"
+        class="mt-2 rounded-md border border-warning-300 bg-warning-50 px-2 py-1 text-xs text-warning-800"
+        role="alert"
+        data-test="registration-vintage-expired"
+      >
+        {{ t('payroll.people.registration.vintage_expired') }}
       </p>
 
       <div class="mt-3 border-t border-success-500/20 pt-3" data-test="registration-transport-actions">
