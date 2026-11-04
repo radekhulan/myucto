@@ -2145,6 +2145,62 @@ final class PayrollRegistrationActionTest extends TestCase
     }
 
     /**
+     * Odhláška schválená a připravená, ale neodeslaná: ČSSZ vede vztah jako
+     * trvající. Změna A3 by s datem skončení z karty šla k ručnímu zpracování
+     * OSSZ, proto se zastaví, dokud odhláška neodejde.
+     */
+    public function testChangeOfEndedEmploymentWaitsForUnsentA2(): void
+    {
+        $this->preparedTermination('2026-10-31', '2026-11-02');
+        self::$todayOverride = '2026-11-04';
+        $this->action = $this->buildAction($this->container, true);
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => '2026-10-20',
+                'source_reference' => 'synthetic-a3-unsent-a2',
+                'changes' => ['title_prefix' => 'Mgr.'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_termination_not_sent', $this->json($response)['error']['code']);
+        self::assertStringContainsString('odešlete', $this->json($response)['error']['message']);
+    }
+
+    /**
+     * Zamítnutou odhlášku ČSSZ nemá: oprava A4 nesmí převzít její datum
+     * skončení ani podklady pro podporu a zastaví se, dokud odhláška
+     * znovu neodejde.
+     */
+    public function testCorrectionOfEndedEmploymentWaitsForRejectedA2(): void
+    {
+        $source = $this->preparedA3('2026-10-10', '2026-10-15', 'synthetic-a4-rejected-a2-source');
+        $this->markRegistrationAccepted($source['submission_id']);
+        $termination = $this->preparedTermination('2026-10-31', '2026-11-02', false);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "rejected", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP()
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $termination]);
+
+        $response = $this->approveA4(
+            $source['submission_id'],
+            '2026-10-15',
+            '2026-11-04',
+            'synthetic-a4-rejected-a2',
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_termination_not_sent', $this->json($response)['error']['code']);
+    }
+
+    /**
      * GitHub MPSV #380: 10224 musí být shodné s datem skončení, které vede
      * ČSSZ, tedy z odeslané odhlášky. Jiné datum na kartě vztahu je rozpor,
      * který se ohlásí, ne tiše přepíše.
@@ -6055,14 +6111,31 @@ final class PayrollRegistrationActionTest extends TestCase
      */
     private function acceptedTermination(string $endOn, string $a2Day): int
     {
+        $submissionId = $this->preparedTermination($endOn, $a2Day);
+        $this->markRegistrationAccepted($submissionId);
+
+        return $submissionId;
+    }
+
+    /**
+     * Totéž co {@see self::acceptedTermination()}, odhláška ale zůstane jen
+     * připravená a neodeslaná. Vrací číslo připraveného podání. Bez
+     * `$seed` navazuje na vztah, který už připravil jiný pomocník.
+     */
+    private function preparedTermination(string $endOn, string $a2Day, bool $seed = true): int
+    {
         self::$todayOverride = $a2Day;
         $this->action = $this->buildAction($this->container, true);
-        $this->employmentActiveSince('2026-03-01');
+        if ($seed) {
+            $this->employmentActiveSince('2026-03-01');
+        }
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments SET end_date = ?, status = "ended"
               WHERE supplier_id = ? AND id = ?',
         )->execute([$endOn, $this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        if ($seed) {
+            $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        }
         $approved = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
                 'environment' => 'test',
@@ -6091,10 +6164,8 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         );
         self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
-        $submissionId = (int) $this->json($prepared)['submission_id'];
-        $this->markRegistrationAccepted($submissionId);
 
-        return $submissionId;
+        return (int) $this->json($prepared)['submission_id'];
     }
 
     /**

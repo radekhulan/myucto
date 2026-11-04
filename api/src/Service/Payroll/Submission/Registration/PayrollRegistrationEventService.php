@@ -713,15 +713,16 @@ final readonly class PayrollRegistrationEventService
      * takže oprava u vztahu skončeného v roce 2026 jde jako REGZEC25 i v roce
      * 2027.
      *
-     * 10224 je datum skončení, které vede ČSSZ: z odeslané odhlášky A2, bez
-     * ní z karty vztahu ({@see PayrollRegistrationRegisteredEnd::endOn()}).
+     * 10224 je datum skončení, které vede ČSSZ: z odeslané odhlášky A2, a jen
+     * když k vztahu v aplikaci žádná odhláška není, z karty vztahu
+     * ({@see PayrollRegistrationRegisteredEnd::endOn()}). Odhláška schválená,
+     * ale u ČSSZ chybějící, změnu i opravu zastaví, dokud se neodešle.
      * Formulář ho nenese, oprava samotného data skončení jde s přílohou
      * k ručnímu zpracování OSSZ (GitHub MPSV #304) a aplikace ji nepodává.
      *
      * Oprava A4-OST a A4-SPEC k 10224 přebírá části odhlášky (skončení
      * smrtí, podklady pro podporu v nezaměstnanosti, důvod předčasného
-     * ukončení) z odeslané, jinak schválené odhlášky A2 s týmž datem
-     * skončení. Opravit je jde jen výslovně
+     * ukončení) z odeslané odhlášky A2 s týmž datem skončení. Opravit je jde jen výslovně
      * ({@see self::correctedUnemployment()}).
      *
      * @param array<string,mixed> $data
@@ -749,6 +750,25 @@ final readonly class PayrollRegistrationEventService
             return $data;
         }
         $terminations = $this->terminationEvents($supplierId, $environment, $employmentId);
+        $terminationInApp = $terminations['sent'] !== null || $terminations['approved'] !== null;
+        if (PayrollRegistrationRegisteredEnd::awaitsSentTermination(
+            $actionCode,
+            $variant,
+            $terminations['sent'] !== null,
+            $terminationInApp,
+        )) {
+            throw new PayrollRegistrationXmlException(
+                'registration_termination_not_sent',
+                $this->actionName($actionCode) . ' u vztahu, ke kterému je schválená'
+                    . ' odhláška (' . $this->actionName(2) . '), se podává až po ní.'
+                    . ' ČSSZ odhlášku zatím nemá (není odeslaná, nebo ji zamítla),'
+                    . ' takže vztah vede jako trvající a nezná datum skončení ani'
+                    . ' podklady pro podporu v nezaměstnanosti. Nejdřív odešlete'
+                    . ' odhlášku (' . $this->actionName(2) . ') a po jejím přijetí'
+                    . ' akci zopakujte.'
+                    . PayrollRegistrationFieldVocabulary::reference('end_on'),
+            );
+        }
         $sentEndOn = $terminations['sent']['end_on'] ?? null;
         $cardEndOn = is_string($context['end_date'] ?? null) && $context['end_date'] !== ''
             ? $context['end_date']
@@ -759,13 +779,14 @@ final readonly class PayrollRegistrationEventService
             is_string($sentEndOn) ? $sentEndOn : null,
             $cardEndOn,
             PayrollSubmissionCalendar::today($this->clock->now()),
+            $terminationInApp,
         );
         if ($endOn === null) {
             return $data;
         }
         // Datum na kartě a v odeslané odhlášce musí sedět, jinak by 10224
         // tvrdilo jiné skončení, než vede ČSSZ. Části odhlášky se berou
-        // z odeslané odhlášky, jinak ze schválené se stejným datem skončení.
+        // z odeslané odhlášky se stejným datem skončení.
         if ($cardEndOn !== $endOn) {
             throw new PayrollRegistrationXmlException(
                 'registration_registered_end_mismatch',
@@ -790,7 +811,7 @@ final readonly class PayrollRegistrationEventService
             return $data;
         }
 
-        $termination = $terminations['sent'] ?? $terminations['approved'];
+        $termination = $terminations['sent'];
         if (($termination['end_on'] ?? null) !== $endOn) {
             $termination = null;
         }
@@ -805,14 +826,14 @@ final readonly class PayrollRegistrationEventService
             . ($variant === PayrollRegistrationBusinessMatrix::VARIANT_OST
                 ? 'zda vztah skončil úmrtím a podklady pro podporu v nezaměstnanosti.'
                 : 'důvod předčasného ukončení zaměstnání cizince.')
-            . ' Aplikace je přebírá ze schválené odhlášky (' . $this->actionName(2) . ')'
+            . ' Aplikace je přebírá z odeslané odhlášky (' . $this->actionName(2) . ')'
             . ' se stejným datem skončení.';
         if ($termination === null) {
             throw new PayrollRegistrationXmlException(
                 'registration_a4_termination_source_missing',
                 $missing . ' Takovou odhlášku u tohoto vztahu a prostředí'
                     . ' nenašla. V registraci na kartě pracovního vztahu'
-                    . ' nejdřív schvalte odhlášku a opravu pak zopakujte.'
+                    . ' nejdřív schvalte a odešlete odhlášku a opravu pak zopakujte.'
                     . ' Byl-li vztah odhlášen mimo aplikaci, opravu vyřiďte'
                     . ' s ČSSZ mimo aplikaci.'
                     . PayrollRegistrationFieldVocabulary::reference('unemployment'),
