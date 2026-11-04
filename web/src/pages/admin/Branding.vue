@@ -1,17 +1,23 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onActivated, onDeactivated, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { settingsApi, type OperationalBrandingSettings } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import BrandingProfilesSettings from '@/components/settings/BrandingProfilesSettings.vue'
+import PdfAppearanceSettings from '@/components/settings/PdfAppearanceSettings.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
+import { requestSupplierIdNumber } from '@/workspace/supplierContext'
 
 const { t } = useI18n()
 const props = withDefaults(defineProps<{ clientScoped?: boolean }>(), {
   clientScoped: false,
 })
 const toast = useToast()
+const auth = useAuthStore()
+const supplierStore = useSupplierStore()
 const { blockDemoMutation } = useDemoMode()
 const supplier = ref<OperationalBrandingSettings | null>(null)
 const loading = ref(true)
@@ -19,7 +25,10 @@ const previewLocale = ref<'cs' | 'en'>('cs')
 const previewHtml = ref('')
 const logoFileInput = ref<HTMLInputElement | null>(null)
 const logoUploading = ref(false)
-let watching = false
+let mounted = false
+let active = true
+let generation = 0
+let saveQueue = Promise.resolve()
 let colorTimer: ReturnType<typeof setTimeout> | null = null
 
 async function bumpPreview() {
@@ -31,38 +40,89 @@ async function bumpPreview() {
   }
 }
 
+function invalidate() {
+  generation++
+  if (colorTimer) clearTimeout(colorTimer)
+  colorTimer = null
+}
+
+function isCurrent(id: number, version: number) {
+  const requestId = requestSupplierIdNumber()
+  return active && generation === version && supplierStore.currentSupplierId === id
+    && (!requestId || requestId === id) && auth.canWrite('settings.branding')
+}
+
 async function load() {
+  const version = generation
+  const id = supplierStore.currentSupplierId
   loading.value = true
   try {
-    supplier.value = await settingsApi.getClientBranding()
+    const result = await settingsApi.getClientBranding()
+    if (!isCurrent(id, version) || result.id !== id) return
+    supplier.value = result
     await bumpPreview()
-    setTimeout(() => { watching = true }, 0)
   } finally {
-    loading.value = false
+    if (generation === version) loading.value = false
   }
 }
 
-async function saveBranding(silent = false) {
-  if (blockDemoMutation()) return
+async function refreshAfterSaves() {
+  const version = generation
+  const id = supplierStore.currentSupplierId
+  loading.value = true
+  await saveQueue
+  if (isCurrent(id, version)) await load()
+}
+
+function savePatch(payload: Partial<OperationalBrandingSettings>, silent = true) {
+  if (blockDemoMutation() || !supplier.value) return
+  const id = supplier.value.id
+  const version = generation
+  saveQueue = saveQueue.then(async () => {
+    if (!isCurrent(id, version)) return
+    try {
+      await settingsApi.updateClientBranding(payload, id)
+      if (!isCurrent(id, version)) return
+      if (!silent) toast.success(t('common.saved'))
+      await bumpPreview()
+    } catch (e: any) {
+      if (!isCurrent(id, version)) return
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
+      // Při chybě zahoď i navazující změny a obnov potvrzený stav serveru.
+      invalidate()
+      supplier.value = null
+      try { await load() } catch { toast.error(t('common.error')) }
+    }
+  })
+}
+
+function saveBranding(silent = false) {
   if (!supplier.value) return
   if (!/^#[0-9A-Fa-f]{6}$/.test(supplier.value.email_accent_color || '')) {
     if (!silent) toast.error(t('settings.branding_color_invalid'))
     return
   }
-  try {
-    const payload = {
-      email_branding_enabled: supplier.value.email_branding_enabled,
-      email_accent_color: supplier.value.email_accent_color,
-      pdf_logo_show_name: supplier.value.pdf_logo_show_name,
-      invoice_pdf_monochrome: !!supplier.value.invoice_pdf_monochrome,
+  savePatch({ email_branding_enabled: supplier.value.email_branding_enabled,
+    email_accent_color: supplier.value.email_accent_color, pdf_logo_show_name: supplier.value.pdf_logo_show_name }, silent)
+}
+
+function changePdf(patch: Partial<OperationalBrandingSettings>) {
+  if (!supplier.value) return
+  Object.assign(supplier.value, patch)
+  savePatch(patch)
+}
+
+function changeColor() {
+  if (colorTimer) clearTimeout(colorTimer)
+  if (!supplier.value) return
+  const id = supplier.value.id
+  const version = generation
+  const color = supplier.value.email_accent_color
+  colorTimer = setTimeout(() => {
+    if (isCurrent(id, version) && /^#[0-9A-Fa-f]{6}$/.test(color)) {
+      savePatch({ email_accent_color: color })
     }
-    const updated = await settingsApi.updateClientBranding(payload)
-    supplier.value = { ...supplier.value, ...updated }
-    if (!silent) toast.success(t('common.saved'))
-    await bumpPreview()
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
-  }
+  }, 500)
 }
 
 function pickLogo() {
@@ -108,16 +168,19 @@ async function removeLogo() {
 }
 
 watch(previewLocale, () => { if (supplier.value) bumpPreview() })
-watch(() => supplier.value?.email_branding_enabled, () => { if (watching) saveBranding(true) })
-watch(() => supplier.value?.pdf_logo_show_name, () => { if (watching) saveBranding(true) })
-watch(() => supplier.value?.invoice_pdf_monochrome, () => { if (watching) saveBranding(true) })
-watch(() => supplier.value?.email_accent_color, () => {
-  if (!watching) return
-  if (colorTimer) clearTimeout(colorTimer)
-  colorTimer = setTimeout(() => saveBranding(true), 500)
+watch(() => supplierStore.currentSupplierId, () => { invalidate(); supplier.value = null; if (active) void refreshAfterSaves() }, { flush: 'sync' })
+watch(() => auth.canWrite('settings.branding'), allowed => {
+  invalidate()
+  if (!allowed) supplier.value = null
+  else if (active) void refreshAfterSaves()
+}, { flush: 'sync' })
+onMounted(async () => { await load(); mounted = true })
+onActivated(async () => {
+  active = true
+  if (mounted) await refreshAfterSaves()
 })
-
-onMounted(load)
+onDeactivated(() => { active = false; invalidate() })
+onBeforeUnmount(() => { active = false; invalidate() })
 </script>
 
 <template>
@@ -134,14 +197,14 @@ onMounted(load)
       v-model:enabled="supplier.branding_profiles_enabled"
       :supplier="supplier"
       :client-scoped="props.clientScoped"
-      @changed="load"
+      @changed="refreshAfterSaves"
     />
 
     <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm mt-5">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('settings.branding_title') }}</h2>
         <label class="inline-flex items-center gap-2 cursor-pointer whitespace-nowrap">
-          <input v-model="supplier.email_branding_enabled" type="checkbox" class="h-4 w-4 accent-primary-600" />
+          <input v-model="supplier.email_branding_enabled" type="checkbox" @change="savePatch({ email_branding_enabled: supplier.email_branding_enabled })" class="h-4 w-4 accent-primary-600" />
           <span class="text-sm text-neutral-700">{{ t('settings.branding_enabled') }}</span>
         </label>
       </div>
@@ -170,6 +233,7 @@ onMounted(load)
             <label class="inline-flex items-center gap-2 mt-3 cursor-pointer">
               <input
                 v-model="supplier.pdf_logo_show_name"
+                @change="savePatch({ pdf_logo_show_name: supplier.pdf_logo_show_name })"
                 type="checkbox"
                 :disabled="!supplier.email_branding_enabled || !supplier.has_email_logo"
                 class="h-4 w-4 accent-primary-600 disabled:opacity-50"
@@ -177,17 +241,7 @@ onMounted(load)
               <span class="text-sm text-neutral-700">{{ t('settings.branding_logo_show_name') }}</span>
             </label>
             <p class="text-xs text-neutral-500 mt-1">{{ t('settings.branding_logo_show_name_hint') }}</p>
-            <!-- Úsporná černobílá faktura (migrace 2033): nezávislá na brandingu, proto není disabled. -->
-            <label class="inline-flex items-center gap-2 mt-3 cursor-pointer">
-              <input
-                v-model="supplier.invoice_pdf_monochrome"
-                type="checkbox"
-                data-testid="branding-invoice-pdf-monochrome"
-                class="h-4 w-4 accent-primary-600"
-              />
-              <span class="text-sm text-neutral-700">{{ t('settings.branding_pdf_monochrome') }}</span>
-            </label>
-            <p class="text-xs text-neutral-500 mt-1">{{ t('settings.branding_pdf_monochrome_hint') }}</p>
+
           </div>
 
           <div>
@@ -196,12 +250,14 @@ onMounted(load)
             <div class="flex flex-wrap items-center gap-3">
               <input
                 v-model="supplier.email_accent_color"
+                @input="changeColor"
                 type="color"
                 :disabled="!supplier.email_branding_enabled"
                 class="h-10 w-14 cursor-pointer rounded border border-neutral-300 disabled:opacity-50"
               />
               <input
                 v-model="supplier.email_accent_color"
+                @input="changeColor"
                 type="text"
                 placeholder="#3B2D83"
                 pattern="^#[0-9A-Fa-f]{6}$"
@@ -212,7 +268,7 @@ onMounted(load)
                 type="button"
                 :disabled="!supplier.email_branding_enabled"
                 class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                @click="supplier.email_accent_color = '#3B2D83'"
+                @click="supplier.email_accent_color = '#3B2D83'; changeColor()"
               >
                 {{ t('settings.branding_accent_reset') }}
               </button>
@@ -240,6 +296,9 @@ onMounted(load)
           <iframe :srcdoc="previewHtml" sandbox="allow-same-origin" class="w-full h-[420px] border border-neutral-200 rounded-md bg-neutral-50" />
         </div>
       </div>
+    </section>
+    <section v-if="auth.canWrite('settings.branding')" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm mt-5">
+      <PdfAppearanceSettings :model-value="supplier" @change="changePdf" />
     </section>
     </template>
   </div>

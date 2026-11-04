@@ -26431,6 +26431,7 @@
     "email_profile_default_badge": "Výchozí",
     "email_profile_status": "Stav",
     "branding_page_title": "Branding",
+    "pdf_appearance_title": "Vzhled PDF dokladů",
     "branding_title": "Branding e-mailů a PDF",
     "branding_subtitle": "Vlastní logo a barvy v hlavičce odchozích e-mailů a v PDF faktur. Pokud je vypnuté, e-mail použije default MyÚčto „M\" branding a PDF zobrazí jméno firmy textem.",
     "branding_save": "Uložit branding",

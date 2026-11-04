@@ -26431,6 +26431,7 @@
     "email_profile_default_badge": "Default",
     "email_profile_status": "Status",
     "branding_page_title": "Branding",
+    "pdf_appearance_title": "Document PDF appearance",
     "branding_title": "Email and PDF branding",
     "branding_subtitle": "Custom logo and colors in the header of outgoing emails AND on invoice PDFs. When disabled, e-mails use the default MyÚčto „M\" branding and PDFs show the company name as text.",
     "branding_save": "Save branding",
