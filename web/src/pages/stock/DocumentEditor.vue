@@ -9,7 +9,7 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatUnitPrice } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -143,7 +143,7 @@ async function onSearch(rowIndex: number, q: string) {
     rowOptions[rowIndex] = res.map(r => ({
       value: r.id,
       label: `${r.sku} - ${r.name}`,
-      secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatMoney(Number(r.sale_price_without_vat))}` : r.unit,
+      secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatUnitPrice(Number(r.sale_price_without_vat))}` : r.unit,
     }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
 }

@@ -139,13 +139,8 @@ final class TimeBilling
             $item['quantity'] = $durationMinutes / 60;
         }
 
-        $catalogLinked = isset($item['price_list_item_id']) && (int) $item['price_list_item_id'] > 0;
-        $timeItem = !$stockLinked && !$catalogLinked && self::isHourUnit($item['unit'] ?? null);
         $item['duration_minutes'] = $durationMinutes;
-        $item['unit_price_without_vat'] = round(
-            (float) ($item['unit_price_without_vat'] ?? 0),
-            $timeItem ? 6 : 2,
-        );
+        $item['unit_price_without_vat'] = UnitPricePrecision::normalize((float) ($item['unit_price_without_vat'] ?? 0));
 
         return $item;
     }

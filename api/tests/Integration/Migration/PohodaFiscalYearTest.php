@@ -142,6 +142,37 @@ final class PohodaFiscalYearTest extends TestCase
     }
 
     /**
+     * Agenda v daňové evidenci: POHODA účetní deník nevydá (agendu nepoužívá). Průvodce
+     * má říct, že daňovou evidenci převod nepodporuje a čím převést doklady, ne hlásit
+     * chybu souboru a přepnutí firmy do podvojného účetnictví.
+     */
+    public function testTaxEvidenceAgendaIsReportedAsUnsupported(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        file_put_contents($dir . '/01_ucetni_denik.xml', (string) iconv('UTF-8', 'Windows-1250',
+            '<?xml version="1.0" encoding="Windows-1250"?>'
+            . '<rsp:responsePack version="2.0" id="001" state="ok" programVersion="SYNTETICKY 1.0" ico="' . SyntheticPohodaExport::ICO . '"'
+            . ' xmlns:rsp="http://www.stormware.cz/schema/version_2/response.xsd">'
+            . '<rsp:responsePackItem version="2.0" id="001-1" state="error" note="Agenda Účetní deník není v této účetní jednotce dostupná."></rsp:responsePackItem>'
+            . '</rsp:responsePack>'));
+        $export = PohodaExport::open($dir);
+        $supplierId = $this->supplier(1);
+
+        $preflight = $this->importer->preflight($supplierId, $export);
+        $codes = array_column($preflight, 'code');
+        self::assertContains('tax_evidence_agenda_unsupported', $codes, json_encode($preflight, JSON_UNESCAPED_UNICODE));
+        self::assertNotContains('switch_to_double_entry', $codes);
+        self::assertNotContains('file_state', $codes);
+        $message = $preflight[array_search('tax_evidence_agenda_unsupported', $codes, true)];
+        self::assertSame('error', $message['level']);
+        self::assertStringContainsString('Pohoda XML', $message['message']);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertTrue($protocol->hasErrors());
+        self::assertSame(0, $this->entryCount($supplierId));
+    }
+
+    /**
      * Agenda ze {@see SyntheticPohodaExport::write()} posunutá na hospodářský rok od srpna:
      * leden 2026 → srpen 2025 (počáteční stavy 1. 8. 2025), minulý rok prosinec → červenec.
      * Navíc zápis 15. 3. 2026 (stejný hospodářský rok, jiný kalendářní) a 10. 9. 2026

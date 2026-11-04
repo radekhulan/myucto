@@ -42,6 +42,18 @@ final class CompanyIdNormalizer
     }
 
     /**
+     * SQL výraz se stejnou normalizací jako {@see self::ic()} nad sloupcem s IČO.
+     * Samotný `LPAD(…, 8, '0')` delší hodnotu ořízne na 8 znaků, takže zahraniční
+     * identifikátor s víc číslicemi (maďarské daňové číslo apod.) se s výsledkem
+     * ic() nikdy neshodl a import zakládal ke každému dokladu novou kartu.
+     */
+    public static function icSql(string $column): string
+    {
+        $digits = "REGEXP_REPLACE({$column}, '[^0-9]', '')";
+        return "IF(CHAR_LENGTH({$digits}) <= 8, LPAD({$digits}, 8, '0'), {$digits})";
+    }
+
+    /**
      * Odstraní mezery a jakékoli nealfanumerické znaky, převede na velká písmena.
      * „CZ 12345678" i „cz12345678" normalizuje na „CZ12345678".
      */

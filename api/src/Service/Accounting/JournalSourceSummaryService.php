@@ -153,7 +153,7 @@ final class JournalSourceSummaryService
         $row = $this->one(
             'SELECT oi.id, oi.side, oi.kind, k.name AS kind_name, oi.title, oi.partner_name, oi.issued_on, oi.due_on,
                     oi.currency, oi.amount, oi.document_no, oi.status, oi.variable_symbol, oi.account_code,
-                    oi.counter_account_code, oi.note
+                    oi.counter_account_code, oi.note, oi.settled_outside_amount
                FROM other_items oi
                LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
               WHERE oi.id = ? AND oi.supplier_id = ? AND oi.deleted_at IS NULL',
@@ -165,7 +165,8 @@ final class JournalSourceSummaryService
               WHERE other_item_id = ? AND supplier_id = ? AND reversed_on IS NULL',
             [$id, $supplierId],
         );
-        $paidAmount = (float) ($paid['amount'] ?? 0);
+        // Uhrazeno stejně jako v detailu položky (OtherItemRepository): i úhrada převzatá mimo evidenci.
+        $paidAmount = (float) ($paid['amount'] ?? 0) + (float) $row['settled_outside_amount'];
         $route = ['name' => 'other-item-detail', 'params' => ['id' => $id]];
         $currency = (string) $row['currency'];
         return [

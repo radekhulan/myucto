@@ -8,7 +8,7 @@ import { useExpandableItems } from '@/composables/useExpandableItems'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
-import { formatMoney, formatMoneyWhole, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { isCalendarType } from '@/utils/invoiceCalendar'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
@@ -26,6 +26,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import MultiSelectFilter, { type MultiSelectOption } from '@/components/ui/MultiSelectFilter.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
@@ -948,6 +949,7 @@ function listParams(): InvoiceListParams {
     include_dimensions: tbl.isVisible('dimensions'),
   }
 }
+const invoiceBookUrl = (format: 'pdf' | 'xlsx') => invoicesApi.bookUrl(listParams(), format)
 const listNav = useListNavigationSource('invoices', () => ({
   ids: flatRows.value.map(inv => inv.id),
   page: page.value,
@@ -1273,6 +1275,12 @@ useWindowRefresh(refreshLoadedPages,
             {{ t('invoice.client_edit') }}
           </RouterLink>
         </template>
+        <InvoiceBookMenu
+          v-if="auth.canRead('invoices')"
+          :label="t('invoice.book_issued')"
+          :url-for="invoiceBookUrl"
+          fallback-filename="kniha-vystavenych-faktur"
+        />
         <RouterLink
           v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
@@ -1771,7 +1779,7 @@ useWindowRefresh(refreshLoadedPages,
                         <template v-else>
                         <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                         <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
-                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                        <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatUnitPrice(item.unit_price_without_vat, inv.currency) }}</td>
                         <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
                         </template>
                       </tr>

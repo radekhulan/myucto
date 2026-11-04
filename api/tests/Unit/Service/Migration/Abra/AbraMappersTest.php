@@ -74,11 +74,19 @@ final class AbraMappersTest extends TestCase
 
         self::assertSame([], $plan['blockers']);
         self::assertSame('SYN-GOODS-1', $plan['card']['sku']);
-        self::assertSame('123.46', $plan['card']['sale_price_without_vat']);
+        self::assertSame('123.4567', $plan['card']['sale_price_without_vat']);
         self::assertSame(21.0, $plan['card']['vat_rate_percent']);
         self::assertTrue($plan['card']['is_stocked']);
-        self::assertSame(['EUR' => '100.00', 'GBP' => '20.00', 'USD' => '24.79'], $plan['price_rows']);
-        self::assertContains('catalog_price_rounded', $plan['warnings']);
+        self::assertSame(['EUR' => '100.00', 'GBP' => '20.00', 'USD' => '24.793388'], $plan['price_rows']);
+        self::assertSame(['EUR' => '100.00', 'GBP' => '20.00', 'USD' => '30.00'], $plan['legacy_price_rows']);
+        self::assertNotContains('catalog_price_rounded', $plan['warnings']);
+
+        $rounded = (new AbraCatalogMapper())->map([
+            'id' => 6, 'kod' => 'SYN-GOODS-2', 'nazev' => 'Syntetické zboží', 'mj1' => 'code:KS',
+            'typZasobyK' => 'typZasoby.zbozi', 'cenaZaklBezDph' => '0.0040004',
+        ]);
+        self::assertSame('0.004', $rounded['card']['sale_price_without_vat']);
+        self::assertContains('catalog_price_rounded', $rounded['warnings']);
     }
 
     public function testCatalogCurrencyPriceWithoutVatIsNeverDividedByRate(): void

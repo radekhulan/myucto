@@ -1361,7 +1361,7 @@ final class PohodaImportTest extends TestCase
               WHERE r.supplier_id = ? ORDER BY l.code'
         );
         $rules->execute([$supplierId]);
-        self::assertSame([['B2B', '30.00', 'CZK'], ['EUR', '1.20', 'EUR']],
+        self::assertSame([['B2B', '30.000000', 'CZK'], ['EUR', '1.200000', 'EUR']],
             array_map(static fn (array $r): array => array_values(array_map('strval', $r)), $rules->fetchAll(\PDO::FETCH_ASSOC)));
 
         $category = $this->db->pdo()->prepare(

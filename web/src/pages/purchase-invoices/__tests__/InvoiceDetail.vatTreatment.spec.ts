@@ -55,6 +55,7 @@ vi.mock('@/composables/useUserPrefs', () => ({
 
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (v: number, c?: string) => `${v} ${c ?? ''}`.trim(),
+  formatUnitPrice: (v: number, c?: string) => `${v} ${c ?? ''}`.trim(),
   formatDate: (d: string | null | undefined) => d ?? '',
 }))
 

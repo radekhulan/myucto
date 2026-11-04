@@ -37,7 +37,7 @@ Kontrolní hlášení právnické osoby zůstává měsíční. Měsíční náh
 
 ## 41.2 Než začnete
 
-1. **Daňové nastavení firmy.** V `Nastavení → Daně a účetnictví`, v boxu **Daňové nastavení (EPO výkazy DPH/KH)**, vyplňte **Typ poplatníka** (fyzická osoba nebo právnická osoba), **Perioda DPH přiznání** (měsíční nebo kvartální), **Kód finančního úřadu** a případně **Kód územního pracoviště (ÚzP)**. Povinné je také **DIČ** v identifikaci firmy. Volitelně doplňte **CZ-NACE klasifikaci**, datovou schránku a **Sestavitel přiznání (účetní)**. Přehled všech polí je v [§ 41.13.1](#41131-pole-epo-a-vetap).
+1. **Daňové nastavení firmy.** V `Nastavení → Daně a účetnictví`, v boxu **Daňové nastavení (EPO výkazy DPH/KH)**, vyplňte **Typ poplatníka** (fyzická osoba nebo právnická osoba), **Perioda DPH přiznání** (měsíční nebo kvartální), **Finanční úřad** a případně **Územní pracoviště (ÚzP)**. Povinné je také **DIČ** v identifikaci firmy. Volitelně doplňte **CZ-NACE klasifikaci**, datovou schránku a **Sestavitel přiznání (účetní)**. Přehled všech polí je v [§ 41.13.1](#41131-pole-epo-a-vetap).
 2. **Údaje podnikatele nebo oprávněné osoby.** U fyzické osoby zkontrolujte v `Nastavení → Daně a účetnictví` část **Osobní údaje podnikatele**. U právnické osoby vyplňte v části **Oprávněná osoba (jednatel / podpisující)** jméno, příjmení a postavení osoby, která přiznání podepisuje (typicky jednatel).
 3. **Plátcovství DPH.** Rozhoduje stav ke konci období výkazu, ne dnešní stav. Historii plátcovství vedete v témže nastavení v bloku **Plátcovství DPH**.
 4. **Doklady.** Doklady za období musí být vystavené nebo přijaté (ne koncepty) a mít správnou **Klasifikaci DPH**. Chybějící klasifikaci doplní automatika, viz [§ 41.13.10](#411310-automaticke-prirazeni-klasifikace).
@@ -223,13 +223,13 @@ Používáte ji jako věřitel: opravujete základ daně u pohledávky, kterou d
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
 | EPO odmítne soubor s chybou o neúplné adrese | Chybí číslo popisné nebo orientační | V `Nastavení → Daně a účetnictví` vyplňte **Číslo popisné** a **Číslo orientační**. EPO chce ulici, popisné i orientační číslo zvlášť. |
-| **Chybí kód finančního úřadu - XML nemusí projít validací EPO.** | V nastavení není kód úřadu | Vyplňte **Kód finančního úřadu** v `Nastavení → Daně a účetnictví`. Bez něj XML neprojde kontrolou. |
+| **Chybí kód finančního úřadu - XML nemusí projít validací EPO.** | V nastavení není vybraný úřad | Vyberte **Finanční úřad** v `Nastavení → Daně a účetnictví`. Bez něj XML neprojde kontrolou. |
 | **Chybí IČO tenanta.** nebo **Chybí DIČ tenanta.** | V identifikaci firmy chybí údaj | Doplňte IČO a DIČ v identifikaci firmy v nastavení. |
 | **Tenant nebyl v průběhu období evidovaný jako plátce DPH - výkaz nemusí být relevantní.** | Plátcovství se posuzuje podle období výkazu, ne podle dneška | V bloku **Plátcovství DPH** zkontrolujte historii a doplňte nebo opravte řádek. Jste-li identifikovaná osoba, nechte **Plátce DPH** vypnuté a zaškrtněte **Identifikovaná osoba (§ 6g-6l ZDPH)**, přiznání se pak tvoří jako přiznání identifikované osoby. |
 | Částky v tabulkách přiznání nesedí s fakturami | Řádky faktur nemají správnou **Klasifikaci DPH** | V editoru faktury zkontrolujte pole **Klasifikace DPH** na řádcích. Kódy a automatika jsou v [§ 41.13.9](#41139-klasifikacni-kody-dph) a [§ 41.13.10](#411310-automaticke-prirazeni-klasifikace). |
 | Prázdné tabulky a hláška, že musíte faktury označit klasifikací | V období nejsou doklady s klasifikací | Označte řádky faktur klasifikací DPH. Starším importovaným dokladům ji doplňte ručně v editoru. |
 | Přiznání je čtvrtletní, ale aplikace počítá měsíčně | V nastavení je jiná perioda | V `Nastavení → Daně a účetnictví` změňte **Perioda DPH přiznání** na kvartální, pak na stránce přiznání zvolte **Kvartálně** a čtvrtletí. |
-| Nevím kód úřadu a pracoviště | - | Podívejte se na poslední přiznání nahrané na EPO (VetaD a VetaP), zavolejte na svůj finanční úřad, nebo použijte [seznam územních pracovišť](https://www.financnisprava.cz/cs/financni-sprava/organy-financni-spravy/uzemni-pracoviste). |
+| Nevím, který úřad a pracoviště vybrat | - | Úřad je ten pro kraj, kde má firma sídlo (OSVČ bydliště), velké firmy patří pod Specializovaný finanční úřad. Pracoviště najdete na posledním přiznání nahraném na EPO (VetaD a VetaP), nebo se zeptejte svého finančního úřadu. |
 | OKEČ vychází `631000`, ale činnost je jiná | Pole CZ-NACE je prázdné, použije se náhradní hodnota | Vyplňte **CZ-NACE klasifikaci** podle živnostenského listu nebo ARES. Aplikace odstraní předponu a doplní na 6 číslic. |
 | Červený rámeček **Přiznání nesedí na kontrolní/souhrnné hlášení nebo účet 343** | Přiznání se rozchází s KH, SH nebo obratem účtu 343 | Opravte podklad (doplňte DIČ, opravte klasifikaci, zaúčtujte chybějící doklad) a načtěte náhled znovu. Viz [§ 41.13.5](#41135-krizova-kontrola-s-kh-sh-a-uctem-343). |
 | **Doklady se samovyměřením čekají na schválení** | Přijaté doklady jsou ve schvalování nebo zamítnuté, proto v podání chybí | Doklady před podáním schvalte, nebo stornujte. Daň ze samovyměření patří do období DUZP a nejde ji přesunout. |
@@ -257,8 +257,8 @@ Tato část mapuje pole z `Nastavení → Daně a účetnictví`, box **Daňové
 <!-- cols: 26 14 60 -->
 | Pole v UI | XML atribut | Popis a kde zjistit |
 |---|---|---|
-| **Kód finančního úřadu** | `c_ufo` | Číselný kód finančního úřadu, např. `451` Finanční úřad pro hlavní město Prahu, `461` Finanční úřad pro Jihomoravský kraj, `13` Specializovaný finanční úřad. Najdete ho na posledním podaném přiznání nebo v EPO. |
-| **Kód územního pracoviště (ÚzP)** | `c_pracufo` | Konkrétní pracoviště v rámci úřadu, např. `3203` pracoviště Brno III. Volitelné, ale EPO ho někdy vyžaduje. |
+| **Finanční úřad** | `c_ufo` | Výběr z číselníku finanční správy, např. `451` Finanční úřad pro hlavní město Prahu, `461` Finanční úřad pro Jihomoravský kraj, `13` Specializovaný finanční úřad. Pod výběrem se ukáže datová schránka úřadu a jeho účty pro placení DPH, daně z příjmů, záloh na daň ze závislé činnosti a srážkové daně. |
+| **Územní pracoviště (ÚzP)** | `c_pracufo` | Pracoviště vybraného úřadu, např. `3003` Územní pracoviště Brno III. Nabízí se jen pracoviště zvoleného úřadu, Specializovaný finanční úřad žádné nemá. Volitelné, ale EPO ho někdy vyžaduje. |
 | **CZ-NACE klasifikace** | `c_okec` | Hlavní podnikatelská činnost, např. `631000` (IT poradenství). Najdete ji na živnostenském listě nebo v ARES. Při prázdném poli se použije `631000`. Pole nabízí jen kódy platné k dnešku, číselník EPO je od 1. 1. 2026 na NACE rev. 2.1. |
 
 #### Typ plátce a perioda

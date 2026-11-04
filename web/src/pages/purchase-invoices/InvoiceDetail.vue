@@ -13,8 +13,8 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsync
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse, type VatDeduction, type PurchaseForceMode } from '@/api/purchaseInvoices'
-import { formatMoney, formatHourlyRate, formatDate } from '@/composables/useFormat'
-import { formatDuration, isTimeItem, itemQuantity } from '@/utils/timeBilling'
+import { formatMoney, formatUnitPrice, formatDate } from '@/composables/useFormat'
+import { formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity } from '@/utils/timeBilling'
 import { useToast } from '@/composables/useToast'
 import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
@@ -121,7 +121,7 @@ let loadGeneration = 0
 // unit_price_without_vat už netto → vracíme ho beze změny.
 function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(it.quantity)) {
-    if (isTimeItem(it) && (it.duration_minutes != null || it.unit_price_without_vat !== Math.round(it.unit_price_without_vat * 100) / 100)) {
+    if (isPreciseUnitPrice(it)) {
       return Math.round(((it.total_without_vat ?? 0) / itemQuantity(it)) * 1e6) / 1e6
     }
     return Math.round(((it.total_without_vat ?? 0) / Number(it.quantity)) * 100) / 100
@@ -1623,7 +1623,7 @@ useWindowRefresh(async () => {
               </td>
               <td class="py-2 px-2 text-right font-mono">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</td>
               <td class="py-2 px-2">{{ it.unit }}</td>
-              <td class="py-2 px-2 text-right font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</td>
+              <td class="py-2 px-2 text-right font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), invoice.currency) }}</td>
               <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
               <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
             </tr>
@@ -1641,7 +1641,7 @@ useWindowRefresh(async () => {
                 <span class="font-mono text-neutral-700">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</span>
                 <span class="ml-1">{{ it.unit }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
                 <span>{{ it.vat_rate_snapshot }}%</span>
               </span>

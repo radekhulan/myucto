@@ -139,6 +139,10 @@ final class HostedMcpEndpointAction
         if (!is_array($arguments)) {
             throw new \InvalidArgumentException('Neplatné argumenty nástroje.');
         }
+        // Lokální obsluha list_suppliers musí projít stejnou politikou jako nástroje volané přes Node.
+        if ($input['allowedTools'] !== null && !in_array($params['name'], $input['allowedTools'], true)) {
+            return ['content' => [['type' => 'text', 'text' => 'Pro tento nástroj nemáte oprávnění.']], 'isError' => true];
+        }
         if ($params['name'] === 'list_suppliers') {
             return $this->listAccessibleSuppliers($request, $input['boundSupplierId']);
         }

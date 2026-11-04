@@ -48,6 +48,7 @@ vi.mock('@/api/eshop', () => ({
 }))
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (value: number) => value.toFixed(2),
+  formatUnitPrice: (value: number) => value.toFixed(2),
   formatDate: (value: string) => value,
 }))
 vi.mock('@/stores/auth', () => ({

@@ -30,7 +30,8 @@ import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type VatRate, type Currency, type Unit } from '@/api/codebooks'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
 import { revenueCategoriesApi, type RevenueCategory } from '@/api/revenueCategories'
-import { formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
+import { formatMoney, formatNumber, formatPercent, formatUnitPrice } from '@/composables/useFormat'
+import { hasSubCentPrice, roundUnitPrice, unitPriceDecimals, unitPriceText } from '@/utils/unitPrice'
 import { formatAdjustment } from '@/pages/eshop/priceAdjustment'
 import { evalMath } from '@/directives/vMath'
 import { apiErrorMessage } from '@/api/errors'
@@ -67,7 +68,7 @@ import DurationInput from '@/components/ui/DurationInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import ItemDimensionsToggle from '@/components/dimensions/ItemDimensionsToggle.vue'
 import { useDocumentDimensions, applyPrefill } from '@/composables/useDocumentDimensions'
-import { durationTotal, isPreciseTimeItem, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
+import { durationTotal, isPreciseUnitPrice, isTimeItem, itemAmount, itemQuantity, syncCreditNoteItemSign, timeItemTotals, unitPriceForAmount, validateDurationInputs, workHours, workRowTotal } from '@/utils/timeBilling'
 import { amountItems, blankTextItem, isTextItem, textItemPayload } from '@/utils/invoiceTextRow'
 import { groupInvoiceStockAvailability, invoiceStockAvailabilityKey, stockSearchBadge } from './invoiceStockAvailability'
 import { unchangedRows, useUnitDecimals } from '@/composables/useUnitDecimals'
@@ -226,7 +227,7 @@ const priceListOptions = computed(() => priceListItems.value.map(item => {
     value: item.id,
     label: `${item.code} · ${item.name}`,
     secondary: resolved
-      ? `${t(`price_list.price_source.${resolved.catalog_price_source}`)} · ${resolved.unit_price_without_vat.toFixed(2)} ${resolved.target_currency_code}${resolved.catalog_exchange_rate_date ? ` · ${resolved.catalog_exchange_rate_date}` : ''}`
+      ? `${t(`price_list.price_source.${resolved.catalog_price_source}`)} · ${unitPriceText(resolved.unit_price_without_vat)} ${resolved.target_currency_code}${resolved.catalog_exchange_rate_date ? ` · ${resolved.catalog_exchange_rate_date}` : ''}`
       : undefined,
   }
 }))
@@ -542,7 +543,8 @@ function stockPriceForRow(item: InvoiceItem, net: number | null): number | null
 function stockPriceForRow(item: InvoiceItem, net: number | null): number | null {
   if (net === null || !form.value.prices_include_vat || !supplierIsVatPayer.value || form.value.reverse_charge) return net
   const rate = vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0
-  return round2(net * (100 + rate) / 100)
+  const gross = net * (100 + rate) / 100
+  return hasSubCentPrice(net) ? roundUnitPrice(gross) : round2(gross)
 }
 
 /** Odběratel bez hladiny u karty bez funkcí: řádek dostane zpět původní cenu karty, jednotka zůstává. */
@@ -604,7 +606,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       }
       if (si.promo_price != null) {
         toast.info(t('invoice.promo_price_applied', {
-          price: formatMoney(stockPriceForRow(item, Number(si.promo_price))),
+          price: formatUnitPrice(stockPriceForRow(item, Number(si.promo_price))),
           label: si.promo_label ?? t('invoice.promo_price_generic'),
         }))
       }
@@ -626,7 +628,7 @@ function onStockSelect(rowIndex: number, itemId: number | null) {
       void quoteStockRows([item], 'select', initialStockUnit(si)).then((quoted) => {
         if (!quoted && quoteFailureFallback('select', si)?.promoToast) {
           toast.info(t('invoice.promo_price_applied', {
-            price: formatMoney(stockPriceForRow(item, Number(si.promo_price))),
+            price: formatUnitPrice(stockPriceForRow(item, Number(si.promo_price))),
             label: si.promo_label ?? t('invoice.promo_price_generic'),
           }))
         }
@@ -802,7 +804,7 @@ function lineDiscountHint(item: InvoiceItem): string | null {
   const pct = lineDiscountPct(item.list_unit_price, item.unit_price_without_vat)
   if (pct === null || item.list_unit_price == null) return null
   const params = {
-    price: formatNumber(Number(item.list_unit_price), { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    price: formatNumber(Number(item.list_unit_price), { minimumFractionDigits: 2, maximumFractionDigits: unitPriceDecimals(item.list_unit_price) }),
     pct: formatNumber(Math.abs(pct), { maximumFractionDigits: 2 }),
   }
   // Se slevou zadávanou u řádku je vidět, že se skladový řádek počítá z ceníku karty (ne z ceny hladiny).
@@ -1984,7 +1986,7 @@ const computed_totals = computed(() => {
     const amount = round2(itemAmount(item))
     let base: number
     let vat: number
-    if (isPreciseTimeItem(item)) {
+    if (isPreciseUnitPrice(item)) {
       const totals = timeItemTotals(item, vatRate, pricesIncl)
       base = totals.base
       vat = totals.vat
@@ -2229,7 +2231,7 @@ function round6(n: number): number {
  * net základ + DPH je v souhrnu níže). U neplátce / reverse-charge je sazba 0 → = základ.
  */
 function itemTotal(item: InvoiceItem): number {
-  if (isPreciseTimeItem(item)) {
+  if (isPreciseUnitPrice(item)) {
     const rate = (form.value.reverse_charge || !supplierIsVatPayer.value)
       ? 0 : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
     return timeItemTotals(item, rate, !!form.value.prices_include_vat && supplierIsVatPayer.value).with
@@ -2258,7 +2260,7 @@ function setItemGross(item: InvoiceItem, raw: string): void {
   if (qty === 0) return
   if (form.value.prices_include_vat && supplierIsVatPayer.value) {
     // unit_price_without_vat nese cenu S DPH → ulož gross jako jednotkovou cenu.
-    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : round2(gross / qty)
+    item.unit_price_without_vat = isTimeItem(item) ? round6(gross / qty) : unitPriceForAmount(gross, qty)
     return
   }
   // Běžný režim: dopočti netto odečtením DPH shora (u neplátce / RC je sazba 0).
@@ -2266,7 +2268,7 @@ function setItemGross(item: InvoiceItem, raw: string): void {
     ? 0
     : (vatRates.value.find(v => v.id === item.vat_rate_id)?.rate_percent ?? 0)
   const net = gross / (1 + vatRate / 100)
-  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : round2(net / qty)
+  item.unit_price_without_vat = isTimeItem(item) ? round6(net / qty) : unitPriceForAmount(net, qty)
 }
 
 // Přepínač „ceny s DPH" má smysl jen pro plátce DPH (u neplátce/RC je sazba 0 → gross = net).
@@ -3455,7 +3457,7 @@ useWindowTitle(
                 </select>
               </td>
               <td class="px-3 py-2">
-                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-9 px-2 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
@@ -3826,7 +3828,7 @@ useWindowTitle(
             <div :class="supplierIsVatPayer || showLineDiscountInput ? 'grid grid-cols-2 gap-2' : ''">
               <div>
                 <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                <input v-model="item.unit_price_without_vat" v-math="isTimeItem(item) ? 6 : 2" type="text" inputmode="decimal"
+                <input v-model="item.unit_price_without_vat" v-math="6" type="text" inputmode="decimal"
                   :class="['w-full h-10 px-3 border rounded text-right font-mono text-sm', itemHasBothNegative(item) ? 'border-danger-400' : 'border-neutral-300']" />
                 <p v-if="lineDiscountHint(item)" data-test="line-discount-hint" :title="t('invoice.line_discount.title')"
                   class="mt-1 text-xs text-neutral-500 text-right">{{ lineDiscountHint(item) }}</p>
@@ -4316,7 +4318,7 @@ useWindowTitle(
                   </select>
                 </td>
                 <td class="px-2 py-1.5">
-                  <input v-model.number="m.unit_price" type="number" step="0.01" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
+                  <input v-model.number="m.unit_price" type="number" step="any" min="0" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
                   {{ formatMoney((Number(m.quantity) || 0) * (Number(m.unit_price) || 0), form.currency) }}
@@ -4387,7 +4389,7 @@ useWindowTitle(
               <div class="grid grid-cols-2 gap-2 items-end">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ unitPriceHeaderLabel }}</label>
-                  <input v-model.number="m.unit_price" type="number" inputmode="decimal" step="0.01" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
+                  <input v-model.number="m.unit_price" type="number" inputmode="decimal" step="any" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
                 </div>
                 <div class="text-right pb-2">
                   <div class="text-xs font-medium text-neutral-500 uppercase tracking-wide">{{ t('invoice.wr_total') }}</div>

@@ -42,12 +42,12 @@ final class TimeBillingTest extends TestCase
         self::assertSame(333.333334, $item['unit_price_without_vat']);
     }
 
-    public function testNonTimeAndStockPricesRetainTwoDecimalPrecision(): void
+    public function testEveryItemKeepsSixDecimalUnitPrice(): void
     {
         $ordinary = TimeBilling::normalizeInvoiceItem([
             'quantity' => 1,
             'unit' => 'ks',
-            'unit_price_without_vat' => 12.345678,
+            'unit_price_without_vat' => 12.3456789,
         ]);
         $stock = TimeBilling::normalizeInvoiceItem([
             'quantity' => 1,
@@ -62,9 +62,29 @@ final class TimeBillingTest extends TestCase
             'unit_price_without_vat' => 12.345678,
         ]);
 
-        self::assertSame(12.35, $ordinary['unit_price_without_vat']);
-        self::assertSame(12.35, $stock['unit_price_without_vat']);
-        self::assertSame(12.35, $catalog['unit_price_without_vat']);
+        self::assertSame(12.345679, $ordinary['unit_price_without_vat']);
+        self::assertSame(12.345678, $stock['unit_price_without_vat']);
+        self::assertSame(12.345678, $catalog['unit_price_without_vat']);
+    }
+
+    public function testSubCentUnitPriceOfBulkItemKeepsLineTotal(): void
+    {
+        $caps = TimeBilling::normalizeInvoiceItem([
+            'quantity' => 250000,
+            'unit' => 'ks',
+            'unit_price_without_vat' => 0.004,
+        ]);
+        $preciseCaps = TimeBilling::normalizeInvoiceItem([
+            'quantity' => 250000,
+            'unit' => 'ks',
+            'stock_item_id' => 10,
+            'unit_price_without_vat' => 0.0108,
+        ]);
+
+        self::assertSame(0.004, $caps['unit_price_without_vat']);
+        self::assertSame(1000.0, TimeBilling::invoiceAmount($caps));
+        self::assertSame(0.0108, $preciseCaps['unit_price_without_vat']);
+        self::assertSame(2700.0, TimeBilling::invoiceAmount($preciseCaps));
     }
 
     public function testExactDurationCreatesOnlyACompatibilityProjection(): void

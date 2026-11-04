@@ -794,7 +794,7 @@ final class PayrollRegistrationA1SnapshotBuilder
 
             return null;
         }
-        if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($value)) {
+        if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($value, $this->specVersion)) {
             $this->malformed(
                 'employment_status_code',
                 'není v číselníku Klasifikace postavení v zaměstnání (NKPZ), '

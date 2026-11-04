@@ -1179,6 +1179,20 @@ final class PayrollRunCommandService
                  */
                 if ($command === PayrollRunCommand::CANCEL) {
                     $this->runs->abandonRevisionsOnCancel($supplierId, $runId);
+                    /*
+                     * Zrušený běh, který nikdy nebyl schválený, nesmí dál držet
+                     * zámek vstupů. Jinak docházka s příplatky nešla schválit
+                     * ani po zrušení („vstupy uzamčené mzdovým během") a cesta
+                     * ven nevedla. Schválený základ opravy si vstupy drží dál
+                     * svým snímkem, tam se zámek nevrací.
+                     */
+                    if ($this->runs->latestApprovedRevision($supplierId, $runId) === null) {
+                        $this->runs->unlockInputsForCorrection(
+                            $supplierId,
+                            (string) $run['period_start'],
+                            $run['office_id'] === null ? null : (int) $run['office_id'],
+                        );
+                    }
                     $revision = $revision === null
                         ? null
                         : $this->runs->revision(

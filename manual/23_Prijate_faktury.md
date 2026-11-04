@@ -157,6 +157,13 @@ Originál vybraného dokladu je vedle údajů o dokladu. Tlačítkem **Skrýt or
 **Jak poznáte, že je hotovo:** z dokladu vznikl koncept přijaté faktury a originál se přesunul do archivu
 (složka **Příchozí doklady / Archiv / rok / měsíc**).
 
+Doklad zůstane konceptem, dokud ho nepřijmete. Nese-li vytěžení varování (například přenesená daňová
+povinnost, doklad podle textu už uhrazený nebo dodavatel neplátce DPH), otevře se nejdřív kontrola
+vytěžení a teprve po ní editor.
+
+Pokud se vytěžení nedokončí (například se přeruší spojení), vrátí se doklad po 10 minutách mezi čekající
+s upozorněním, že zpracování bylo přerušeno. Pak ho vytěžte znovu, nebo smažte z fronty.
+
 Podrobnosti o frontě, hromadných akcích a odmítnutí jsou v [§ 23.11.3](#23113-prichozi-doklady).
 
 ## 23.6 Krok za krokem: zaplatit fakturu
@@ -352,6 +359,12 @@ Neobsahuje pevnou výchozí částku. Pravidlo samo nemění fakturu. Úhrady fa
 Otevřete-li detail ze seznamu přijatých faktur, vlevo od odkazu **Zpět na seznam** jsou šipky předchozí a další
 faktury (zkratky `[` a `]`), které listují v pořadí a s filtry seznamu, ze kterého jste přišli; detail otevřený
 přímým odkazem šipky nemá.
+
+**Kniha přijatých faktur.** Tlačítko vpravo nahoře v seznamu stáhne sestavu všech dokladů odpovídajících
+aktuálnímu filtru jako PDF na šířku nebo tabulku XLSX, seřazenou podle čísla dokladu. Sloupce, pravidla pro
+koncepty a storna i součty po měnách jsou stejné jako u knihy vystavených faktur
+([§ 14.7.1](14_Faktury.md#1471-kniha-vystavenych-faktur)); místo odběratele uvádí dodavatele a variabilní symbol
+bere z platebního VS, jinak z čísla dokladu dodavatele.
 
 ### 23.11.2 Stavy přijaté faktury
 
@@ -573,9 +586,13 @@ dodavatele**. Starší zápisy si nechávají své číslo. Kontrolní hlášen�
 
 ### 23.11.6 Položky a druh výdaje
 
-U hodinových služeb lze zadat dobu jako `H:MM` a hodinovou sazbu až na šest desetinných míst, stejně jako u
+Cenu za jednotku lze zadat až na šest desetinných míst u každé položky, i u skladové. Levný materiál
+kupovaný po statisících kusů tak drží přesnou cenu: 250 000 ks × 0,0108 EUR dá řádek 2 700,00 EUR. Celkem
+za řádek, rekapitulace DPH i součet dokladu zůstávají na haléře. Detail, PDF a exporty ukazují víc než dvě
+místa jen u ceny, která je má.
+
+U hodinových služeb lze zadat dobu jako `H:MM`, stejně jako u
 [vystavené faktury](15_Faktura_editor.md#1596-vykaz-vicepraci). Čas a sazbu přepište podle dokladu dodavatele.
-Součty a rekapitulace DPH zůstávají v peněžních částkách. Skladové ceny mají nadále dvě desetinná místa.
 
 Tlačítkem **+ Přidat položku** přidáte řádek. U každého řádku se zadává:
 

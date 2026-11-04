@@ -37,6 +37,24 @@ main.workspace-main-single > .workspace-host {
   }
 }
 
+/* Okno bez firmy (prvotní nastavení) se nevykresluje v iframu, ale přímo
+   v panelu. Okraje, které jednopanelový host ruší, mu proto vrací stejně
+   jako `body.workspace-window-single #app` uvnitř rámu. */
+main.workspace-main-single .workspace-inline-window {
+  padding-inline: 1.25rem;
+  padding-bottom: 1.5rem;
+}
+
+main.workspace-main-single:has(> .workspace-host:only-child) .workspace-inline-window {
+  padding-top: 1.5rem;
+}
+
+@container workspace (width >= 40rem) {
+  main.workspace-main-single .workspace-inline-window {
+    padding-inline: 2rem;
+  }
+}
+
 html.workspace-window-frame {
   scrollbar-gutter: auto;
   scrollbar-color: var(--color-neutral-300) var(--color-neutral-50);

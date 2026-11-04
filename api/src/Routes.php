@@ -675,6 +675,8 @@ final class Routes
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);
+        // Kniha vystavených faktur (PDF/XLSX) nad filtrem seznamu.
+        $app->get    ('/api/invoices/book',         [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'issued']);
         // Veřejný alias admin exportu (bearer allowlist pokrývá /api/invoices/*):
         // ?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv & month=YYYY-MM nebo period=quarterly&year&quarter
         $app->get    ('/api/invoices/export',       ExportAction::class);
@@ -775,6 +777,7 @@ final class Routes
         $app->post   ('/api/purchase-invoices/import-structured',         ImportStructuredPurchaseInvoiceAction::class);
         $app->post   ('/api/purchase-invoices/import-ai',                 AiExtractPdfAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
+        $app->get    ('/api/purchase-invoices/book',                       [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'received']);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
         // Přečíslování měsíce podle data vystavení (náhled + provedení).
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
@@ -3684,6 +3687,7 @@ final class Routes
 
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
+        $app->get ('/api/settings/tax-offices',             [\MyInvoice\Action\Settings\TaxOfficeCatalogAction::class, 'list']);
         $app->get    ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'list']);
         $app->post   ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'create']);
         $app->put    ('/api/settings/domains/{id:[0-9]+}',              [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'update']);
@@ -3719,6 +3723,7 @@ final class Routes
         $app->get ('/api/settings/accounting-activation/jobs', [AccountingActivationAction::class, 'jobs']);
         $app->get ('/api/settings/accounting-activation/jobs/{id:[0-9]+}', [AccountingActivationAction::class, 'job']);
         $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/cancel', [AccountingActivationAction::class, 'cancel']);
+        $app->get ('/api/settings/supplier/invoice-counter', [SupplierInvoiceCounterAction::class, 'peek']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
         $app->get('/api/settings/email-templates', [SupplierEmailTemplateAction::class, 'list']);
         $app->get('/api/settings/email-templates/{code:[a-z_]+}/{locale:cs|en}', [SupplierEmailTemplateAction::class, 'get']);

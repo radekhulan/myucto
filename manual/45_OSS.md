@@ -900,13 +900,10 @@ je, říká souhrn importu i náhled podání.
 
 #### Haléřové rozdíly u množství větší než jedna
 
-Jednotková cena bez DPH se vede na **dvě desetinná místa**. Když vyjde na víc
-(například 0,2683 EUR za kus) a množství je větší než 1, přenásobením vznikne rozdíl
-proti zdrojovému systému. Na jednom dokladu jde o haléře, na čtvrtletním podání
-o jednotky eur.
-
-Není to chyba importu, je to mez datového modelu. **Při rekonciliaci OSS podání
-proti zdrojovým dokladům tyhle rozdíly očekávejte** a nehledejte za nimi chybu.
+Jednotková cena bez DPH se vede na **šest desetinných míst** (například 0,2683 EUR
+za kus zůstane přesně), částka řádku se zaokrouhlí na haléře. Rozdíl proti zdrojovému
+systému proto vznikne jen tehdy, když zdrojový systém zaokrouhluje řádek jinak, třeba
+až za součtem dokladu. Na jednom dokladu jde o haléře.
 
 #### Země spotřeby se bere z odběratele, ne z měny
 

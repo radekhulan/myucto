@@ -3,6 +3,10 @@
 *.ps1 text eol=crlf
 .githooks/* text eol=lf
 
+# Kontrola MCP manifestu porovnává deterministický výstup generátoru bajt po bajtu.
+MCP/src/tool-api.generated.json text eol=lf
+api/tests/Fixtures/Mcp/*.json text eol=lf
+
 # PHP zdroják musí mít stejné konce řádků na Windows i na Linuxu — golden
 # heredocy v testech se jinak porovnávají proti CRLF verzi sebe sama.
 *.php text eol=lf
@@ -31,6 +35,11 @@ api/resources/payroll/jmhz/**/*.json text eol=lf
 # spadne na koncích řádků místo na obsahu.
 api/resources/payroll/cz-isco/SHA256SUMS text eol=lf
 api/resources/payroll/cz-isco/**/*.json text eol=lf
+
+# Klasifikace NKPZ (ČSÚ 80145) stejně: export ČSÚ se pinuje bajt po bajtu.
+api/resources/payroll/nkpz/SHA256SUMS text eol=lf
+api/resources/payroll/nkpz/**/*.json text eol=lf
+api/resources/payroll/nkpz/**/*.csv -text -diff
 
 # Otevřená data ČSSZ (sazby pojistného) se pinují otiskem staženého souboru —
 # ten má CRLF. Bez -text je git při commitu normalizoval na LF, takže otisk

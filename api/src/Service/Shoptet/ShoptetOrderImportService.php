@@ -741,7 +741,7 @@ final class ShoptetOrderImportService
         if ($ic !== null) {
             $stmt = $this->db->pdo()->prepare(
                 "SELECT id FROM clients WHERE supplier_id = ? AND archived_at IS NULL
-                    AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ? LIMIT 1"
+                    AND " . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . " = ? LIMIT 1"
             );
             $stmt->execute([$supplierId, $ic]);
             $id = $stmt->fetchColumn();

@@ -137,6 +137,79 @@ fakturace, kontaktů, zakázek, přijatých dokladů, pravidelné fakturace, kni
 ceníku a čtení skladových položek; konkrétní nabídka závisí na právech a rozsahu.
 Účetní a mzdové nástroje se klientským připojením nezpřístupňují.
 
+Dostupnost nástroje se odvozuje z jeho deklarovaných API operací podle stejných
+pravidel klientské domény a oprávnění role jako v aplikaci, s omezením rozsahem
+tokenu. Nástroj se nabídne jen tehdy, když máte práva ke všem jeho operacím,
+včetně pomocného dohledávání. U výkazů práce a materiálu potřebujete čtení nebo
+zápis vydaných faktur podle prováděné akce. Přidání řádku vyžaduje také čtení
+zakázek a klientů; přidání práce navíc čtení nastavení firmy pro dohledání sazby.
+Platí to i při přímém zadání ID faktury a sazby. Výkaz lze přes MCP upravovat
+pouze u konceptu faktury. Seznam sazeb DPH vyžaduje čtení nastavení firmy.
+
+Klientské připojení podporuje také seznam měn a nacenění položky ceníku pro
+odběratele, úpravy hlavičky a položek konceptu přijaté faktury, nahrávání
+příloh vydané faktury nebo PDF přijaté faktury a import přijaté faktury ze
+souboru. Seznam měn vyžaduje čtení nastavení firmy, ceníku, skladu nebo zakázek;
+nacenění položky čtení ceníku, vydaných faktur nebo opakované fakturace. Úprava hlavičky přijatého
+konceptu vyžaduje také čtení klientů a přístup k číselníku měn. Nahrazení již
+archivovaného PDF vyžaduje výslovné potvrzení. Import přijaté faktury ze souboru
+zpracovává ISDOC, ISDOCX a PDF s vloženým ISDOC. K importu je potřeba právo
+vytvořit přijatou fakturu; k úpravám a nahrávání právo zápisu příslušné agendy.
+Všechny tyto zápisové nástroje vyžadují také token pro čtení a zápis.
+
+S čtecím tokenem a právem čtení banky lze zobrazit také zůstatky bankovních
+účtů a návrhy párování výpisu. Návrhy server filtruje podle práv k dotčeným
+dokladům. Čtení pravidelné fakturace zpřístupňuje historii faktur vytvořených
+ze šablony. Čtení skladu umožňuje rychlé hledání zboží, množství vybraných karet
+ve skladech určených k prodeji (bez odečtení rezervací) a seznam nebo detail
+skladů. Hodnotu zásob skladu klientská role nevidí.
+
+Čtení skladu zpřístupňuje také množství po odečtení rezervací přes
+`stock_quantities`, skladové lokace, balení a převody jednotek a aktuální
+zásobu šarží nebo sériových čísel včetně expirace. Klientská odpověď obsahuje
+jen souhrnná množství na cestě a u dodavatelů, ne zdrojové objednávky, nabídky
+dodavatelů ani historii pohybů šarží a sériových čísel. S právem čtení přijatých faktur lze zobrazit platební údaje dokladu;
+MCP vrací údaje bez obrázku QR kódu a platbu neprovádí. Seznam kategorií
+nákladů vyžaduje čtení nastavení firmy.
+
+Čtení vydaných faktur zpřístupňuje přehled záloh vhodných k propojení s fakturou,
+konečných faktur vhodných k propojení se zálohou a záloh s částkou dostupnou
+k postupnému čerpání na konceptu faktury. Umožňuje také náhled úroku z prodlení
+k vydané faktuře. Čtení přijatých faktur zpřístupňuje obdobné přehledy záloh
+a vyúčtovacích faktur od dodavatele. Tyto nástroje pouze zobrazují podklady;
+zápis provádějí samostatné nástroje se zápisovým tokenem:
+
+| Operace | Nástroje | Potřebné právo zápisu |
+|---|---|---|
+| Propojení nebo odpojení vydané zálohy | `link_invoice_advance`, `unlink_invoice_advance` | Vydané faktury |
+| Čerpání na konceptu nebo jeho odebrání | `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | Vydané faktury |
+| Finální faktura ze zálohy | `create_final_invoice_from_proforma` | Vystavování vydaných faktur (`invoices.issue`) |
+| Daňový doklad k přijaté platbě | `create_payment_tax_document` | Evidence úhrad (`invoices.mark_paid`) |
+| Propojení nebo odpojení přijaté zálohy | `link_purchase_advance`, `unlink_purchase_advance` | Přijaté faktury |
+
+Obecný zápis vydaných faktur nenahrazuje samostatné právo vystavování nebo
+evidence úhrad. Zámky dokladů a uzavřených období platí stejně jako v aplikaci;
+klient je nemůže obejít. Tvorba penalizační faktury se klientským připojením
+nezpřístupňuje.
+
+Při ručním režimu daňového dokladu k platbě postupujte takto:
+
+1. Přijatou platbu zálohy vyhledejte přes `list_invoice_payments` a její koncept
+   dokladu založte přes `create_payment_tax_document`.
+2. Koncept zkontrolujte a vystavte přes `issue_invoice`. Opakované založení
+   k téže platbě vrátí existující doklad.
+3. Zálohu čerpejte na konceptu běžné faktury přes `apply_invoice_advance_drawdown`,
+   nebo založte finální koncept přes `create_final_invoice_from_proforma`.
+   Finální koncept zkontrolujte a samostatně vystavte. Opakované založení finálu
+   vrátí již existující doklad.
+
+Čerpání vyžaduje vystavený daňový doklad k platbě, stejnou protistranu a měnu
+a nevyčerpanou částku zálohy; OSS nepodporuje. Opakované čerpání na stejném
+konceptu nahradí dosavadní odpočet. Odpojení vazby vydané i přijaté faktury
+a odebrání čerpání se provedou až s `confirm: true`. Bez potvrzení asistent
+ukáže náhled. Samotné odpojení vazby ponechá odečtenou zálohu na dokladu;
+odebrání čerpání odstraní i odpočtové řádky konceptu.
+
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
 Odebrání oprávnění nebo členství, vypnutí domény či její převedení na jinou

@@ -1,3 +1,4 @@
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { seg } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -21,6 +22,7 @@ export const dimensionQuery = (args) => ({
 });
 
 const read = (name, title, description, properties, required, run) => ({
+  api: false, apiReason: NOT_IN_CLIENT_CATALOG,
   name, title, description, inputSchema: schema(properties, required), write: false, run,
 });
 

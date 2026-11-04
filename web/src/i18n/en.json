@@ -2424,8 +2424,24 @@
         "coverage_issue": "The domain versions do not cover the whole period, so the calculation does not read from it. Fill in the missing effectivity.",
         "missing": "There is no version for this domain."
       },
-      "manual_review_share": "Manual judgement applies to {manual} of {total} parameters — the rest is used normally.",
-      "manual_review_all": "Manual judgement applies to all {total} parameters of this domain.",
+      "review": {
+        "title": "Outside automatic calculation",
+        "category": {
+          "manual_review": "Not calculated by the app",
+          "pending_publication": "Awaiting publication",
+          "pending_publication_expected": "Awaiting publication (expected {month})",
+          "assessed_elsewhere": "Assessed elsewhere"
+        },
+        "years": "{years} set",
+        "go_to": "Go to {agenda}",
+        "source": "Legal basis",
+        "route": {
+          "payroll-annual-settlement": "Annual tax settlement",
+          "payroll-absences": "Absences",
+          "payroll-submissions": "Submissions",
+          "payroll-travel": "Travel expenses"
+        }
+      },
       "manual_review_badge": "Manual judgement",
       "manual_review_why": "Why:",
       "manual_review_action": "What to do:",
@@ -3680,7 +3696,23 @@
       },
       "revision": "revision {revision}",
       "reason_prompt": "Enter the reason for the change:",
+      "reason_prompt_optional": "Note for the run history (optional)",
       "reason_required": "A reason is required.",
+      "cancel_hint": "The work-in-progress calculation of this unapproved run is discarded. Attendance, payroll inputs and components are kept, and you can bring the run back any time with “Start again”.",
+      "continue_steps": {
+        "title": "How to continue",
+        "intro_cancelled": "The run was cancelled because it could not be approved. Fix the inputs below and bring the run back with the last step - payroll is calculated right away. The steps can be done in any order.",
+        "intro": "The run is calculated but cannot be approved yet. Do not cancel it - just fix the inputs below and refresh the run. The steps can be done in any order.",
+        "time": "Approve the month's attendance. For people without tracked attendance, the full fund per the calendar is filled in by “Fill working days” and the bulk approval.",
+        "time_action": "Open attendance and approve the month",
+        "inputs": "Approve the draft payroll inputs.",
+        "inputs_action": "Approve all payroll inputs",
+        "components": "Enter pay (the base component) for those who have none this month. If there really was no income, enter 0.",
+        "components_action": "Open monthly inputs",
+        "refresh": "When done, load the corrected inputs into the run. Payroll is recalculated right away.",
+        "refresh_action": "Refresh inputs and recalculate",
+        "restart_action": "Start again and calculate"
+      },
       "cash_before": "Cash income before enforcement",
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
@@ -3760,11 +3792,11 @@
         }
       },
       "validation": {
-        "draft_inputs_one": "One employment relationship has unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
-        "draft_inputs_many": "There are {count} employment relationships with unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
+        "draft_inputs_one": "One employment relationship has unapproved payroll inputs. Approve them with Approve all (or under Payroll components), then click Refresh inputs.",
+        "draft_inputs_many": "There are {count} employment relationships with unapproved payroll inputs. Approve them with Approve all (or under Payroll components), then click Refresh inputs.",
         "enforcement_net_pay_one": "Enforcement withholding cannot yet be calculated for one employee because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholding will then be recalculated automatically.",
         "enforcement_net_pay_many": "Enforcement withholding cannot yet be calculated for {count} employees because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholdings will then be recalculated automatically.",
-        "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then open a new run revision.",
+        "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then click Refresh inputs.",
         "requires_attention": "A check found data that must be completed or reviewed by a person. Open the place to fix it; the technical detail remains in the audit trail.",
         "and_more": "and {count} more",
         "open_remediation": "Open the place to fix",
@@ -4195,11 +4227,13 @@
         "affected": "Affects: {names}",
         "impact": {
           "blocking": "Payroll cannot be calculated without this",
+          "approval": "Can be calculated, not approved",
           "revision": "Fixing this later requires a correction revision",
           "anytime": "Can be added any time, the run is not held up"
         },
         "impact_hint": {
           "blocking": "The calculation has nothing to work from. Resolve this before anything else.",
+          "approval": "The run starts and calculates, but it cannot be approved until this is resolved. It is easiest to resolve it now - the buttons are next to the finding.",
           "revision": "The run can start now, but this value goes into the frozen snapshot — after inputs are locked it can only be fixed with a new revision.",
           "anytime": "No effect on the payroll calculation. It just has to be filled in before filing."
         },
@@ -4208,11 +4242,12 @@
           "monthly": "Monthly work."
         },
         "title": "Pre-flight check",
-        "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. None of it blocks the run: payroll can be calculated with these findings.",
+        "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. Payroll can be calculated with these findings, but the red ones block approving the run - each has a button that resolves it.",
         "clear": "The pre-flight check found nothing that would stop you from calculating payroll for this period.",
         "all_clear": "The check came back clean, you can calculate payroll.",
         "confirm_title": "Really start the payroll run?",
-        "confirm_intro": "The pre-flight check found the following before anything gets frozen. None of it blocks the run — decide whether to continue or fix it first.",
+        "confirm_intro": "The pre-flight check found the following before anything gets frozen. Payroll can still be calculated - decide whether to continue or fix it first.",
+        "approval_first": "The red findings would block approving the run. We recommend resolving them now, then click “Check again”:",
         "confirm_note": "Starting locks the inputs and calculates payroll right away. Anything entered afterwards stays out of the calculation until the run is reopened.",
         "recheck": "Check again",
         "start_anyway": "Start anyway"
@@ -5474,6 +5509,18 @@
       "empty": "There are no employments for the selected period",
       "empty_hint": "Change the period or disable the incomplete filter.",
       "approve": "Approve month",
+      "absence_action": "Absence",
+      "more_actions": "More",
+      "guide": {
+        "title": "How to process the month",
+        "work": "Enter worked time in the grid below. For people working by the calendar, “Fill working days” and “Save grid” are enough - the full fund is filled in, holidays and weekends are skipped.",
+        "absence": "Enter holiday, sickness, care leave and other absences under Absences. The grid then skips those days.",
+        "absence_action": "Enter absence",
+        "approve": "Approve the month for everyone at once. Approved attendance is the input for the payroll run.",
+        "approve_action": "Approve month for everyone ({count})",
+        "all_approved": "All months on this page are approved.",
+        "to_runs": "Continue to the payroll run"
+      },
       "approved": "Time data was approved and locked.",
       "approve_failed": "The month could not be approved.",
       "reopen": "Reopen",
@@ -5549,7 +5596,14 @@
           "title": "Not approved in bulk ({count}) — handle these individually",
           "absences": "the month contains absences, so answering the unworked-hours and obstacles questions is a decision, not a recorded fact",
           "no_preview": "the JMHZ summary suggestion is missing",
-          "incomplete_suggestions": "the JMHZ summary suggestion is incomplete"
+          "incomplete_suggestions": "the JMHZ summary suggestion is incomplete",
+          "approve_single": "Approve individually"
+        },
+        "under_fund": {
+          "title": "Worked less than the fund and no absence recorded ({count})",
+          "row": "worked {worked} of {fund}",
+          "hint": "You can still approve, but fewer worked hours will go to the ČSSZ report without explanation. If these people worked the whole month by the calendar, fill in the missing days. If they were away, enter an absence.",
+          "fill": "Fill missing working days by the calendar"
         }
       },
       "columns": {
@@ -5617,6 +5671,7 @@
       },
       "plan_shifts": {
         "action": "Schedule shifts from calendar",
+        "short_hint": "Plans shifts on working days. Only needed for wage compensation during sickness and holiday with irregular working hours.",
         "hint": "Creates published shifts on all working days of the month from the employment's work calendar (without a calendar Monday to Friday at 8 h). Days that already have a shift are skipped. Sick-pay and vacation compensation need these shifts.",
         "nothing": "Every working day of the month already has a shift.",
         "done": "Shifts created: {count} ({name}).",
@@ -5674,19 +5729,21 @@
         "holiday_arrangement_missing": "The month contains work on a public holiday, but {name} has no agreed arrangement (time off in lieu, or a surcharge). Pay cannot be calculated without it, so approval stops here.",
         "difficulty_factors_missing": "The month contains work in a difficult environment, but {name} has no count of aggravating factors under § 117.",
         "average_earning_missing": "The surcharge for {name} is calculated from average earnings, and none is established for this period.",
-        "inputs_locked": "Period inputs are locked by a payroll run, so approving attendance cannot write surcharges into them.",
+        "inputs_locked": "The payroll run for this month already has locked inputs, so approving attendance cannot write surcharges into them. In the payroll run click “Cancel run” (attendance and inputs are kept), come back and approve the month, then click “Start again and calculate” in the run.",
         "overtime_conflict": "Overtime for {name} is entered twice — in attendance and in quick inputs. Keep only one record.",
         "link": {
           "holiday_arrangement_missing": "Open the employee card and set the surcharge arrangement",
           "difficulty_factors_missing": "Open the employee card and set the aggravating factors",
           "average_earning_missing": "Open average earnings",
-          "inputs_locked": "Open payroll runs",
+          "inputs_locked": "Open this month's payroll run",
           "overtime_conflict": "Open quick inputs"
         }
       },
       "calendar": {
         "default_name": "Regular working week",
         "create": "Create calendar",
+        "short_hint": "Mon-Fri 8 h working week from the start of the month. Without a calendar the fund is estimated the same way.",
+        "new_version_hint": "From day 1 of the month sets a Mon-Fri 8 h week and replaces the current schedule. For part-time work this raises the fund.",
         "new_version": "New calendar version",
         "saved": "The historical work-calendar version was saved.",
         "failed": "The calendar could not be saved."
@@ -8133,7 +8190,10 @@
           "identifiers_verified": "I verified the OIČ and ID PPV in the employee list on the ČSSZ ePortal",
           "identifiers_verified_hint": "Only for an employee taken over from an earlier notification (ONZ) whose numbers do not come from a ČSSZ protocol, an accepted A3 completion or an imported ČSSZ employee export. The A2 deregistration can then be filed without the A3 completion, which stays as a separate duty.",
           "select_placeholder": "Select…"
-        }
+        },
+        "reprepare": "Prepare again",
+        "reprepare_failed": "The filing could not be prepared again.",
+        "vintage_expired": "The filing was prepared in the REGZEC25 format; from 23 December 2026 ČSSZ accepts changes to an active employment only as REGZEC27. Prepare it again."
       },
       "dimensions": {
         "title": "Payroll dimensions of this relation",
@@ -13437,7 +13497,7 @@
       "registration_schema_unavailable": "This ČSSZ form cannot be prepared by this version of the application. Only REGZEC25 registrations and notices and partial PREZEC26 registrations are supported - file others through the ČSSZ portal.",
       "registration_spec_version_unavailable": "The event must be reported on a ČSSZ form under the JMHZ 2027 specification, which this version of the application cannot prepare. The filing is not prepared.",
       "registration_spec_version_mismatch": "The registration filing uses a different form vintage than the decisive event date requires (boundary 1 January 2027). Prepare the filing again.",
-      "registration_regzec27_not_yet_accepted": "An event from 1 January 2027 is reported on form REGZEC27, which the production ČSSZ accepts only from 1 January 2027. Prepare and send the filing on 1 January 2027 or later. Employees with Czech citizenship can be partially registered in December via PREZEC (at the earliest eight days before they start). Partial registration is not possible for a foreign employee: file the registration on 1 January 2027 or later, always before they start work; if they start on 1 January 2027, file it that day before work begins.",
+      "registration_regzec27_not_yet_accepted": "This filing is reported on form REGZEC27, which the production ČSSZ accepts only from 23 December 2026. Prepare and send the filing on 23 December 2026 or later. Employees with Czech citizenship can be partially registered earlier via PREZEC (at the earliest eight days before they start). Partial registration is not possible for a foreign employee: file the registration on 23 December 2026 or later, always before they start work; if they start on 1 January 2027, file it that day at the latest, before work begins.",
       "registration_regzec25_value_from_2027": "The data contain a codebook value that ČSSZ accepts only for events from 1 January 2027. Choose another value for an earlier date.",
       "registration_regzec27_change_in_future": "A change or correction cannot be filed with a future effective date. Prepare the filing on the day it takes effect at the earliest.",
       "registration_regzec27_orientation_number_too_long": "From 1 January 2027 the orientation number may have at most four characters in every address.",
@@ -13572,7 +13632,15 @@
       "zp_transport_envelope_undocumented": "No documented transport envelope format exists for automated dispatch to this health insurer. The application prepares the file, but you must send it manually through a documented channel (data box or the insurer's portal).",
       "zp_xml_serialization_failed": "The health insurer data record could not be built.",
       "zp_xml_snapshot_mismatch": "The data record does not match the exact source snapshot.",
-      "zp_xsd_validation_failed": "The data record did not pass validation against the pinned XSD schema."
+      "zp_xsd_validation_failed": "The data record did not pass validation against the pinned XSD schema.",
+      "registration_regzec25_change_stale": "The filing was prepared in the REGZEC25 format; from 23 December 2026 ČSSZ accepts changes to an active employment only as REGZEC27. Prepare it again.",
+      "registration_reprepare_not_needed": "This filing does not need to be prepared again: it is not a prepared change or correction whose format ČSSZ would reject today.",
+      "registration_reprepare_not_applicable": "Only a change or correction from an approved event can be prepared again.",
+      "registration_registered_end_mismatch": "The end date on the employment card differs from the date in the sent deregistration. A change or correction of an ended employment must carry the date held by ČSSZ. Correct the date on the employment card.",
+      "registration_a4_termination_source_missing": "A correction for an employment that has ended at ČSSZ also carries data from the deregistration (death, unemployment benefit data). No approved deregistration was found for this employment: approve the deregistration first, or settle the correction with ČSSZ outside the application.",
+      "registration_a4_termination_source_variant_mismatch": "The approved deregistration belongs to a different activity type than the correction. Check the activity type in the agreed terms of the employment.",
+      "registration_a4_termination_source_incomplete": "The approved deregistration does not have complete unemployment benefit data. Approve the deregistration again with the data filled in.",
+      "registration_a4_unemployment_forbidden": "Unemployment benefit data can be sent in a correction only for a regular employment that has already ended at ČSSZ."
     },
     "remediation": {
       "actions": {
@@ -14040,6 +14108,7 @@
     "delete_success": "The document left the queue and its original is in the Documents trash.",
     "submitted_by": "Submitted by: {name}",
     "processed_success": "The document was processed into a received invoice.",
+    "processing_stale": "Extraction did not finish because processing was interrupted. Run it again or delete the document.",
     "already_exists": "This document is already in the system as received invoice {number}; no new invoice was created. A cancelled document does not block processing.",
     "bulk_duplicates": "Already in the system: {n} documents. No new invoice was created for them.",
     "upload_already_processed": "File {file} has already been processed as received invoice {number}.",
@@ -23762,6 +23831,13 @@
     "bulk_pdf_download": "Download PDF",
     "bulk_pdf_done": "PDF export ready ({n} invoices).",
     "bulk_pdf_failed": "PDF export failed",
+    "book_issued": "Issued invoice book",
+    "book_received": "Received invoice book",
+    "book_hint": "Report of documents matching the current list filter, with totals",
+    "book_scope": "All documents matching the current filter, without paging",
+    "book_pdf": "Landscape PDF",
+    "book_xlsx": "XLSX spreadsheet",
+    "book_failed": "The invoice book could not be created",
     "oss": {
       "enabled": "OSS",
       "country": "Country",
@@ -26480,9 +26556,21 @@
     "flat_tax_band2": "Band 2 (up to CZK 1,500,000/yr)",
     "flat_tax_band3": "Band 3 (up to CZK 2,000,000/yr)",
     "flat_tax_hint": "Non-VAT payers only (§ 7a Income Tax Act). The Sales page shows how close you are to the band's income limit.",
-    "financial_office_code": "Financial office code",
-    "financial_office_hint": "e.g. 451 = Prague 1. Find on tax portal.",
-    "workplace_code": "Territorial workplace code (ÚzP)",
+    "financial_office_code": "Tax office",
+    "financial_office_hint": "Locally competent tax office. Its code is used in tax filings.",
+    "workplace_code": "Territorial workplace (ÚzP)",
+    "tax_office": {
+      "none": "Not selected",
+      "unknown": "Code {code} (not in the codebook)",
+      "pick_office_first": "Select the tax office first",
+      "specialized_hint": "The Specialised Tax Office has no territorial workplaces.",
+      "data_box": "Data box",
+      "account_vat": "VAT account",
+      "account_dppo": "Corporate income tax account",
+      "account_dpfo": "Personal income tax account",
+      "account_employment": "Employment income tax advances account",
+      "account_withholding": "Withholding tax account"
+    },
     "cssz_vsdp": "Self-employed social security VS (ČSSZ)",
     "cssz_ossz_code": "District SSA code",
     "health_insurance_number": "Health insurance member no.",
@@ -29134,7 +29222,24 @@
       "last_import": "Last import: {date} · {n} documents",
       "batch_summary": "Imported {ok} documents, {failed} with errors.",
       "show_in_list": "Show in purchase invoices",
-      "coming_hint": "—"
+      "coming_hint": "—",
+      "merge": {
+        "title": "Merge several PDFs into one document",
+        "hint": "Got one invoice or receipt split across several files (one page each)? Upload all parts, put them in order by dragging or with the arrows and they are merged into one PDF that is extracted as a single document.",
+        "drop": "Drop the document parts here or click",
+        "formats": "PDFs and photos (JPG, PNG, WebP), at least two files",
+        "parts_title": "Document parts ({n})",
+        "move_up": "Move up",
+        "drag_hint": "Drag to change the order",
+        "move_down": "Move down",
+        "run": "Merge and import as one document",
+        "merging": "Merging files…",
+        "only_pdf_images": "Only PDFs and photos (JPG, PNG, WebP) can be merged. Other files were skipped.",
+        "error_encrypted": "File {file} is password protected and cannot be merged.",
+        "error_unreadable": "File {file} could not be read.",
+        "error_unsupported": "File {file} cannot be merged, only PDFs and photos are supported.",
+        "error_too_large": "The merged PDF exceeds 32 MB. Use smaller photos or fewer pages."
+      }
     },
     "salesAi": {
       "import_title": "AI import of issued invoices",

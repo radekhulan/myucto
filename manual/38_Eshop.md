@@ -780,8 +780,8 @@ nahoru). Pro dopočtenou cenu **1 035,7335 Kč** dopadnou režimy takto:
 <!-- cols: 34 20 46 -->
 | Režim | Výsledek | Poznámka |
 |---|---:|---|
-| **Bez** | 1 035,73 | Jen normalizace na haléře |
-| **Na haléře (0,01)** | 1 035,73 | Totožné s „Bez“ |
+| **Bez** | 1 035,73 | Na haléře; levná položka, kterou by haléře zkreslily o víc než 1 % (0,0108 Kč), drží až šest desetinných míst |
+| **Na haléře (0,01)** | 1 035,73 | |
 | **Na desetihaléře (0,10)** | 1 035,70 | |
 | **Na půlkoruny (0,50)** | 1 035,50 | |
 | **Na koruny (1)** | 1 036,00 | Nejčastější volba pro běžný retail |
@@ -978,7 +978,8 @@ Duplikace karty zákaznické ceny nepřenáší.
 - Cena je vždy **za základní jednotku** karty a **bez DPH**. Řádek faktury v balení
   ([Balení](37_Sklad.md#371228-baleni)) dostane cenu vynásobenou poměrem balení.
 - Pro jednoho odběratele a měnu smí mít karta jen jednu individuální cenu.
-- Sleva se počítá ze standardní ceny v dané měně a zaokrouhluje na haléře.
+- Sleva se počítá ze standardní ceny v dané měně a zaokrouhluje na haléře. Levné zboží,
+  které by haléře zkreslily o víc než 1 %, drží až šest desetinných míst, takže se nevynuluje.
 
 ##### Která cena platí
 
@@ -1498,7 +1499,8 @@ V detailu hladiny zpřesníte slevu nebo přirážku pro konkrétní zboží:
 
 - Sleva, přirážka i pevná cena jsou vždy **za základní jednotku** karty a **bez DPH**.
   Řádek faktury v balení dostane cenu vynásobenou poměrem balení.
-- Sleva i přirážka se počítá ze standardní ceny v měně dokladu a zaokrouhluje na haléře.
+- Sleva i přirážka se počítá ze standardní ceny v měně dokladu a zaokrouhluje na haléře,
+  u levného zboží, které by haléře zkreslily o víc než 1 %, na až šest desetinných míst.
   Příklad: standardní cena 1 000 Kč, přirážka 45 % → 1 450 Kč; sleva 10 % → 900 Kč.
 - Pravidlo s hodnotou 0 % vyřadí zboží z výchozí slevy i přirážky hladiny.
 - Pravidlo může platit jen v jedné měně, bez měny platí ve všech. Pevná cena má měnu

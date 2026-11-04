@@ -13,6 +13,7 @@ use MyInvoice\Repository\StockPriceLevelRepository;
 use MyInvoice\Repository\WarehouseRepository;
 use MyInvoice\Service\Eshop\CategoryTreeService;
 use MyInvoice\Service\Eshop\EshopException;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryException;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryWriter;
 use MyInvoice\Service\Migration\Shared\MigratedStockOpening;
@@ -224,7 +225,7 @@ final class StockImporter
                 'tracking_mode' => 'none',
                 'ean' => PohodaStock::ean($card['EAN']),
                 'vat_rate_id' => $vat === null ? null : $this->vatRates->find($vat, $date),
-                'sale_price_without_vat' => (float) $card['ProdejKc'] > 0 ? number_format((float) $card['ProdejKc'], 2, '.', '') : null,
+                'sale_price_without_vat' => (float) $card['ProdejKc'] > 0 ? self::unitPrice((float) $card['ProdejKc']) : null,
                 'min_qty' => (float) $card['MinLim'] > 0 ? number_format((float) $card['MinLim'], 3, '.', '') : null,
                 'intrastat_cn8_code' => null,
                 'intrastat_net_mass_kg' => null,
@@ -415,7 +416,7 @@ final class StockImporter
             $price = $list['vat_included'] ? $row['price'] / (1 + $item['vat'] / 100) : $row['price'];
             $this->levels->insertRule($ctx->supplierId, $list['level'], [
                 'match_type' => 'product', 'match_id' => $item['id'], 'rule_type' => 'fixed', 'discount_pct' => null,
-                'fixed_price' => number_format(round($price, 2), 2, '.', ''), 'currency_code' => $list['currency'], 'priority' => 0,
+                'fixed_price' => self::unitPrice($price), 'currency_code' => $list['currency'], 'priority' => 0,
             ]);
             $list['existing'][$key] = true;
             unset($list);
@@ -505,11 +506,17 @@ final class StockImporter
         }
         $this->vendors->add($ctx->supplierId, $itemId, [
             'client_id' => $clientId,
-            'purchase_price' => (float) $card['NakupC'] > 0 ? number_format((float) $card['NakupC'], 2, '.', '') : null,
+            'purchase_price' => (float) $card['NakupC'] > 0 ? self::unitPrice((float) $card['NakupC']) : null,
             'currency_code' => 'CZK',
             'is_preferred' => true,
         ]);
         $ctx->protocol->count(self::STEP, 'vendors');
+    }
+
+    /** Cena karty na šest míst, tvar „12.50" / „0.0108" jako při čtení z databáze. */
+    private static function unitPrice(float $price): string
+    {
+        return (string) UnitPricePrecision::toDecimalString(number_format($price, UnitPricePrecision::DECIMALS, '.', ''));
     }
 
     /** Sazba DPH karty z pořadí sazby POHODY; snížená podle kalendářního roku konce období agendy. */

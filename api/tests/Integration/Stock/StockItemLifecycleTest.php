@@ -228,14 +228,14 @@ final class StockItemLifecycleTest extends StockTestCase
         $vendorRow = $vendor->fetch(\PDO::FETCH_ASSOC);
 
         self::assertSame('25.000', $row['markup_pct']);
-        self::assertSame('50.00', $row['computed_price']);
+        self::assertSame('50.000000', $row['computed_price']);
         self::assertSame('40.000000', $row['computed_base']);
         self::assertNull($row['computed_rate']);
         self::assertNotSame('2000-01-01 00:00:00', $row['computed_at']);
         self::assertStringNotContainsString('"old":"audit"', (string) $row['computed_context']);
         self::assertSame(0, (int) $row['use_pricing_rules']);
         self::assertNull($vendorRow['vendor_sku']);
-        self::assertSame('40.00', $vendorRow['purchase_price']);
+        self::assertSame('40.000000', $vendorRow['purchase_price']);
     }
 
     public function testDuplicatePreservesCapturedVendorOfferTerms(): void

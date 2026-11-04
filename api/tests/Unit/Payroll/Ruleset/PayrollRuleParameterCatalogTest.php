@@ -39,6 +39,50 @@ final class PayrollRuleParameterCatalogTest extends TestCase
         );
     }
 
+    /**
+     * Každý parametr, ze kterého výpočet nečerpá, má jednu ze tří kategorií.
+     * „Čeká na vyhlášení" musí říct kdy a odkud, „posuzuje se jinde" musí vést
+     * na routu, která ve frontendu opravdu existuje.
+     */
+    public function testEveryReviewExplanationHasCategoryAndWorkingPointer(): void
+    {
+        $routes = (string) file_get_contents(dirname(__DIR__, 5) . '/web/src/router/workspaceRoutes.ts');
+        $categories = [
+            PayrollRuleParameterCatalog::REVIEW_MANUAL,
+            PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION,
+            PayrollRuleParameterCatalog::REVIEW_ASSESSED_ELSEWHERE,
+        ];
+        $seen = [];
+        foreach (\MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets::provider()->versions() as $version) {
+            foreach ($version->parameters as $key => $parameter) {
+                if ($parameter->capability !== PayrollRulesetCapability::ManualReview) {
+                    continue;
+                }
+                $explanation = PayrollRuleParameterCatalog::manualReview($version->domain->value, $key);
+                self::assertNotNull($explanation, "{$version->id}:{$key}");
+                self::assertContains($explanation['category'], $categories, $key);
+                if ($explanation['category'] === PayrollRuleParameterCatalog::REVIEW_PENDING_PUBLICATION) {
+                    self::assertMatchesRegularExpression('/^\d{4}-\d{2}$/', $explanation['expected'] ?? '', $key);
+                    self::assertStringStartsWith('https://', $explanation['source_url'] ?? '', $key);
+                }
+                if (isset($explanation['route'])) {
+                    self::assertStringContainsString("name: '{$explanation['route']}'", $routes, $key);
+                }
+                $seen[$version->domain->value . '|' . $key] = $explanation['category'];
+            }
+        }
+
+        self::assertSame(
+            PayrollRuleParameterCatalog::REVIEW_ASSESSED_ELSEWHERE,
+            $seen['income_tax|credit.spouse.eligibility'] ?? null,
+        );
+        self::assertSame(
+            'payroll-annual-settlement',
+            PayrollRuleParameterCatalog::manualReview('income_tax', 'credit.spouse.eligibility')['route'] ?? null,
+        );
+        self::assertArrayNotHasKey('income_tax|benefit_exemption.non_cash_leisure.yearly', $seen);
+    }
+
     public function testManualReviewIsRareAndTheRestOfTheSetIsUsable(): void
     {
         $manual = 0;

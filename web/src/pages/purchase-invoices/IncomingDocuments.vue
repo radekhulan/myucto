@@ -133,12 +133,14 @@ function canReview(item: PurchaseInvoiceSubmission): boolean {
     && item.replacement_submission_id === null && item.purchase_invoice_id === null
 }
 const canReviewSelected = computed(() => canWrite.value && selected.value !== null && canReview(selected.value))
-const canDeleteSelected = computed(() =>
-  canDelete.value
-  && selected.value !== null
-  && selected.value.status !== 'processed'
-  && selected.value.status !== 'processing',
-)
+/** Přerušené vytěžení (`processing_stale`) jde spustit znovu i smazat jako čekající podání. */
+function canExtract(item: PurchaseInvoiceSubmission): boolean {
+  return item.status === 'submitted' || !!item.processing_stale
+}
+function canDeleteItem(item: PurchaseInvoiceSubmission): boolean {
+  return item.status !== 'processed' && (item.status !== 'processing' || !!item.processing_stale)
+}
+const canDeleteSelected = computed(() => canDelete.value && selected.value !== null && canDeleteItem(selected.value))
 
 /** Hromadný výběr (checkboxy) je nezávislý na dokladu otevřeném v náhledu. */
 const checkedIds = ref<Set<number>>(new Set())
@@ -147,9 +149,9 @@ const bulkDims = ref<DimensionMap>({})
 const bulkProgress = ref<{ done: number; total: number } | null>(null)
 const checkedItems = computed(() => items.value.filter(i => checkedIds.value.has(i.id)))
 const allChecked = computed(() => items.value.length > 0 && checkedItems.value.length === items.value.length)
-const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(i => i.status === 'submitted'))
+const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(canExtract))
 const bulkCanReject = computed(() => canWrite.value && checkedItems.value.some(canReview))
-const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(i => i.status !== 'processed' && i.status !== 'processing'))
+const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(canDeleteItem))
 const bulkCanDimensions = computed(() => canWrite.value && dims.canEdit.value && dims.documentTypes.value.length > 0)
 const bulkNeedsReason = computed(() =>
   checkedItems.value.some(canReview),
@@ -201,7 +203,7 @@ function reportBulk(result: { ok: number; failed: number; lastError: string }, s
 
 async function bulkExtract() {
   if (acting.value || !bulkCanExtract.value) return
-  const targets = checkedItems.value.filter(i => i.status === 'submitted')
+  const targets = checkedItems.value.filter(canExtract)
   const skipped = checkedItems.value.length - targets.length
   const invoiceIds: number[] = []
   let duplicates = 0
@@ -247,7 +249,7 @@ async function bulkReject() {
 
 async function bulkDelete() {
   if (acting.value || !bulkCanDelete.value) return
-  const targets = checkedItems.value.filter(i => i.status !== 'processed' && i.status !== 'processing')
+  const targets = checkedItems.value.filter(canDeleteItem)
   const skipped = checkedItems.value.length - targets.length
   if (!confirm(t('purchase_submissions.bulk_delete_confirm', { n: targets.length }))) return
   acting.value = true
@@ -767,9 +769,12 @@ onBeforeUnmount(() => { context++; loadRequest++ })
           <p v-if="selected.extraction_error" class="text-xs rounded bg-warning-50 text-warning-700 px-3 py-2">
             {{ selected.extraction_error }}
           </p>
+          <p v-if="selected.processing_stale" class="text-xs rounded bg-warning-50 text-warning-700 px-3 py-2">
+            {{ t('purchase_submissions.processing_stale') }}
+          </p>
 
           <div class="flex flex-wrap gap-2">
-            <button v-if="selected.status === 'submitted' && canWrite && canCreateInvoice" type="button"
+            <button v-if="canExtract(selected) && canWrite && canCreateInvoice" type="button"
               :disabled="acting" :class="btnFilled('primary')" @click="extract">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m9-9H3" /></svg>
               {{ acting ? t('purchase_submissions.processing') : t('purchase_submissions.extract') }}

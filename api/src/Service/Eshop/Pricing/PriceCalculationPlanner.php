@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Eshop\Pricing;
 
+use MyInvoice\Service\Invoice\UnitPricePrecision;
+
 final class PriceCalculationPlanner
 {
     public function __construct(
@@ -93,7 +95,7 @@ final class PriceCalculationPlanner
                 if ($baseCzk !== null) {
                     $computedBase = $baseCzk;
                     if ($currency === 'CZK') {
-                        $computedPrice = PriceRounding::apply(self::calculate($baseCzk, '1', $mode, $percentage), $rounding);
+                        $computedPrice = self::roundComputed(self::calculate($baseCzk, '1', $mode, $percentage), $rounding);
                     } else {
                         if ($fxPolicy !== null) {
                             $sellingRate = $this->fx->businessRateFor($supplierId, $currency, $onDate, $fxPolicy['source'], $fxPolicy['max_age_days'], $snapshot);
@@ -102,7 +104,7 @@ final class PriceCalculationPlanner
                             $rate = $this->fx->rateFor($currency, $onDate, $snapshot);
                         }
                         if ($rate !== null && bccomp($rate, '0', 6) > 0) {
-                            $computedPrice = PriceRounding::apply(self::calculate($baseCzk, $rate, $mode, $percentage), $rounding);
+                            $computedPrice = self::roundComputed(self::calculate($baseCzk, $rate, $mode, $percentage), $rounding);
                             $computedRate = $rate;
                         }
                     }
@@ -137,6 +139,18 @@ final class PriceCalculationPlanner
             ]);
         }
         return $plans;
+    }
+
+    /**
+     * Vypočtená cena bez zvoleného zaokrouhlení jde na haléře jako dřív; šest míst
+     * dostane jen levná položka, kterou by haléře zkreslily. Explicitní mód (0.01,
+     * 0.10, 1 …) rozhoduje sám. Pevná cena zadaná ručně tudy nejde.
+     */
+    private static function roundComputed(string $price, string $rounding): string
+    {
+        return $rounding === 'none'
+            ? UnitPricePrecision::roundDerived($price)
+            : PriceRounding::apply($price, $rounding);
     }
 
     private static function calculate(string $baseCzk, string $rate, string $mode, string $percentage): string

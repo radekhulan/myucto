@@ -147,4 +147,15 @@ describe('Příchozí doklady: odmítnutí', () => {
     const wrapper = await mountPage([submission(1, status)])
     expect(button(wrapper, 'reject')).toBeUndefined()
   })
+
+  it('přerušené vytěžení nabídne znovu vytěžit i smazat, běžící ne', async () => {
+    const running = await mountPage([submission(1, 'processing', 'staff')])
+    expect(button(running, 'extract')).toBeUndefined()
+    expect(running.find('[data-testid="inbox-delete"]').exists()).toBe(false)
+
+    const stale = await mountPage([{ ...submission(2, 'processing', 'staff'), processing_stale: true }])
+    expect(stale.text()).toContain('purchase_submissions.processing_stale')
+    expect(button(stale, 'extract')).toBeDefined()
+    expect(stale.find('[data-testid="inbox-delete"]').exists()).toBe(true)
+  })
 })

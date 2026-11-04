@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\InvoiceListFilters;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
-use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
@@ -47,11 +47,6 @@ final class ListPurchaseInvoicesAction
     {
         $q = $request->getQueryParams();
         $filter = (array) ($q['filter'] ?? []);
-        foreach (['has_visual_document', 'has_structured_source'] as $key) {
-            if (array_key_exists($key, $filter) && !in_array($filter[$key], ['0', '1'], true)) {
-                return Json::error($response, 'validation_failed', "filter[{$key}] musí být 0 nebo 1.", 422);
-            }
-        }
         if (($filter['include_dimensions'] ?? null) === '1'
             && !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
@@ -68,50 +63,9 @@ final class ListPurchaseInvoicesAction
             return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
         }
 
-        // Neuhrazené K DATU X (task #4) — historický protějšek `unpaid_only`. Validace
-        // shodná se SaldoAction::isDate — chybný formát je 422, ne tiché "nefiltrovat".
-        $unpaidAsOf = isset($filter['unpaid_as_of']) && is_scalar($filter['unpaid_as_of'])
-            ? trim((string) $filter['unpaid_as_of'])
-            : '';
-        if ($unpaidAsOf !== '' && !$this->isDate($unpaidAsOf)) {
-            return Json::error($response, 'validation_failed', "filter[unpaid_as_of] musí být datum (YYYY-MM-DD).", 422);
-        }
-
-        $filters = [
-            'q'             => isset($q['q']) ? trim((string) $q['q']) : '',
-            'status'        => $filter['status']        ?? null,
-            'document_kind' => $filter['document_kind'] ?? null,
-            'vendor_id'     => $filter['vendor_id']     ?? null,
-            'project_id'    => $filter['project_id']    ?? null,
-            'year'          => $filter['year']          ?? null,
-            'month'         => $filter['month']         ?? null,
-            'date_from'     => $filter['date_from']     ?? null,
-            'date_to'       => $filter['date_to']       ?? null,
-            'currency'      => $filter['currency']      ?? null,
-            'unpaid_only'   => !empty($filter['unpaid_only']),
-            'overdue'       => !empty($filter['overdue']),
-            'unpaid_as_of'  => $unpaidAsOf !== '' ? $unpaidAsOf : null,
-            'unmatched'     => !empty($filter['unmatched']),
-            'needs_review'  => !empty($filter['needs_review']),
-            'approval_status' => is_scalar($filter['approval_status'] ?? $q['approval_status'] ?? null)
-                ? (string) ($filter['approval_status'] ?? $q['approval_status']) : null,
-            'paid_shortfall' => !empty($filter['paid_shortfall']),
-            'payment_ordered' => $filter['payment_ordered'] ?? null,
-            'booked'        => $filter['booked'] ?? null,
-            'has_visual_document' => $filter['has_visual_document'] ?? null,
-            'has_structured_source' => $filter['has_structured_source'] ?? null,
-            'import_batch_id' => $filter['import_batch_id'] ?? null,
-            'supplier_id'   => (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0),
-            'group_by_month' => !is_scalar($filter['group_by_month'] ?? null) || (string) $filter['group_by_month'] !== '0',
-            'sort_key' => is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '',
-            'sort_dir' => is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '',
-        ];
-
-        // CSV split pro multi-select
-        foreach (['status', 'document_kind'] as $f) {
-            if (is_string($filters[$f]) && $filters[$f] !== '' && str_contains($filters[$f], ',')) {
-                $filters[$f] = explode(',', $filters[$f]);
-            }
+        $filters = InvoiceListFilters::purchase($request);
+        if (is_string($filters)) {
+            return Json::error($response, 'validation_failed', $filters, 422);
         }
 
         $page = max(1, (int) ($q['page'] ?? 1));
@@ -179,11 +133,5 @@ final class ListPurchaseInvoicesAction
         }
 
         return Json::ok($response, $result);
-    }
-
-    private function isDate(string $v): bool
-    {
-        $d = \DateTimeImmutable::createFromFormat('Y-m-d', $v);
-        return $d !== false && $d->format('Y-m-d') === $v;
     }
 }

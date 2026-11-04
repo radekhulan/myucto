@@ -4,6 +4,7 @@
 
 import { i18n } from '@/i18n'
 import { isInvoiceDateOverdue } from '@/utils/invoiceOverdue'
+import { hasSubCentPrice, unitPriceDecimals } from '@/utils/unitPrice'
 
 // Per-currency default decimals (ISO 4217). JPY/KRW/HUF = 0, BHD/JOD = 3, ostatní 2.
 // Volající může override přes parametr `decimals`.
@@ -20,10 +21,15 @@ function activeLocale(): string {
   return i18n.global.locale.value === 'en' ? 'en-US' : 'cs-CZ'
 }
 
+/** Jednotková cena: haléřová jako částka, přesnější (0,004 EUR/ks, sazba 333,333333) na svá místa, nejvýš šest. */
+export function formatUnitPrice(value: number | string | null | undefined, currency = 'CZK'): string {
+  const amount = Number(value)
+  if (value === null || value === undefined || !Number.isFinite(amount) || !hasSubCentPrice(amount)) return formatMoney(value, currency)
+  return formatMoney(amount, currency, Math.max(defaultDecimals(currency), unitPriceDecimals(amount)))
+}
+
 export function formatHourlyRate(value: number, currency = 'CZK'): string {
-  if (value === Math.round(value * 100) / 100) return formatMoney(value, currency)
-  const decimals = Math.max(defaultDecimals(currency), Math.min(6, (value.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length))
-  return formatMoney(value, currency, decimals)
+  return formatUnitPrice(value, currency)
 }
 
 export function formatMoney(value: number | string | null | undefined, currency: string = 'CZK', decimals?: number): string {

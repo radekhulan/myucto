@@ -2424,8 +2424,24 @@
         "coverage_issue": "Verze domény nepokrývají celé období, takže z ní výpočet nečerpá. Doplňte chybějící účinnost.",
         "missing": "Pro tuhle doménu není žádná verze."
       },
-      "manual_review_share": "Ruční posouzení se týká {manual} z {total} parametrů - zbytek se používá normálně.",
-      "manual_review_all": "Ruční posouzení se týká všech {total} parametrů domény.",
+      "review": {
+        "title": "Mimo automatický výpočet",
+        "category": {
+          "manual_review": "Aplikace nepočítá",
+          "pending_publication": "Čeká na vyhlášení",
+          "pending_publication_expected": "Čeká na vyhlášení (očekáváno {month})",
+          "assessed_elsewhere": "Posuzuje se jinde"
+        },
+        "years": "sada {years}",
+        "go_to": "Přejít na {agenda}",
+        "source": "Předpis",
+        "route": {
+          "payroll-annual-settlement": "Roční zúčtování",
+          "payroll-absences": "Nepřítomnosti",
+          "payroll-submissions": "Podání",
+          "payroll-travel": "Cestovní náhrady"
+        }
+      },
       "manual_review_badge": "Ruční posouzení",
       "manual_review_why": "Proč:",
       "manual_review_action": "Co s tím:",
@@ -3680,7 +3696,23 @@
       },
       "revision": "revize {revision}",
       "reason_prompt": "Uveďte důvod změny:",
+      "reason_prompt_optional": "Poznámka do historie běhu (nepovinná)",
       "reason_required": "Důvod je povinný.",
+      "cancel_hint": "Zruší se rozpracovaný výpočet neschváleného běhu. Docházka, mzdové vstupy ani složky se nemažou a běh kdykoli vrátíte tlačítkem „Začít znovu“.",
+      "continue_steps": {
+        "title": "Jak pokračovat",
+        "intro_cancelled": "Běh je zrušený, protože ho nešlo schválit. Opravte podklady níže a běh vraťte posledním krokem - mzdy se rovnou spočítají. Kroky jdou udělat v libovolném pořadí.",
+        "intro": "Běh je spočítaný, ale schválit ho zatím nejde. Nic nerušte - stačí opravit podklady níže a běh obnovit. Kroky jdou udělat v libovolném pořadí.",
+        "time": "Schvalte docházku za měsíc. Kdo docházku nevede, odpracoval podle kalendáře celý fond - to obstará „Vyplnit pracovní dny“ a hromadné schválení.",
+        "time_action": "Otevřít docházku a schválit měsíc",
+        "inputs": "Schvalte rozpracované mzdové vstupy.",
+        "inputs_action": "Schválit všechny mzdové vstupy",
+        "components": "Doplňte mzdu (základní složku) těm, kdo ji v měsíci nemají. Pokud příjem opravdu nevznikl, zadejte 0 Kč.",
+        "components_action": "Otevřít měsíční vstupy",
+        "refresh": "Až bude hotovo, načtěte opravené podklady do běhu. Mzdy se rovnou přepočítají.",
+        "refresh_action": "Obnovit podklady a přepočítat",
+        "restart_action": "Začít znovu a spočítat"
+      },
       "cash_before": "Peněžní příjem před srážkou",
       "enforcement_withheld": "Exekuční srážka a paušál",
       "payable_after": "K výplatě po srážce",
@@ -3760,11 +3792,11 @@
         }
       },
       "validation": {
-        "draft_inputs_one": "Jeden pracovní vztah má neschválené mzdové vstupy. Schvalte je v agendě Mzdové složky a potom otevřete novou revizi běhu.",
-        "draft_inputs_many": "Neschválené mzdové vstupy mají pracovní vztahy v počtu {count}. Schvalte je v agendě Mzdové složky a potom otevřete novou revizi běhu.",
+        "draft_inputs_one": "Jeden pracovní vztah má neschválené mzdové vstupy. Schvalte je tlačítkem Schválit vše (nebo v agendě Mzdové složky) a potom klikněte na Obnovit podklady.",
+        "draft_inputs_many": "Neschválené mzdové vstupy mají pracovní vztahy v počtu {count}. Schvalte je tlačítkem Schválit vše (nebo v agendě Mzdové složky) a potom klikněte na Obnovit podklady.",
         "enforcement_net_pay_one": "Exekuční srážku u jednoho zaměstnance zatím nelze spočítat, protože chybí vypočtená nebo ověřená čistá mzda. Nejprve dokončete zákonný výpočet; srážka se potom přepočítá automaticky.",
         "enforcement_net_pay_many": "Exekuční srážku u {count} zaměstnanců zatím nelze spočítat, protože chybí vypočtená nebo ověřená čistá mzda. Nejprve dokončete zákonný výpočet; srážky se potom přepočítají automaticky.",
-        "statutory_incomplete": "Zákonný výpočet pojistného, daně nebo čisté mzdy nebyl dokončen. Opravte mzdové složky a zákonné údaje zaměstnanců a potom otevřete novou revizi běhu.",
+        "statutory_incomplete": "Zákonný výpočet pojistného, daně nebo čisté mzdy nebyl dokončen. Opravte mzdové složky a zákonné údaje zaměstnanců a potom klikněte na Obnovit podklady.",
         "requires_attention": "Kontrola našla údaj, který je potřeba doplnit nebo ručně ověřit. Otevřete místo k opravě; technický detail zůstává uložený v auditní stopě.",
         "and_more": "a dalších {count}",
         "open_remediation": "Otevřít místo k opravě",
@@ -4195,11 +4227,13 @@
         "affected": "Týká se: {names}",
         "impact": {
           "blocking": "Bez tohohle se nedá počítat",
+          "approval": "Spočítat půjde, schválit ne",
           "revision": "Pozdější oprava znamená opravnou revizi",
           "anytime": "Doplní se kdykoli, běh to nezdrží"
         },
         "impact_hint": {
           "blocking": "Výpočet nemá z čeho vyjít. Tohle je potřeba vyřešit dřív než cokoli dalšího.",
+          "approval": "Běh se zahájí i spočítá, ale schválit ho nepůjde, dokud tohle nebude vyřešené. Nejjednodušší je vyřešit to hned - tlačítka jsou u nálezu.",
           "revision": "Zahájit běh jde i teď, ale tenhle údaj vstupuje do zmrazeného snímku - po zamknutí vstupů se opraví jen novou revizí.",
           "anytime": "Na mzdový výpočet to nemá vliv. Stačí doplnit, než se bude podávat."
         },
@@ -4208,11 +4242,12 @@
           "monthly": "Měsíční práce."
         },
         "title": "Kontrola před zahájením",
-        "subtitle": "Tohle uvidíte i po zahájení běhu - ukazujeme to teď, dokud jdou vstupy ještě opravit. Nic z toho mzdový běh neblokuje: spočítat se dá i s těmito nálezy.",
+        "subtitle": "Tohle uvidíte i po zahájení běhu - ukazujeme to teď, dokud jdou vstupy ještě opravit. Spočítat se dá i s těmito nálezy, červené ale zablokují schválení běhu - u každého je tlačítko, které ho vyřeší.",
         "clear": "Kontrola před zahájením nenašla nic, co by bránilo spočítat mzdy za tohle období.",
         "all_clear": "Kontrola už nic nenašla, můžete mzdy spočítat.",
         "confirm_title": "Opravdu zahájit mzdový běh?",
-        "confirm_intro": "Předběžná kontrola tohle našla dřív, než se cokoli zmrazí. Nic z toho běh neblokuje - rozhodněte se, jestli chcete pokračovat, nebo to nejdřív opravit.",
+        "confirm_intro": "Předběžná kontrola tohle našla dřív, než se cokoli zmrazí. Spočítat mzdy jde i tak - rozhodněte se, jestli chcete pokračovat, nebo to nejdřív opravit.",
+        "approval_first": "Červené nálezy by zablokovaly schválení běhu. Doporučujeme je vyřešit teď, potom klikněte na „Zkontrolovat znovu“:",
         "confirm_note": "Zahájením se zamknou vstupy a rovnou se spočítají mzdy. Co zapíšete potom, se do výpočtu nedostane, dokud běh znovu neotevřete.",
         "recheck": "Zkontrolovat znovu",
         "start_anyway": "Přesto zahájit"
@@ -5468,6 +5503,18 @@
       "search_placeholder": "Hledat jméno nebo kód…",
       "reload": "Obnovit",
       "add": "Přidat čas",
+      "absence_action": "Nepřítomnost",
+      "more_actions": "Další",
+      "guide": {
+        "title": "Jak zpracovat měsíc",
+        "work": "Odpracovaný čas zapište do mřížky níž. Kdo pracuje podle kalendáře, tomu stačí „Vyplnit pracovní dny“ a „Uložit mřížku“ - doplní se celý fond, svátky a víkendy se vynechají.",
+        "absence": "Dovolenou, nemoc, ošetřovné a jiné nepřítomnosti zadejte v Nepřítomnostech. Mřížka pak tyto dny sama vynechá.",
+        "absence_action": "Zadat nepřítomnost",
+        "approve": "Schvalte měsíc všem najednou. Schválená docházka je podklad pro mzdový běh.",
+        "approve_action": "Schválit měsíc všem ({count})",
+        "all_approved": "Všechny měsíce na stránce jsou schválené.",
+        "to_runs": "Pokračovat na mzdový běh"
+      },
       "load_failed": "Docházku se nepodařilo načíst.",
       "saved": "Časový záznam byl uložen.",
       "save_failed": "Časový záznam se nepodařilo uložit.",
@@ -5549,7 +5596,14 @@
           "title": "Hromadně se neschválí ({count}) - odbavte je jednotlivě",
           "absences": "měsíc obsahuje absence, takže odpověď na neodpracované hodiny a překážky je rozhodnutí, ne údaj z evidence",
           "no_preview": "chybí návrh souhrnu JMHZ",
-          "incomplete_suggestions": "návrh souhrnu JMHZ je neúplný"
+          "incomplete_suggestions": "návrh souhrnu JMHZ je neúplný",
+          "approve_single": "Schválit jednotlivě"
+        },
+        "under_fund": {
+          "title": "Odpracováno méně než fond a nepřítomnost není zapsaná ({count})",
+          "row": "odpracováno {worked} z {fund}",
+          "hint": "Schválit to jde i tak, do hlášení ČSSZ ale půjde méně odpracovaných hodin bez vysvětlení. Pokud tito lidé odpracovali celý měsíc podle kalendáře, doplňte chybějící dny. Pokud chyběli, zadejte nepřítomnost.",
+          "fill": "Doplnit chybějící pracovní dny podle kalendáře"
         }
       },
       "columns": {
@@ -5617,6 +5671,7 @@
       },
       "plan_shifts": {
         "action": "Rozvrhnout směny podle kalendáře",
+        "short_hint": "Naplánuje směny na pracovní dny. Potřebné jen pro náhradu mzdy při nemoci a dovolené u nepravidelné pracovní doby.",
         "hint": "Založí publikované směny na všechny pracovní dny měsíce podle pracovního kalendáře vztahu (bez kalendáře pondělí až pátek po 8 h). Dny, které už směnu mají, přeskočí. Směny potřebuje náhrada mzdy při DPN i za dovolenou.",
         "nothing": "Všechny pracovní dny měsíce už směnu mají.",
         "done": "Založeno směn: {count} ({name}).",
@@ -5674,19 +5729,21 @@
         "holiday_arrangement_missing": "Měsíc obsahuje práci ve svátek, ale u vztahu {name} není sjednaná zásada (náhradní volno, nebo příplatek). Bez ní se z evidence nedá spočítat mzda, takže ji schválení nepustí dál.",
         "difficulty_factors_missing": "Měsíc obsahuje práci ve ztíženém prostředí, ale u vztahu {name} chybí počet ztěžujících vlivů podle § 117.",
         "average_earning_missing": "Příplatek se u vztahu {name} počítá z průměrného výdělku a ten pro toto období není zjištěný.",
-        "inputs_locked": "Vstupy období jsou uzamčené mzdovým během, takže do nich schválení docházky nemůže zapsat příplatky.",
+        "inputs_locked": "Mzdový běh za tento měsíc už má zamčené vstupy, takže schválení docházky do nich nemůže zapsat příplatky. V mzdovém běhu klikněte na „Zrušit běh“ (docházka ani vstupy se nesmažou), vraťte se sem a měsíc schvalte. Potom v běhu klikněte na „Začít znovu a spočítat“.",
         "overtime_conflict": "Přesčas je u vztahu {name} zadaný dvakrát - v docházce i v rychlých vstupech. Nechte jen jednu evidenci.",
         "link": {
           "holiday_arrangement_missing": "Otevřít kartu zaměstnance a doplnit zásadu příplatků",
           "difficulty_factors_missing": "Otevřít kartu zaměstnance a doplnit ztěžující vlivy",
           "average_earning_missing": "Otevřít průměrné výdělky",
-          "inputs_locked": "Otevřít mzdové běhy",
+          "inputs_locked": "Otevřít mzdový běh za tento měsíc",
           "overtime_conflict": "Otevřít rychlé vstupy"
         }
       },
       "calendar": {
         "default_name": "Pravidelný pracovní týden",
         "create": "Založit kalendář",
+        "short_hint": "Pracovní týden po-pá 8 h od začátku měsíce. Bez kalendáře se fond odhaduje stejně.",
+        "new_version_hint": "Od 1. dne měsíce nastaví týden po-pá 8 h a nahradí dosavadní rozvrh. U zkráceného úvazku tím vzroste fond.",
         "new_version": "Nová verze kalendáře",
         "saved": "Historická verze pracovního kalendáře byla uložena.",
         "failed": "Kalendář se nepodařilo uložit."
@@ -8133,7 +8190,10 @@
           "identifiers_verified": "OIČ a ID PPV jsem ověřil(a) v Seznamu zaměstnanců na ePortálu ČSSZ",
           "identifiers_verified_hint": "Jen u zaměstnance převzatého z dřívějšího oznámení (ONZ), jehož čísla nejsou z protokolu ČSSZ, přijatého dohlášení A3 ani z importu exportu zaměstnanců ČSSZ. Odhlášku A2 pak jde podat i bez dohlášení A3; to zůstane jako samostatná povinnost.",
           "select_placeholder": "Vyberte…"
-        }
+        },
+        "reprepare": "Připravit znovu",
+        "reprepare_failed": "Podání se nepodařilo připravit znovu.",
+        "vintage_expired": "Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026 ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27. Připravte ho znovu."
       },
       "dimensions": {
         "title": "Mzdové dimenze vztahu",
@@ -13437,7 +13497,7 @@
       "registration_schema_unavailable": "Tento formulář ČSSZ tato verze aplikace neumí připravit. Podporované jsou přihlášení a oznámení REGZEC25 a částečné přihlášení PREZEC26, ostatní podejte přes portál ČSSZ.",
       "registration_spec_version_unavailable": "Událost se hlásí formulářem ČSSZ podle specifikace JMHZ 2027, který tato verze aplikace neumí připravit. Podání se nepřipraví.",
       "registration_spec_version_mismatch": "Registrační podání má jiný ročník formuláře, než odpovídá rozhodnému datu události (hranice 1. 1. 2027). Připravte podání znovu.",
-      "registration_regzec27_not_yet_accepted": "Událost od 1. 1. 2027 se hlásí formulářem REGZEC27, který ostrá ČSSZ přijímá až od 1. 1. 2027. Podání připravte a odešlete nejdřív 1. 1. 2027. Zaměstnance s českým občanstvím můžete v prosinci přihlásit částečně přes PREZEC (nejdřív osm dnů před nástupem). U zahraničního zaměstnance částečné přihlášení nelze: přihlášku podejte 1. 1. 2027 nebo později, vždy před nástupem, při nástupu 1. 1. 2027 téhož dne před začátkem práce.",
+      "registration_regzec27_not_yet_accepted": "Podání se hlásí formulářem REGZEC27, který ostrá ČSSZ přijímá až od 23. 12. 2026. Podání připravte a odešlete nejdřív 23. 12. 2026. Zaměstnance s českým občanstvím můžete dřív přihlásit částečně přes PREZEC (nejdřív osm dnů před nástupem). U zahraničního zaměstnance částečné přihlášení nelze: přihlášku podejte 23. 12. 2026 nebo později, vždy před nástupem, při nástupu 1. 1. 2027 nejpozději téhož dne před začátkem práce.",
       "registration_regzec25_value_from_2027": "Údaj obsahuje hodnotu číselníku, kterou ČSSZ přijímá až pro události od 1. 1. 2027. Pro dřívější datum vyberte jinou hodnotu.",
       "registration_regzec27_change_in_future": "Změnu nebo opravu nejde podat s platností do budoucna. Připravte podání nejdřív v den, kdy začne platit.",
       "registration_regzec27_orientation_number_too_long": "Číslo orientační smí mít od 1. 1. 2027 u všech adres nejvýš čtyři znaky.",
@@ -13572,7 +13632,15 @@
       "zp_transport_envelope_undocumented": "Pro tuto zdravotní pojišťovnu není doložený formát obálky pro automatizované odeslání. Aplikace soubor připraví, ale odeslat ho musíte ručně doloženou cestou (datovou schránkou nebo portálem pojišťovny).",
       "zp_xml_serialization_failed": "Datovou větu zdravotní pojišťovny se nepodařilo sestavit.",
       "zp_xml_snapshot_mismatch": "Datová věta neodpovídá přesnému zdrojovému snapshotu.",
-      "zp_xsd_validation_failed": "Datová věta neprošla připnutým XSD schématem."
+      "zp_xsd_validation_failed": "Datová věta neprošla připnutým XSD schématem.",
+      "registration_regzec25_change_stale": "Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026 ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27. Připravte ho znovu.",
+      "registration_reprepare_not_needed": "Tohle podání se znovu připravovat nemusí: není to připravená změna nebo oprava, jejíž formát by ČSSZ dnes odmítla.",
+      "registration_reprepare_not_applicable": "Znovu se připravuje jen změna nebo oprava ze schválené události.",
+      "registration_registered_end_mismatch": "Datum skončení na kartě pracovního vztahu se liší od data v odeslané odhlášce. Změna i oprava skončeného vztahu musí nést datum, které vede ČSSZ. Opravte datum na kartě vztahu.",
+      "registration_a4_termination_source_missing": "Oprava u vztahu, který u ČSSZ skončil, nese i údaje z odhlášky (úmrtí, podklady pro podporu v nezaměstnanosti). Schválenou odhlášku k tomuto vztahu aplikace nenašla: nejdřív schvalte odhlášku, nebo opravu vyřiďte s ČSSZ mimo aplikaci.",
+      "registration_a4_termination_source_variant_mismatch": "Schválená odhláška patří k jinému druhu činnosti než oprava. Zkontrolujte druh činnosti ve sjednaných podmínkách vztahu.",
+      "registration_a4_termination_source_incomplete": "Schválená odhláška nemá úplné podklady pro podporu v nezaměstnanosti. Schvalte odhlášku znovu s vyplněnými podklady.",
+      "registration_a4_unemployment_forbidden": "Podklady pro podporu v nezaměstnanosti jde v opravě poslat jen u běžného pracovního vztahu, který už u ČSSZ skončil."
     },
     "remediation": {
       "actions": {
@@ -14040,6 +14108,7 @@
     "delete_success": "Doklad byl vyřazen z fronty a originál je v koši Dokumentů.",
     "submitted_by": "Předal/a: {name}",
     "processed_success": "Doklad byl zpracován do přijaté faktury.",
+    "processing_stale": "Vytěžení se nedokončilo, zpracování bylo přerušeno. Spusťte ho znovu, nebo doklad smažte.",
     "already_exists": "Tento doklad už v systému je jako přijatá faktura {number}, nová faktura nevznikla. Stornovaný doklad zpracování neblokuje.",
     "bulk_duplicates": "Už v systému bylo dokladů: {n}. Nová faktura k nim nevznikla.",
     "upload_already_processed": "Soubor {file} už byl zpracován jako přijatá faktura {number}.",
@@ -23762,6 +23831,13 @@
     "bulk_pdf_download": "Stáhnout PDF",
     "bulk_pdf_done": "PDF export připraven ({n} faktur).",
     "bulk_pdf_failed": "PDF export selhal",
+    "book_issued": "Kniha vystavených faktur",
+    "book_received": "Kniha přijatých faktur",
+    "book_hint": "Sestava dokladů podle aktuálního filtru seznamu se součty",
+    "book_scope": "Všechny doklady odpovídající aktuálnímu filtru, bez stránkování",
+    "book_pdf": "PDF na šířku",
+    "book_xlsx": "Tabulka XLSX",
+    "book_failed": "Knihu faktur se nepodařilo vytvořit",
     "oss": {
       "enabled": "OSS",
       "country": "Země",
@@ -26480,9 +26556,21 @@
     "flat_tax_band2": "2. pásmo (do 1 500 000 Kč/rok)",
     "flat_tax_band3": "3. pásmo (do 2 000 000 Kč/rok)",
     "flat_tax_hint": "Jen pro neplátce DPH (§ 7a ZDP). Na stránce Tržby uvidíte, jak blízko jste limitu příjmů pásma.",
-    "financial_office_code": "Kód finančního úřadu",
-    "financial_office_hint": "např. 451 = Praha 1. Najdete na portálu daně.cz.",
-    "workplace_code": "Kód územního pracoviště (ÚzP)",
+    "financial_office_code": "Finanční úřad",
+    "financial_office_hint": "Místně příslušný finanční úřad. Jeho kód se píše do daňových podání.",
+    "workplace_code": "Územní pracoviště (ÚzP)",
+    "tax_office": {
+      "none": "Nevybráno",
+      "unknown": "Kód {code} (není v číselníku)",
+      "pick_office_first": "Nejdřív vyberte finanční úřad",
+      "specialized_hint": "Specializovaný finanční úřad územní pracoviště nemá.",
+      "data_box": "Datová schránka",
+      "account_vat": "Účet pro DPH",
+      "account_dppo": "Účet pro daň z příjmů PO",
+      "account_dpfo": "Účet pro daň z příjmů FO",
+      "account_employment": "Účet pro zálohy na daň ze závislé činnosti",
+      "account_withholding": "Účet pro daň vybíranou srážkou"
+    },
     "cssz_vsdp": "Variabilní symbol OSVČ (ČSSZ)",
     "cssz_ossz_code": "Kód OSSZ (okres)",
     "health_insurance_number": "Číslo pojištěnce ZP",
@@ -29134,7 +29222,24 @@
       "last_import": "Poslední import: {date} · {n} dokladů",
       "batch_summary": "Naimportováno {ok} dokladů, {failed} s chybou.",
       "show_in_list": "Zobrazit v přijatých fakturách",
-      "coming_hint": "—"
+      "coming_hint": "—",
+      "merge": {
+        "title": "Spojit více PDF do jednoho dokladu",
+        "hint": "Máte jednu fakturu nebo účtenku ve více souborech (každá strana zvlášť)? Nahrajte všechny části, seřaďte je přetažením nebo šipkami a spojí se do jednoho PDF, které se vytěží jako jeden doklad.",
+        "drop": "Přetáhněte části dokladu sem nebo klikněte",
+        "formats": "PDF a fotky (JPG, PNG, WebP), alespoň dva soubory",
+        "parts_title": "Části dokladu ({n})",
+        "move_up": "Posunout výš",
+        "drag_hint": "Přetažením změníte pořadí",
+        "move_down": "Posunout níž",
+        "run": "Spojit a importovat jako jeden doklad",
+        "merging": "Spojuji soubory…",
+        "only_pdf_images": "Spojit lze jen PDF a fotky (JPG, PNG, WebP). Ostatní soubory byly vynechány.",
+        "error_encrypted": "Soubor {file} je chráněný heslem, nelze ho spojit.",
+        "error_unreadable": "Soubor {file} se nepodařilo načíst.",
+        "error_unsupported": "Soubor {file} nelze spojit, podporované jsou PDF a fotky.",
+        "error_too_large": "Spojené PDF je větší než 32 MB. Zmenšete fotky nebo nahrajte méně stran."
+      }
     },
     "salesAi": {
       "import_title": "AI import vydané faktury",

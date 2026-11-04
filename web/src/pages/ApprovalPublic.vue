@@ -46,11 +46,12 @@ const branding = computed(() => data.value?.branding || decided.value?.branding 
 /** Iniciála dodavatele místo našeho „M", dokud logo chybí. */
 const brandInitial = computed(() => branding.value.display_name?.trim().charAt(0).toUpperCase() || 'M')
 
-function fmtMoney(n: number | null, currency: string): string {
+function fmtMoney(n: number | null, currency: string, maxDecimals?: number): string {
   if (n == null) return ''
   const decimals = currency === 'JPY' ? 0 : 2
   const locale = lang.value === 'en' ? 'en-US' : 'cs-CZ'
-  return n.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + ' ' + currency
+  const precision = maxDecimals && n !== Math.round(n * 100) / 100 ? maxDecimals : decimals
+  return n.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: precision }) + ' ' + currency
 }
 function fmtHours(n: number | null): string {
   if (n == null) return ''
@@ -324,7 +325,7 @@ async function submit(decision: 'approve' | 'reject') {
                     <td class="px-4 py-2 whitespace-pre-wrap text-neutral-800">{{ m.description }}</td>
                     <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }}</td>
                     <td class="px-3 py-2 text-neutral-600">{{ m.unit }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(m.unit_price, data.invoice.currency) }}</td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(m.unit_price, data.invoice.currency, 6) }}</td>
                     <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(m.total_amount, data.invoice.currency) }}</td>
                   </tr>
                   <tr class="bg-neutral-50 font-semibold">

@@ -2987,6 +2987,68 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/invoices/book:
+    get:
+      tags: [Invoices]
+      summary: Kniha vystavených faktur (PDF nebo XLSX) nad filtrem seznamu
+      description: |
+        Tisková sestava všech vystavených dokladů, které odpovídají filtru seznamu
+        `GET /api/v1/invoices` (stejné parametry `q` a `filter[...]`), bez
+        stránkování. Doklad bez čísla (koncept) v knize není; koncepty s číslem
+        a stornované doklady jsou v ní jen tehdy, když je vybírá filtr, a do součtů
+        nevstupují. Řazení podle čísla dokladu.
+
+        Sloupce: číslo dokladu, datum vystavení, splatnost, DUZP, částka s DPH,
+        zbývá uhradit, odběratel, platební variabilní symbol a popis (text položky
+        s nejvyšší částkou, jinak první řádek textu nad položkami). Dobropisy mají
+        částky záporné.
+
+        Součty jsou po měnách bez přepočtu kurzem: celkem k úhradě (po odpočtu
+        záloh), zbývá uhradit u faktur, zbývá uhradit u dobropisů a zvlášť daňové
+        doklady k přijaté platbě. Hlavička nese firmu, IČ, období a shrnutí
+        použitého filtru, patička stránky autora tisku, datum a číslo strany. PDF je
+        A4 na šířku.
+
+        Vyžaduje stejné oprávnění jako seznam (`invoices` čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: 'filter[status]', description: Čárkou oddělený seznam stavů, schema: { type: string, example: 'issued,paid' } }
+        - { in: query, name: 'filter[type]', description: Čárkou oddělený seznam typů dokladu, schema: { type: string, example: 'invoice,credit_note' } }
+        - { in: query, name: 'filter[client_id]', schema: { type: integer } }
+        - { in: query, name: 'filter[project_id]', schema: { type: integer } }
+        - { in: query, name: 'filter[year]', description: Rok podle DUZP, schema: { type: integer } }
+        - { in: query, name: 'filter[month]', schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: 'filter[date_from]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[date_to]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[currency]', schema: { type: string, example: EUR } }
+        - { in: query, name: 'filter[unpaid_only]', schema: { type: boolean } }
+        - { in: query, name: 'filter[overdue]', schema: { type: boolean } }
+        - { in: query, name: 'filter[unpaid_as_of]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[booked]', schema: { type: string, enum: ['1', '0'] } }
+        - { in: query, name: 'filter[oss_review]', schema: { type: string, enum: [any, oss, domestic, '1'] } }
+        - { in: query, name: 'filter[revenue_category_id]', schema: { type: string, example: '3,7,none' } }
+        - { in: query, name: 'filter[revenue_category_exclude]', schema: { type: string, example: '12,none' } }
+      responses:
+        '200':
+          description: Soubor knihy (Content-Disposition attachment)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403':
+          description: Chybí oprávnění ke čtení vystavených faktur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Neplatný formát nebo hodnota filtru (`validation_failed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /api/v1/invoices/{id}/isdoc:
     get:
       tags: [Invoices]
@@ -5055,19 +5117,40 @@ paths:
         schema: { type: integer, format: int64 }
     post:
       tags: [InvoiceOps]
-      summary: Vystaví finální fakturu ze zaplacené zálohy (proforma → invoice)
+      summary: Vytvoří koncept finální faktury ze zálohy
       description: |
-        Pouze pro `invoice_type = proforma` ve stavu `paid`. Vytvoří finální
-        daňový doklad navázaný na zálohu (`parent_id`). Číslo a snapshoty
-        se zafixují stejně jako u běžného vystavení.
+        Pro `invoice_type = proforma` s alespoň částečnou úhradou. Vytvoří koncept
+        finálního dokladu s vazbou `parent_invoice_id`; vystavuje se samostatně
+        přes `/issue`. Opakované volání vrátí již existující nestornovaný finální
+        doklad. Vyžaduje `invoices.issue` na úrovni WRITE a zápisový rozsah tokenu.
+        Nový koncept nesmí pro klienta vzniknout v uzamčeném období.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinalFromProformaInput' }
       responses:
         '201':
-          description: Finální faktura vytvořena
+          description: Nový koncept nebo již existující finální faktura
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Invoice' }
+              schema: { $ref: '#/components/schemas/FinalFromProformaResult' }
+        '400':
+          description: Neplatné kalendářní datum (`invalid_date`) nebo celková cena zakázky
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Chybějící oprávnění, rozsah tokenu nebo zámek klientského dokladu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Zdrojový doklad není v přístupné firmě
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Zdrojový doklad není proforma `paid`
+          description: Zdroj není proforma, nemá úhradu nebo je období uzavřené
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -7109,6 +7192,38 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/settings/supplier/invoice-counter:
+    get:
+      tags: [Settings]
+      summary: Příští číslo číselné řady dokladů
+      description: |
+        Vrátí číslo, které dostane **příští vystavený doklad** řady, bez zápisu.
+        Počítá stejně jako vystavení: srovná počítadlo na nejvyšší použité číslo
+        (nebo ruční začátek řady) a přeskočí obsazená čísla. U řady bez čítače
+        vrací `next_number: null`.
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [invoice, proforma, credit_note, simplified], default: invoice } }
+        - { name: client_id, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: revenue_category_id, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200':
+          description: Příští číslo řady
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  type: { type: string }
+                  next_number: { type: integer, nullable: true }
+                  counter: { type: integer }
+                  period: { type: string }
+                  preview: { type: string }
+                  client_id: { type: integer }
+                  revenue_category_id: { type: integer }
+        '400':
+          description: Neplatný typ, kombinace os nebo id mimo firmu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     put:
       tags: [Settings]
       summary: Nastavení counteru číselné řady dokladů
@@ -10537,6 +10652,72 @@ paths:
             X-Export-Reconstructed:
               schema: { type: integer }
               description: Počet faktur, u kterých se místo originálu vložila naše rekonstrukce (jen pdf-zip)
+
+  /api/v1/purchase-invoices/book:
+    get:
+      tags: [Purchase invoices]
+      summary: Kniha přijatých faktur (PDF nebo XLSX) nad filtrem seznamu
+      description: |
+        Tisková sestava všech přijatých faktur, které odpovídají filtru seznamu
+        `GET /api/v1/purchase-invoices` (stejné parametry `q` a `filter[...]`), bez
+        stránkování. Doklad bez čísla (koncept) v knize není; koncepty s číslem
+        a stornované doklady jsou v ní jen tehdy, když je vybírá filtr, a do součtů
+        nevstupují. Řazení podle čísla dokladu.
+
+        Sloupce: číslo dokladu, datum vystavení, splatnost, DUZP, částka s DPH,
+        zbývá uhradit, dodavatel, variabilní symbol (platební VS, jinak číslo
+        dokladu dodavatele) a popis (text položky s nejvyšší částkou, jinak první
+        řádek textu nad položkami). Dobropisy mají částky záporné.
+
+        Součty jsou po měnách bez přepočtu kurzem: celkem k úhradě, zbývá uhradit
+        u faktur, zbývá uhradit u dobropisů a zvlášť daňové doklady k přijaté
+        platbě. Hlavička nese firmu, IČ, období a shrnutí použitého filtru, patička
+        stránky autora tisku, datum a číslo strany. PDF je A4 na šířku.
+
+        Vyžaduje stejné oprávnění jako seznam (`purchase_invoices` čtení).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: 'filter[status]', description: Čárkou oddělený seznam stavů, schema: { type: string, example: 'received,paid' } }
+        - { in: query, name: 'filter[document_kind]', description: Čárkou oddělený seznam druhů dokladu, schema: { type: string, example: 'invoice,credit_note' } }
+        - { in: query, name: 'filter[vendor_id]', schema: { type: integer } }
+        - { in: query, name: 'filter[project_id]', description: "ID zakázky nebo `none` = bez zakázky", schema: { type: string } }
+        - { in: query, name: 'filter[year]', schema: { type: integer } }
+        - { in: query, name: 'filter[month]', schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: 'filter[date_from]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[date_to]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[currency]', schema: { type: string, example: EUR } }
+        - { in: query, name: 'filter[unpaid_only]', schema: { type: boolean } }
+        - { in: query, name: 'filter[overdue]', schema: { type: boolean } }
+        - { in: query, name: 'filter[unpaid_as_of]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[unmatched]', schema: { type: boolean } }
+        - { in: query, name: 'filter[needs_review]', schema: { type: boolean } }
+        - { in: query, name: 'filter[paid_shortfall]', schema: { type: integer, enum: [0, 1] } }
+        - { in: query, name: 'filter[approval_status]', schema: { type: string, enum: [none, pending, approved, rejected] } }
+        - { in: query, name: 'filter[payment_ordered]', schema: { type: string, enum: ['1', '0'] } }
+        - { in: query, name: 'filter[booked]', schema: { type: string, enum: ['1', '0'] } }
+        - { in: query, name: 'filter[has_visual_document]', schema: { type: string, enum: ['0', '1'] } }
+        - { in: query, name: 'filter[has_structured_source]', schema: { type: string, enum: ['0', '1'] } }
+        - { in: query, name: 'filter[import_batch_id]', schema: { type: string } }
+      responses:
+        '200':
+          description: Soubor knihy (Content-Disposition attachment)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403':
+          description: Chybí oprávnění ke čtení přijatých faktur
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Neplatný formát nebo hodnota filtru (`validation_failed`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/purchase-invoices/{id}/activity:
     get:
@@ -20707,7 +20888,7 @@ paths:
         neznámá jednotka = základní), cena za základní jednotku vznikne stejně jako
         `effective_price` (se zákaznickou cenou nebo cenovou hladinou dokladu či odběratele, akce se stropem
         v základních jednotkách) a `unit_price` = cena za základní jednotku × poměr
-        na haléře. Karta bez ceny v požadované měně vrací `unit_price`
+        na šest desetinných míst (haléřová cena ve tvaru „12.50“, levnější i „0.0108“). Karta bez ceny v požadované měně vrací `unit_price`
         i `base_unit_price` null, nikdy 0.
       requestBody:
         required: true
@@ -21154,6 +21335,7 @@ paths:
                   type:
                   - string
                   - 'null'
+                  description: Prodejní cena bez DPH, nejvýš 6 desetinných míst; haléřová cena se vrací na dvě místa („12.50“).
                 min_qty:
                   type:
                   - string
@@ -34793,7 +34975,7 @@ components:
         description: { type: string, maxLength: 500, description: "Povinný bez skladové karty" }
         quantity: { type: [number, string], default: 1, description: "Kladné, nejvýš 3 desetinná místa" }
         unit: { type: string, maxLength: 20 }
-        unit_price: { type: [number, string], description: "Jednotková cena, nejvýš 2 desetinná místa" }
+        unit_price: { type: [number, string], description: "Jednotková cena, nejvýš 6 desetinných míst" }
         vat_rate: { type: [number, string], default: 0, description: "Sazba DPH v procentech (21, 12, 0)" }
         prices_include_vat: { type: boolean, default: true, description: "Ceny s DPH (DPH shora); musí být stejné u všech položek" }
     QuickReceiptInput:
@@ -42016,7 +42198,7 @@ components:
           default: sum
           description: '`sum` = součet cen komponent, `discount` = součet se slevou `discount_pct`, `fixed` = pevná cena `fixed_price` bez DPH.'
         discount_pct: { type: [string, 'null'], pattern: '^\d{1,3}(\.\d{1,3})?$', description: 'Sleva v procentech (0–100), jen pro `discount`.' }
-        fixed_price: { type: [string, 'null'], pattern: '^\d{1,12}(\.\d{1,2})?$', description: 'Pevná cena bez DPH, jen pro `fixed`.' }
+        fixed_price: { type: [string, 'null'], pattern: '^\d{1,12}(\.\d{1,6})?$', description: 'Pevná cena bez DPH, nejvýš 6 desetinných míst, jen pro `fixed`.' }
     StockSetDefinition:
       type: object
       description: |
@@ -42374,7 +42556,7 @@ components:
         client_id: { type: integer, minimum: 1 }
         currency_code: { type: string, minLength: 3, maxLength: 3 }
         price_type: { type: string, enum: [fixed, discount_pct] }
-        fixed_price: { type: [string, number, 'null'], description: 'Povinné pro fixed; ≥ 0, nejvýš 2 desetinná místa, za základní jednotku bez DPH.' }
+        fixed_price: { type: [string, number, 'null'], description: 'Povinné pro fixed; ≥ 0, nejvýš 6 desetinných míst, za základní jednotku bez DPH.' }
         discount_pct: { type: [string, number, 'null'], description: 'Povinné pro discount_pct; 0–100, nejvýš 3 desetinná místa.' }
         valid_from: { type: [string, 'null'], format: date }
         valid_to: { type: [string, 'null'], format: date }
@@ -42568,7 +42750,7 @@ components:
         match_id: { type: integer, minimum: 1 }
         rule_type: { type: string, enum: [discount_pct, fixed], description: "fixed jen pro product a vždy s měnou." }
         discount_pct: { type: [string, number, 'null'], description: "Povinné pro discount_pct; sleva v %, záporná hodnota je přirážka; −999,999 až 100, nejvýš 3 desetinná místa." }
-        fixed_price: { type: [string, number, 'null'], description: "Povinné pro fixed; ≥ 0, nejvýš 2 desetinná místa." }
+        fixed_price: { type: [string, number, 'null'], description: "Povinné pro fixed; ≥ 0, nejvýš 6 desetinných míst." }
         currency_code: { type: [string, 'null'], minLength: 3, maxLength: 3 }
         priority: { type: integer, default: 0 }
     StockItemPriceLevel:
@@ -42626,7 +42808,7 @@ components:
         currency_code: { type: string, pattern: '^[A-Za-z]{3}$' }
         price_mode: { type: string, enum: [markup, target_margin, fixed], default: markup }
         markup_pct: { type: [number, string, 'null'], description: Přirážka od -100 do 9999.999; v režimu target_margin marže od 0 včetně do 100 bez 100 }
-        fixed_price: { type: [number, string, 'null'], description: Nezáporná cena do 9999999999.99; povinná pro fixed }
+        fixed_price: { type: [number, string, 'null'], description: Nezáporná cena do 9999999999.999999, nejvýš 6 desetinných míst; povinná pro fixed }
         rounding: { type: string, enum: [none, '0.01', '0.10', '0.50', '1', '9_ending'], default: none }
         is_manual_override: { type: boolean, default: false }
         use_pricing_rules: { type: boolean, default: false, description: Použít odpovídající cenový profil a pravidlo firmy místo lokálního výpočtu. }
@@ -43162,7 +43344,7 @@ components:
       properties:
         code: { type: string }
         severity: { type: string, enum: [blocker, warning, info] }
-        impact: { type: string, enum: [anytime, revision, blocking] }
+        impact: { type: string, enum: [anytime, revision, approval, blocking] }
         scope: { type: string, enum: [setup, monthly] }
         message: { type: string }
         remediation_path: { type: [string, "null"] }
@@ -43444,7 +43626,7 @@ components:
         žádné floatování).
       properties:
         vendor_sku: { type: [string, "null"], maxLength: 80, description: Kód zboží u dodavatele. }
-        purchase_price: { type: [string, "null"], description: Nákupní cena bez DPH. }
+        purchase_price: { type: [string, "null"], description: Nákupní cena bez DPH, nejvýš 6 desetinných míst. }
         currency_code: { type: string, minLength: 3, maxLength: 3, default: CZK }
         delivery_days: { type: [integer, "null"], minimum: 0, maximum: 65535 }
         stock_qty: { type: [string, "null"], description: Množství, které dodavatel hlásí skladem. }
@@ -49000,7 +49182,7 @@ components:
         quantity: { type: number, format: float, description: "Může být záporné pro slevový řádek. Nesmí být 0." }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Přesná délka časové položky v celých minutách. Povoleno jen bez skladové vazby a s hodinovou měrnou jednotkou; NULL používá legacy `quantity`. Záporná hodnota je určena pro dobropis." }
         unit: { type: string, example: ks }
-        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena bez DPH. Hodinová časová položka podporuje až 6 desetinných míst; ostatní a skladové položky zůstávají na 2 místech. Může být záporná pro slevový řádek." }
+        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena bez DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek." }
         list_unit_price: { type: [number, "null"], format: double, description: "Ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat` (v režimu „ceny s DPH\" brutto). Informační údaj, částky dokladu z ní nevychází. NULL = neznámá." }
         line_discount_pct: { type: [number, "null"], format: double, description: "Sleva z ceníkové ceny v % (3 desetinná místa), dopočtená serverem z `list_unit_price` a `unit_price_without_vat`. Záporná = přirážka. NULL = bez slevy. S hlavičkovou slevou `discount_percent` nesouvisí." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
@@ -49075,7 +49257,7 @@ components:
         quantity: { type: number, format: float, description: "Nesmí být 0. Může být záporné pro slevový řádek, ale ne současně se zápornou cenou. Má-li jednotka v číselníku nastavené `quantity_decimals`, smí mít nejvýš tolik desetinných míst; jinak 400 `validation_failed` se seznamem `items` [{index, unit, decimals}]. Nic se nezaokrouhluje. Chybějící `unit` se kontroluje jako výchozí `ks`. Časové řádky se nekontrolují. U PUT se kontrolují jen nové a změněné řádky; řádek se stejnou jednotkou a množstvím jako uložený řádek dokladu (podle `id`, jinak podle dvojice jednotka + množství) projde beze změny." }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet z `quantity`. Nula není povolena." }
         unit: { type: string, default: "ks", description: "Kód jednotky, s číselníkem `/codebooks/units` se páruje bez ohledu na velikost písmen." }
-        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena BEZ DPH. Hodinová časová položka podporuje až 6 desetinných míst; ostatní a skladové položky 2 místa. Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
+        unit_price_without_vat: { type: number, format: double, description: "Jednotková cena BEZ DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
         list_unit_price: { type: [number, "null"], format: double, description: "Volitelná ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat`. Kladné číslo, jinak se uloží NULL. Server z ní dopočítá `line_discount_pct`, poslané procento ignoruje. Při úpravě dokladu ji pošlete znovu (GET ji vrací), jinak se smaže." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
         order_index: { type: integer, description: "Pořadí v rámci faktury. Default = pozice v poli." }
@@ -49210,7 +49392,7 @@ components:
               quantity: { type: number, format: float, description: "Může být záporné pro slevový řádek. Nesmí být 0." }
               duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Přesná délka časové položky v minutách; NULL používá legacy `quantity`." }
               unit: { type: string }
-              unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní položky 2 místa. Může být záporná pro slevový řádek." }
+              unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek." }
               vat_rate_id: { type: integer }
               vat_rate_percent: { type: number, format: float }
               vat_classification_code:
@@ -49313,7 +49495,7 @@ components:
               quantity: { type: number, format: float, description: "Nesmí být 0. Může být záporné pro slevový řádek, ale ne současně se zápornou cenou." }
               duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a řádek bez skladové vazby; vynecháno/NULL zachová legacy výpočet." }
               unit: { type: string, default: ks }
-              unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní položky 2 místa. Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
+              unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
               vat_rate_id: { type: integer }
               vat_classification_code:
                 type: [string, "null"]
@@ -49462,7 +49644,7 @@ components:
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Přesná délka časové položky v minutách; NULL používá legacy `quantity`." }
         unit: { type: string }
-        unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní a skladové položky 2 místa." }
+        unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech)." }
         vat_rate_id: { type: integer }
         vat_rate_snapshot: { type: number }
         total_without_vat: { type: number }
@@ -49519,7 +49701,7 @@ components:
         quantity: { type: number }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet." }
         unit: { type: string, default: ks }
-        unit_price_without_vat: { type: number, format: double, description: "Hodinová časová položka podporuje až 6 desetinných míst, ostatní a skladové položky 2 místa." }
+        unit_price_without_vat: { type: number, format: double, description: "Až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech)." }
         vat_rate_id: { type: integer }
         order_index: { type: integer }
         vat_classification_code: { type: [string, "null"] }
@@ -58619,6 +58801,33 @@ components:
       properties:
         deleted:
           type: boolean
+    FinalFromProformaInput:
+      type: object
+      properties:
+        tax_date:
+          type: [string, 'null']
+          format: date
+          description: Platné kalendářní datum DUZP; výchozí dnešní datum
+        due_date:
+          type: [string, 'null']
+          format: date
+          description: Platné kalendářní datum splatnosti; výchozí dnešní datum
+        advance_paid_amount:
+          type: [number, 'null']
+          description: Ručně určená výše odečtu zálohy
+        final_total:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: Celková cena zakázky ve stejném základu netto/brutto jako ceny proformy
+
+    FinalFromProformaResult:
+      type: object
+      required: [final_invoice_id, edit_url, invoice]
+      properties:
+        final_invoice_id: { type: integer, format: int64 }
+        edit_url: { type: string }
+        invoice: { $ref: '#/components/schemas/Invoice' }
+
     InvoiceProjectWrite:
       type: object
       properties:

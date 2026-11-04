@@ -8,6 +8,7 @@ use Mpdf\Mpdf;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\FuelingRepository;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Pdf\ChunkedHtmlWriter;
 use MyInvoice\Service\Pdf\MpdfFontConfig;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -151,7 +152,7 @@ final class FuelingExportService
                 . '<td class="w1">' . $e($t['car_registration'] ?? '') . '</td>'
                 . '<td class="w2">' . $e($t['fuel_type'] ?? '') . '</td>'
                 . '<td class="r w3">' . ($t['quantity'] !== null ? $e($this->num((float) $t['quantity']) . ' ' . ((string) ($t['unit'] ?? 'l') ?: 'l')) : '') . '</td>'
-                . '<td class="r w4">' . ($t['unit_price'] !== null ? $e($this->num((float) $t['unit_price'])) : '') . '</td>'
+                . '<td class="r w4">' . ($t['unit_price'] !== null ? $e($this->unitPrice((float) $t['unit_price'])) : '') . '</td>'
                 . '<td class="r w5">' . ($base !== null ? $e($this->num($base)) : '') . '</td>'
                 . '<td class="r w6">' . $e($this->money((float) $t['amount_with_vat'], (string) $t['currency'])) . '</td>'
                 . '<td class="r w7">' . $e($this->odo($t)) . '</td>'
@@ -181,6 +182,7 @@ final class FuelingExportService
     }
 
     private function num(float $n): string { return number_format($n, 2, ',', ' '); }
+    private function unitPrice(float $n): string { return number_format($n, UnitPricePrecision::decimalPlaces($n), ',', ' '); }
     private function money(float $n, string $ccy): string { return number_format($n, 2, ',', ' ') . ' ' . ($ccy ?: 'CZK'); }
 
     /** Tachometr: vlastní stav, jinak orientační z knihy jízd; odhad nese prefix ≈, jinak prázdné. */

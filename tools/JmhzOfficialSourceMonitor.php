@@ -476,7 +476,10 @@ final class JmhzOfficialSourceMonitor
                     break;
                 }
             }
-            if ($key === null || $key === '' || $url === $indexUrl) {
+            // `…/index.html` je týž index jako `…/`: portál ho od 11/2026
+            // přesměrovává (HTTP 301) a hlídač přesměrování nenásleduje, takže
+            // celý běh padal na odkazu „Úvod" v navigaci stránky.
+            if ($key === null || $key === '' || $key === 'index.html' || $url === $indexUrl) {
                 continue;
             }
             if (count($documents) >= self::MAX_SITE_PAGES) {
@@ -1243,7 +1246,14 @@ final class JmhzOfficialSourceMonitor
         }
     }
 
-    private function fetchHttps(string $url, int $maxBytes): string
+    /**
+     * Přesměrování se následuje jen v rámci téhož hostitele a nejvýš třikrát.
+     * Portál MPSV od 11/2026 přesměrovává stránky `…/x.html` na `…/x` a index
+     * `…/index.html` na `…/`; cizí hostitel by znamenal jiný než oficiální zdroj.
+     */
+    private const MAX_REDIRECTS = 3;
+
+    private function fetchHttps(string $url, int $maxBytes, int $redirects = 0): string
     {
         $this->assertHttpsUrl($url, []);
         $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'timeout' => 20, 'ignore_errors' => true]]);
@@ -1255,6 +1265,18 @@ final class JmhzOfficialSourceMonitor
             $meta = stream_get_meta_data($stream);
             $headers = $meta['wrapper_data'] ?? [];
             $status = is_array($headers) && isset($headers[0]) && preg_match('/\s(\d{3})\s/', (string) $headers[0], $matches) === 1 ? (int) $matches[1] : 0;
+            if (in_array($status, [301, 302, 307, 308], true) && $redirects < self::MAX_REDIRECTS) {
+                $location = '';
+                foreach (is_array($headers) ? $headers : [] as $header) {
+                    if (preg_match('/\ALocation:\s*(\S+)/i', (string) $header, $found) === 1) {
+                        $location = $found[1];
+                    }
+                }
+                $target = $location === '' ? '' : $this->resolveUrl($url, $location);
+                if ($target !== '' && $this->host($target) === $this->host($url)) {
+                    return $this->fetchHttps($target, $maxBytes, $redirects + 1);
+                }
+            }
             if ($status !== 200) {
                 throw new RuntimeException("Oficiální zdroj {$url} vrátil HTTP {$status}.");
             }

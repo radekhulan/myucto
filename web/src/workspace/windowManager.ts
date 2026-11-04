@@ -296,7 +296,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     workspace.windows.unshift(state)
     const storedState = workspace.windows[0]!
     const root = document.createElement('div')
-    root.className = 'h-full min-h-0'
+    root.className = 'workspace-inline-window h-full min-h-0'
     const portal = document.createElement('div')
     portal.dataset.workspaceWindow = state.id
     portal.hidden = true

@@ -339,7 +339,7 @@ async function verify() {
                     <td class="px-4 py-2 whitespace-pre-wrap break-words text-neutral-800">{{ m.description }}</td>
                     <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }}</td>
                     <td class="px-3 py-2 text-neutral-600">{{ m.unit }}</td>
-                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(m.unit_price, rep.currency) }}</td>
+                    <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(m.unit_price, rep.currency, 6) }}</td>
                     <td class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(m.total_amount, rep.currency) }}</td>
                   </tr>
                   <tr class="bg-neutral-50 border-t border-neutral-200 font-semibold">

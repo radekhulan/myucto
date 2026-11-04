@@ -104,7 +104,7 @@ final class TimeBillingPersistenceTest extends TestCase
         self::assertSame(0.33, $first[1]['quantity']);
         self::assertSame(20, $first[2]['duration_minutes']);
         self::assertSame(333.333333, $first[2]['unit_price_without_vat']);
-        self::assertSame(12.35, $first[3]['unit_price_without_vat']);
+        self::assertSame(12.345678, $first[3]['unit_price_without_vat']);
         $amountKey = $gross ? 'total_with_vat' : 'total_without_vat';
         self::assertSame(16.67, $first[0][$amountKey]);
         self::assertSame(330.0, $first[1][$amountKey]);

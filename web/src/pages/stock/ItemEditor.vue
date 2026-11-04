@@ -47,7 +47,8 @@ import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
-import { formatMoney } from '@/composables/useFormat'
+import { formatUnitPrice } from '@/composables/useFormat'
+import { roundDerivedPrice, unitPriceText } from '@/utils/unitPrice'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MarkdownEditor from '@/components/ui/MarkdownEditor.vue'
@@ -311,9 +312,9 @@ function priceRowFrom(p: ProductPrice): PriceRow {
     currency_code: p.currency_code,
     price_mode: p.price_mode,
     markup_pct: p.markup_pct,
-    fixed_price: p.fixed_price,
+    fixed_price: unitPriceText(p.fixed_price),
     rounding: p.rounding,
-    computed_price: p.computed_price,
+    computed_price: unitPriceText(p.computed_price),
     computed_base: p.computed_base,
     computed_rate: p.computed_rate,
     computed_at: p.computed_at,
@@ -428,7 +429,7 @@ function promoRowFrom(p: ProductPromoPrice): PromoRow {
   return {
     id: p.id,
     currency_code: p.currency_code,
-    promo_price: p.promo_price,
+    promo_price: unitPriceText(p.promo_price),
     label: p.label,
     valid_from: p.valid_from,
     valid_to: p.valid_to,
@@ -505,7 +506,7 @@ function vendorRowFrom(v: ProductVendor): VendorRow {
     id: v.id,
     client_id: v.client_id,
     vendor_sku: v.vendor_sku,
-    purchase_price: v.purchase_price,
+    purchase_price: unitPriceText(v.purchase_price),
     currency_code: v.currency_code,
     delivery_days: v.delivery_days,
     stock_qty: v.stock_qty,
@@ -654,7 +655,7 @@ function customerPriceRowFrom(p: StockItemCustomerPrice): CustomerPriceRow {
     client_name: p.client_name,
     currency_code: p.currency_code,
     price_type: p.price_type,
-    fixed_price: p.fixed_price,
+    fixed_price: unitPriceText(p.fixed_price),
     discount_pct: p.discount_pct,
     valid_from: p.valid_from,
     valid_to: p.valid_to,
@@ -719,7 +720,7 @@ function customerPricePreview(r: CustomerPriceRow): number | null {
   const pct = normalizeDecimal(r.discount_pct)
   const standard = standardPriceFor(r.currency_code)
   if (standard === null || pct === '' || !Number.isFinite(Number(pct))) return null
-  return Math.round(standard * (1 - Number(pct) / 100) * 100) / 100
+  return roundDerivedPrice(standard * (1 - Number(pct) / 100))
 }
 function validateCustomerPrices(): string | null {
   const seen = new Set<string>()
@@ -915,7 +916,7 @@ function priceLevelInheritedPrice(r: StockItemPriceLevelRow): number | null | un
 function discountedPrice(standard: string | null, pctRaw: string): number | null {
   const pct = normalizeDecimal(pctRaw)
   if (standard === null || pct === '' || !Number.isFinite(Number(pct))) return null
-  return Math.round(Number(standard) * (1 - Number(pct) / 100) * 100 + Number.EPSILON) / 100
+  return roundDerivedPrice(Number(standard) * (1 - Number(pct) / 100))
 }
 /**
  * Náhled výsledné ceny: výjimka měny → sleva pro produkt → zděděná cena.
@@ -1122,7 +1123,7 @@ async function loadProduct(id: number) {
     tracking_mode: p.tracking_mode ?? 'none',
     ean: p.ean,
     vat_rate_id: p.vat_rate_id,
-    sale_price_without_vat: p.sale_price_without_vat,
+    sale_price_without_vat: unitPriceText(p.sale_price_without_vat),
     min_qty: p.min_qty,
     intrastat_cn8_code: p.intrastat_cn8_code,
     intrastat_country_of_origin: p.intrastat_country_of_origin,
@@ -1633,7 +1634,7 @@ function onImgError(e: Event) {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('stock.items.field_sale_price') }}</label>
-              <input v-model="form.sale_price_without_vat" type="number" step="0.01" min="0"
+              <input v-model="form.sale_price_without_vat" type="number" step="any" min="0"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-right focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             </div>
             <div v-if="form.item_type !== 'service'">
@@ -2172,7 +2173,7 @@ function onImgError(e: Event) {
                     <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.customer_prices.preview', { unit: form.unit || '—' }) }}</span>
                     <div class="h-9 flex items-center justify-end gap-2 rounded-md bg-neutral-50 px-2 font-mono text-sm text-neutral-800">
                       <span v-if="!c.id" class="mr-auto font-sans text-xs text-neutral-400">{{ t('stock.customer_prices.unsaved') }}</span>
-                      {{ customerPricePreview(c) === null ? '—' : formatMoney(customerPricePreview(c), c.currency_code || 'CZK') }}
+                      {{ customerPricePreview(c) === null ? '—' : formatUnitPrice(customerPricePreview(c), c.currency_code || 'CZK') }}
                     </div>
                   </div>
                 </div>
@@ -2245,10 +2246,10 @@ function onImgError(e: Event) {
                     <tbody>
                       <tr v-for="r in g.rows" :key="`${r.price_level_id}-${r.currency_code}`" class="border-b border-neutral-100 last:border-0 align-top">
                         <td class="py-2 px-3"><div class="h-9 flex items-center font-mono font-semibold text-neutral-800">{{ r.currency_code }}</div></td>
-                        <td class="py-2 px-3"><div class="h-9 flex items-center justify-end font-mono text-neutral-600 whitespace-nowrap">{{ r.standard_price === null ? '—' : formatMoney(Number(r.standard_price), r.currency_code) }}</div></td>
+                        <td class="py-2 px-3"><div class="h-9 flex items-center justify-end font-mono text-neutral-600 whitespace-nowrap">{{ r.standard_price === null ? '—' : formatUnitPrice(Number(r.standard_price), r.currency_code) }}</div></td>
                         <td class="py-2 px-3">
                           <div class="min-h-9 flex flex-wrap items-center gap-x-2 text-xs text-neutral-600">
-                            <span v-if="priceLevelInheritedPrice(r) != null" class="font-mono text-sm text-neutral-800 whitespace-nowrap">{{ formatMoney(priceLevelInheritedPrice(r)!, r.currency_code) }}</span>
+                            <span v-if="priceLevelInheritedPrice(r) != null" class="font-mono text-sm text-neutral-800 whitespace-nowrap">{{ formatUnitPrice(priceLevelInheritedPrice(r)!, r.currency_code) }}</span>
                             <span>{{ priceLevelSourceText(r) }}</span>
                           </div>
                         </td>
@@ -2271,7 +2272,7 @@ function onImgError(e: Event) {
                         <td class="py-2 px-3">
                           <div class="h-9 flex items-center justify-end font-mono text-neutral-800 whitespace-nowrap">
                             <span v-if="priceLevelPreview(g.o, r).pending" class="font-sans text-xs text-neutral-400">{{ t('stock.price_levels.after_save') }}</span>
-                            <template v-else>{{ priceLevelPreview(g.o, r).value === null ? '—' : formatMoney(priceLevelPreview(g.o, r).value, r.currency_code) }}</template>
+                            <template v-else>{{ priceLevelPreview(g.o, r).value === null ? '—' : formatUnitPrice(priceLevelPreview(g.o, r).value, r.currency_code) }}</template>
                           </div>
                         </td>
                       </tr>

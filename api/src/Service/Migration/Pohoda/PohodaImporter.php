@@ -123,6 +123,16 @@ final class PohodaImporter
             // Export cizí firmy by se jinak vmíchal do účetnictví téhle.
             $add('error', 'ico_mismatch', "Export je agenda IČO {$export->ico}, firma v MyÚčtu má IČO {$supplierIco}.", ['agenda' => $export->ico, 'supplier' => $supplierIco]);
         }
+        // Agenda vedená v daňové evidenci nemá účetní deník: POHODA na jeho export odpoví
+        // chybou, protože agendu nepoužívá. Převod účetnictví ji neumí a technická chyba
+        // souboru s větou o přepnutí do podvojného by uživatele jen poslala špatným směrem.
+        if (self::isTaxEvidenceAgenda($export)) {
+            $add('error', 'tax_evidence_agenda_unsupported', 'Agenda POHODY je vedená v daňové evidenci (peněžní deník). '
+                . 'Převod z POHODY zatím podporuje jen agendy vedené v podvojném účetnictví, daňovou evidenci nepřevede. '
+                . 'Vydané a přijaté faktury převedete importem souborů Pohoda XML (Prodej → Import a Nákup → Import) '
+                . 'a pohyby na účtu importem bankovních výpisů; firma přitom zůstane v daňové evidenci.');
+            return $out;
+        }
         foreach ($export->files() as $f) {
             if (!$f['exists']) {
                 continue;
@@ -201,6 +211,26 @@ final class PohodaImporter
             $add('info', 'payroll_separate', 'Export obsahuje mzdy z datového souboru POHODY (91_mzdy.xml). Převod účetnictví je nepřevádí, zaměstnanci a mzdy se převádějí zvlášť.');
         }
         return $out;
+    }
+
+    /**
+     * Účetní deník existuje, ale POHODA ho nevydala (stav jiný než `ok`) a agenda nemá
+     * ani jeden zápis: znak agendy v daňové evidenci, která deník vůbec nevede.
+     */
+    private static function isTaxEvidenceAgenda(PohodaExport $export): bool
+    {
+        foreach ($export->files() as $f) {
+            if ($f['key'] === 'journal') {
+                if (!$f['exists'] || $f['state'] === 'ok' || $f['note'] === 'MDB') {
+                    return false;
+                }
+                foreach ($export->records('journal', 'accountingItem') as $ignored) {
+                    return false;
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

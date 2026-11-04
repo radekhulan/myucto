@@ -138,6 +138,22 @@ Sloučené PDF obsahuje pouze samotné faktury. Nepřidává uživatelské pří
 ani výkazy víceprací. Pro archiv jednotlivých souborů (PDF ZIP, ISDOC ZIP, Pohoda XML)
 použijte `Prodej → Export` ([kapitola 20](20_Exporty.md)).
 
+### 14.7.1 Kniha vystavených faktur
+
+1. V seznamu nastavte filtr (období, stav, odběratele, hledání a další).
+2. Vpravo nahoře klikněte na **Kniha vystavených faktur** a zvolte **PDF na šířku** nebo
+   **Tabulka XLSX**.
+
+Kniha obsahuje všechny doklady odpovídající filtru, ne jen načtenou stránku, seřazené podle
+čísla. U každého dokladu uvádí číslo, datum vystavení, splatnost, DUZP, částku, zbývá
+uhradit, odběratele, variabilní symbol a popis (text položky s nejvyšší částkou). Hlavička
+shrnuje použitý filtr, patička stránky uvádí, kdo a kdy sestavu vytiskl.
+
+Koncept bez čísla v knize není. Koncepty s číslem a stornované doklady se objeví jen tehdy,
+když je filtr zahrnuje, a do součtů nevstupují. Součty jsou za každou měnu zvlášť, bez
+přepočtu kurzem: celkem k úhradě (po odpočtu záloh), zbývá uhradit u faktur a u dobropisů
+a samostatně daňové doklady k přijaté platbě.
+
 ## 14.8 Krok za krokem: hromadné nastavení OSS
 
 Po migraci nebo po importu zůstanou desítky až stovky řádků, u kterých je potřeba doplnit

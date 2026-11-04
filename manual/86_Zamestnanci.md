@@ -703,8 +703,9 @@ nemění.
 
 Kód `D` dává jen dosažení důchodového věku; předčasný starobní důchod ho
 nezakládá a odečítané doby po dosažení věku neruší. Starobní důchod v plné výši ukončuje odečítané doby a od roku
-2025 i vedení ročního evidenčního listu; měsíc, od kterého výplata náleží
-(u důchodu přiznaného uprostřed měsíce měsíc přiznání), se ještě vede. Invalidní
+2025 i vedení ročního evidenčního listu a údajů ELDP v měsíčním hlášení; měsíc,
+od kterého výplata náleží (u důchodu přiznaného uprostřed měsíce měsíc přiznání),
+se ještě vede. Invalidní
 a cizí důchody kód `D` nezakládají. Import přihlášek REGZEC doplní pobíraný
 důchod do prázdné evidence; vyplněnou nemění a rozdíl jen ohlásí.
 

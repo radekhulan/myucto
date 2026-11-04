@@ -229,6 +229,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\TaxStatement\TaxStatementService::FORMS',
         'payrollRulesets.ts::PayrollRulesetOutlookSeverity'
             => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook::SEVERITIES',
+        'payrollRulesets.ts::PayrollRulesetReviewCategory'
+            => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRuleParameterCatalog::REVIEW_CATEGORIES',
         'payroll.ts::PayrollForeignPermitKind'
             => 'db:payroll_person_foreign_permits.permit_kind',
         'payroll.ts::PayrollForeignPermitStatus'

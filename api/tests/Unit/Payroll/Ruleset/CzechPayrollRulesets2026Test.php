@@ -367,7 +367,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
                     $provider->forCalculation($domain, $date);
                     self::fail("Doména {$domain->value} je ruční posouzení a nesmí do výpočtu.");
                 } catch (PayrollRulesetException $exception) {
-                    self::assertStringContainsString('requires manual review', $exception->getMessage());
+                    self::assertStringContainsString('nemá hodnotu pro výpočet', $exception->getMessage());
                 }
                 continue;
             }

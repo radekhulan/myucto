@@ -500,7 +500,7 @@ final class ClientRepository
         $stmt = $this->db->pdo()->prepare(
             "UPDATE clients SET dic = ?
               WHERE id = ?
-                AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ?
+                AND " . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . " = ?
                 AND (dic IS NULL OR REGEXP_REPLACE(dic, '[^0-9]', '') IN ('', ?))"
         );
         $stmt->execute([$groupDic, $id, $icDigits, $icDigits]);

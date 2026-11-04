@@ -198,6 +198,60 @@ podle toho se nástroj skryje v režimu jen pro čtení a označí varováním v
 ve schématu a `confirmed()` / `requireConfirm()` v `run()`, které bez potvrzení
 místo zápisu vrátí náhled dotčeného záznamu.
 
+Každý nástroj má přímo u definice deklaraci `api`, například
+`api: [['GET', '/api/invoices/{id}'], ['PUT', '/api/invoices/{id}/work-report']]`.
+Uvádějte všechny operace včetně podmíněného dohledávání v pomocných funkcích;
+každá operace mimo GET vyžaduje `write: true`. Nástroje, které nejsou převedené
+do klientského katalogu nebo API této instalace nevolají, mají výslovné
+`api: false` a `apiReason`. Na klientské doméně se nikdy nenabídnou.
+
+`npm run generate:api` v `MCP/` vytvoří `src/tool-api.generated.json`; tento
+manifest se commituje a neupravuje ručně. PHP jej načítá bez Node a podle
+stávající mapy API oprávnění, pravidel klientské domény a role uživatele posoudí
+každou operaci. Chybějící nebo poškozený manifest znamená prázdný katalog.
+Rozsah tokenu dále omezí nabídku v serverovém MCP. Při běhu se všechna práva
+a vazba na firmu ověřují znovu v API.
+
+`npm test` kontroluje shodu manifestu s deklaracemi i skutečná volání nástrojů
+nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář
+v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným operacím a
+zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
+klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpravy
+přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
+strukturovaný import. Ke čtení jsou také zůstatky bankovních účtů, návrhy
+párování výpisů, historie faktur ze šablony, hledání zboží, jeho dostupnost
+a seznam/detail skladů. Čtení skladu zpřístupňuje i `stock_quantities`, lokace,
+balení a sledování šarží/sériových čísel. Server klientovi nevrací zdrojové
+objednávky, nabídky dodavatelů ani historii pohybů šarží/sériových čísel.
+Platební údaje přijaté faktury vyžadují její čtení; obrázek QR se do MCP
+nepředává. Kategorie nákladů vyžadují čtení nastavení firmy.
+Čtení vydaných faktur zpřístupňuje i přehledy kandidátů k propojení záloh,
+konečných faktur, záloh k postupnému čerpání a náhled úroku z prodlení. Čtení
+přijatých faktur zpřístupňuje jejich kandidáty záloh a vyúčtování. Jde pouze
+o GET. Zápisový token navíc umožňuje propojování a odpojování vydaných i přijatých
+záloh, postupné čerpání a jeho odebrání, vytvoření finální faktury ze zálohy
+a ručního daňového dokladu k platbě. Vazby a čerpání vyžadují zápis příslušné
+agendy; `create_final_invoice_from_proforma` právo `invoices.issue`
+a `create_payment_tax_document` právo `invoices.mark_paid`. Obecný zápis
+vydaných faktur tato dvě samostatná práva nenahrazuje.
+
+V ručním režimu dokladu k platbě vyber platbu přes `list_invoice_payments`,
+založ její koncept přes `create_payment_tax_document` a po kontrole jej vystav
+přes `issue_invoice`. Poté lze zálohu čerpat na konceptu běžné faktury přes
+`apply_invoice_advance_drawdown`, nebo založit finální koncept přes
+`create_final_invoice_from_proforma`. Vystavení finálu je samostatný krok.
+Opakované vytvoření dokladu k téže platbě nebo finálu vrací existující doklad;
+opakované čerpání na témže konceptu nahrazuje dosavadní odpočet. Čerpání
+vyžaduje vystavený doklad k platbě, stejnou protistranu a měnu, dostupný zůstatek
+a nepodporuje OSS. Nadále platí serverové zámky období a dokladů.
+
+Obě odpojení vazby a odebrání čerpání vyžadují `confirm: true`; bez něj
+zobrazí pouze náhled. Samotné odpojení vazby ponechá `advance_paid_amount`
+na dokladu. Odebrání čerpání naopak odstraní i odpočtové řádky konceptu.
+Vytvoření penalizační faktury zůstává mimo klientský katalog.
+Ostatní nástroje zůstávají výslovně vyloučené, dokud
+nebudou převedené se stejným ověřením závislostí.
+
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
 pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník
 stejného tvaru je tedy jeden objekt, ne pět nástrojů psaných ručně.

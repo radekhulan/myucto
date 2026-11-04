@@ -1,3 +1,5 @@
+import { hasSubCentPrice, UNIT_PRICE_DECIMALS } from '@/utils/timeBilling'
+
 /**
  * Ceníková cena a sleva řádku faktury (migrace 2035).
  *
@@ -79,5 +81,7 @@ export function applyLineDiscount(
     if (current === null || current <= 0 || pct === 0) return null
     list = current
   }
-  return { list_unit_price: list, unit_price_without_vat: roundTo(list * (100 - pct) / 100, 2) }
+  // Ceníková cena pod haléř (0,004/ks) by se na dvou místech vynulovala, drží proto přesnost ceny.
+  const decimals = hasSubCentPrice(list) ? UNIT_PRICE_DECIMALS : 2
+  return { list_unit_price: list, unit_price_without_vat: roundTo(list * (100 - pct) / 100, decimals) }
 }

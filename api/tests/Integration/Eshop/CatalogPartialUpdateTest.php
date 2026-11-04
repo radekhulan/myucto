@@ -316,7 +316,7 @@ final class CatalogPartialUpdateTest extends StockTestCase
         self::assertSame('bal', $row['unit']);
         self::assertSame('material', $row['item_type']);
         self::assertSame($this->vatRateId, (int) $row['vat_rate_id']);
-        self::assertSame('100.00', $row['sale_price_without_vat']);
+        self::assertSame('100.000000', $row['sale_price_without_vat']);
         self::assertSame(1, (int) $row['is_active']);
         self::assertCount(1, $this->container->get(StockItemVendorRepository::class)->listForItem($sid, $itemId), 'Vynechané vendors zůstávají.');
         self::assertCount(1, $this->container->get(StockItemPromoPriceRepository::class)->listForItem($sid, $itemId), 'Vynechané promo_prices zůstávají.');

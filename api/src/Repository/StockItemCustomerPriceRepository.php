@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -157,6 +158,7 @@ final class StockItemCustomerPriceRepository
         $r['client_id'] = (int) $r['client_id'];
         $r['currency_code'] = strtoupper((string) $r['currency_code']);
         // fixed_price, discount_pct zůstávají string (money-safe).
+        $r['fixed_price'] = UnitPricePrecision::toDecimalString($r['fixed_price']);
         return $r;
     }
 }

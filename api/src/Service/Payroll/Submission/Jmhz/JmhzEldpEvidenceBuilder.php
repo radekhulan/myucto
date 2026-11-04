@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpPensionAgeCode;
@@ -264,7 +265,7 @@ final class JmhzEldpEvidenceBuilder
         );
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
         $participates = $this->participationMode($relationType, $relationship, $employmentId);
-        $eldpReported = $participates && !self::workingPensioner($input, $employeeId);
+        $eldpReported = $participates && !self::pensionerWithoutEldp($input, $employeeId, $source, $periodStart);
         $assessmentBaseMinor = $this->nonNegativeInt(
             $relationship['assessment_base_minor_units'] ?? null,
             'assessment_base_minor_units',
@@ -474,9 +475,11 @@ final class JmhzEldpEvidenceBuilder
          * pojištění (10356), který se vykáže jako 0". Nemocensky pojištěný
          * zůstává, takže vyloučené dny § 18 odst. 7 se vykazují dál. Přijatá
          * hlášení dvou jiných mzdových systémů to tak mají. Vyměřovací základ
-         * a pojistné (10477, 10370) nejsou třída ELDP a zůstávají.
+         * a pojistné (10477, 10370) nejsou třída ELDP a zůstávají. Měsíc,
+         * od kterého výplata důchodu náleží, ještě třídu ELDP nese
+         * ({@see pensionerWithoutEldp()}).
          */
-        $eldpReported = $participates && !self::workingPensioner($input, $employeeId);
+        $eldpReported = $participates && !self::pensionerWithoutEldp($input, $employeeId, $source, $periodStart);
         $insuranceFrom = $this->date($confirmation['insurance_from'] ?? null, 'insurance_from');
         $insuranceTo = $this->date($confirmation['insurance_to'] ?? null, 'insurance_to');
         $validFrom = $eldpReported ? $this->date($confirmation['valid_from'] ?? null, 'valid_from') : null;
@@ -1116,6 +1119,37 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return false;
+    }
+
+    /**
+     * Hlásí se za osobu ve vykazovaném měsíci místo třídy ELDP jen interval
+     * 10354 a 10355 s 10356 = 0?
+     *
+     * Ověřená sleva pracujícího důchodce ({@see workingPensioner()}) náleží
+     * i za měsíc, od jehož prvního dne se důchod vyplácí. Ten ale ELDP ještě
+     * nese: vyplňuje se „pouze do měsíce, od něhož náleží výplata starobního
+     * důchodu v plné výši" včetně něj (diskuse JMHZ #363, Metodická pomůcka
+     * ELDP, příklad 8a), stejně jako roční evidenční list
+     * ({@see PayrollPensionStatus::eldpKeptInMonth()}). Bez starobního důchodu
+     * v zákonné evidenci osoby rozhoduje sleva sama, jako dřív.
+     *
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $source
+     */
+    private static function pensionerWithoutEldp(
+        array $input,
+        int $employeeId,
+        array $source,
+        string $periodStart,
+    ): bool {
+        if (!self::workingPensioner($input, $employeeId)) {
+            return false;
+        }
+        $status = $source['pension_status'] ?? null;
+        $fullPaidFrom = is_array($status) ? ($status['full_pension_paid_from'] ?? null) : null;
+
+        return !is_string($fullPaidFrom)
+            || !PayrollPensionStatus::eldpKeptInMonth($fullPaidFrom, $periodStart);
     }
 
     /**
