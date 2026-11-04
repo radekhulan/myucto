@@ -1075,6 +1075,42 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  it('requires a reason to cancel a correction revision of an approved run', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      revision_kind: 'correction',
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-cancel"]').trigger('click')
+    await flushPromises()
+    const textarea = document.body.querySelector<HTMLTextAreaElement>(
+      '[data-test="run-command-reason"]',
+    )!
+    expect(textarea.required).toBe(true)
+    expect(document.body.querySelector('[data-test="run-cancel-hint"]')?.textContent)
+      .toContain('payroll.runs.cancel_correction_hint')
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+    expect(m.commandRun).not.toHaveBeenCalled()
+
+    textarea.value = 'Oprava se nakonec nedělá.'
+    textarea.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'cancel',
+      { row_version: 2, reason: 'Oprava se nakonec nedělá.' },
+      expect.any(String),
+    )
+    wrapper.unmount()
+  })
   it('guides a run held by unapproved attendance and inputs to refresh instead of cancelling', async () => {
     m.runs.mockResolvedValue([run({
       status: 'calculated',

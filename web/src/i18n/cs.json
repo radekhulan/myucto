@@ -3699,6 +3699,7 @@
       "reason_prompt": "Uveďte důvod změny:",
       "reason_prompt_optional": "Poznámka do historie běhu (nepovinná)",
       "reason_required": "Důvod je povinný.",
+      "cancel_correction_hint": "Zruší se rozpracovaná opravná revize. Schválený výsledek běhu zůstává platný a opravu kdykoli otevřete znovu tlačítkem „Začít znovu“. Uveďte důvod, zapíše se do historie běhu.",
       "cancel_hint": "Zruší se rozpracovaný výpočet neschváleného běhu. Docházka, mzdové vstupy ani složky se nemažou a běh kdykoli vrátíte tlačítkem „Začít znovu“.",
       "continue_steps": {
         "title": "Jak pokračovat",

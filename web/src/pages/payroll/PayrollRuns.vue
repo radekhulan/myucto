@@ -1100,13 +1100,16 @@ function reloadedRun(run: PayrollRun): PayrollRun | null {
 }
 
 /**
- * Důvod se píše jen u opravy schváleného běhu. Zrušení neschváleného běhu
- * vrací „Začít znovu", takže stačí jedno potvrzení bez psaní; samotné
- * „Začít znovu" je návrat a dialog nemá. Dřív se obrazovka ptala na důvod
- * dvakrát za sebou a účetní psala „xxx", aby mohla pokračovat.
+ * Důvod se píše jen u opravy schváleného běhu: u vyžádání opravy a u zrušení
+ * opravné revize, protože ta stojí nad schváleným (zaúčtovaným, uzavřeným)
+ * výsledkem. Server to hlídá stejně. Zrušení neschváleného běhu vrací
+ * „Začít znovu", takže stačí jedno potvrzení bez psaní; samotné „Začít
+ * znovu" je návrat a dialog nemá. Dřív se obrazovka ptala na důvod dvakrát
+ * za sebou a účetní psala „xxx", aby mohla pokračovat.
  */
-function commandNeedsReason(command: PayrollRunCommand): boolean {
+function commandNeedsReason(run: PayrollRun, command: PayrollRunCommand): boolean {
   return command === 'request_correction'
+    || (command === 'cancel' && run.revision_kind === 'correction')
 }
 
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
@@ -1330,7 +1333,7 @@ function dismissBlocker(runId: number) {
 async function confirmCommand() {
   if (!pendingCommand.value) return
   const reason = commandReason.value.trim()
-  if (!reason && commandNeedsReason(pendingCommand.value.command)) {
+  if (!reason && commandNeedsReason(pendingCommand.value.run, pendingCommand.value.command)) {
     commandError.value = t('payroll.runs.reason_required')
     return
   }
@@ -3060,17 +3063,19 @@ onMounted(load)
           class="text-sm text-neutral-700"
           data-test="run-cancel-hint"
         >
-          {{ t('payroll.runs.cancel_hint') }}
+          {{ pendingCommand.run.revision_kind === 'correction'
+            ? t('payroll.runs.cancel_correction_hint')
+            : t('payroll.runs.cancel_hint') }}
         </p>
         <label class="block text-sm font-medium text-neutral-700">
-          {{ commandNeedsReason(pendingCommand.command)
+          {{ commandNeedsReason(pendingCommand.run, pendingCommand.command)
             ? t('payroll.runs.reason_prompt')
             : t('payroll.runs.reason_prompt_optional') }}
           <textarea
             v-model="commandReason"
             class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
-            :class="commandNeedsReason(pendingCommand.command) ? 'min-h-24' : 'min-h-12'"
-            :required="commandNeedsReason(pendingCommand.command)"
+            :class="commandNeedsReason(pendingCommand.run, pendingCommand.command) ? 'min-h-24' : 'min-h-12'"
+            :required="commandNeedsReason(pendingCommand.run, pendingCommand.command)"
             autofocus
             data-test="run-command-reason"
           />

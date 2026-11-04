@@ -862,6 +862,8 @@ final class PayrollRunCommandService
                 reason: $reason,
                 correctionRevision: $refreshAsCorrection,
                 staleSourceCount: $staleSourceCount,
+                hasApprovedRevision: $command === PayrollRunCommand::CANCEL
+                    && $this->runs->latestApprovedRevision($supplierId, $runId) !== null,
             );
             $transition = $this->workflow->transition($from, $command, $context);
 

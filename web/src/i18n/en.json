@@ -3699,6 +3699,7 @@
       "reason_prompt": "Enter the reason for the change:",
       "reason_prompt_optional": "Note for the run history (optional)",
       "reason_required": "A reason is required.",
+      "cancel_correction_hint": "The work-in-progress correction revision is discarded. The approved result of the run stays valid and you can open the correction again any time with “Start again”. Give a reason, it is recorded in the run history.",
       "cancel_hint": "The work-in-progress calculation of this unapproved run is discarded. Attendance, payroll inputs and components are kept, and you can bring the run back any time with “Start again”.",
       "continue_steps": {
         "title": "How to continue",

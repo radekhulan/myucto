@@ -386,6 +386,56 @@ final class PayrollRunPersistenceTest extends TestCase
     }
 
     /**
+     * Zrušení opravné revize nad schváleným během ruší rozpracovanou opravu
+     * schváleného výsledku a bez důvodu neprojde. Neschválený běh se dál
+     * ruší bez důvodu ({@see self::testCancelOfUnapprovedRunReleasesLockedInputsWithoutReason()}).
+     */
+    public function testCancelOfCorrectionOverApprovedRunRequiresReason(): void
+    {
+        $approved = $this->approveInitialRun();
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            (int) $approved->run['id'],
+            (int) $approved->run['row_version'],
+            'request-cancel-reason',
+            $this->actors[0],
+            'Syntetická oprava',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            (int) $approved->run['id'],
+            (int) $requested->run['row_version'],
+            'reopen-cancel-reason',
+            $this->actors[0],
+            'Syntetická oprava',
+        );
+
+        try {
+            $this->service->cancel(
+                $this->supplierId,
+                (int) $approved->run['id'],
+                (int) $reopened->run['row_version'],
+                'cancel-without-reason',
+                $this->actors[0],
+                '  ',
+            );
+            self::fail('Zrušení opravné revize bez důvodu muselo selhat.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('důvod', $exception->getMessage());
+        }
+
+        $cancelled = $this->service->cancel(
+            $this->supplierId,
+            (int) $approved->run['id'],
+            (int) $reopened->run['row_version'],
+            'cancel-with-reason',
+            $this->actors[0],
+            'Oprava se nakonec nedělá.',
+        );
+        self::assertSame('cancelled', $cancelled->run['status']);
+    }
+
+    /**
      * Opravná revize odemyká jen vstupy svého běhu: vstup, který drží
      * schválená revize běhu jiné účtárny, zůstává zamčený.
      */

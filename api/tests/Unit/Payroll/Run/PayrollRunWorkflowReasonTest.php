@@ -28,6 +28,35 @@ final class PayrollRunWorkflowReasonTest extends TestCase
         self::assertSame(PayrollRunStatus::CANCELLED, $transition->to);
     }
 
+    /**
+     * Zrušení opravné revize nad schváleným (zaúčtovaným, uzavřeným) během
+     * ruší rozpracovanou opravu schváleného výsledku, důvod je povinný.
+     */
+    public function testCancelOfRunWithApprovedRevisionNeedsReason(): void
+    {
+        $this->expectException(\DomainException::class);
+        (new PayrollRunWorkflow())->transition(
+            PayrollRunStatus::REOPENED,
+            PayrollRunCommand::CANCEL,
+            new PayrollRunTransitionContext(actorUserId: 1, reason: ' ', hasApprovedRevision: true),
+        );
+    }
+
+    public function testCancelOfRunWithApprovedRevisionPassesWithReason(): void
+    {
+        $transition = (new PayrollRunWorkflow())->transition(
+            PayrollRunStatus::REOPENED,
+            PayrollRunCommand::CANCEL,
+            new PayrollRunTransitionContext(
+                actorUserId: 1,
+                reason: 'Oprava se nedělá.',
+                hasApprovedRevision: true,
+            ),
+        );
+
+        self::assertSame(PayrollRunStatus::CANCELLED, $transition->to);
+    }
+
     public function testReopenOfCancelledRunNeedsNoReason(): void
     {
         $transition = (new PayrollRunWorkflow())->transition(

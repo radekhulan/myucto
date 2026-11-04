@@ -385,9 +385,12 @@ Pořadí je dané a nedá se přeskočit.
 | Čeká na opravu / Zrušeno | **Otevřít opravu** | nová revize nad opravenými vstupy |
 
 Vedle jsou méně časté akce **Vyžádat opravu** a **Zrušit běh** (červeně úplně
-vpravo). Důvod se píše jen u **Vyžádat opravu** schváleného běhu. Zrušení
+vpravo). Důvod se píše u **Vyžádat opravu** schváleného běhu a u zrušení
+opravné revize, protože ta stojí nad schváleným výsledkem. Zrušení
 neschváleného běhu stačí potvrdit, docházka ani vstupy se nemažou a běh vrátí
-**Začít znovu a spočítat**.
+**Začít znovu a spočítat**. Zrušení uvolní jen vstupy zaměstnanců tohoto běhu.
+Vstupy, které drží běh jiné mzdové účtárny za stejný měsíc, zůstávají
+zamčené.
 
 **Kontrola před zahájením.** Každý nález má vyznačený dopad: **Bez tohohle se
 nedá počítat**, **Spočítat půjde, schválit ne** (červeně, například neschválená
