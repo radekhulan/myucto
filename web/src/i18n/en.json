@@ -22669,6 +22669,8 @@
     "post_document": "Post to journal",
     "post_document_success": "Document was posted to the journal.",
     "post_document_confirm": "Post this document to the accounting journal?",
+    "booked_without_entry_title": "The document is marked as posted, but the journal has no entry for it.",
+    "booked_without_entry_hint": "The posted flag most likely comes from a migration from another program where the document was not posted. Post it with the Post to journal button.",
     "all": "All",
     "filter": "Filter",
     "filters": "Filters",

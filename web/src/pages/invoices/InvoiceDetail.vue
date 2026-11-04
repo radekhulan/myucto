@@ -1863,11 +1863,15 @@ async function updateApprovalStatus() {
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
-  && !invoice.value.booked_at
   && !invoice.value.locked?.journal_entry_id
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('invoices'))
+
+// Doklad označený jako zaúčtovaný (booked_at), ke kterému v deníku zápis není - typicky
+// po převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtování zůstává dostupné.
+const bookedWithoutEntry = computed(() => canPostToJournal.value && !!invoice.value?.booked_at
+  && ['invoice', 'credit_note', 'tax_document', 'penalty'].includes(invoice.value.invoice_type))
 
 async function postToJournal() {
   if (!invoice.value || !canPostToJournal.value) return
@@ -2017,7 +2021,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
       show: canPostToJournal.value, disabled: b, loading: busy.value === 'post', run: postToJournal },
     { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-      show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+      show: isDoubleEntry.value && !!inv.locked?.journal_entry_id,
       to: { name: 'accounting-journal', query: { source_type: 'invoice', source_id: String(inv.id) } } },
     // Koncept vyúčtovací faktury po úhradě zálohy → daňový doklad k přijaté platbě
     // (záloha na plnění, které ještě nenastalo). Route vyžaduje invoices.delete
@@ -2154,6 +2158,12 @@ useWindowRefresh(async () => {
           </span>
         </h1>
         <ActionBar :actions="invoiceActions" />
+      </div>
+
+      <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
+      <div v-if="bookedWithoutEntry" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700" data-test="booked-without-entry">
+        <div class="font-medium">{{ t('common.booked_without_entry_title') }}</div>
+        <div class="mt-1 text-warning-700/90">{{ t('common.booked_without_entry_hint') }}</div>
       </div>
 
       <div class="flex items-start justify-between gap-4">

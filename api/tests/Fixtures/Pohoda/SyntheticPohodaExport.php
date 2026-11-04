@@ -877,6 +877,24 @@ final class SyntheticPohodaExport
             . self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'DPH', 210, '343011', '321001', '2026-01-20'));
     }
 
+    /** Doklady s předkontací „Nevím" ({@see withNotYetPosted()}). */
+    public const NOT_POSTED_PURCHASE = '26PF0090';
+    public const NOT_POSTED_ISSUED = '26FV0090';
+
+    /**
+     * Přijatá faktura 26PF0090 a vydaná 26FV0090 s předkontací „Nevím" (zaúčtuje se později):
+     * v deníku POHODY zápis nemají, převod je proto nesmí označit jako zaúčtované.
+     */
+    public static function withNotYetPosted(string $agendaDir): void
+    {
+        $later = static fn (string $xml): string => str_replace('<inv:text>Služby</inv:text>',
+            '<inv:text>Služby</inv:text><inv:accounting><typ:ids>Nevím</typ:ids></inv:accounting>', $xml);
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            $later(self::invoice('receivedInvoice', self::NOT_POSTED_PURCHASE, '2026090', '2026-02-15', 1000, 210)));
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            $later(self::invoice('issuedInvoice', self::NOT_POSTED_ISSUED, '2026091', '2026-02-16', 1000, 210)));
+    }
+
     /** Úhrada přes platební bránu ({@see withPaymentGateway()}). */
     public const GATEWAY_INVOICE = '26FV0040';
     public const GATEWAY_BANK = 'BAN0010040';

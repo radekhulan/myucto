@@ -22669,6 +22669,8 @@
     "post_document": "Zaúčtovat",
     "post_document_success": "Doklad byl zaúčtován do deníku.",
     "post_document_confirm": "Zaúčtovat doklad do účetního deníku?",
+    "booked_without_entry_title": "Doklad je označený jako zaúčtovaný, ale v deníku k němu zápis není.",
+    "booked_without_entry_hint": "Příznak zaúčtování pochází nejspíš z převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtujte ho tlačítkem Zaúčtovat.",
     "all": "Všechny",
     "filter": "Filtrovat",
     "filters": "Filtry",

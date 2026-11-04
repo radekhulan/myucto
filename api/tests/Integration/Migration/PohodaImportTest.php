@@ -1178,6 +1178,20 @@ final class PohodaImportTest extends TestCase
         self::assertEqualsWithDelta(210.0, $delta(3, '40'), 0.005, 'Odpočet běžného dokladu v období plnění.');
     }
 
+    /** Předkontace „Nevím": doklad bez zápisu v deníku POHODY zůstane nezaúčtovaný a půjde zaúčtovat. */
+    public function testNotYetPostedDocumentsAreNotMarkedBooked(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withNotYetPosted($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol = '%s' AND booked_at IS NULL AND status = 'received'", SyntheticPohodaExport::NOT_POSTED_PURCHASE)), $this->explain($protocol));
+        self::assertSame(1, $this->rows('invoices', $supplierId, sprintf("varsymbol = '%s' AND booked_at IS NULL AND status = 'sent'", SyntheticPohodaExport::NOT_POSTED_ISSUED)), $this->explain($protocol));
+        self::assertSame(0, $this->rows('purchase_invoices', $supplierId, sprintf("varsymbol <> '%s' AND booked_at IS NULL AND status <> 'draft' AND document_kind <> 'advance'", SyntheticPohodaExport::NOT_POSTED_PURCHASE)), 'Ostatní doklady zůstávají zaúčtované.');
+    }
+
     /** Vydaný doklad v tuzemském přenesení daňové povinnosti (ř. 25) nese příznak na hlavičce. */
     public function testDomesticReverseSaleIsFlagged(): void
     {
