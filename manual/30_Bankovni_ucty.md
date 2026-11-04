@@ -72,7 +72,7 @@ Jen pro podvojné účetnictví. Každý bankovní účet má vlastní analytiku
 2. U každého účtu zkontrolujte **Název**, **Druh** (běžný účet, spořicí účet, termínovaný vklad), **Analytika**, **Dokladová řada** a **Aktivní**. Účet kreditní karty (231) se tu nenastavuje, spravuje ho stránka Kreditní karty.
 3. Potřebujete-li účet namapovat na konkrétní analytiku, kterou už v osnově používáte (například termínovaný vklad na 221.100), přepište číslo za tečkou (1 až 6 číslic). Vedle se ukáže výsledný účet.
 4. Chcete-li změnit dokladovou řadu zápisů (například `BCR`), přepište ji. Smí obsahovat písmena A-Z a číslice, nejvýše 10 znaků, a jedna řada patří vždy jen jednomu účtu.
-5. Máte-li zapnuté [dimenze](114_Dimenze.md), můžete účtu nastavit **Výchozí dimenze**: ve sloupci klikněte na **Upravit** a pro každý typ vyberte nejvýše jednu hodnotu. Dostanou je pohyby na účtu, které hodnotu typu nemají samy ani z hrazených dokladů, typicky úroky, srážková daň a poplatky (viz [§ 114.11.5](114_Dimenze.md#114115-vychozi-dimenze)).
+5. Máte-li zapnuté [dimenze](114_Dimenze.md), můžete účtu nastavit **Výchozí dimenze**: ve sloupci klikněte na **Upravit** a pro každý typ vyberte nejvýše jednu hodnotu. Dostane je řádek banky pohybů na účtu, které hodnotu typu nemají samy ani z hrazených dokladů, a u pohybů bez dokladu (úroky, srážková daň, poplatky) i jejich protiúčet (viz [§ 114.11.5](114_Dimenze.md#114115-vychozi-dimenze)).
 6. Klikněte na **Uložit**.
 
 **Jak poznáte, že je hotovo:** Zobrazí se hláška „Bankovní účty byly uloženy.“ a u každého účtu je vidět jeho analytika (například `221.200`). Po změně řady aplikace ukáže počet přečíslovaných bankovních zápisů v otevřených obdobích.
@@ -212,7 +212,7 @@ V tabulce u každého účtu nastavíte:
 | **Druh** | Běžný účet / spořicí účet / termínovaný vklad |
 | **Analytika** | Číslo za tečkou - vedle se hned ukáže výsledný účet (např. `221.200`) |
 | **Dokladová řada** | Řada, pod kterou se bankovní zápisy účtu číslují v deníku (např. `BCR`) |
-| **Výchozí dimenze** | Jen se zapnutými dimenzemi. Hodnoty, které zaúčtování doplní pohybu na účtu, když je nemá sám ani z hrazených dokladů |
+| **Výchozí dimenze** | Jen se zapnutými dimenzemi. Hodnoty, které zaúčtování doplní řádku banky a u pohybu bez dokladu i protiúčtu, když je řádek nemá z pohybu, hrazeného dokladu ani pravidla dimenzí |
 | **Aktivní** | Neaktivní účet se do kontací nenabízí, ale své číslo si drží |
 
 Číslo můžete **přepsat**, typicky když už některý účet v rozvrhu vedete pod konkrétní analytikou a chcete na ni bankovní účet **namapovat** (například termínovaný vklad na 221.100). Analytiku, kterou už používá jiný účet, systém odmítne, a jednou přidělenou analytiku **nelze zrušit**, jde ji jen změnit na jiné číslo. Analytika, na které už leží účetní zápisy, se sama nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
