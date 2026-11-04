@@ -5117,19 +5117,40 @@ paths:
         schema: { type: integer, format: int64 }
     post:
       tags: [InvoiceOps]
-      summary: Vystaví finální fakturu ze zaplacené zálohy (proforma → invoice)
+      summary: Vytvoří koncept finální faktury ze zálohy
       description: |
-        Pouze pro `invoice_type = proforma` ve stavu `paid`. Vytvoří finální
-        daňový doklad navázaný na zálohu (`parent_id`). Číslo a snapshoty
-        se zafixují stejně jako u běžného vystavení.
+        Pro `invoice_type = proforma` s alespoň částečnou úhradou. Vytvoří koncept
+        finálního dokladu s vazbou `parent_invoice_id`; vystavuje se samostatně
+        přes `/issue`. Opakované volání vrátí již existující nestornovaný finální
+        doklad. Vyžaduje `invoices.issue` na úrovni WRITE a zápisový rozsah tokenu.
+        Nový koncept nesmí pro klienta vzniknout v uzamčeném období.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinalFromProformaInput' }
       responses:
         '201':
-          description: Finální faktura vytvořena
+          description: Nový koncept nebo již existující finální faktura
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Invoice' }
+              schema: { $ref: '#/components/schemas/FinalFromProformaResult' }
+        '400':
+          description: Neplatné kalendářní datum (`invalid_date`) nebo celková cena zakázky
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Chybějící oprávnění, rozsah tokenu nebo zámek klientského dokladu
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Zdrojový doklad není v přístupné firmě
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Zdrojový doklad není proforma `paid`
+          description: Zdroj není proforma, nemá úhradu nebo je období uzavřené
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -58780,6 +58801,33 @@ components:
       properties:
         deleted:
           type: boolean
+    FinalFromProformaInput:
+      type: object
+      properties:
+        tax_date:
+          type: [string, 'null']
+          format: date
+          description: Platné kalendářní datum DUZP; výchozí dnešní datum
+        due_date:
+          type: [string, 'null']
+          format: date
+          description: Platné kalendářní datum splatnosti; výchozí dnešní datum
+        advance_paid_amount:
+          type: [number, 'null']
+          description: Ručně určená výše odečtu zálohy
+        final_total:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          description: Celková cena zakázky ve stejném základu netto/brutto jako ceny proformy
+
+    FinalFromProformaResult:
+      type: object
+      required: [final_invoice_id, edit_url, invoice]
+      properties:
+        final_invoice_id: { type: integer, format: int64 }
+        edit_url: { type: string }
+        invoice: { $ref: '#/components/schemas/Invoice' }
+
     InvoiceProjectWrite:
       type: object
       properties:
