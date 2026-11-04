@@ -70,22 +70,12 @@ final class DocumentBackfill
             $bind['from_date'] = $from;
         }
 
-        $invoiceBind = $bind;
-        $invoiceTypePlaceholders = [];
-        foreach (PostingService::POSTABLE_ISSUED_INVOICE_TYPES as $index => $invoiceType) {
-            $key = 'invoice_type_' . $index;
-            $invoiceTypePlaceholders[] = ':' . $key;
-            $invoiceBind[$key] = $invoiceType;
-        }
         $invStmt = $pdo->prepare(
             "SELECT i.id, i.varsymbol AS doc_no, i.issue_date, i.tax_date,
                     COALESCE(i.tax_date, i.issue_date) AS entry_date
                FROM invoices i
-              WHERE i.supplier_id = :sid
-                AND i.status NOT IN ('draft','cancelled')
-                AND i.invoice_type IN (" . implode(', ', $invoiceTypePlaceholders) . "){$dateWhere}"
-                . ' AND ' . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i')
-                . ' AND NOT ' . TakenOverRecord::documentSql('invoice', 'i')
+              WHERE i.supplier_id = :sid{$dateWhere}
+                AND " . self::scopeSql('invoice', 'i')
                 . ($settlementsOnly
                     ? " AND EXISTS (
                             SELECT 1 FROM invoices parent
@@ -99,18 +89,15 @@ final class DocumentBackfill
                     : '') . "
            ORDER BY entry_date, i.id"
         );
-        $invStmt->execute($invoiceBind);
+        $invStmt->execute($bind);
         $invoices = $invStmt->fetchAll(PDO::FETCH_ASSOC);
 
         $piStmt = $pdo->prepare(
             "SELECT pi.id, pi.vendor_invoice_number AS doc_no, pi.issue_date, pi.tax_date,
                     COALESCE(pi.tax_date, pi.issue_date) AS entry_date
                FROM purchase_invoices pi
-              WHERE pi.supplier_id = :sid
-                AND pi.status IN ('received','booked','paid'){$dateWhere}
-                AND pi.document_kind <> 'advance'"
-                . ' AND ' . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi')
-                . ' AND NOT ' . TakenOverRecord::documentSql('purchase_invoice', 'pi')
+              WHERE pi.supplier_id = :sid{$dateWhere}
+                AND " . self::scopeSql('purchase_invoice', 'pi')
                 . ($settlementsOnly
                     ? " AND EXISTS (
                             SELECT 1 FROM purchase_invoices adv
@@ -127,7 +114,7 @@ final class DocumentBackfill
         $piStmt->execute($bind);
         $purchases = $piStmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $takenOver = $this->takenOverCount($invoiceBind, $bind, $dateWhere, $invoiceTypePlaceholders, $onlyUnposted);
+        $takenOver = $this->takenOverCount($bind, $dateWhere, $onlyUnposted);
         $emit('Ke zpracování: ' . count($invoices) . ' vydaných + ' . count($purchases) . " přijatých faktur.\n");
         if ($takenOver['invoice'] + $takenOver['purchase_invoice'] > 0) {
             $emit('Převzato z jiného účetního programu, nezaúčtuje se ani nepřepíše: ' . $takenOver['invoice']
@@ -139,6 +126,13 @@ final class DocumentBackfill
             'invoice' => ['posted' => 0, 'updated' => 0, 'skipped' => 0, 'failed' => 0],
             'purchase_invoice' => ['posted' => 0, 'updated' => 0, 'skipped' => 0, 'failed' => 0],
         ];
+        // Pokrytí pro kontrolu úplnosti: `pending` = zpracované doklady, které na začátku
+        // neměly aktivní zápis (tutéž množinu počítá {@see PendingBackfillCounter}),
+        // `already_posted` = doklady se zápisem, které průvodce jen přepisuje.
+        $coverage = [
+            'invoice' => ['pending' => 0, 'already_posted' => 0],
+            'purchase_invoice' => ['pending' => 0, 'already_posted' => 0],
+        ];
         $skipReasons = [];
         $documentIssues = [];
         $cancelled = false;
@@ -147,6 +141,9 @@ final class DocumentBackfill
             'SELECT ' . DocumentPostingGroup::activePostingExistsSql('?', '?', '?', false)
         );
         $ensuredYears = [];
+        // Kontrola nanečisto nic nezapisuje, takže na zámek k datu by jinak nenarazila
+        // a ostrý běh by teprve přeskočil, co kontrola hlásila jako připravené.
+        $dryRunLockedUntil = $dryRun ? $this->posting->currentLockedUntil($supplierId) : null;
 
         $total = count($invoices) + count($purchases);
         $report = static function () use (&$processed, &$stats, $total, $onProgress): void {
@@ -155,8 +152,9 @@ final class DocumentBackfill
         $report();
 
         $process = function (string $sourceType, array $doc) use (
-            &$stats, &$skipReasons, &$documentIssues, &$processed, &$ensuredYears, &$cancelled,
-            $supplierId, $dryRun, $asDrafts, $isCancelled, $existsStmt, $pdo, $emit, $report, $onlyUnposted
+            &$stats, &$coverage, &$skipReasons, &$documentIssues, &$processed, &$ensuredYears, &$cancelled,
+            $supplierId, $dryRun, $asDrafts, $isCancelled, $existsStmt, $pdo, $emit, $report, $onlyUnposted,
+            $dryRunLockedUntil
         ): void {
             if ($isCancelled !== null && $isCancelled()) {
                 $cancelled = true;
@@ -166,16 +164,22 @@ final class DocumentBackfill
             $id = (int) $doc['id'];
             $entryDate = (string) $doc['entry_date'];
             $label = ($sourceType === 'invoice' ? 'FV' : 'PF') . " #{$id} ({$doc['doc_no']}, {$entryDate})";
+            // Zjišťuje se před sestavením předpisu: i doklad, u kterého sestavení selže,
+            // se musí započítat do správné části kontroly úplnosti.
+            $existsStmt->execute([$supplierId, $sourceType, $id, $supplierId, $sourceType, $id]);
+            $wasThere = (bool) $existsStmt->fetchColumn();
+            $coverage[$sourceType][$wasThere ? 'already_posted' : 'pending']++;
 
             try {
                 $lines = $sourceType === 'invoice'
                     ? $this->posting->buildFromInvoice($supplierId, $id, ['entry_date' => $entryDate])
                     : $this->posting->buildFromPurchaseInvoice($supplierId, $id, ['entry_date' => $entryDate]);
                 PostingService::assertBalanced($lines);
-                $existsStmt->execute([$supplierId, $sourceType, $id, $supplierId, $sourceType, $id]);
-                $wasThere = (bool) $existsStmt->fetchColumn();
 
                 if ($dryRun) {
+                    if ($dryRunLockedUntil !== null && $entryDate <= $dryRunLockedUntil) {
+                        throw PostingService::dateLockedException($entryDate, $dryRunLockedUntil);
+                    }
                     $balance = PostingService::balanceCents($lines);
                     $stats[$sourceType][$wasThere ? 'updated' : 'posted']++;
                     $emit(sprintf("  [OK]   %-38s řádků=%d  MD=D=%s Kč\n", $label, count($lines), number_format($balance['debit'] / 100, 2, ',', ' ')));
@@ -221,21 +225,26 @@ final class DocumentBackfill
                 if (in_array($e->errorCode, ['document_not_postable', 'advance_payment_only', 'date_locked', 'period_not_open'], true)) {
                     $stats[$sourceType]['skipped']++;
                     $skipReasons[$reason] = ($skipReasons[$reason] ?? 0) + 1;
-                    $documentIssues[] = $this->documentIssue($sourceType, $doc, 'skipped', $reason, $e->getMessage());
+                    $documentIssues[] = $this->documentIssue($sourceType, $doc, 'skipped', $reason, $e->getMessage(), $wasThere);
                     $emit(sprintf("  [SKIP] %-38s %s\n", $label, $e->getMessage()));
                     return;
                 }
                 $stats[$sourceType]['failed']++;
-                $documentIssues[] = $this->documentIssue($sourceType, $doc, 'failed', $e->errorCode, $e->getMessage());
+                $documentIssues[] = $this->documentIssue($sourceType, $doc, 'failed', $e->errorCode, $e->getMessage(), $wasThere);
                 $emit(sprintf("  [FAIL] %-38s %s: %s\n", $label, $e->errorCode, $e->getMessage()));
             } catch (\Throwable $e) {
                 $stats[$sourceType]['failed']++;
+                // Text databázové chyby do reportu nepatří (nese SQL a názvy tabulek);
+                // ostatní výjimky mají srozumitelnou větu, kterou uživatel potřebuje vidět.
                 $documentIssues[] = $this->documentIssue(
                     $sourceType,
                     $doc,
                     'failed',
                     'processing_error',
-                    'Doklad se nepodařilo zpracovat. Podrobnost najdete v protokolu.',
+                    $e instanceof \PDOException
+                        ? 'Doklad se nepodařilo zpracovat kvůli chybě databáze.'
+                        : 'Doklad se nepodařilo zpracovat: ' . mb_substr($e->getMessage(), 0, 300),
+                    $wasThere,
                 );
                 $emit(sprintf("  [FAIL] %-38s %s\n", $label, $e->getMessage()));
             }
@@ -286,6 +295,7 @@ final class DocumentBackfill
         if ($dryRun) $emit("\n(dry-run — nic nebylo zapsáno; pro ostrý běh spusť bez --dry-run)\n");
 
         return $stats + [
+            'coverage' => $coverage,
             'taken_over' => $takenOver,
             'skip_reasons' => $skipReasons,
             'document_issues' => $documentIssues,
@@ -298,12 +308,10 @@ final class DocumentBackfill
     /**
      * Převzaté doklady, které guard z dávky vynechal (týž rozsah dat a typů).
      *
-     * @param array<string,mixed> $invoiceBind
      * @param array<string,mixed> $bind
-     * @param list<string> $invoiceTypePlaceholders
      * @return array{invoice:int, purchase_invoice:int}
      */
-    private function takenOverCount(array $invoiceBind, array $bind, string $dateWhere, array $invoiceTypePlaceholders, bool $onlyUnposted): array
+    private function takenOverCount(array $bind, string $dateWhere, bool $onlyUnposted): array
     {
         $unposted = static fn (string $type, string $alias): string => $onlyUnposted
             ? ' AND NOT ' . DocumentPostingGroup::activePostingExistsSql("'{$type}'", "{$alias}.id", "{$alias}.supplier_id", false)
@@ -311,24 +319,50 @@ final class DocumentBackfill
         $pdo = $this->db->pdo();
         $invoices = $pdo->prepare(
             "SELECT COUNT(*) FROM invoices i
-              WHERE i.supplier_id = :sid AND i.status NOT IN ('draft','cancelled')
-                AND i.invoice_type IN (" . implode(', ', $invoiceTypePlaceholders) . "){$dateWhere}
-                AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i') . '
+              WHERE i.supplier_id = :sid{$dateWhere}
+                AND " . self::baseScopeSql('invoice', 'i') . '
                 AND ' . TakenOverRecord::documentSql('invoice', 'i') . $unposted('invoice', 'i')
         );
-        $invoices->execute($invoiceBind);
+        $invoices->execute($bind);
         $purchases = $pdo->prepare(
             "SELECT COUNT(*) FROM purchase_invoices pi
-              WHERE pi.supplier_id = :sid AND pi.status IN ('received','booked','paid'){$dateWhere}
-                AND pi.document_kind <> 'advance'
-                AND " . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi') . '
+              WHERE pi.supplier_id = :sid{$dateWhere}
+                AND " . self::baseScopeSql('purchase_invoice', 'pi') . '
                 AND ' . TakenOverRecord::documentSql('purchase_invoice', 'pi') . $unposted('purchase_invoice', 'pi')
         );
         $purchases->execute($bind);
         return ['invoice' => (int) $invoices->fetchColumn(), 'purchase_invoice' => (int) $purchases->fetchColumn()];
     }
 
-    private function documentIssue(string $sourceType, array $doc, string $severity, string $errorCode, string $message): array
+    /**
+     * Doklady, které doúčtování zpracuje (bez omezení datem a bez ohledu na existující
+     * zápis). Jediná definice rozsahu pro běh i pro {@see PendingBackfillCounter}: kontrola
+     * úplnosti aktivace porovnává právě tyto dvě strany, takže odlišný filtr na jedné
+     * z nich se projeví jako chybějící doklady.
+     */
+    public static function scopeSql(string $sourceType, string $alias): string
+    {
+        return self::baseScopeSql($sourceType, $alias) . ' AND NOT ' . TakenOverRecord::documentSql($sourceType, $alias);
+    }
+
+    /** Rozsah dokladů včetně převzatých z jiného programu ({@see TakenOverRecord}). */
+    private static function baseScopeSql(string $sourceType, string $alias): string
+    {
+        if (preg_match('/^[a-z_][a-z0-9_]*$/', $alias) !== 1) {
+            throw new \InvalidArgumentException('Neplatný alias.');
+        }
+        return match ($sourceType) {
+            'invoice' => "{$alias}.status NOT IN ('draft','cancelled')
+                AND {$alias}.invoice_type IN ('" . implode("','", PostingService::POSTABLE_ISSUED_INVOICE_TYPES) . "')
+                AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', $alias),
+            'purchase_invoice' => "{$alias}.status IN ('received','booked','paid')
+                AND {$alias}.document_kind <> 'advance'
+                AND " . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', $alias),
+            default => throw new \InvalidArgumentException('Neplatný typ dokladu.'),
+        };
+    }
+
+    private function documentIssue(string $sourceType, array $doc, string $severity, string $errorCode, string $message, bool $hadPosting): array
     {
         return [
             'source_type' => $sourceType,
@@ -338,6 +372,9 @@ final class DocumentBackfill
             'severity' => $severity,
             'error_code' => $errorCode,
             'message' => $message,
+            // Doklad už měl platný zápis: přeskočení znamená jen, že se nepřepsal,
+            // ne že v deníku chybí.
+            'had_posting' => $hadPosting,
         ];
     }
 }

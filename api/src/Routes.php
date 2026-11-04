@@ -3725,6 +3725,7 @@ final class Routes
         $app->get ('/api/settings/accounting-activation/jobs', [AccountingActivationAction::class, 'jobs']);
         $app->get ('/api/settings/accounting-activation/jobs/{id:[0-9]+}', [AccountingActivationAction::class, 'job']);
         $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/cancel', [AccountingActivationAction::class, 'cancel']);
+        $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/force-complete', [AccountingActivationAction::class, 'forceComplete']);
         $app->get ('/api/settings/supplier/invoice-counter', [SupplierInvoiceCounterAction::class, 'peek']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
         $app->get('/api/settings/email-templates', [SupplierEmailTemplateAction::class, 'list']);

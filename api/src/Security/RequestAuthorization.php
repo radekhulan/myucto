@@ -227,6 +227,17 @@ final class RequestAuthorization
         return self::isCompanyAdmin($request);
     }
 
+    /**
+     * Dokončit aktivaci podvojného účetnictví přes zbývající chyby doúčtování smí jen
+     * správce firmy. Delegovaná role s právem spravovat účetní období průvodce projde,
+     * ale rozhodnutí, že část historie zůstane nedoúčtovaná, za firmu nedělá.
+     */
+    public static function canForceAccountingActivation(Request $request): bool
+    {
+        return self::isCompanyAdmin($request)
+            && self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE);
+    }
+
     /** Klient čte jen připravená podání, interní role dál používají agendu výkazů. */
     public static function canReadTaxSubmissions(Request $request): bool
     {

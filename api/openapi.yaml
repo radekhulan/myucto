@@ -44779,7 +44779,7 @@ components:
         supplier_id: { type: integer }
         kind: { type: string, enum: [dry_run, execute] }
         status: { type: string, enum: [queued, running, completed, failed, cancelled] }
-        phase: { type: [string, "null"], enum: [opening, documents, cash, bank, null] }
+        phase: { type: [string, "null"], enum: [opening, documents, cash, bank, account_settlements, advance_settlements, null] }
         total_items: { type: [integer, "null"] }
         processed: { type: integer }
         cancel_requested: { type: boolean }
@@ -44795,24 +44795,57 @@ components:
                 type: object
                 required: [source_type, source_id, document_no, entry_date, severity, error_code, message]
                 properties:
-                  source_type: { type: string, enum: [invoice, purchase_invoice] }
+                  source_type: { type: string, enum: [invoice, purchase_invoice, cash] }
                   source_id: { type: integer }
                   document_no: { type: string }
                   entry_date: { type: string, format: date }
                   severity: { type: string, enum: [skipped, failed] }
                   error_code: { type: string }
                   message: { type: string }
+                  had_posting:
+                    type: boolean
+                    description: Faktura už měla platný zápis; přeskočení znamená jen, že se zápis nepřepsal.
+            bank_issues:
+              type: array
+              description: Bankovní pohyby, které doúčtování přeskočilo (kromě už zaúčtovaných); nejvýše 200 položek.
+              items:
+                type: object
+                required: [tx_id, statement_id, posted_at, amount, currency, reason]
+                properties:
+                  tx_id: { type: integer }
+                  statement_id: { type: integer }
+                  posted_at: { type: string, format: date }
+                  amount: { type: number }
+                  currency: { type: string }
+                  counterparty_name: { type: string }
+                  variable_symbol: { type: string }
+                  reason: { type: string }
+                  message: { type: string }
             document_coverage:
               type: object
+              description: |
+                Kontrola úplnosti: `expected` = faktury bez aktivního zápisu podle počítadla
+                čekajících, `handled` = kolik z nich běh zpracoval, `already_posted` = faktury
+                se zápisem, které běh jen přepisoval (do porovnání nevstupují).
               additionalProperties:
                 type: object
                 required: [expected, handled, missing, unexpected, complete]
                 properties:
                   expected: { type: integer }
                   handled: { type: integer }
+                  already_posted: { type: integer }
                   missing: { type: integer }
                   unexpected: { type: integer }
                   complete: { type: boolean }
+            forced:
+              type: [object, "null"]
+              description: Aktivaci dokončil správce firmy přes zbývající chyby.
+              required: [by, at, reason, failed_total]
+              properties:
+                by: { type: integer }
+                at: { type: string }
+                reason: { type: string }
+                failed_total: { type: integer }
 
     AccountingBackfillJobPage:
       type: object
