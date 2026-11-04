@@ -314,6 +314,46 @@ final class PayrollRunPersistenceTest extends TestCase
     }
 
     /**
+     * Zrušení neschváleného běhu vrací vstupy do stavu schválený a nechce
+     * důvod. Dřív zůstaly zamčené, takže docházku s příplatky nešlo schválit
+     * ani po zrušení — a „Začít znovu" chtělo důvod podruhé.
+     */
+    public function testCancelOfUnapprovedRunReleasesLockedInputsWithoutReason(): void
+    {
+        $role = $this->payrollRole();
+        $created = $this->json($this->action->create(
+            $this->apiRequest('POST', '/api/payroll/runs', $role)
+                ->withParsedBody([
+                    'period_start' => '2026-06-01',
+                    'payment_date' => '2026-07-15',
+                ]),
+            new Response(),
+        ))['run'];
+        $runId = (int) $created['id'];
+        $countInputs = function (string $status): int {
+            $statement = $this->db->pdo()->prepare(
+                'SELECT COUNT(*) FROM payroll_inputs
+                  WHERE supplier_id = ? AND period_start = ? AND status = ?',
+            );
+            $statement->execute([$this->supplierId, '2026-06-01', $status]);
+
+            return (int) $statement->fetchColumn();
+        };
+
+        $run = $this->command($role, $runId, 'lock_inputs', (int) $created['row_version']);
+        $locked = $countInputs('locked');
+        self::assertGreaterThan(0, $locked, 'Fixture musí mít schválené vstupy, jinak test nic neověří.');
+
+        $run = $this->command($role, $runId, 'cancel', (int) $run['row_version']);
+        self::assertSame('cancelled', $run['status']);
+        self::assertSame(0, $countInputs('locked'));
+        self::assertGreaterThanOrEqual($locked, $countInputs('approved'));
+
+        $run = $this->command($role, $runId, 'reopen', (int) $run['row_version']);
+        self::assertSame('reopened', $run['status']);
+    }
+
+    /**
      * Zakládací formulář dřív nabízel natvrdo patnáctého následujícího měsíce
      * a sjednanou mzdovou politiku ignoroval. Návrh počítá server, protože
      * posun na pracovní den musí znát státní svátky.
@@ -2761,7 +2801,7 @@ final class PayrollRunPersistenceTest extends TestCase
             self::assertContains($finding['severity'], ['blocker', 'warning', 'info']);
             self::assertContains(
                 $finding['impact'],
-                ['blocking', 'revision', 'anytime'],
+                ['blocking', 'approval', 'revision', 'anytime'],
             );
             self::assertContains($finding['scope'], ['setup', 'monthly']);
             self::assertNotSame('', trim((string) $finding['message']));

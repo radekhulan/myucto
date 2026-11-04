@@ -7327,7 +7327,7 @@ export interface PayrollRunReadinessFinding {
    * - `revision` — dá, ale po zamknutí vstupů to stojí opravnou revizi.
    * - `blocking` — nedá; výpočet nemá z čeho vyjít.
    */
-  impact: 'anytime' | 'revision' | 'blocking'
+  impact: 'anytime' | 'revision' | 'approval' | 'blocking'
   /**
    * `setup` = nastavení firmy, dořeší se při rozjezdu a pak je pokoj.
    * `monthly` = práce, která se opakuje každý měsíc.

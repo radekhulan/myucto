@@ -686,7 +686,9 @@ function hasSourceDrift(run: PayrollRun): boolean {
 }
 
 function primaryCommand(run: PayrollRun): PayrollRunCommand | undefined {
-  if (hasSourceDrift(run) && run.available_commands.includes('refresh_inputs')) {
+  if ((hasSourceDrift(run) || sourceBlockerSteps(run).length > 0)
+    && run.available_commands.includes('refresh_inputs')
+  ) {
     return 'refresh_inputs'
   }
   return PRIMARY_COMMAND[run.status]
@@ -802,6 +804,51 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
     if (command === 'prepare_payments') return auth.canWrite('payroll.payments')
     return canWrite.value
   }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
+}
+
+/*
+ * ─── Jak pokračovat, když běh drží neschválené podklady ──────────────────────
+ *
+ * Neschválená docházka, rozpracované vstupy nebo chybějící mzdová složka se
+ * opravují MIMO běh a do běhu se dostanou obnovením podkladů. Dřív karta
+ * ukázala jen červený seznam a text „otevřete novou revizi"; účetní běh
+ * zrušila, znovu otevřela (dvakrát psala důvod) a stála tam, kde předtím.
+ * Každý krok tu má proto vlastní tlačítko a poslední krok běh přepočítá.
+ */
+type SourceStep = 'time' | 'inputs' | 'components'
+
+const SOURCE_STEP_CODES: Record<SourceStep, string[]> = {
+  time: ['time_month_not_approved', 'time_month_missing'],
+  inputs: ['draft_inputs_present'],
+  components: ['employment_without_inputs', 'statutory_calculation_manual_review'],
+}
+
+const SOURCE_STEP_STATUSES = new Set<PayrollRun['status']>([
+  'inputs_locked',
+  'reopened',
+  'calculated',
+  'reviewed',
+  'cancelled',
+])
+
+function sourceBlockerSteps(run: PayrollRun): SourceStep[] {
+  if (!SOURCE_STEP_STATUSES.has(run.status)) return []
+  const blocking = new Set(run.validations
+    .filter(validation => validation.severity === 'blocker')
+    .map(validation => validation.code))
+  return (Object.keys(SOURCE_STEP_CODES) as SourceStep[])
+    .filter(step => SOURCE_STEP_CODES[step].some(code => blocking.has(code)))
+}
+
+/** Krok, který opravené podklady do běhu přenese — a hned přepočítá. */
+function sourceRefreshCommand(run: PayrollRun): PayrollRunCommand | null {
+  if (run.available_commands.includes('refresh_inputs')) return 'refresh_inputs'
+  if (run.status === 'cancelled' && run.available_commands.includes('reopen')) return 'reopen'
+  return null
+}
+
+function runPeriod(run: PayrollRun): string {
+  return run.period_start.slice(0, 7)
 }
 
 /*
@@ -1052,8 +1099,18 @@ function reloadedRun(run: PayrollRun): PayrollRun | null {
   return runs.value.find(candidate => candidate.id === run.id) ?? null
 }
 
+/**
+ * Důvod se píše jen u opravy schváleného běhu. Zrušení neschváleného běhu
+ * vrací „Začít znovu", takže stačí jedno potvrzení bez psaní; samotné
+ * „Začít znovu" je návrat a dialog nemá. Dřív se obrazovka ptala na důvod
+ * dvakrát za sebou a účetní psala „xxx", aby mohla pokračovat.
+ */
+function commandNeedsReason(command: PayrollRunCommand): boolean {
+  return command === 'request_correction'
+}
+
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
-  if (['request_correction', 'reopen', 'cancel'].includes(command)) {
+  if (command === 'request_correction' || command === 'cancel') {
     pendingCommand.value = { run, command }
     commandReason.value = ''
     commandError.value = ''
@@ -1145,7 +1202,7 @@ function findingNotListed(finding: PayrollRunReadinessFinding): number {
 }
 
 function findingClass(finding: PayrollRunReadinessFinding): string {
-  if (finding.impact === 'blocking') {
+  if (finding.impact === 'blocking' || finding.impact === 'approval') {
     return 'border-danger-500/30 bg-danger-50 text-danger-700'
   }
 
@@ -1163,9 +1220,28 @@ function findingClass(finding: PayrollRunReadinessFinding): string {
  */
 const readinessGroups = computed(() => ([
   { impact: 'blocking' as const, findings: readinessFindings.value.filter(f => f.impact === 'blocking') },
+  { impact: 'approval' as const, findings: readinessFindings.value.filter(f => f.impact === 'approval') },
   { impact: 'revision' as const, findings: readinessFindings.value.filter(f => f.impact === 'revision') },
   { impact: 'anytime' as const, findings: readinessFindings.value.filter(f => f.impact === 'anytime') },
 ]).filter(group => group.findings.length > 0))
+
+/**
+ * Co z předběžné kontroly zablokuje schválení — stejné kroky, jaké karta
+ * běhu nabízí po výpočtu. Vyřešit je PŘED zahájením je levnější: odpadne
+ * obnova podkladů i přepočet.
+ */
+const readinessSourceSteps = computed<SourceStep[]>(() => {
+  const codes = new Set(readinessFindings.value
+    .filter(finding => finding.impact === 'approval')
+    .map(finding => finding.code))
+  return (Object.keys(SOURCE_STEP_CODES) as SourceStep[])
+    .filter(step => SOURCE_STEP_CODES[step].some(code => codes.has(code)))
+})
+
+async function approveDraftInputsBeforeStart(run: PayrollRun) {
+  await approveDraftInputs(run)
+  await recheckReadiness()
+}
 
 async function submitCommand(
   run: PayrollRun,
@@ -1191,6 +1267,20 @@ async function submitCommand(
     commandReason.value = ''
     commandError.value = ''
     await load()
+    /*
+     * Obnovené podklady nebo nová revize nemají výsledek a jediný smysluplný
+     * další krok je přepočet. Udělá se rovnou, ať účetní nemačká dvě tlačítka
+     * za sebou a neplete si „obnoveno" se „spočítáno".
+     */
+    if (command === 'refresh_inputs' || command === 'reopen') {
+      const fresh = reloadedRun(run)
+      if (fresh !== null && fresh.available_commands.includes('calculate')
+        && auth.canWrite('payroll.calculate')
+      ) {
+        await submitCommand(fresh, 'calculate')
+        return
+      }
+    }
     if (command === 'prepare_payments'
       && outcome !== 'payments_not_applicable'
     ) {
@@ -1240,14 +1330,14 @@ function dismissBlocker(runId: number) {
 async function confirmCommand() {
   if (!pendingCommand.value) return
   const reason = commandReason.value.trim()
-  if (!reason) {
+  if (!reason && commandNeedsReason(pendingCommand.value.command)) {
     commandError.value = t('payroll.runs.reason_required')
     return
   }
   await submitCommand(
     pendingCommand.value.run,
     pendingCommand.value.command,
-    reason,
+    reason || undefined,
   )
 }
 
@@ -1676,6 +1766,36 @@ onMounted(load)
           <p class="mt-1 max-w-3xl text-sm text-neutral-600">
             {{ t('payroll.runs.readiness.subtitle') }}
           </p>
+          <div
+            v-if="readinessSourceSteps.length"
+            class="mt-3 flex flex-wrap gap-2"
+            data-test="run-readiness-approval-links"
+          >
+            <RouterLink
+              v-if="readinessSourceSteps.includes('time')"
+              :to="{ name: 'payroll-time', query: { period, approve: 'all' } }"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.time_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('inputs')"
+              :to="{ name: 'payroll-components', query: { tab: 'inputs', status: 'draft', period } }"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.inputs_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('components')"
+              :to="{ name: 'payroll-quick-inputs', query: { period } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.runs.continue_steps.components_action') }}
+            </RouterLink>
+          </div>
           <div
             v-for="group in readinessGroups"
             :key="group.impact"
@@ -2331,6 +2451,69 @@ onMounted(load)
           </RouterLink>
         </div>
 
+        <section
+          v-if="sourceBlockerSteps(run).length"
+          class="mt-4 rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm text-neutral-800"
+          :data-testid="`payroll-run-${run.id}-next-steps`"
+        >
+          <p class="font-semibold text-primary-800">{{ t('payroll.runs.continue_steps.title') }}</p>
+          <p class="mt-1 max-w-prose text-neutral-700">{{ t(run.status === 'cancelled' ? 'payroll.runs.continue_steps.intro_cancelled' : 'payroll.runs.continue_steps.intro') }}</p>
+          <ol class="mt-3 space-y-3">
+            <li
+              v-for="(step, index) in sourceBlockerSteps(run)"
+              :key="step"
+              class="flex flex-wrap items-center gap-x-3 gap-y-2"
+              :data-testid="`payroll-run-${run.id}-next-step-${step}`"
+            >
+              <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-semibold text-white">{{ index + 1 }}</span>
+              <span class="min-w-0 flex-1 basis-64">{{ t(`payroll.runs.continue_steps.${step}`) }}</span>
+              <RouterLink
+                v-if="step === 'time'"
+                :to="{ name: 'payroll-time', query: { period: runPeriod(run), approve: 'all' } }"
+                :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.runs.continue_steps.time_action') }}
+              </RouterLink>
+              <button
+                v-else-if="step === 'inputs' && canOverride"
+                type="button"
+                :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                :disabled="saving"
+                @click="approveDraftInputs(run)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.runs.continue_steps.inputs_action') }}
+              </button>
+              <RouterLink
+                v-else-if="step === 'components'"
+                :to="{ name: 'payroll-quick-inputs', query: { period: runPeriod(run) } }"
+                :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll.runs.continue_steps.components_action') }}
+              </RouterLink>
+            </li>
+            <li
+              v-if="sourceRefreshCommand(run)"
+              class="flex flex-wrap items-center gap-x-3 gap-y-2"
+              :data-testid="`payroll-run-${run.id}-next-step-refresh`"
+            >
+              <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-semibold text-white">{{ sourceBlockerSteps(run).length + 1 }}</span>
+              <span class="min-w-0 flex-1 basis-64">{{ t('payroll.runs.continue_steps.refresh') }}</span>
+              <button
+                type="button"
+                :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                :disabled="saving"
+                @click="runCommand(run, sourceRefreshCommand(run)!)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                {{ t(run.status === 'cancelled' ? 'payroll.runs.continue_steps.restart_action' : 'payroll.runs.continue_steps.refresh_action') }}
+              </button>
+            </li>
+          </ol>
+        </section>
+
         <div
           v-if="sectionValidations(run).length"
           class="mt-4 scroll-mt-24 space-y-2"
@@ -2748,6 +2931,41 @@ onMounted(load)
         <p class="text-sm text-neutral-700">
           {{ t('payroll.runs.readiness.confirm_intro') }}
         </p>
+        <div
+          v-if="readinessSourceSteps.length"
+          class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          data-test="run-readiness-approval-steps"
+        >
+          <p class="font-semibold">{{ t('payroll.runs.readiness.approval_first') }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <RouterLink
+              v-if="readinessSourceSteps.includes('time')"
+              :to="{ name: 'payroll-time', query: { period: runPeriod(pendingStart.run), approve: 'all' } }"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.time_action') }}
+            </RouterLink>
+            <button
+              v-if="readinessSourceSteps.includes('inputs') && canOverride"
+              type="button"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+              :disabled="saving"
+              @click="approveDraftInputsBeforeStart(pendingStart.run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.inputs_action') }}
+            </button>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('components')"
+              :to="{ name: 'payroll-quick-inputs', query: { period: runPeriod(pendingStart.run) } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.runs.continue_steps.components_action') }}
+            </RouterLink>
+          </div>
+        </div>
         <!--
           Dialog není seznam chyb, ale SOUPIS TOHO, CO JEŠTĚ ČEKÁ. Napřed to,
           co po zamknutí vstupů půjde opravit jen přes opravnou revizi — jen
@@ -2818,7 +3036,7 @@ onMounted(load)
           <button
             type="button"
             class="cursor-pointer"
-            :class="btnFilled('primary')"
+            :class="readinessSourceSteps.length ? btnOutline('primary') : btnFilled('primary')"
             :disabled="saving"
             data-test="confirm-run-readiness"
             @click="confirmStart()"
@@ -2837,12 +3055,22 @@ onMounted(load)
       @close="pendingCommand = null"
     >
       <form class="space-y-4" data-test="run-command-dialog" @submit.prevent="confirmCommand">
+        <p
+          v-if="pendingCommand.command === 'cancel'"
+          class="text-sm text-neutral-700"
+          data-test="run-cancel-hint"
+        >
+          {{ t('payroll.runs.cancel_hint') }}
+        </p>
         <label class="block text-sm font-medium text-neutral-700">
-          {{ t('payroll.runs.reason_prompt') }}
+          {{ commandNeedsReason(pendingCommand.command)
+            ? t('payroll.runs.reason_prompt')
+            : t('payroll.runs.reason_prompt_optional') }}
           <textarea
             v-model="commandReason"
-            class="mt-1 min-h-24 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
-            required
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+            :class="commandNeedsReason(pendingCommand.command) ? 'min-h-24' : 'min-h-12'"
+            :required="commandNeedsReason(pendingCommand.command)"
             autofocus
             data-test="run-command-reason"
           />
@@ -2857,8 +3085,8 @@ onMounted(load)
         </p>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" @click="pendingCommand = null">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
-            {{ t('common.cancel') }}
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronLeft" /></svg>
+            {{ t('common.close') }}
           </button>
           <button
             type="submit"

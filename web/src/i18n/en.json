@@ -3696,7 +3696,23 @@
       },
       "revision": "revision {revision}",
       "reason_prompt": "Enter the reason for the change:",
+      "reason_prompt_optional": "Note for the run history (optional)",
       "reason_required": "A reason is required.",
+      "cancel_hint": "The work-in-progress calculation of this unapproved run is discarded. Attendance, payroll inputs and components are kept, and you can bring the run back any time with “Start again”.",
+      "continue_steps": {
+        "title": "How to continue",
+        "intro_cancelled": "The run was cancelled because it could not be approved. Fix the inputs below and bring the run back with the last step - payroll is calculated right away. The steps can be done in any order.",
+        "intro": "The run is calculated but cannot be approved yet. Do not cancel it - just fix the inputs below and refresh the run. The steps can be done in any order.",
+        "time": "Approve the month's attendance. For people without tracked attendance, the full fund per the calendar is filled in by “Fill working days” and the bulk approval.",
+        "time_action": "Open attendance and approve the month",
+        "inputs": "Approve the draft payroll inputs.",
+        "inputs_action": "Approve all payroll inputs",
+        "components": "Enter pay (the base component) for those who have none this month. If there really was no income, enter 0.",
+        "components_action": "Open monthly inputs",
+        "refresh": "When done, load the corrected inputs into the run. Payroll is recalculated right away.",
+        "refresh_action": "Refresh inputs and recalculate",
+        "restart_action": "Start again and calculate"
+      },
       "cash_before": "Cash income before enforcement",
       "enforcement_withheld": "Enforcement withholding and fee",
       "payable_after": "Payable after enforcement",
@@ -3776,11 +3792,11 @@
         }
       },
       "validation": {
-        "draft_inputs_one": "One employment relationship has unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
-        "draft_inputs_many": "There are {count} employment relationships with unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
+        "draft_inputs_one": "One employment relationship has unapproved payroll inputs. Approve them with Approve all (or under Payroll components), then click Refresh inputs.",
+        "draft_inputs_many": "There are {count} employment relationships with unapproved payroll inputs. Approve them with Approve all (or under Payroll components), then click Refresh inputs.",
         "enforcement_net_pay_one": "Enforcement withholding cannot yet be calculated for one employee because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholding will then be recalculated automatically.",
         "enforcement_net_pay_many": "Enforcement withholding cannot yet be calculated for {count} employees because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholdings will then be recalculated automatically.",
-        "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then open a new run revision.",
+        "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then click Refresh inputs.",
         "requires_attention": "A check found data that must be completed or reviewed by a person. Open the place to fix it; the technical detail remains in the audit trail.",
         "and_more": "and {count} more",
         "open_remediation": "Open the place to fix",
@@ -4211,11 +4227,13 @@
         "affected": "Affects: {names}",
         "impact": {
           "blocking": "Payroll cannot be calculated without this",
+          "approval": "Can be calculated, not approved",
           "revision": "Fixing this later requires a correction revision",
           "anytime": "Can be added any time, the run is not held up"
         },
         "impact_hint": {
           "blocking": "The calculation has nothing to work from. Resolve this before anything else.",
+          "approval": "The run starts and calculates, but it cannot be approved until this is resolved. It is easiest to resolve it now - the buttons are next to the finding.",
           "revision": "The run can start now, but this value goes into the frozen snapshot — after inputs are locked it can only be fixed with a new revision.",
           "anytime": "No effect on the payroll calculation. It just has to be filled in before filing."
         },
@@ -4224,11 +4242,12 @@
           "monthly": "Monthly work."
         },
         "title": "Pre-flight check",
-        "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. None of it blocks the run: payroll can be calculated with these findings.",
+        "subtitle": "You would see these after starting the run anyway — we show them now, while the inputs can still be fixed. Payroll can be calculated with these findings, but the red ones block approving the run - each has a button that resolves it.",
         "clear": "The pre-flight check found nothing that would stop you from calculating payroll for this period.",
         "all_clear": "The check came back clean, you can calculate payroll.",
         "confirm_title": "Really start the payroll run?",
-        "confirm_intro": "The pre-flight check found the following before anything gets frozen. None of it blocks the run — decide whether to continue or fix it first.",
+        "confirm_intro": "The pre-flight check found the following before anything gets frozen. Payroll can still be calculated - decide whether to continue or fix it first.",
+        "approval_first": "The red findings would block approving the run. We recommend resolving them now, then click “Check again”:",
         "confirm_note": "Starting locks the inputs and calculates payroll right away. Anything entered afterwards stays out of the calculation until the run is reopened.",
         "recheck": "Check again",
         "start_anyway": "Start anyway"
@@ -5490,6 +5509,18 @@
       "empty": "There are no employments for the selected period",
       "empty_hint": "Change the period or disable the incomplete filter.",
       "approve": "Approve month",
+      "absence_action": "Absence",
+      "more_actions": "More",
+      "guide": {
+        "title": "How to process the month",
+        "work": "Enter worked time in the grid below. For people working by the calendar, “Fill working days” and “Save grid” are enough - the full fund is filled in, holidays and weekends are skipped.",
+        "absence": "Enter holiday, sickness, care leave and other absences under Absences. The grid then skips those days.",
+        "absence_action": "Enter absence",
+        "approve": "Approve the month for everyone at once. Approved attendance is the input for the payroll run.",
+        "approve_action": "Approve month for everyone ({count})",
+        "all_approved": "All months on this page are approved.",
+        "to_runs": "Continue to the payroll run"
+      },
       "approved": "Time data was approved and locked.",
       "approve_failed": "The month could not be approved.",
       "reopen": "Reopen",
@@ -5565,7 +5596,14 @@
           "title": "Not approved in bulk ({count}) — handle these individually",
           "absences": "the month contains absences, so answering the unworked-hours and obstacles questions is a decision, not a recorded fact",
           "no_preview": "the JMHZ summary suggestion is missing",
-          "incomplete_suggestions": "the JMHZ summary suggestion is incomplete"
+          "incomplete_suggestions": "the JMHZ summary suggestion is incomplete",
+          "approve_single": "Approve individually"
+        },
+        "under_fund": {
+          "title": "Worked less than the fund and no absence recorded ({count})",
+          "row": "worked {worked} of {fund}",
+          "hint": "You can still approve, but fewer worked hours will go to the ČSSZ report without explanation. If these people worked the whole month by the calendar, fill in the missing days. If they were away, enter an absence.",
+          "fill": "Fill missing working days by the calendar"
         }
       },
       "columns": {
@@ -5633,6 +5671,7 @@
       },
       "plan_shifts": {
         "action": "Schedule shifts from calendar",
+        "short_hint": "Plans shifts on working days. Only needed for wage compensation during sickness and holiday with irregular working hours.",
         "hint": "Creates published shifts on all working days of the month from the employment's work calendar (without a calendar Monday to Friday at 8 h). Days that already have a shift are skipped. Sick-pay and vacation compensation need these shifts.",
         "nothing": "Every working day of the month already has a shift.",
         "done": "Shifts created: {count} ({name}).",
@@ -5690,19 +5729,21 @@
         "holiday_arrangement_missing": "The month contains work on a public holiday, but {name} has no agreed arrangement (time off in lieu, or a surcharge). Pay cannot be calculated without it, so approval stops here.",
         "difficulty_factors_missing": "The month contains work in a difficult environment, but {name} has no count of aggravating factors under § 117.",
         "average_earning_missing": "The surcharge for {name} is calculated from average earnings, and none is established for this period.",
-        "inputs_locked": "Period inputs are locked by a payroll run, so approving attendance cannot write surcharges into them.",
+        "inputs_locked": "The payroll run for this month already has locked inputs, so approving attendance cannot write surcharges into them. In the payroll run click “Cancel run” (attendance and inputs are kept), come back and approve the month, then click “Start again and calculate” in the run.",
         "overtime_conflict": "Overtime for {name} is entered twice — in attendance and in quick inputs. Keep only one record.",
         "link": {
           "holiday_arrangement_missing": "Open the employee card and set the surcharge arrangement",
           "difficulty_factors_missing": "Open the employee card and set the aggravating factors",
           "average_earning_missing": "Open average earnings",
-          "inputs_locked": "Open payroll runs",
+          "inputs_locked": "Open this month's payroll run",
           "overtime_conflict": "Open quick inputs"
         }
       },
       "calendar": {
         "default_name": "Regular working week",
         "create": "Create calendar",
+        "short_hint": "Mon-Fri 8 h working week from the start of the month. Without a calendar the fund is estimated the same way.",
+        "new_version_hint": "From day 1 of the month sets a Mon-Fri 8 h week and replaces the current schedule. For part-time work this raises the fund.",
         "new_version": "New calendar version",
         "saved": "The historical work-calendar version was saved.",
         "failed": "The calendar could not be saved."

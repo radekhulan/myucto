@@ -43323,7 +43323,7 @@ components:
       properties:
         code: { type: string }
         severity: { type: string, enum: [blocker, warning, info] }
-        impact: { type: string, enum: [anytime, revision, blocking] }
+        impact: { type: string, enum: [anytime, revision, approval, blocking] }
         scope: { type: string, enum: [setup, monthly] }
         message: { type: string }
         remediation_path: { type: [string, "null"] }
