@@ -79,7 +79,9 @@ final class CsasApiClient
         return $this->identityBaseUrl() . '/auth?' . http_build_query([
             'response_type' => 'code', 'client_id' => $this->value($credentials, 'client_id'),
             'redirect_uri' => $this->value($credentials, 'redirect_uri'), 'scope' => self::scope($payments),
-            'access_type' => 'offline', 'prompt' => 'consent', 'state' => $state,
+            // „login" vynutí nové přihlášení i při živé relaci banky v prohlížeči. Bez něj banka
+            // použije výchozí pracovní prostor George Business a souhlas vydá za jinou firmu.
+            'access_type' => 'offline', 'prompt' => 'login consent', 'state' => $state,
             'code_challenge' => \MyInvoice\Service\OAuth\Pkce::challenge($this->value($credentials, 'code_verifier')),
             'code_challenge_method' => 'S256',
         ], '', '&', PHP_QUERY_RFC3986);

@@ -645,6 +645,7 @@
     "csas_connect": "Grant or renew bank consent",
     "csas_server": "The administrator must configure the bank credential encryption key.",
     "csas_error": "Česká spořitelna consent could not be completed. Check credentials, callback URL and account permissions, then restart the connection.",
+    "csas_error_account_mismatch": "The bank granted consent to accounts that do not include this one. If you have several workspaces (companies) in George Business, choose the workspace of the company whose account you are connecting when signing in at the bank. If the choice does not appear, sign out of George and George Business, or start the connection in a private browser window. Also check that your user has access to the account.",
     "fio_help_title": "API token for a specific account",
     "moneta_help_title": "MONETA API token",
     "csob_help_title": "ČSOB CEB contract number and communication certificate",

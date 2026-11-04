@@ -65,18 +65,27 @@ final class BankOAuthCallbackHandler implements OAuthCallbackHandler
     public function failureLocation(array $session, string $errorCode): string
     {
         return match ($session['provider'] ?? null) {
-            CsasOnboardingService::PROVIDER => self::csasLocation('error'),
+            CsasOnboardingService::PROVIDER => self::csasLocation('error', (int) ($session['subject_id'] ?? 0), $errorCode),
             KbPlusOnboardingService::PROVIDER => self::kbPlusLocation($this->baseUrl(), 'error', (int) ($session['subject_id'] ?? 0), $errorCode),
             BankPaymentSignatureService::OAUTH_PROVIDER => $this->signatures->failureLocation($session),
             default => '/bank?' . http_build_query(['tab' => 'accounts']),
         };
     }
 
-    /** Návrat na Banku po připojení ČSAS (stejný tvar jako před společnou vrstvou). */
-    public static function csasLocation(string $status, ?int $currencyId = null): string
+    /**
+     * Návrat na Banku po připojení ČSAS. Při chybě nese účet a kód, aby hláška u účtu
+     * mohla říct proč (např. souhlas udělený za jinou firmu).
+     */
+    public static function csasLocation(string $status, ?int $currencyId = null, ?string $errorCode = null): string
     {
-        return '/bank?' . http_build_query(['tab' => 'accounts', 'csas' => $status]
-            + ($currencyId !== null ? ['currency_id' => $currencyId] : []));
+        $query = ['tab' => 'accounts', 'csas' => $status];
+        if ($currencyId !== null && $currencyId > 0) {
+            $query['currency_id'] = $currencyId;
+        }
+        if ($errorCode !== null && preg_match('/^[a-z0-9_]{1,80}$/D', $errorCode)) {
+            $query['code'] = $errorCode;
+        }
+        return '/bank?' . http_build_query($query);
     }
 
     /** Návrat na Banku po připojení KB+ (stejný tvar jako před společnou vrstvou). */

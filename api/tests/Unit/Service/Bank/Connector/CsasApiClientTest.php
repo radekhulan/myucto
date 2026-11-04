@@ -67,6 +67,9 @@ final class CsasApiClientTest extends TestCase
         parse_str(parse_url($url, PHP_URL_QUERY), $query);
         self::assertSame('siblings.accounts siblings.payments', $query['scope']);
         self::assertSame('offline', $query['access_type']);
+        // Nové přihlášení i při živé relaci banky: jen tak George Business nabídne výběr
+        // pracovního prostoru (firmy) a souhlas se nevydá za výchozí firmu.
+        self::assertSame('login consent', $query['prompt']);
         self::assertSame('S256', $query['code_challenge_method']);
         self::assertSame(rtrim(strtr(base64_encode(hash('sha256', str_repeat('a', 64), true)), '+/', '-_'), '='), $query['code_challenge']);
         self::assertStringNotContainsString('synthetic-secret', $url);

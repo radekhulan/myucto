@@ -645,6 +645,7 @@
     "csas_connect": "Udělit nebo obnovit souhlas v bance",
     "csas_server": "Správce musí nakonfigurovat šifrovací klíč bankovních přístupů.",
     "csas_error": "Souhlas České spořitelny se nepodařilo dokončit. Zkontrolujte přístupové údaje, návratovou adresu a oprávnění k účtu; poté spusťte připojení znovu.",
+    "csas_error_account_mismatch": "Banka udělila souhlas k účtům, mezi kterými tento účet není. Pokud máte v George Business víc pracovních prostorů (firem), vyberte při přihlášení v bance prostor firmy, jejíž účet připojujete. Když se výběr nezobrazí, odhlaste se z George a George Business, nebo připojení spusťte v anonymním okně prohlížeče. Ověřte také, že váš uživatel má k účtu přístup.",
     "fio_help_title": "API token pro konkrétní účet",
     "moneta_help_title": "Token MONETA API",
     "csob_help_title": "Číslo smlouvy a komunikační certifikát ČSOB CEB",
