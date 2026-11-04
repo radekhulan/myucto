@@ -18800,7 +18800,7 @@
       "counter_all": "Všechny protiúčty",
       "counter_none": "bez protiúčtu",
       "counter_totals_title": "Součty podle protiúčtu",
-      "counter_totals_hint": "Složený zápis se dělí poměrem řádků protistrany. Kliknutím na řádek opis vyfiltrujete.",
+      "counter_totals_hint": "Řádky se shodnou částkou na obou stranách zápisu patří své dvojici, ostatní se dělí poměrem řádků protistrany. Kliknutím na řádek opis vyfiltrujete.",
       "counter_total": "Celkem = obrat účtu",
       "counter_filter_note": "Filtr protiúčtu {account}: podíl na obratu MD {md}, Dal {d}. Zůstatek v řádcích je zůstatek celého účtu.",
       "inventory": {

@@ -432,7 +432,7 @@ final class ReportXlsxExporter
 
         if (($data['counter_totals'] ?? []) !== []) {
             $tr = $r + 2;
-            $sheet->setCellValue("A{$tr}", 'Součty podle protiúčtu (složený zápis se dělí poměrem řádků protistrany)');
+            $sheet->setCellValue("A{$tr}", 'Součty podle protiúčtu (dvojice se shodnou částkou patří své dvojici, ostatní řádky se dělí poměrem)');
             $sheet->getStyle("A{$tr}")->getFont()->setBold(true);
             $tr++;
             foreach ($data['counter_totals'] as $row) {
