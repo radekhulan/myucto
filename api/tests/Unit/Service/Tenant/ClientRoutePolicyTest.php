@@ -18,6 +18,12 @@ final class ClientRoutePolicyTest extends TestCase
         $this->policy = new ClientRoutePolicy();
     }
 
+    public function testInvoiceDefaultsUseClientPermissionRoutePolicy(): void
+    {
+        self::assertTrue($this->policy->allowsApiRequest('GET', '/api/settings/client/invoice-defaults'));
+        self::assertTrue($this->policy->allowsApiRequest('PUT', '/api/settings/client/invoice-defaults'));
+    }
+
     public function testManifestCoversAuditedCoreAndLegacyAliasMatrixWithoutDuplicates(): void
     {
         $routes = $this->policy->routes();

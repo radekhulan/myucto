@@ -1136,7 +1136,8 @@
         "2232_currencies_foreign_bank_code.sql",
         "2233_dimension_defaults_bank_account.sql",
         "2234_bank_posting_rule_dimensions.sql",
-        "2235_cash_register_foreign_opening.sql"
+        "2235_cash_register_foreign_opening.sql",
+        "2236_invoice_defaults_role_permission.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

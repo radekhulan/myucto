@@ -37,6 +37,7 @@ use MyInvoice\Service\Epo\EpoStepUpService;
 use MyInvoice\Service\Epo\EpoSubmissionException;
 use MyInvoice\Service\Supplier\SupplierCarryOver;
 use MyInvoice\Service\Supplier\SupplierBrandingSettings;
+use MyInvoice\Service\Supplier\SupplierInvoiceDefaults;
 use MyInvoice\Service\Supplier\SupplierCreator;
 use MyInvoice\Service\Supplier\SupplierDirectory;
 use MyInvoice\Service\Supplier\SupplierDirectoryQuery;
@@ -63,12 +64,6 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SettingsAction
 {
-    /**
-     * Strop výchozí poznámky pod položkami (#79). Sloupec je TEXT, limit je tu
-     * proti překlepu typu vložená smlouva — na doklad se text tiskne celý.
-     */
-    private const DEFAULT_NOTE_MAX_LENGTH = 5000;
-
     private const UNIT_DECIMALS_ERROR = 'Desetinná místa množství musí být 0 až 3, nebo prázdné (bez omezení).';
 
     /**
@@ -78,7 +73,6 @@ final class SettingsAction
      * Hodnota v mapě je to, co se místo prázdného pole uloží (nullable sloupec → NULL).
      */
     private const SUPPLIER_BLANK_VALUES = [
-        'default_hourly_rate' => '0',
         'oss_valid_from' => null,
         'oss_valid_to' => null,
         'tax_entity_status_date' => null,
@@ -87,7 +81,7 @@ final class SettingsAction
     /** NOT NULL sloupce bez smysluplné prázdné hodnoty: prázdné pole nechá uloženou hodnotu. */
     private const SUPPLIER_BLANK_KEEPS_CURRENT = [
         'country_id', 'default_currency_id', 'default_vat_rate_id',
-        'default_payment_due_days', 'reminder_days_after_due', 'fiscal_year_start_month',
+        'reminder_days_after_due', 'fiscal_year_start_month',
     ];
 
     /**
@@ -582,6 +576,7 @@ final class SettingsAction
 
         try {
             $body = SupplierBrandingSettings::validate($body, blankColorUsesDefault: true);
+            $body = SupplierInvoiceDefaults::validate($body);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -591,6 +586,7 @@ final class SettingsAction
         foreach ([
             [OperationalSettingsAccess::paymentQr($request), SupplierPaymentQrSettingsRepository::FIELDS],
             [OperationalSettingsAccess::branding($request), SupplierBrandingSettings::FIELDS],
+            [OperationalSettingsAccess::invoiceDefaults($request), SupplierInvoiceDefaults::FIELDS],
         ] as [$allowedArea, $fields]) {
             if ($allowedArea) continue;
             $postedFields = array_values(array_intersect($fields, array_keys($body)));
@@ -599,7 +595,9 @@ final class SettingsAction
             $current->execute([$id]);
             $stored = $current->fetch(\PDO::FETCH_ASSOC);
             foreach ($postedFields as $field) {
-                $same = $stored !== false && SupplierBrandingSettings::sameValue($field, $body[$field], $stored[$field]);
+                $same = $stored !== false && (in_array($field, SupplierInvoiceDefaults::FIELDS, true)
+                    ? SupplierInvoiceDefaults::sameValue($field, $body[$field], $stored[$field])
+                    : SupplierBrandingSettings::sameValue($field, $body[$field], $stored[$field]));
                 if (!$same) return Json::error($response, 'forbidden_permission', 'Nemáš oprávnění měnit toto provozní nastavení firmy.', 403);
                 unset($body[$field]);
             }
@@ -771,35 +769,6 @@ final class SettingsAction
                 "purchase_import_received_at musí být 'issue_date' nebo 'import_date'.",
                 400,
             );
-        }
-
-        // Výchozí poznámka pod položkami (#79). Text se ukládá tak, jak ho uživatel
-        // napsal (včetně odřádkování), jen oříznutý o okrajové mezery; prázdný text
-        // je NULL, ať „nevyplněno" a „vyplněno mezerou" neznamenají dvě různé věci.
-        foreach (DefaultInvoiceNote::COLUMNS as $lang => $column) {
-            if (!array_key_exists($column, $body)) continue;
-            if ($body[$column] !== null && !is_string($body[$column])) {
-                return Json::error($response, 'validation_failed', "$column musí být text.", 400);
-            }
-            $text = trim((string) ($body[$column] ?? ''));
-            if (mb_strlen($text) > self::DEFAULT_NOTE_MAX_LENGTH) {
-                return Json::error(
-                    $response,
-                    'validation_failed',
-                    "Výchozí poznámka pod položkami ($lang) je delší než " . self::DEFAULT_NOTE_MAX_LENGTH . ' znaků.',
-                    400,
-                );
-            }
-            $body[$column] = $text === '' ? null : $text;
-        }
-
-        // Prázdnou sazbu už převedl normalizeSupplierBlankFields(); tady se čistí zápis čísla.
-        if (array_key_exists('default_hourly_rate', $body)) {
-            $rate = str_replace([' ', "\u{00A0}", ','], ['', '', '.'], trim((string) $body['default_hourly_rate']));
-            if (!is_numeric($rate) || (float) $rate < 0) {
-                return Json::error($response, 'validation_failed', 'Výchozí hodinová sazba musí být nezáporné číslo.', 400);
-            }
-            $body['default_hourly_rate'] = $rate;
         }
 
         // F7 — ENUM validace AI provider selection (§3.8).
@@ -1150,11 +1119,6 @@ final class SettingsAction
             && !in_array($body['invoice_number_period'], ['year', 'month', 'none'], true)
         ) {
             return Json::error($response, 'validation_failed', "Neplatné invoice_number_period (year|month|none).", 400);
-        }
-        if (array_key_exists('default_payment_due_unit', $body)
-            && !in_array($body['default_payment_due_unit'], ['days', 'month'], true)
-        ) {
-            return Json::error($response, 'validation_failed', "default_payment_due_unit musí být 'days' nebo 'month'.", 400);
         }
         // Legacy: pokud frontend pošle 'default_currency' jako code, převedeme na id (scoped to supplier)
         if (isset($body['default_currency']) && !isset($body['default_currency_id'])) {
@@ -1635,9 +1599,7 @@ final class SettingsAction
         $row['oss_return_currency']      = (string) ($row['oss_return_currency'] ?? 'EUR');
         $row['default_vat_rate_id']      = (int) $row['default_vat_rate_id'];
         $row['default_currency_id']      = (int) $row['default_currency_id'];
-        $row['default_payment_due_days'] = (int) $row['default_payment_due_days'];
-        $row['default_payment_due_unit'] = (string) ($row['default_payment_due_unit'] ?? 'days');
-        $row['default_hourly_rate']      = (float) $row['default_hourly_rate'];
+        $row = SupplierInvoiceDefaults::normalizeResponse($row);
         $row['auto_send_reminders']      = (bool) $row['auto_send_reminders'];
         $row['reminder_days_after_due']  = (int) ($row['reminder_days_after_due'] ?? 3);
         $row['auto_generate_recurring']  = (bool) ($row['auto_generate_recurring'] ?? true);
@@ -1689,13 +1651,6 @@ final class SettingsAction
             true,
         ) ? (string) $row['purchase_import_received_at']
           : \MyInvoice\Service\Import\ImportedReceivedDatePolicy::DEFAULT_MODE;
-        // Výchozí poznámka pod položkami (#79, migrace 1855). Chybějící sloupce =
-        // nedoběhlá migrace; fallback drží dnešní chování (vypnuto, prázdno), ať
-        // formulář nastavení nevykreslí `undefined` do textarey.
-        $row[DefaultInvoiceNote::ENABLED_COLUMN] = (bool) ($row[DefaultInvoiceNote::ENABLED_COLUMN] ?? false);
-        foreach (DefaultInvoiceNote::COLUMNS as $column) {
-            $row[$column] = isset($row[$column]) ? (string) $row[$column] : null;
-        }
         // F7 — AI provider selection (non-secret; klíče `*_enc` jsou níže redigovány).
         $row['ai_provider']              = (string) ($row['ai_provider'] ?? 'anthropic');
         $row['ai_data_region']           = (string) ($row['ai_data_region'] ?? 'us');

@@ -163,6 +163,7 @@ final class RbacHttpRoleMatrixTest extends TestCase
             ['GET', '/api/settings/client/email-profiles', null, $writeAllowed],
             ['GET', '/api/settings/client/branding', null, $writeAllowed],
             ['GET', '/api/settings/client/payment-qr', null, $writeAllowed],
+            ['GET', '/api/settings/client/invoice-defaults', null, $writeAllowed],
             ['PUT', '/api/settings/supplier', [], $staffSettingsWriteAllowed],
             ['POST', '/api/invoices/999999/send', [], $writeAllowed],
             ['POST', '/api/purchase-invoices', [], $writeAllowed],
@@ -201,6 +202,7 @@ final class RbacHttpRoleMatrixTest extends TestCase
             'settings.email_templates' => '/api/settings/client/email-templates',
             'settings.branding' => '/api/settings/client/branding',
             'settings.payment_qr' => '/api/settings/client/payment-qr',
+            'settings.invoice_defaults' => '/api/settings/client/invoice-defaults',
             'settings.signing_profiles' => '/api/settings/client/signing/profiles',
         ];
         foreach ($areas as $permission => $path) {
@@ -365,6 +367,207 @@ final class RbacHttpRoleMatrixTest extends TestCase
         ]);
         self::assertSame(200, $unchanged->getStatusCode(), (string) $unchanged->getBody());
         self::assertSame($before, $this->pdfAppearanceRow($this->supplierId));
+    }
+
+    #[DataProvider('roleMatrix')]
+    public function testInvoiceDefaultsUseEffectivePermission(string $variant, string $roleType, int $level, bool $hasSupplier): void
+    {
+        $this->supplierId = $this->createInvoiceDefaultsSupplier();
+        $session = $this->createSession($this->createUser($variant, $roleType, $level, $hasSupplier));
+        $before = $this->invoiceDefaultsRow($this->supplierId);
+        $response = $this->request('PUT', '/api/settings/client/invoice-defaults', $session, self::invoiceDefaultsPayload());
+        $allowed = ($hasSupplier && $level === 2) || $variant === 'superadmin';
+        self::assertSame($allowed ? 200 : 403, $response->getStatusCode(), (string) $response->getBody());
+        if (!$allowed) {
+            self::assertSame($before, $this->invoiceDefaultsRow($this->supplierId));
+            return;
+        }
+        $returned = $this->json($response);
+        foreach (self::invoiceDefaultsPayload() as $field => $value) {
+            self::assertSame($value, $returned[$field] ?? null, $field);
+        }
+        $stored = $this->invoiceDefaultsRow($this->supplierId);
+        self::assertSame(21, (int) $stored['default_payment_due_days']);
+        self::assertSame('1234.567890', $stored['default_hourly_rate']);
+        self::assertSame('Syntetická poznámka', $stored['default_note_below_items_cs']);
+        self::assertArrayNotHasKey('default_rounding_mode', $returned);
+        self::assertArrayNotHasKey('default_vat_rate_id', $returned);
+    }
+
+    public function testInvoiceDefaultsRejectMixedInvalidOrForbiddenPayloadWithoutPartialWrite(): void
+    {
+        $this->supplierId = $this->createInvoiceDefaultsSupplier();
+        $session = $this->createSession($this->createUser('defaults_invalid', 'client', 2, true));
+        $before = $this->invoiceDefaultsRow($this->supplierId);
+        foreach ([
+            [['supplier_id' => $this->supplierId], 403, 'field_not_delegable'],
+            [['default_currency' => 'EUR'], 403, 'field_not_delegable'],
+            [['default_rounding_mode' => 'whole_czk'], 403, 'field_not_delegable'],
+            [['default_prices_include_vat' => true], 403, 'field_not_delegable'],
+            [['default_vat_rate_id' => 1], 403, 'field_not_delegable'],
+            [['default_payment_due_days' => -1], 400, 'validation_failed'],
+            [['default_payment_due_days' => 1.5], 400, 'validation_failed'],
+            [['default_payment_due_days' => 4294967296], 400, 'validation_failed'],
+            [['default_payment_due_days' => []], 400, 'validation_failed'],
+            [['default_payment_due_unit' => 'year'], 400, 'validation_failed'],
+            [['default_hourly_rate' => '1e999'], 400, 'validation_failed'],
+            [['default_hourly_rate' => -1], 400, 'validation_failed'],
+            [['default_hourly_rate' => []], 400, 'validation_failed'],
+            [['default_note_below_items_enabled' => 'false'], 400, 'validation_failed'],
+            [['default_note_below_items_en' => str_repeat('ž', 5001)], 400, 'validation_failed'],
+        ] as [$invalid, $status, $code]) {
+            $response = $this->request('PUT', '/api/settings/client/invoice-defaults', $session,
+                array_replace(self::invoiceDefaultsPayload(), $invalid));
+            self::assertSame($status, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame($code, $this->json($response)['error']['code'] ?? null);
+            self::assertSame($before, $this->invoiceDefaultsRow($this->supplierId));
+        }
+    }
+
+    public function testInvoiceDefaultsRespectSupplierMembershipOverrideAndRevocation(): void
+    {
+        $this->supplierId = $this->createInvoiceDefaultsSupplier();
+        $other = $this->createInvoiceDefaultsSupplier();
+        $user = $this->createUser('defaults_writer', 'client', 2, true);
+        $writerRole = (int) end($this->roleIds);
+        $session = $this->createSession($user);
+        $beforeOther = $this->invoiceDefaultsRow($other);
+        $path = '/api/settings/client/invoice-defaults';
+        self::assertSame(403, $this->request('PUT', $path, $session, self::invoiceDefaultsPayload(), supplierId: $other)->getStatusCode());
+        self::assertSame(200, $this->request('PUT', $path, $session, self::invoiceDefaultsPayload())->getStatusCode());
+        self::assertSame($beforeOther, $this->invoiceDefaultsRow($other));
+        $this->createUser('defaults_reader_role', 'client', 1, true);
+        $readerRole = (int) end($this->roleIds);
+        $this->db->pdo()->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$user, $other, $readerRole]);
+        $this->app = null;
+        self::assertSame(403, $this->request('PUT', $path, $session, self::invoiceDefaultsPayload(), supplierId: $other)->getStatusCode());
+        self::assertSame(200, $this->request('GET', $path, $session)->getStatusCode());
+        $this->db->pdo()->prepare('DELETE FROM role_permissions WHERE role_id = ? AND permission_key = ?')
+            ->execute([$writerRole, 'settings.invoice_defaults']);
+        $this->app = null;
+        $before = $this->invoiceDefaultsRow($this->supplierId);
+        self::assertSame(403, $this->request('PUT', $path, $session, ['default_payment_due_days' => 7])->getStatusCode());
+        self::assertSame(403, $this->request('GET', $path, $session)->getStatusCode());
+        self::assertSame($before, $this->invoiceDefaultsRow($this->supplierId));
+        self::assertSame($beforeOther, $this->invoiceDefaultsRow($other));
+    }
+
+    public function testCompanyWriteCannotBypassRevokedInvoiceDefaultsButAcceptsUnchangedForm(): void
+    {
+        $this->supplierId = $this->createInvoiceDefaultsSupplier();
+        $user = $this->createUser('defaults_staff_revoked', 'staff', 2, true);
+        $role = (int) end($this->roleIds);
+        $this->db->pdo()->prepare('DELETE FROM role_permissions WHERE role_id = ? AND permission_key = ?')
+            ->execute([$role, 'settings.invoice_defaults']);
+        $session = $this->createSession($user);
+        $before = $this->invoiceDefaultsRow($this->supplierId);
+        foreach (self::invoiceDefaultsPayload() as $field => $value) {
+            $response = $this->request('PUT', '/api/settings/supplier', $session, [$field => $value]);
+            self::assertSame(403, $response->getStatusCode(), $field . ': ' . (string) $response->getBody());
+            self::assertSame($before, $this->invoiceDefaultsRow($this->supplierId));
+        }
+        $unchanged = array_replace($before, ['default_payment_due_days' => 14, 'default_hourly_rate' => '1 500,000000',
+            'default_note_below_items_enabled' => false, 'default_note_below_items_cs' => '', 'default_note_below_items_en' => null]);
+        $response = $this->request('PUT', '/api/settings/supplier', $session, $unchanged);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame($before, $this->invoiceDefaultsRow($this->supplierId));
+    }
+
+    private static function invoiceDefaultsPayload(): array
+    {
+        return ['default_payment_due_days' => 21, 'default_payment_due_unit' => 'month',
+            'default_hourly_rate' => 1234.56789, 'default_note_below_items_enabled' => true,
+            'default_note_below_items_cs' => 'Syntetická poznámka', 'default_note_below_items_en' => 'Synthetic note'];
+    }
+
+    public static function invoiceDefaultsEndpoints(): iterable
+    {
+        yield 'delegované nastavení' => ['/api/settings/client/invoice-defaults'];
+        yield 'obecné nastavení' => ['/api/settings/supplier'];
+    }
+
+    #[DataProvider('invoiceDefaultsEndpoints')]
+    public function testInvoiceDefaultsPreserveExistingLongerDuePeriod(string $path): void
+    {
+        $this->supplierId = $this->createInvoiceDefaultsSupplier();
+        $this->db->pdo()->prepare('UPDATE supplier SET default_payment_due_days = 400 WHERE id = ?')
+            ->execute([$this->supplierId]);
+        $session = $this->createSession($this->createUser('defaults_longer_due', 'staff', 2, true));
+        $response = $this->request('PUT', $path, $session, ['default_payment_due_days' => 400]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(400, $this->json($response)['default_payment_due_days']);
+        self::assertSame(400, (int) $this->invoiceDefaultsRow($this->supplierId)['default_payment_due_days']);
+    }
+
+    #[DataProvider('invoiceDefaultsEndpoints')]
+    public function testInvoiceDefaultsLeaveExistingDraftAndIssuedDocumentsUnchanged(string $path): void
+    {
+        $this->supplierId = $this->createInvoiceDefaultsSupplier();
+        $user = $this->createUser('defaults_existing_documents', 'staff', 2, true);
+        $session = $this->createSession($user);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id)
+            SELECT id, '__TEST defaults customer', 'Testovací 1', 'Praha', '11000', country_id,
+            'defaults@example.test', default_currency_id FROM supplier WHERE id = ?")->execute([$this->supplierId]);
+        $client = (int) $pdo->lastInsertId();
+        $invoiceIds = [];
+        try {
+            foreach (['draft', 'issued'] as $status) {
+                $pdo->prepare("INSERT INTO invoices (supplier_id, client_id, issue_date, tax_date, due_date,
+                    currency_id, created_by, status, invoice_type, note_below_items)
+                    SELECT id, ?, '2096-03-10', '2096-03-10', '2096-03-24', default_currency_id, ?, ?,
+                    'invoice', 'Původní syntetická poznámka' FROM supplier WHERE id = ?")
+                    ->execute([$client, $user, $status, $this->supplierId]);
+                $id = (int) $pdo->lastInsertId();
+                $invoiceIds[] = $id;
+                $pdo->prepare("INSERT INTO invoice_items (invoice_id, description, quantity, unit, unit_price_without_vat,
+                    vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat)
+                    SELECT ?, 'Syntetická hodinová práce', 2, 'h', 1500, default_vat_rate_id, 0, 3000, 0, 3000
+                    FROM supplier WHERE id = ?")->execute([$id, $this->supplierId]);
+            }
+            $documents = $pdo->prepare('SELECT * FROM invoices WHERE supplier_id = ? ORDER BY id');
+            $items = $pdo->prepare('SELECT ii.* FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
+                WHERE i.supplier_id = ? ORDER BY ii.id');
+            $documents->execute([$this->supplierId]);
+            $items->execute([$this->supplierId]);
+            $beforeDocuments = $documents->fetchAll(\PDO::FETCH_ASSOC);
+            $beforeItems = $items->fetchAll(\PDO::FETCH_ASSOC);
+            self::assertCount(2, $beforeDocuments);
+            self::assertCount(2, $beforeItems);
+            $response = $this->request('PUT', $path, $session, self::invoiceDefaultsPayload());
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            $documents->execute([$this->supplierId]);
+            $items->execute([$this->supplierId]);
+            self::assertSame($beforeDocuments, $documents->fetchAll(\PDO::FETCH_ASSOC));
+            self::assertSame($beforeItems, $items->fetchAll(\PDO::FETCH_ASSOC));
+            $defaults = $this->invoiceDefaultsRow($this->supplierId);
+            self::assertSame(['value' => 21, 'unit' => 'month'],
+                \MyInvoice\Service\Invoice\PaymentDueResolver::resolve(null, null, $defaults));
+            self::assertSame('Syntetická poznámka', \MyInvoice\Service\Invoice\DefaultInvoiceNote::forLanguage($defaults, 'cs'));
+        } finally {
+            foreach ($invoiceIds as $id) $pdo->prepare('DELETE FROM invoices WHERE id = ?')->execute([$id]);
+            $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$client]);
+        }
+    }
+
+    private function createInvoiceDefaultsSupplier(): int
+    {
+        $id = $this->createPdfAppearanceSupplier();
+        $this->db->pdo()->prepare("UPDATE supplier SET default_payment_due_days = 14, default_payment_due_unit = 'days',
+            default_hourly_rate = 1500, default_note_below_items_enabled = 0,
+            default_note_below_items_cs = NULL, default_note_below_items_en = NULL WHERE id = ?")->execute([$id]);
+        return $id;
+    }
+
+    private function invoiceDefaultsRow(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT default_payment_due_days, default_payment_due_unit, default_hourly_rate,
+            default_note_below_items_enabled, default_note_below_items_cs, default_note_below_items_en FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        return $row;
     }
 
     private function createPdfAppearanceSupplier(): int
@@ -1199,8 +1402,8 @@ final class RbacHttpRoleMatrixTest extends TestCase
             $roleId = (int) $this->db->pdo()->lastInsertId();
             $this->roleIds[] = $roleId;
             $keys = $roleType === 'client'
-                ? ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'settings.company', 'settings.branding', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.signing_profiles']
-                : ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'documents', 'bank', 'accounting', 'reports', 'settings.company', 'settings.company.write', 'settings.branding', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr'];
+                ? ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'settings.company', 'settings.branding', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.signing_profiles', 'settings.invoice_defaults']
+                : ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'documents', 'bank', 'accounting', 'reports', 'settings.company', 'settings.company.write', 'settings.branding', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.invoice_defaults'];
             $insert = $this->db->pdo()->prepare('INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, ?, ?)');
             foreach ($keys as $key) $insert->execute([$roleId, $key, $level]);
         }
