@@ -1811,7 +1811,9 @@ final class JournalEntryRepository
      */
     private static function accountRangeBounds(array $filters): array
     {
-        return AccountCodeRange::parse((string) ($filters['account_from'] ?? ''), (string) ($filters['account_to'] ?? ''))->sqlBounds();
+        // Vstup od uživatele už ověřil JournalAction (parse); kód z hledání účtu přichází
+        // z databáze a nemusí abecedou projít, proto se tu jen sestaví meze.
+        return AccountCodeRange::sqlBoundsFor((string) ($filters['account_from'] ?? ''), (string) ($filters['account_to'] ?? ''));
     }
 
     /**

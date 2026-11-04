@@ -72,4 +72,11 @@ final class AccountCodeRangeTest extends TestCase
         $this->expectException(AccountCodeRangeException::class);
         AccountCodeRange::parse($from, $to);
     }
+
+    /** Kód z databáze (hledání účtu v deníku) se znovu nevaliduje: převzatý kód s mezerou nesmí dát 500. */
+    public function testSqlBoundsForStoredCodeDoNotRevalidate(): void
+    {
+        self::assertSame(['518 1', '518 1ZZZZZZZZZZ'], AccountCodeRange::sqlBoundsFor('518 1', ' 518 1 '));
+        self::assertSame(AccountCodeRange::parse('501', '518')->sqlBounds(), AccountCodeRange::sqlBoundsFor('501', '518'));
+    }
 }

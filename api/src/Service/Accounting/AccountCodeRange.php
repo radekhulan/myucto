@@ -66,7 +66,19 @@ final class AccountCodeRange
      */
     public function sqlBounds(): array
     {
-        return [$this->from, $this->to . self::SQL_UPPER_PAD];
+        return self::sqlBoundsFor($this->from, $this->to);
+    }
+
+    /**
+     * Meze z už ověřeného rozsahu bez nové kontroly abecedy. Pro repozitář, který dostává
+     * kód i z databáze (hledání účtu v deníku): převzatý kód s mezerou by kontrolou neprošel
+     * a dotaz by skončil chybou místo výsledku. Vstup od uživatele ověřuje parse().
+     *
+     * @return array{0:string, 1:string}
+     */
+    public static function sqlBoundsFor(string $from, string $to): array
+    {
+        return [strtoupper(trim($from)), strtoupper(trim($to)) . self::SQL_UPPER_PAD];
     }
 
     /**
