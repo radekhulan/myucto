@@ -364,9 +364,9 @@ final class BankConnectionService
 
         $end = $today;
         $watermark = trim((string) ($connection['sync_watermark_date'] ?? ''));
-        $start = $watermark !== ''
+        $start = $this->afterTakeover($connection, $watermark !== ''
             ? $this->date($watermark)->modify('-' . self::OVERLAP_DAYS . ' days')
-            : $end->modify('-' . (self::INITIAL_DAYS - 1) . ' days');
+            : $end->modify('-' . (self::INITIAL_DAYS - 1) . ' days'));
         $oldest = $end->modify('-' . (self::MAX_AUTOMATIC_DAYS - 1) . ' days');
         if ($start < $oldest) {
             throw new BankConnectorOperationException('history_gap');
@@ -393,8 +393,29 @@ final class BankConnectionService
             $current = $this->date($watermark);
             return $start <= $current->modify('+1 day') && $end > $current ? $to : null;
         }
-        $requiredStart = (new \DateTimeImmutable('today'))->modify('-' . (self::INITIAL_DAYS - 1) . ' days');
+        $requiredStart = $this->afterTakeover($connection, (new \DateTimeImmutable('today'))->modify('-' . (self::INITIAL_DAYS - 1) . ' days'));
         return $start <= $requiredStart && $end >= new \DateTimeImmutable('today') ? $to : null;
+    }
+
+    /**
+     * Automatické stažení nezačíná ve dnech, které už pokrývá výpis převzatý z jiného
+     * programu. Banka tytéž pohyby popisuje jinak (vlastní reference, protiúčet, popis),
+     * takže by se s převzatými shodovaly jen datem a částkou a čekaly na potvrzení
+     * uživatelem, které cron dát nemůže. Ruční načtení zvoleného období se neomezuje,
+     * tam shodu potvrdí uživatel.
+     */
+    private function afterTakeover(array $connection, \DateTimeImmutable $start): \DateTimeImmutable
+    {
+        $through = $this->connections->takenOverThrough(
+            (int) $connection['supplier_id'],
+            strtoupper((string) ($connection['verified_currency'] ?? $connection['account_code'] ?? '')),
+            (string) ($connection['verified_account_number'] ?? ''),
+            (string) ($connection['verified_bank_code'] ?? ''),
+            $start->format('Y-m-d'),
+        );
+        if ($through === null) return $start;
+        $next = $this->date($through)->modify('+1 day');
+        return $next > $start ? $next : $start;
     }
 
     private function assertConnectionUsable(array $connection): void

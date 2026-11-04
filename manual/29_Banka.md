@@ -652,7 +652,7 @@ Stažené pohyby se slučují do **jednoho měsíčního výpisu** pro danou fir
 Načítání má bezpečnostní meze:
 
 - **ruční načtení**: nejvýše **31 dní** včetně krajních dnů,
-- **automatické pokračování** (prázdné pole *Od data*): naváže 3 dny před posledním úspěšně načteným datem (překryv kvůli pozdě zaúčtovaným pohybům); u zcela nového napojení stáhne posledních 14 dní,
+- **automatické pokračování** (prázdné pole *Od data*): naváže 3 dny před posledním úspěšně načteným datem (překryv kvůli pozdě zaúčtovaným pohybům); u zcela nového napojení stáhne posledních 14 dní. Dny pokryté výpisem převzatým z jiného programu automatické načtení přeskakuje a začne dnem po něm. Ruční načtení od tohoto dne do dneška se počítá jako úplné první načtení,
 - pokud by mezi posledním načtením a dneškem vznikla mezera delší než **89 dní**, automatické pokračování to odmítne a je potřeba mezeru dohnat ručním načtením po částech,
 - konkrétní banka může mít vlastní dodatečné omezení (například Raiffeisenbank vrací pohyby jen za posledních 90 dní, KB+ tarif Plus/Pro omezuje frekvenci dotazů na jednou za 61, resp. 10 minut).
 
