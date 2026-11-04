@@ -364,6 +364,10 @@ final class LedgerReportRepository
      * 1 210 má protiúčty 602 za 1 000 a 343 za 210 i vedle dvojice v témže zápisu.
      * Řádek bez protistrany (jednostranný zápis) má protiúčet NULL.
      *
+     * Stejné pravidlo žije třikrát (výkon nedovoluje jednu implementaci): tady v SQL,
+     * ve filtru {@see pairedSql()} a v PHP v {@see \MyInvoice\Service\Accounting\Reports\JournalLineContext}.
+     * Při změně upravte všechna tři místa, jinak se rozejde protiúčet řádku, filtr a součty.
+     *
      * @return list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}>
      */
     public function accountCounterTotals(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): array

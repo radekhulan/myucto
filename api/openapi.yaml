@@ -14785,7 +14785,7 @@ paths:
         - { in: path, name: accountId, required: true, schema: { type: integer } }
         - { in: query, name: from, required: true, schema: { type: string, format: date } }
         - { in: query, name: to, required: true, schema: { type: string, format: date } }
-        - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
+        - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Řádek se shodnou částkou na obou stranách se filtruje jen ve své dvojici. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, default: 50, maximum: 200 } }
         - { in: query, name: after_closing, description: "1 = zahrnout technické uzavírací a otevírací zápisy", schema: { type: integer, enum: [0, 1], default: 0 } }
@@ -14801,7 +14801,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: accountId, required: true, schema: { type: integer } }
-        - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
+        - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Řádek se shodnou částkou na obou stranách se filtruje jen ve své dvojici. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
         - { in: query, name: from, required: true, schema: { type: string, format: date } }
         - { in: query, name: to, required: true, schema: { type: string, format: date } }
         - { in: query, name: format, required: true, schema: { type: string, enum: [pdf, xlsx] } }
@@ -60414,7 +60414,7 @@ components:
         turnover_d:
           type: number
         counter_totals:
-          description: Obraty podle protiúčtu, Σ = obrat účtu. Složený zápis se dělí poměrem řádků protistrany. Jen na první stránce, jinak null.
+          description: Obraty podle protiúčtu, Σ = obrat účtu. Řádky se shodnou částkou na obou stranách zápisu patří své dvojici, ostatní se dělí poměrem řádků protistrany. Jen na první stránce, jinak null.
           type:
           - array
           - 'null'
