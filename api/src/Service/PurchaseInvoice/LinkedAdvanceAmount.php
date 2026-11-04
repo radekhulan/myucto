@@ -83,6 +83,65 @@ final class LinkedAdvanceAmount
         return $filled;
     }
 
+    /**
+     * Konečné faktury s nulovou uhrazenou zálohou, ačkoli jejich záloha už uhrazená je
+     * (záloha spárovaná dřív, než dopočet při změně úhrady existoval). Převzaté doklady
+     * se nemění. Pro auto-backfill v migrate.php.
+     */
+    public function pending(): int
+    {
+        return count($this->candidates(null));
+    }
+
+    /**
+     * Doplní uhrazenou zálohu existujícím propojením. Dry-run nic nezapíše. Stav „uhrazeno"
+     * konečných faktur pak srovná {@see AdvanceCoveredPaidStatus::syncFinalsOfAdvance()}.
+     *
+     * @return list<array{supplier_id:int, final_id:int, advance_id:int, amount:float}>
+     */
+    public function backfill(?int $supplierId, bool $apply): array
+    {
+        $rows = [];
+        $status = new AdvanceCoveredPaidStatus($this->db);
+        foreach ($this->candidates($supplierId) as $candidate) {
+            $rows[] = $candidate;
+            if (!$apply) continue;
+            $this->fillFinalsOfAdvance($candidate['supplier_id'], $candidate['advance_id']);
+            $status->syncFinalsOfAdvance($candidate['supplier_id'], $candidate['advance_id'], allowRevert: false);
+        }
+        return $rows;
+    }
+
+    /** @return list<array{supplier_id:int, final_id:int, advance_id:int, amount:float}> */
+    private function candidates(?int $supplierId): array
+    {
+        $taken = new \MyInvoice\Service\Accounting\TakenOverRecord($this->db);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT f.supplier_id, f.id AS final_id, f.total_with_vat,
+                    a.id, a.status, a.total_with_vat AS advance_total, a.paid_amount_invoice_ccy
+               FROM purchase_invoices f
+               JOIN purchase_invoices a ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
+              WHERE f.document_kind = 'invoice' AND f.status IN ('received', 'booked', 'paid')
+                AND f.advance_paid_amount = 0
+                AND a.document_kind IN ('advance', 'tax_document') AND a.status <> 'cancelled'"
+            . ($supplierId !== null ? ' AND f.supplier_id = ?' : '')
+            . ' ORDER BY f.supplier_id, f.id'
+        );
+        $stmt->execute($supplierId !== null ? [$supplierId] : []);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $sid = (int) $r['supplier_id'];
+            if ($taken->isDocument($sid, 'purchase_invoice', (int) $r['final_id'])) continue;
+            $amount = round($this->forFinal($sid, [
+                'id' => (int) $r['id'], 'status' => $r['status'], 'total_with_vat' => $r['advance_total'],
+                'paid_amount_invoice_ccy' => $r['paid_amount_invoice_ccy'],
+            ], (float) $r['total_with_vat']), 2);
+            if ($amount <= 0.0) continue;
+            $out[] = ['supplier_id' => $sid, 'final_id' => (int) $r['final_id'], 'advance_id' => (int) $r['id'], 'amount' => $amount];
+        }
+        return $out;
+    }
+
     /** Zaúčtované úhrady zálohy z banky a pokladny v měně zálohy. */
     public function paidAdvanceAmount(int $advanceId, int $supplierId): float
     {

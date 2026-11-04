@@ -381,6 +381,14 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
                 ->pending(),
             'script'  => 'purchase-rounding-settlement-backfill.php',
         ],
+        [
+            // Konečné přijaté faktury propojené se zálohou dřív, než se záloha spárovala
+            // s platbou: odečítají nulovou zálohu (issue #313), viz LinkedAdvanceAmount.
+            'name'    => 'linked-advance-amount',
+            'reason'  => 'konečných faktur s chybějící uhrazenou zálohou',
+            'count'   => static fn (): int => (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($connection))->pending(),
+            'script'  => 'backfill-linked-advance-amount.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";
