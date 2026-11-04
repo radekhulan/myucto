@@ -32,7 +32,7 @@ final class JournalLineContext
     ) {}
 
     /**
-     * Každá položka musí nést entry_id, line_no, account_id (účet řádku), side,
+     * Každá položka musí nést entry_id, line_id, line_no, account_id (účet řádku), side,
      * source_type, source_id, currency_code a amount_foreign.
      *
      * @param list<array<string,mixed>> $items
@@ -78,33 +78,100 @@ final class JournalLineContext
     }
 
     /**
-     * Protiúčty řádku: účty opačné ÚČINNÉ strany téhož zápisu (bez účtu řádku samého);
-     * když žádné nejsou, ostatní účty zápisu. Účinná strana odpovídá filtru a součtům
+     * Protiúčty řádku: účty opačné ÚČINNÉ strany téhož zápisu (včetně vlastního účtu,
+     * je-li na opačné straně); u zápisu bez opačné strany ostatní účty zápisu. Zápis
+     * složený z dvojic (pokladní doklad 501 / 211 a 513 / 211) se páruje podle částky:
+     * řádky se shodnou částkou tvoří dvojici, když jich je na obou účinných stranách
+     * stejně. Spárovaný řádek má za protiúčet jen svou dvojici, ostatní řádky jen ostatní
+     * nespárované řádky protistrany. Stejné pravidlo drží filtr i součty
      * v {@see \MyInvoice\Repository\LedgerReportRepository::accountCounterTotals()},
      * jinak by řádek ukazoval jiný protiúčet, než podle kterého se dá vyfiltrovat.
      *
-     * @param list<array{line_no:int, account_code:string, side:string}> $lines
+     * @param array<string,mixed> $entry index zápisu z {@see entryIndex()} ([] = zápis nenalezen)
      * @param array<string,mixed> $item
      */
-    private function counterAccounts(array $lines, array $item): ?string
+    private function counterAccounts(array $entry, array $item): ?string
     {
+        if ($entry === []) {
+            return null;
+        }
         $own = (string) ($item['account_code'] ?? '');
         $ownSide = !empty($item['is_red_storno']) ? ($item['side'] === 'debit' ? 'credit' : 'debit') : $item['side'];
-        $opposite = [];
-        $other = [];
+        $opposite = $ownSide === 'debit' ? 'credit' : 'debit';
+        // Vlastní řádek z deníku podle id (částku bere odtud, položka může nést jen díl řádku;
+        // line_no se v převzatých zápisech opakuje).
+        $ownCents = $entry['by_id'][(int) ($item['line_id'] ?? 0)] ?? null;
+        // Vlastní účet na opačné straně je protiúčtem jako každý jiný (převod v rámci
+        // účtu); součty i filtr mu dávají jeho díl, zobrazení ho proto taky ukáže.
+        $matched = $ownCents !== null && isset($entry['paired'][$ownCents])
+            ? ($entry['pair_label'][$opposite][$ownCents] ?? null)
+            : ($entry['free_label'][$opposite] ?? null);
+        if ($matched !== null) {
+            return $matched;
+        }
+        // Nespárovaný řádek, jehož protistrana je celá spárovaná, protiúčet nemá (součty
+        // ho vedou bez protiúčtu a filtr ho nenajde). Ostatní účty zápisu jako nápověda
+        // jen u jednostranného zápisu bez opačné strany.
+        if (isset($entry['sides'][$opposite])) {
+            return null;
+        }
+        $other = $entry['codes'];
+        unset($other[$own]);
+        return self::label($other);
+    }
+
+    /**
+     * Index zápisu pro {@see counterAccounts()}: dvojice (částky se stejným počtem řádků
+     * na obou účinných stranách) a hotové popisky protiúčtů podle strany a částky.
+     * Spočítá se jednou na zápis, takže zápis o tisících řádků není kvadratický.
+     *
+     * @param list<array{line_id:int, account_code:string, side:string, amount_cents:int}> $lines
+     * @return array<string,mixed>
+     */
+    private static function entryIndex(array $lines): array
+    {
+        $count = [];
+        $byId = [];
         foreach ($lines as $l) {
-            if ($l['account_code'] === $own) {
-                continue;
-            }
-            $other[$l['account_code']] = true;
-            if ($l['side'] !== $ownSide) {
-                $opposite[$l['account_code']] = true;
+            $count[$l['amount_cents']][$l['side']] = ($count[$l['amount_cents']][$l['side']] ?? 0) + 1;
+            $byId[$l['line_id']] = $l['amount_cents'];
+        }
+        $paired = [];
+        foreach ($count as $cents => $sides) {
+            if (($sides['debit'] ?? 0) === ($sides['credit'] ?? 0)) {
+                $paired[$cents] = true;
             }
         }
-        $codes = array_keys($opposite !== [] ? $opposite : $other);
+        $pair = [];
+        $free = [];
+        $sides = [];
+        $codes = [];
+        foreach ($lines as $l) {
+            $sides[$l['side']] = true;
+            $codes[$l['account_code']] = true;
+            if (isset($paired[$l['amount_cents']])) {
+                $pair[$l['side']][$l['amount_cents']][$l['account_code']] = true;
+            } else {
+                $free[$l['side']][$l['account_code']] = true;
+            }
+        }
+        return [
+            'by_id'      => $byId,
+            'paired'     => $paired,
+            'pair_label' => array_map(static fn (array $byCents): array => array_map(self::label(...), $byCents), $pair),
+            'free_label' => array_map(self::label(...), $free),
+            'sides'      => $sides,
+            'codes'      => $codes,
+        ];
+    }
+
+    /** @param array<string,true> $codes */
+    private static function label(array $codes): ?string
+    {
         if ($codes === []) {
             return null;
         }
+        $codes = array_map('strval', array_keys($codes));
         sort($codes, SORT_STRING);
         $shown = array_slice($codes, 0, self::MAX_COUNTER_ACCOUNTS);
         return implode(', ', $shown) . (count($codes) > self::MAX_COUNTER_ACCOUNTS ? ', …' : '');
@@ -112,7 +179,7 @@ final class JournalLineContext
 
     /**
      * @param list<int> $entryIds
-     * @return array<int,list<array{line_no:int, account_code:string, side:string}>> side = účinná strana
+     * @return array<int,array<string,mixed>> entry_id => index z {@see entryIndex()} (strana = účinná)
      */
     private function entryLines(int $supplierId, array $entryIds): array
     {
@@ -120,7 +187,7 @@ final class JournalLineContext
         foreach (array_chunk($entryIds, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
             $stmt = $this->db->pdo()->prepare(
-                "SELECT l.entry_id, l.line_no, ca.account_code,
+                "SELECT l.id, l.entry_id, ca.account_code, l.amount,
                         CASE WHEN l.is_red_storno = 1
                              THEN (CASE WHEN l.side = 'debit' THEN 'credit' ELSE 'debit' END)
                              ELSE l.side END AS side
@@ -131,13 +198,14 @@ final class JournalLineContext
             $stmt->execute([$supplierId, ...$chunk]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $out[(int) $r['entry_id']][] = [
-                    'line_no'      => (int) $r['line_no'],
+                    'line_id'      => (int) $r['id'],
                     'account_code' => (string) $r['account_code'],
                     'side'         => (string) $r['side'],
+                    'amount_cents' => (int) round(((float) $r['amount']) * 100),
                 ];
             }
         }
-        return $out;
+        return array_map(self::entryIndex(...), $out);
     }
 
     /**

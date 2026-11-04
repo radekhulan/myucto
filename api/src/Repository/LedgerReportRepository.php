@@ -199,7 +199,7 @@ final class LedgerReportRepository
         $limit = max(1, $limit);
         $offset = max(0, $offset);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
-        [$counterSql, $counterParams] = $this->counterAccountFilter('t.entry_id', 't.effective_side', $supplierId, $counterAccountId);
+        [$counterSql, $counterParams] = $this->counterAccountFilter('t.entry_id', 't.effective_side', 't.amount', $supplierId, $counterAccountId);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
@@ -334,7 +334,7 @@ final class LedgerReportRepository
     {
         $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
-        [$counterSql, $counterParams] = $this->counterAccountFilter('l.entry_id', self::effectiveSideSql('l'), $supplierId, $counterAccountId);
+        [$counterSql, $counterParams] = $this->counterAccountFilter('l.entry_id', self::effectiveSideSql('l'), 'l.amount', $supplierId, $counterAccountId);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COUNT(*)
                FROM journal_entry_lines l
@@ -354,8 +354,11 @@ final class LedgerReportRepository
      * {@see accountTurnovers()}.
      *
      * Protiúčet je účet na opačné ÚČINNÉ straně téhož zápisu (červené storno stranu
-     * obrací, viz {@see effectiveSideSql()}). U složeného zápisu se částka řádku dělí
-     * poměrem řádků protistrany, takže 311 MD 1 210 má protiúčty 602 za 1 000 a 343 za 210.
+     * obrací, viz {@see effectiveSideSql()}). Řádky se shodnou částkou tvoří dvojici, když
+     * jich je na obou stranách stejně (pokladní doklad 501 / 211 a 513 / 211): spárovaný
+     * řádek se dělí rovným dílem jen mezi řádky své dvojice.
+     * Ostatní řádky se dělí poměrem jen mezi nespárované řádky protistrany, takže 311 MD
+     * 1 210 má protiúčty 602 za 1 000 a 343 za 210 i vedle dvojice v témže zápisu.
      * Řádek bez protistrany (jednostranný zápis) má protiúčet NULL.
      *
      * @return list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}>
@@ -364,41 +367,85 @@ final class LedgerReportRepository
     {
         $accountDefinitions = AccountDefinitionRepository::relation($to, $supplierId);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
+        // Jeden průchod řádky zápisů účtu, bez spojení řádku s protistranou: každý řádek zápisu
+        // dostane okny součty vlastních řádků (podle účinné a zapsané strany) a z nich svůj díl.
+        // CTE odkazované dvakrát MariaDB materializuje dvakrát, proto se na `counterpart`
+        // odkazuje jen jednou. `paired` = částka se stejným počtem řádků na obou stranách,
+        // `free_total` = nespárovaná částka strany, `own_*` = vlastní řádky (u = nespárované
+        // za zápis, p = spárované za částku; d/c účinná strana, md/d strana výsledku).
+        $ownSum = static fn (string $paired, string $eff, string $side, string $partition): string =>
+            "SUM(CASE WHEN x.is_own AND " . ($paired === 'p' ? '' : 'NOT ') . "x.paired AND x.effective_side = '{$eff}' AND x.side = '{$side}'"
+            . " THEN x.signed_amount END) OVER (PARTITION BY {$partition})";
+        $own = [];
+        foreach (['u' => 'x.entry_id', 'p' => 'x.entry_id, x.amount'] as $kind => $partition) {
+            foreach (['d' => 'debit', 'c' => 'credit'] as $e => $eff) {
+                foreach (['md' => 'debit', 'd' => 'credit'] as $res => $side) {
+                    $own[] = $ownSum($kind, $eff, $side, $partition) . " AS own_{$kind}{$e}_{$res}";
+                }
+            }
+        }
+        $freeMd = "(CASE WHEN c.effective_side = 'debit' THEN c.own_uc_md ELSE c.own_ud_md END)";
+        $freeD = "(CASE WHEN c.effective_side = 'debit' THEN c.own_uc_d ELSE c.own_ud_d END)";
+        // Podíl nespárovaného řádku na své straně; násobit před dělením (decimal drží jen 4 místa
+        // navíc). free_total > 0: nespárovaný řádek se do něj počítá a částka je kladná
+        // (chk_jel_amount_positive).
+        $freeShare = static fn (string $sum): string => "({$sum} * c.amount / c.free_total)";
         $stmt = $this->db->pdo()->prepare(
-            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", " : "WITH ") . "own AS (
-                SELECT l.entry_id, l.side, l.signed_amount, " . self::effectiveSideSql('l') . " AS effective_side
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", " : "WITH ") . "own_accounts AS (
+                SELECT ca.id FROM {$accountDefinitions} ca WHERE ca.id = ? OR ca.parent_id = ?
+            ),
+            entries AS (
+                SELECT DISTINCT l.entry_id
                   FROM journal_entry_lines l
                   JOIN journal_entries e ON e.id = l.entry_id
                   " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-                  JOIN {$accountDefinitions} ca ON ca.id = l.account_id
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                   AND (l.account_id = ? OR ca.parent_id = ?)
+                   AND l.account_id IN (SELECT id FROM own_accounts)
                    AND e.entry_date BETWEEN ? AND ?{$technicalSql}
             ),
-            entries AS (SELECT DISTINCT entry_id FROM own),
             -- Pořadí a index pevně: řádky hledáme jen pro zápisy účtu. Plánovač jinak
             -- staví rowid filtr nad celou firmou a na tisíci řádcích je to desetkrát pomalejší.
             counterpart AS (
-                SELECT o.entry_id, o.account_id, o.amount, " . self::effectiveSideSql('o') . " AS effective_side,
-                       SUM(o.amount) OVER (PARTITION BY o.entry_id, " . self::effectiveSideSql('o') . ") AS side_total
-                  FROM entries x
-                  STRAIGHT_JOIN journal_entry_lines o FORCE INDEX (idx_jel_supplier_entry)
-                       ON o.supplier_id = ? AND o.entry_id = x.entry_id
+                SELECT x.*,
+                       SUM(CASE WHEN x.paired THEN 0 ELSE x.amount END) OVER (PARTITION BY x.entry_id, x.effective_side) AS free_total,
+                       SUM(NOT x.paired AND x.effective_side = 'debit') OVER (PARTITION BY x.entry_id) AS free_d,
+                       SUM(NOT x.paired AND x.effective_side = 'credit') OVER (PARTITION BY x.entry_id) AS free_c,
+                       " . implode(",
+                       ", $own) . "
+                  FROM (SELECT o.entry_id, o.account_id, o.amount, o.side, o.signed_amount, " . self::effectiveSideSql('o') . " AS effective_side,
+                               o.account_id IN (SELECT id FROM own_accounts) AS is_own,
+                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY o.entry_id, o.amount) AS n_debit,
+                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY o.entry_id, o.amount)
+                                 = SUM(" . self::effectiveSideSql('o') . " = 'credit') OVER (PARTITION BY o.entry_id, o.amount) AS paired
+                          FROM entries e
+                          STRAIGHT_JOIN journal_entry_lines o FORCE INDEX (idx_jel_supplier_entry)
+                               ON o.supplier_id = ? AND o.entry_id = e.entry_id) x
+            ),
+            -- Díl řádku jako protiúčtu vlastních řádků opačné strany; k = 1 je vlastní
+            -- nespárovaný řádek bez nespárované protistrany (protiúčet NULL).
+            shares AS (
+                SELECT CASE WHEN k.k = 0 THEN c.account_id END AS account_id,
+                       CASE WHEN k.k = 1 THEN (CASE WHEN c.side = 'debit' THEN c.signed_amount ELSE 0 END)
+                            WHEN c.paired THEN (CASE WHEN c.effective_side = 'debit' THEN c.own_pc_md ELSE c.own_pd_md END) / c.n_debit
+                            ELSE " . $freeShare($freeMd) . " END AS md,
+                       CASE WHEN k.k = 1 THEN (CASE WHEN c.side = 'credit' THEN c.signed_amount ELSE 0 END)
+                            WHEN c.paired THEN (CASE WHEN c.effective_side = 'debit' THEN c.own_pc_d ELSE c.own_pd_d END) / c.n_debit
+                            ELSE " . $freeShare($freeD) . " END AS d
+                  FROM counterpart c
+                  JOIN (SELECT 0 AS k UNION ALL SELECT 1) k
+                       ON k.k = 0 OR (c.is_own AND NOT c.paired AND (CASE WHEN c.effective_side = 'debit' THEN c.free_c ELSE c.free_d END) = 0)
             ),
             allocated AS (
-                SELECT c.account_id,
-                       SUM(CASE WHEN own.side = 'debit'  THEN own.signed_amount * COALESCE(c.amount / c.side_total, 1) ELSE 0 END) AS md,
-                       SUM(CASE WHEN own.side = 'credit' THEN own.signed_amount * COALESCE(c.amount / c.side_total, 1) ELSE 0 END) AS d
-                  FROM own
-             LEFT JOIN counterpart c ON c.entry_id = own.entry_id AND c.effective_side <> own.effective_side
-                 GROUP BY c.account_id
+                SELECT account_id, SUM(md) AS md, SUM(d) AS d FROM shares
+                 WHERE md IS NOT NULL OR d IS NOT NULL
+                 GROUP BY account_id
             )
             SELECT x.account_id, a.account_code, a.name, a.parent_id, x.md, x.d
               FROM allocated x
          LEFT JOIN {$accountDefinitions} a ON a.id = x.account_id
              ORDER BY a.account_code IS NULL, a.account_code"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, $supplierId]);
+        $stmt->execute([$accountId, $accountId, $supplierId, $from, $to, ...$technicalParams, $supplierId]);
         return array_map(static fn (array $r): array => [
             'account_id'   => $r['account_id'] === null ? null : (int) $r['account_id'],
             'account_code' => $r['account_code'] === null ? null : (string) $r['account_code'],
@@ -411,14 +458,19 @@ final class LedgerReportRepository
 
     /**
      * Omezení řádků opisu na ty, jejichž zápis má na opačné účinné straně daný účet
-     * (nebo jeho analytiku). Prázdný filtr nepřidá nic.
+     * (nebo jeho analytiku). Spárovaný řádek (viz {@see accountCounterTotals()}) jen
+     * v rámci své dvojice, nespárovaný jen mezi nespárovanými, stejně jako součty
+     * a zobrazený protiúčet. Prázdný filtr nepřidá nic.
+     *
+     * Shodná částka je vždy ve stejné skupině (dvojice je vlastnost částky v zápisu), takže
+     * spárovanost se zjišťuje jen u řádků s jinou částkou; běžný zápis 311 / 602 ji nečte.
      *
      * Skalární poddotaz místo EXISTS záměrně: EXISTS plánovač převede na semi-join řízený
      * řádky protiúčtu, u účtu s tisíci pohyby pak dotaz běžel přes sekundu místo milisekund.
      *
      * @return array{0:string, 1:list<int>}
      */
-    private function counterAccountFilter(string $entryExpr, string $sideExpr, int $supplierId, ?int $counterAccountId): array
+    private function counterAccountFilter(string $entryExpr, string $sideExpr, string $amountExpr, int $supplierId, ?int $counterAccountId): array
     {
         if ($counterAccountId === null) {
             return ['', []];
@@ -429,9 +481,20 @@ final class LedgerReportRepository
                     WHERE cl.supplier_id = ? AND cl.entry_id = {$entryExpr}
                       AND (cl.account_id = ? OR cc.parent_id = ?)
                       AND " . self::effectiveSideSql('cl') . " <> {$sideExpr}
+                      AND (cl.amount = {$amountExpr}
+                           OR (NOT " . self::pairedSql($entryExpr, $amountExpr) . "
+                               AND NOT " . self::pairedSql('cl.entry_id', 'cl.amount') . "))
                     LIMIT 1) = 1",
-            [$supplierId, $counterAccountId, $counterAccountId],
+            [$supplierId, $counterAccountId, $counterAccountId, $supplierId, $supplierId],
         ];
+    }
+
+    /** Tvoří řádky dané částky v zápisu dvojici? Pravidlo viz {@see accountCounterTotals()}. */
+    private static function pairedSql(string $entryExpr, string $amountExpr): string
+    {
+        return "(SELECT SUM(" . self::effectiveSideSql('pg') . " = 'debit') = SUM(" . self::effectiveSideSql('pg') . " = 'credit')
+                   FROM journal_entry_lines pg
+                  WHERE pg.supplier_id = ? AND pg.entry_id = {$entryExpr} AND pg.amount = {$amountExpr})";
     }
 
     /** Strana, na které řádek skutečně působí: červené storno MD je účinkem Dal a naopak. */

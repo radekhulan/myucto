@@ -18801,7 +18801,7 @@
       "counter_all": "All counter accounts",
       "counter_none": "no counter account",
       "counter_totals_title": "Totals by counter account",
-      "counter_totals_hint": "A compound entry is split in proportion to the opposite lines. Click a row to filter the statement.",
+      "counter_totals_hint": "Lines with the same amount on both sides of an entry belong to their pair, other lines are split in proportion to the opposite lines. Click a row to filter the statement.",
       "counter_total": "Total = account turnover",
       "counter_filter_note": "Counter account filter {account}: share of debit turnover {md}, credit {d}. The balance in the rows is the balance of the whole account.",
       "inventory": {

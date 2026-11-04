@@ -1099,7 +1099,7 @@ export interface OpenItemsListReport {
   totals: { open_count: number; open_md: number; open_d: number; unmatched: number }
 }
 
-/** Součet účtu podle protiúčtu; složený zápis se dělí poměrem řádků protistrany. */
+/** Součet účtu podle protiúčtu; dvojice se shodnou částkou patří své dvojici, ostatní řádky se dělí poměrem. */
 export interface AccountCounterTotal {
   account_id: number | null
   account_code: string | null
