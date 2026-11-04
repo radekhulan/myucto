@@ -228,11 +228,14 @@ Každá provozní oblast má samostatné oprávnění **Zápis**. Klient vidí a
 - firemní podpisové profily s podporovaným nativním backendem a šifrovaně uloženým heslem k certifikátu; klientský správce může nahrát P12/PFX, nastavit použití pro PDF a vybrat profil v odesílacím profilu pro S/MIME e-mail,
 - obsah e-mailových šablon firmy v češtině a angličtině,
 - branding komunikace, logo, barvy, patičky a brandingové profily; také volby vzhledu PDF, jako jsou kompaktní řádky položek, zobrazení autora, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce,
-- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených a přijatých dokladů zahrnout datum splatnosti.
+- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených a přijatých dokladů zahrnout datum splatnosti,
+- výchozí hodnoty nových dokladů: splatnost, hodinovou sazbu a zapnutí a text poznámky pod položkami v češtině a angličtině.
+
+Záložka **Výchozí hodnoty dokladů** vyžaduje stejnojmenné oprávnění se zápisem. Změna platí pro nově zakládané doklady a nepřepisuje již uložené koncepty ani vystavené doklady. Neumožňuje měnit měnu, sazbu DPH, ceny s DPH ani zaokrouhlování. Správce může právo samostatně přidělit i odebrat; samotný přístup k nastavení firmy je nenahrazuje.
 
 Firemní šablony otevřete na záložce **E-mailové šablony** v `Nastavení firmy`. U každého typu zprávy a jazyka vidíte, zda se používá vlastní firemní, společná nebo výchozí šablona. Úprava uloží vlastní kopii firmy; volba **Používat společnou šablonu** ji odstraní. Editor nabízí přehled proměnných a náhled na syntetických datech. Seznam typů a pravidla dědění popisuje [§ 96.6](96_Nastaveni.md#966-krok-za-krokem-e-mailove-sablony).
 
-Klient nastavení otevře v `Firma → Nastavení firmy`, na záložce **Branding**. Nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH, účetní režim, integrace, přístupové údaje AI, uživatele ani role. Volby vzhledu PDF nemění účetní ani daňové údaje. Kontaktní údaje brandingových profilů spravuje ve stejné oblasti. Osobní podpisové profily, osobní trezor certifikátů, nepodporované backendy a systémový `sendmail` zůstávají ve správě administrátora.
+Klient nastavení otevře v `Firma → Nastavení firmy` na příslušné povolené záložce. Nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH, účetní režim, integrace, přístupové údaje AI, uživatele ani role. Volby vzhledu PDF nemění účetní ani daňové údaje. Kontaktní údaje brandingových profilů spravuje na záložce **Branding**. Osobní podpisové profily, osobní trezor certifikátů, nepodporované backendy a systémový `sendmail` zůstávají ve správě administrátora.
 
 SMTP a IMAP hesla se po uložení nikdy nevracejí do prohlížeče, rozhraní ukáže jen informaci, zda je heslo nastavené. Změny i testovací odeslání se zapisují do historie akcí bez tajných hodnot a požadavky podléhají stejnému rate limitu jako ostatní mutace. Všechny operace používají firmu z ověřeného kontextu, ID firmy zaslané v těle požadavku rozsah nerozšíří.
 
