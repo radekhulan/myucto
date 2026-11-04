@@ -8,10 +8,12 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\BankPostingRuleRepository;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\StatementOverrideRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingRuleValidator;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateValidator;
 use MyInvoice\Service\Accounting\Dimension\DimensionAccountMask;
@@ -658,7 +660,7 @@ final class CompanyProfileImporter
             return;
         }
         if (!$this->dimensionRepo->enabled($supplierId)) {
-            $this->warn($section, 'Firma nemá zapnuté dimenze, výchozí dimenze klientů, zakázek a produktů se nenahrály.');
+            $this->warn($section, 'Firma nemá zapnuté dimenze, výchozí dimenze klientů, zakázek, produktů a bankovních účtů se nenahrály.');
             return;
         }
         $types = [];
@@ -668,6 +670,9 @@ final class CompanyProfileImporter
                 $types[$t['code']] = (int) $t['id'];
             }
         }
+        $mode = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $mode->execute([$supplierId]);
+        $doubleEntry = $mode->fetchColumn() === 'double_entry';
         $wanted = [];
         foreach (array_values($data) as $d) {
             if (!is_array($d)) {
@@ -676,17 +681,25 @@ final class CompanyProfileImporter
             $entity = (string) ($d['entity'] ?? '');
             $typeCode = (string) ($d['type_code'] ?? '');
             $valueCode = (string) ($d['value_code'] ?? '');
+            if ($entity === 'bank_account' && !$doubleEntry) {
+                // Výchozí dimenze účtu platí jen v podvojném účetnictví (Kontace účtů).
+                $this->warn($section, sprintf('Firma nevede podvojné účetnictví, výchozí dimenze bankovního účtu %s přeskočena.', (string) ($d['bank_account']['account'] ?? '?')));
+                continue;
+            }
             $entityId = match ($entity) {
                 'client' => $this->clientId($supplierId, (array) ($d['client'] ?? [])),
                 'project' => $this->projectId($supplierId, (array) ($d['project'] ?? [])),
                 'product' => $this->codeId('SELECT id FROM stock_items WHERE supplier_id = ? AND sku = ?', $supplierId, (string) ($d['product']['sku'] ?? '')),
                 'product_category' => $this->codeId('SELECT id FROM stock_categories WHERE supplier_id = ? AND code = ?', $supplierId, (string) ($d['product_category']['code'] ?? '')),
+                'bank_account' => $this->bankAccountId($supplierId, (array) ($d['bank_account'] ?? [])),
                 default => null,
             };
             $who = match ($entity) {
                 'client' => 'klient ' . (string) ($d['client']['name'] ?? '?'),
                 'product' => 'produkt ' . (string) ($d['product']['sku'] ?? '?'),
                 'product_category' => 'kategorie ' . (string) ($d['product_category']['code'] ?? '?'),
+                'bank_account' => 'bankovní účet ' . (string) ($d['bank_account']['account'] ?? '?')
+                    . ((string) ($d['bank_account']['bank_code'] ?? '') !== '' ? '/' . (string) $d['bank_account']['bank_code'] : ''),
                 default => 'zakázka ' . (string) ($d['project']['name'] ?? '?'),
             };
             if ($entityId === null) {
@@ -870,6 +883,22 @@ final class CompanyProfileImporter
         $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
         return count($ids) === 1 ? (int) $ids[0] : null;
+    }
+
+    /**
+     * Vlastní bankovní účet firmy podle čísla účtu a kódu banky, stejně jako ho najde
+     * zaúčtování pohybu ({@see SupplierBankAccountRepository::matchCounterparty()}): číslo
+     * i kód banky se kanonizují a účet registru bez kódu banky se spáruje taky. Neaktivní
+     * účet se najde, jeho nastavení se přenáší jako ostatní vlastnosti účtu.
+     *
+     * @param array<string,mixed> $key
+     */
+    private function bankAccountId(int $supplierId, array $key): ?int
+    {
+        $bank = trim((string) ($key['bank_code'] ?? ''));
+        $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+            ->matchCounterparty($supplierId, (string) ($key['account'] ?? ''), $bank === '' ? null : $bank, true);
+        return $account === null ? null : (int) $account['id'];
     }
 
     /** @param array<string,mixed> $project */

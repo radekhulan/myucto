@@ -24787,6 +24787,9 @@
         "credit_card": "Credit card"
       },
       "credit_card_managed": "Account 231 is managed in Credit cards",
+      "dimensions_edit": "Edit",
+      "dimensions_show": "Show",
+      "dimensions_hide": "Hide",
       "col": {
         "account": "Account",
         "currency": "Currency",
@@ -24794,6 +24797,7 @@
         "kind": "Kind",
         "analytic": "Analytic code",
         "series": "Document series",
+        "dimensions": "Default dimensions",
         "active": "Active"
       }
     },
@@ -36129,6 +36133,7 @@
       "hint_project": "Prefilled into the header of invoices of this project. A document without a dimension of that type gets it when posted. They take precedence over the client defaults.",
       "hint_product": "A document line with this product gets them unless it has its own. On revenue and expense lines they take precedence over the document header.",
       "hint_category": "Applies to products of this category and its subcategories that have no value of the type themselves.",
+      "hint_bank_account": "Movements on this account receive them when posted if they have no value of that type themselves or from the paid documents (interest, withholding tax, fees). A value entered on the movement and the dimensions of the paid invoice take precedence.",
       "save_failed": "The record is saved, but its default dimensions could not be saved: {message}",
       "autofilled": "Prefilled from the default dimensions of the client, project or paid document."
     },

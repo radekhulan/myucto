@@ -227,7 +227,8 @@ final class CompanyProfileExporter
             "SELECT t.code AS type_code, v.code AS value_code,
                     c.ic AS client_ic, c.company_name AS client_name,
                     p.name AS project_name, p.project_number, pc.ic AS project_client_ic, pc.company_name AS project_client_name,
-                    si.sku AS product_sku, sc.code AS category_code
+                    si.sku AS product_sku, sc.code AS category_code,
+                    sba.account_canonical AS bank_account, sba.bank_code_norm AS bank_code
                FROM dimension_defaults d
                JOIN dimension_types t ON t.id = d.dimension_type_id
                JOIN dimension_values v ON v.id = d.dimension_value_id
@@ -236,8 +237,9 @@ final class CompanyProfileExporter
           LEFT JOIN clients pc ON pc.id = p.client_id AND pc.supplier_id = d.supplier_id
           LEFT JOIN stock_items si ON si.id = d.product_id AND si.supplier_id = d.supplier_id
           LEFT JOIN stock_categories sc ON sc.id = d.product_category_id AND sc.supplier_id = d.supplier_id
+          LEFT JOIN supplier_bank_accounts sba ON sba.id = d.supplier_bank_account_id AND sba.supplier_id = d.supplier_id
               WHERE d.supplier_id = ?
-              ORDER BY d.client_id IS NULL, c.company_name, p.name, si.sku, sc.code, t.code"
+              ORDER BY d.client_id IS NULL, c.company_name, p.name, si.sku, sc.code, sba.account_canonical, sba.bank_code_norm, t.code"
         );
         $stmt->execute([$supplierId]);
         $out = [];
@@ -272,6 +274,14 @@ final class CompanyProfileExporter
                 $out[] = [
                     'entity' => 'product_category',
                     'product_category' => ['code' => (string) $r['category_code']],
+                    'type_code' => (string) $r['type_code'],
+                    'value_code' => (string) $r['value_code'],
+                ];
+            } elseif ($r['bank_account'] !== null) {
+                // Vlastní bankovní účet se páruje číslem účtu a kódem banky (unikátní ve firmě).
+                $out[] = [
+                    'entity' => 'bank_account',
+                    'bank_account' => ['account' => (string) $r['bank_account'], 'bank_code' => (string) $r['bank_code']],
                     'type_code' => (string) $r['type_code'],
                     'value_code' => (string) $r['value_code'],
                 ];

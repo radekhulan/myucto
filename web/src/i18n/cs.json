@@ -24787,6 +24787,9 @@
         "credit_card": "Kreditní karta"
       },
       "credit_card_managed": "Účet 231 spravuje stránka Kreditní karty",
+      "dimensions_edit": "Upravit",
+      "dimensions_show": "Zobrazit",
+      "dimensions_hide": "Skrýt",
       "col": {
         "account": "Účet",
         "currency": "Měna",
@@ -24794,6 +24797,7 @@
         "kind": "Druh",
         "analytic": "Analytika",
         "series": "Dokladová řada",
+        "dimensions": "Výchozí dimenze",
         "active": "Aktivní"
       }
     },
@@ -36129,6 +36133,7 @@
       "hint_project": "Předvyplní se do hlavičky faktur této zakázky. Doklad bez dimenze daného typu je dostane při zaúčtování. Mají přednost před výchozími dimenzemi klienta.",
       "hint_product": "Položka dokladu s touto kartou je dostane, pokud je sama nemá. Na výnosech a nákladech mají přednost před hlavičkou dokladu.",
       "hint_category": "Platí pro produkty této kategorie a podkategorií, které hodnotu typu samy nemají.",
+      "hint_bank_account": "Pohyb na tomto účtu je dostane při zaúčtování, pokud hodnotu typu nemá sám ani z hrazených dokladů (úroky, srážková daň, poplatky). Hodnota zadaná u pohybu a dimenze hrazené faktury mají přednost.",
       "save_failed": "Karta je uložená, ale výchozí dimenze se uložit nepodařilo: {message}",
       "autofilled": "Předvyplněno z výchozích dimenzí klienta, zakázky nebo placeného dokladu."
     },

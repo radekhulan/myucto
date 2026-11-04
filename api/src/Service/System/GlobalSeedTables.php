@@ -312,7 +312,9 @@ final class GlobalSeedTables
      *   generátor pak padal na `uq_wh_supplier_code` („Duplicate entry '1-HLAVNI'")
      *   a purge už sirotka neuměl uklidit.
      * - pracovní kalendáře, směny a pravidla výplat mají employment/employee (osobní data).
-     * - dimension_defaults jsou výchozí dimenze KLIENTA a projektu, které se mažou.
+     * - dimension_defaults jsou výchozí dimenze klienta, zakázky, produktu a kategorie,
+     *   které se mažou. Výchozí dimenze bankovního účtu jsou konfigurace ponechaného
+     *   účtu, proto zůstanou ({@see self::RESET_KEEP_USERS_SUPPLIER_PARTIAL}).
      * - payroll_period_ownership, accounting_setup_* a tax_advance_schedules jsou stopa
      *   převodu, průvodce nebo párování nad smazanými daty; převod je založí znovu.
      *
@@ -591,6 +593,18 @@ final class GlobalSeedTables
     }
 
     /**
+     * Tabulky ze seznamu mazaných ({@see self::RESET_KEEP_USERS_SUPPLIER_WIPES}), ve kterých
+     * režim `--keep-users-supplier` ponechá řádky patřící ponechané konfiguraci. Hodnota je
+     * podmínka řádků, které se smažou.
+     *
+     * @var array<string, string>
+     */
+    public const RESET_KEEP_USERS_SUPPLIER_PARTIAL = [
+        // Výchozí dimenze vlastního bankovního účtu: účet, typy i hodnoty dimenzí zůstávají.
+        'dimension_defaults' => 'supplier_bank_account_id IS NULL',
+    ];
+
+    /**
      * Keep-list režimu `--keep-users-supplier` a smíšené tabulky, u kterých se v tomto
      * režimu maže jen per-tenant část (ty, které jsou konfigurací, zůstávají celé).
      *
@@ -599,7 +613,8 @@ final class GlobalSeedTables
     public static function resetKeepUsersSupplier(bool $keepCache): array
     {
         $keep = array_values(array_unique(array_merge(self::resetKeep($keepCache), self::RESET_KEEP_USERS_SUPPLIER)));
-        $partial = array_diff_key(self::RESET_PARTIAL, array_flip(self::RESET_KEEP_USERS_SUPPLIER));
+        $partial = array_diff_key(self::RESET_PARTIAL, array_flip(self::RESET_KEEP_USERS_SUPPLIER))
+            + self::RESET_KEEP_USERS_SUPPLIER_PARTIAL;
 
         return ['keep' => $keep, 'partial' => $partial];
     }

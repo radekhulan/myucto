@@ -1116,7 +1116,7 @@ final class DimensionService
     // ── výchozí dimenze klienta a zakázky ─────────────────────────────────────
 
     /**
-     * @param 'client'|'project'|'product'|'product_category' $entity
+     * @param 'client'|'project'|'product'|'product_category'|'bank_account' $entity
      * @return array<int,int> typ => hodnota
      */
     public function entityDefaults(int $supplierId, string $entity, int $entityId): array
@@ -1126,10 +1126,10 @@ final class DimensionService
     }
 
     /**
-     * Uloží výchozí dimenze klienta, zakázky, produktu nebo kategorie. Zaúčtované doklady se nemění —
+     * Uloží výchozí dimenze klienta, zakázky, produktu, kategorie nebo bankovního účtu. Zaúčtované doklady se nemění —
      * výchozí hodnoty se uplatní až u dokladů, které se budou účtovat.
      *
-     * @param 'client'|'project'|'product'|'product_category' $entity
+     * @param 'client'|'project'|'product'|'product_category'|'bank_account' $entity
      * @param array<int|string,mixed> $raw typ => hodnota
      * @return array<int,int>
      */
@@ -1361,6 +1361,7 @@ final class DimensionService
                 'project' => 'Zakázka nenalezena.',
                 'product' => 'Skladová karta nenalezena.',
                 'product_category' => 'Kategorie nenalezena.',
+                'bank_account' => 'Bankovní účet nenalezen.',
                 default => 'Klient nenalezen.',
             }, 404);
         }
