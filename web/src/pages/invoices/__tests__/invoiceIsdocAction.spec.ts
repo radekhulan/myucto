@@ -88,10 +88,12 @@ describe('stažení ISDOC v detailu vydané faktury', () => {
 
   it.each(['issued', 'sent', 'reminded', 'paid'])('nabízí stažení ve stavu %s v Pokročilé', async status => {
     m.invoice.status = status
-    expect(isdocAction(await actions())).toMatchObject({
+    const items = await actions()
+    expect(isdocAction(items)).toMatchObject({
       label: 'invoice.download_isdoc', tier: 'advanced', variant: 'neutral',
       icon: 'inbox', href: '/api/invoices/9/isdoc?supplier_id=1', download: true,
     })
+    expect(items[items.findIndex(a => a.key === 'isdoc') + 1]?.key).toBe('rebuild-snapshots')
   })
 
   it.each(['draft', 'cancelled'])('nenabízí export ve stavu %s', async status => {
