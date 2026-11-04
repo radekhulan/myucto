@@ -418,6 +418,11 @@ final class StatementImporter
         // Explicitně zvolený měnový účet (#167) je autoritativní; jinak lookup podle čísla.
         $accountCurrency = $account['code'] ?? null;
         $accountBankCode = $account['bank_code'] ?? $registeredOwner['bank_code'] ?? null;
+        // Výpis nese jen český kód banky (CHAR(4)). Zahraniční kód účtu (sort code)
+        // by zápis výpisu shodil a s kódem banky z výpisu by se stejně nikdy neshodoval.
+        if ($accountBankCode !== null && AccountNumberNormalizer::canonicalBankCode((string) $accountBankCode) === null) {
+            $accountBankCode = null;
+        }
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
 

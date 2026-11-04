@@ -813,7 +813,13 @@ final class InvoicePdfRenderer
         if (empty($row)) return null;
         $hasCzk = !empty($row['account_number']) && !empty($row['bank_code']);
         $hasIban = !empty($row['iban']);
-        return ($hasCzk || $hasIban) ? $row : null;
+        if (!$hasCzk && !$hasIban) return null;
+        // Zahraniční kód banky (sort code) se netiskne jako „číslo / kód": má vlastní řádek.
+        $row['foreign_bank_code'] = \MyInvoice\Service\Bank\CurrencyBankAccountFields::foreignBankCode(
+            isset($row['bank_code']) ? (string) $row['bank_code'] : null,
+            isset($row['iban']) ? (string) $row['iban'] : null,
+        );
+        return $row;
     }
 
     /**

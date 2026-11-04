@@ -57569,6 +57569,8 @@ components:
           - type: string
           - type: 'null'
         bank_code:
+          description: Čtyřmístný kód české banky, u zahraničního účtu národní kód banky (např. britský sort code 60-84-64).
+          maxLength: 10
           anyOf:
           - type: string
           - type: 'null'

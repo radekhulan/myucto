@@ -260,6 +260,15 @@ final class AccountNumberNormalizerTest extends TestCase
         self::assertNull(AccountNumberNormalizer::canonicalBankCode(null, 'DE89370400440532013000'));
     }
 
+    /** Issue #314: britský sort code se nesmí zkrátit na český kód banky `8464`. */
+    public function testForeignBankCodeIsNotTruncatedToCzechCode(): void
+    {
+        self::assertSame('0800', AccountNumberNormalizer::canonicalBankCode('000800'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode('608464'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode('60-84-64'));
+        self::assertNull(AccountNumberNormalizer::canonicalBankCode('021000021'));
+    }
+
     #[DataProvider('accountPrefixCases')]
     public function testCzechAccountPrefix(string $raw, ?string $expected): void
     {

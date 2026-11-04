@@ -1132,7 +1132,8 @@
         "2228_other_item_kinds.sql",
         "2229_work_report_display_options.sql",
         "2230_journal_lines_cost_center_index.sql",
-        "2231_unit_prices_six_decimals.sql"
+        "2231_unit_prices_six_decimals.sql",
+        "2232_currencies_foreign_bank_code.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4649,7 +4650,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "account_number": "varchar(30) NULL DEFAULT NULL",
-                "bank_code": "char(4) NULL DEFAULT NULL",
+                "bank_code": "varchar(10) NULL DEFAULT NULL",
                 "bank_name": "varchar(120) NULL DEFAULT NULL",
                 "bic": "varchar(11) NULL DEFAULT NULL",
                 "code": "char(3) NOT NULL",

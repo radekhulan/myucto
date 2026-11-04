@@ -25506,6 +25506,7 @@
     "account_label": "Account name",
     "account_number": "Account number",
     "bank_code": "Bank code",
+    "bank_code_hint": "For a Czech account, the four-digit bank code (e.g. 0800). For a foreign account, the national bank code such as the UK sort code 60-84-64; if left empty, the invoice takes the sort code from a UK IBAN.",
     "bank_name": "Bank name",
     "iban": "IBAN",
     "bic": "BIC",

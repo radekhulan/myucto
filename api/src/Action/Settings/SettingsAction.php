@@ -22,6 +22,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\AccountingFrameworkException;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Bank\CurrencyBankAccountFields;
 use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\Codebook\UnitPrecision;
 use MyInvoice\Service\IpMatcher;
@@ -1903,6 +1904,9 @@ final class SettingsAction
             return Json::error($response, 'validation_failed', 'Název účtu je povinný.', 400,
                 ['fields' => ['label' => ['Název účtu je povinný.']]]);
         }
+        if (($bankErrors = CurrencyBankAccountFields::validationErrors($body)) !== []) {
+            return Json::error($response, 'validation_failed', (string) reset($bankErrors)[0], 400, ['fields' => $bankErrors]);
+        }
         $allowed = ['label', 'symbol', 'decimals', 'is_active', 'is_default', 'account_number', 'bank_code', 'bank_name', 'iban', 'bic'];
         $sets = [];
         $params = [];
@@ -1916,6 +1920,8 @@ final class SettingsAction
                 } elseif ($f === 'symbol') {
                     // NOT NULL sloupec — prázdné ulož jako '' (ne null).
                     $params[] = (string) $body[$f];
+                } elseif (in_array($f, ['account_number', 'bank_code', 'bank_name', 'iban', 'bic'], true)) {
+                    $params[] = CurrencyBankAccountFields::normalized($body[$f]);
                 } else {
                     $params[] = ($body[$f] === '' || $body[$f] === null) ? null : $body[$f];
                 }
@@ -2192,6 +2198,9 @@ final class SettingsAction
         }
         $label = trim((string) ($b['label'] ?? "$code — výchozí"));
         if ($label === '') $label = $code;
+        if (($bankErrors = CurrencyBankAccountFields::validationErrors($b)) !== []) {
+            return Json::error($response, 'validation_failed', (string) reset($bankErrors)[0], 400, ['fields' => $bankErrors]);
+        }
         if (($claimed = $this->rejectForeignBankAccount($request, $response, $sid, $b)) !== null) {
             return $claimed;
         }
@@ -2222,11 +2231,11 @@ final class SettingsAction
             (int) ($b['decimals'] ?? 2),
             array_key_exists('is_active', $b) ? ((int) (bool) $b['is_active']) : 1,
             $isDefault,
-            ($b['account_number'] ?? '') !== '' ? (string) $b['account_number'] : null,
-            ($b['bank_code'] ?? '') !== '' ? (string) $b['bank_code'] : null,
-            ($b['bank_name'] ?? '') !== '' ? (string) $b['bank_name'] : null,
-            ($b['iban'] ?? '') !== '' ? (string) $b['iban'] : null,
-            ($b['bic'] ?? '') !== '' ? (string) $b['bic'] : null,
+            CurrencyBankAccountFields::normalized($b['account_number'] ?? null),
+            CurrencyBankAccountFields::normalized($b['bank_code'] ?? null),
+            CurrencyBankAccountFields::normalized($b['bank_name'] ?? null),
+            CurrencyBankAccountFields::normalized($b['iban'] ?? null),
+            CurrencyBankAccountFields::normalized($b['bic'] ?? null),
         ]);
         $newId = (int) $pdo->lastInsertId();
         // Nová měna může rovnou nést vlastní účet (typicky EUR účet vedle CZK) —

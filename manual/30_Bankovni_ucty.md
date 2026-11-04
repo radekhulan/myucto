@@ -62,6 +62,8 @@ Sekce **Měny + bankovní účty** je čistý seznam účtů firmy. Účet zde n
 > [!TIP]
 > Slovenský účet můžete zadat slovenským IBANem, se správným kódem banky a měnou EUR.
 
+U zahraničního účtu zadejte do **Kód banky** národní kód banky, například britský sort code `60-84-64` (nejvýše 10 znaků). Faktura ho vytiskne na samostatném řádku („Sort code: 60-84-64“) vedle čísla účtu, takže z něj zaplatí i odběratel domácím převodem. Necháte-li pole prázdné, vezme faktura sort code z britského IBANu. Výpisy, párování a QR platba pracují jen s českým kódem banky, u zahraničního účtu proto rozhoduje IBAN.
+
 ## 30.4 Krok za krokem: analytika 221 a dokladová řada
 
 Jen pro podvojné účetnictví. Každý bankovní účet má vlastní analytiku syntetického účtu 221 (221.100, 221.200 …), která se přidělí automaticky.

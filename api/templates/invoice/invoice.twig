@@ -18,7 +18,9 @@
 <htmlpagefooter name="attribution">
 {% if bank_in_footer %}
   {% set _bank_parts = [] %}
-  {% if bank.account_number %}{% set _bank_parts = _bank_parts|merge([bank.account_number ~ (bank.bank_code ? ' / ' ~ bank.bank_code : '')]) %}{% endif %}
+  {% set _foreign_code = bank.foreign_bank_code|default(null) %}
+  {% if bank.account_number %}{% set _bank_parts = _bank_parts|merge([bank.account_number ~ (bank.bank_code and not _foreign_code ? ' / ' ~ bank.bank_code : '')]) %}{% endif %}
+  {% if _foreign_code %}{% set _bank_parts = _bank_parts|merge([(_foreign_code.label == 'sort_code' ? 'Sort code' : t('Kód banky', 'Bank code')) ~ ': ' ~ _foreign_code.value]) %}{% endif %}
   {% if bank.iban %}{% set _bank_parts = _bank_parts|merge(['IBAN: ' ~ bank.iban]) %}{% endif %}
   {% if bank.bic %}{% set _bank_parts = _bank_parts|merge(['BIC: ' ~ bank.bic]) %}{% endif %}
   {% if bank.bank_name %}{% set _bank_parts = _bank_parts|merge([bank.bank_name]) %}{% endif %}
@@ -467,7 +469,10 @@
               <div class="bank-label">{{ t('Bankovní spojení', 'Bank account') }}</div>
               <div class="spacer-3">&nbsp;</div>
               {% if bank.account_number %}
-                <div class="bank-value">{{ bank.account_number }}{% if bank.bank_code %} / {{ bank.bank_code }}{% endif %}</div>
+                <div class="bank-value">{{ bank.account_number }}{% if bank.bank_code and not bank.foreign_bank_code|default(null) %} / {{ bank.bank_code }}{% endif %}</div>
+              {% endif %}
+              {% if bank.foreign_bank_code|default(null) %}
+                <div class="bank-meta-line">{{ bank.foreign_bank_code.label == 'sort_code' ? 'Sort code' : t('Kód banky', 'Bank code') }}: {{ bank.foreign_bank_code.value }}</div>
               {% endif %}
               {% if bank.iban %}
                 <div class="bank-value">{{ bank.iban }}</div>

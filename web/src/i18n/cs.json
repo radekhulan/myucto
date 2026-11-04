@@ -25506,6 +25506,7 @@
     "account_label": "Název účtu",
     "account_number": "Číslo účtu",
     "bank_code": "Kód banky",
+    "bank_code_hint": "U českého účtu čtyřmístný kód banky (např. 0800). U zahraničního účtu národní kód banky, například britský sort code 60-84-64; když ho nevyplníte, faktura vezme sort code z britského IBANu.",
     "bank_name": "Název banky",
     "iban": "IBAN",
     "bic": "BIC",
