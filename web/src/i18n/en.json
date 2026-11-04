@@ -17826,7 +17826,6 @@
       "filter_amount_to": "Amount to",
       "filter_integrity": "Document ↔ journal mismatches",
       "filter_integrity_amount_mismatch": "Entry amount does not match the document",
-      "filter_integrity_hint": "Entries where the document total does not appear in the posting at all — typically a document changed after it was posted.",
       "filter_dimension_only_value": "value only",
       "reset_filters": "Reset filters",
       "posted": "Posted",

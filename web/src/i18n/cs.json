@@ -17826,7 +17826,6 @@
       "filter_amount_to": "Částka do",
       "filter_integrity": "Nesrovnalosti doklad ↔ deník",
       "filter_integrity_amount_mismatch": "Částka zápisu nesedí na doklad",
-      "filter_integrity_hint": "Zápisy, u kterých se celková částka dokladu v zaúčtování vůbec neobjeví - typicky doklad změněný po zaúčtování.",
       "filter_dimension_only_value": "jen hodnota",
       "reset_filters": "Zrušit filtry",
       "posted": "Zaúčtováno",

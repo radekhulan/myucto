@@ -1030,7 +1030,6 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <option value="">{{ t('common.all') }}</option>
             <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
           </select>
-          <p class="text-[11px] text-neutral-500 mt-1">{{ t('accounting.journal.filter_integrity_hint') }}</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
