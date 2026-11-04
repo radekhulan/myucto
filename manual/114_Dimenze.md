@@ -386,26 +386,46 @@ na záložce **Kontace účtů**, ve sloupci **Výchozí dimenze** tlačítkem *
 a ukládají se spolu s ostatními změnami tlačítkem **Uložit**. Hodí se pro pohyby,
 které nehradí žádný doklad, například úroky, srážkovou daň a poplatky: bez nich
 by pohyb neměl odkud hodnotu vzít a povinná dimenze z pravidla by zaúčtování
-zastavila. U bankovního pohybu se typ po typu bere první hodnota z tohoto pořadí:
+zastavila.
+
+Výchozí dimenze účtu se doplní jen na tyto řádky zápisu pohybu:
+
+- **řádek banky**, tedy analytiku 221 účtu, na kterém pohyb je (u kreditní
+  karty její úvěrový účet 231),
+- **protiúčet pohybu, který nehradí žádný doklad**, například úrok, poplatek
+  nebo srážkovou daň.
+
+Řádky saldokonta hrazených dokladů (311, 321, 314, 324 a další u úhrady faktury,
+zálohy nebo ostatní pohledávky a závazku) dimenzi účtu nedostanou, nesou jen
+dimenze dokladu. Stejně tak peněžní účty a peníze na cestě (211, 221, 261 a účet
+z kontace převodu mezi vlastními účty): u převodu mezi dvěma vlastními účty
+s různými výchozími dimenzemi dostane dimenzi každého účtu jen jeho řádek banky
+a 261 zůstane bez ní. Saldokonto i 261 se tak po dimenzi vyrovnají.
+
+Na každém řádku se typ po typu bere první hodnota z tohoto pořadí:
 
 1. dimenze zadaná u pohybu (panel **Dimenze**),
 2. dimenze hrazených dokladů (faktury, ostatní pohledávky a závazky) včetně
    jejich výchozích hodnot,
-3. výchozí dimenze bankovního účtu, na kterém pohyb je,
-4. výchozí hodnota z pravidla dimenzí podle účtu.
+3. výchozí hodnota z pravidla dimenzí podle účtu řádku (pravidlo pro 568
+   je na řádku 568 konkrétnější než bankovní účet),
+4. výchozí dimenze bankovního účtu, na kterém pohyb je.
 
 Typ, který mají všechny hrazené doklady, ale s různými hodnotami, rozdělí
 zaúčtování po řádcích a na řádku banky jako rozpad. Výchozí dimenze účtu ho
 nepřepíše.
 
-Výchozí hodnota účtu se doplní všem řádkům zápisu pohybu, které typ nemají,
-tedy i řádku banky, saldokonta hrazeného dokladu bez dané dimenze a u převodu
-mezi vlastními účty řádku 261. Účet vypnutý v poli **Aktivní** své výchozí
-dimenze nepoužije, stejně jako se na jeho analytiku pohyby nepřesměrují.
-Nastavit je lze i úvěrovému účtu kreditní karty; ten je používá i po archivaci
-na stránce Kreditní karty, stejně jako se jeho pohyby dál účtují na 231. Změna výchozích dimenzí účtu se do už
-zaúčtovaného pohybu promítne, až když se jeho dimenze znovu orazítkují (uložení
-dimenzí pohybu nebo hrazeného dokladu).
+Účet vypnutý v poli **Aktivní** své výchozí dimenze u nově účtovaných pohybů
+nepoužije, stejně jako se na jeho analytiku pohyby nepřesměrují. Pohyby, které
+na něm už jsou zaúčtované, si dimenzi účtu ponechají i po deaktivaci. Nastavit
+je lze i úvěrovému účtu kreditní karty; ten je používá i po archivaci na stránce
+Kreditní karty, stejně jako se jeho pohyby dál účtují na 231.
+
+Změna výchozích dimenzí účtu se do už zaúčtovaného pohybu promítne, až když se
+jeho dimenze znovu orazítkují. To se stane při uložení dimenzí pohybu nebo
+hrazeného dokladu, při novém spárování nebo opakovaném importu výpisu, při
+převodu pohybů na kreditní kartu a při přiřazení nebo odpojení úhrady ostatní
+pohledávky či závazku. Přerazítkují se jen pohyby v otevřených obdobích.
 
 Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u dokladů
 zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.

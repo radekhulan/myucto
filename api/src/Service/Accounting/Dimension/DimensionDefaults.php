@@ -10,6 +10,8 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
+use MyInvoice\Service\Accounting\CreditCard\CreditCardAccounts;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
@@ -100,8 +102,8 @@ final class DimensionDefaults
      *     včetně jejích výchozích
      *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých)
      *     a ostatních pohledávek a závazků včetně jejich výchozích; u více dokladů
-     *     jen hodnoty společné všem; chybějící typy doplní výchozí dimenze vlastního
-     *     bankovního účtu
+     *     jen hodnoty společné všem; výchozí dimenze vlastního bankovního účtu jen
+     *     řádku banky a protiúčtu pohybu bez dokladu ({@see DimensionStamper::fillBankAccount()})
      *   • ostatní pohledávka / závazek: protistrana
      *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
      *     {@see DimensionStamper})
@@ -122,12 +124,12 @@ final class DimensionDefaults
      *
      * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
      */
-    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId, bool $includeInactiveBankAccount = false): array
     {
         return match ($sourceType) {
             'invoice', 'purchase_invoice', 'other_item' => $this->forDocumentWithOrigins($supplierId, $sourceType, $sourceId) + ['splits' => [], 'split_origins' => []],
             'cash' => $this->forCash($supplierId, $sourceId, true),
-            'bank' => $this->forBank($supplierId, $sourceId, true),
+            'bank' => $this->forBank($supplierId, $sourceId, true, $includeInactiveBankAccount),
             'offset' => $this->forOffset($supplierId, $sourceId, true),
             'settlement' => $this->forSettlement($supplierId, $sourceId),
             'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
@@ -420,53 +422,94 @@ final class DimensionDefaults
     /**
      * Hlavička společná všem dokladům, které pohyb hradí. Hradí-li doklady s různou
      * hodnotou typu, typ tu chybí — rozdělí ho {@see DimensionStamper} po řádcích.
-     * Typy, které nemá žádná z vrstev výše, doplní výchozí dimenze bankovního účtu.
+     *
+     * Výchozí dimenze vlastního bankovního účtu do hlavičky nepatří: platí jen pro řádek
+     * banky a protiúčet pohybu bez dokladu. S originy proto vrací i `bank_account`
+     * ({@see bankAccountLayer()}), které po řádcích doplní {@see DimensionStamper::fillBankAccount()}.
      *
      * @return array<int,int>
      */
-    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false): array
+    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false, bool $includeInactiveAccount = false): array
     {
         $bank = $this->bankDocuments($supplierId, $transactionId, $withOrigins);
         $documents = $bank['documents'];
-        $common = self::commonHeader(array_column($documents, 'header'));
-        $account = $this->bankAccountDefaults($supplierId, $bank['statement_account'] ?? null);
-        $header = self::fill($common, $account['header']);
+        $header = self::commonHeader(array_column($documents, 'header'));
         if (!$withOrigins) {
             return $header;
         }
-        // commonOrigins() má původ pro každý typ dokladů, účet doplní jen zbylé typy.
-        $origins = self::commonOrigins($documents, $common, 'bank:' . $transactionId) + $account['origins'];
-        ksort($origins);
-        return ['header' => $header, 'splits' => [], 'origins' => $origins, 'split_origins' => []];
+        return [
+            'header' => $header,
+            'splits' => [],
+            'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId),
+            'split_origins' => [],
+            'bank_account' => $this->bankAccountLayer($supplierId, $bank, $includeInactiveAccount),
+        ];
     }
 
+    /** @var array<string,array{id:int, kind:string, layer:array<int,int>}|null> (firma, číslo účtu, kód banky, i neaktivní) => účet */
+    private array $bankAccountCache = [];
+
+    private int $bankAccountGeneration = -1;
+
     /**
-     * Výchozí dimenze vlastního bankovního účtu, na kterém pohyb leží: nejnižší vrstva
-     * pohybu, pod vlastními dimenzemi pohybu i pod hrazenými doklady. Účet výpisu se
-     * hledá stejně jako bankovní noha zápisu ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticResolver}),
-     * takže dimenze patří účtu, na jehož analytiku 221.xxx se pohyb účtuje.
+     * Výchozí dimenze vlastního bankovního účtu, na kterém pohyb leží, s tím, na které
+     * řádky zápisu patří: `synthetics` a `side` určují řádek banky, `pays_documents`
+     * říká, zda smí i na protiúčet (pohyb, který nehradí doklad).
      *
-     * Typ, ve kterém se hrazené doklady liší, rozdělí {@see DimensionStamper} po řádcích
-     * a na řádku banky jako rozpad; rozpad má na řádku přednost před hodnotou z hlavičky
-     * ({@see DimensionStamper::expandSplits()}), takže ho hodnota účtu nepřepíše.
+     * Účet výpisu se hledá stejně jako bankovní noha zápisu
+     * ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticResolver}), takže dimenze patří
+     * účtu, na jehož analytiku 221.xxx se pohyb účtuje. Přerazítkování už zaúčtovaného
+     * pohybu (`$includeInactive`) bere i účet, který mezitím někdo deaktivoval — pohyb
+     * na něm byl zaúčtován a dimenzi si má ponechat.
      *
-     * @param array{number:string, bank:string}|null $statementAccount účet výpisu z {@see bankDocuments()}
-     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>}
+     * Shoda účtu a jeho výchozí dimenze se drží v cache podle (firma, číslo účtu, kód
+     * banky), hromadné přerazítkování tak pro každý pohyb téhož účtu nečte znovu.
+     * Uložení výchozích dimenzí ({@see DimensionDefaultRepository::replace()}) cache zahodí.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
      */
-    private function bankAccountDefaults(int $supplierId, ?array $statementAccount): array
+    private function bankAccountLayer(int $supplierId, array $bank, bool $includeInactive): ?array
     {
-        // Výpis bez čísla účtu: matchCounterparty() vrátí null ještě před dotazem.
-        $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
-            ->matchCounterparty($supplierId, (string) ($statementAccount['number'] ?? ''), $statementAccount['bank'] ?? null);
-        if ($account === null) {
-            return ['header' => [], 'origins' => []];
+        if (!isset($bank['statement_account'])) {
+            return null;
         }
-        $accountId = (int) $account['id'];
-        // Účet bez výchozích dimenzí: merge() prázdnou vrstvu vrátí bez dalšího dotazu.
-        $merged = $this->merge($supplierId, [
-            'bank_account:' . $accountId => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', $accountId),
-        ]);
-        return ['header' => $merged['header'], 'origins' => $merged['origins']];
+        $number = $bank['statement_account']['number'];
+        $bankCode = $bank['statement_account']['bank'];
+        if ($this->bankAccountGeneration !== DimensionDefaultRepository::generation()) {
+            $this->bankAccountCache = [];
+            $this->bankAccountGeneration = DimensionDefaultRepository::generation();
+        }
+        $key = $supplierId . '|' . $number . '|' . $bankCode . '|' . ($includeInactive ? 1 : 0);
+        if (!array_key_exists($key, $this->bankAccountCache)) {
+            // Výpis bez čísla účtu: matchCounterparty() vrátí null ještě před dotazem.
+            $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+                ->matchCounterparty($supplierId, $number, $bankCode, $includeInactive);
+            $this->bankAccountCache[$key] = $account === null ? null : [
+                'id' => (int) $account['id'],
+                'kind' => (string) ($account['kind'] ?? ''),
+                'layer' => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', (int) $account['id']),
+            ];
+        }
+        $account = $this->bankAccountCache[$key];
+        if ($account === null || $account['layer'] === []) {
+            return null;
+        }
+        // merge() ověří, že hodnota je pořád aktivní a typ firma vidí.
+        $merged = $this->merge($supplierId, ['bank_account:' . $account['id'] => $account['layer']]);
+        if ($merged['header'] === []) {
+            return null;
+        }
+        return [
+            'header' => $merged['header'],
+            'origins' => $merged['origins'],
+            // Kreditní karta má vlastní nohu na úvěru 231.x; pravidla a ruční zápisy píšou 221.
+            'synthetics' => $account['kind'] === BankAnalyticAssigner::CREDIT_CARD_KIND
+                ? [CreditCardAccounts::SYNTHETIC, BankAnalyticAssigner::BANK_SYNTHETIC]
+                : [BankAnalyticAssigner::BANK_SYNTHETIC],
+            'side' => $bank['incoming'] ? 'debit' : 'credit',
+            'pays_documents' => $bank['documents'] !== [],
+        ];
     }
 
     /**

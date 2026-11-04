@@ -9,7 +9,7 @@ use PDO;
 
 /**
  * Výchozí dimenze klienta, zakázky, produktu, kategorie produktu a vlastního bankovního
- * účtu (`dimension_defaults`, migrace 1861, 1949 a 2232).
+ * účtu (`dimension_defaults`, migrace 1861, 1949 a 2233).
  *
  * Mapa typ => hodnota, nejvýš jedna hodnota za typ (unikátní klíč). Validaci hodnot
  * dělá volající přes {@see \MyInvoice\Service\Accounting\Dimension\DimensionService::normalize()};
@@ -19,7 +19,15 @@ final class DimensionDefaultRepository
 {
     public const ENTITIES = ['client', 'project', 'product', 'product_category', 'bank_account'];
 
+    /** Počítadlo zápisů v běhu — podle něj zahodí cache výchozích dimenzí bankovního účtu ({@see \MyInvoice\Service\Accounting\Dimension\DimensionDefaults}). */
+    private static int $generation = 0;
+
     public function __construct(private readonly Connection $db) {}
+
+    public static function generation(): int
+    {
+        return self::$generation;
+    }
 
     /**
      * Klient, produkt, kategorie a bankovní účet patří firmě přímo, zakázka přes svého
@@ -72,6 +80,7 @@ final class DimensionDefaultRepository
     public function replace(int $supplierId, string $entity, int $entityId, array $dims): void
     {
         $column = self::column($entity);
+        self::$generation++;
         $pdo = $this->db->pdo();
         $pdo->prepare("DELETE FROM dimension_defaults WHERE supplier_id = ? AND {$column} = ?")
             ->execute([$supplierId, $entityId]);

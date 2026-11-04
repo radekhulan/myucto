@@ -107,6 +107,26 @@ describe('bank account default dimensions', () => {
     wrapper.unmount()
   })
 
+  it('keeps the dimension draft when the account saves but its dimensions fail', async () => {
+    mocks.updateAccount.mockImplementation(async (id: number) => ({ ...account(id), document_series: 'B22' }))
+    mocks.saveDefaults.mockRejectedValue(new Error('value closed'))
+    const wrapper = shallowMount(BankAccountAnalytics)
+    await flushPromises()
+    await wrapper.findAll('[data-test="bank-account-dimensions-toggle"]')[1].trigger('click')
+    wrapper.findComponent(DimensionFields).vm.$emit('update:modelValue', { 7: 71 })
+    await wrapper.findAll('input[placeholder="BCR"]')[1].setValue('B22')
+    await wrapper.find('button.bg-primary-600').trigger('click')
+    await flushPromises()
+    expect(mocks.updateAccount).toHaveBeenCalledTimes(1)
+    expect(mocks.saveDefaults).toHaveBeenCalledWith('accounting/bank-accounts', 2, { 7: 71 })
+    expect(mocks.error).toHaveBeenCalled()
+    const fields = wrapper.findComponent(DimensionFields)
+    expect(fields.exists()).toBe(true)
+    expect(fields.props('modelValue')).toEqual({ 7: 71 })
+    expect(wrapper.text()).toContain('bank.analytics.unsaved')
+    wrapper.unmount()
+  })
+
   it('hides the column and skips loading when dimensions are off', async () => {
     dims.enabled = ref(false)
     const wrapper = shallowMount(BankAccountAnalytics)

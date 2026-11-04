@@ -36132,7 +36132,7 @@
       "hint_project": "Předvyplní se do hlavičky faktur této zakázky. Doklad bez dimenze daného typu je dostane při zaúčtování. Mají přednost před výchozími dimenzemi klienta.",
       "hint_product": "Položka dokladu s touto kartou je dostane, pokud je sama nemá. Na výnosech a nákladech mají přednost před hlavičkou dokladu.",
       "hint_category": "Platí pro produkty této kategorie a podkategorií, které hodnotu typu samy nemají.",
-      "hint_bank_account": "Pohyb na tomto účtu je dostane při zaúčtování, pokud hodnotu typu nemá sám ani z hrazených dokladů (úroky, srážková daň, poplatky). Hodnota zadaná u pohybu a dimenze hrazené faktury mají přednost.",
+      "hint_bank_account": "Při zaúčtování pohybu na tomto účtu je dostane řádek banky a u pohybu bez dokladu (úroky, srážková daň, poplatky) i protiúčet. Saldokonto hrazených dokladů a 261 je nedostanou. Hodnota zadaná u pohybu, dimenze hrazené faktury a výchozí hodnota pravidla dimenzí mají přednost.",
       "save_failed": "Karta je uložená, ale výchozí dimenze se uložit nepodařilo: {message}",
       "autofilled": "Předvyplněno z výchozích dimenzí klienta, zakázky nebo placeného dokladu."
     },

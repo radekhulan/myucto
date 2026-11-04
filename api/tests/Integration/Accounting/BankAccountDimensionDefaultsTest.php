@@ -9,15 +9,18 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\BankPostingRuleRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Security\RoutePermissionMap;
+use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionRuleService;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\System\GlobalSeedTables;
@@ -29,10 +32,11 @@ use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
- * Výchozí dimenze vlastního bankovního účtu (migrace 2232): pohyb bez dokladu (úrok,
- * srážková daň) dostane při zaúčtování dimenze účtu, na kterém leží. Pořadí vrstev
- * typ po typu: dimenze pohybu > hrazené doklady > výchozí dimenze účtu > pravidlo
- * dimenzí. Vše v jedné transakci nad izolovanými firmami, tearDown rollbackne.
+ * Výchozí dimenze vlastního bankovního účtu (migrace 2233): řádek banky a u pohybu bez
+ * dokladu (úrok, srážková daň) i protiúčet dostanou při zaúčtování dimenze účtu, na kterém
+ * pohyb leží. Saldokonto hrazených dokladů a 261 převodu je nedostanou. Pořadí typ po typu:
+ * dimenze pohybu > hrazené doklady > výchozí hodnota pravidla dimenzí > výchozí dimenze
+ * účtu. Vše v jedné transakci nad izolovanými firmami, tearDown rollbackne.
  */
 #[Group('integration')]
 final class BankAccountDimensionDefaultsTest extends TestCase
@@ -44,6 +48,7 @@ final class BankAccountDimensionDefaultsTest extends TestCase
     private const CURRENT = '1000000005';
 
     private Connection $db;
+    private \Psr\Container\ContainerInterface $container;
     private PostingService $posting;
     private JournalEntryRepository $journal;
     private DimensionService $dimensions;
@@ -64,6 +69,7 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         }
         try {
             $container = Bootstrap::buildContainer();
+            $this->container = $container;
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->journal = $container->get(JournalEntryRepository::class);
@@ -251,9 +257,9 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         $this->match($tx, [$purchase => 500.00]);
 
         $lines = $this->linesByAmount($this->postPayment($tx, [500.00]));
-        $expected = [$this->projectType => $accountProject, $this->centerType => $invoiceCenter];
-        self::assertEquals($expected, $lines['debit|500.00']['dims'], 'Středisko faktury přebije účet, projekt doplní účet.');
-        self::assertEquals($expected, $lines['credit|500.00']['dims']);
+        self::assertEquals([$this->centerType => $invoiceCenter], $lines['debit|500.00']['dims'], 'Saldokonto nese jen dimenze faktury.');
+        self::assertEquals([$this->projectType => $accountProject, $this->centerType => $invoiceCenter], $lines['credit|500.00']['dims'],
+            'Na řádku banky středisko faktury přebije účet, projekt doplní účet.');
     }
 
     public function testTypeSplitAcrossPaidDocumentsKeepsSplitAndOthersGetAccountDefault(): void
@@ -272,15 +278,15 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         $this->match($tx, [$pfA => 600.00, $pfB => 400.00]);
 
         $lines = $this->linesByAmount($this->postPayment($tx, [600.00, 400.00]));
-        self::assertEquals([$this->projectType => $accountProject, $this->centerType => $a], $lines['debit|600.00']['dims']);
-        self::assertEquals([$this->projectType => $accountProject, $this->centerType => $b], $lines['debit|400.00']['dims']);
+        self::assertEquals([$this->centerType => $a], $lines['debit|600.00']['dims']);
+        self::assertEquals([$this->centerType => $b], $lines['debit|400.00']['dims']);
         self::assertEquals([$this->projectType => $accountProject], $lines['credit|1000.00']['dims'],
             'Středisko, ve kterém se faktury liší, účet na řádku banky nedoplní.');
         self::assertEqualsWithDelta([$a => 0.6, $b => 0.4], $lines['credit|1000.00']['splits'][$this->centerType] ?? [], 1e-9,
             'Banka nese středisko jako rozpad v poměru alokací.');
     }
 
-    public function testPaidDocumentWithoutTypeGetsAccountDefaultNextToDocumentWithIt(): void
+    public function testPaidDocumentWithoutTypeGetsAccountDefaultOnlyOnBankLine(): void
     {
         $account = $this->ownAccount(self::SAVINGS);
         $accountCenter = $this->value($this->centerType, 'BA-ACC4');
@@ -294,8 +300,8 @@ final class BankAccountDimensionDefaultsTest extends TestCase
 
         $lines = $this->linesByAmount($this->postPayment($tx, [600.00, 400.00]));
         self::assertEquals([$this->centerType => $a], $lines['debit|600.00']['dims']);
-        self::assertEquals([$this->centerType => $accountCenter], $lines['debit|400.00']['dims'], 'Faktura bez střediska dostane středisko účtu.');
-        self::assertEquals([$this->centerType => $accountCenter], $lines['credit|1000.00']['dims']);
+        self::assertEquals([], $lines['debit|400.00']['dims'], 'Saldokonto faktury bez střediska středisko účtu nedostane.');
+        self::assertEquals([$this->centerType => $accountCenter], $lines['credit|1000.00']['dims'], 'Řádek banky ano.');
     }
 
     public function testMovementOnAccountWithoutDefaultsStaysWithoutDimensions(): void
@@ -345,9 +351,9 @@ final class BankAccountDimensionDefaultsTest extends TestCase
 
         $this->dimensions->saveDocument($this->supplierId, 'purchase_invoice', $purchase, [$this->centerType => $moved], []);
         $lines = $this->linesByAmount($entryId);
-        self::assertEquals([$this->projectType => $accountProject, $this->centerType => $moved], $lines['debit|500.00']['dims'],
-            'Přerazítkování úhrady po změně faktury drží projekt z účtu.');
-        self::assertEquals([$this->projectType => $accountProject, $this->centerType => $moved], $lines['credit|500.00']['dims']);
+        self::assertEquals([$this->centerType => $moved], $lines['debit|500.00']['dims']);
+        self::assertEquals([$this->projectType => $accountProject, $this->centerType => $moved], $lines['credit|500.00']['dims'],
+            'Přerazítkování úhrady po změně faktury drží na řádku banky projekt z účtu.');
     }
 
     public function testSavingDefaultsDoesNotRestampPostedMovement(): void
@@ -358,7 +364,169 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         self::assertSame([], $this->assignments->entryLineDimensions($this->supplierId, $entryId), 'Zaúčtované pohyby se samy nepřepisují.');
     }
 
+    public function testOwnTransferLeavesTransitAccountWithoutAccountDimensions(): void
+    {
+        $savings = $this->ownAccount(self::SAVINGS);
+        $current = $this->ownAccount(self::CURRENT);
+        $a = $this->value($this->centerType, 'BA-TA');
+        $b = $this->value($this->centerType, 'BA-TB');
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $savings, [$this->centerType => $a]);
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $current, [$this->centerType => $b]);
+
+        $out = $this->linesByAccount($this->postLines($this->transaction(self::SAVINGS, -1_000.00), [
+            ['account_code' => '261', 'side' => 'debit', 'amount' => 1_000.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 1_000.00],
+        ]));
+        $in = $this->linesByAccount($this->postLines($this->transaction(self::CURRENT, 1_000.00), [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 1_000.00],
+            ['account_code' => '261', 'side' => 'credit', 'amount' => 1_000.00],
+        ]));
+
+        self::assertSame([$this->centerType => $a], $out['221|credit']);
+        self::assertSame([$this->centerType => $b], $in['221|debit']);
+        self::assertSame([], $out['261|debit'], 'Peníze na cestě dimenzi odesílajícího účtu nedostanou.');
+        self::assertSame([], $in['261|credit'], 'Peníze na cestě dimenzi přijímajícího účtu nedostanou.');
+        self::assertSame([], $this->transitBalanceByCenter(), '261 se po středisku vyrovná.');
+    }
+
+    public function testIssuedInvoicePaymentKeepsReceivableWithoutAccountDimension(): void
+    {
+        $account = $this->ownAccount(self::SAVINGS);
+        $center = $this->value($this->centerType, 'BA-INC');
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $account, [$this->centerType => $center]);
+        $tx = $this->transaction(self::SAVINGS, 800.00);
+        $this->db->pdo()->prepare('UPDATE bank_transactions SET matched_invoice_id = ? WHERE id = ?')
+            ->execute([$this->issuedInvoice('2096001', 800.00), $tx]);
+
+        $lines = $this->linesByAccount($this->postLines($tx, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 800.00],
+            ['account_code' => '311', 'side' => 'credit', 'amount' => 800.00],
+        ]));
+        self::assertSame([$this->centerType => $center], $lines['221|debit'], 'Řádek banky nese středisko účtu.');
+        self::assertSame([], $lines['311|credit'], 'Saldokonto hrazené faktury středisko účtu nedostane.');
+    }
+
+    public function testFeeWithoutDocumentGivesAccountDimensionToBankAndCounterLine(): void
+    {
+        $account = $this->ownAccount(self::SAVINGS);
+        $center = $this->value($this->centerType, 'BA-FEE');
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $account, [$this->centerType => $center]);
+
+        $lines = $this->linesByAccount($this->postLines($this->transaction(self::SAVINGS, -50.00), [
+            ['account_code' => '568', 'side' => 'debit', 'amount' => 50.00],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 50.00],
+        ]));
+        self::assertSame([$this->centerType => $center], $lines['568|debit']);
+        self::assertSame([$this->centerType => $center], $lines['221|credit']);
+    }
+
+    public function testRuleDefaultOnAccountWinsOverBankAccountDefaultOnApproval(): void
+    {
+        $account = $this->ownAccount(self::SAVINGS);
+        $ruleValue = $this->value($this->centerType, 'BA-RULE');
+        $accountValue = $this->value($this->centerType, 'BA-ACCT');
+        (new DimensionRuleService($this->db))->create($this->supplierId, [
+            'dimension_type_id' => $this->centerType, 'account_mask' => '568', 'enforcement' => 'none', 'default_value_id' => $ruleValue,
+        ]);
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $account, [$this->centerType => $accountValue]);
+        $tx = $this->transaction(self::SAVINGS, -50.00, 'Poplatek za vedení účtu');
+        $this->container->get(BankPostingRuleRepository::class)->insert($this->supplierId, [
+            'name' => 'Poplatek', 'direction' => 'outgoing', 'message_contains' => 'poplatek za vedeni',
+            'debit_account_code' => '568', 'credit_account_code' => '221', 'mode' => 'suggest',
+            'is_active' => 1, 'priority' => 100, 'applies_currency' => 'CZK',
+        ], $this->userId);
+        $bank = $this->container->get(BankPostingService::class);
+        $handled = $bank->handleTransaction($tx, $this->userId);
+        $suggestion = (int) ($handled['suggestion_id'] ?? 0);
+        self::assertGreaterThan(0, $suggestion, 'Pravidlo pohybu vytvoří návrh: ' . json_encode($handled));
+
+        $entryId = $bank->approveSuggestion($this->supplierId, $suggestion, ['user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $lines = $this->linesByAccount($entryId);
+        self::assertSame([$this->centerType => $ruleValue], $lines['568|debit'], 'Výchozí hodnota pravidla na 568 má přednost před účtem.');
+        $bankLine = array_values(array_filter($lines, static fn (string $key): bool => str_starts_with($key, '221'), ARRAY_FILTER_USE_KEY));
+        self::assertSame([[$this->centerType => $accountValue]], $bankLine, 'Řádek banky dostane středisko účtu.');
+    }
+
+    public function testRestampAfterAccountDeactivationKeepsAccountDimension(): void
+    {
+        $account = $this->ownAccount(self::SAVINGS);
+        $center = $this->value($this->centerType, 'BA-DEACT');
+        $this->dimensions->saveEntityDefaults($this->supplierId, 'bank_account', $account, [$this->centerType => $center]);
+        $tx = $this->transaction(self::SAVINGS, 120.00);
+        $entryId = $this->postInterest($tx);
+        self::assertSame([$center], $this->centersOf($entryId));
+
+        $this->db->pdo()->prepare('UPDATE supplier_bank_accounts SET is_active = 0 WHERE id = ?')->execute([$account]);
+        // Nová instance = jiný požadavek, bez cache shody účtu ze zaúčtování.
+        (new DimensionStamper($this->db))->restamp($this->supplierId, 'bank', $tx);
+        self::assertSame([$center], $this->centersOf($entryId), 'Přerazítkování po deaktivaci účtu dimenzi zaúčtovaného pohybu neodebere.');
+    }
+
     // ── pomocné ──────────────────────────────────────────────────────────────
+
+    /** @param list<array<string,mixed>> $lines */
+    private function postLines(int $txId, array $lines): int
+    {
+        return (int) $this->posting->postDocument($this->supplierId, 'bank', $txId, $lines,
+            ['entry_date' => self::YEAR . '-05-31', 'posted_by' => $this->userId]);
+    }
+
+    /** @return array<string,array<int,int>> kód účtu|strana => dimenze */
+    private function linesByAccount(int $entryId): array
+    {
+        $dims = $this->assignments->entryLineDimensions($this->supplierId, $entryId);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT l.id, l.side, c.account_code FROM journal_entry_lines l JOIN chart_of_accounts c ON c.id = l.account_id
+              WHERE l.supplier_id = ? AND l.entry_id = ?'
+        );
+        $stmt->execute([$this->supplierId, $entryId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $line) {
+            $d = $dims[(int) $line['id']] ?? [];
+            ksort($d);
+            $out[$line['account_code'] . '|' . $line['side']] = $d;
+        }
+        return $out;
+    }
+
+    /** @return array<string,float> středisko => zůstatek 261 (jen nenulové) */
+    private function transitBalanceByCenter(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.id, l.entry_id, l.side, l.amount FROM journal_entry_lines l JOIN chart_of_accounts c ON c.id = l.account_id
+              WHERE l.supplier_id = ? AND c.account_code LIKE '261%'"
+        );
+        $stmt->execute([$this->supplierId]);
+        $balance = [];
+        $dims = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $dims[(int) $r['entry_id']] ??= $this->assignments->entryLineDimensions($this->supplierId, (int) $r['entry_id']);
+            $key = (string) ($dims[(int) $r['entry_id']][(int) $r['id']][$this->centerType] ?? '-');
+            $balance[$key] = round(($balance[$key] ?? 0.0) + ($r['side'] === 'debit' ? 1 : -1) * (float) $r['amount'], 2);
+        }
+        return array_filter($balance, static fn (float $v): bool => abs($v) > 0.001);
+    }
+
+    private function issuedInvoice(string $number, float $total): int
+    {
+        $pdo = $this->db->pdo();
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, dic, main_email,
+                                  language, currency_default_id, is_customer, is_vendor)
+             VALUES (?, ?, "Test 1", "Praha", "11000", ?, "CZ12345678", "odberatel@example.invalid", "cs", ?, 1, 0)'
+        )->execute([$this->supplierId, 'Odběratel ' . $number, $countryId, $currencyId]);
+        $clientId = (int) $pdo->lastInsertId();
+        $date = self::YEAR . '-05-01';
+        $pdo->prepare(
+            'INSERT INTO invoices (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                                   currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat,
+                                   paid_total, status, vat_classification_code, created_by)
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, 0, ?, 0, ?, 0, "issued", "1", ?)'
+        )->execute([$this->supplierId, $number, $clientId, $date, $date, $date, $currencyId, $total, $total, $this->userId]);
+        return (int) $pdo->lastInsertId();
+    }
 
     private function ownAccount(string $number, string $kind = 'savings'): int
     {
@@ -371,7 +539,7 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
-    private function transaction(string $account, float $amount): int
+    private function transaction(string $account, float $amount, string $description = 'Pohyb na vlastním účtu'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -382,8 +550,8 @@ final class BankAccountDimensionDefaultsTest extends TestCase
         $statementId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, description)
-             VALUES (?, ?, ?, 'CZK', 'Pohyb na vlastním účtu')"
-        )->execute([$statementId, self::YEAR . '-05-31', $amount]);
+             VALUES (?, ?, ?, 'CZK', ?)"
+        )->execute([$statementId, self::YEAR . '-05-31', $amount, $description]);
         return (int) $pdo->lastInsertId();
     }
 

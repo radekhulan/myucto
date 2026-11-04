@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Accounting\Dimension;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\Product\IssuedDiscountAllocation;
 use MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard;
@@ -124,9 +126,9 @@ final class DimensionStamper
         if (!$hasExplicit && !$enabled) {
             return $resolved;
         }
-        [$header, $items, $splits, , $headerOrigins, $splitOrigins] = $sourceId !== null && isset(self::SOURCES[$sourceType]) && $enabled
+        [$header, $items, $splits, , $headerOrigins, $splitOrigins, , $bankAccount] = $sourceId !== null && isset(self::SOURCES[$sourceType]) && $enabled
             ? $this->documentContext($supplierId, $sourceType, $sourceId, $itemAccounts)
-            : [[], [], [], [], [], []];
+            : [[], [], [], [], [], [], [], null];
         if ($header !== [] || $items !== [] || $hasExplicit) {
             $resolved = self::expandSplits(
                 self::assign($resolved, $header, $items, $this->accountTypes($supplierId), true, $headerOrigins,$this->serviceCostAccounts($supplierId, $sourceType, $entryDate, $resolved))['lines'],
@@ -137,6 +139,9 @@ final class DimensionStamper
         if ($enabled && $entryDate !== null) {
             // Výchozí hodnoty pravidel dimenzí až po dokladu — doklad má vždy přednost.
             $resolved = $this->rules()->applyDefaults($supplierId, $sourceType, $sourceId, $resolved, $entryDate);
+        }
+        if ($bankAccount !== null) {
+            $resolved = self::fillBankAccount($resolved, $bankAccount, $this->lineAccountCodes($supplierId, $resolved), $this->transferCodes($supplierId));
         }
         return $this->syncLinkedColumns($supplierId, $resolved);
     }
@@ -266,7 +271,8 @@ final class DimensionStamper
         if ($entryDates === []) {
             return ['lines' => 0, 'needs_repost' => false, 'account_change' => false];
         }
-        [$header, $items, $splits, , $headerOrigins, $splitOrigins] = $this->documentContext($supplierId, $sourceType, $sourceId, null, true);
+        // Přerazítkování bere i deaktivovaný bankovní účet: pohyb na něm už je zaúčtovaný.
+        [$header, $items, $splits, , $headerOrigins, $splitOrigins, , $bankAccount] = $this->documentContext($supplierId, $sourceType, $sourceId, null, true, true);
         $types = $this->accountTypes($supplierId);
         $assignments = new DimensionAssignmentRepository($this->db);
         $router = new DimensionAccountRouter($this->db);
@@ -331,6 +337,9 @@ final class DimensionStamper
                 self::expandSplits($result['lines'], $splits, $splitOrigins),
                 $entryDate,
             );
+            if ($bankAccount !== null) {
+                $restamped = self::fillBankAccount($restamped, $bankAccount, $this->lineAccountCodes($supplierId, $restamped), $this->transferCodes($supplierId));
+            }
             // Výsledné dimenze řádku (u zachovaných ručních typů po sloučení s řádkem).
             foreach ($restamped as $i => $line) {
                 if (!$keepLineTypes) {
@@ -778,6 +787,117 @@ final class DimensionStamper
     }
 
     /**
+     * Výchozí dimenze vlastního bankovního účtu po řádcích zápisu pohybu. Doplní jen typ,
+     * který řádek nemá hodnotou ani rozpadem — dimenze pohybu, hrazeného dokladu
+     * i výchozí hodnota pravidla dimenzí podle účtu ({@see DimensionRuleService::applyDefaults()},
+     * běží dřív) mají přednost.
+     *
+     * Dostane ji jen řádek banky (strana pohybu na syntetice účtu výpisu: 221, u kreditní
+     * karty 231) a u pohybu, který nehradí doklad, i protiúčet. Řádky saldokonta hrazených
+     * dokladů ji nedostanou, jinak by se pohledávka nebo závazek po dimenzi nevyrovnaly
+     * s předpisem. Protiúčet na peněžním účtu a penězích na cestě (21x, 22x, 26x a účty
+     * pravidel převodu mezi vlastními účty) ji nedostane taky: nohy převodu leží na různých
+     * bankovních účtech a 261 se musí po dimenzi vyrovnat, i když mají účty různé výchozí
+     * dimenze.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @param array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool} $account
+     * @param array<int,string> $codes id účtu => kód
+     * @param list<string> $transferCodes účty pravidel převodu mezi vlastními účty
+     * @return list<array<string,mixed>>
+     */
+    public static function fillBankAccount(array $lines, array $account, array $codes, array $transferCodes = []): array
+    {
+        foreach ($lines as $i => $line) {
+            $code = $codes[(int) ($line['account_id'] ?? 0)] ?? '';
+            $isBank = ($line['side'] ?? null) === $account['side']
+                && array_filter($account['synthetics'], static fn (string $synthetic): bool => str_starts_with($code, $synthetic)) !== [];
+            if (!$isBank && ($account['pays_documents'] || self::isMoneyAccount($code, $transferCodes))) {
+                continue;
+            }
+            $dims = array_map('intval', (array) ($line['dimensions'] ?? []));
+            $lineSplits = (array) ($line['dimension_splits'] ?? []);
+            $added = false;
+            foreach ($account['header'] as $typeId => $valueId) {
+                if (isset($dims[$typeId]) || isset($lineSplits[$typeId])) {
+                    continue;
+                }
+                $dims[$typeId] = $valueId;
+                $lines[$i]['dimension_origins'][$typeId] = DimensionAssignmentOrigin::normalize($account['origins'][$typeId] ?? []);
+                $added = true;
+            }
+            if ($added) {
+                ksort($dims);
+                $lines[$i]['dimensions'] = $dims;
+            }
+        }
+        return array_values($lines);
+    }
+
+    /** @param list<string> $transferCodes */
+    private static function isMoneyAccount(string $code, array $transferCodes): bool
+    {
+        if (preg_match('/^2[126]/', $code) === 1) {
+            return true;
+        }
+        foreach ($transferCodes as $transfer) {
+            if (str_starts_with($code, $transfer)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $lines
+     * @return array<int,string> id účtu => kód
+     */
+    private function lineAccountCodes(int $supplierId, array $lines): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map(static fn (array $l): int => (int) ($l['account_id'] ?? 0), $lines))));
+        if ($ids === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, account_code FROM chart_of_accounts WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['id']] = (string) $r['account_code'];
+        }
+        return $out;
+    }
+
+    /** @var array<int,list<string>> */
+    private array $transferCodes = [];
+
+    /**
+     * Účty pravidel převodu mezi vlastními účty mimo banku (výchozí 261, viz
+     * {@see \MyInvoice\Service\Accounting\Bank\TransferPairService}).
+     *
+     * @return list<string>
+     */
+    private function transferCodes(int $supplierId): array
+    {
+        if (!isset($this->transferCodes[$supplierId])) {
+            $rules = new PostingRuleRepository($this->db);
+            $codes = [];
+            foreach (['bank.transfer.own.out', 'bank.transfer.own.in'] as $key) {
+                $rule = $rules->resolve($supplierId, $key);
+                foreach (['debit_account_code', 'credit_account_code'] as $column) {
+                    $code = trim((string) ($rule[$column] ?? ''));
+                    if ($code !== '' && !str_starts_with($code, BankAnalyticAssigner::BANK_SYNTHETIC)) {
+                        $codes[] = $code;
+                    }
+                }
+            }
+            $this->transferCodes[$supplierId] = array_values(array_unique($codes));
+        }
+        return $this->transferCodes[$supplierId];
+    }
+
+    /**
      * Rozdělí haléře podle vah. Kladný zbytek dostane největší váha, záporný
      * se od největších vah postupně odečte jen do výše jejich zaokrouhlených dílů.
      * Součet tak sedí přesně a kladný celek nikdy nevytvoří záporný díl.
@@ -824,9 +944,11 @@ final class DimensionStamper
      * @param array<int,int>|null $itemAccounts
      * Čtvrtý prvek = id položky => její vlastní dimenze (položka > produkt), bez hlavičky.
      *
+     * Osmý prvek = výchozí dimenze vlastního bankovního účtu pohybu ({@see fillBankAccount()}).
+     *
      * @return array{0:array<int,int>, 1:list<array{dims:array<int,int>, weight:float, account_id:?int}>, 2:list<array<int,float>>, 3:array<int,array<int,int>>}
      */
-    private function documentContext(int $supplierId, string $sourceType, int $sourceId, ?array $itemAccounts, bool $forUpdate = false): array
+    private function documentContext(int $supplierId, string $sourceType, int $sourceId, ?array $itemAccounts, bool $forUpdate = false, bool $includeInactiveBankAccount = false): array
     {
         [$docType, $itemTable, $itemColumn] = self::SOURCES[$sourceType];
         $defaults = $this->defaults();
@@ -905,7 +1027,7 @@ final class DimensionStamper
         }
         // Zděděné dimenze (zápočet z faktury, karta z přijaté faktury) včetně rozpadu;
         // typ, který doklad má sám (hodnotou nebo rozpadem), zůstává.
-        $inherited = $defaults->sourceDimensions($supplierId, $sourceType, $sourceId);
+        $inherited = $defaults->sourceDimensions($supplierId, $sourceType, $sourceId, $includeInactiveBankAccount);
         foreach ($inherited['splits'] as $typeId => $shares) {
             if (!isset($dims['header'][$typeId])) {
                 $splits[] = $shares;
@@ -915,7 +1037,7 @@ final class DimensionStamper
         }
         $header = DimensionDefaults::fill($dims['header'], $inherited['header']);
         $headerOrigins = ($docOrigins['header'] ?? []) + ($inherited['origins'] ?? []);
-        return [$header, $items, $splits, $byItem, $headerOrigins, $splitOrigins, $byItemOrigins];
+        return [$header, $items, $splits, $byItem, $headerOrigins, $splitOrigins, $byItemOrigins, $inherited['bank_account'] ?? null];
     }
 
     /**
