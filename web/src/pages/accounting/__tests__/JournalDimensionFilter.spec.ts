@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   listJournal: vi.fn(),
   exportReport: vi.fn(),
   replace: vi.fn(),
+  toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
   supplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } as Record<string, string>,
 }))
@@ -44,7 +45,7 @@ vi.mock('vue-i18n', async importOriginal => ({
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ get currentSupplier() { return m.supplier } }) }))
-vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError, success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
 vi.mock('@/composables/useTablePrefs', () => ({
@@ -100,11 +101,19 @@ function lastListCall(): Record<string, unknown> {
 
 describe('Journal – filtr dimenze', () => {
   beforeEach(() => {
-    for (const fn of [m.listPeriods, m.listAccounts, m.listJournal, m.exportReport, m.replace]) fn.mockReset()
+    for (const fn of [m.listPeriods, m.listAccounts, m.listJournal, m.exportReport, m.replace, m.toastError]) fn.mockReset()
     m.listPeriods.mockResolvedValue([])
     m.listAccounts.mockResolvedValue([])
     m.listJournal.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 50 })
     m.routeQuery = {}
+  })
+
+  it('neplatný filtr ukáže hlášku serveru, ne obecnou chybu', async () => {
+    m.routeQuery = { account_from: '6', account_to: '5' }
+    m.listJournal.mockRejectedValue({ response: { status: 422, data: { error: { code: 'validation_failed', message: 'Počáteční účet nesmí být větší než koncový.' } } } })
+    mountJournal()
+    await flushPromises()
+    expect(m.toastError).toHaveBeenCalledWith('Počáteční účet nesmí být větší než koncový.')
   })
 
   it('převezme hodnotu dimenze z URL, pošle ji serveru a ukáže chip', async () => {

@@ -185,6 +185,71 @@ final class JournalExportAndHistoryTest extends TestCase
     }
 
     /**
+     * Rozsah účtů je prefixový včetně krajů: 5 až 5 = celá třída 5, 501 až 518 včetně
+     * analytiky 518.100, kód „0“ je platná mez (třída 0) a fungují i kódy z importů (518-1).
+     */
+    public function testAccountRangeIsPrefixInclusiveLikeGeneralLedger(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             SELECT supplier_id, ?, ?, account_type, normal_side, 0, id, 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?'
+        )->execute(['518.100', 'Analytika 518.100', $this->supplierId, '518']);
+        // Kód s pomlčkou zakládají importy (Abra, StereoNx), ruční osnova ho nedovolí.
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             SELECT supplier_id, ?, ?, account_type, normal_side, 0, id, 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?'
+        )->execute(['518-1', 'Importovaná analytika', $this->supplierId, '518']);
+        $imported = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518-1', 'side' => 'debit', 'amount' => 30.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 30.0],
+        ], ['entry_date' => self::YEAR . '-04-05', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $analytic = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '518.100', 'side' => 'debit', 'amount' => 70.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 70.0],
+        ], ['entry_date' => self::YEAR . '-04-03', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $asset = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '013', 'side' => 'debit', 'amount' => 90.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 90.0],
+        ], ['entry_date' => self::YEAR . '-04-04', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+
+        $ids = fn (array $query): array => array_map(static fn (array $i): int => (int) $i['id'],
+            $this->call('list', 'GET', 'accountant', [], [], [], $query + ['per_page' => 200])['body']['items']);
+
+        foreach ([['5', '5'], ['501', '518'], ['518', '518'], ['518.100', '518.100']] as [$from, $to]) {
+            $res = $this->call('list', 'GET', 'accountant', [], [], [], ['account_from' => $from, 'account_to' => $to]);
+            $row = $this->findItem($res['body']['items'], $analytic);
+            self::assertNotNull($row, "Rozsah {$from}–{$to} musí zahrnout 518.100.");
+            // Částka v seznamu počítá stejný rozsah jako filtr.
+            self::assertEqualsWithDelta(70.0, (float) $row['amount'], 0.001, "{$from}–{$to}");
+            self::assertNotContains($asset, $ids(['account_from' => $from, 'account_to' => $to]));
+        }
+        self::assertNotContains($analytic, $ids(['account_from' => '502', 'account_to' => '517']));
+        self::assertContains($asset, $ids(['account_from' => '0', 'account_to' => '0']));
+        self::assertNotContains($analytic, $ids(['account_from' => '0', 'account_to' => '0']));
+        self::assertContains($analytic, $ids(['account_to' => '5']));
+        self::assertNotContains($analytic, $ids(['account_to' => '0']));
+        // Kód z importu: hledání i rozsah na něj fungují (dřív holé BETWEEN, nově se nesmí odmítnout).
+        foreach ([['q' => '518-1'], ['account_from' => '518-1', 'account_to' => '518-1']] as $query) {
+            $res = $this->call('list', 'GET', 'accountant', [], [], [], $query + ['per_page' => 200]);
+            self::assertSame(200, $res['status'], json_encode($query));
+            $found = array_map(static fn (array $i): int => (int) $i['id'], $res['body']['items']);
+            self::assertContains($imported, $found, json_encode($query));
+            self::assertNotContains($analytic, $found, json_encode($query));
+        }
+        self::assertContains($imported, $ids(['account_from' => '5', 'account_to' => '5']));
+
+        // Export deníku jde po stejné cestě filtrů.
+        $export = $this->journalExport->build($this->supplierId, ['account_from' => '5', 'account_to' => '5']);
+        self::assertContains($analytic, array_map(static fn (array $e): int => (int) $e['id'], $export['entries']));
+
+        foreach ([['account_from' => '5%'], ['account_from' => '6', 'account_to' => '5'], ['account_to' => ['5']]] as $bad) {
+            $res = $this->call('list', 'GET', 'accountant', [], [], [], $bad);
+            self::assertSame(422, $res['status'], json_encode($bad));
+            self::assertSame('validation_failed', $res['body']['error']['code']);
+        }
+    }
+
+    /**
      * Edge case: filtrovaný účet se v JEDNOM zápisu objeví na obou stranách (korekce).
      * Sloupec Částka ukáže NETTO (Σ MD − Σ D na filtrovaném účtu) a stranu podle
      * znaménka — jinak by dvě protichůdné nohy stejného účtu ukázaly zavádějící součet.

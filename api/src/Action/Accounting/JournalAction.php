@@ -24,6 +24,8 @@ use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\JournalListExtras;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\AccountCodeRange;
+use MyInvoice\Service\Accounting\AccountCodeRangeException;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentRepostService;
@@ -133,7 +135,11 @@ final class JournalAction
         $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $filters = $this->parseFilters($q, $supplierId);
+        try {
+            $filters = $this->parseFilters($q, $supplierId);
+        } catch (AccountCodeRangeException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
         $filters['sort_key'] = is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '';
         $filters['sort_dir'] = is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '';
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
@@ -218,7 +224,11 @@ final class JournalAction
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
 
-        $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
+        try {
+            $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
+        } catch (AccountCodeRangeException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
         try {
             $data = $this->exportService->build($supplierId, $filters);
@@ -268,6 +278,7 @@ final class JournalAction
 
     /**
      * @param array<string,mixed> $q query params (Request::getQueryParams())
+     * @throws AccountCodeRangeException neplatný rozsah účtů (akce vrací 422)
      * @return array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float}
      */
     private function parseFilters(array $q, int $supplierId): array
@@ -302,8 +313,15 @@ final class JournalAction
         if (in_array(($q['reversal'] ?? null), ['reversed', 'reversal', 'any', 'none'], true)) {
             $filters['reversal'] = (string) $q['reversal'];
         }
-        if (!empty($q['account_from'])) $filters['account_from'] = mb_substr(trim((string) $q['account_from']), 0, 20);
-        if (!empty($q['account_to']))   $filters['account_to'] = mb_substr(trim((string) $q['account_to']), 0, 20);
+        // Rozsah účtů je prefixový včetně krajů (AccountCodeRange): 5 až 5 = celá třída 5.
+        $from = $q['account_from'] ?? '';
+        $to = $q['account_to'] ?? '';
+        if (!is_string($from) || !is_string($to)) {
+            throw new AccountCodeRangeException('account_from a account_to musí být jedna hodnota.');
+        }
+        $range = AccountCodeRange::parse($from, $to);
+        if ($range->from !== '') $filters['account_from'] = $range->from;
+        if ($range->to !== '')   $filters['account_to'] = $range->to;
         // Jedno vyhledávací pole přijímá i přesný kód účtu. Překládá se na tentýž
         // rozsah jako explicitní účetní filtr, takže částka i export zůstanou na
         // společné cestě. Explicitní rozsah má přednost a q pak zůstává fulltextem.
@@ -314,8 +332,9 @@ final class JournalAction
                 : null;
             if ($account !== null) {
                 $code = (string) $account['account_code'];
+                // Prefixový rozsah: syntetika 221 až 221 zahrne i své analytiky.
                 $filters['account_from'] = $code;
-                $filters['account_to'] = (bool) $account['is_synthetic'] ? $code . '999999' : $code;
+                $filters['account_to'] = $code;
             } else {
                 $filters['q'] = $query;
             }
