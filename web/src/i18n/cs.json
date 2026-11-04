@@ -30578,9 +30578,9 @@
     "done": "Podvojné účetnictví je aktivní od {date}.",
     "history_title": "Historie protokolů aktivace",
     "coverage_title": "Kontrola úplnosti dokladů",
-    "coverage_pass": "Počet postovatelných dokladů odpovídá zpracovaným dokladům.",
-    "coverage_fail": "Některé postovatelné doklady nebyly zpracovány; aktivaci nelze dokončit.",
-    "coverage_row": "očekáváno {expected}, zpracováno {handled}, chybí {missing}",
+    "coverage_pass": "Všechny doklady bez zápisu prošly doúčtováním.",
+    "coverage_fail": "Některé doklady bez zápisu doúčtování nezpracovalo; aktivaci nelze dokončit.",
+    "coverage_row": "bez zápisu {expected}, zpracováno {handled}, chybí {missing}, navíc {unexpected}",
     "kind": {
       "dry_run": "Kontrola nanečisto",
       "execute": "Doúčtování"
@@ -30611,7 +30611,8 @@
     "document_issue_reason": "Důvod",
     "document_type": {
       "invoice": "Vydaná faktura",
-      "purchase_invoice": "Přijatá faktura"
+      "purchase_invoice": "Přijatá faktura",
+      "cash": "Pokladní doklad"
     },
     "skipped_title": "Co se nepodařilo zahrnout",
     "report_no_errors": "Kontrola nenašla žádné chyby.",
@@ -30638,8 +30639,11 @@
       "already_posted": "Doklad už má platný zápis v deníku.",
       "fx_not_supported": "Cizoměnová transakce vyžaduje ruční zaúčtování.",
       "ignored": "Transakce je označena jako ignorovaná a do účetnictví nevstoupí.",
-      "processing_error": "Položku se nepodařilo zpracovat - podrobnost najdete v protokolu.",
-      "other": "Položka byla přeskočena - zkontrolujte podrobnost v protokolu."
+      "processing_error": "Položku se nepodařilo zpracovat - příčinu uvádí seznam položek.",
+      "other": "Položka byla přeskočena - příčinu uvádí seznam položek.",
+      "rules_disabled": "Transakce není spárovaná s dokladem a doúčtování běželo bez pravidel - spárujte ji v bance.",
+      "ambiguous_supplier": "Číslo účtu výpisu patří více firmám - nelze určit, které firmě pohyb patří.",
+      "unknown_supplier": "Číslo účtu výpisu nepatří žádné firmě - zkontrolujte bankovní účty v nastavení."
     },
     "error": {
       "backfill_required": "Firma má nedoúčtovanou historii - pokračujte průvodcem aktivací.",
@@ -30656,8 +30660,38 @@
       "not_found": "Požadované doúčtování už není dostupné - obnovte stránku.",
       "forbidden": "Aktivaci může spravovat jen oprávněný administrátor firmy.",
       "worker_start_failed": "Doúčtování se nepodařilo spustit - zkuste to prosím znovu.",
-      "activation_failed": "Doúčtování se nepodařilo dokončit - zkontrolujte protokol a spusťte kontrolu znovu."
-    }
+      "activation_failed": "Doúčtování se nepodařilo dokončit - zkontrolujte protokol a spusťte kontrolu znovu.",
+      "force_confirmation_required": "Vynucené dokončení vyžaduje výslovné potvrzení.",
+      "force_reason_required": "Uveďte důvod vynuceného dokončení.",
+      "activation_force_fatal": "Doúčtování skončilo dřív, než prošlo všechny zdroje - opravte příčinu a spusťte ho znovu.",
+      "activation_force_wrong_state": "Vynutit lze jen poslední neúspěšné doúčtování - obnovte stránku.",
+      "journal_unbalanced": "Deník není vyrovnaný - aktivaci nelze dokončit ani vynutit."
+    },
+    "coverage_already_posted": " (dalších {n} dokladů už zápis mělo - do kontroly nevstupují)",
+    "forced_banner": "Aktivaci dokončil správce firmy {at} vynuceně přes {n} zbývajících chyb. Nedoúčtované položky doplníte akcí „Doúčtovat chybějící zápisy“.",
+    "forced_reason": "Důvod: {reason}",
+    "failed_items_title": "K opravě ({n})",
+    "bank_items_title": "Nezaúčtované bankovní pohyby ({n})",
+    "bank_items_hint": "Pohyby aktivaci neblokují. Vyřešte je v detailu výpisu a doúčtujte je později.",
+    "bank_item_transaction": "Pohyb",
+    "bank_item_counterparty": "Protistrana",
+    "bank_item_vs": "VS {vs}",
+    "skipped_items_title": "Přeskočené doklady ({n})",
+    "skipped_items_hint": "Přeskočení aktivaci neblokuje. Doklad v uzamčeném období zaúčtujete až po posunutí zámku.",
+    "issue_kept_posting": "Zápis zůstal beze změny",
+    "issue_left_unposted": "Doklad zůstal nezaúčtovaný",
+    "status_forced": "vynuceně",
+    "force_execute": "Vynutit doúčtování",
+    "force_complete": "Vynutit dokončení",
+    "force_intro": "Kontrola našla {n} chyb. Po vynucení se zapne podvojné účetnictví a níže uvedené položky zůstanou nedoúčtované, dokud je neopravíte a nedoúčtujete.",
+    "force_list_title": "Zůstane nedoúčtováno",
+    "force_list_more": "… a dalších {n} položek",
+    "force_missing": "{source}: {n} dokladů doúčtování nezpracovalo",
+    "force_hard_blocks": "Nevyrovnaný deník ani nevyrovnaná otevírací rozvaha se vynutit nedají.",
+    "force_reason": "Důvod vynucení",
+    "force_reason_placeholder": "Např. doklady opravíme po převodu, aktivace je nutná k datu zahájení.",
+    "force_confirm": "Rozumím, že aktivace se dokončí přes {n} chyb a nedoúčtované položky musím doplnit sám.",
+    "force_done": "Aktivace byla vynuceně dokončena."
   },
   "workReportTracking": {
     "button": "Poslat odkaz na sledování výkazu práce",

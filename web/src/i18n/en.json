@@ -30578,9 +30578,9 @@
     "done": "Double-entry accounting is active since {date}.",
     "history_title": "Activation report history",
     "coverage_title": "Document completeness check",
-    "coverage_pass": "The number of postable documents matches the processed documents.",
-    "coverage_fail": "Some postable documents were not processed; activation cannot finish.",
-    "coverage_row": "expected {expected}, processed {handled}, missing {missing}",
+    "coverage_pass": "Every document without an entry went through the backfill.",
+    "coverage_fail": "Some documents without an entry were not processed; activation cannot be completed.",
+    "coverage_row": "without entry {expected}, processed {handled}, missing {missing}, extra {unexpected}",
     "kind": {
       "dry_run": "Dry run",
       "execute": "Backfill"
@@ -30611,7 +30611,8 @@
     "document_issue_reason": "Reason",
     "document_type": {
       "invoice": "Sales invoice",
-      "purchase_invoice": "Purchase invoice"
+      "purchase_invoice": "Purchase invoice",
+      "cash": "Cash document"
     },
     "skipped_title": "What could not be included",
     "report_no_errors": "The check found no errors.",
@@ -30638,8 +30639,11 @@
       "already_posted": "The document already has a valid journal entry.",
       "fx_not_supported": "The foreign-currency transaction requires manual posting.",
       "ignored": "The transaction is marked as ignored and will not enter accounting.",
-      "processing_error": "The item could not be processed — see the report for details.",
-      "other": "The item was skipped — review the report for details."
+      "processing_error": "The item could not be processed - see the list of items for the cause.",
+      "other": "The item was skipped - see the list of items for the cause.",
+      "rules_disabled": "The transaction is not matched to a document and the backfill ran without rules - match it in the bank.",
+      "ambiguous_supplier": "The statement account number belongs to more than one company - the owner of the transaction cannot be determined.",
+      "unknown_supplier": "The statement account number belongs to no company - check the bank accounts in settings."
     },
     "error": {
       "backfill_required": "The company has unposted history — continue with the activation wizard.",
@@ -30656,8 +30660,38 @@
       "not_found": "The requested backfill is no longer available — refresh the page.",
       "forbidden": "Only an authorized company administrator can manage activation.",
       "worker_start_failed": "The backfill could not start — please try again.",
-      "activation_failed": "The backfill could not finish — review the report and run the check again."
-    }
+      "activation_failed": "The backfill could not finish — review the report and run the check again.",
+      "force_confirmation_required": "Forced completion requires explicit confirmation.",
+      "force_reason_required": "Enter the reason for forced completion.",
+      "activation_force_fatal": "The backfill stopped before it went through all sources - fix the cause and run it again.",
+      "activation_force_wrong_state": "Only the latest failed backfill can be forced - reload the page.",
+      "journal_unbalanced": "The journal is not balanced - activation cannot be completed or forced."
+    },
+    "coverage_already_posted": " ({n} more documents already had an entry and are not part of the check)",
+    "forced_banner": "The company administrator forced the activation on {at} despite {n} remaining errors. Post the remaining items with “Post missing entries”.",
+    "forced_reason": "Reason: {reason}",
+    "failed_items_title": "To fix ({n})",
+    "bank_items_title": "Unposted bank transactions ({n})",
+    "bank_items_hint": "These transactions do not block activation. Resolve them in the statement detail and post them later.",
+    "bank_item_transaction": "Transaction",
+    "bank_item_counterparty": "Counterparty",
+    "bank_item_vs": "VS {vs}",
+    "skipped_items_title": "Skipped documents ({n})",
+    "skipped_items_hint": "Skipped documents do not block activation. A document in a locked period can be posted once the lock is moved.",
+    "issue_kept_posting": "Entry left unchanged",
+    "issue_left_unposted": "Document left unposted",
+    "status_forced": "forced",
+    "force_execute": "Force backfill",
+    "force_complete": "Force completion",
+    "force_intro": "The check found {n} errors. Forcing turns double-entry accounting on and the items below stay unposted until you fix and post them.",
+    "force_list_title": "Will stay unposted",
+    "force_list_more": "… and {n} more items",
+    "force_missing": "{source}: {n} documents were not processed",
+    "force_hard_blocks": "An unbalanced journal or an unbalanced opening balance cannot be forced.",
+    "force_reason": "Reason for forcing",
+    "force_reason_placeholder": "E.g. we will fix the documents after the migration; activation is required as of the start date.",
+    "force_confirm": "I understand that activation completes despite {n} errors and that I have to post the remaining items myself.",
+    "force_done": "Activation was completed by force."
   },
   "workReportTracking": {
     "button": "Send work report tracking link",
