@@ -4,19 +4,28 @@
  * termínovaný vklad), label a analytika 221.xxx (analytic_suffix). Účty detekuje
  * systém z výpisů/nastavení; tady se jen pojmenují a zaškatulkují, aby deník
  * a výkazy členily účet 221 po analytikách.
+ *
+ * Se zapnutými dimenzemi nese účet i výchozí dimenze: zaúčtování je doplní pohybu,
+ * který hodnotu typu nemá sám ani z hrazených dokladů (úroky, poplatky).
  */
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { bankPostingApi, type SupplierBankAccount, type BankAccountKind } from '@/api/bankPosting'
+import { dimensionsApi, compactDimensions, type DimensionMap } from '@/api/dimensions'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { useDimensions } from '@/composables/useDimensions'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
+const dims = useDimensions()
 
 const KINDS: BankAccountKind[] = ['current', 'savings', 'term_deposit']
 
@@ -36,6 +45,14 @@ const drafts = ref<Record<number, Draft>>({})
 
 const canWrite = computed(() => auth.canWrite('accounting'))
 
+// Výchozí dimenze účtu: uložené mapy zvlášť od draftů (jako ostatní pole), řádek
+// s výběrem se rozbalí tlačítkem ve sloupci.
+const dimensionsVisible = computed(() => dims.enabled.value && dims.documentTypes.value.length > 0)
+const savedDimensions = ref<Record<number, string>>({})
+const dimensionDrafts = ref<Record<number, DimensionMap>>({})
+const dimensionsOpen = ref<Record<number, boolean>>({})
+const columnCount = computed(() => (dimensionsVisible.value ? 8 : 7))
+
 function draftFrom(a: SupplierBankAccount): Draft {
   return {
     kind: a.kind,
@@ -46,7 +63,16 @@ function draftFrom(a: SupplierBankAccount): Draft {
   }
 }
 
+function dimensionsDirty(a: SupplierBankAccount): boolean {
+  if (!dimensionsVisible.value || !dimensionDrafts.value[a.id]) return false
+  return JSON.stringify(compactDimensions(dimensionDrafts.value[a.id])) !== (savedDimensions.value[a.id] ?? '{}')
+}
+
 function isDirty(a: SupplierBankAccount): boolean {
+  return fieldsDirty(a) || dimensionsDirty(a)
+}
+
+function fieldsDirty(a: SupplierBankAccount): boolean {
   const d = drafts.value[a.id]
   if (!d) return false
   return d.kind !== a.kind
@@ -78,6 +104,30 @@ async function load() {
   } finally {
     loading.value = false
   }
+  try {
+    await loadDimensions()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  }
+}
+
+async function loadDimensions() {
+  if (!dims.enabled.value) return
+  await dims.load()
+  if (!dimensionsVisible.value) return
+  const loaded = await Promise.all(accounts.value.map(async (a) => [a.id, await dimensionsApi.getDefaults('accounting/bank-accounts', a.id)] as const))
+  const drafts: Record<number, DimensionMap> = {}
+  const saved: Record<number, string> = {}
+  for (const [id, map] of loaded) {
+    drafts[id] = { ...map }
+    saved[id] = JSON.stringify(compactDimensions(map))
+  }
+  dimensionDrafts.value = drafts
+  savedDimensions.value = saved
+}
+
+function toggleDimensions(id: number) {
+  dimensionsOpen.value = { ...dimensionsOpen.value, [id]: !dimensionsOpen.value[id] }
 }
 
 async function saveAll() {
@@ -86,6 +136,10 @@ async function saveAll() {
   let renumbered = 0
   try {
     for (const a of accounts.value.filter(isDirty)) {
+      if (!fieldsDirty(a)) {
+        await dimensionsApi.saveDefaults('accounting/bank-accounts', a.id, dimensionDrafts.value[a.id])
+        continue
+      }
       const d = drafts.value[a.id]
       const series = normalizeSeries(d.document_series)
       if (!SERIES_PATTERN.test(series)) {
@@ -115,6 +169,10 @@ async function saveAll() {
       if (clash) {
         toast.error(t('bank.analytics.suffix_taken', { suffix: BANK_PREFIX + d.analytic_suffix, account: accountLabel(clash) }))
         return
+      }
+      // Výchozí dimenze až po kontrole polí účtu, ať chyba v řadě nebo analytice neuloží půlku řádku.
+      if (dimensionsDirty(a)) {
+        await dimensionsApi.saveDefaults('accounting/bank-accounts', a.id, dimensionDrafts.value[a.id])
       }
       // Úvěrový účet kreditní karty: druh, analytiku (231) i archivaci spravuje stránka
       // Kreditní karty; vypnout ho tu nejde (pohyby by spadly na 221).
@@ -179,11 +237,13 @@ onMounted(load)
                 <th class="px-3 py-2 text-left font-medium">{{ t('bank.analytics.col.kind') }}</th>
                 <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('bank.analytics.col.analytic') }}</th>
                 <th class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('bank.analytics.col.series') }}</th>
+                <th v-if="dimensionsVisible" class="px-3 py-2 text-left font-medium whitespace-nowrap">{{ t('bank.analytics.col.dimensions') }}</th>
                 <th class="px-3 py-2 text-center font-medium">{{ t('bank.analytics.col.active') }}</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="a in accounts" :key="a.id" :class="{ 'bg-primary-50/40': isDirty(a) }">
+              <template v-for="a in accounts" :key="a.id">
+              <tr :class="{ 'bg-primary-50/40': isDirty(a) }">
                 <td class="px-3 py-2 font-mono whitespace-nowrap">
                   {{ accountLabel(a) }}
                   <div v-if="a.iban && a.account_number" class="text-[10px] text-neutral-400">{{ a.iban }}</div>
@@ -222,11 +282,33 @@ onMounted(load)
                          placeholder="BCR"
                          class="w-24 h-8 px-2 border border-neutral-300 rounded-md text-sm bg-surface font-mono uppercase disabled:bg-neutral-50" />
                 </td>
+                <td v-if="dimensionsVisible" class="px-3 py-2">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <DimensionChips :dimensions="dimensionDrafts[a.id]" />
+                    <button type="button" :class="btnOutlineSm('neutral')"
+                            :aria-expanded="!!dimensionsOpen[a.id]" data-test="bank-account-dimensions-toggle"
+                            @click="toggleDimensions(a.id)">
+                      <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" :d="canWrite ? ICONS.edit : ICONS.eye" />
+                      </svg>
+                      {{ dimensionsOpen[a.id] ? t('bank.analytics.dimensions_hide') : (canWrite ? t('bank.analytics.dimensions_edit') : t('bank.analytics.dimensions_show')) }}
+                    </button>
+                  </div>
+                </td>
                 <td class="px-3 py-2 text-center">
                   <input v-model="drafts[a.id].is_active" type="checkbox" :disabled="!canWrite || a.kind === 'credit_card'"
                          class="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500" />
                 </td>
               </tr>
+              <tr v-if="dimensionsVisible && dimensionsOpen[a.id] && dimensionDrafts[a.id]" :class="{ 'bg-primary-50/40': isDirty(a) }"
+                  data-test="bank-account-dimensions">
+                <td :colspan="columnCount" class="px-3 pb-3 pt-1">
+                  <p class="text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.defaults.title') }}</p>
+                  <DimensionFields v-model="dimensionDrafts[a.id]" :disabled="!canWrite" />
+                  <p class="text-xs text-neutral-500 mt-1">{{ t('dimensions.defaults.hint_bank_account') }}</p>
+                </td>
+              </tr>
+              </template>
             </tbody>
           </table>
         </div>

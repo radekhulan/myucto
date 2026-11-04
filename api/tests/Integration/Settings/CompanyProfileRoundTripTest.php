@@ -37,6 +37,7 @@ final class CompanyProfileRoundTripTest extends TestCase
     private const PREV_YEAR = 2091;
     private const YEAR = 2092;
     private const CLIENT_IC = '10000005';
+    private const BANK_ACCOUNT = '3000000004';
 
     private Connection $db;
     private CompanyProfileExporter $exporter;
@@ -129,6 +130,11 @@ final class CompanyProfileRoundTripTest extends TestCase
 
         $exportB = $this->exporter->export($b);
         self::assertSame($profile['sections'], $exportB['sections'], 'Profil firmy B po nahrání odpovídá profilu firmy A.');
+        self::assertContains(
+            ['entity' => 'bank_account', 'bank_account' => ['account' => self::BANK_ACCOUNT, 'bank_code' => '0100'], 'type_code' => 'lokalita', 'value_code' => 'SEVER'],
+            $exportB['sections']['dimension_defaults'],
+            'Výchozí dimenze bankovního účtu se přenese podle čísla účtu.',
+        );
         self::assertSame(1, $result['sections']['dimension_rules']['created'] ?? null, 'Pravidlo dimenze se přenese.');
         self::assertSame($this->rulesFingerprint($a), $this->rulesFingerprint($b), 'Pravidla dimenzí firmy B odpovídají firmě A.');
 
@@ -206,6 +212,34 @@ final class CompanyProfileRoundTripTest extends TestCase
         self::assertStringContainsString('budouci_sekce', implode("\n", $result['warnings']), 'Neznámou sekci starší aplikace přeskočí s upozorněním.');
     }
 
+    public function testBankAccountDefaultMatchesNormalizedNumberAndNeedsDoubleEntry(): void
+    {
+        $b = $this->company();
+        $this->dimensions->setEnabled($b, true);
+        $type = $this->dimensions->createType($b, ['code' => 'lokalita', 'name' => 'Lokalita', 'kind' => 'location']);
+        $this->dimensions->createValue($b, (int) $type['id'], ['code' => 'SEVER', 'name' => 'Sever']);
+        $profile = [
+            'format' => 'myucto.company-profile',
+            'version' => 1,
+            'sections' => ['dimension_defaults' => [[
+                'entity' => 'bank_account',
+                'bank_account' => ['account' => '000000-' . self::BANK_ACCOUNT, 'bank_code' => '100'],
+                'type_code' => 'lokalita',
+                'value_code' => 'SEVER',
+            ]]],
+        ];
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$b]);
+        $skipped = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(0, $skipped['changed']);
+        self::assertStringContainsString('podvojné účetnictví', implode("\n", $skipped['sections']['dimension_defaults']['warnings']),
+            'Daňová evidence výchozí dimenze účtu nenahraje.');
+
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$b]);
+        $imported = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(1, $imported['changed'], 'Číslo s předčíslím z nul a kód banky bez nuly se spárují s registrem.');
+    }
+
     public function testInvalidItemRollsBackWholeImport(): void
     {
         $b = $this->company();
@@ -262,6 +296,11 @@ final class CompanyProfileRoundTripTest extends TestCase
             'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, ic)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([$id, 'Odběratel Test s.r.o.', 'Testovací 1', 'Praha', '11000', $country, $currency, self::CLIENT_IC]);
+        $pdo->prepare(
+            "INSERT INTO supplier_bank_accounts
+                (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, 'Spořicí účet', ?, '0100', '0100', 'CZK', ?, 'savings', 'manual', 1)"
+        )->execute([$id, self::BANK_ACCOUNT, self::BANK_ACCOUNT]);
 
         return $id;
     }
@@ -289,6 +328,9 @@ final class CompanyProfileRoundTripTest extends TestCase
         $client = $pdo->prepare('SELECT id FROM clients WHERE supplier_id = ? AND ic = ?');
         $client->execute([$id, self::CLIENT_IC]);
         $this->dimensions->saveEntityDefaults($id, 'client', (int) $client->fetchColumn(), [(int) $type['id'] => (int) $north['id']]);
+        $account = $pdo->prepare('SELECT id FROM supplier_bank_accounts WHERE supplier_id = ? AND account_canonical = ?');
+        $account->execute([$id, self::BANK_ACCOUNT]);
+        $this->dimensions->saveEntityDefaults($id, 'bank_account', (int) $account->fetchColumn(), [(int) $type['id'] => (int) $north['id']]);
         $this->rules->create($id, [
             'dimension_type_id' => (int) $type['id'],
             'account_mask' => '5, !59',

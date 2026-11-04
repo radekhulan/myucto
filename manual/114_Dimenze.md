@@ -38,6 +38,7 @@ Kapitolu otevřete, když:
 | jednou při zavedení | Zapnout dimenze a založit typy a hodnoty | `Firma → Nastavení`, box **Dimenze**; `Firma → Dimenze` |
 | při práci s doklady | Vybrat dimenze na faktuře, pokladním dokladu, bankovním pohybu | detail a editor dokladu, panel **Dimenze** |
 | při nové firmě nebo zakázce | Nastavit výchozí dimenze klienta a zakázky | formulář klienta a zakázky, sekce **Výchozí dimenze** |
+| při zavedení bankovního účtu | Nastavit výchozí dimenze účtu pro úroky a poplatky | `Peníze → Bankovní účty`, záložka **Kontace účtů**, sloupec **Výchozí dimenze** |
 | při schvalování nákupu | Rozhodnout o dokladu čekajícím na schválení | `Nákup → Ke schválení` |
 | po skončení období | Zkontrolovat, kterým řádkům dimenze chybí | `Firma → Dimenze`, záložka **Pravidla**, **Zkontrolovat deník** |
 | měsíčně nebo ročně | Zobrazit výsledky po dimenzi | `Grafy → Dimenze`, `Účetnictví → Výkazy po dimenzi` |
@@ -52,7 +53,8 @@ Kapitolu otevřete, když:
    číst účetnictví, měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí
    dimenzí patří k nastavení firmy, skupinu firem spravuje správce firmy.
    Výchozí dimenze klienta a zakázky smí měnit ten, kdo smí upravovat klienta,
-   resp. zakázku. Schvalování řídí oprávnění **Schvalovat přijaté doklady**.
+   resp. zakázku. Výchozí dimenze bankovního účtu smí měnit uživatel s právem
+   zápisu do účetnictví. Schvalování řídí oprávnění **Schvalovat přijaté doklady**.
 3. **Podvojné účetnictví** pro sestavy v menu **Grafy → Dimenze** a pro většinu
    účetních funkcí (účtotvorná dimenze, pravidla, účty produktů).
 
@@ -377,6 +379,32 @@ vytěžení, opakované faktury, automatizace): typ, pro který doklad hodnotu n
 dostane výchozí hodnotu zakázky, jinak klienta. Dimenze uvedená na dokladu
 vždy vyhrává. U pokladního dokladu platí výchozí dimenze jeho zakázky a pak
 dimenze placené faktury, u bankovního pohybu dimenze spárované faktury.
+
+**Výchozí dimenze bankovního účtu.** Vlastní bankovní účet může mít výchozí
+dimenze (jen podvojné účetnictví). Nastavují se v `Peníze → Bankovní účty`
+na záložce **Kontace účtů**, ve sloupci **Výchozí dimenze** tlačítkem **Upravit**,
+a ukládají se spolu s ostatními změnami tlačítkem **Uložit**. Hodí se pro pohyby,
+které nehradí žádný doklad, například úroky, srážkovou daň a poplatky: bez nich
+by pohyb neměl odkud hodnotu vzít a povinná dimenze z pravidla by zaúčtování
+zastavila. U bankovního pohybu se typ po typu bere první hodnota z tohoto pořadí:
+
+1. dimenze zadaná u pohybu (panel **Dimenze**),
+2. dimenze hrazených dokladů (faktury, ostatní pohledávky a závazky) včetně
+   jejich výchozích hodnot,
+3. výchozí dimenze bankovního účtu, na kterém pohyb je,
+4. výchozí hodnota z pravidla dimenzí podle účtu.
+
+Typ, který mají všechny hrazené doklady, ale s různými hodnotami, rozdělí
+zaúčtování po řádcích a na řádku banky jako rozpad. Výchozí dimenze účtu ho
+nepřepíše.
+
+Výchozí hodnota účtu se doplní všem řádkům zápisu pohybu, které typ nemají,
+tedy i řádku banky, saldokonta hrazeného dokladu bez dané dimenze a u převodu
+mezi vlastními účty řádku 261. Nastavit ji lze i úvěrovému účtu kreditní karty.
+Účet vypnutý v poli **Aktivní** své výchozí dimenze nepoužije, stejně jako se na
+jeho analytiku pohyby nepřesměrují. Změna výchozích dimenzí účtu se do už
+zaúčtovaného pohybu promítne, až když se jeho dimenze znovu orazítkují (uložení
+dimenzí pohybu nebo hrazeného dokladu).
 
 Změna výchozích dimenzí už zaúčtované doklady nemění. Projeví se u dokladů
 zaúčtovaných později a u dokladu, jehož dimenze na detailu znovu uložíte.

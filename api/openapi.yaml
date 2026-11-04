@@ -16345,6 +16345,57 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/bank-accounts/{id}/dimensions:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Accounting]
+      summary: Výchozí dimenze vlastního bankovního účtu
+      description: |
+        Hodnoty dimenzí (Firma → Dimenze), které zaúčtování doplní pohybu na tomto účtu,
+        když hodnotu typu nemá sám ani z hrazených dokladů (úrok, srážková daň, poplatek).
+        Dimenze pohybu a hrazených dokladů mají přednost. Jen podvojné účetnictví
+        (jinak 403 `wrong_accounting_mode`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Accounting]
+      summary: Uložit výchozí dimenze vlastního bankovního účtu
+      description: >-
+        Nahradí celou mapu. Vyžaduje zapnuté dimenze firmy a podvojné účetnictví; už zaúčtované
+        pohyby se nemění.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DimensionDefaults' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DimensionDefaults' }
+        '400':
+          description: Neplatná hodnota dimenze (`invalid_dimension`)
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Dimenze nejsou u firmy zapnuté (`dimensions_disabled`)
+        '422':
+          description: Uzavřená hodnota dimenze (`dimension_closed`)
+
   /api/v1/accounting/assets:
     get:
       tags: [Accounting]

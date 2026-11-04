@@ -9,6 +9,7 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
@@ -99,7 +100,8 @@ final class DimensionDefaults
      *     včetně jejích výchozích
      *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých)
      *     a ostatních pohledávek a závazků včetně jejich výchozích; u více dokladů
-     *     jen hodnoty společné všem
+     *     jen hodnoty společné všem; chybějící typy doplní výchozí dimenze vlastního
+     *     bankovního účtu
      *   • ostatní pohledávka / závazek: protistrana
      *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
      *     {@see DimensionStamper})
@@ -418,31 +420,74 @@ final class DimensionDefaults
     /**
      * Hlavička společná všem dokladům, které pohyb hradí. Hradí-li doklady s různou
      * hodnotou typu, typ tu chybí — rozdělí ho {@see DimensionStamper} po řádcích.
+     * Typy, které nemá žádná z vrstev výše, doplní výchozí dimenze bankovního účtu.
      *
      * @return array<int,int>
      */
     private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false): array
     {
-        $documents = $this->bankDocuments($supplierId, $transactionId, $withOrigins)['documents'];
-        $header = self::commonHeader(array_column($documents, 'header'));
-        return $withOrigins
-            ? ['header' => $header, 'splits' => [], 'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId), 'split_origins' => []]
-            : $header;
+        $bank = $this->bankDocuments($supplierId, $transactionId, $withOrigins);
+        $documents = $bank['documents'];
+        $common = self::commonHeader(array_column($documents, 'header'));
+        $account = $this->bankAccountDefaults($supplierId, $bank['statement_account'] ?? null);
+        $header = self::fill($common, $account['header']);
+        if (!$withOrigins) {
+            return $header;
+        }
+        $origins = self::commonOrigins($documents, $common, 'bank:' . $transactionId)
+            + array_diff_key($account['origins'], $common);
+        ksort($origins);
+        return ['header' => $header, 'splits' => [], 'origins' => $origins, 'split_origins' => []];
+    }
+
+    /**
+     * Výchozí dimenze vlastního bankovního účtu, na kterém pohyb leží: nejnižší vrstva
+     * pohybu, pod vlastními dimenzemi pohybu i pod hrazenými doklady. Účet výpisu se
+     * hledá stejně jako bankovní noha zápisu ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticResolver}),
+     * takže dimenze patří účtu, na jehož analytiku 221.xxx se pohyb účtuje.
+     *
+     * Typ, ve kterém se hrazené doklady liší, rozdělí {@see DimensionStamper} po řádcích
+     * a na řádku banky jako rozpad; rozpad má na řádku přednost před hodnotou z hlavičky
+     * ({@see DimensionStamper::expandSplits()}), takže ho hodnota účtu nepřepíše.
+     *
+     * @param array{number:string, bank:string}|null $statementAccount účet výpisu z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>}
+     */
+    private function bankAccountDefaults(int $supplierId, ?array $statementAccount): array
+    {
+        $number = trim((string) ($statementAccount['number'] ?? ''));
+        if ($number === '') {
+            return ['header' => [], 'origins' => []];
+        }
+        $bank = trim((string) ($statementAccount['bank'] ?? ''));
+        $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+            ->matchCounterparty($supplierId, $number, $bank === '' ? null : $bank);
+        if ($account === null) {
+            return ['header' => [], 'origins' => []];
+        }
+        $accountId = (int) $account['id'];
+        $own = (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', $accountId);
+        if ($own === []) {
+            return ['header' => [], 'origins' => []];
+        }
+        $merged = $this->merge($supplierId, ['bank_account:' . $accountId => $own]);
+        return ['header' => $merged['header'], 'origins' => $merged['origins']];
     }
 
     /**
      * Doklady, které bankovní pohyb hradí, s částkou alokace a efektivní hlavičkou.
      * Stejné zdroje jako úhrada v BankPostingService: vystavené faktury z invoice_payments
      * (bez nich z párování, jinak matched_invoice_id), přijaté faktury z párování.
-     * Více alokací na tentýž doklad se sečte.
+     * Více alokací na tentýž doklad se sečte. `statement_account` = číslo účtu a kód banky
+     * výpisu, na kterém pohyb leží (pro výchozí dimenze účtu, {@see forBank()}).
      *
-     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
+     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>, statement_account?:array{number:string, bank:string}}
      */
     public function bankDocuments(int $supplierId, int $transactionId, bool $withOrigins = false): array
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT bt.amount, bt.matched_invoice_id
+            'SELECT bt.amount, bt.matched_invoice_id, bs.account_number, bs.bank_code
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql()
@@ -500,7 +545,11 @@ final class DimensionDefaults
                 ];
             }
         }
-        return ['incoming' => (float) $tx['amount'] > 0, 'documents' => $documents];
+        return [
+            'incoming' => (float) $tx['amount'] > 0,
+            'documents' => $documents,
+            'statement_account' => ['number' => (string) ($tx['account_number'] ?? ''), 'bank' => (string) ($tx['bank_code'] ?? '')],
+        ];
     }
 
     /**

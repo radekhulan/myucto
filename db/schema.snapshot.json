@@ -1132,7 +1132,8 @@
         "2228_other_item_kinds.sql",
         "2229_work_report_display_options.sql",
         "2230_journal_lines_cost_center_index.sql",
-        "2231_unit_prices_six_decimals.sql"
+        "2231_unit_prices_six_decimals.sql",
+        "2232_dimension_defaults_bank_account.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -4859,18 +4860,21 @@
                 "product_category_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "product_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_bank_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_dimdef_supplier": "BTREE (supplier_id)",
                 "idx_dimdef_type_value": "BTREE (dimension_type_id, dimension_value_id)",
+                "uq_dimdef_bank_account_type": "UNIQUE BTREE (supplier_bank_account_id, dimension_type_id)",
                 "uq_dimdef_category_type": "UNIQUE BTREE (product_category_id, dimension_type_id)",
                 "uq_dimdef_client_type": "UNIQUE BTREE (client_id, dimension_type_id)",
                 "uq_dimdef_product_type": "UNIQUE BTREE (product_id, dimension_type_id)",
                 "uq_dimdef_project_type": "UNIQUE BTREE (project_id, dimension_type_id)"
             },
             "foreign_keys": {
+                "fk_dimdef_bank_account": "(supplier_bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_category": "(product_category_id) -> stock_categories (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_client": "(client_id) -> clients (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_dimdef_product": "(product_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
@@ -4879,7 +4883,7 @@
                 "fk_dimdef_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_dimdef_owner": "(`client_id` is not null) + (`project_id` is not null) + (`product_id` is not null) + (`product_category_id` is not null) = 1"
+                "chk_dimdef_owner": "(`client_id` is not null) + (`project_id` is not null) + (`product_id` is not null) + (`product_category_id` is not null) + (`supplier_bank_account_id` is not null) = 1"
             }
         },
         "dimension_types": {

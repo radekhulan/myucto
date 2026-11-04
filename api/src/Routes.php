@@ -3228,6 +3228,8 @@ final class Routes
             // Automatizace (mini-epic) — pravidla účtování + fronta návrhů.
             $g->get   ('/bank-accounts',                              [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'list']);
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
+            $g->get   ('/bank-accounts/{id:[0-9]+}/dimensions',       [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getBankAccount']);
+            $g->put   ('/bank-accounts/{id:[0-9]+}/dimensions',       [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveBankAccount']);
             $g->get   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'settings']);
             $g->put   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'saveSettings']);
             $g->get   ('/gopay/pending',                              [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'pending']);
