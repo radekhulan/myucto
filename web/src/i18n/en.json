@@ -36133,7 +36133,7 @@
       "hint_project": "Prefilled into the header of invoices of this project. A document without a dimension of that type gets it when posted. They take precedence over the client defaults.",
       "hint_product": "A document line with this product gets them unless it has its own. On revenue and expense lines they take precedence over the document header.",
       "hint_category": "Applies to products of this category and its subcategories that have no value of the type themselves.",
-      "hint_bank_account": "Movements on this account receive them when posted if they have no value of that type themselves or from the paid documents (interest, withholding tax, fees). A value entered on the movement and the dimensions of the paid invoice take precedence.",
+      "hint_bank_account": "When a movement on this account is posted, they go to the bank line and, for a movement without a document (interest, withholding tax, fees), also to the contra line. Receivable and payable lines of paid documents and account 261 do not receive them. A value entered on the movement, the dimensions of the paid invoice and the default value of a dimension rule take precedence.",
       "save_failed": "The record is saved, but its default dimensions could not be saved: {message}",
       "autofilled": "Prefilled from the default dimensions of the client, project or paid document."
     },

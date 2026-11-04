@@ -5,8 +5,8 @@
  * systém z výpisů/nastavení; tady se jen pojmenují a zaškatulkují, aby deník
  * a výkazy členily účet 221 po analytikách.
  *
- * Se zapnutými dimenzemi nese účet i výchozí dimenze: zaúčtování je doplní pohybu,
- * který hodnotu typu nemá sám ani z hrazených dokladů (úroky, poplatky).
+ * Se zapnutými dimenzemi nese účet i výchozí dimenze: zaúčtování je doplní řádku banky
+ * a u pohybu bez dokladu (úroky, poplatky) i protiúčtu.
  */
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -173,6 +173,12 @@ async function saveAll() {
   }
   saving.value = true
   let renumbered = 0
+  // Rozpracované výchozí dimenze, které ještě nejsou uložené: po chybě je načtení
+  // ze serveru nesmí zahodit (pole účtu mohla projít a dimenze ne).
+  const pendingDimensions = new Map<number, DimensionMap>()
+  for (const a of dirty) {
+    if (dimensionsDirty(a)) pendingDimensions.set(a.id, { ...dimensionDrafts.value[a.id] })
+  }
   try {
     for (const a of dirty) {
       if (fieldsDirty(a)) {
@@ -195,6 +201,7 @@ async function saveAll() {
       // Výchozí dimenze až po polích účtu: když server pole odmítne, dimenze zůstanou neuložené.
       if (dimensionsDirty(a)) {
         await dimensionsApi.saveDefaults('accounting/bank-accounts', a.id, dimensionDrafts.value[a.id])
+        pendingDimensions.delete(a.id)
       }
     }
     toast.success(t('bank.analytics.saved'))
@@ -203,6 +210,10 @@ async function saveAll() {
   } catch (e) {
     toast.error(apiErrorMessage(e))
     await load()
+    if (pendingDimensions.size > 0) {
+      dimensionDrafts.value = { ...dimensionDrafts.value, ...Object.fromEntries(pendingDimensions) }
+      dimensionsOpen.value = { ...dimensionsOpen.value, ...Object.fromEntries([...pendingDimensions.keys()].map((id) => [id, true])) }
+    }
   } finally {
     saving.value = false
   }
