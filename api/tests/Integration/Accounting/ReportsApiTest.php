@@ -17,11 +17,13 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response as Psr7Response;
+use Smalot\PdfParser\Parser as PdfParser;
 
 /**
  * Integrační testy REST API účetních sestav (Epic F2, T16, vzor AccountingApiTest):
@@ -131,6 +133,37 @@ final class ReportsApiTest extends TestCase
         self::assertArrayHasKey('totals', $res['body']);
         self::assertArrayHasKey('draft_count', $res['body']);
         self::assertNotEmpty($res['body']['accounts']);
+    }
+
+    public function testGeneralLedgerFiltersAccountRangeAndRecountsTotals(): void
+    {
+        $all = $this->call($this->generalLedgerAction, 'get', 'GET', 'readonly', ['period_id' => (string) $this->periodId]);
+        $res = $this->call($this->generalLedgerAction, 'get', 'GET', 'readonly',
+            ['period_id' => (string) $this->periodId, 'account_from' => '6', 'account_to' => '6']);
+
+        self::assertSame(200, $res['status']);
+        self::assertSame('6', $res['body']['account_from']);
+        self::assertSame('6', $res['body']['account_to']);
+        $codes = array_column($res['body']['accounts'], 'account_code');
+        self::assertNotEmpty($codes);
+        self::assertSame([], array_values(array_filter($codes, static fn (string $c): bool => !str_starts_with($c, '6'))));
+        self::assertGreaterThan(count($codes), count($all['body']['accounts']));
+        $turnover = 0;
+        foreach ($res['body']['accounts'] as $a) $turnover += (int) round($a['turnover_d'] * 100);
+        self::assertSame($turnover, (int) round($res['body']['totals']['turnover_d'] * 100));
+        // Celkem sečte jen vybrané účty (602), ne celou knihu (602 + 343).
+        self::assertNotSame($all['body']['totals']['turnover_d'], $res['body']['totals']['turnover_d']);
+
+        foreach ([['account_from' => '6', 'account_to' => '5'], ['account_from' => '5%'], ['account_to' => ['5']]] as $bad) {
+            $err = $this->call($this->generalLedgerAction, 'get', 'GET', 'readonly', $bad + ['period_id' => (string) $this->periodId]);
+            self::assertSame(422, $err['status'], json_encode($bad));
+            self::assertSame('validation_failed', $err['body']['error']['code']);
+            // Rozsah se ověřuje před obdobím i sestavením knihy: neexistující období ho nepřebije.
+            foreach (['get', 'export'] as $method) {
+                $early = $this->call($this->generalLedgerAction, $method, 'GET', 'readonly', $bad + ['period_id' => '999999999', 'format' => 'pdf']);
+                self::assertSame(422, $early['status'], $method . ' ' . json_encode($bad));
+            }
+        }
     }
 
     public function testGeneralLedgerReturnsAllPeriodsWithoutPeriodId(): void
@@ -357,6 +390,77 @@ final class ReportsApiTest extends TestCase
             $query + ['format' => 'csv']);
         self::assertSame(422, $csv['status'], 'format=csv není ve whitelistu.');
         self::assertSame('validation_failed', $csv['body']['error']['code']);
+    }
+
+    public function testGeneralLedgerDetailExportAndItsValidation(): void
+    {
+        $query = ['period_id' => (string) $this->periodId, 'include_documents' => '1'];
+        // Rozsah s účtem, na kterém je zápis fixture (602), ať rozpis opravdu nese doklad.
+        $pdf = $this->raw($this->generalLedgerAction, 'export', 'GET', 'readonly',
+            $query + ['format' => 'pdf', 'account_from' => '6', 'account_to' => '6']);
+        self::assertSame(200, $pdf->getStatusCode());
+        self::assertStringContainsString('hlavni-kniha-doklady-' . self::YEAR . '.pdf', $pdf->getHeaderLine('Content-Disposition'));
+        $text = (new PdfParser())->parseContent((string) $pdf->getBody())->getText();
+        self::assertStringContainsString('602', $text);
+        self::assertStringContainsString('15.06.' . self::YEAR, $text, 'Rozpis obsahuje řádek dokladu.');
+        self::assertStringNotContainsString('311 -', $text, 'Účet mimo rozsah v rozpisu není.');
+        // Rozpis do XLSX se zatím nenabízí (součty a kontingenční tabulky by sečetly PS a obraty dvakrát).
+        $xlsx = $this->call($this->generalLedgerAction, 'export', 'GET', 'readonly', $query + ['format' => 'xlsx']);
+        self::assertSame(422, $xlsx['status']);
+        self::assertSame('validation_failed', $xlsx['body']['error']['code']);
+
+        $summary = $this->raw($this->generalLedgerAction, 'export', 'GET', 'readonly',
+            ['period_id' => (string) $this->periodId, 'format' => 'xlsx', 'account_from' => '5', 'account_to' => '6']);
+        self::assertSame(200, $summary->getStatusCode());
+        self::assertStringContainsString('hlavni-kniha-' . self::YEAR . '.xlsx', $summary->getHeaderLine('Content-Disposition'));
+
+        foreach ([
+            ['include_documents' => '2'],
+            ['account_from' => '6', 'account_to' => '5'],
+            ['account_from' => '5%'],
+            ['account_from' => ['5']],
+            ['include_documents' => ['1']],
+        ] as $bad) {
+            $res = $this->call($this->generalLedgerAction, 'export', 'GET', 'readonly', $bad + $query + ['format' => 'pdf']);
+            self::assertSame(422, $res['status'], json_encode($bad));
+            self::assertSame('validation_failed', $res['body']['error']['code']);
+        }
+    }
+
+    public function testGeneralLedgerDetailExportStopsAtSizeLimitBeforeRendering(): void
+    {
+        // Akce musí limit rozpisu opravdu zavolat; limit 1 řádek se nevejde ani na jeden účet.
+        $container = Bootstrap::buildContainer();
+        $action = $container->make(GeneralLedgerAction::class, [
+            'details' => $container->make(GeneralLedgerDetailService::class, ['maxLines' => 1]),
+        ]);
+        $query = ['period_id' => (string) $this->periodId, 'include_documents' => '1', 'format' => 'pdf'];
+        $res = $this->call($action, 'export', 'GET', 'readonly', $query);
+        self::assertSame(422, $res['status']);
+        self::assertSame('export_too_large', $res['body']['error']['code']);
+        // Souhrn limit nemá.
+        self::assertSame(200, $this->raw($action, 'export', 'GET', 'readonly', ['period_id' => (string) $this->periodId, 'format' => 'pdf'])->getStatusCode());
+    }
+
+    public function testGeneralLedgerExportReadsSummaryAndDetailInOneSnapshot(): void
+    {
+        // API testy běží ve vnější transakci, kde snímek nic neotevírá; proto se ověřuje, že akce
+        // celé sestavení (souhrn, rozpis i sazbu) předá snímku a vrátí to, co v něm vzniklo.
+        $container = Bootstrap::buildContainer();
+        $inside = [];
+        $snapshot = $this->createMock(\MyInvoice\Infrastructure\Database\ReadOnlySnapshot::class);
+        $snapshot->expects(self::exactly(2))->method('read')->willReturnCallback(static function (callable $read) use (&$inside): mixed {
+            $result = $read();
+            $inside[] = $result[1]['mime'];
+            return $result;
+        });
+        $action = $container->make(GeneralLedgerAction::class, ['snapshot' => $snapshot]);
+        $query = ['period_id' => (string) $this->periodId, 'format' => 'pdf'];
+        $detail = $this->raw($action, 'export', 'GET', 'readonly', $query + ['include_documents' => '1']);
+        self::assertSame(200, $detail->getStatusCode());
+        $summary = $this->raw($action, 'export', 'GET', 'readonly', $query);
+        self::assertSame(200, $summary->getStatusCode());
+        self::assertSame(['application/pdf', 'application/pdf'], $inside, 'PDF vzniklo uvnitř snímku.');
     }
 
     public function testBalanceSheetExportXlsx(): void

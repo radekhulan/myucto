@@ -41,7 +41,8 @@ final class LedgerReportRepository
      *        dle protistrany/položky zdrojového dokladu (viz {@see counterpartyFilter()})
      * @return list<array<string,mixed>> {id, account_code, name, account_type,
      *                                    normal_side, is_synthetic, parent_id, parent_code,
-     *                                    parent_name, ps_md, ps_d, to_md, to_d}
+     *                                    parent_name, parent_normal_side, ps_md, ps_d, to_md, to_d,
+     *                                    to_count (počet řádků obratu, pro limit rozpisu)}
      */
     public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
@@ -82,7 +83,8 @@ final class LedgerReportRepository
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
                               AND l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS to_md,
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
-                              AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS to_d
+                              AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS to_d,
+                    SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql} THEN 1 ELSE 0 END) AS to_count
                 FROM {$linesSql}
                 JOIN journal_entries e   ON e.id = l.entry_id
                 " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
@@ -93,7 +95,7 @@ final class LedgerReportRepository
             SELECT c.id, c.account_code, c.name, c.account_type, c.normal_side, c.is_synthetic,
                    p.id AS parent_id, p.account_code AS parent_code, p.name AS parent_name,
                    p.normal_side AS parent_normal_side,
-                   agg.ps_md, agg.ps_d, agg.to_md, agg.to_d
+                   agg.ps_md, agg.ps_d, agg.to_md, agg.to_d, agg.to_count
               FROM agg
               JOIN {$accountDefinitions} c ON c.id = agg.acc_id
               LEFT JOIN {$accountDefinitions} p ON p.id = c.parent_id
@@ -103,6 +105,7 @@ final class LedgerReportRepository
             $analytics ? 1 : 0,
             $from, $from, $periodStart, $anchor, $anchor,
             $from, $from, $periodStart, $anchor, $anchor,
+            $from, ...$turnoverOpeningParams,
             $from, ...$turnoverOpeningParams,
             $from, ...$turnoverOpeningParams,
             ...$linesParams,
@@ -964,6 +967,96 @@ final class LedgerReportRepository
     private function lineSource(int $supplierId, ?DimensionFilter $dimension, ?string $from, string $to): array
     {
         return $dimension !== null ? $dimension->lineSource($supplierId, 'l', $from, $to) : ['journal_entry_lines l', []];
+    }
+
+    /** @return array{name:string, ic:string} */
+    public function supplierIdentity(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT company_name, ic FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return ['name' => (string) ($row['company_name'] ?? ''), 'ic' => (string) ($row['ic'] ?? '')];
+    }
+
+    /**
+     * Pohyby podrobné hlavní knihy, řazené účtem a chronologicky. Jediný proudový
+     * dotaz se odloží do dočasného proudu (nad 2 MB na disk), pak se předává po
+     * dávkách. Kontext může používat totéž PDO až po uzavření nebufferovaného
+     * kurzoru. Bez odložení by každá dávka znovu řadila celý roční deník.
+     * Filtry PS/obratů i osnova k datu `to` zůstávají stejné jako v trialBalanceRows,
+     * jinak by kontrola souhlasu se souhrnem hlásila nesoulad.
+     * @return \Generator<int,list<array<string,mixed>>>
+     */
+    public function generalLedgerLineBatches(int $supplierId, array $data, array $filters, bool $afterClosing, int $batchSize = 500): \Generator
+    {
+        $ids = array_column($data['accounts'], 'account_id');
+        if ($ids === []) return;
+        $batchSize = max(1, min(1000, $batchSize));
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $accountDefinitions = AccountDefinitionRepository::relation($data['to'], $supplierId);
+        // Účty řádků předem, aby úzký rozsah (501–501) šel po indexu účtu, ne přes celý rok.
+        $lineAccountSql = !empty($data['analytics'])
+            ? "l.account_id IN ({$marks})"
+            : "l.account_id IN (SELECT ca.id FROM chart_of_accounts ca WHERE ca.supplier_id = ? AND (ca.id IN ({$marks}) OR ca.parent_id IN ({$marks})))";
+        $lineAccountParams = !empty($data['analytics']) ? $ids : [$supplierId, ...$ids, ...$ids];
+        [$source, $sourceParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null, $data['from'], $data['to']);
+        // Dimenzní zdroj řádků nenese is_red_storno a znaménko dílu nestačí (díl rozpadu může být 0,00).
+        // Příznak účinné strany protiúčtu se proto bere ze základního řádku po primárním klíči.
+        $stornoSql = isset($filters['dimension']) ? 'raw.is_red_storno' : 'l.is_red_storno';
+        $stornoJoin = isset($filters['dimension']) ? 'JOIN journal_entry_lines raw ON raw.id = l.id AND raw.supplier_id = l.supplier_id' : '';
+        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        $excludeClosing = !$afterClosing;
+        $closingSql = $excludeClosing ? ' AND ' . JournalTaxOrigin::includedSql() : '';
+        $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
+        $openingSql = !empty($data['all_periods']) && !$afterClosing
+            ? " AND e.source_type <> 'opening'"
+            : " AND NOT (e.entry_date = ? AND e.source_type = 'opening')";
+        $openingParams = !empty($data['all_periods']) && !$afterClosing ? [] : [$data['from']];
+        $group = !empty($data['analytics']) ? 'a.id' : 'COALESCE(a.parent_id, a.id)';
+        $sql = ($excludeClosing ? 'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . ' ' : '') . "
+                SELECT g.id AS group_id, g.account_code AS group_code,
+                       e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
+                       l.id AS line_id, l.line_no, l.account_id, a.account_code, l.side, l.signed_amount AS amount,
+                       {$stornoSql} AS is_red_storno
+                  FROM {$source}
+                  {$stornoJoin}
+                  JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                  " . ($excludeClosing ? JournalTaxOrigin::join() : '') . "
+                  JOIN {$accountDefinitions} a ON a.id = l.account_id
+                  JOIN {$accountDefinitions} g ON g.id = {$group}
+                 WHERE l.supplier_id = ? AND e.supplier_id = ? AND e.posted_at IS NOT NULL
+                   AND e.entry_date >= ? AND e.entry_date <= ? AND {$lineAccountSql} AND g.id IN ({$marks})
+                   {$filterSql}{$closingSql}{$openingSql}
+                 ORDER BY g.account_code, e.entry_date, e.id, l.line_no, l.id";
+        $pdo = $this->db->pdo();
+        $buffered = $pdo->getAttribute(\Pdo\Mysql::ATTR_USE_BUFFERED_QUERY);
+        $spool = new \SplTempFileObject(2 * 1024 * 1024);
+        $stmt = null;
+        try {
+            $pdo->setAttribute(\Pdo\Mysql::ATTR_USE_BUFFERED_QUERY, false);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([...$sourceParams, $supplierId, $supplierId, $data['from'], $data['to'], ...$lineAccountParams, ...$ids,
+                ...$filterParams, ...$closingParams, ...$openingParams]);
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $encoded = json_encode($row, JSON_THROW_ON_ERROR) . "\n";
+                if ($spool->fwrite($encoded) !== strlen($encoded)) throw new \RuntimeException('Nelze uložit dočasná data exportu.');
+            }
+        } finally {
+            $stmt?->closeCursor();
+            $pdo->setAttribute(\Pdo\Mysql::ATTR_USE_BUFFERED_QUERY, $buffered);
+        }
+        $spool->rewind();
+        $batch = [];
+        while (!$spool->eof()) {
+            $encoded = $spool->fgets();
+            if ($encoded === '') continue;
+            $batch[] = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
+            if (count($batch) === $batchSize) {
+                yield $batch;
+                $batch = [];
+            }
+        }
+        if ($batch !== []) yield $batch;
     }
 
     private static function escapeLike(string $value): string

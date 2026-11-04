@@ -26,7 +26,7 @@ Hlavní kniha zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové �
 2. V poli **Období** zvolte fiskální rok. Hodnota **Vše** spojí všechna období firmy.
 3. Chcete-li zúžit rozsah, vyplňte **Od** a **Do**.
 4. Chcete-li vidět jednotlivé analytické účty, zapněte **Rozpad po analytikách**.
-5. Hledáte-li konkrétní doklady, použijte filtry **Dodavatel**, **Odběratel** nebo **Položka faktury**. Filtry zrušíte tlačítkem **Zrušit filtry**.
+5. Hledáte-li konkrétní doklady, použijte filtry **Dodavatel**, **Odběratel** nebo **Položka faktury**. Chcete-li vidět jen část účtů, vyplňte **Účet od** a **Účet do**. Filtry zrušíte tlačítkem **Zrušit filtry**.
 6. Prohlédněte sloupce **PS MD / PS Dal**, **Obrat MD / Obrat Dal** a **KS MD / KS Dal**. Seřadíte je kliknutím na záhlaví.
 7. Chcete-li kombinaci uložit, uložte aktuální filtr jako pohled (nabídka **Uložené pohledy**) a případně ho nastavte jako výchozí.
 
@@ -61,10 +61,38 @@ Použijte na účtech, kde se řádky vyrovnávají dodatečně, například 261
 
 ## 55.6 Krok za krokem: export
 
-1. Nastavte období, rozsah, rozpad analytik a filtry tak, jak je chcete mít na výstupu.
-2. Klikněte na **Export PDF** nebo **Export XLSX**.
+1. Nastavte období, rozsah, rozpad analytik, účty a filtry tak, jak je chcete mít na výstupu.
+2. Klikněte na **Exportovat…**. V dialogu vyberte obsah a formát PDF/XLSX.
+3. Zkontrolujte převzaté období a filtry a klikněte na **Exportovat**.
 
 **Jak poznáte, že je hotovo:** Soubor se stáhne a v názvu obsahuje fiskální rok.
+
+### 55.6.1 Export více účtů včetně dokladů
+
+V dialogu **Export hlavní knihy** vyberte **Souhrn účtů** nebo **Rozpis včetně
+dokladů** a formát. Souhrn jde do PDF i XLSX,
+rozpis včetně dokladů zatím jen do PDF. Exportuje se kniha,
+jak je zobrazená: období, **Rozpad po analytikách**, rozsah účtů a filtry se převezmou z naposledy
+načtené knihy a dialog je vypíše. Dokud se kniha načítá, export nejde spustit.
+Jiné období nebo filtry nastavte na obrazovce. Během přípravy souboru tlačítko ukazuje
+**Připravuji export…**; velký rozpis může trvat až minutu. Podrobná sestava obsahuje všechny zaúčtované
+řádky ve zvoleném období, po účtech a chronologicky: datum, číslo dokladu, popis,
+protiúčet, MD, D a průběžný zůstatek. Rozpis navíc obsahuje účty, které obrazovka
+nezobrazí, protože mají nulový počáteční stav i obrat, ale nesou pohyby (typicky zápis
+a jeho červené storno). U každého účtu uvádí počáteční stav, obraty,
+saldo obratů (MD − D) a konečný zůstatek. Kladný zůstatek znamená MD, záporný D.
+PDF rozpisu je na výšku a účty v něm jdou plynule za sebou; pokračuje-li účet na
+další straně, nese hlavička strany jeho název a záhlaví sloupců. Hlavička sestavy uvádí název firmy a IČ.
+Jde o rozpis účetních zápisů, nikoli o přiložené skeny nebo PDF prvotních dokladů.
+
+Které účty export obsahuje, určuje filtr **Účet od** a **Účet do** na obrazovce
+(viz [§ 55.8.2](#5582-obdobi-rozsah-a-filtry)). Ostatní filtry hlavní knihy platí
+i pro export, včetně dimenzí a pohledu před/po uzavření knih. Koncepty se neexportují.
+Volbou **Souhrn účtů** se stejným rozsahem získáte souhrnnou hlavní knihu.
+
+Rozpis včetně dokladů má nejvýše 10 000 řádků. Do limitu se kromě řádků dokladů
+počítá za každý účet 6 řádků na jeho záhlaví, počáteční stav a součty. Větší rozpis
+rozdělte podle období nebo rozsahu účtů.
 
 ## 55.7 Když něco nejde
 
@@ -75,6 +103,7 @@ Použijte na účtech, kde se řádky vyrovnávají dodatečně, například 261
 | **Žádné účty s pohybem nebo počátečním stavem ve zvoleném rozsahu.** | V rozsahu není žádný zaúčtovaný pohyb | Zkontrolujte **Období**, **Od** a **Do**. |
 | Server odmítl datum | Datum leží mimo období, nebo je **Od** později než **Do** | Opravte rozsah. |
 | Zůstatek k poslednímu dni uzavřeného roku je nulový | Zapnuté **Stav po uzavření knih** zahrnuje závěrkový převod | Vypněte volbu. Výchozí pohled závěrkový převod vynechává. |
+| **Rozpis má N řádků v M účtech, pro PDF je to příliš mnoho …** | Rozpis by byl pro PDF příliš velký | Zužte období nebo rozsah účtů a exportujte po částech. |
 | Chybějící účet, který čekáte | Účet bez PS a bez obratu se nezobrazuje | Zkontrolujte rozsah, nebo účet v [Účtovém rozvrhu](66_Ucetni_osnova.md). |
 | Párování nejde založit | Řádky jsou z různých účtů (u syntetiky z různých analytik), nebo už jsou v jiném okruhu | Okruh drží řádky jednoho účtu a každý řádek smí být jen v jednom okruhu. |
 | Rozdíl otevřených položek proti zůstatku účtu | Karta **Zůstatek účtu** zvýrazní rozdíl | Zkontrolujte okruhy a **K datu**. Součet otevřených položek se má rovnat zůstatku účtu. |
@@ -111,8 +140,17 @@ majetku, mezd, uzávěrky nebo ručního zápisu. Hlavní kniha mezi těmito zdr
 - **Dodavatel**, **Odběratel** a **Položka faktury** filtrují zápisy podle
   protistrany nebo položky zdrojové přijaté či vydané faktury. Filtr se
   uplatní na počáteční stav, obraty i měsíční rozpad vybraného výřezu.
+- **Účet od** a **Účet do** omezí knihu na rozsah účtů včetně krajů. Pole
+  našeptávají z účtového rozvrhu a pod polem ukážou název účtu, u začátku kódu
+  počet účtů, které na něj začínají (včetně neaktivních). Zadat jde
+  i začátek kódu: **5 až 5** vybere všechny nákladové účty, **501 až 518** rozsah
+  včetně analytik a **501.100 až 501.100** jednu analytiku. Rozsah se použije
+  po potvrzení pole Enterem nebo po jeho opuštění a řádek **Součty** sečte jen
+  vybrané účty. Stejně funguje filtr **Účet od / Účet do** v [účetním deníku](52_Ucetni_denik.md). Pro výběr jednotlivých analytik zapněte **Rozpad po analytikách**;
+  bez něj se rozsah uplatňuje na syntetické účty a mez s analytikou vybere celou
+  syntetiku. Stránka na to upozorní.
 
-Aktuální kombinaci období, rozsahu, rozpadu analytik a vyhledávacích filtrů
+Aktuální kombinaci období, rozsahu, rozpadu analytik, rozsahu účtů a vyhledávacích filtrů
 lze uložit jako vlastní sestavu a případně ji nastavit jako výchozí. Volba
 **Stav po uzavření knih** se do uložené kombinace nepřenáší. Ovládání **Sloupce**
 skrývá či zobrazuje sloupce tabulky a **Hustota** mění řádkování; obě volby
@@ -248,8 +286,8 @@ znovu. Tyto změny se zapisují do historie aktivit.
 
 ### 55.8.6 Export a návaznosti
 
-**Export PDF** a **Export XLSX** používají stejné období, rozsah, rozpad
-analytik, pohled před/po uzavření a filtry jako obrazovka. Název souboru
+Dialog **Export hlavní knihy** používá stejné období, rozsah dat, rozpad
+analytik, rozsah účtů, pohled před/po uzavření a filtry jako obrazovka. Název souboru
 obsahuje fiskální rok. Stejná logika PS/obrat/KS se používá také v
 [Obratové předvaze](56_Obratova_predvaha.md); výkazové mapování a zákonné
 řádky popisuje [Rozvaha](57_Rozvaha.md).

@@ -1,0 +1,5 @@
+<table class="detail account-start">
+<tr><td class="account" colspan="7">{{ account.account_code }} - {{ account.name }}</td></tr>
+<tr class="head"><th class="date">Datum</th><th class="doc">Doklad</th><th class="text">Popis</th><th class="counter">Protiúčet</th><th class="money">MD</th><th class="money">D</th><th class="money">Zůstatek</th></tr>
+<tr class="summary"><td class="date"></td><td class="doc"></td><td class="text">Počáteční zůstatek</td><td class="counter"></td><td class="money">{{ account.opening_md|cz_money }}</td><td class="money">{{ account.opening_d|cz_money }}</td><td class="money">{{ (account.opening_md - account.opening_d)|cz_money }}</td></tr>
+</table>

@@ -8,13 +8,18 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\ReadOnlySnapshot;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Accounting\AccountCodeRange;
+use MyInvoice\Service\Accounting\AccountCodeRangeException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Pdf\GeneralLedgerDetailPdfRenderer;
 use MyInvoice\Service\Pdf\GeneralLedgerPdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -42,6 +47,9 @@ final class GeneralLedgerAction
         private readonly LoggerInterface $log,
         private readonly Connection $db,
         private readonly DimensionService $dimensions,
+        private readonly GeneralLedgerDetailService $details,
+        private readonly GeneralLedgerDetailPdfRenderer $detailPdf,
+        private readonly ReadOnlySnapshot $snapshot,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -55,6 +63,7 @@ final class GeneralLedgerAction
             $data = $params['all_periods']
                 ? $this->ledger->buildAllPeriods($supplierId, $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing'])
                 : $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing']);
+            $data = GeneralLedgerDetailService::selectAccounts($data, $params['account_from'], $params['account_to']);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -77,19 +86,50 @@ final class GeneralLedgerAction
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
 
+        $includeDocuments = $request->getQueryParams()['include_documents'] ?? '0';
+        if (!is_string($includeDocuments)) {
+            return Json::error($response, 'validation_failed', 'include_documents musí být jedna hodnota.', 422);
+        }
+        $includeDocuments = trim($includeDocuments);
+        if (!in_array($includeDocuments, ['0', '1'], true)) {
+            return Json::error($response, 'validation_failed', 'include_documents musí být 0 nebo 1.', 422);
+        }
+        // Rozpis do XLSX se zatím nenabízí: řádky PS a součtů účtu v jedné tabulce s doklady by
+        // rozbily součty a kontingenční tabulky; podobu XLSX je potřeba domluvit s maintainerem.
+        if ($includeDocuments === '1' && $format !== 'pdf') {
+            return Json::error($response, 'validation_failed', 'Rozpis včetně dokladů je zatím jen v PDF.', 422);
+        }
         try {
-            $data = $params['all_periods']
-                ? $this->ledger->buildAllPeriods($supplierId, $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing'])
-                : $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing']);
-            $periodLabel = $params['all_periods'] ? 'vse' : (string) ($data['period']['fiscal_year'] ?? '');
-            $out = $format === 'pdf'
-                ? [
-                    'bytes'    => $this->pdf->render($data),
-                    'filename' => sprintf('hlavni-kniha-%s.pdf', $periodLabel),
-                    'mime'     => 'application/pdf',
-                ]
-                : $this->xlsx->generalLedger($data);
+            // Souhrn a dávky dokladů musí číst tentýž snímek i při souběžném účtování
+            // a i na serveru, jehož výchozí izolace je READ COMMITTED.
+            [$data, $out] = $this->snapshot->read(function () use ($params, $supplierId, $includeDocuments, $format): array {
+                $forDetail = $includeDocuments === '1';
+                $data = $params['all_periods']
+                    ? $this->ledger->buildAllPeriods($supplierId, $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing'], $forDetail)
+                    : $this->ledger->build($supplierId, $params['period_id'], $params['from'], $params['to'], $params['analytics'], $params['filters'], $params['after_closing'], $forDetail);
+                $periodLabel = $params['all_periods'] ? 'vse' : (string) ($data['period']['fiscal_year'] ?? '');
+                $data = GeneralLedgerDetailService::selectAccounts($data, $params['account_from'], $params['account_to']);
+                if ($includeDocuments === '1') {
+                    $this->details->checkExportSize($data);
+                    $supplier = $this->details->supplierIdentity($supplierId);
+                    $data['supplier_name'] = $supplier['name'];
+                    $data['supplier_ic'] = $supplier['ic'];
+                    $data['after_closing'] = $params['after_closing'];
+                    $data['events'] = $this->details->events($supplierId, $data, $params['filters'], $params['after_closing']);
+                    return [$data, ['bytes' => $this->detailPdf->render($data), 'filename' => 'hlavni-kniha-doklady-' . $periodLabel . '.pdf', 'mime' => 'application/pdf']];
+                }
+                return [$data, $format === 'pdf'
+                    ? [
+                        'bytes'    => $this->pdf->render($data),
+                        'filename' => sprintf('hlavni-kniha-%s.pdf', $periodLabel),
+                        'mime'     => 'application/pdf',
+                    ]
+                    : $this->xlsx->generalLedger($data)];
+            });
         } catch (ReportException $e) {
+            if ($e->errorCode === 'ledger_detail_mismatch') {
+                $this->log->error('Rozpis hlavní knihy nesouhlasí se souhrnem.', ['supplier_id' => $supplierId] + $e->context);
+            }
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
             $this->log->error('Účetní sestavu se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
@@ -97,7 +137,7 @@ final class GeneralLedgerAction
         }
 
         $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
-            ['report' => 'general_ledger', 'format' => $format],
+            ['report' => 'general_ledger', 'format' => $format, 'include_documents' => $includeDocuments === '1', 'account_from' => $data['account_from'], 'account_to' => $data['account_to']],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $supplierId);
 
@@ -110,11 +150,25 @@ final class GeneralLedgerAction
     }
 
     /**
-     * @return array{period_id:?int, all_periods:bool, from:?string, to:?string, analytics:bool, after_closing:bool, filters:array{vendor?:string, client?:string, item?:string}}|null
+     * @return array{period_id:?int, all_periods:bool, from:?string, to:?string, analytics:bool, after_closing:bool, filters:array{vendor?:string, client?:string, item?:string}, account_from:string, account_to:string}|null
      */
     private function validateParams(Request $request, Response $response, int $supplierId, ?Response &$err): ?array
     {
         $q = $request->getQueryParams();
+
+        // Rozsah účtů se ověří před jakýmkoli dotazem: neplatná mez nesmí spustit agregaci celé knihy.
+        $from = $q['account_from'] ?? '';
+        $to = $q['account_to'] ?? '';
+        if (!is_string($from) || !is_string($to)) {
+            $err = Json::error($response, 'validation_failed', 'account_from a account_to musí být jedna hodnota.', 422);
+            return null;
+        }
+        try {
+            $accounts = AccountCodeRange::parse($from, $to);
+        } catch (AccountCodeRangeException $e) {
+            $err = Json::error($response, 'validation_failed', $e->getMessage(), 422);
+            return null;
+        }
 
         $allPeriods = (string) ($q['all_periods'] ?? '') === '1';
         $periodId = null;
@@ -184,6 +238,9 @@ final class GeneralLedgerAction
             // vynulované a účetní by k rozvahovému dni neviděla žádné zůstatky.
             'after_closing' => (string) ($q['after_closing'] ?? '') === '1',
             'filters'   => $filters,
+            // Rozsah účtů (prefixový včetně krajů, AccountCodeRange) filtruje knihu i export.
+            'account_from' => $accounts->from,
+            'account_to'   => $accounts->to,
         ];
     }
 

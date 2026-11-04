@@ -67,4 +67,16 @@ final class AccountCodeRangeCollationTest extends TestCase
         sort($expectedSorted);
         self::assertSame($expectedSorted, $selected);
     }
+
+    /** contains() (výběr účtů hlavní knihy v PHP) musí vybrat totéž co databáze. */
+    #[DataProvider('ranges')]
+    public function testContainsMatchesDatabaseSelection(string $from, string $to, array $expected): void
+    {
+        $range = AccountCodeRange::parse($from, $to);
+        $selected = array_values(array_filter(self::CODES, static fn (string $c): bool => $range->contains($c)));
+        sort($selected);
+        $expectedSorted = $expected;
+        sort($expectedSorted);
+        self::assertSame($expectedSorted, $selected);
+    }
 }
