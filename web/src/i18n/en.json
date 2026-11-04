@@ -11021,6 +11021,7 @@
             "email_profiles": "Company sender profiles",
             "email_templates": "Company email templates",
             "branding": "Company branding",
+            "invoice_defaults": "Default document values",
             "payment_qr": "Company payment QR codes",
             "signing_profiles": "Company signing profiles and PDF signing"
           },
@@ -25719,6 +25720,7 @@
     "client_company_settings_title": "Company settings",
     "client_company_settings_hint": "Manage sending and signing profiles, communication branding and payment QR codes for the current company. Accounting, tax, legal and system settings remain with your accountant.",
     "client_company_settings_tabs": "Company settings sections",
+    "invoice_defaults_title": "Default document values",
     "payment_qr_tab": "QR payments",
     "payment_qr_due_date_title": "Due date in payment QR codes",
     "payment_qr_due_date_hint": "This setting controls the DT field in the Czech QR Payment (SPAYD) format. The European EPC format does not carry a due date, and an embedded QR image imported from a supplier PDF cannot be changed.",
@@ -25998,6 +26000,7 @@
     "default_due_preset_14": "14 days",
     "default_due_preset_month": "Month",
     "default_due_preset_custom": "Custom…",
+    "default_due_custom_months_suffix": "months",
     "default_due_custom_days_suffix": "days",
     "default_due_month_hint": "Calendar month — Feb 1 → Mar 1, Jan 31 → Feb 28 (not a fixed 30 days).",
     "default_prices_include_vat": "New invoices use prices incl. VAT",
@@ -27119,6 +27122,7 @@
       "email_profiles": "Company sender profiles",
       "email_templates": "Company email templates",
       "branding": "Company branding",
+      "invoice_defaults": "Default document values",
       "payment_qr": "Company payment QR codes",
       "signing_profiles": "Company signing profiles and PDF signing"
     },

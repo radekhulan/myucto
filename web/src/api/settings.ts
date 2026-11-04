@@ -499,6 +499,18 @@ export interface BrandingProfile {
 }
 
 /** Úzký supplier-scoped výřez, který lze delegovat klientské roli. */
+export interface InvoiceDefaultsSettings {
+  id: number
+  default_currency: string
+  default_payment_due_days: number
+  default_payment_due_unit: 'days' | 'month'
+  default_hourly_rate: number
+  default_note_below_items_enabled: boolean
+  default_note_below_items_cs: string | null
+  default_note_below_items_en: string | null
+}
+export type InvoiceDefaultsPayload = Omit<InvoiceDefaultsSettings, 'id' | 'default_currency'>
+
 export interface OperationalBrandingSettings {
   id: number
   company_name: string
@@ -1155,6 +1167,9 @@ export const settingsApi = {
         ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
       },
     }).then(r => r.data),
+  getClientInvoiceDefaults: () => api.get<InvoiceDefaultsSettings>('/settings/client/invoice-defaults').then(r => r.data),
+  updateClientInvoiceDefaults: (payload: InvoiceDefaultsPayload, supplierId: number) =>
+    api.put<InvoiceDefaultsSettings>('/settings/client/invoice-defaults', payload, { headers: { 'X-Supplier-Id': String(supplierId) } }).then(r => r.data),
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
   updateClientBranding: (payload: Partial<OperationalBrandingSettings>, supplierId?: number) =>
     api.put<OperationalBrandingSettings>('/settings/client/branding', payload, supplierId ? { headers: { 'X-Supplier-Id': String(supplierId) } } : undefined).then(r => r.data),

@@ -11021,6 +11021,7 @@
             "email_profiles": "Odesílací profily firmy",
             "email_templates": "E-mailové šablony firmy",
             "branding": "Branding firmy",
+            "invoice_defaults": "Výchozí hodnoty dokladů",
             "payment_qr": "Platební QR firmy",
             "signing_profiles": "Firemní podpisové profily a PDF podpisy"
           },
@@ -25719,6 +25720,7 @@
     "client_company_settings_title": "Nastavení firmy",
     "client_company_settings_hint": "Správa odesílacích a podpisových profilů, vzhledu komunikace a platebních QR kódů aktuální firmy. Účetní, daňové, právní a systémové nastavení zůstává ve správě účetní.",
     "client_company_settings_tabs": "Sekce nastavení firmy",
+    "invoice_defaults_title": "Výchozí hodnoty dokladů",
     "payment_qr_tab": "QR platby",
     "payment_qr_due_date_title": "Datum splatnosti v QR platbě",
     "payment_qr_due_date_hint": "Nastavení ovlivňuje pole DT v českém formátu QR Platba (SPAYD). Evropský formát EPC datum splatnosti nepřenáší a převzatý obrázek QR kódu z PDF dodavatele nelze změnit.",
@@ -25998,6 +26000,7 @@
     "default_due_preset_14": "14 dnů",
     "default_due_preset_month": "Měsíc",
     "default_due_preset_custom": "Vlastní…",
+    "default_due_custom_months_suffix": "měsíců",
     "default_due_custom_days_suffix": "dnů",
     "default_due_month_hint": "Kalendářní měsíc - 1. 2. → 1. 3., 31. 1. → 28. 2. (ne pevných 30 dnů).",
     "default_prices_include_vat": "Nové faktury s cenami včetně DPH",
@@ -27119,6 +27122,7 @@
       "email_profiles": "Odesílací profily firmy",
       "email_templates": "E-mailové šablony firmy",
       "branding": "Branding firmy",
+      "invoice_defaults": "Výchozí hodnoty dokladů",
       "payment_qr": "Platební QR firmy",
       "signing_profiles": "Firemní podpisové profily a PDF podpisy"
     },

@@ -88,6 +88,8 @@ describe('AppLayout company settings navigation', () => {
     expect(renderNavigation('accountant', base).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.branding': true }).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.payment_qr': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('accountant', { ...base, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('accountant', { ...base, 'settings.company.write': true, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.email_templates': true }).find(portal).exists()).toBe(true)
   })
 
@@ -95,6 +97,7 @@ describe('AppLayout company settings navigation', () => {
     const none = Object.fromEntries(OPERATIONAL_SETTINGS_KEYS.map(key => [key, false]))
     expect(renderNavigation('client', none).find(portal).exists()).toBe(false)
     expect(renderNavigation('client', { ...none, 'settings.branding': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('client', { ...none, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(true)
   })
 })
 
