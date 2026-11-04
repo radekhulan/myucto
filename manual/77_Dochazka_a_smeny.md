@@ -61,9 +61,9 @@ odpracovaný čas, nepřítomnosti a schválení měsíce všem.
 4. U směny s pracovní pohotovostí vyplňte **Pohotovost (min)**.
 5. Porovnejte docházku s absencemi, svátky a změnami vztahu.
 6. Klikněte na **Schválit měsíc všem**. Dialog hromadného schválení předvyplní
-   souhrn pro každý vztah. Pokud má pracovní poměr odpracováno méně než fond
-   a nemá zapsanou nepřítomnost, dialog to ukáže a nabídne **Doplnit chybějící
-   pracovní dny podle kalendáře**. Vztahy s nepřítomností schválíte tlačítkem
+   souhrn pro každý vztah. Pokud pracovnímu poměru nepokryje fond odpracovaná
+   doba spolu se svátky v pracovní dny, dialog to ukáže a nabídne **Doplnit
+   chybějící pracovní dny podle kalendáře**. Vztahy s nepřítomností schválíte tlačítkem
    **Schválit jednotlivě** přímo z dialogu. Jednotlivý měsíc schválíte také
    tlačítkem **Schválit měsíc** u řádku.
 7. V dialogu **Potvrzení pracovního souhrnu JMHZ** zkontrolujte předvyplněné

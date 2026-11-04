@@ -1759,6 +1759,32 @@ describe('TimeAttendance — měsíční mřížka', () => {
   })
 
   /**
+   * Svátek v jinak pracovní den je neodpracovaná hodina, která se do fondu
+   * počítá (10268 + 10275 = 10260). Hromadné schválení dřív porovnávalo jen
+   * odpracovanou dobu s fondem a u měsíce se svátkem varovalo, že práce fond
+   * nepokrývá.
+   */
+  it('hromadné schválení nevaruje pod fondem, když chybějící hodiny pokryje svátek', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    const [holidayMonth, shortMonth] = page.items as any[]
+    holidayMonth.summary = { ...holidayMonth.summary, fund_minutes: 10_080 }
+    holidayMonth.jmhz_work_summary.preview.holiday_millihours = 8_000
+    shortMonth.summary = { ...shortMonth.summary, fund_minutes: 10_080 }
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await flushPromises()
+
+    const warning = wrapper.get('[data-test="bulk-approve-under-fund"]')
+    expect(warning.text()).not.toContain('Osoba A')
+    expect(warning.text()).toContain('Osoba B')
+    wrapper.unmount()
+  })
+
+  /**
    * X-18: hromadné schválení posílalo `approveTimeMonth` BEZ souhrnu JMHZ,
    * zatímco schválení jednoho vztahu šlo přes modal s dvanácti poli. Měsíc se
    * tak dal schválit dvěma různě úplnými způsoby. Souhrn se teď skládá i

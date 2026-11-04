@@ -59,6 +59,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   formatPayrollMinutes,
   payrollIsoToWallTime,
+  payrollMonthCoversFund,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -1622,15 +1623,15 @@ function approveAllOpen() {
 }
 
 /*
- * Pracovní poměr, kde zapsaná práce nepokrývá fond a není zapsaná ani
- * nepřítomnost. Hromadné schválení by do hlášení ČSSZ poslalo méně
- * odpracovaných hodin bez vysvětlení. Neblokuje se: dialog to ukáže
- * a nabídne doplnit chybějící dny podle kalendáře jedním klikem.
+ * Pracovní poměr, kde zapsaná práce spolu s nepřítomnostmi a svátky
+ * nepokrývá fond (payrollMonthCoversFund). Hromadné schválení by do hlášení
+ * ČSSZ poslalo méně odpracovaných hodin bez vysvětlení. Neblokuje se: dialog
+ * to ukáže a nabídne doplnit chybějící dny podle kalendáře jedním klikem.
  * Dohody (DPP, DPČ) sem nepatří - jejich „fond" je jen sjednaný rozsah.
  */
 const bulkUnderFund = computed(() => bulkCandidates.value.filter(item =>
   item.employment.relation_type === 'employment'
-  && item.summary.actual_minutes < item.summary.fund_minutes))
+  && !payrollMonthCoversFund(item)))
 
 async function fillUnderFundAndReturn() {
   const ids = new Set(bulkUnderFund.value.map(item => item.employment.id))
