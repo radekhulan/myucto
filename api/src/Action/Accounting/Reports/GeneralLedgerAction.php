@@ -115,8 +115,14 @@ final class GeneralLedgerAction
                     $data['supplier_name'] = $supplier['name'];
                     $data['supplier_ic'] = $supplier['ic'];
                     $data['after_closing'] = $params['after_closing'];
-                    $data['events'] = $this->details->events($supplierId, $data, $params['filters'], $params['after_closing']);
-                    return [$data, ['bytes' => $this->detailPdf->render($data), 'filename' => 'hlavni-kniha-doklady-' . $periodLabel . '.pdf', 'mime' => 'application/pdf']];
+                    // Ve snímku se řádky jen načtou (a ověří proti souhrnu) do dočasného souboru.
+                    // Sazba PDF trvá desítky sekund a nesmí po tu dobu držet transakci se zámkem
+                    // metadat deníku: migrace za provozu by na ni čekala a za ní celá aplikace.
+                    $spool = new \SplTempFileObject(2 * 1024 * 1024);
+                    foreach ($this->details->events($supplierId, $data, $params['filters'], $params['after_closing']) as $event) {
+                        $spool->fwrite(json_encode($event, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION) . "\n");
+                    }
+                    return [$data, ['spool' => $spool, 'filename' => 'hlavni-kniha-doklady-' . $periodLabel . '.pdf', 'mime' => 'application/pdf']];
                 }
                 return [$data, $format === 'pdf'
                     ? [
@@ -126,6 +132,11 @@ final class GeneralLedgerAction
                     ]
                     : $this->xlsx->generalLedger($data)];
             });
+            if (isset($out['spool'])) {
+                $data['events'] = self::replayEvents($out['spool']);
+                $out['bytes'] = $this->detailPdf->render($data);
+                unset($out['spool']);
+            }
         } catch (ReportException $e) {
             if ($e->errorCode === 'ledger_detail_mismatch') {
                 $this->log->error('Rozpis hlavní knihy nesouhlasí se souhrnem.', ['supplier_id' => $supplierId] + $e->context);
@@ -147,6 +158,21 @@ final class GeneralLedgerAction
             ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
             ->withHeader('Content-Length', (string) strlen($out['bytes']))
             ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Události rozpisu zpět z dočasného souboru, po jedné, mimo transakci snímku.
+     *
+     * @return \Generator<int,array<string,mixed>>
+     */
+    private static function replayEvents(\SplTempFileObject $spool): \Generator
+    {
+        $spool->rewind();
+        while (!$spool->eof()) {
+            $line = $spool->fgets();
+            if ($line === '' || $line === "\n") continue;
+            yield json_decode($line, true, 64, JSON_THROW_ON_ERROR);
+        }
     }
 
     /**
