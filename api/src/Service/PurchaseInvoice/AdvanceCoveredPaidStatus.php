@@ -30,6 +30,10 @@ use PDO;
  *      storno pokladny), vrací se konečná faktura do stavu před úhradou (zaúčtovaná →
  *      `booked`, jinak `received`), stejně jako po zrušení vlastní úhrady.
  *
+ * Uhradí-li se záloha až po propojení s konečnou fakturou, doplní se nejdřív konečné
+ * faktuře uhrazená záloha ({@see LinkedAdvanceAmount}); pravidlo 2 pak vidí její
+ * skutečnou zbývající částku.
+ *
  * Čerpání zálohy po dvojicích (`purchase_advance_deductions`, převod nebo Vyrovnat
  * v saldokontu) sem záměrně nepatří: nemění `advance_paid_amount` ani `amount_to_pay`
  * konečné faktury, takže úhradu faktury nekryje. Je to účetní přiřazení odpočtu na 314;
@@ -65,6 +69,10 @@ final class AdvanceCoveredPaidStatus
             $doc = $this->document($supplierId, $id);
             if ($doc === null) {
                 continue;
+            }
+            // Záloha uhrazená až po propojení: konečná faktura ji dosud neodečítala.
+            if (in_array((string) $doc['document_kind'], ['advance', 'tax_document'], true)) {
+                (new LinkedAdvanceAmount($this->db))->fillFinalsOfAdvance($supplierId, $id);
             }
             if ((string) $doc['document_kind'] === 'advance') {
                 $this->syncFinalsOfAdvance($supplierId, $id);

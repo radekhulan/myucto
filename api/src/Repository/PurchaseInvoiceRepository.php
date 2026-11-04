@@ -2848,14 +2848,8 @@ final class PurchaseInvoiceRepository
             throw new \RuntimeException('Záloha i finální faktura musí být ve stejné měně.');
         }
 
-        $paid = $this->paidAdvanceAmount($advanceId, $supplierId);
-        $paidInInvoiceCurrency = (float) ($advance['paid_amount_invoice_ccy'] ?? 0);
-        $advanceBase = $paidInInvoiceCurrency > 0.0
-            ? $paidInInvoiceCurrency
-            : ($paid > 0.0
-                ? $paid
-                : (($advance['status'] ?? '') === 'paid' ? (float) $advance['total_with_vat'] : 0.0));
-        $advanceTotal = min($advanceBase, (float) $final['total_with_vat']);
+        $advanceTotal = (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($this->db))
+            ->forFinal($supplierId, $advance, (float) $final['total_with_vat']);
         $setAdvancePaid = ((float) ($final['advance_paid_amount'] ?? 0)) == 0.0;
 
         $sql = 'UPDATE purchase_invoices
@@ -2868,37 +2862,10 @@ final class PurchaseInvoiceRepository
         $this->db->pdo()->prepare($sql)->execute($params);
     }
 
+    /** Viz {@see \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount::paidAdvanceAmount()}. */
     private function paidAdvanceAmount(int $advanceId, int $supplierId): float
     {
-        $bank = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(pm.amount), 0)
-               FROM payment_matches pm
-               JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
-               JOIN bank_statements bs ON bs.id = bt.statement_id
-               JOIN purchase_invoices pi ON pi.id = pm.purchase_invoice_id
-               JOIN currencies cur ON cur.id = pi.currency_id
-               JOIN journal_entries je
-                 ON je.supplier_id = pm.supplier_id AND je.source_type = 'bank'
-                AND je.source_id = pm.bank_transaction_id AND je.reversed_by IS NULL
-              WHERE pm.supplier_id = ? AND pm.purchase_invoice_id = ?
-                AND UPPER(COALESCE(bt.currency, bs.currency, 'CZK')) = cur.code"
-        );
-        $bank->execute([$supplierId, $advanceId]);
-
-        $cash = $this->db->pdo()->prepare(
-            "SELECT COALESCE(SUM(cd.total_amount), 0)
-               FROM cash_documents cd
-               JOIN purchase_invoices pi ON pi.id = cd.purchase_invoice_id
-               JOIN currencies cur ON cur.id = pi.currency_id
-               JOIN journal_entries je
-                 ON je.supplier_id = cd.supplier_id AND je.source_type = 'cash'
-                AND je.source_id = cd.id AND je.reversed_by IS NULL
-              WHERE cd.supplier_id = ? AND cd.purchase_invoice_id = ?
-                AND UPPER(cd.currency_code) = cur.code"
-        );
-        $cash->execute([$supplierId, $advanceId]);
-
-        return round((float) $bank->fetchColumn() + (float) $cash->fetchColumn(), 2);
+        return (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($this->db))->paidAdvanceAmount($advanceId, $supplierId);
     }
 
     /**
