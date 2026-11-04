@@ -80,6 +80,14 @@ uložené ve vámi zvolené složce.
 > Firefox a Safari dialog Uložit jako nepodporují, PDF se tam stáhne do výchozí
 > složky prohlížeče. Totéž platí u přijaté faktury.
 
+Samostatný soubor **ISDOC** stáhnete na detailu vydané faktury přes
+**Další akce → Pokročilé → Stáhnout ISDOC**. Není potřeba posílat fakturu e-mailem.
+Akce je dostupná i uživateli s právem čtení faktur a nezávisí na nastavení ISDOC
+příloh e-mailů ani veřejné web faktury. Koncepty a stornované faktury ji nenabízejí;
+u nájemních a zálohových kalendářů ji najdete na jednotlivých vydaných dokladech splátek.
+Soubor má název `Faktura-<číslo faktury>.isdoc`; pokud je zapnutý podpis výstupu
+**Vydaná faktura**, export použije stejný podpisový profil.
+
 ## 16.5 Krok za krokem: Zaevidovat platbu nebo částečnou úhradu
 
 1. Otevřete detail faktury.
