@@ -661,6 +661,11 @@ final readonly class PayrollRegistrationEventService
                 $context,
                 $relation,
             );
+            $this->assertEmploymentStatusCodeKnown(
+                $interaction === 'change' ? 3 : 4,
+                $effectiveOn,
+                $data,
+            );
         }
         if ($interaction === 'correction') {
             $data = $this->correctedUnemployment(
@@ -2143,7 +2148,7 @@ final readonly class PayrollRegistrationEventService
                 'contact_address' => $this->contactAddress($value),
                 'permanent_address' => $this->permanentAddress($value),
                 'foreign_worker' => $this->foreignWorkerChange($value),
-                'employment' => $this->employmentChange($value, $effectiveOn),
+                'employment' => $this->employmentChange($value),
                 'identity' => $this->identityChange($value),
                 'pension' => $this->pensionChange($value),
                 'facts' => $this->factsChange($value),
@@ -3184,12 +3189,48 @@ final readonly class PayrollRegistrationEventService
     }
 
     /**
+     * Kód postavení v zaměstnání (NKPZ) ve změně A3 nebo opravě A4 musí být
+     * v číselníku ročníku, kterým věta odejde. Ročník volí
+     * {@see PayrollRegistrationSchemaCatalog::versionFor()} nad finálními daty
+     * události, tedy až s datem skončení 10224 z withRegisteredEnd(): změna
+     * vyhotovená od 23. 12. 2026 u vztahu skončeného v roce 2026 jde jako
+     * REGZEC25 a kód se ověří proti číselníku 2026, ne 2027. Bez data
+     * skončení rozhoduje den vyhotovení (odpověď ČSSZ 13).
+     *
+     * @param array<string,mixed> $data
+     */
+    private function assertEmploymentStatusCodeKnown(
+        int $actionCode,
+        string $effectiveOn,
+        array $data,
+    ): void {
+        $code = $data['delta']['employment']['employment_status_code'] ?? null;
+        if ($code === null) {
+            return;
+        }
+        $code = (string) $code;
+        $version = PayrollRegistrationSchemaCatalog::versionFor(
+            $actionCode,
+            $effectiveOn,
+            $data,
+            PayrollSubmissionCalendar::today($this->clock->now()),
+        );
+        if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code, $version)) {
+            throw new \InvalidArgumentException($this->say(
+                'employment.employment_status_code',
+                'musí být čtyřmístný kód z číselníku Klasifikace postavení '
+                    . "v zaměstnání (NKPZ), teď je „{$code}“.",
+            ));
+        }
+    }
+
+    /**
      * Pracovní údaje změny A3 (postavení, režim, místo výkonu, profese…).
      * Hodnoty se kontrolují stejně přísně jako v profilu A1.
      *
      * @return array<string,string|bool>
      */
-    private function employmentChange(mixed $value, string $effectiveOn): array
+    private function employmentChange(mixed $value): array
     {
         $raw = $this->object($value, 'employment');
         $fields = PayrollRegistrationChangeDeltaPlanner::EMPLOYMENT_FIELDS;
@@ -3215,26 +3256,8 @@ final readonly class PayrollRegistrationEventService
                 default => $this->requiredText($item, $path, 100),
             };
         }
-        if (isset($result['employment_status_code'])) {
-            $code = (string) $result['employment_status_code'];
-            // Číselník podle ročníku věty, tedy podle téže volby jako schéma
-            // (PayrollRegistrationSchemaCatalog::versionFor). U A3 bez data
-            // skončení rozhoduje podle odpovědi ČSSZ 13 den vyhotovení, ne den
-            // platnosti změny; datum skončení doplní až withRegisteredEnd().
-            $version = PayrollRegistrationSchemaCatalog::versionFor(
-                3,
-                $effectiveOn,
-                null,
-                PayrollSubmissionCalendar::today($this->clock->now()),
-            );
-            if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($code, $version)) {
-                throw new \InvalidArgumentException($this->say(
-                    'employment.employment_status_code',
-                    'musí být čtyřmístný kód z číselníku Klasifikace postavení '
-                        . "v zaměstnání (NKPZ), teď je „{$code}“.",
-                ));
-            }
-        }
+        // Kód NKPZ se proti číselníku ověří až nad finálními daty, viz
+        // assertEmploymentStatusCodeKnown().
         if (isset($result['profession_code'])
             && !PayrollRegistrationProfessionCode::isRegistrable((string) $result['profession_code'])
         ) {
