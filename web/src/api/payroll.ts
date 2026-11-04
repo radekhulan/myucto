@@ -1492,6 +1492,8 @@ export interface PayrollJmhzWorkSummaryPreview {
    * nejde vyjádřit v celých tisícinách hodiny a měsíc nejde schválit.
    */
   holiday_millihours?: number | null
+  /** Svátky uvnitř nepřítomnosti, za kterou se mzda krátí (jen do 10275). */
+  holiday_unpaid_millihours?: number | null
   requires_unworked_hours_followup: boolean
   /** Druhy nepřítomnosti evidované v měsíci, seřazené abecedně. */
   absence_types: string[]

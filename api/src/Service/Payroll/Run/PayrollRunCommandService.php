@@ -862,6 +862,8 @@ final class PayrollRunCommandService
                 reason: $reason,
                 correctionRevision: $refreshAsCorrection,
                 staleSourceCount: $staleSourceCount,
+                hasApprovedRevision: $command === PayrollRunCommand::CANCEL
+                    && $this->runs->latestApprovedRevision($supplierId, $runId) !== null,
             );
             $transition = $this->workflow->transition($from, $command, $context);
 
@@ -904,8 +906,8 @@ final class PayrollRunCommandService
                 if ($reopenAsCorrection || $refreshAsCorrection) {
                     $this->runs->unlockInputsForCorrection(
                         $supplierId,
+                        $runId,
                         (string) $run['period_start'],
-                        $run['office_id'] === null ? null : (int) $run['office_id'],
                     );
                 } else {
                     $this->runs->lockApprovedInputs(
@@ -1189,8 +1191,8 @@ final class PayrollRunCommandService
                     if ($this->runs->latestApprovedRevision($supplierId, $runId) === null) {
                         $this->runs->unlockInputsForCorrection(
                             $supplierId,
+                            $runId,
                             (string) $run['period_start'],
-                            $run['office_id'] === null ? null : (int) $run['office_id'],
                         );
                     }
                     $revision = $revision === null

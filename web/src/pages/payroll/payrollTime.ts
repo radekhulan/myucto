@@ -115,3 +115,39 @@ export function payrollWallTimeToIso(value: string, timezone: string): string {
   const offset = `${sign}${String(Math.floor(absoluteOffset / 60)).padStart(2, '0')}:${String(absoluteOffset % 60).padStart(2, '0')}`
   return `${value}:00${offset}`
 }
+
+interface PayrollFundCoverageSource {
+  summary: { fund_minutes: number; actual_minutes: number }
+  jmhz_work_summary?: {
+    preview: {
+      suggestions: { unworked_total_hours: string | null }
+      holiday_millihours?: number | null
+      holiday_unpaid_millihours?: number | null
+    } | null
+  } | null
+}
+
+function hoursToMinutes(value: string | null | undefined): number {
+  const hours = Number(value ?? '')
+  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 60) : 0
+}
+
+function millihoursToMinutes(value: number | null | undefined): number {
+  return typeof value === 'number' && value > 0 ? Math.round(value * 60 / 1000) : 0
+}
+
+/**
+ * Pokrývá evidence měsíce fond pracovní doby? Stejné pravidlo jako souhrn
+ * měsíce pro JMHZ (`PayrollJmhzWorkMonthSummaryBuilder`): odpracované hodiny
+ * (10268) a neodpracované hodiny celkem (10275, tedy nepřítomnosti a svátky
+ * v jinak pracovní dny) dávají dohromady sjednaný fond (10260). Svátek,
+ * dovolená, nemoc ani překážka proto nejsou „chybějící" hodiny.
+ */
+export function payrollMonthCoversFund(item: PayrollFundCoverageSource): boolean {
+  const preview = item.jmhz_work_summary?.preview ?? null
+  const unworked = hoursToMinutes(preview?.suggestions.unworked_total_hours)
+    + millihoursToMinutes(preview?.holiday_millihours)
+    + millihoursToMinutes(preview?.holiday_unpaid_millihours)
+
+  return item.summary.actual_minutes + unworked >= item.summary.fund_minutes
+}

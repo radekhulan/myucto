@@ -196,13 +196,16 @@ final class PayrollRunWorkflow
             throw new \DomainException('Označení za uhrazené vyžaduje platební dávku.');
         }
         /*
-         * Důvod se vyžaduje jen u opravy SCHVÁLENÉHO běhu. Zrušení jde jen
-         * u neschváleného běhu a vrací ho „Začít znovu", otevření nové revize
+         * Důvod se vyžaduje jen u opravy SCHVÁLENÉHO běhu: u vyžádání opravy
+         * a u zrušení běhu, který má schválenou revizi (opravná revize nad
+         * schváleným, zaúčtovaným nebo uzavřeným během). Zrušení neschváleného
+         * běhu vrací „Začít znovu" a důvod nechce, otevření nové revize
          * navazuje na zrušení nebo na vyžádanou opravu, která důvod už nese.
          * Dřív se účetní na důvod ptala obrazovka dvakrát za sebou (zrušit
          * a hned začít znovu), aniž by z toho cokoli vyplývalo.
          */
-        if ($command === PayrollRunCommand::REQUEST_CORRECTION
+        if (($command === PayrollRunCommand::REQUEST_CORRECTION
+                || ($command === PayrollRunCommand::CANCEL && $context->hasApprovedRevision))
             && trim((string) $context->reason) === ''
         ) {
             throw new \DomainException('Tento přechod vyžaduje uvedení důvodu.');

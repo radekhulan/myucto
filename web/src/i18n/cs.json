@@ -3699,6 +3699,7 @@
       "reason_prompt": "Uveďte důvod změny:",
       "reason_prompt_optional": "Poznámka do historie běhu (nepovinná)",
       "reason_required": "Důvod je povinný.",
+      "cancel_correction_hint": "Zruší se rozpracovaná opravná revize. Schválený výsledek běhu zůstává platný a opravu kdykoli otevřete znovu tlačítkem „Začít znovu“. Uveďte důvod, zapíše se do historie běhu.",
       "cancel_hint": "Zruší se rozpracovaný výpočet neschváleného běhu. Docházka, mzdové vstupy ani složky se nemažou a běh kdykoli vrátíte tlačítkem „Začít znovu“.",
       "continue_steps": {
         "title": "Jak pokračovat",
@@ -13637,8 +13638,9 @@
       "registration_regzec25_change_stale": "Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026 ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27. Připravte ho znovu.",
       "registration_reprepare_not_needed": "Tohle podání se znovu připravovat nemusí: není to připravená změna nebo oprava, jejíž formát by ČSSZ dnes odmítla.",
       "registration_reprepare_not_applicable": "Znovu se připravuje jen změna nebo oprava ze schválené události.",
+      "registration_termination_not_sent": "K vztahu je schválená odhláška, kterou ČSSZ zatím nemá (není odeslaná, nebo ji zamítla). Změnu i opravu skončeného vztahu podejte až po ní: nejdřív odešlete odhlášku a po jejím přijetí akci zopakujte.",
       "registration_registered_end_mismatch": "Datum skončení na kartě pracovního vztahu se liší od data v odeslané odhlášce. Změna i oprava skončeného vztahu musí nést datum, které vede ČSSZ. Opravte datum na kartě vztahu.",
-      "registration_a4_termination_source_missing": "Oprava u vztahu, který u ČSSZ skončil, nese i údaje z odhlášky (úmrtí, podklady pro podporu v nezaměstnanosti). Schválenou odhlášku k tomuto vztahu aplikace nenašla: nejdřív schvalte odhlášku, nebo opravu vyřiďte s ČSSZ mimo aplikaci.",
+      "registration_a4_termination_source_missing": "Oprava u vztahu, který u ČSSZ skončil, nese i údaje z odhlášky (úmrtí, podklady pro podporu v nezaměstnanosti). Odeslanou odhlášku k tomuto vztahu aplikace nenašla: nejdřív schvalte a odešlete odhlášku, nebo opravu vyřiďte s ČSSZ mimo aplikaci.",
       "registration_a4_termination_source_variant_mismatch": "Schválená odhláška patří k jinému druhu činnosti než oprava. Zkontrolujte druh činnosti ve sjednaných podmínkách vztahu.",
       "registration_a4_termination_source_incomplete": "Schválená odhláška nemá úplné podklady pro podporu v nezaměstnanosti. Schvalte odhlášku znovu s vyplněnými podklady.",
       "registration_a4_unemployment_forbidden": "Podklady pro podporu v nezaměstnanosti jde v opravě poslat jen u běžného pracovního vztahu, který už u ČSSZ skončil."

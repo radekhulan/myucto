@@ -31,11 +31,14 @@ final class PayrollRegistrationRegisteredEnd
      * Datum skončení, které vede ČSSZ. 10224 musí být s ním SHODNÉ, jinak jde
      * podání k ručnímu zpracování (ČSSZ, odpověď 16. 4. 2026, GitHub MPSV
      * #380). Zdrojem je proto odeslaná odhláška A2; datum skončení z karty
-     * vztahu je jen záloha, když žádná odhláška neodešla (vztah odhlášený
-     * mimo aplikaci). Ze zálohy se bere jen datum, které už nastalo (odhláška
-     * má lhůtu osm dnů, stejně to bere dohlášení
-     * {@see PayrollRegistrationProfileCompletion::delta()}). Shodu obou
-     * zdrojů hlídá {@see PayrollRegistrationEventService}.
+     * vztahu je jen záloha pro vztah, ke kterému v aplikaci žádná odhláška
+     * není (vztah odhlášený mimo aplikaci). Odhláška schválená v aplikaci,
+     * ale u ČSSZ chybějící (neodeslaná nebo zamítnutá), zálohu vylučuje:
+     * ČSSZ vztah vede jako trvající a změna s 10224 by šla k ručnímu
+     * zpracování, viz {@see self::awaitsSentTermination()}. Ze zálohy se bere
+     * jen datum, které už nastalo (odhláška má lhůtu osm dnů, stejně to bere
+     * dohlášení {@see PayrollRegistrationProfileCompletion::delta()}). Shodu
+     * obou zdrojů hlídá {@see PayrollRegistrationEventService}.
      */
     public static function endOn(
         int $actionCode,
@@ -43,6 +46,7 @@ final class PayrollRegistrationRegisteredEnd
         ?string $sentTerminationEndOn,
         ?string $cardEndOn,
         string $today,
+        bool $terminationInApp = false,
     ): ?string {
         if (!self::allowsEndOn($actionCode, $variant)) {
             return null;
@@ -50,11 +54,30 @@ final class PayrollRegistrationRegisteredEnd
         if ($sentTerminationEndOn !== null && $sentTerminationEndOn !== '') {
             return $sentTerminationEndOn;
         }
+        if ($terminationInApp) {
+            return null;
+        }
         if ($cardEndOn === null || $cardEndOn === '' || $cardEndOn > $today) {
             return null;
         }
 
         return $cardEndOn;
+    }
+
+    /**
+     * Musí změna nebo oprava počkat na odeslání odhlášky? Ano, když varianta
+     * 10224 nese a v aplikaci k vztahu je odhláška A2, kterou ČSSZ nemá
+     * (schválená či připravená a neodeslaná, nebo zamítnutá). Datum skončení
+     * by pak nebylo to, které vede ČSSZ, a A4 by převzala podklady pro
+     * podporu z odhlášky, kterou ČSSZ nezná.
+     */
+    public static function awaitsSentTermination(
+        int $actionCode,
+        string $variant,
+        bool $terminationSent,
+        bool $terminationInApp,
+    ): bool {
+        return self::allowsEndOn($actionCode, $variant) && !$terminationSent && $terminationInApp;
     }
 
     /** Smí změna nebo oprava této varianty nést 10224 (EDV, ID 10224). */

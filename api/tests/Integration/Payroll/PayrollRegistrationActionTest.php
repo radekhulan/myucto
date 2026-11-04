@@ -2068,6 +2068,56 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringContainsString(' to="2026-11-30"', $ended2026);
     }
 
+    /**
+     * Číselník NKPZ podle ročníku, kterým věta odejde. Změna vyhotovená
+     * 28. 12. 2026 u vztahu skončeného 30. 11. 2026 nese 10224 a jde jako
+     * REGZEC25, takže kód postavení se ověřuje proti slovníku 2026 (list
+     * 2119), ne proti číselníku ČSÚ pro rok 2027 (2219). Dřív se ročník volil
+     * bez data skončení, tedy podle dne vyhotovení.
+     */
+    public function testA3OfEmploymentEnded2026ValidatesStatusCodeAgainstRegzec25Codebook(): void
+    {
+        $xml = $this->preparedA3Xml(
+            '2026-11-20',
+            '2026-12-28',
+            'synthetic-a3-nkpz-2026',
+            '2026-11-30',
+            ['employment' => ['employment_status_code' => '2119']],
+        );
+
+        self::assertStringContainsString('xmlns="' . PayrollRegistrationSchemaCatalog::NS_REGZEC_2026 . '"', $xml);
+        self::assertStringContainsString(' to="2026-11-30"', $xml);
+        self::assertStringContainsString('relat="2119"', $xml);
+    }
+
+    public function testA3OfEmploymentEnded2026RejectsStatusCodeOnlyIn2027Codebook(): void
+    {
+        self::$todayOverride = '2026-12-28';
+        $this->action = $this->buildAction($this->container, true);
+        $this->employmentActiveSince('2026-03-01');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2026-11-30", status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => '2026-11-20',
+                'source_reference' => 'synthetic-a3-nkpz-2027-only',
+                'changes' => ['employment' => ['employment_status_code' => '2219']],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertGreaterThanOrEqual(400, $response->getStatusCode(), (string) $response->getBody());
+        self::assertLessThan(500, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString('NKPZ', (string) $response->getBody());
+    }
+
     public function testA3OfEmploymentEndedIn2027CarriesEndDateAndIsRegzec27(): void
     {
         $ended2027 = $this->preparedA3Xml(
@@ -2142,6 +2192,62 @@ final class PayrollRegistrationActionTest extends TestCase
             $this->json($response)['error']['code'],
         );
         self::assertStringContainsString('odhlášku', $this->json($response)['error']['message']);
+    }
+
+    /**
+     * Odhláška schválená a připravená, ale neodeslaná: ČSSZ vede vztah jako
+     * trvající. Změna A3 by s datem skončení z karty šla k ručnímu zpracování
+     * OSSZ, proto se zastaví, dokud odhláška neodejde.
+     */
+    public function testChangeOfEndedEmploymentWaitsForUnsentA2(): void
+    {
+        $this->preparedTermination('2026-10-31', '2026-11-02');
+        self::$todayOverride = '2026-11-04';
+        $this->action = $this->buildAction($this->container, true);
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => '2026-10-20',
+                'source_reference' => 'synthetic-a3-unsent-a2',
+                'changes' => ['title_prefix' => 'Mgr.'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_termination_not_sent', $this->json($response)['error']['code']);
+        self::assertStringContainsString('odešlete', $this->json($response)['error']['message']);
+    }
+
+    /**
+     * Zamítnutou odhlášku ČSSZ nemá: oprava A4 nesmí převzít její datum
+     * skončení ani podklady pro podporu a zastaví se, dokud odhláška
+     * znovu neodejde.
+     */
+    public function testCorrectionOfEndedEmploymentWaitsForRejectedA2(): void
+    {
+        $source = $this->preparedA3('2026-10-10', '2026-10-15', 'synthetic-a4-rejected-a2-source');
+        $this->markRegistrationAccepted($source['submission_id']);
+        $termination = $this->preparedTermination('2026-10-31', '2026-11-02', false);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "rejected", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP()
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $termination]);
+
+        $response = $this->approveA4(
+            $source['submission_id'],
+            '2026-10-15',
+            '2026-11-04',
+            'synthetic-a4-rejected-a2',
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('registration_termination_not_sent', $this->json($response)['error']['code']);
     }
 
     /**
@@ -5987,14 +6093,16 @@ final class PayrollRegistrationActionTest extends TestCase
      * Schválí a připraví změnu titulu (A3) v testovacím prostředí k danému
      * dni a vrátí zmrazené XML. S datem skončení je vztah už ukončený.
      */
+    /** @param array<string,mixed> $changes */
     private function preparedA3Xml(
         string $effectiveOn,
         string $today,
         string $reference,
         ?string $endOn = null,
+        array $changes = ['title_prefix' => 'Mgr.'],
     ): string {
         return $this->storedArtifactXml(
-            $this->preparedA3($effectiveOn, $today, $reference, $endOn)['submission_id'],
+            $this->preparedA3($effectiveOn, $today, $reference, $endOn, $changes)['submission_id'],
         );
     }
 
@@ -6002,6 +6110,7 @@ final class PayrollRegistrationActionTest extends TestCase
      * Totéž co {@see self::preparedA3Xml()}, vrací ale čísla události
      * a podání.
      *
+     * @param array<string,mixed> $changes
      * @return array{event_id:int,submission_id:int}
      */
     private function preparedA3(
@@ -6009,6 +6118,7 @@ final class PayrollRegistrationActionTest extends TestCase
         string $today,
         string $reference,
         ?string $endOn = null,
+        array $changes = ['title_prefix' => 'Mgr.'],
     ): array {
         self::$todayOverride = $today;
         $this->action = $this->buildAction($this->container, true);
@@ -6026,7 +6136,7 @@ final class PayrollRegistrationActionTest extends TestCase
                 'interaction' => 'change',
                 'effective_on' => $effectiveOn,
                 'source_reference' => $reference,
-                'changes' => ['title_prefix' => 'Mgr.'],
+                'changes' => $changes,
             ]),
             new Response(),
             ['employmentId' => (string) $this->employmentId],
@@ -6055,14 +6165,31 @@ final class PayrollRegistrationActionTest extends TestCase
      */
     private function acceptedTermination(string $endOn, string $a2Day): int
     {
+        $submissionId = $this->preparedTermination($endOn, $a2Day);
+        $this->markRegistrationAccepted($submissionId);
+
+        return $submissionId;
+    }
+
+    /**
+     * Totéž co {@see self::acceptedTermination()}, odhláška ale zůstane jen
+     * připravená a neodeslaná. Vrací číslo připraveného podání. Bez
+     * `$seed` navazuje na vztah, který už připravil jiný pomocník.
+     */
+    private function preparedTermination(string $endOn, string $a2Day, bool $seed = true): int
+    {
         self::$todayOverride = $a2Day;
         $this->action = $this->buildAction($this->container, true);
-        $this->employmentActiveSince('2026-03-01');
+        if ($seed) {
+            $this->employmentActiveSince('2026-03-01');
+        }
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments SET end_date = ?, status = "ended"
               WHERE supplier_id = ? AND id = ?',
         )->execute([$endOn, $this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        if ($seed) {
+            $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+        }
         $approved = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
                 'environment' => 'test',
@@ -6091,10 +6218,8 @@ final class PayrollRegistrationActionTest extends TestCase
             ['employmentId' => (string) $this->employmentId],
         );
         self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
-        $submissionId = (int) $this->json($prepared)['submission_id'];
-        $this->markRegistrationAccepted($submissionId);
 
-        return $submissionId;
+        return (int) $this->json($prepared)['submission_id'];
     }
 
     /**

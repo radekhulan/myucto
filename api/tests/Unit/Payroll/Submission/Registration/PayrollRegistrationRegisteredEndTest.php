@@ -41,6 +41,36 @@ final class PayrollRegistrationRegisteredEndTest extends TestCase
         ));
     }
 
+    /**
+     * Karta je záloha jen pro vztah bez odhlášky v aplikaci. Odhláška, kterou
+     * ČSSZ nemá (neodeslaná, zamítnutá), zálohu vylučuje a změna i oprava
+     * čeká na její odeslání; s odeslanou odhláškou se 10224 nese dál.
+     */
+    public function testCardFallbackOnlyWithoutAnyA2InTheApplication(): void
+    {
+        self::assertNull(PayrollRegistrationRegisteredEnd::endOn(
+            3,
+            Matrix::VARIANT_OST,
+            null,
+            '2026-10-31',
+            '2026-11-04',
+            true,
+        ));
+        self::assertSame('2026-10-31', PayrollRegistrationRegisteredEnd::endOn(
+            3,
+            Matrix::VARIANT_OST,
+            '2026-10-31',
+            '2026-10-31',
+            '2026-11-04',
+            true,
+        ));
+        self::assertTrue(PayrollRegistrationRegisteredEnd::awaitsSentTermination(3, Matrix::VARIANT_OST, false, true));
+        self::assertTrue(PayrollRegistrationRegisteredEnd::awaitsSentTermination(4, Matrix::VARIANT_10, false, true));
+        self::assertFalse(PayrollRegistrationRegisteredEnd::awaitsSentTermination(4, Matrix::VARIANT_OST, true, true));
+        self::assertFalse(PayrollRegistrationRegisteredEnd::awaitsSentTermination(4, Matrix::VARIANT_OST, false, false));
+        self::assertFalse(PayrollRegistrationRegisteredEnd::awaitsSentTermination(3, Matrix::VARIANT_SPEC, false, true));
+    }
+
     /** EDV 1.4.0.7 i 1.5.0.3, ID 10224: A3-10 a A3-SPEC „/", A4 všechny varianty „N". */
     public function testVariantsThatMayCarryTheEndDate(): void
     {

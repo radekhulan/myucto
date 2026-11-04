@@ -1883,32 +1883,66 @@ final class PayrollRunRepository
     }
 
     /**
-     * Opravná revize vrací uzamčené vstupy období do stavu schválený, aby je šlo
-     * opravit nebo zrušit. Schválený výsledek drží vlastní snímek vstupů, zámek
-     * se obnoví schválením opravné revize ({@see lockApprovedInputs()}).
+     * Opravná revize a zrušení neschváleného běhu vrací uzamčené vstupy období
+     * do stavu schválený, aby je šlo opravit nebo zrušit. Schválený výsledek
+     * drží vlastní snímek vstupů, zámek se obnoví schválením opravné revize
+     * ({@see lockApprovedInputs()}).
+     *
+     * Odemykají se jen vstupy zaměstnání zmrazených v revizích tohoto běhu,
+     * stejně jako je zamyká {@see lockApprovedInputs()}. Za totéž období může
+     * běžet i běh jiného rozsahu účtárny ({@see siblingRunsInOtherOfficeScope()});
+     * vstup, který drží jeho schválená revize nebo rozdělaná revize jeho
+     * nezrušeného běhu, zůstává zamčený. Dřív se odemykalo podle období
+     * a účtárny, takže zrušení běhu bez účtárny odemklo i vstupy schváleného
+     * běhu jiné účtárny.
      */
     public function unlockInputsForCorrection(
         int $supplierId,
+        int $runId,
         string $periodStart,
-        ?int $officeId,
     ): void {
-        $officeSql = $officeId === null ? '1 = 1' : 'employment.office_id = ?';
         $stmt = $this->db->pdo()->prepare(
             'UPDATE payroll_inputs input
-               JOIN payroll_employments employment
-                 ON employment.supplier_id = input.supplier_id
-                AND employment.id = input.employment_id
                 SET input.status = "approved",
                     input.row_version = input.row_version + 1
               WHERE input.supplier_id = ?
                 AND input.period_start = ?
                 AND input.status = "locked"
-                AND ' . $officeSql
+                AND EXISTS (
+                      SELECT 1
+                        FROM payroll_run_revisions own
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = own.supplier_id
+                         AND frozen.revision_id = own.id
+                       WHERE own.supplier_id = input.supplier_id
+                         AND own.run_id = ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                    )
+                AND NOT EXISTS (
+                      SELECT 1
+                        FROM payroll_runs other
+                        JOIN payroll_run_revisions held
+                          ON held.supplier_id = other.supplier_id
+                         AND held.run_id = other.id
+                        JOIN payroll_run_employments frozen
+                          ON frozen.supplier_id = held.supplier_id
+                         AND frozen.revision_id = held.id
+                       WHERE other.supplier_id = input.supplier_id
+                         AND other.period_start = input.period_start
+                         AND other.id <> ?
+                         AND frozen.employment_id = input.employment_id
+                         AND frozen.period_start = input.period_start
+                         AND (held.status = "approved"
+                              OR (other.status <> "cancelled"
+                                  AND held.status IN ("snapshot", "calculated", "reviewed")))
+                    )'
         );
         $stmt->execute([
             $supplierId,
             $periodStart,
-            ...($officeId === null ? [] : [$officeId]),
+            $runId,
+            $runId,
         ]);
     }
 
