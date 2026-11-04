@@ -177,8 +177,38 @@ konečných faktur vhodných k propojení se zálohou a záloh s částkou dostu
 k postupnému čerpání na konceptu faktury. Umožňuje také náhled úroku z prodlení
 k vydané faktuře. Čtení přijatých faktur zpřístupňuje obdobné přehledy záloh
 a vyúčtovacích faktur od dodavatele. Tyto nástroje pouze zobrazují podklady;
-propojení dokladů, čerpání zálohy a vytvoření penalizační faktury se přes ně
-neprovádí.
+zápis provádějí samostatné nástroje se zápisovým tokenem:
+
+| Operace | Nástroje | Potřebné právo zápisu |
+|---|---|---|
+| Propojení nebo odpojení vydané zálohy | `link_invoice_advance`, `unlink_invoice_advance` | Vydané faktury |
+| Čerpání na konceptu nebo jeho odebrání | `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | Vydané faktury |
+| Finální faktura ze zálohy | `create_final_invoice_from_proforma` | Vystavování vydaných faktur (`invoices.issue`) |
+| Daňový doklad k přijaté platbě | `create_payment_tax_document` | Evidence úhrad (`invoices.mark_paid`) |
+| Propojení nebo odpojení přijaté zálohy | `link_purchase_advance`, `unlink_purchase_advance` | Přijaté faktury |
+
+Obecný zápis vydaných faktur nenahrazuje samostatné právo vystavování nebo
+evidence úhrad. Zámky dokladů a uzavřených období platí stejně jako v aplikaci;
+klient je nemůže obejít. Tvorba penalizační faktury se klientským připojením
+nezpřístupňuje.
+
+Při ručním režimu daňového dokladu k platbě postupujte takto:
+
+1. Přijatou platbu zálohy vyhledejte přes `list_invoice_payments` a její koncept
+   dokladu založte přes `create_payment_tax_document`.
+2. Koncept zkontrolujte a vystavte přes `issue_invoice`. Opakované založení
+   k téže platbě vrátí existující doklad.
+3. Zálohu čerpejte na konceptu běžné faktury přes `apply_invoice_advance_drawdown`,
+   nebo založte finální koncept přes `create_final_invoice_from_proforma`.
+   Finální koncept zkontrolujte a samostatně vystavte. Opakované založení finálu
+   vrátí již existující doklad.
+
+Čerpání vyžaduje vystavený daňový doklad k platbě, stejnou protistranu a měnu
+a nevyčerpanou částku zálohy; OSS nepodporuje. Opakované čerpání na stejném
+konceptu nahradí dosavadní odpočet. Odpojení vazby vydané i přijaté faktury
+a odebrání čerpání se provedou až s `confirm: true`. Bez potvrzení asistent
+ukáže náhled. Samotné odpojení vazby ponechá odečtenou zálohu na dokladu;
+odebrání čerpání odstraní i odpočtové řádky konceptu.
 
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
