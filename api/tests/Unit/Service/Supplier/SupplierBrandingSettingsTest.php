@@ -48,6 +48,7 @@ final class SupplierBrandingSettingsTest extends TestCase
         self::assertFalse($response['invoice_pdf_show_line_discount']);
         self::assertFalse($response['invoice_pdf_bank_in_footer']);
         self::assertSame('#3B2D83', $response['email_accent_color']);
+        self::assertSame('#3B2D83', SupplierBrandingSettings::normalizeResponse(['email_accent_color' => ''])['email_accent_color']);
     }
 
     public function testBooleanValuesAndColorAreNormalizedBeforeStorage(): void

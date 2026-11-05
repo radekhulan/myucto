@@ -15521,7 +15521,7 @@
       "in_transit_from_sent": "Sent order",
       "in_transit_from_confirmed": "Only once confirmed by the vendor",
       "pdf_base_qty_label": "Show packaging in base units on the invoice PDF",
-      "pdf_base_qty_hint": "For a line sold in packaging, the invoice also shows the total quantity in the base unit, e.g. \"(total 80 pcs)\"."
+      "pdf_base_qty_hint": "For a line sold in packaging, the invoice also shows the total quantity in the base unit, e.g. \"(total 80 pcs)\". Applies only when stock tracking is enabled."
     },
     "error": {
       "not_found": "Stock document not found.",

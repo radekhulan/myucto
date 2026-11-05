@@ -349,8 +349,8 @@ Vygenerované PDF obsahuje:
    této evidence, převzatý importem nebo zobrazený jako koncept ukáže autora dokladu.
    Doklad vystavený bez přihlášeného uživatele (schválení výkazu klientem přes odkaz
    nebo pravidelná fakturace spuštěná automaticky) ukáže také autora. Stejné jméno vidíte
-   v detailu faktury. U vystavených dokladů se již uložené PDF zachová; změna volby
-   ovlivní nově generované PDF konceptů.
+   v detailu faktury. U už vystavených dokladů se řádek objeví až po přegenerování
+   jejich PDF (například po úpravě dokladu), dříve uložené PDF se samo nemění.
 5. **Bankovní spojení** - číslo účtu nebo IBAN, BIC, banka, variabilní symbol.
    Se zapnutou volbou **Bankovní spojení v patičce PDF faktury** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) se číslo účtu, IBAN, BIC a banka tisknou v patičce každé strany

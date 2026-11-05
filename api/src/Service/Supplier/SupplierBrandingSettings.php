@@ -78,7 +78,7 @@ final class SupplierBrandingSettings
         foreach (self::FIELDS as $field) {
             $row[$field] = match ($field) {
                 'work_report_display_options' => WorkReportDisplayOptions::resolve($row[$field] ?? null),
-                'email_accent_color' => (string) ($row[$field] ?? '#3B2D83'),
+                'email_accent_color' => ((string) ($row[$field] ?? '')) ?: '#3B2D83',
                 'invoice_pdf_show_base_qty' => (bool) ($row[$field] ?? true),
                 default => (bool) ($row[$field] ?? false),
             };

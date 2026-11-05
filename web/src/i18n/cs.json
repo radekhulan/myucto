@@ -15521,7 +15521,7 @@
       "in_transit_from_sent": "Odeslaná objednávka",
       "in_transit_from_confirmed": "Až potvrzená dodavatelem",
       "pdf_base_qty_label": "Na PDF faktury rozepsat balení na základní jednotky",
-      "pdf_base_qty_hint": "U položky prodané v balení se na faktuře doplní i celkové množství v základní jednotce, například „(celkem 80 ks)“."
+      "pdf_base_qty_hint": "U položky prodané v balení se na faktuře doplní i celkové množství v základní jednotce, například „(celkem 80 ks)“. Projeví se jen se zapnutou evidencí skladu."
     },
     "error": {
       "not_found": "Skladový doklad nenalezen.",
