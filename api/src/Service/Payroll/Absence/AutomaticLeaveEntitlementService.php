@@ -286,12 +286,22 @@ final class AutomaticLeaveEntitlementService
         $months = $this->timeMonths($supplierId, (int) $employment['id'], $start, $end);
         $requiredMonths = $this->requiredMonths($start, $end);
         $approvedPeriods = [];
-        foreach ($months as $month) {
+        $manualPeriods = [];
+        foreach ($months as &$month) {
+            if (($month['work_source'] ?? 'entries') === 'manual_summary') {
+                $manualPeriods[(string) $month['period_start']] = true;
+            } else {
+                unset($month['work_source']);
+            }
             if ($month['status'] === 'approved') {
                 $approvedPeriods[(string) $month['period_start']] = true;
             }
         }
+        unset($month);
         $blockers = array_fill_keys($resolved['blockers'], true);
+        if ($manualPeriods !== []) {
+            $blockers['manual_work_source_requires_review'] = true;
+        }
         foreach ($requiredMonths as $period) {
             if (!isset($approvedPeriods[$period])) {
                 $blockers['approved_time_month_missing'] = true;
@@ -313,6 +323,9 @@ final class AutomaticLeaveEntitlementService
         $timeEntries = [];
         foreach ($allTimeEntries as $entry) {
             $period = substr((string) $entry['starts_at_utc'], 0, 7) . '-01';
+            if (isset($manualPeriods[$period])) {
+                continue;
+            }
             if (isset($approvedPeriods[$period])) {
                 $timeEntries[] = $entry;
                 continue;
@@ -487,7 +500,7 @@ final class AutomaticLeaveEntitlementService
             'entitlement_weeks' => $resolved['entitlement_weeks'],
             'allowance_source' => $resolved['allowance_source'],
             'continuous_calendar_days' => $continuousDays,
-            'worked_equivalent_minutes' => $workedEquivalent,
+            'worked_equivalent_minutes' => $manualPeriods === [] ? $workedEquivalent : null,
             'ready' => $blockers === [],
             'blockers' => array_keys($blockers),
             'takeover' => null,
@@ -590,7 +603,7 @@ final class AutomaticLeaveEntitlementService
     private function timeMonths(int $supplierId, int $employmentId, string $from, string $to): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, period_start, status, revision_no, row_version
+            'SELECT id, period_start, status, revision_no, row_version, work_source
                FROM payroll_time_months
               WHERE supplier_id = ? AND employment_id = ?
                 AND period_start BETWEEN ? AND ?

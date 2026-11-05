@@ -180,7 +180,8 @@ final class PayrollRunSnapshotBuilder
             $supplierId, $employmentIds, $periodStart, $periodEnd,
         );
 
-        $workedTimeEvidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $employmentIds, $periodStart);
+        // Nový přesný podklad patří pouze hodinovým vztahům; měsíční otisk zůstává beze změny.
+        $workedTimeEvidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, array_keys($hourlyTerms), $periodStart);
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -732,7 +733,9 @@ final class PayrollRunSnapshotBuilder
                     ],
                 'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
-                'worked_time_evidence' => $workedTimeEvidence[$employmentId] ?? null,
+                ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
+                    'worked_time_evidence' => $workedTimeEvidence[$employmentId] ?? null,
+                ]),
                 'absences' => $absences,
                 'inputs' => $inputs,
                 'risky_savings_evidence' => $riskySavingsEvidence,
@@ -866,6 +869,7 @@ final class PayrollRunSnapshotBuilder
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
      *   worked_time_evidence:array<int,array<string,mixed>>,
+     *   manual_time_month_state:array<int,array<string,mixed>>,
      *   hourly_remuneration_terms:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * }
@@ -916,12 +920,15 @@ final class PayrollRunSnapshotBuilder
             );
         }
 
+        $hourlyTerms = $this->batch->hourlyRemunerationTerms($supplierId, $allEmployments, $periodStart, $periodEnd);
+        $workedTime = new PayrollWorkedTimeEvidence($this->db);
         return [
             'eligible_employment_ids' => $eligible,
-            'worked_time_evidence' => (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $allEmployments, $periodStart),
-            'hourly_remuneration_terms' => $this->batch->hourlyRemunerationTerms(
-                $supplierId, $allEmployments, $periodStart, $periodEnd,
+            'worked_time_evidence' => $workedTime->loadMany($supplierId, array_keys($hourlyTerms), $periodStart),
+            'manual_time_month_state' => $workedTime->manualHistoryStates(
+                $supplierId, array_values(array_diff($allEmployments, array_keys($hourlyTerms))), $periodStart,
             ),
+            'hourly_remuneration_terms' => $hourlyTerms,
             'inputs' => $inputs,
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,

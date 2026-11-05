@@ -53,9 +53,10 @@ final class PayrollAgreementAnnualHours
     public const STATUS_OK = 'ok';
     public const STATUS_APPROACHING = 'approaching';
     public const STATUS_EXCEEDED = 'exceeded';
+    public const STATUS_MANUAL_REVIEW_REQUIRED = 'manual_review_required';
 
     /** Stavy, které dostane klient (PayrollAgreementAnnualHoursStatus). */
-    public const STATUSES = [self::STATUS_OK, self::STATUS_APPROACHING, self::STATUS_EXCEEDED];
+    public const STATUSES = [self::STATUS_OK, self::STATUS_APPROACHING, self::STATUS_EXCEEDED, self::STATUS_MANUAL_REVIEW_REQUIRED];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -73,30 +74,31 @@ final class PayrollAgreementAnnualHours
     }
 
     /**
-     * @param array{own_minutes:int,takeover_minutes:int,total_minutes:int} $hours
-     * @return array{year:int,total_minutes:int,takeover_minutes:int,limit_minutes:int,warning_minutes:int,remaining_minutes:int,status:string}
+     * @param array{own_minutes:int,takeover_minutes:int,total_minutes:int,manual_review_required?:bool} $hours
+     * @return array{year:int,total_minutes:?int,takeover_minutes:int,limit_minutes:int,warning_minutes:int,remaining_minutes:?int,status:string}
      */
     public static function summary(int $year, array $hours): array
     {
         $total = $hours['total_minutes'];
+        $manualReview = $hours['manual_review_required'] ?? false;
 
         return [
             'year' => $year,
-            'total_minutes' => $total,
+            'total_minutes' => $manualReview ? null : $total,
             'takeover_minutes' => $hours['takeover_minutes'],
             'limit_minutes' => self::LIMIT_MINUTES,
             'warning_minutes' => self::WARNING_MINUTES,
-            'remaining_minutes' => max(0, self::LIMIT_MINUTES - $total),
-            'status' => self::status($total),
+            'remaining_minutes' => $manualReview ? null : max(0, self::LIMIT_MINUTES - $total),
+            'status' => $manualReview ? self::STATUS_MANUAL_REVIEW_REQUIRED : self::status($total),
         ];
     }
 
     /**
      * Přehled za celý kalendářní rok po osobách (seznam lidí a karta osoby).
-     * Dva dávkové dotazy bez ohledu na počet osob.
+     * Dávkové dotazy bez ohledu na počet osob.
      *
      * @param list<int> $employeeIds
-     * @return array<int,array{year:int,total_minutes:int,takeover_minutes:int,limit_minutes:int,warning_minutes:int,remaining_minutes:int,status:string}>
+     * @return array<int,array{year:int,total_minutes:?int,takeover_minutes:int,limit_minutes:int,warning_minutes:int,remaining_minutes:?int,status:string}>
      */
     public function yearSummaries(int $supplierId, array $employeeIds, int $year): array
     {
@@ -244,7 +246,23 @@ final class PayrollAgreementAnnualHours
         );
         $own->execute([$supplierId, ...$employeeIds, $yearStart, $periodStart, ...$exclusionParams]);
 
-        return self::combine($employeeIds, $takeoverRows, $own->fetchAll(PDO::FETCH_ASSOC));
+        $result = self::combine($employeeIds, $takeoverRows, $own->fetchAll(PDO::FETCH_ASSOC));
+        // Ruční souhrn může obsahovat zlomky minut a nemusí mít potvrzené JMHZ.
+        // Minutový součet proto není úplný podklad pro posouzení limitu.
+        $manual = $this->db->pdo()->prepare(
+            "SELECT DISTINCT employment.employee_id
+               FROM payroll_employments employment FORCE INDEX (idx_payroll_employment_employee)
+               JOIN payroll_time_months month_row FORCE INDEX (uq_payroll_time_month_period) ON month_row.supplier_id = employment.supplier_id
+                AND month_row.employment_id = employment.id
+              WHERE employment.supplier_id = ? AND employment.relation_type = 'dpp'
+                AND employment.employee_id IN ({$in}) AND month_row.period_start >= ? AND month_row.period_start <= ?
+                AND month_row.work_source = 'manual_summary'{$exclusion}",
+        );
+        $manual->execute([$supplierId, ...$employeeIds, $yearStart, $periodStart, ...$exclusionParams]);
+        foreach ($manual->fetchAll(PDO::FETCH_COLUMN) as $employeeId) {
+            $result[(int) $employeeId]['manual_review_required'] = true;
+        }
+        return $result;
     }
 
     /**
@@ -311,7 +329,8 @@ final class PayrollAgreementAnnualHours
             $employeeId = (int) $row['employee_id'];
             $employmentId = (int) $row['employment_id'];
             $total = $hours[$employeeId]['total_minutes'] ?? 0;
-            $status = self::status($total);
+            $status = ($hours[$employeeId]['manual_review_required'] ?? false)
+                ? self::STATUS_MANUAL_REVIEW_REQUIRED : self::status($total);
             if ($status === self::STATUS_OK) {
                 continue;
             }
@@ -336,6 +355,7 @@ final class PayrollAgreementAnnualHours
 
     public static function validationCode(string $status): string
     {
+        if ($status === self::STATUS_MANUAL_REVIEW_REQUIRED) return 'dpp_annual_hours_manual_review_required';
         return $status === self::STATUS_EXCEEDED
             ? 'dpp_annual_hours_exceeded'
             : 'dpp_annual_hours_approaching';
@@ -350,6 +370,7 @@ final class PayrollAgreementAnnualHours
         int $takeoverMinutes,
     ): string {
         return match ($status) {
+            self::STATUS_MANUAL_REVIEW_REQUIRED => 'Roční limit DPP nelze z ručního měsíčního souhrnu přesně vyhodnotit. Ověřte odpracované hodiny podle podkladů.',
             self::STATUS_EXCEEDED => self::message($name, $year, $totalMinutes, $takeoverMinutes),
             self::STATUS_APPROACHING => self::approachingMessage($name, $year, $totalMinutes, $takeoverMinutes),
             default => '',

@@ -54,6 +54,30 @@ final class PayrollStandbyFullFlowTest extends TestCase
         $this->tearDownPayrollFullFlow();
     }
 
+    public function testManualSummaryDoesNotPayArchivedStandbyThroughDirectService(): void
+    {
+        $person = $this->hire('Syntetická Pohotovost', 'female', '1988-03-14');
+        $this->standby($person['employment_id'], ['2026-07-07', '2026-07-09'], 240);
+        $this->db->pdo()->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source, status, approved_at)
+            VALUES (?, ?, ?, "manual_summary", "approved", NOW())
+            ON DUPLICATE KEY UPDATE work_source = "manual_summary", status = "approved", approved_at = NOW()')
+            ->execute([$this->supplierId, $person['employment_id'], self::PERIOD_START]);
+        $service = $this->container->get(\MyInvoice\Service\Payroll\Time\Surcharge\PayrollStandbyInputMaterializer::class);
+        $result = $service->materialize($this->supplierId, $person['employment_id'], self::PERIOD_START, $this->actors[0]);
+        self::assertFalse($result['written']);
+        self::assertSame('manual_summary', $result['skipped_reason']);
+        self::assertTrue($result['requires_manual_review']);
+        self::assertNull($result['minutes']);
+        self::assertNull($result['amount_minor']);
+        self::assertSame(0, $this->standbyTotal($person['employment_id']));
+        try {
+            $service->calculate($this->supplierId, $person['employment_id'], self::PERIOD_START);
+            self::fail('Ruční souhrn neprokazuje nulovou ani kladnou pohotovost.');
+        } catch (\MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException $exception) {
+            self::assertSame('manual_summary_standby_unavailable', $exception->reason);
+        }
+    }
+
     public function testStandbyMinutesReachPayAndJmhz10343(): void
     {
         $person = $this->hire('Pavla Pohotová', 'female', '1988-03-14');

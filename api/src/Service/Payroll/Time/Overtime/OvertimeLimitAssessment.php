@@ -24,21 +24,45 @@ final readonly class OvertimeLimitAssessment
         public int $employmentId,
         public array $findings,
         public array $weeks,
-        public int $orderedYearMinutes,
+        public ?int $orderedYearMinutes,
         public int $orderedYearLimitMinutes,
-        public int $agreedYearMinutes,
+        public ?int $agreedYearMinutes,
         public ?string $averagingFrom,
         public ?string $averagingTo,
         public int $averagingWeeks,
-        public int $averagingMinutes,
+        public ?int $averagingMinutes,
         public int $averagingLimitMinutes,
         public bool $consentEvidenced,
         public bool $limitsFromRuleset,
-        public int $averagingCompensatedMinutes = 0,
+        public ?int $averagingCompensatedMinutes = 0,
         public string $averagingBasis = OvertimeLimits::BASIS_STATUTORY,
         public ?string $averagingReference = null,
         public array $prohibitedMinutes = [],
+        public array $manualSummaryPeriods = [],
     ) {}
+
+    /** Neúplný souhrn neruší již doložená porušení v ostatních měsících. @param list<string> $periods */
+    public function withManualSummaryPeriods(array $periods, string $from, string $to): self
+    {
+        return new self(
+            employmentId: $this->employmentId,
+            findings: [new OvertimeLimitFinding(
+                code: OvertimeLimitFinding::CODE_MANUAL_SUMMARY,
+                severity: 'warning',
+                message: 'Ruční souhrn pracovní doby nemá denní rozpad přesčasů. Limity ani zákazy práce přesčas nelze ověřit; doložte ruční posouzení.',
+                actualMinutes: null, limitMinutes: $this->orderedYearLimitMinutes,
+                scopeFrom: $from, scopeTo: $to, consentEvidenced: $this->consentEvidenced,
+                requiresOverride: true,
+            ), ...$this->findings],
+            weeks: [], orderedYearMinutes: null, orderedYearLimitMinutes: $this->orderedYearLimitMinutes,
+            agreedYearMinutes: null, averagingFrom: $this->averagingFrom, averagingTo: $this->averagingTo,
+            averagingWeeks: $this->averagingWeeks, averagingMinutes: null, averagingLimitMinutes: $this->averagingLimitMinutes,
+            consentEvidenced: $this->consentEvidenced, limitsFromRuleset: $this->limitsFromRuleset,
+            averagingCompensatedMinutes: null, averagingBasis: $this->averagingBasis,
+            averagingReference: $this->averagingReference, prohibitedMinutes: $this->prohibitedMinutes,
+            manualSummaryPeriods: $periods,
+        );
+    }
 
     public function hasWarnings(): bool
     {
@@ -67,6 +91,10 @@ final readonly class OvertimeLimitAssessment
     public function toArray(): array
     {
         return [
+            ...($this->manualSummaryPeriods === [] ? [] : [
+                'evidence_status' => 'manual_review_required',
+                'manual_summary_periods' => $this->manualSummaryPeriods,
+            ]),
             'employment_id' => $this->employmentId,
             'findings' => array_map(
                 static fn (OvertimeLimitFinding $finding): array => $finding->toArray(),

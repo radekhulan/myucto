@@ -89,6 +89,12 @@ final class PayrollStandbyInputMaterializer
      */
     public function calculate(int $supplierId, int $employmentId, string $periodStart): array
     {
+        $source = $this->db->pdo()->prepare('SELECT work_source FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = ?');
+        $source->execute([$supplierId, $employmentId, $periodStart]);
+        if ($source->fetchColumn() === 'manual_summary') {
+            throw PayrollSurchargeException::of('manual_summary_standby_unavailable',
+                'Ruční souhrn pracovní doby nedokládá pohotovost; staré směny nelze použít pro výpočet odměny.');
+        }
         $minutes = $this->standbyMinutes($supplierId, $employmentId, $periodStart);
         $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $periodStart);
         $statutory = PayrollSurchargePolicy::basisPointsOf($ruleset->standbyRate());
@@ -138,10 +144,10 @@ final class PayrollStandbyInputMaterializer
     private function reconcile(int $supplierId, int $employmentId, string $periodStart, ?int $userId): array
     {
         $month = $this->timeMonth($supplierId, $employmentId, $periodStart);
-        if (($month['work_source'] ?? 'entries') === 'import_summary') {
+        if (in_array($month['work_source'] ?? 'entries', ['import_summary', 'manual_summary'], true)) {
             // Měsíc ze souhrnu importu nese odměny jako spočítané složky;
             // druhý výpočet ze směn by nárok zaplatil dvakrát.
-            return $this->report($employmentId, $periodStart, null, false, 'import_summary');
+            return $this->report($employmentId, $periodStart, null, false, $month['work_source']);
         }
         $calculation = $this->calculate($supplierId, $employmentId, $periodStart);
         $existing = $this->existingInputs($supplierId, $employmentId, $periodStart);
@@ -312,10 +318,11 @@ final class PayrollStandbyInputMaterializer
         return [
             'employment_id' => $employmentId,
             'period_start' => $periodStart,
-            'minutes' => $calculation['minutes'] ?? 0,
+            'minutes' => $skippedReason === 'manual_summary' ? null : ($calculation['minutes'] ?? 0),
             'rate_basis_points' => $calculation['rate_basis_points'] ?? null,
             'rate_source' => $calculation['rate_source'] ?? null,
-            'amount_minor' => $calculation['amount_minor'] ?? 0,
+            'amount_minor' => $skippedReason === 'manual_summary' ? null : ($calculation['amount_minor'] ?? 0),
+            ...($skippedReason === 'manual_summary' ? ['requires_manual_review' => true] : []),
             'written' => $written,
             'skipped_reason' => $skippedReason,
         ];

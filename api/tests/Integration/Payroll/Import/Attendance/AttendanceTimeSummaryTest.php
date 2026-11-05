@@ -197,12 +197,16 @@ final class AttendanceTimeSummaryTest extends TestCase
     public function testManualReplacementRejectsImplicitImportAndCanRestoreOriginalImport(): void
     {
         $employmentId = $this->employment('ZAM-MANUAL', 'employment', '2026-01-01', '40.00');
-        $importId = $this->batch([$this->hoursRows($employmentId)]);
+        $importId = $this->batch([$this->hoursRows($employmentId, 160_501)]);
         $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
         $original = $this->time->importSummary($this->supplierId, $employmentId, self::JULY);
         self::assertNotNull($original);
         $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
         $service = $this->service(PayrollTimeService::class);
+        $initial = $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0];
+        self::assertSame('import_summary', $initial['summary']['work_source']);
+        self::assertSame(481503, $initial['summary']['worked_duration_units']);
+        self::assertNull($initial['summary']['actual_minutes']);
         $input = [
             'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
             'reason' => 'Syntetická oprava', 'replace_source' => false,
@@ -218,6 +222,7 @@ final class AttendanceTimeSummaryTest extends TestCase
         $input['replace_source'] = true;
         $manual = $service->saveManualSummary($this->supplierId, '2026-07', $input, $this->userId);
         self::assertSame('manual_summary', $manual['month']['work_source']);
+        self::assertSame(3000, $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0]['summary']['worked_duration_units']);
         try {
             $this->time->saveImportSummary($this->supplierId, $employmentId, self::JULY, $importId, $original['values'], $original['sources'], $original['content_sha256'], $this->userId);
             self::fail('Import nesmí ruční zdroj tiše přepsat.');
@@ -233,6 +238,10 @@ final class AttendanceTimeSummaryTest extends TestCase
         self::assertSame($original['values'], $recovered['values']);
         self::assertSame($original['content_sha256'], $recovered['content_sha256']);
         self::assertSame($original['attendance_import_id'], $recovered['attendance_import_id']);
+        $history = $service->history($this->supplierId, $employmentId, '2026-07', '2026-07')['items'][0];
+        self::assertSame('import_summary', $history['summary']['work_source']);
+        self::assertSame(481503, $history['summary']['worked_duration_units']);
+        self::assertNull($history['summary']['actual_minutes']);
     }
 
     public function testReplayDoesNotDuplicate(): void

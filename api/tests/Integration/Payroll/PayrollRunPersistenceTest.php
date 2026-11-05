@@ -191,6 +191,9 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testManualTimeSnapshotPreservesExactSourceWithoutJmhzAndDetectsReopen(): void
     {
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000,
+            remuneration_basis_kind = "contract", remuneration_basis = "Syntetická dohoda", monthly_gross_minor = NULL
+            WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
         $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
         $saved = $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0,
             'Syntetický ručně doložený souhrn', false, [[
@@ -225,6 +228,36 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame(1, $drift->workedTimeChanged);
         self::assertNotSame($frozen['source_sha256'], $current['worked_time_evidence'][$this->employmentId]['source_sha256']);
         self::assertSame(53, $snapshot->data['people'][0]['employments'][0]['worked_time_evidence']['manual_summary']['segments'][0]['worked_duration_units']);
+    }
+
+    public function testMonthlyManualSourceAndReturnToEntriesUseExistingSnapshotStateForDrift(): void
+    {
+        $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $original = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $saved = $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0,
+            'Syntetický ručně doložený měsíc', false, [[
+                'date_from' => '2026-06-01', 'date_to' => '2026-06-30',
+                'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null,
+            ]], $this->actors[0]);
+        $approved = $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $saved['month']['row_version'], null, $this->actors[0]);
+        $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $employment = $snapshot->data['people'][0]['employments'][0];
+        self::assertArrayNotHasKey('worked_time_evidence', $employment);
+        self::assertNull($employment['time_month']['jmhz_work_summary']);
+        $current = $builder->currentSources($this->supplierId, '2026-06-01', '2026-07-15', null, [$this->employmentId], [$this->employeeId]);
+        self::assertSame([], $current['worked_time_evidence']);
+        self::assertSame(0, \MyInvoice\Service\Payroll\Run\PayrollRunSourceDrift::between($snapshot->data, $current)->workedTimeChanged);
+        self::assertSame(1, \MyInvoice\Service\Payroll\Run\PayrollRunSourceDrift::between($original->data, $current)->workedTimeChanged);
+        self::assertSame([], (new \MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence($this->db))->manualHistoryStates($this->otherSupplierId, [$this->employmentId], '2026-06-01'));
+        $reopened = $time->reopenMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $approved['row_version'], 'Syntetická oprava', $this->actors[0]);
+        $restored = $time->restoreEntries($this->supplierId, $this->employmentId, '2026-06-01', (int) $reopened['row_version'], 'Návrat k intervalům', 'entries', $this->actors[0]);
+        $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $restored['month']['row_version'], null, $this->actors[0]);
+        $current = $builder->currentSources($this->supplierId, '2026-06-01', '2026-07-15', null, [$this->employmentId], [$this->employeeId]);
+        self::assertSame(1, \MyInvoice\Service\Payroll\Run\PayrollRunSourceDrift::between($snapshot->data, $current)->workedTimeChanged);
+        self::assertArrayHasKey($this->employmentId, $current['manual_time_month_state']);
+        $fresh = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertSame(0, \MyInvoice\Service\Payroll\Run\PayrollRunSourceDrift::between($fresh->data, $current)->workedTimeChanged);
     }
 
     public function testHourlyIntervalBeforeMonthlyTermsStillBlocksRunAndCannotBeOverridden(): void

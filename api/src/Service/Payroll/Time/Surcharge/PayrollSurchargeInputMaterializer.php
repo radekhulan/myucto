@@ -99,9 +99,10 @@ final class PayrollSurchargeInputMaterializer
              * v něm repozitář nedovolí, takže výpočet dnes vychází na nulu —
              * ale kdyby se do měsíce záznam dostal jinou cestou (nebo výpočet
              * začal číst hodiny ze souhrnu), vyplatil by se týž nárok podruhé.
+             * Ruční souhrn také nahrazuje intervaly, ale nedokládá příplatkové vrstvy.
              * Pojistka stojí na zdroji měsíce, ne na tom, že dnes vyjde nula.
              */
-            if (($month['work_source'] ?? 'entries') === 'import_summary') {
+            if (in_array($month['work_source'] ?? 'entries', ['import_summary', 'manual_summary'], true)) {
                 $this->commitOwned($pdo, $ownsTransaction);
 
                 return [
@@ -113,9 +114,9 @@ final class PayrollSurchargeInputMaterializer
                     'unchanged_count' => 0,
                     'written' => [],
                     'unchanged' => [],
-                    'requires_manual_review' => false,
+                    'requires_manual_review' => $month['work_source'] === 'manual_summary',
                     'findings' => [],
-                    'skipped_reason' => 'import_summary',
+                    'skipped_reason' => $month['work_source'],
                 ];
             }
 

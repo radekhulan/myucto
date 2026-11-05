@@ -221,6 +221,8 @@ final class PayrollTimeService
             $start = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
             $employmentStarts[$id] = is_string($start) ? $start : null;
         }
+        $manualSummaries = $this->repository->selectedManualSummaries($supplierId, $employmentIds, [$periodStart]);
+        $importSummaries = $this->repository->selectedImportSummaries($supplierId, $employmentIds, [$periodStart]);
         $periodLastDay = (new \DateTimeImmutable($periodEnd))
             ->modify('-1 day')
             ->format('Y-m-d');
@@ -284,6 +286,8 @@ final class PayrollTimeService
                 'reopened_at' => null,
                 'reopen_reason' => null,
             ];
+            $manualSummary = $manualSummaries[$employmentId][$periodStart] ?? null;
+            $selectedSummary = $this->selectedWorkSummary($state, $manualSummary, $importSummaries[$employmentId][$periodStart] ?? null, $periodStart, $actualMinutes, $plannedMinutes, $categories);
             $jmhzRevision = $this->repository->jmhzWorkSummaryRevision(
                 $supplierId,
                 $employmentId,
@@ -296,9 +300,7 @@ final class PayrollTimeService
                 'summary' => [
                     'fund_minutes' => $fundMinutes,
                     'planned_minutes' => $plannedMinutes,
-                    'actual_minutes' => $actualMinutes,
-                    'difference_minutes' => $actualMinutes - $plannedMinutes,
-                    'category_minutes' => $categories,
+                    ...$selectedSummary,
                     'incomplete' => $incomplete,
                 ],
                 'jmhz_work_summary' => [
@@ -330,6 +332,7 @@ final class PayrollTimeService
                     : null,
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
+                'manual_summary' => $manualSummary,
             ];
             $items[] = $item;
         }
@@ -482,6 +485,26 @@ final class PayrollTimeService
         ];
     }
 
+    /** @param array<string,mixed> $state @param ?array<string,mixed> $manualSummary @param ?array<string,mixed> $importSummary @param array<string,int> $categories @return array<string,mixed> */
+    private function selectedWorkSummary(array $state, ?array $manualSummary, ?array $importSummary, string $periodStart, int $entryMinutes, int $plannedMinutes, array $categories): array
+    {
+        $source = $state['work_source'] ?? 'entries';
+        if ($source === 'manual_summary' || $source === 'import_summary') {
+            $worked = $source === 'manual_summary'
+                ? PayrollWorkedTimeSource::fromManualSummary($manualSummary, $periodStart)
+                : PayrollWorkedTimeSource::fromImportSummary($importSummary);
+            $units = $worked['issues'] === [] ? $worked['worked_duration_units'] : null;
+            $minutes = $units === null ? null : PayrollDuration::exactMinutes($units);
+            $categories = null;
+        } else {
+            $minutes = $entryMinutes;
+            $units = PayrollDuration::fromMinutes($entryMinutes);
+        }
+        return ['work_source' => $source, 'worked_duration_units' => $units,
+            'actual_minutes' => $minutes, 'difference_minutes' => $minutes === null ? null : $minutes - $plannedMinutes,
+            'category_minutes' => $categories];
+    }
+
     /**
      * Historie docházky JEDNOHO vztahu po měsících, sestupně a stránkovaně.
      *
@@ -532,11 +555,14 @@ final class PayrollTimeService
         }
 
         $page = array_slice($periods, $offset, $limit);
+        $periodStarts = array_map(static fn (string $period): string => $period . '-01', $page);
+        $selectedManual = $this->repository->selectedManualSummaries($supplierId, [$employmentId], $periodStarts)[$employmentId] ?? [];
+        $selectedImport = $this->repository->selectedImportSummaries($supplierId, [$employmentId], $periodStarts)[$employmentId] ?? [];
         $manualSummaryOffset = max(0, $manualSummaryOffset);
-        $manualHistory = $this->repository->manualSummaryHistory($supplierId, $employmentId, array_map(static fn (string $period): string => $period . '-01', $page), $manualSummaryOffset);
+        $manualHistory = $this->repository->manualSummaryHistory($supplierId, $employmentId, $periodStarts, $manualSummaryOffset);
         $items = [];
         foreach ($page as $period) {
-            $item = $this->historyMonth($supplierId, $employmentId, $period);
+            $item = $this->historyMonth($supplierId, $employmentId, $period, $selectedManual[$period . '-01'] ?? null, $selectedImport[$period . '-01'] ?? null);
             $history = $manualHistory[$period . '-01'] ?? [];
             $item['manual_summary_history_truncated'] = count($history) > 20;
             $item['manual_summary_history_offset'] = $manualSummaryOffset;
@@ -555,7 +581,7 @@ final class PayrollTimeService
     }
 
     /** @return array<string,mixed> */
-    private function historyMonth(int $supplierId, int $employmentId, string $period): array
+    private function historyMonth(int $supplierId, int $employmentId, string $period, ?array $manualSummary, ?array $importSummary): array
     {
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
         [$fundMinutes, $calendarDto] = $this->fundMinutesForMonth(
@@ -597,9 +623,7 @@ final class PayrollTimeService
             'summary' => [
                 'fund_minutes' => $fundMinutes,
                 'planned_minutes' => $plannedMinutes,
-                'actual_minutes' => $actualMinutes,
-                'difference_minutes' => $actualMinutes - $plannedMinutes,
-                'category_minutes' => $categories,
+                ...$this->selectedWorkSummary($state, $manualSummary, $importSummary, $periodStart, $actualMinutes, $plannedMinutes, $categories),
                 // „Má kalendář?" se tu pozná z téhož dotazu, který počítá fond
                 // (`calendars()`), zatímco přehled na to má hromadný dotaz přes
                 // celou stránku (`employmentIdsWithCalendar()`). Podmínka je
@@ -612,6 +636,7 @@ final class PayrollTimeService
             ],
             'shift_count' => count($employmentShifts),
             'entry_count' => count($employmentEntries),
+            'manual_summary' => $manualSummary,
         ];
     }
 

@@ -1588,6 +1588,7 @@ final class AttendanceImportService
                 'own_minutes' => $before['own_minutes'] + $importedMinutes,
                 'takeover_minutes' => $before['takeover_minutes'],
                 'total_minutes' => $before['total_minutes'] + $importedMinutes,
+                'manual_review_required' => $before['manual_review_required'] ?? false,
             ]);
             $person['dpp_annual_hours'] = $summary + ['imported_minutes' => $importedMinutes];
             if ($summary['status'] !== PayrollAgreementAnnualHours::STATUS_OK) {
@@ -1596,7 +1597,7 @@ final class AttendanceImportService
                     $summary['status'],
                     is_string($name) && $name !== '' ? $name : (string) ($person['display_name'] ?? ''),
                     $year,
-                    $summary['total_minutes'],
+                    $summary['total_minutes'] ?? 0,
                     $summary['takeover_minutes'],
                 );
             }

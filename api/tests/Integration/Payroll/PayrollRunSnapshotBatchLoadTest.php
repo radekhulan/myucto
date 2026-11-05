@@ -170,9 +170,7 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         );
         // Horní mez: dávka má 1 000 ID, takže ani 500 osob s více vztahy
         // nepřidá další dotaz.
-        // Samostatný podklad pracovní doby přidává dvě množinové dávky:
-        // stav zdroje měsíce a použité intervaly (4 round-tripy). Souhrny
-        // importu a ruční segmenty se čtou pouze při použití tohoto zdroje.
+        // Samostatný podklad pracovní doby se měsíčních vztahů netýká.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         // Doložené záměry OZUSPOJ mají vlastní množinovou dávku; risky savings
         // evidence se veze v kořenovém dotazu pracovních vztahů.
@@ -225,10 +223,41 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // Prepare + execute přidávají dva round-tripy bez ohledu na počet osob.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            94,
+            90,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 94 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 90 round-tripů.',
         );
+    }
+
+    public function testHourlyEvidenceLoadHasConstantQueryCountAndStaysOutOfMonthlySnapshots(): void
+    {
+        $pdo = $this->db->pdo();
+        $counts = [];
+        foreach ([1, 24] as $headcount) {
+            if ($headcount > 1) {
+                $this->newTenant();
+            }
+            $this->seed($headcount);
+            $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL,
+                hourly_rate_minor = 20000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetická smlouva"
+                WHERE supplier_id = ?')->execute([$this->supplierId]);
+            $pdo->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start)
+                SELECT supplier_id, id, ? FROM payroll_employments WHERE supplier_id = ?
+                ON DUPLICATE KEY UPDATE period_start = VALUES(period_start)')
+                ->execute([PayrollRunScaleFixture::PERIOD_START, $this->supplierId]);
+            $before = PayrollRunScaleFixture::statementRoundTrips($pdo);
+            $snapshot = $this->build();
+            $counts[$headcount] = PayrollRunScaleFixture::statementRoundTrips($pdo) - $before;
+            self::assertCount($headcount, $snapshot->data['people']);
+            foreach ($snapshot->data['people'] as $person) {
+                foreach ($person['employments'] as $employment) {
+                    self::assertArrayHasKey('worked_time_evidence', $employment);
+                    self::assertSame('entries', $employment['worked_time_evidence']['work_source']);
+                }
+            }
+        }
+        self::assertSame($counts[1], $counts[24]);
+        self::assertLessThanOrEqual(94, $counts[24]);
     }
 
     /** Dvakrát postavený snapshot téhož vstupu musí být bajtově týž. */
@@ -258,6 +287,7 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         foreach ($legacy->data['people'] as $person) {
             foreach ($person['employments'] as $employment) {
                 self::assertArrayNotHasKey('hourly_remuneration_terms', $employment);
+                self::assertArrayNotHasKey('worked_time_evidence', $employment);
                 foreach (['remuneration_type', 'hourly_rate_minor', 'remuneration_basis_kind', 'remuneration_basis'] as $key) {
                     self::assertArrayNotHasKey($key, $employment['term']);
                 }

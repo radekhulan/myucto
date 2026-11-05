@@ -78,6 +78,20 @@ final class PayrollSurchargeMaterializationTest extends TestCase
         }
     }
 
+    public function testDirectMaterializationCannotPayArchivedEntriesOfManualSummary(): void
+    {
+        $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');
+        $this->db->pdo()->prepare('UPDATE payroll_time_months SET work_source = "manual_summary" WHERE supplier_id = ? AND employment_id = ? AND period_start = ?')
+            ->execute([$this->supplierId, $this->employmentId, self::PERIOD]);
+        $result = $this->materialize();
+        self::assertSame('manual_summary', $result['skipped_reason']);
+        self::assertTrue($result['requires_manual_review']);
+        self::assertSame(0, $result['written_count']);
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_inputs WHERE supplier_id = ? AND employment_id = ?');
+        $count->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
     public function testFirstMaterializationCreatesApprovedInput(): void
     {
         // Dvě hodiny přesčasu 10.–12. hodiny 2026-06-10.

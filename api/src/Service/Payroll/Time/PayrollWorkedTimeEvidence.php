@@ -13,6 +13,45 @@ final class PayrollWorkedTimeEvidence
 {
     public function __construct(private readonly Connection $db) {}
 
+    /**
+     * Jen měsíce, kde byl výslovně zvolen ruční zdroj, včetně jeho pozdějšího opuštění.
+     * Stav se porovnává s již existujícím time_month; nepřidává klíče do měsíčního snímku.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function manualHistoryStates(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT month_row.employment_id, month_row.id, month_row.status,
+                    month_row.revision_no, month_row.row_version, summary.summary_sha256
+             FROM payroll_time_months month_row FORCE INDEX (uq_payroll_time_month_period)
+             LEFT JOIN payroll_jmhz_work_month_revisions summary
+               ON summary.supplier_id = month_row.supplier_id AND summary.time_month_id = month_row.id
+              AND summary.time_month_revision_no = month_row.revision_no
+             WHERE month_row.supplier_id = ? AND month_row.employment_id IN ($in) AND month_row.period_start = ?
+               AND EXISTS (
+                 SELECT 1 FROM payroll_time_month_manual_summaries manual_history FORCE INDEX (uq_manual_summary_revision)
+                 WHERE manual_history.supplier_id = month_row.supplier_id AND manual_history.time_month_id = month_row.id
+               )",
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $periodStart]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            unset($row['employment_id']);
+            foreach (['id', 'revision_no', 'row_version'] as $key) {
+                $row[$key] = (int) $row[$key];
+            }
+            $result[$employmentId] = $row;
+        }
+        return $result;
+    }
+
     /** @param list<int> $employmentIds @return array<int,array<string,mixed>> */
     public function loadMany(int $supplierId, array $employmentIds, string $periodStart, bool $lock = false): array
     {

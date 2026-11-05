@@ -95,6 +95,28 @@ final class PayrollAgreementAnnualHoursTest extends TestCase
         self::assertSame('warning', PayrollRunReadinessImpact::describe('dpp_annual_hours_exceeded')['severity']);
     }
 
+    public function testManualSummaryMakesAnnualLimitExplicitlyUnknown(): void
+    {
+        $this->db->pdo()->prepare("INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source) VALUES (?, ?, '2026-10-01', 'manual_summary')")
+            ->execute([$this->supplierId, $this->firstAgreement]);
+        $service = new PayrollAgreementAnnualHours($this->db);
+        $summary = $service->yearSummaries($this->supplierId, [$this->employeeId], 2026)[$this->employeeId];
+        self::assertSame('manual_review_required', $summary['status']);
+        self::assertNull($summary['total_minutes']);
+        self::assertNull($summary['remaining_minutes']);
+        self::assertSame('dpp_annual_hours_manual_review_required', $this->validations()[0]->code);
+        $stored = $service->yearWithoutMonth($this->supplierId, [$this->employeeId], '2026-03-01', [$this->firstAgreement]);
+        self::assertTrue($stored[$this->employeeId]['manual_review_required']);
+        $persons = AttendanceImportService::annotateAgreementHours([[
+            'display_name' => 'Syntetická brigádnice',
+            'match' => ['status' => 'linked', 'employment_id' => $this->firstAgreement, 'employee_id' => $this->employeeId],
+            'warnings' => [], '_metrics' => ['worked_hours' => ['millihours' => 70_000, 'source' => 'A1']],
+        ]], [['employment_id' => $this->firstAgreement, 'relation_type' => 'dpp']], $stored, 2026);
+        self::assertSame('manual_review_required', $persons[0]['dpp_annual_hours']['status']);
+        self::assertNull($persons[0]['dpp_annual_hours']['total_minutes']);
+        self::assertStringContainsString('ověřte', mb_strtolower($persons[0]['warnings'][0]));
+    }
+
     public function testHoursBelowTheWarningThresholdProduceNoWarning(): void
     {
         // 8 × 30 h = 240 h, jedna minuta pod prahem upozornění.

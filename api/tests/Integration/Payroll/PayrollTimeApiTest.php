@@ -354,7 +354,7 @@ final class PayrollTimeApiTest extends TestCase
             'employment_id' => $this->employmentId, 'row_version' => (int) $month['row_version'],
             'reason' => 'Syntetická oprava', 'replace_source' => false,
             'segments' => [['date_from' => '2026-05-01', 'date_to' => '2026-05-31',
-                'worked_duration_units' => 22500, 'overtime_duration_units' => null, 'worked_days' => null]],
+                'worked_duration_units' => 22503, 'overtime_duration_units' => null, 'worked_days' => null]],
         ];
         $attempt = $this->action->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-05/manual-summary')->withParsedBody($payload), new Response(), ['period' => '2026-05']);
         self::assertSame(422, $attempt->getStatusCode());
@@ -363,9 +363,25 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
         $data = $this->json($saved);
         self::assertSame('manual_summary', $data['month']['work_source']);
-        self::assertSame(22500, $data['manual_summary']['segments'][0]['worked_duration_units']);
+        self::assertSame(22503, $data['manual_summary']['segments'][0]['worked_duration_units']);
         self::assertNull($data['manual_summary']['segments'][0]['worked_days']);
         self::assertSame(422, $this->saveEntry(monthVersion: (int) $data['month']['row_version'])->getStatusCode());
+        $overview = $this->json($this->action->month($this->request('GET', '/api/payroll/time/month')->withQueryParams([
+            'period' => '2026-05', 'employment_id' => $this->employmentId,
+        ]), new Response()))['items'][0];
+        self::assertSame('manual_summary', $overview['summary']['work_source']);
+        self::assertSame(22503, $overview['summary']['worked_duration_units']);
+        self::assertNull($overview['summary']['actual_minutes']);
+        self::assertNull($overview['summary']['difference_minutes']);
+        self::assertNull($overview['summary']['category_minutes']);
+        self::assertCount(1, $overview['entries']);
+        self::assertSame('Syntetická oprava', $overview['manual_summary']['reason']);
+        $historyQuery = ['employment_id' => $this->employmentId, 'from' => '2026-05', 'to' => '2026-05'];
+        $selectedHistory = $this->json($this->action->history($this->request('GET', '/api/payroll/time/history')->withQueryParams($historyQuery), new Response()))['items'][0];
+        self::assertSame('manual_summary', $selectedHistory['summary']['work_source']);
+        self::assertSame(22503, $selectedHistory['summary']['worked_duration_units']);
+        self::assertNull($selectedHistory['summary']['actual_minutes']);
+        self::assertSame(22503, $selectedHistory['manual_summary']['segments'][0]['worked_duration_units']);
 
         $approval = $this->action->approve($this->request('POST', '/api/payroll/time/months/2026-05/approve')->withParsedBody([
             'employment_id' => $this->employmentId, 'row_version' => (int) $data['month']['row_version'],
@@ -389,6 +405,11 @@ final class PayrollTimeApiTest extends TestCase
         $revised = $this->action->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-05/manual-summary')->withParsedBody($payload), new Response(), ['period' => '2026-05']);
         self::assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
         self::assertSame(0, $this->json($revised)['manual_summary']['segments'][0]['worked_duration_units']);
+        $zero = $this->json($this->action->month($this->request('GET', '/api/payroll/time/month')->withQueryParams([
+            'period' => '2026-05', 'employment_id' => $this->employmentId,
+        ]), new Response()))['items'][0]['summary'];
+        self::assertSame(0, $zero['worked_duration_units']);
+        self::assertSame(0, $zero['actual_minutes']);
         self::assertSame(3, $this->countRows('payroll_time_month_manual_summaries'));
         $revisedMonth = $this->json($revised)['month'];
         $restore = $this->action->restoreEntries($this->request('POST', '/api/payroll/time/months/2026-05/work-source')->withParsedBody([
@@ -402,9 +423,13 @@ final class PayrollTimeApiTest extends TestCase
         ]), new Response());
         self::assertSame(200, $history->getStatusCode(), (string) $history->getBody());
         $monthHistory = $this->json($history)['items'][0];
+        self::assertSame('entries', $monthHistory['summary']['work_source']);
+        self::assertSame(22500, $monthHistory['summary']['worked_duration_units']);
+        self::assertSame(450, $monthHistory['summary']['actual_minutes']);
+        self::assertNull($monthHistory['manual_summary']);
         self::assertFalse($monthHistory['manual_summary_history_truncated']);
         self::assertCount(3, $monthHistory['manual_summary_history']);
-        self::assertSame(22500, $monthHistory['manual_summary_history'][2]['segments'][0]['worked_duration_units']);
+        self::assertSame(22503, $monthHistory['manual_summary_history'][2]['segments'][0]['worked_duration_units']);
         self::assertSame('Syntetická oprava', $monthHistory['manual_summary_history'][2]['reason']);
         self::assertSame($this->userId, $monthHistory['manual_summary_history'][2]['created_by']);
         self::assertNotNull($monthHistory['manual_summary_history'][2]['created_at']);

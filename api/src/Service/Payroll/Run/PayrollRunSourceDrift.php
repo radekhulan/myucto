@@ -41,6 +41,7 @@ final readonly class PayrollRunSourceDrift
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
      *   worked_time_evidence?:array<int,array<string,mixed>>,
+     *   manual_time_month_state?:array<int,array<string,mixed>>,
      *   hourly_remuneration_terms?:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * } $current
@@ -53,6 +54,7 @@ final readonly class PayrollRunSourceDrift
         $frozenEvidence = [];
         $frozenHourlyTerms = [];
         $frozenWorkedTime = [];
+        $frozenTimeMonths = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
@@ -68,6 +70,7 @@ final readonly class PayrollRunSourceDrift
                 $frozenEmployments[(int) ($employment['employment']['id'] ?? 0)] = true;
                 $frozenHourlyTerms[(int) ($employment['employment']['id'] ?? 0)] =
                     $employment['hourly_remuneration_terms'] ?? [];
+                $frozenTimeMonths[(int) ($employment['employment']['id'] ?? 0)] = $employment['time_month'] ?? null;
                 if (array_key_exists('worked_time_evidence', $employment)) {
                     $frozenWorkedTime[(int) ($employment['employment']['id'] ?? 0)] = $employment['worked_time_evidence'];
                 }
@@ -126,17 +129,28 @@ final readonly class PayrollRunSourceDrift
 
         $workedTimeChanged = 0;
         if (isset($current['worked_time_evidence'])) {
-            foreach ($frozenEmployments as $employmentId => $_) {
-                $now = $current['worked_time_evidence'][$employmentId] ?? null;
-                // Starší snímky dobu samostatně nezmrazovaly. Nový ruční zdroj
-                // přesto musí zastavit jejich schválení; běžné staré měsíce neměníme.
-                if (!array_key_exists($employmentId, $frozenWorkedTime)
-                    && ($now['work_source'] ?? null) !== 'manual_summary') {
-                    continue;
-                }
-                if (self::fingerprint($frozenWorkedTime[$employmentId] ?? null) !== self::fingerprint($now)) {
+            foreach ($frozenWorkedTime as $employmentId => $evidence) {
+                if (self::fingerprint($evidence) !== self::fingerprint($current['worked_time_evidence'][$employmentId] ?? null)) {
                     ++$workedTimeChanged;
                 }
+            }
+        }
+        // Měsíční snímek zůstává historicky totožný. Kontrola se aktivuje pouze
+        // doloženou ruční volbou, a nepřestane platit ani po návratu k docházce/importu.
+        foreach ($current['manual_time_month_state'] ?? [] as $employmentId => $state) {
+            if (!isset($frozenEmployments[$employmentId]) || array_key_exists($employmentId, $frozenWorkedTime)) {
+                continue;
+            }
+            $month = $frozenTimeMonths[$employmentId];
+            $before = $month === null ? null : [
+                'id' => $month['id'],
+                'status' => $month['status'],
+                'revision_no' => $month['revision_no'],
+                'row_version' => $month['row_version'],
+                'summary_sha256' => $month['jmhz_work_summary']['summary_sha256'] ?? null,
+            ];
+            if (self::fingerprint($before) !== self::fingerprint($state)) {
+                ++$workedTimeChanged;
             }
         }
 

@@ -27987,6 +27987,7 @@ paths:
     get:
       tags: [Payroll]
       summary: Docházka za měsíc
+      description: Přehled rozlišuje vybraný zdroj pracovního měsíce. Ruční ani importovaný souhrn se nesčítá s původními zápisy; přesná odpracovaná doba je vyjádřena jednotkami 1/3000 hodiny a hodnoty v minutách mohou být null, pokud přesný převod není možný. Původní entries zůstávají v odpovědi jako uchovaná evidence; při jiném work_source se nezapočítávají do summary.
       parameters:
         - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
@@ -28011,12 +28012,15 @@ paths:
         vrací `/payroll/time/month`. Bez `from`/`to` jde rozsah od měsíce nástupu
         po měsíc ukončení, nejdál po aktuální měsíc, rozšířený o měsíce, ve
         kterých vztah v docházce něco má.
+        Historie ručních souhrnů je neměnná a stránkuje se zvlášť po 20 revizích
+        v každém vráceném měsíci; `manual_summary_offset` posouvá tuto vnitřní stránku.
       parameters:
         - { name: employment_id, in: query, required: true, schema: { type: integer, format: int64 } }
         - { name: from, in: query, description: První měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: to, in: query, description: Poslední měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 12, default: 12 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: manual_summary_offset, in: query, description: Posun v historii ručních souhrnů každého měsíce, schema: { type: integer, minimum: 0, maximum: 1000000, default: 0 } }
       responses:
         '200':
           description: Historie docházky po měsících
@@ -28040,6 +28044,8 @@ paths:
         `difficulty_factor_count` se zdědí jen při nezměněné kategorii a explicitní `null` ho
         vymaže. Povinné zůstávají vždy `employment_id`, `row_version` a `month_row_version`. Nový
         záznam bez `supersedes_id` vyžaduje plnou sadu polí jako dosud.
+        Je-li vybraným zdrojem měsíce ruční souhrn, zápis denní docházky je blokovaný;
+        zdroj musí nejprve výslovně změnit oprávněný uživatel v aplikaci.
       requestBody:
         required: true
         content:
@@ -28057,7 +28063,7 @@ paths:
                   entry: { $ref: '#/components/schemas/PayrollTimeEntry' }
                   month: { type: object, additionalProperties: true }
         '403': { $ref: '#/components/responses/InsufficientScope' }
-        '409': { description: Docházka je uzamčená nebo došlo ke konfliktu verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Docházka je uzamčená, došlo ke konfliktu verze nebo je vybraným zdrojem měsíce ruční souhrn, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/payroll/time/absences:
@@ -43494,6 +43500,8 @@ components:
             hodin převzatých z předchozího programu. `null`, když osoba DPP nemá.
             `approaching` = dosažen práh upozornění (`warning_minutes`),
             `exceeded` = limit překročen.
+            `manual_review_required` znamená, že ruční zdroj doby vyžaduje
+            samostatné posouzení; neověřený roční součet není nulou ani potvrzením dodržení limitu.
           oneOf:
             - type: 'null'
             - { $ref: '#/components/schemas/PayrollAgreementAnnualHours' }
@@ -43503,12 +43511,12 @@ components:
       required: [year, total_minutes, takeover_minutes, limit_minutes, warning_minutes, remaining_minutes, status]
       properties:
         year: { type: integer }
-        total_minutes: { type: integer, minimum: 0 }
+        total_minutes: { type: [integer, "null"], minimum: 0, description: Null při nedostatečně ověřeném ručním podkladu. }
         takeover_minutes: { type: integer, minimum: 0 }
         limit_minutes: { type: integer, minimum: 0 }
         warning_minutes: { type: integer, minimum: 0 }
-        remaining_minutes: { type: integer, minimum: 0 }
-        status: { type: string, enum: [ok, approaching, exceeded] }
+        remaining_minutes: { type: [integer, "null"], minimum: 0 }
+        status: { type: string, enum: [ok, approaching, exceeded, manual_review_required] }
 
     PayrollPersonDataGap:
       type: object
@@ -43943,7 +43951,14 @@ components:
         employment_id: { type: [integer, "null"], format: int64 }
         items:
           type: array
-          items: { type: object, additionalProperties: true }
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              month: { $ref: '#/components/schemas/PayrollTimeMonthState' }
+              summary: { $ref: '#/components/schemas/PayrollTimeSummary' }
+              manual_summary: { $ref: '#/components/schemas/PayrollManualTimeSummary' }
+              overtime_limits: { $ref: '#/components/schemas/PayrollOvertimeLimits' }
         total: { type: integer, minimum: 0 }
         limit: { type: integer, minimum: 1 }
         offset: { type: integer, minimum: 0 }
@@ -43965,18 +43980,15 @@ components:
             additionalProperties: true
             properties:
               period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
-              month: { type: object, additionalProperties: true }
-              summary:
-                type: object
-                required: [fund_minutes, planned_minutes, actual_minutes, difference_minutes, category_minutes, incomplete]
-                additionalProperties: true
-                properties:
-                  fund_minutes: { type: integer }
-                  planned_minutes: { type: integer }
-                  actual_minutes: { type: integer }
-                  difference_minutes: { type: integer }
-                  category_minutes: { type: object, additionalProperties: { type: integer } }
-                  incomplete: { type: boolean }
+              month: { $ref: '#/components/schemas/PayrollTimeMonthState' }
+              summary: { $ref: '#/components/schemas/PayrollTimeSummary' }
+              manual_summary: { $ref: '#/components/schemas/PayrollManualTimeSummary' }
+              manual_summary_history:
+                type: array
+                maxItems: 20
+                items: { $ref: '#/components/schemas/PayrollManualTimeSummaryRevision' }
+              manual_summary_history_offset: { type: integer, minimum: 0 }
+              manual_summary_history_truncated: { type: boolean, description: Existují další starší revize; další stránka má offset zvýšený o 20. }
               shift_count: { type: integer, minimum: 0 }
               entry_count: { type: integer, minimum: 0 }
         total: { type: integer, minimum: 0 }
@@ -43988,6 +44000,100 @@ components:
           properties:
             from: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
             to: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+
+    PayrollTimeWorkSource:
+      type: string
+      enum: [entries, import_summary, manual_summary]
+      description: Jediný vybraný zdroj odpracované doby pro vztah a měsíc; jednotlivé zdroje se nesčítají.
+
+    PayrollOvertimeLimits:
+      type: [object, "null"]
+      additionalProperties: true
+      description: Limity přesčasů se posuzují z doloženého rozdělení do dnů a týdnů. Ruční souhrn, který takové rozdělení nedokládá, vrací neznámé agregáty a požadavek ručního posouzení; archivní denní zápisy se nepoužijí.
+      properties:
+        employment_id: { type: integer, format: int64 }
+        evidence_status: { type: string, enum: [manual_review_required] }
+        manual_summary_periods:
+          type: array
+          items: { type: string, format: date }
+        ordered_year_minutes: { type: [integer, "null"], minimum: 0 }
+        agreed_year_minutes: { type: [integer, "null"], minimum: 0 }
+        averaging_minutes: { type: [integer, "null"], minimum: 0 }
+        averaging_compensated_minutes: { type: [integer, "null"], minimum: 0 }
+        requires_override: { type: boolean, description: K chybějícímu doložení nebo zjištěnému zákazu se musí oprávněný uživatel výslovně vyjádřit. }
+        findings:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              code: { type: string }
+              severity: { type: string, enum: [warning, info] }
+              message: { type: string }
+              actual_minutes: { type: [integer, "null"], minimum: 0 }
+              limit_minutes: { type: integer, minimum: 0 }
+              requires_override: { type: boolean }
+
+    PayrollTimeMonthState:
+      type: object
+      additionalProperties: true
+      properties:
+        id: { type: [integer, "null"], format: int64 }
+        employment_id: { type: integer, format: int64 }
+        period_start: { type: string, format: date }
+        status: { type: string, enum: [open, approved] }
+        revision_no: { type: integer, minimum: 1 }
+        row_version: { type: integer, minimum: 0 }
+        work_source: { $ref: '#/components/schemas/PayrollTimeWorkSource' }
+        approved_at: { type: [string, "null"] }
+        reopened_at: { type: [string, "null"] }
+        reopen_reason: { type: [string, "null"] }
+
+    PayrollTimeSummary:
+      type: object
+      required: [fund_minutes, planned_minutes, actual_minutes, difference_minutes, category_minutes, incomplete]
+      additionalProperties: true
+      properties:
+        fund_minutes: { type: integer }
+        planned_minutes: { type: integer }
+        actual_minutes: { type: [integer, "null"], description: Skutečná doba v celých minutách; null znamená neznámou dobu nebo nemožnost přesného převodu. }
+        difference_minutes: { type: [integer, "null"], description: Rozdíl skutečné doby proti plánu, pouze pokud jej lze přesně vyjádřit v celých minutách. }
+        category_minutes: { type: [object, "null"], additionalProperties: { type: integer }, description: Rozpad denních zápisů po kategoriích; ruční ani importovaný souhrn jej nedokládá a vrací null. }
+        incomplete: { type: boolean }
+        work_source: { $ref: '#/components/schemas/PayrollTimeWorkSource' }
+        worked_duration_units: { type: [integer, "null"], minimum: 0, description: Přesná odpracovaná doba v jednotkách 1/3000 hodiny; minuta je 50 jednotek, tisícina hodiny 3. Nula je doložená nula, null neznámý údaj. }
+
+    PayrollManualTimeSegment:
+      type: object
+      required: [date_from, date_to, worked_duration_units, overtime_duration_units, worked_days]
+      properties:
+        date_from: { type: string, format: date }
+        date_to: { type: string, format: date }
+        worked_duration_units: { type: integer, minimum: 0, description: Celkem odpracováno včetně přesčasu, v jednotkách 1/3000 hodiny. }
+        overtime_duration_units: { type: [integer, "null"], minimum: 0, description: Přesčas je součástí celku; null znamená neznámý rozsah. }
+        worked_days: { type: [integer, "null"], minimum: 0, maximum: 31 }
+
+    PayrollManualTimeSummary:
+      type: [object, "null"]
+      additionalProperties: true
+      properties:
+        id: { type: integer, format: int64 }
+        time_month_revision_no: { type: integer, minimum: 1 }
+        content_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        reason: { type: string, maxLength: 500 }
+        segments:
+          type: array
+          maxItems: 31
+          items: { $ref: '#/components/schemas/PayrollManualTimeSegment' }
+
+    PayrollManualTimeSummaryRevision:
+      allOf:
+        - { $ref: '#/components/schemas/PayrollManualTimeSummary' }
+        - type: object
+          properties:
+            created_by: { type: [integer, "null"], format: int64 }
+            created_by_name: { type: [string, "null"] }
+            created_at: { type: string }
 
     PayrollAbsenceWrite:
       type: object

@@ -1193,6 +1193,62 @@ final class PayrollTimeRepository
             'content_sha256' => (string) $row['content_sha256'], 'reason' => (string) $row['reason'], 'segments' => $items];
     }
 
+    /** @param list<int> $employmentIds @param list<string> $periods @return array<int,array<string,array<string,mixed>>> */
+    public function selectedManualSummaries(int $supplierId, array $employmentIds, array $periods): array
+    {
+        if ($employmentIds === [] || $periods === []) return [];
+        $ids = implode(',', array_fill(0, count($employmentIds), '?'));
+        $dates = implode(',', array_fill(0, count($periods), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT summary.id, summary.employment_id, summary.period_start, summary.time_month_revision_no,
+                summary.content_sha256, summary.reason, segment.date_from, segment.date_to,
+                segment.worked_duration_units, segment.overtime_duration_units, segment.worked_days
+            FROM payroll_time_months month_row FORCE INDEX (uq_payroll_time_month_period)
+            JOIN payroll_time_month_manual_summaries summary ON summary.supplier_id = month_row.supplier_id
+                AND summary.time_month_id = month_row.id AND summary.time_month_revision_no = month_row.revision_no
+            LEFT JOIN payroll_time_month_manual_segments segment ON segment.supplier_id = summary.supplier_id AND segment.summary_id = summary.id
+            WHERE month_row.supplier_id = ? AND month_row.employment_id IN ($ids)
+                AND month_row.period_start IN ($dates) AND month_row.work_source = 'manual_summary'
+            ORDER BY summary.id, segment.sequence_no");
+        $stmt->execute([$supplierId, ...$employmentIds, ...$periods]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int) $row['employment_id'];
+            $period = (string) $row['period_start'];
+            $result[$id][$period] ??= ['id' => (int) $row['id'], 'time_month_revision_no' => (int) $row['time_month_revision_no'],
+                'content_sha256' => (string) $row['content_sha256'], 'reason' => (string) $row['reason'], 'segments' => []];
+            if ($row['date_from'] !== null) {
+                $result[$id][$period]['segments'][] = ['date_from' => (string) $row['date_from'], 'date_to' => (string) $row['date_to'],
+                    'worked_duration_units' => (int) $row['worked_duration_units'],
+                    'overtime_duration_units' => $row['overtime_duration_units'] === null ? null : (int) $row['overtime_duration_units'],
+                    'worked_days' => $row['worked_days'] === null ? null : (int) $row['worked_days']];
+            }
+        }
+        return $result;
+    }
+
+    /** @param list<int> $employmentIds @param list<string> $periods @return array<int,array<string,array<string,mixed>>> */
+    public function selectedImportSummaries(int $supplierId, array $employmentIds, array $periods): array
+    {
+        if ($employmentIds === [] || $periods === []) return [];
+        $ids = implode(',', array_fill(0, count($employmentIds), '?'));
+        $dates = implode(',', array_fill(0, count($periods), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT summary.employment_id, month_row.period_start, summary.values_json, summary.worked_days
+            FROM payroll_time_months month_row FORCE INDEX (uq_payroll_time_month_period)
+            JOIN payroll_time_month_import_summaries summary ON summary.supplier_id = month_row.supplier_id
+                AND summary.time_month_id = month_row.id AND summary.time_month_revision_no = month_row.revision_no
+            WHERE month_row.supplier_id = ? AND month_row.employment_id IN ($ids)
+                AND month_row.period_start IN ($dates) AND month_row.work_source = 'import_summary'");
+        $stmt->execute([$supplierId, ...$employmentIds, ...$periods]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['employment_id']][(string) $row['period_start']] = [
+                'values' => json_decode((string) $row['values_json'], true, flags: JSON_THROW_ON_ERROR),
+                'worked_days' => $row['worked_days'] === null ? null : (int) $row['worked_days'],
+            ];
+        }
+        return $result;
+    }
+
     /** @param list<string> $periods @return array<string,list<array<string,mixed>>> */
     public function manualSummaryHistory(int $supplierId, int $employmentId, array $periods, int $offset = 0): array
     {

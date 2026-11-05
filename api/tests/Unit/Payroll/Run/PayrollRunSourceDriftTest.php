@@ -22,8 +22,31 @@ final class PayrollRunSourceDriftTest extends TestCase
         self::assertSame(1, $drift->toArray()['worked_time_changed']);
         $current['worked_time_evidence'][2] = $frozen['people'][0]['employments'][0]['worked_time_evidence'];
         self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
-        unset($frozen['people'][0]['employments'][0]['worked_time_evidence']);
-        self::assertTrue(PayrollRunSourceDrift::between($frozen, $current)->hasChanges(), 'Nový ruční zdroj zastaví i starý snímek.');
+        $current['worked_time_evidence'] = [];
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged, 'Opuštění hodinového zdroje nesmí skrýt změnu.');
+    }
+
+    public function testMonthlyManualOptInUsesExistingTimeMonthWithoutChangingLegacyDefaults(): void
+    {
+        $month = ['id' => 9, 'status' => 'approved', 'revision_no' => 1, 'row_version' => 3, 'jmhz_work_summary' => null];
+        $frozen = ['people' => [['employee' => ['id' => 1], 'employments' => [[
+            'employment' => ['id' => 2], 'time_month' => $month,
+        ]]]]];
+        $current = ['eligible_employment_ids' => [2], 'inputs' => [], 'absences' => [], 'statutory_evidence' => null,
+            'worked_time_evidence' => [], 'manual_time_month_state' => []];
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        $state = ['id' => 9, 'status' => 'approved', 'revision_no' => 1, 'row_version' => 3, 'summary_sha256' => null];
+        $current['manual_time_month_state'][2] = $state;
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        foreach (['revision_no' => 2, 'row_version' => 4, 'status' => 'open', 'summary_sha256' => 'changed'] as $key => $value) {
+            $current['manual_time_month_state'][2] = [...$state, $key => $value];
+            self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged);
+        }
+        $frozen['people'][0]['employments'][0]['time_month'] = null;
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged, 'Ruční zdroj založený po zmrazení nesmí projít.');
+        $frozen['people'][0]['employments'][0]['worked_time_evidence'] = ['source_sha256' => 'before'];
+        $current['worked_time_evidence'][2] = ['source_sha256' => 'after'];
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged, 'Hodinový podklad se započte právě jednou.');
     }
 
     public function testHourlyTermsAddedAfterLockPreventApprovalOfOldMonthlySnapshot(): void
