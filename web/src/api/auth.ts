@@ -118,6 +118,8 @@ export interface SetupStatus {
     password: string
   }
   passwordless_login_enabled: boolean
+  /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
+  maintenance_notices?: import('@/api/maintenanceNotice').MaintenanceNotice[]
   captcha: {
     provider: 'turnstile' | 'none'
     site_key: string
