@@ -32,7 +32,9 @@
           <td style="padding:4px 0;font-family:monospace;font-weight:600;">{{ work_report.total_hours|number_format(2, '.', ',') }} h</td>
         </tr>
         {% endif %}
-        {% if work_report.material_total > 0 %}
+{% if work_report.billing_snapshot|default(null) and (work_report.effective_display_options.amount ?? true) %}
+        {% for row in work_report.billing_preview.items|default([]) %}<tr><td style="padding:4px 0;">{{ row.description }}</td><td style="padding:4px 0;font-family:monospace;">{{ row.total_amount|number_format(2, '.', ',') }} {{ invoice.currency }}</td></tr>{% endfor %}
+        {% endif %}        {% if work_report.material_total > 0 %}
         <tr>
           <td style="padding:4px 0;color:#7A748C;">{{ work_report.material_title|default('Material') }}</td>
           <td style="padding:4px 0;font-family:monospace;font-weight:600;">{{ work_report.material_total|number_format(2, '.', ',') }} {{ invoice.currency }}</td>

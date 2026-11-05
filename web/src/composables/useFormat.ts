@@ -22,23 +22,23 @@ function activeLocale(): string {
 }
 
 /** Jednotková cena: haléřová jako částka, přesnější (0,004 EUR/ks, sazba 333,333333) na svá místa, nejvýš šest. */
-export function formatUnitPrice(value: number | string | null | undefined, currency = 'CZK'): string {
+export function formatUnitPrice(value: number | string | null | undefined, currency = 'CZK', localeOverride?: string): string {
   const amount = Number(value)
-  if (value === null || value === undefined || !Number.isFinite(amount) || !hasSubCentPrice(amount)) return formatMoney(value, currency)
-  return formatMoney(amount, currency, Math.max(defaultDecimals(currency), unitPriceDecimals(amount)))
+  if (value === null || value === undefined || !Number.isFinite(amount) || !hasSubCentPrice(amount)) return formatMoney(value, currency, undefined, localeOverride)
+  return formatMoney(amount, currency, Math.max(defaultDecimals(currency), unitPriceDecimals(amount)), localeOverride)
 }
 
-export function formatHourlyRate(value: number, currency = 'CZK'): string {
-  return formatUnitPrice(value, currency)
+export function formatHourlyRate(value: number, currency = 'CZK', localeOverride?: string): string {
+  return formatUnitPrice(value, currency, localeOverride)
 }
 
-export function formatMoney(value: number | string | null | undefined, currency: string = 'CZK', decimals?: number): string {
+export function formatMoney(value: number | string | null | undefined, currency: string = 'CZK', decimals?: number, localeOverride?: string): string {
   if (value === null || value === undefined) return '—'
   // API posílá částky z DECIMAL sloupců i jako text („237600.60").
   const amount = Number(value)
   if (Number.isNaN(amount)) return '—'
   const dec = decimals ?? defaultDecimals(currency)
-  const formatter = new Intl.NumberFormat(activeLocale(), {
+  const formatter = new Intl.NumberFormat(localeOverride ? (localeOverride.startsWith('en') ? 'en-US' : 'cs-CZ') : activeLocale(), {
     style: 'decimal',
     minimumFractionDigits: dec,
     maximumFractionDigits: dec,

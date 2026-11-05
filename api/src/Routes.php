@@ -870,6 +870,11 @@ final class Routes
         $app->post   ('/api/recurring/{id:[0-9]+}/reschedule', [RecurringTemplateAction::class, 'reschedule']);
 
         // Work reports — výkaz víceprací (M5)
+        $app->map(['GET', 'POST'], '/api/work-report-billing-templates', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->map(['PUT', 'DELETE'], '/api/work-report-billing-templates/{id:[0-9]+}', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->post('/api/work-report-billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'previewUnsaved']);
+        $app->get('/api/invoices/{id:[0-9]+}/work-report/billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'preview']);
+        $app->post('/api/invoices/{id:[0-9]+}/work-report/billing-transfer', [\MyInvoice\Action\WorkReport\BillingAction::class, 'transfer']);
         $app->get    ('/api/invoices/{id:[0-9]+}/work-report', GetWorkReportAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}/work-report', SaveWorkReportAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}/work-report/materials', SaveWorkReportMaterialsAction::class);
@@ -3660,6 +3665,9 @@ final class Routes
         $app->get    ('/api/admin/imports/{id:[0-9]+}/report',  \MyInvoice\Action\Admin\Import\ImportJobReportAction::class);
         $app->post   ('/api/admin/imports/{id:[0-9]+}/cancel',  CancelImportJobAction::class);
         $app->delete ('/api/admin/imports/{id:[0-9]+}',         \MyInvoice\Action\Admin\Import\DeleteImportJobAction::class);
+        $app->get('/api/admin/user-sessions', [\MyInvoice\Action\Admin\UserSessionAction::class, 'list']);
+        $app->post('/api/admin/user-sessions/terminate', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminateSelected']);
+        $app->delete('/api/admin/user-sessions/{id}', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminate']);
         $app->get    ('/api/admin/users',           [UserAdminAction::class, 'list']);
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);

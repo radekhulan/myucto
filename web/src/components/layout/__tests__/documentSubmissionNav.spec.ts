@@ -31,18 +31,18 @@ const navigationCode = ts.transpileModule(declarations.map(declaration => declar
   compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None },
 }).outputText
 
-function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}) {
+function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}, options: { stockEnabled?: boolean; writeOverrides?: Record<string, boolean> } = {}) {
   const profile = profiles[role]
-  const can = (permission: string) => profile.isSuperadmin
-    || (permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
+  const can = (permission: string, access = 'read') => profile.isSuperadmin
+    || (access === 'write' && options.writeOverrides?.[permission] !== undefined ? options.writeOverrides[permission]! : permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
   const auth = {
     ...profile,
     isAdminPlusRole: false, hasCommercialFeatures: true, hasPayrollFeatures: true,
-    isManagedInstallation: false, isDemo: false, can, canRead: can, canWrite: can,
+    isManagedInstallation: false, isDemo: false, can, canRead: can, canWrite: (permission: string) => can(permission, 'write'),
   }
   const evaluate = new Function('computed', 'auth', 'supplierStore', 'clientExperience', 't', 'ICONS',
     'approvalCount', 'accountantSigningProfilesEnabled', 'hostingAttention', 'automationStore', 'canUsePurchaseAiExtraction', 'OPERATIONAL_SETTINGS_KEYS', 'hasFrameworkScope', `${navigationCode}\nreturn navSections;`)
-  const sections = evaluate(computed, auth, { currentSupplier: { accounting_mode: 'double_entry', accounting_enabled: true } },
+  const sections = evaluate(computed, auth, { currentSupplier: { accounting_mode: 'double_entry', accounting_enabled: true, stock_enabled: options.stockEnabled } },
     ref(auth.isClientRole), (key: string) => key, new Proxy({}, { get: (_, key) => String(key) }),
     { pending: ref(0) }, ref(false), ref(null), { actionable: 0 }, canUsePurchaseAiExtraction, OPERATIONAL_SETTINGS_KEYS, hasFrameworkScope) as ComputedRef<NavSection[]>
   return mount(defineComponent({
@@ -120,5 +120,27 @@ describe('AppLayout client tax submissions', () => {
     expect(allowed.find('a[href="/admin/electronic-signatures"]').exists()).toBe(false)
     expect(renderNavigation('client', { 'reports.submissions': false, reports: true })
       .find('a[href="/reports/submissions"]').exists()).toBe(false)
+  })
+})
+
+
+describe('AppLayout a položka menu pro účtování výkazů', () => {
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s bez skladu nemá šablony v menu (otevírají se z Ceníku)', role => {
+    const wrapper = renderNavigation(role, { price_list: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s se skladem má šablony v menu místo Ceníku', role => {
+    const wrapper = renderNavigation(role, { price_list: true }, { stockEnabled: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/admin/price-list"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bez práva na Ceník šablony v menu nejsou ani se skladem', () => {
+    const wrapper = renderNavigation('accountant', { price_list: false }, { stockEnabled: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

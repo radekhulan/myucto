@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -297,8 +298,8 @@ async function verify() {
                     <th class="px-4 py-2 text-left font-medium">{{ t('workReportTracking.public.description') }}</th>
                     <th v-if="rep.effective_display_options?.date !== false && reportHasDates(rep.items)" class="px-3 py-2 text-left font-medium w-28">{{ t('workReportTracking.public.date') }}</th>
                     <th v-if="rep.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-medium w-20 whitespace-nowrap">{{ t('workReportTracking.public.hours') }}</th>
-                    <th v-if="rep.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-medium w-32 whitespace-nowrap">{{ t('workReportTracking.public.rate') }}</th>
-                    <th v-if="rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-medium w-36 whitespace-nowrap">{{ t('workReportTracking.public.amount') }}</th>
+                    <th v-if="!rep.billing_enabled && rep.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-medium w-32 whitespace-nowrap">{{ t('workReportTracking.public.rate') }}</th>
+                    <th v-if="!rep.billing_enabled && rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-medium w-36 whitespace-nowrap">{{ t('workReportTracking.public.amount') }}</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-100">
@@ -306,17 +307,21 @@ async function verify() {
                     <td class="px-4 py-2 whitespace-pre-wrap break-words text-neutral-800">{{ it.description }}</td>
                     <td v-if="rep.effective_display_options?.date !== false && reportHasDates(rep.items)" class="px-3 py-2 whitespace-nowrap text-neutral-600">{{ fmtDate(it.work_date) }}</td>
                     <td v-if="rep.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ it.duration_minutes != null ? formatDuration(it.duration_minutes) : fmtHours(it.hours) }}</td>
-                    <td v-if="rep.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, rep.currency, 6) }}</td>
-                    <td v-if="rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, rep.currency) }}</td>
+                    <td v-if="!rep.billing_enabled && rep.effective_display_options?.rate !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.rate, rep.currency, 6) }}</td>
+                    <td v-if="!rep.billing_enabled && rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(it.total_amount, rep.currency) }}</td>
                   </tr>
-                  <tr v-if="rep.effective_display_options?.hours !== false || rep.effective_display_options?.amount !== false" class="bg-neutral-50 border-t border-neutral-200 font-semibold">
+                  <tr v-if="rep.effective_display_options?.hours !== false || !rep.billing_enabled && rep.effective_display_options?.amount !== false" class="bg-neutral-50 border-t border-neutral-200 font-semibold">
                     <td class="px-4 py-2 text-right" :colspan="rep.effective_display_options?.date !== false && reportHasDates(rep.items) ? 2 : 1">{{ t('workReportTracking.public.report') }}</td>
                     <td v-if="rep.effective_display_options?.hours !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ durationTotal(rep.items) ?? fmtHours(rep.total_hours) }} h</td>
-                    <td v-if="rep.effective_display_options?.rate !== false"></td>
-                    <td v-if="rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(rep.total_amount, rep.currency) }}</td>
+                    <td v-if="!rep.billing_enabled && rep.effective_display_options?.rate !== false"></td>
+                    <td v-if="!rep.billing_enabled && rep.effective_display_options?.amount !== false" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ fmtMoney(rep.total_amount, rep.currency) }}</td>
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            <div v-if="rep.billing_enabled && rep.billing_preview" class="p-4 border-t border-neutral-200">
+              <BillingRecap :preview="rep.billing_preview" :currency="rep.currency" :display-options="rep.effective_display_options" :language="lang" :prices-include-vat="rep.prices_include_vat" />
             </div>
 
             <!-- Výkaz materiálu -->

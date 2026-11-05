@@ -1,7 +1,7 @@
 {# Společná tabulka práce pro přílohu faktury i samostatný schvalovací výkaz. #}
 {# Odsazení a konce řádků jsou uvnitř podmínek záměrně: výchozí volby musí dát bajtově stejné HTML jako před zavedením voleb (hlídá WorkReportDefaultHtmlTest). #}
 {% set wr_display = work_report.effective_display_options|default({compact: false, date: true, hours: true, rate: true, amount: true}) %}
-{% set wr_has_dates = wr_display.date and (work_report.items|filter(it => it.work_date)|length) > 0 %}
+{% set wr_original_display = wr_display %}{% if work_report.billing_snapshot|default(null) %}{% set wr_display = wr_display|merge({rate: false, amount: false}) %}{% endif %}{% set wr_has_dates = wr_display.date and (work_report.items|filter(it => it.work_date)|length) > 0 %}
 {# Desetinná místa per sloupec: skryj „,00" jen když jsou VŠECHNY hodnoty ve sloupci celé. #}
 {% set hours_dec = (work_report.items|filter(it => it.hours != it.hours|round(0))|length) > 0 ? 2 : 0 %}
 {% set rate_dec = (work_report.items|filter(it => it.rate != it.rate|round(0))|length) > 0 ? 2 : 0 %}
@@ -49,3 +49,4 @@
 {% endif %}
   </tbody>
 </table>
+{% if work_report.billing_snapshot|default(null) and work_report.billing_preview|default(null) and wr_original_display.amount %}{% include 'work_report_billing.twig' %}{% endif %}

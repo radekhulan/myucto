@@ -330,7 +330,7 @@ final class WorkReportLinkService
         $projectId  = $link['project_id'] !== null ? (int) $link['project_id'] : null;
 
         $sql =
-            "SELECT i.id, i.varsymbol, i.issue_date, i.created_at, cur.code AS currency,
+            "SELECT i.id, i.varsymbol, i.issue_date, i.created_at, i.prices_include_vat, cur.code AS currency,
                     p.name AS project_name
                FROM invoices i
                JOIN work_reports wr ON wr.invoice_id = i.id
@@ -372,11 +372,15 @@ final class WorkReportLinkService
                 + (float) $wr['total_amount'] + (float) ($wr['material_total'] ?? 0);
 
             $reports[] = [
+                'billing_enabled' => $wr['billing_enabled'] ?? false,
+                'billing_preview' => $wr['billing_preview'],
+                'billing_period' => $wr['billing_period'],
                 'effective_display_options' => $wr['effective_display_options'],
                 'invoice_id'   => (int) $row['id'],
                 'label'        => $row['varsymbol'] ?: null,
                 'date'         => $row['issue_date'] ?: substr((string) $row['created_at'], 0, 10),
                 'currency'     => $currency,
+                'prices_include_vat' => (bool) $row['prices_include_vat'],
                 'project_name' => $row['project_name'] ?: null,
                 'title'          => (string) $wr['title'],
                 'total_hours'    => $wr['total_hours'],

@@ -50,6 +50,7 @@ final class RequestApprovalAction
         private readonly AutoIssueAndSendService $autoIssue,
         private readonly PdfArchiveService $pdfArchive,
         private readonly RecipientResolver $recipients,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -75,6 +76,12 @@ final class RequestApprovalAction
                 && $this->repo->refundInvoicesEnabled((int) $invoice['supplier_id']))
         ) {
             return Json::error($response, 'invalid_amount', InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE, 409);
+        }
+
+        try {
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         }
 
         // Příjemci — jednotný resolver (#86), účel `approvals`: kontakty klienta

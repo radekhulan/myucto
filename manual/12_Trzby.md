@@ -170,7 +170,19 @@ firem a chybějících příspěvků. Záložky načítají data až při otevř
 > Pro souhrnný pohled na tržby i náklady vedle sebe (zisk, marže, zdraví firmy)
 > použijte [Zisk](11_Zisk.md). Tato kapitola je čistě o příjmové straně.
 
-## 12.8 Související kapitoly
+## 12.8 Cashflow na CRM přehledu
+
+Na `CRM` je dostupná čtyřtýdenní prognóza cashflow. Základní sloupce ukazují
+plánované příjmy a výdaje podle uložených částek dokladů a jejich splatností, týdenní
+saldo a jeho kumulaci; nejde o předpověď zůstatku bankovního účtu. Neplatné datum
+splatnosti se do týdnů nezařadí a počet těchto dokladů lze otevřít v seznamu faktur.
+
+Volba **Zahrnout koncepty** je ve výchozím stavu vypnutá. Po zapnutí zobrazí oddělený
+výhled příjmů z konceptů podle uložené částky a splatnosti. Výkazy práce se k částkám
+faktur nepřičítají znovu. Koncepty bez budoucí splatnosti se nabízejí k otevření
+v seznamu faktur.
+
+## 12.9 Související kapitoly
 
 - [Zisk](11_Zisk.md) - tržby a náklady vedle sebe
 - [Náklady](13_Naklady.md) - zrcadlová stránka pro přijaté faktury

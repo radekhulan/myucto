@@ -84,12 +84,13 @@ final class MeActionTest extends TestCase
             ->with(self::logicalAnd(
                 self::stringContains('0 AS invoice_pdf_show_line_discount'),
                 self::stringContains('NULL AS work_report_display_options'),
+                self::stringContains('0 AS default_hourly_rate'),
             ))
             ->willReturn($supplierStatement);
         $db = $this->createMock(Connection::class);
         // Sloupce kontrolované kvůli instalacím pozadu s migrací: OSS, zjednodušený doklad (2037)
         // rozpis slevy na PDF (2035) a zobrazení výkazu (2229, oba tady záměrně chybí).
-        $db->expects(self::exactly(4))->method('hasColumn')
+        $db->expects(self::exactly(5))->method('hasColumn')
             ->willReturnCallback(static fn (string $table, string $column): bool =>
                 $table === 'supplier' && in_array($column, ['oss_enabled', 'simplified_hide_customer_default'], true));
         $db->expects(self::once())->method('pdo')->willReturn($pdo);

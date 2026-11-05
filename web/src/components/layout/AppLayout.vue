@@ -358,6 +358,8 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/recurring', label: t('nav.recurring'), icon: ICONS.recurring, newTo: '/recurring/new' },
           { to: '/projects', label: t('nav.projects'), icon: ICONS.projects, newTo: '/projects/new' },
           ...(!isStockEnabled ? [{ to: '/admin/price-list', label: t('nav.price_list'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
+          // Se skladem Ceník v menu není, šablony účtování výkazů mají vlastní položku.
+          ...(isStockEnabled ? [{ to: '/admin/work-report-billing-templates', label: t('nav.work_report_billing_templates'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
         ],
       },
       {
@@ -484,6 +486,15 @@ const navSections = computed<NavSection[]>(() => {
         ...(!isStockEnabled ? [{
           to: '/admin/price-list',
           label: t('nav.price_list'),
+          icon: ICONS.price_list,
+          permission: 'price_list' as PermissionKey,
+          access: 'read' as const,
+        }] : []),
+        // Se skladem Ceník v menu není (nahrazuje ho katalog), šablony účtování
+        // výkazů proto mají vlastní položku; bez skladu se otevírají z Ceníku.
+        ...(isStockEnabled ? [{
+          to: '/admin/work-report-billing-templates',
+          label: t('nav.work_report_billing_templates'),
           icon: ICONS.price_list,
           permission: 'price_list' as PermissionKey,
           access: 'read' as const,

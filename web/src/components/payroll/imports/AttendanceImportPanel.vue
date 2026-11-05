@@ -27,6 +27,8 @@ import AttendanceTimeApprovalResult from './AttendanceTimeApprovalResult.vue'
 import AttendanceTemplateDownload from './AttendanceTemplateDownload.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import {
+  ATTENDANCE_FILE_ACCEPT,
+  ATTENDANCE_FILE_EXTENSIONS,
   autoCreatablePersons,
   autoPersonCreateDefaults,
   buildAttendanceLinks,
@@ -437,8 +439,8 @@ async function approveTimeMonths() {
       <ImportFilesDropzone
         v-model:files="files"
         test-id="attendance-dropzone"
-        accept=".xlsx,.csv"
-        :allowed-extensions="['xlsx', 'csv']"
+        :accept="ATTENDANCE_FILE_ACCEPT"
+        :allowed-extensions="ATTENDANCE_FILE_EXTENSIONS"
         :drop-hint="t('payroll_imports.attendance.drop_hint')"
         :disabled="!canWrite || busy !== null"
       />

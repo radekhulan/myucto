@@ -194,6 +194,17 @@ describe('window frame updates', () => {
       await flushPromises()
       expect(document.body.classList.contains('workspace-window-single-padded')).toBe(true)
 
+      // Hláška nad oknem (údržba) se zobrazí a zavře křížkem bez nové zprávy o vzhledu.
+      const banner = document.createElement('div')
+      shellMain.style.paddingTop = '24px'
+      shellMain.prepend(banner)
+      await flushPromises()
+      expect(document.body.classList.contains('workspace-window-single-padded')).toBe(false)
+      banner.remove()
+      shellMain.style.paddingTop = '0px'
+      await flushPromises()
+      expect(document.body.classList.contains('workspace-window-single-padded')).toBe(true)
+
       const changed = vi.fn()
       window.addEventListener('myucto:window-data-changed', changed, { once: true })
       const refreshes = mocks.refresh.mock.calls.length

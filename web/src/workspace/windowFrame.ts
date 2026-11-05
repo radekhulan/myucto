@@ -36,15 +36,40 @@ function toggleClass(element: HTMLElement, name: string, enabled = true): void {
   if (element.classList.contains(name) !== enabled) element.classList.toggle(name, enabled)
 }
 
+let singlePanelState = false
+let observedMain: Element | null = null
+let mainObserver: MutationObserver | null = null
+
+/*
+ * Horní odsazení jediného okna: hlavní plocha shellu ruší vlastní padding, když
+ * v ní je jen okno (main.css, `:has(> .workspace-host:only-child)`). Hláška nad
+ * oknem (údržba, licence, úložiště) ale může zmizet i bez nové zprávy o vzhledu,
+ * třeba zavřením křížkem. Proto se stav přepočítá i při změně obsahu shellu,
+ * jinak by obsah okna vyjel až k menu.
+ */
+function syncSinglePadding(): void {
+  const shellMain = window.frameElement?.closest('main') ?? null
+  toggleClass(document.body, 'workspace-window-single-padded', singlePanelState
+    && (!shellMain || window.parent.getComputedStyle(shellMain).paddingTop === '0px'))
+  if (shellMain === observedMain) return
+  mainObserver?.disconnect()
+  mainObserver = null
+  observedMain = shellMain
+  if (shellMain) {
+    const Observer = (window.parent as typeof window).MutationObserver ?? MutationObserver
+    mainObserver = new Observer(() => syncSinglePadding())
+    mainObserver.observe(shellMain, { childList: true, attributes: true, attributeFilter: ['class', 'style'] })
+  }
+}
+
 async function applyAppearance(theme: WindowFrameTheme, locale: WindowFrameLocale, accent = 'primary', singlePanel = false): Promise<void> {
   const sequence = ++appearanceSequence
   toggleClass(document.documentElement, 'dark', theme === 'dark')
   toggleClass(document.documentElement, 'workspace-window-frame')
   toggleClass(document.body, 'workspace-window-frame')
   toggleClass(document.body, 'workspace-window-single', singlePanel)
-  const shellMain = window.frameElement?.closest('main')
-  toggleClass(document.body, 'workspace-window-single-padded', singlePanel
-    && (!shellMain || window.parent.getComputedStyle(shellMain).paddingTop === '0px'))
+  singlePanelState = singlePanel
+  syncSinglePadding()
   if (document.body.dataset.accent !== accent) document.body.dataset.accent = accent
   if (i18n.global.locale.value !== locale) await ensureLocaleLoaded(locale)
   if (sequence !== appearanceSequence) return

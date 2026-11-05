@@ -66,6 +66,13 @@ describe('závislosti dat mezi okny', () => {
     }
   })
 
+  it('šablony účtování mají vlastní ručně obnovovanou stránku a změny obnoví i zakázky', () => {
+    expect(windowDataProfile('/admin/work-report-billing-templates')).toEqual({ reads: ['projects'], mode: 'manual' })
+    expect(affected('/admin/work-report-billing-templates', '/work-report-billing-templates/7')).toBe(true)
+    expect(affected('/projects', '/work-report-billing-templates/7')).toBe(true)
+    expect(affected('/payroll/people', '/work-report-billing-templates/7')).toBe(false)
+  })
+
   it('každá route aplikace je v mapě zařazená', () => {
     const missing = routePaths(createWorkspaceRoutes())
       .map(path => path.replace(/:id\([^)]*\)|:id/g, '1').replace(/:[a-zA-Z]+(\([^)]*\))?/g, '1'))

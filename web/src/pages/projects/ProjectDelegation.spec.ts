@@ -5,8 +5,9 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 const mocks = vi.hoisted(() => ({
   permissions: {} as Record<string, number>,
   list: vi.fn(), get: vi.fn(), profit: vi.fn(), invoices: vi.fn(), clients: vi.fn(), client: vi.fn(),
-  categories: vi.fn(), currencies: vi.fn(),
+  categories: vi.fn(), currencies: vi.fn(), billingTemplates: vi.fn(),
 }))
+vi.mock('@/api/workReportBilling', () => ({ workReportBillingApi: { list: mocks.billingTemplates } }))
 vi.mock('@/api/projects', () => ({ projectsApi: { list: mocks.list, get: mocks.get, profit: mocks.profit } }))
 vi.mock('@/api/invoices', () => ({ invoicesApi: { listGrouped: mocks.invoices } }))
 vi.mock('@/api/clients', () => ({ clientsApi: { list: mocks.clients, get: mocks.client } }))
@@ -37,6 +38,7 @@ describe('delegated project requests', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.permissions = { projects: 1 }
+    mocks.billingTemplates.mockResolvedValue([])
     mocks.list.mockResolvedValue({ data: [], meta: { total: 0, pages: 1 } })
     mocks.get.mockResolvedValue(project)
     mocks.invoices.mockResolvedValue({ data: [], meta: { total: 0, pages: 1 } })
@@ -68,4 +70,18 @@ describe('delegated project requests', () => {
     expect(mocks.categories).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+})
+
+
+it.each([false, true])('ProjectForm nepřidá ovládání firmě bez šablon, uložená volba zůstane viditelná (%s)', async selected => {
+  mocks.permissions = { projects: 2 }
+  mocks.billingTemplates.mockResolvedValue([])
+  mocks.currencies.mockResolvedValue([{ id: 1, code: 'CZK' }])
+  mocks.get.mockResolvedValue({ ...project, billing_template_id: selected ? 7 : null })
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/projects/:id/edit', component: { render: () => null } }] })
+  await router.push('/projects/7/edit')
+  const wrapper = mount(ProjectForm, { global: { plugins: [router], mocks: { $i18n: { locale: 'cs' } }, stubs: { EntityDimensionDefaults: true } } })
+  await flushPromises()
+  expect(wrapper.text().includes('work_report_billing.template')).toBe(selected)
+  wrapper.unmount()
 })

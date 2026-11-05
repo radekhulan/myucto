@@ -48,6 +48,7 @@ final class AutoIssueAndSendService
         private readonly DocumentAutoPoster $autoPoster,
         private readonly ClientRepository $clients,
         private readonly InvoicePaymentService $payments,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
     ) {}
 
     /**
@@ -69,6 +70,7 @@ final class AutoIssueAndSendService
         $issued = false;
         // 1. Vystavit pokud draft
         if ($invoice['status'] === 'draft') {
+            $this->billing->assertCurrent($invoiceId, (int) $invoice['supplier_id']);
             if (
                 InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                     (string) ($invoice['invoice_type'] ?? 'invoice'),
@@ -90,6 +92,9 @@ final class AutoIssueAndSendService
             if ($stockEnabled && $ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
             if ($ownTransaction) $pdo->beginTransaction();
             try {
+                $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+                $billingLock->execute([$supplierId, $invoiceId]);
+                $this->billing->assertCurrent($invoiceId, $supplierId);
                 $issue = $pdo->prepare(
                     'UPDATE invoices SET status = "issued" WHERE id = ? AND status = "draft"'
                 );

@@ -2555,6 +2555,10 @@ paths:
         měsíční skupiny se skládají až z aktuální stránky, takže skupina na
         hranici stránky může pokračovat na stránce další.
       parameters:
+        - in: query
+          name: 'filter[cashflow_draft_unscheduled]'
+          description: "Koncepty vhodné pro cashflow s chybějící nebo minulou splatností; lze kombinovat s měnou a stránkováním."
+          schema: { type: boolean, default: false }
         - $ref: '#/components/parameters/SupplierIdHeader'
         - in: query
           name: q
@@ -3107,8 +3111,9 @@ paths:
       description: |
         Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
         jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
-        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
-        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
+        v konceptu (`draft`) odstraní všechny položky a přepočítá součty na nulu.
+        U nedraftového dokladu s položkami se odmítne s 422 `no_items`, i při `force=1`.
+        Poslané neprázdné `items` řádky nahradí
         (DELETE + INSERT), takže payload musí nést kompletní seznam.
 
         Vynucená úprava vystaveného dokladu (`force=1`, u zaúčtovaného dokladu
@@ -3125,8 +3130,8 @@ paths:
         Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""` vymaže nullable pole; `issue_date`
         a `currency_id` se při `null` vrátí na výchozí hodnotu (dnes, měna
         projektu/klienta/dodavatele). `items`, `payment_schedule` a `cash_register_id` jsou při
-        vynechání beze změny, při poslání se nahradí (`items: []` u dokladu s položkami vrátí 422
-        `no_items`).
+        vynechání beze změny, při poslání se nahradí (`items: []` lze uložit v konceptu;
+        u nedraftového dokladu s položkami vrátí 422 `no_items`).
 
         Výjimky a odvozená pole: (1) změní-li se `client_id` a `project_id` je vynechané, zakázka se
         odebere, protože patří klientovi. (2) `revenue_category` a `revenue_category_id` tvoří
@@ -3150,6 +3155,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
+        '400':
+          description: |
+            Neplatný vstup (`validation_failed`), nebo změna měny faktury, jejíž výkaz práce má
+            cenové ujednání v původní měně (`billing_currency_mismatch`). Ujednání výkazu je
+            nejprve potřeba zrušit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '403':
           description: |
             Doklad je uzamčený pro roli (`document_locked`), nebo API token žádá vynucenou
@@ -3172,7 +3185,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: '`items: []` by doklad připravilo o všechny položky (`no_items`)'
+          description: '`items: []` by nedraftový doklad připravilo o všechny položky (`no_items`)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -3277,6 +3290,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: |
+            Cenová rekapitulace výkazu nebyla přenesena nebo byly změněny její položky (`billing_stale`).
             Doklad není koncept (`not_draft`), nemá kladnou částku k úhradě
             (`invalid_amount`), k zálohové faktuře už existuje finální doklad
             (`final_exists`), varsymbol by kolidoval (`varsymbol_duplicate`),
@@ -4001,6 +4015,56 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/invoices/{id}/work-report/billing-preview:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    get:
+      tags: [WorkReports]
+      summary: Cenová rekapitulace výkazu pro přenos do faktury
+      responses:
+        '200':
+          description: Aktuální výpočet a otisk
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WorkReportBillingPreview' }
+        '400': { description: Výkaz nemá cenové ujednání }
+        '403': { description: Chybí oprávnění číst faktury }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/invoices/{id}/work-report/billing-transfer:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer } }
+    post:
+      tags: [WorkReports]
+      summary: Přenese cenovou rekapitulaci do položek konceptu
+      description: "Atomicky nahradí navázané položky paušálu a pásem, ostatní zachová. Starší souhrnnou položku lze explicitně nahradit pomocí legacy_item_id. Vyžaduje právo zápisu faktur a respektuje zámky dokladu."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fingerprint]
+              properties:
+                fingerprint: { type: string, description: Otisk z aktuálního náhledu }
+                legacy_item_id: { type: [integer, "null"], description: ID staré souhrnné položky této faktury určené k nahrazení }
+      responses:
+        '200':
+          description: Aktualizovaný výkaz a položky
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  work_report: { $ref: '#/components/schemas/WorkReport' }
+                  items: { type: array, items: { $ref: '#/components/schemas/InvoiceItem' } }
+                  preview: { $ref: '#/components/schemas/WorkReportBillingPreview' }
+        '400': { description: Neplatné cenové ujednání nebo nahrazovaná položka }
+        '403': { description: Chybí oprávnění zápisu nebo nelze změnit uzamčený doklad }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Zastaralý náhled, uzamčený doklad nebo faktura není koncept }
+
   /api/v1/invoices/{id}/work-report:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -4037,11 +4101,11 @@ paths:
         (bez ohledu na status). Vynucená úprava i smazání výkazu vystavené faktury
         jdou jen z relace, API token dostane 403 `token_write_forbidden`.
 
-        Suma `total_hours` a `total_amount` se přepočítá ze `items` na serveru.
+        Suma `total_hours` se přepočítá ze `items` na serveru. V konceptu se při `billing_snapshot` cena počítá z paušálu a pásem; jinak ze sazeb jednotlivých činností. Mimo koncept se účtovaný souhrn bere z navázaných položek faktury a změna šablony, cenového nastavení nebo období je odmítnuta i při `force=1`. Vynechané cenové nastavení zůstane zachované.
 
         **Pozor:** výkaz víceprací je samostatná entita — ukládá se jen jako
         příloha (2. strana PDF) a **NEmění položky ani částku faktury**. Pokud chceš
-        práci i vyúčtovat, přidej odpovídající položku faktury zvlášť přes
+        práci i vyúčtovat, použij v aplikaci explicitní přenos; u původního účtování přidej položku zvlášť přes
         `PUT /api/v1/invoices/{id}` (úprava `items`). Obojí lze dělat jen u draftu.
 
         Částečná aktualizace (viz úvod). Schéma `WorkReportInput` popisuje i založení výkazu, kde
@@ -4070,7 +4134,7 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '409':
-          description: Faktura není draft a požadavek není vynucená úprava s oprávněním (`not_editable`)
+          description: Faktura není draft a požadavek není vynucená úprava s oprávněním (`not_editable`), nebo se mění cenové ujednání či období mimo koncept / ruší již přenesené účtování (`billing_conflict`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4097,7 +4161,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Faktura není draft a požadavek není vynucené smazání s oprávněním (`not_editable`)
+          description: Faktura není draft a požadavek není vynucené smazání s oprávněním (`not_editable`), nebo na výkaz stále odkazují položky účtování (`billing_conflict`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4146,7 +4210,7 @@ paths:
                     type: array
                     items: { type: string, format: email }
         '409':
-          description: Faktura není draft / nemá výkaz / projekt nevyžaduje schválení
+          description: Faktura není draft / nemá výkaz / projekt nevyžaduje schválení / cenová rekapitulace není aktuálně přenesena do faktury (`billing_stale`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8900,10 +8964,10 @@ paths:
       description: |
         Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
         jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
-        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
-        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
-        (DELETE + INSERT), takže payload musí nést kompletní seznam. Vyprázdnit řádky
-        draftu lze dedikovaným `PUT /api/v1/purchase-invoices/{id}/items`.
+        v konceptu (`draft`) odstraní všechny položky, stejně jako dedikovaný
+        `PUT /api/v1/purchase-invoices/{id}/items`. U nedraftového dokladu s položkami
+        se odmítne s 422 `no_items`, i při `force=1`. Poslané neprázdné `items` řádky
+        nahradí (DELETE + INSERT), takže payload musí nést kompletní seznam.
 
         Částečná aktualizace (viz úvod). Schéma `PurchaseInvoicePayload` je sdílené s POST, kde jsou
         povinné `vendor_id`, `vendor_invoice_number`, `issue_date`, `due_date`, `currency_id` a
@@ -8985,7 +9049,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: |
-            `items: []` by doklad připravilo o všechny položky (`no_items`), chybí
+            `items: []` by nedraftový doklad připravilo o všechny položky (`no_items`), chybí
             `force_mode` u zaúčtovaného dokladu v uzavřeném období (`force_mode_required`),
             `force_mode=notes_only` narazil na změnu účetního pole
             (`financial_change_not_allowed`), nebo změnu nároku v hlavičce nejde jednoznačně
@@ -10931,11 +10995,18 @@ paths:
     get:
       tags: [CRM]
       summary: Cash flow prognóza N týdnů dopředu
+      description: "Volitelná vrstva konceptů vychází z uložených částek faktur a splatnosti. Samotný výkaz se nepřičítá. Koncepty bez splatnosti nebo s minulou splatností jsou mimo týdenní součty."
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: weeks, schema: { type: integer, default: 4, minimum: 1, maximum: 12 } }
         - { in: query, name: currency, schema: { type: string, default: CZK } }
-      responses: { '200': { description: 'weeks[] + total_in/out/net' } }
+        - { in: query, name: include_drafts, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: "Původní částky jsou zachovány; pole konceptů a kombinovaného výhledu jsou přítomna pouze při include_drafts=1."
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CrmCashFlowForecast' }
 
   /api/v1/crm/late-risk:
     get:
@@ -46525,6 +46596,7 @@ components:
     SupplierBrief:
       type: object
       properties:
+        default_hourly_rate: { type: number, minimum: 0, readOnly: true, description: "Výchozí hodinová sazba firmy v přehledu firem session endpointu /api/auth/me." }
         work_report_display_options: { $ref: '#/components/schemas/WorkReportDisplayOptions' }
         id: { type: integer }
         company_name: { type: string }
@@ -47442,6 +47514,7 @@ components:
         client_is_walk_in: { type: boolean, description: "Odběratelem je systémový koncový zákazník (zjednodušený doklad bez údajů o odběrateli, § 30 ZDPH)." }
         project_id: { type: [integer, "null"] }
         project_name: { type: [string, "null"] }
+        project_billing_template_id: { type: [integer, "null"], readOnly: true, description: "Výchozí šablona účtování zakázky, pouze v detailu faktury. Uložený výkaz má přednost před tímto výchozím nastavením." }
         parent_invoice_id: { type: [integer, "null"], description: "Pro credit_note / cancellation / final-z-proformy odkaz na původní fakturu" }
         calendar_id: { type: [integer, "null"], description: "Kalendář, ke kterému patří interní doklad splátky (`invoice`, `proforma`) nebo daňový doklad k její úhradě (`tax_document`, číslo `KP-<id platby>`)." }
         calendar_contract_ref: { type: [string, "null"], maxLength: 190, description: "Nájemní smlouva splátkového kalendáře (§ 31 ZDPH)." }
@@ -47820,6 +47893,7 @@ components:
             i prázdný řetězec jsou vědomé vyprázdnění a výchozí text nepřepíšou.
         items:
           type: array
+          description: "Kompletní seznam položek. Koncept může být prázdný; při PUT vynechaný klíč nebo null zachová položky, [] je v konceptu odstraní."
           items: { $ref: '#/components/schemas/InvoiceItemInput' }
 
     InvoiceImportInput:
@@ -47917,6 +47991,7 @@ components:
         budget_yearly:  { type: [number, "null"] }
         budget_monthly: { type: [number, "null"] }
         default_revenue_category_id: { type: [integer, "null"], description: "Default kategorie tržby pro faktury zakázky" }
+        billing_template_id: { type: [integer, "null"], description: "Výchozí firemní šablona účtování nových výkazů." }
         archived_at: { type: [string, "null"], format: date-time }
 
     Project:
@@ -47925,6 +48000,7 @@ components:
         - $ref: '#/components/schemas/ProjectBrief'
         - type: object
           properties:
+            billing_template_id: { type: [integer, "null"], description: "Výchozí firemní šablona účtování nových výkazů." }
             client_id: { type: integer, format: int64 }
             client_company_name: { type: string }
             client_main_email: { type: [string, "null"], format: email }
@@ -47987,6 +48063,7 @@ components:
       type: object
       required: [client_id, name, payment_due_days]
       properties:
+        billing_template_id: { type: [integer, "null"], description: "Výchozí firemní šablona účtování nových výkazů." }
         client_id:
           type: integer
           format: int64
@@ -48063,6 +48140,69 @@ components:
           default: auto
           description: "Jak kombinovat e-maily zakázky s příjemci dle kontaktů klienta (#86)."
 
+    WorkReportBillingSettings:
+      type: object
+      required: [name, currency, included_hours, bands]
+      properties:
+        name: { type: string, maxLength: 200 }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        fixed_fee: { type: [number, "null"], minimum: 0, description: "Plný paušál i při nulovém času; null vypíná paušál." }
+        included_hours: { type: number, minimum: 0 }
+        fixed_description: { type: string, description: "Šablona názvu s placeholdery nazev, zakazka, obdobi, limit, od, do, hodiny ve složených závorkách." }
+        bands:
+          type: array
+          items:
+            type: object
+            required: [up_to_hours, rate, description]
+            properties:
+              up_to_hours: { type: [number, "null"], description: "Rostoucí kumulativní hranice hodin včetně hodin paušálu; poslední pásmo null = bez limitu." }
+              rate: { type: number, minimum: 0 }
+              description: { type: string }
+    WorkReportBillingPreview:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/InvoiceItem' }
+              - type: object
+                properties:
+                  billing_key: { type: string }
+                  total_amount: { type: number }
+        total_hours: { type: number }
+        included_hours: { type: number }
+        extra_hours: { type: number }
+        total_amount: { type: number }
+        totals: { type: object, additionalProperties: true }
+        vat_breakdown: { type: array, items: { type: object, additionalProperties: true } }
+        fingerprint: { type: string, description: "Otisk aktuálního ocenění pro kontrolu souběžné změny při přenosu." }
+    CrmCashFlowForecast:
+      type: object
+      properties:
+        currency: { type: string }
+        weeks:
+          type: array
+          items:
+            type: object
+            properties:
+              week_start: { type: string, format: date }
+              week_end: { type: string, format: date }
+              label: { type: string }
+              in: { type: number }
+              out: { type: number }
+              net: { type: number }
+              running: { type: number }
+              draft_in: { type: number }
+              outlook_net: { type: number }
+              outlook_running: { type: number }
+        total_in: { type: number }
+        total_out: { type: number }
+        total_net: { type: number }
+        total_draft_in: { type: number }
+        total_outlook_net: { type: number }
+        unscheduled_draft_count: { type: integer }
+
     WorkReportItem:
       type: object
       properties:
@@ -48100,6 +48240,19 @@ components:
     WorkReport:
       type: object
       properties:
+        billing_template_id: { type: [integer, "null"], description: "Firemní šablona; výkaz uchovává vlastní kopii nastavení." }
+        billing_snapshot:
+          oneOf:
+            - { $ref: '#/components/schemas/WorkReportBillingSettings' }
+            - { type: "null" }
+        billing_period: { type: [string, "null"], pattern: '^\d{4}-(0[1-9]|1[0-2])$', description: "Období pro popisy položek; limit platí pro výkaz, nikoli napříč měsícem." }
+        billing_transferred_fingerprint: { type: [string, "null"], readOnly: true, description: "Otisk posledního explicitního přenosu do položek faktury." }
+        billing_stale: { type: boolean, description: "Cenová rekapitulace se liší od přenesených položek faktury; před vystavením je nutný nový přenos." }
+        billing_error: { type: [string, "null"], description: "Důvod, proč uložené cenové ujednání nejde vyhodnotit (např. hodiny nad zahrnutý limit bez neomezeného pásma). Rekapitulace (`billing_preview`) pak chybí a vystavení je blokované." }
+        billing_preview:
+          oneOf:
+            - { $ref: '#/components/schemas/WorkReportBillingPreview' }
+            - { type: "null" }
         effective_display_options: { $ref: '#/components/schemas/WorkReportDisplayOptions' }
         display_options:
           oneOf:
@@ -48122,6 +48275,12 @@ components:
       type: object
       required: [title, items]
       properties:
+        billing_template_id: { type: [integer, "null"], description: "Firemní šablona; výkaz uchovává vlastní kopii nastavení. Nový výkaz výchozí šablonu zakázky nepřebírá sám, je třeba ji poslat výslovně; vynechaný klíč založí výkaz bez pásmového účtování." }
+        billing_snapshot:
+          oneOf:
+            - { $ref: '#/components/schemas/WorkReportBillingSettings' }
+            - { type: "null" }
+        billing_period: { type: [string, "null"], pattern: '^\d{4}-(0[1-9]|1[0-2])$', description: "Období pro popisy položek; limit platí pro výkaz, nikoli napříč měsícem." }
         display_options:
           oneOf:
             - { $ref: '#/components/schemas/WorkReportDisplayOptions' }
@@ -48137,7 +48296,7 @@ components:
           maxLength: 190
         items:
           type: array
-          minItems: 1
+          minItems: 0
           items: { $ref: '#/components/schemas/WorkReportItemInput' }
 
     PdfArchiveEntry:
@@ -49635,6 +49794,7 @@ components:
     InvoiceItem:
       type: object
       properties:
+        work_report_billing_key: { type: [string, "null"], description: "Stabilní klíč paušálu nebo pásma výkazu; při úpravě položek zachovejte spolu s linked_work_report_id." }
         id: { type: integer }
         invoice_id: { type: integer }
         description: { type: string }
@@ -49712,6 +49872,8 @@ components:
       type: object
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
+        linked_work_report_id: { type: [integer, "null"], description: "Vazba položky na výkaz této faktury." }
+        work_report_billing_key: { type: [string, "null"], description: "Stabilní klíč paušálu nebo pásma výkazu; při úpravě položek zachovejte spolu s linked_work_report_id." }
         description: { type: string }
         quantity: { type: number, format: float, description: "Nesmí být 0. Může být záporné pro slevový řádek, ale ne současně se zápornou cenou. Má-li jednotka v číselníku nastavené `quantity_decimals`, smí mít nejvýš tolik desetinných míst; jinak 400 `validation_failed` se seznamem `items` [{index, unit, decimals}]. Nic se nezaokrouhluje. Chybějící `unit` se kontroluje jako výchozí `ks`. Časové řádky se nekontrolují. U PUT se kontrolují jen nové a změněné řádky; řádek se stejnou jednotkou a množstvím jako uložený řádek dokladu (podle `id`, jinak podle dvojice jednotka + množství) projde beze změny." }
         duration_minutes: { type: [integer, "null"], minimum: -599999999, maximum: 599999999, description: "Volitelná přesná délka v celých minutách. Vyžaduje hodinovou jednotku a prázdný `stock_item_id`; vynecháno/NULL zachová legacy výpočet z `quantity`. Nula není povolena." }
@@ -50957,6 +51119,7 @@ components:
         vat_classification_code: { type: [string, "null"] }
         items:
           type: array
+          description: "Kompletní seznam položek. Koncept může být prázdný; při PUT vynechaný klíč nebo null zachová položky, [] je v konceptu odstraní."
           items: { $ref: '#/components/schemas/PurchaseInvoiceItemPayload' }
 
     InboxScanResult:

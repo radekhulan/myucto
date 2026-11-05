@@ -97,6 +97,7 @@ final class PublicApprovalGetAction
             'varsymbol'           => $invoice['varsymbol'],
             'invoice_type'        => $invoice['invoice_type'],
             'currency'            => $invoice['currency'],
+            'prices_include_vat'  => (bool) ($invoice['prices_include_vat'] ?? false),
             'language'            => $invoice['language'],
             'client_company_name' => $invoice['client_company_name'] ?? null,
             'project_name'        => $invoice['project_name'] ?? null,
