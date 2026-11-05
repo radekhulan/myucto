@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { formatPayrollDuration, parsePayrollDuration } from './payrollDuration'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute } from 'vue-router'
 import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
@@ -208,7 +209,7 @@ const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surfa
 const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-  'employer_obstacle', 'compensatory_time_off', 'unexcused',
+  'employer_obstacle', 'compensatory_time_off', 'holiday_compensatory_time_off', 'unexcused',
   'public_function', 'employee_obstacle_unpaid', 'invalid_termination', 'other',
 ]
 /*
@@ -258,8 +259,8 @@ const averageForm = reactive({
   decisive_to: decisiveTo,
   gross_earnings_czk: 0,
   longer_period_allocated_czk: 0,
-  worked_hours: 0,
-  worked_days: 0,
+  worked_hours: '' as string | number,
+  worked_days: '' as string | number,
   probable_hourly_czk: null as number | null,
   rationale: '',
 })
@@ -279,7 +280,8 @@ const bulkAverageQuarter = ref(applicationQuarter)
 const averageSuggestion = ref<AverageEarningSuggestion | null>(null)
 const averageSuggestionLoading = ref(false)
 const averageSuggestionError = ref('')
-const averagePrefill = ref<{ gross: number, hours: number, days: number } | null>(null)
+const averagePrefill = ref<{ gross: number, hours: string | number, days: string | number } | null>(null)
+const averageOriginalDuration = ref<{ raw: string, units: number } | null>(null)
 const entitlementForm = reactive({
   employment_id: 0,
   leave_year: periodYear,
@@ -1129,21 +1131,22 @@ async function loadAverageSuggestion() {
 }
 
 /*
- * Nedá-li se odvodit, formulář se VYPRÁZDNÍ (nuly, tedy výchozí stav) — nechat
+ * Nedá-li se doba odvodit, zůstane prázdná — nechat
  * v něm čísla z předchozího vztahu nebo čtvrtletí by bylo horší než prázdno.
  */
 function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
   averageForm.decisive_from = suggestion.decisive_from
   averageForm.decisive_to = suggestion.decisive_to
   const gross = (suggestion.gross_earnings_minor ?? 0) / 100
-  const hours = (suggestion.worked_minutes ?? 0) / 60
-  const days = suggestion.worked_days ?? 0
+  const units = suggestion.worked_duration_units ?? (suggestion.worked_minutes == null ? null : suggestion.worked_minutes * 50)
+  const hours = units == null ? '' : units % 50 === 0 ? String(units / 3000) : formatPayrollDuration(units)
+  const days = suggestion.worked_days ?? ''
+  averageOriginalDuration.value = units == null ? null : { raw: hours, units }
   averageForm.gross_earnings_czk = gross
   averageForm.worked_hours = hours
   averageForm.worked_days = days
-  // § 355 ZP — skutečný průměr nevznikne, průměr se STANOVUJE z pravděpodobného
-  // výdělku zmrazeného v podmínkách vztahu. Účetní ho tady nepřepisuje, jen
-  // potvrzuje; přepsat ho jde na kartě vztahu, kde ho i odůvodnila.
+  // § 355 ZP — návrh pravděpodobného výdělku účetní posoudí a může upravit,
+  // zejména vychází-li pouze ze sjednané sazby bez obvyklých složek mzdy.
   averageForm.probable_hourly_czk = suggestion.source_kind === 'probable'
     ? (suggestion.probable_hourly_minor ?? 0) / 100
     : null
@@ -1153,10 +1156,19 @@ function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
   averagePrefill.value = suggestion.ready ? { gross, hours, days } : null
 }
 
+function averageWorkedTimePayload(): { worked_minutes: number } | { worked_duration_units: number } {
+  const raw = String(averageForm.worked_hours)
+  const original = averageOriginalDuration.value
+  const units = original?.raw === raw ? original.units : parsePayrollDuration(raw)
+  if (units == null) throw new Error(t('payroll_absence.validation.exact_hours'))
+  return units % 50 === 0 ? { worked_minutes: units / 50 } : { worked_duration_units: units }
+}
+
 async function createAverage() {
   averageError.value = ''
   saving.value = true
   try {
+    if (averageForm.worked_days === '') throw new Error(t('payroll_absence.validation.number'))
     await payrollAbsenceApi.createAverage({
       employment_id: averageForm.employment_id,
       applicable_year: wholeNumber(averageForm.applicable_year, true),
@@ -1165,7 +1177,7 @@ async function createAverage() {
       decisive_to: averageForm.decisive_to,
       gross_earnings_minor: toMinor(averageForm.gross_earnings_czk),
       longer_period_allocated_minor: toMinor(averageForm.longer_period_allocated_czk),
-      worked_minutes: hoursToMinutes(averageForm.worked_hours),
+      ...averageWorkedTimePayload(),
       worked_days: wholeNumber(averageForm.worked_days),
       probable_hourly_minor: toMinor(averageForm.probable_hourly_czk, true, true),
       rationale: averageForm.rationale || null,
@@ -1663,6 +1675,7 @@ onMounted(async () => {
               accent="payroll"
               :aria-label="t('payroll_absence.absences.type')"
             />
+            <p v-if="absenceForm.absence_type === 'holiday_compensatory_time_off'" class="mt-1 text-xs text-neutral-500" data-test="absence-holiday-time-off-hint">{{ t('payroll_absence.absences.holiday_time_off_hint') }}</p>
             <p
               v-if="isUnpaidExcused"
               data-test="absence-unpaid-excused-hint"
@@ -2232,8 +2245,8 @@ onMounted(async () => {
               <span v-else-if="candidate.ready && candidate.source_kind === 'actual'" class="mt-1 block text-xs text-neutral-500">
                 {{ t('payroll_absence.averages.bulk_actual_summary', {
                   gross: money(candidate.gross_earnings_minor ?? 0),
-                  hours: minutes(candidate.worked_minutes ?? 0),
-                  days: candidate.worked_days ?? 0,
+                  hours: candidate.worked_duration_units == null ? minutes(candidate.worked_minutes) : formatPayrollDuration(candidate.worked_duration_units),
+                  days: candidate.worked_days ?? t('payroll.worked_hours.unknown'),
                 }) }}
               </span>
               <span v-else-if="candidate.ready && candidate.source_kind === 'probable'" class="mt-1 block text-xs text-neutral-500">
@@ -2311,7 +2324,7 @@ onMounted(async () => {
             data-test="average-suggestion-probable"
             class="mt-1 text-xs text-success-700"
           >
-            {{ t('payroll_absence.averages.suggestion_probable') }}
+            {{ t(averageSuggestion.probable_source === 'agreed_hourly_rate' ? 'payroll_absence.averages.hourly_rate_review' : 'payroll_absence.averages.suggestion_probable') }}
           </p>
           <p v-else class="mt-1 text-xs text-success-700">{{ t('payroll_absence.averages.suggestion_sources') }}</p>
           <!--
@@ -2374,7 +2387,8 @@ onMounted(async () => {
           </label>
           <label>
             <span class="form-label">{{ t('payroll_absence.averages.worked_minutes') }}</span>
-            <input v-model.number="averageForm.worked_hours" data-test="average-worked-hours" min="0" step="0.25" type="number" :class="fieldClass">
+            <input v-model="averageForm.worked_hours" data-test="average-worked-hours" type="text" :class="fieldClass">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.exact_hours_hint') }}</span>
             <span v-if="averagePrefill" class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_worked_hours') }}</span>
           </label>
           <label>
@@ -2385,7 +2399,7 @@ onMounted(async () => {
           <label v-if="averageProbableApplies" data-test="average-probable-field">
             <span class="form-label">{{ t('payroll_absence.averages.probable_minor') }}</span>
             <input v-model.number="averageForm.probable_hourly_czk" data-test="average-probable-czk" min="0.01" step="0.01" type="number" :class="fieldClass">
-            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll_absence.averages.source_probable') }}</span>
+            <span class="mt-1 block text-xs text-neutral-500">{{ t(averageSuggestion?.probable_source === 'agreed_hourly_rate' ? 'payroll_absence.averages.hourly_rate_review' : 'payroll_absence.averages.source_probable') }}</span>
           </label>
           <label class="sm:col-span-2 lg:col-span-3"><span class="form-label">{{ t('payroll_absence.averages.rationale') }}</span><input v-model="averageForm.rationale" maxlength="1000" type="text" :class="fieldClass"></label>
           <div class="flex flex-wrap justify-end sm:col-span-2 lg:col-span-4">
@@ -2406,6 +2420,7 @@ onMounted(async () => {
           <div class="flex justify-between gap-3"><h3 class="font-semibold text-neutral-900">{{ item.applicable_year }}/Q{{ item.applicable_quarter }}</h3><span class="text-xs text-neutral-500">{{ t(`payroll_absence.average_source.${item.source_kind}`) }}</span></div>
           <p class="mt-3 text-2xl font-semibold text-payroll-600">{{ money(item.average_hourly_minor) }}</p>
           <p class="mt-1 text-sm text-neutral-500">{{ t(`payroll_absence.average_status.${item.status}`) }}</p>
+          <p v-if="item.worked_duration_units !== undefined || item.worked_minutes !== undefined" class="mt-1 text-sm text-neutral-500" data-test="average-snapshot-worked">{{ t('payroll_absence.averages.worked_minutes') }}: {{ item.worked_duration_units == null ? minutes(item.worked_minutes ?? null) : formatPayrollDuration(item.worked_duration_units) }}</p>
           <button v-if="canWrite && item.status === 'manual_review'" :class="btnFilled('success')" class="mt-4" :disabled="saving" @click="approveAverage(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll_absence.actions.approve') }}</button>
         </article>
       </section>

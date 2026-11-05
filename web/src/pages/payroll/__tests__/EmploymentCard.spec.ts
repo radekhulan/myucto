@@ -576,7 +576,7 @@ describe('EmploymentCard', () => {
     )
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     expect(wrapper.find('[data-test="terms-monthly-gross"]').exists()).toBe(false)
-    expect(wrapper.get('[data-test="terms-hourly-warning"]').text()).toContain('payroll.people.remuneration.no_calculation')
+    expect(wrapper.get('[data-test="terms-hourly-warning"]').text()).toContain('payroll.people.remuneration.calculation_evidence')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('180,50')
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('  Syntetická dohoda 2026  ')
     await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('agreement')
@@ -692,7 +692,7 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="terms-hourly-warning"]').text()).toContain('rate_distinction')
   })
 
-  it('při přechodu do hodinového režimu nabídne první den a odmítne jiné datum', async () => {
+  it('přechod do hodinového režimu zachová i účinnost uprostřed měsíce', async () => {
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
     const wrapper = await mountCard()
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
@@ -700,12 +700,10 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická smlouva')
     await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('contract')
     const picker = wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput)
-    expect(String(picker.props('modelValue')).endsWith('-01')).toBe(true)
     picker.vm.$emit('update:modelValue', '2099-03-15')
     await flushPromises()
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
-    expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('mode_first_day')
-    expect(payrollApi.addEmploymentTerms).not.toHaveBeenCalled()
+    expect(payrollApi.addEmploymentTerms).toHaveBeenCalledWith(10, 1, expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 20000, effective_from: '2099-03-15' }))
   })
 
   it('změnu sazby při zachovaném hodinovém režimu dovolí i uprostřed měsíce', async () => {

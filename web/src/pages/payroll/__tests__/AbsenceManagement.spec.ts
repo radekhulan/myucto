@@ -594,6 +594,21 @@ describe('AbsenceManagement', () => {
    * před porodem, takže bez očekávaného dne porodu nejde zapsat. Skutečný den
    * porodu je nepovinný, doplní se, až nastane.
    */
+  it('keeps paid public holiday time off separate from unpaid overtime time off', async () => {
+    const wrapper = mount(AbsenceManagement); await flushPromises()
+    const type = wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>
+    type.vm.$emit('update:modelValue', 'holiday_compensatory_time_off'); await flushPromises()
+    expect(wrapper.get('[data-test="absence-holiday-time-off-hint"]').text()).toContain('holiday_time_off_hint')
+    await wrapper.get('[data-test="absence-form"]').trigger('submit'); await flushPromises()
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({ absence_type: 'holiday_compensatory_time_off', average_snapshot_id: null }))
+    expect(m.createAbsence.mock.calls.at(-1)?.[0]).not.toHaveProperty('compensation_policy')
+    ;(wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>).vm.$emit('update:modelValue', 'compensatory_time_off'); await flushPromises()
+    expect(wrapper.find('[data-test="absence-holiday-time-off-hint"]').exists()).toBe(false)
+    await wrapper.get('[data-test="absence-form"]').trigger('submit'); await flushPromises()
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({ absence_type: 'compensatory_time_off', average_snapshot_id: null }))
+    wrapper.unmount()
+  })
+
   it('u PPM žádá očekávaný den porodu a pošle oba dny porodu', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
@@ -915,6 +930,8 @@ describe('AbsenceManagement', () => {
     await flushPromises()
     await wrapper.find('[data-test="tab-averages"]').trigger('click')
 
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('0')
     await wrapper.find('[data-test="average-gross-czk"]').setValue('1.001')
     await wrapper.find('[data-test="average-form"]').trigger('submit')
     await flushPromises()
@@ -926,6 +943,8 @@ describe('AbsenceManagement', () => {
       response: { data: { error: { message: 'Přesná zpráva validační chyby z API.' } } },
     })
     await wrapper.find('[data-test="average-gross-czk"]').setValue('100')
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('0')
     await wrapper.find('[data-test="average-form"]').trigger('submit')
     await flushPromises()
     expect(wrapper.find('[data-test="average-error"]').text())
@@ -939,6 +958,46 @@ describe('AbsenceManagement', () => {
    * v uzavřených bězích. Předvyplnění je proto celý smysl obrazovky — ale
    * potvrzení se nepřeskakuje: snapshot vzniká až odesláním formuláře.
    */
+  it.each([3, 53])('preserves exact average worked units %i without inventing whole minutes', async units => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ ready: true, blockers: [], source_kind: 'actual', gross_earnings_minor: 100000, worked_duration_units: units, worked_minutes: null, worked_days: 21 }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect((wrapper.get('[data-test="average-worked-hours"]').element as HTMLInputElement).value).toBe(units === 3 ? '0,001' : '0:01:03.6')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({ worked_duration_units: units, worked_days: 21 }))
+    expect(m.createAverage.mock.calls[0][0]).not.toHaveProperty('worked_minutes')
+    wrapper.unmount()
+  })
+
+  it('treats an agreed hourly rate as an editable individual proposal', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ ready: true, blockers: [], source_kind: 'probable', probable_source: 'agreed_hourly_rate', probable_hourly_minor: 28000, probable_rationale: 'Syntetická sazba', worked_minutes: 0, worked_days: 0 }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+    expect(wrapper.get('[data-test="average-suggestion-probable"]').text()).toContain('hourly_rate_review')
+    await wrapper.get('[data-test="average-probable-czk"]').setValue('300')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({ probable_hourly_minor: 30000 }))
+    wrapper.unmount()
+  })
+
+  it('leaves unknown suggested hours and days empty', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect((wrapper.get('[data-test="average-worked-hours"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-test="average-worked-days"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('prefills the average form from closed payroll runs and still requires confirmation', async () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({
       ready: true,
@@ -1078,6 +1137,8 @@ describe('AbsenceManagement', () => {
     expect((wrapper.find('[data-test="average-probable-czk"]').element as HTMLInputElement).value)
       .toBe('280')
 
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('0')
     await wrapper.find('[data-test="average-form"]').trigger('submit')
     await flushPromises()
     expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({

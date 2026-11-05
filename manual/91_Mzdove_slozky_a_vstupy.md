@@ -62,6 +62,13 @@ Před přepnutím vztahu na hodinové odměňování ukončete aktivní předpis
 základní mzdy. U hodinového vztahu se předpis procentem ze sjednané
 měsíční mzdy předá k ručnímu posouzení; stará měsíční částka se nepoužije.
 Sjednaná hodinová sazba na kartě vztahu není hotovým mzdovým vstupem.
+[Hodinový výpočet](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)
+vytváří běžnou mzdu, dosažený přesčas, příplatky a náhrady jako samostatné
+doložené nároky. Vypočtený hodinový základ se nepodsouvá jako sjednaná
+měsíční částka procentnímu předpisu. Vstupy spravované hodinovým
+výpočtem neopisujte druhou ruční položkou; oprava patří do hodin, sazby
+nebo příslušného podkladu. Připravené nároky nezaručují úplnost minima
+a výkaznictví, takže schválení běhu zůstává touto kontrolou blokované.
 
 1. Otevřete záložku **Pravidelné předpisy** a klikněte na **Nový předpis**.
 2. Vyberte zaměstnance, vztah a složku.

@@ -346,12 +346,6 @@ const supportsHourly = computed(() => ['employment', 'small_scale_employment', '
 const remunerationNoun = computed(() => ['dpp', 'dpc'].includes(props.employment.relation_type) ? 'reward' : 'wage')
 const hourlyRemuneration = computed(() => termsForm.value?.remuneration_type === 'hourly')
 const remunerationBasisKinds = ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement'] as const
-const hourlyModeChanged = computed(() => hourlyRemuneration.value !== (currentTerms.value?.remuneration_type === 'hourly'))
-function nextMonthStart(earliest: string): string {
-  if (earliest.endsWith('-01')) return earliest
-  const [year, month] = earliest.split('-').map(Number)
-  return new Date(Date.UTC(year!, month!, 1)).toISOString().slice(0, 10)
-}
 const probableEarningInput = ref('')
 /**
  * Pravděpodobný výdělek (§ 355 ZP) se u běžného vztahu nezadává — průměr se
@@ -416,9 +410,6 @@ const dirty = computed(() => baseline.value !== '' && fingerprint() !== baseline
 watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsForm.value?.remuneration_basis_kind, termsForm.value?.remuneration_basis], () => {
   if (!dirty.value) return
   saveMode.value = 'version'
-  if (hourlyModeChanged.value && !versionEffectiveFrom.value.endsWith('-01')) {
-    versionEffectiveFrom.value = nextMonthStart(minimumNewTermsDate.value)
-  }
 })
 
 // Minimum se čte až pro hodinový vztah a skutečné datum ukládané verze.
@@ -722,11 +713,6 @@ async function save(): Promise<boolean> {
   }
   if (hourlyRemuneration.value && !form.remuneration_basis_kind) {
     saveError.value = t('payroll.people.remuneration.basis_kind_required')
-    return false
-  }
-  const effectiveFrom = saveMode.value === 'version' ? versionEffectiveFrom.value : currentTerms.value?.effective_from
-  if (hourlyModeChanged.value && effectiveFrom && !effectiveFrom.endsWith('-01')) {
-    saveError.value = t('payroll.people.remuneration.mode_first_day')
     return false
   }
   if (Number.isNaN(gross)) {
@@ -1512,7 +1498,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <span :class="HINT">{{ t('payroll.people.remuneration.basis_hint') }} {{ t('payroll.people.remuneration.version_hint') }}</span>
           </label>
           <p v-if="hourlyRemuneration" class="sm:col-span-2 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
-            {{ t('payroll.people.remuneration.no_calculation') }}
+            {{ t('payroll.people.remuneration.calculation_evidence') }}
             {{ t('payroll.people.remuneration.rate_distinction') }}
           </p>
 
@@ -2396,6 +2382,8 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
     />
 
     <EmploymentSurchargePolicyPanel
+      :has-hourly-terms="employment.terms.some(term => term.remuneration_type === 'hourly')"
+      :relation-type="employment.relation_type"
       :employment-id="employment.id"
       :can-write="canWrite"
     />

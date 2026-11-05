@@ -7,6 +7,7 @@
  * tady se jen zobrazuje, aby seznam a varování ve mzdách tvrdily totéž.
  */
 import { computed } from 'vue'
+import { formatPayrollDuration } from './payrollDuration'
 import { useI18n } from 'vue-i18n'
 import type { PayrollAgreementAnnualHours } from '@/api/payroll'
 
@@ -22,6 +23,9 @@ function format(minutes: number | null): string {
   return new Intl.NumberFormat(locale.value, { maximumFractionDigits: 2 }).format(minutes / 60)
 }
 
+const total = computed(() => props.hours.total_duration_units == null ? format(props.hours.total_minutes) : formatPayrollDuration(props.hours.total_duration_units))
+const remaining = computed(() => props.hours.remaining_duration_units == null ? format(props.hours.remaining_minutes) : formatPayrollDuration(props.hours.remaining_duration_units))
+
 const tone = computed(() => {
   if (props.hours.status === 'exceeded') return 'bg-danger-50 text-danger-700'
   if (['approaching', 'manual_review_required'].includes(props.hours.status)) return 'bg-warning-50 text-warning-700'
@@ -31,9 +35,9 @@ const tone = computed(() => {
 const title = computed(() => {
   const params = {
     year: props.hours.year,
-    hours: format(props.hours.total_minutes),
+    hours: total.value,
     limit: format(props.hours.limit_minutes),
-    remaining: format(props.hours.remaining_minutes),
+    remaining: remaining.value,
   }
   const main = t(`payroll.people.dpp_hours.title_${props.hours.status}`, params)
   return props.hours.takeover_minutes > 0
@@ -62,6 +66,6 @@ const title = computed(() => {
     >
       <path d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
     </svg>
-    {{ hours.status === 'manual_review_required' ? t('payroll.people.dpp_hours.label_manual_review_required') : t('payroll.people.dpp_hours.label', { hours: format(hours.total_minutes), limit: format(hours.limit_minutes) }) }}
+    {{ hours.status === 'manual_review_required' ? t('payroll.people.dpp_hours.label_manual_review_required') : t('payroll.people.dpp_hours.label', { hours: total, limit: format(hours.limit_minutes) }) }}
   </span>
 </template>

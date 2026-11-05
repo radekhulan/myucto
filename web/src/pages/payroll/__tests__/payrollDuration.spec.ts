@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatPayrollDuration, parsePayrollDuration } from '../payrollDuration'
+import { formatPayrollDuration, parsePayrollDuration, parsePayrollDurationDraft } from '../payrollDuration'
 
 describe('přesná pracovní doba v 1/3000 hodiny', () => {
   it.each([
@@ -9,6 +9,13 @@ describe('přesná pracovní doba v 1/3000 hodiny', () => {
   })
   it.each(['', '-1', '+1', '7:5', '7:60', '1.0001', '1e3', 'NaN', '0:01 + 0,001', '9007199254740991'])('odmítne %s', raw => {
     expect(parsePayrollDuration(raw)).toBeNull()
+  })
+  it('uložené smíšené jednotky zachová jen u skutečně nezměněného draftu', () => {
+    expect(parsePayrollDurationDraft('0:01:03.6', 53)).toBe(53)
+    expect(parsePayrollDurationDraft('0:01', 53)).toBe(50)
+    expect(parsePayrollDurationDraft('0,001', 53)).toBe(3)
+    expect(parsePayrollDurationDraft('', 53)).toBeNull()
+    expect(parsePayrollDurationDraft('0:01:03.6', null)).toBeNull()
   })
   it('přesně formátuje minuty, tisíciny a jejich smíšený součet', () => {
     expect(formatPayrollDuration(null)).toBe('')

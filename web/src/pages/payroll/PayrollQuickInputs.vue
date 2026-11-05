@@ -26,6 +26,7 @@ import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
 import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
 import PayrollWorkedHoursSummary from '@/components/payroll/PayrollWorkedHoursSummary.vue'
+import PayrollHourlyWagePreview from '@/components/payroll/PayrollHourlyWagePreview.vue'
 import PayrollWorkedHoursPanel from '@/components/payroll/PayrollWorkedHoursPanel.vue'
 import {
   payrollPeriodRange,
@@ -336,6 +337,9 @@ const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
  */
 const canApprove = computed(() => auth.canWrite('payroll.approve'))
 const canWriteTime = computed(() => auth.canWrite('payroll.time.write'))
+function hasHourlyEvidence(row: PayrollQuickInputRow): boolean {
+  return row.hourly_remuneration_in_period === true || row.hourly_wage_preview?.settlement_only === true
+}
 const canReopenTime = computed(() => auth.canWrite('payroll.reopen'))
 const workedEmploymentId = ref<number | null>(null)
 const workedPanel = ref<HTMLElement | null>(null)
@@ -1691,6 +1695,7 @@ onMounted(() => {
     <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       <p>{{ t('payroll.quick_inputs.info') }}</p>
       <p class="mt-1 font-medium text-payroll-800">{{ t('payroll.quick_inputs.gross_preview_hint') }}</p>
+      <p v-if="rows.some(hasHourlyEvidence)" class="mt-1 text-warning-800">{{ t('payroll.hourly_preview.input_totals_hint') }}</p>
     </div>
 
     <div
@@ -2054,6 +2059,10 @@ onMounted(() => {
             :full-name="activeWorkedRow.full_name"
             :period="period"
             :value="activeWorkedRow.worked_time"
+            :hourly-preview="activeWorkedRow.hourly_wage_preview"
+            :hourly-enabled="hasHourlyEvidence(activeWorkedRow)"
+            :settlement-only="activeWorkedRow.hourly_wage_preview?.settlement_only === true"
+            :can-read-evidence="auth.canRead('payroll')"
             :closed="rowClosed(activeWorkedRow) || historicalMonth"
             :can-write="canWriteTime"
             :can-approve="canApprove"
@@ -2158,7 +2167,8 @@ onMounted(() => {
                     </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
-                  <PayrollWorkedHoursSummary v-if="row.worked_time && (row.hourly_remuneration_in_period || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
+                  <PayrollWorkedHoursSummary v-if="row.worked_time && (hasHourlyEvidence(row) || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
+                  <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
@@ -2568,6 +2578,7 @@ onMounted(() => {
                 </td>
                 <td v-if="tbl.isVisible('gross_preview')" class="px-3 py-2 text-right">
                   <p class="font-semibold tabular-nums text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
+                  <p v-if="hasHourlyEvidence(row)" class="mt-1 text-xs text-neutral-500">{{ t('payroll.hourly_preview.inputs_only') }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
                   </p>
@@ -2644,6 +2655,7 @@ onMounted(() => {
               </div>
               <div class="text-right">
                 <strong class="text-payroll-700">{{ formatMoney(grossPreview(row)) }}</strong>
+                <p v-if="hasHourlyEvidence(row)" class="mt-1 text-xs text-neutral-500">{{ t('payroll.hourly_preview.inputs_only') }}</p>
                 <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                   {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
                 </p>
@@ -2655,7 +2667,8 @@ onMounted(() => {
                 </p>
               </div>
             </div>
-            <PayrollWorkedHoursSummary v-if="row.worked_time && (row.hourly_remuneration_in_period || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
+            <PayrollWorkedHoursSummary v-if="row.worked_time && (hasHourlyEvidence(row) || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
+            <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
             </p>

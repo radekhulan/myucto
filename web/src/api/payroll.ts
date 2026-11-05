@@ -198,6 +198,8 @@ export type PayrollAgreementAnnualHoursStatus = 'ok' | 'approaching' | 'exceeded
 
 /** Roční součet hodin na DPP (SSOT na serveru: PayrollAgreementAnnualHours). */
 export interface PayrollAgreementAnnualHours {
+  total_duration_units?: number | null
+  remaining_duration_units?: number | null
   year: number
   total_minutes: number | null
   takeover_minutes: number
@@ -2303,6 +2305,31 @@ interface PayrollSurchargeFixedHourlyFields {
   difficult_environment_fixed_hourly_minor: number | null
 }
 
+export interface PayrollHourlyPolicyTerms {
+  included_overtime: {
+    agreement_kind: 'contract'
+    agreement_reference: string
+    scope_kind: 'annual_hours' | 'manager_statutory'
+    calendar_year: number
+    annual_limit_duration_units: number
+    manager_proof_reference: string | null
+    opening_used_duration_units: number
+    opening_as_of: string
+    opening_reference: string
+  } | null
+  included_agreement_premiums: Array<{
+    kind: 'night' | 'weekend' | 'difficult_environment'
+    date_from: string
+    date_to: string
+    scope_duration_units: number
+    included_hourly_minor: number
+    agreement_reference: string
+    opening_used_duration_units: number
+    opening_reference: string
+    opening_as_of: string
+  }>
+}
+
 /** Jedna verze sjednané zásady příplatků na pracovním vztahu (migrace 1624). */
 export interface PayrollEmploymentSurchargePolicy
   extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
@@ -2320,6 +2347,7 @@ export interface PayrollEmploymentSurchargePolicy
   difficult_environment_rate_bp: number | null
   /** Sjednaná sazba odměny za pracovní pohotovost § 140 ZP (migrace 1926); null = zákonné minimum. */
   standby_rate_bp?: number | null
+  hourly_terms?: PayrollHourlyPolicyTerms | null
   agreement_reference: string | null
   note: string | null
   row_version: number
@@ -2337,6 +2365,7 @@ export interface PayrollEmploymentSurchargePolicyPayload
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
   standby_rate_bp?: number | null
+  hourly_terms?: PayrollHourlyPolicyTerms | null
   agreement_reference: string | null
   note: string | null
 }
@@ -2359,6 +2388,7 @@ export interface PayrollEmploymentSurchargePolicyUpdatePayload
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
   standby_rate_bp?: number | null
+  hourly_terms?: PayrollHourlyPolicyTerms | null
   agreement_reference: string | null
   note: string | null
   row_version: number
@@ -2460,7 +2490,7 @@ export interface PayrollQuickSurchargeState {
  * pojištění, jiná placená překážka (§ 199 a § 208 ZP) a neplacená doba.
  */
 export type PayrollWageReplacementTitle = 'vacation' | 'sickness_compensation'
-  | 'state_benefit' | 'paid_obstacle' | 'unpaid'
+  | 'state_benefit' | 'paid_obstacle' | 'unpaid' | 'holiday_time_off'
 
 /** Odkud hodnota v buňce sloupce mzdové složky přišla. */
 export type PayrollQuickComponentSource = 'import' | 'recurring' | 'manual' | 'attendance' | 'surcharge'
@@ -2582,7 +2612,111 @@ export interface PayrollManualTimeSummaryPayload {
   segments: PayrollManualTimeSegment[]
 }
 
+export interface PayrollHourlyPremiumSegment {
+  date_from: string
+  date_to: string
+  night_duration_units: number | null
+  weekend_duration_units: number | null
+  holiday_work_duration_units: number | null
+  holiday_work_days: Array<{ date: string; duration_units: number }>
+  overtime_work_days: Array<{ date: string; duration_units: number }>
+  difficult_exposures: Array<{ duration_units: number; factors: number }> | null
+}
+
+export interface PayrollHourlyHolidayEvidence {
+  nonworked_holidays: Array<{ date: string; duration_units: number }>
+  holiday_time_off_grants: Array<{ entitlement_id: number; entitlement_revision: number; granted_on: string; duration_units: number; absence_id: number }>
+  overtime_time_off_allocations: Array<{ work_date: string; granted_on: string; duration_units: number; absence_id: number; reference: string }>
+}
+
+export interface PayrollHourlyEvidence extends PayrollHourlyHolidayEvidence {
+  id: number
+  revision_no: number
+  reason: string
+  premium_segments: PayrollHourlyPremiumSegment[]
+}
+
+export interface PayrollHourlyEvidenceResponse {
+  work_source: PayrollTimeWorkSource | 'settlement_only'
+  options: {
+    nonworked_holidays: Array<{ date: string; available_duration_units: number; valid?: boolean; reason?: string }>
+    holiday_time_off_entitlements: Array<{ entitlement_id: number; entitlement_revision: number; work_date: string | null; due_on: string | null; available_duration_units: number; valid?: boolean; reason?: string }>
+    overtime_time_off_entitlements?: Array<{ work_date: string; due_on?: string; available_duration_units: number; valid?: boolean; reason?: string }>
+    time_off_absences: Array<{ absence_id: number; date: string; available_duration_units: number; kind: 'holiday' | 'overtime'; valid?: boolean; reason?: string }>
+  }
+  can_write: boolean
+  period: string
+  employment_id: number
+  row_version: number
+  work_source_hash: string
+  segments_suggested: Array<{ date_from: string; date_to: string; overtime_duration_units: number | null; overtime_mode: PayrollSurchargeCompensationMode }>
+  evidence: PayrollHourlyEvidence | null
+  history: Array<{ id: number; revision_no: number; reason: string; created_by_name: string | null; created_at: string }>
+  history_offset: number
+  history_has_more: boolean
+}
+
+export interface PayrollHourlyWagePreview {
+  settlement_only?: boolean
+  complete: boolean
+  blockers: Array<{ code: string; message: string; context: Record<string, unknown> }>
+  rounding: PayrollWageRounding
+  evidence_hash: string
+  payable_total_minor: number | null
+  included_allocations: Array<{
+    kind: string
+    purpose: string
+    ready: boolean
+    date_from: string
+    date_to: string
+    duration_units: number
+    premium_kind?: string
+  }>
+  entitlements: Array<{
+    kind: string
+    purpose: string
+    ready: boolean
+    work_date: string
+    duration_units: number
+    due_on?: string
+    granted_on?: string
+    entitlement_id?: number
+    entitlement_revision?: number
+    absence_id?: number
+  }>
+  claims: Array<{
+    ready: boolean
+    worked_duration_units: number
+    purpose: string
+    component_code: string
+    duration_units: number
+    raw_numerator_minor: number | null
+    raw_denominator: number | null
+    analytical_minor: number | null
+    payable_minor: number | null
+    rounding: PayrollWageRounding
+    segments: Array<{
+      term_id?: number
+      term_row_version?: number | null
+      policy_version_id?: number
+      policy_revision_no?: number
+      date_from?: string
+      date_to?: string
+      date?: string
+      granted_on?: string
+      duration_units: number
+      hourly_rate_minor?: number | null
+      monthly_gross_minor?: number | null
+      raw_numerator_minor?: number
+      raw_denominator?: number
+      raw_fraction?: Record<string, unknown>
+      [key: string]: unknown
+    }>
+  }>
+}
+
 export interface PayrollQuickInputRow {
+  hourly_wage_preview?: PayrollHourlyWagePreview | null
   worked_time?: PayrollWorkedTime
   hourly_remuneration_in_period?: boolean
   employee_id: number
@@ -9754,6 +9888,15 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/surcharge-policies`,
       { params: effectiveOn ? { effective_on: effectiveOn } : {} },
     ).then(response => response.data),
+  hourlyEvidence: (employmentId: number, period: string, offset = 0) =>
+    api.get<PayrollHourlyEvidenceResponse>(`/payroll/employments/${employmentId}/hourly-evidence`, { params: { period, offset } }).then(response => response.data),
+  saveHourlyEvidence: (employmentId: number, payload: PayrollHourlyHolidayEvidence & {
+    period: string
+    row_version: number
+    reason: string
+    work_source_hash: string
+    premium_segments: PayrollHourlyPremiumSegment[]
+  }) => api.post<PayrollHourlyEvidenceResponse>(`/payroll/employments/${employmentId}/hourly-evidence`, payload).then(response => response.data),
   createEmploymentSurchargePolicy: (
     employmentId: number,
     payload: PayrollEmploymentSurchargePolicyPayload,

@@ -27,3 +27,14 @@ export function formatPayrollDuration(units: number | null): string {
   const secondTenths = (units % 50) * 12
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${String(Math.floor(secondTenths / 10)).padStart(2, '0')}.${secondTenths % 10}`
 }
+
+/**
+ * U nezměněného uloženého zlomku zachová přesné jednotky, i když součet
+ * minut a tisícin nejde zapsat samotným H:MM ani třemi desetinnými místy.
+ * Prázdný nebo nově přepsaný vstup se vždy znovu validuje.
+ */
+export function parsePayrollDurationDraft(raw: string, originalUnits?: number | null): number | null {
+  return originalUnits != null && raw === formatPayrollDuration(originalUnits)
+    ? originalUnits
+    : parsePayrollDuration(raw)
+}

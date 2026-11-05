@@ -23,6 +23,8 @@ const m = vi.hoisted(() => ({
   materialize: vi.fn(),
   approveBatch: vi.fn(),
   canWrite: vi.fn(),
+  canRead: vi.fn(),
+  hourlyEvidence: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }))
@@ -38,6 +40,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     quickInputs: m.load,
+    hourlyEvidence: m.hourlyEvidence,
     saveQuickInputs: m.save,
     materializeRecurringComponents: m.materialize,
     approveInputsBatch: m.approveBatch,
@@ -50,7 +53,7 @@ vi.mock('@/api/preferences', () => ({
   },
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: m.canWrite }),
+  useAuthStore: () => ({ canWrite: m.canWrite, canRead: m.canRead }),
 }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
@@ -205,6 +208,8 @@ describe('PayrollQuickInputs', () => {
     m.pagePrefs.value = {}
     m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
+    m.canRead.mockReturnValue(true)
+    m.hourlyEvidence.mockResolvedValue({ work_source: 'manual_summary', options: { nonworked_holidays: [], holiday_time_off_entitlements: [], overtime_time_off_entitlements: [], time_off_absences: [] }, period: '2026-11', employment_id: 12, can_write: true, row_version: 0, work_source_hash: 'a'.repeat(64), segments_suggested: [], evidence: null, history: [], history_offset: 0, history_has_more: false })
     m.load.mockImplementation(async period => ({
       period,
       items: [fixture()],
@@ -414,6 +419,22 @@ describe('PayrollQuickInputs', () => {
     expect(m.load).toHaveBeenCalledTimes(1)
   })
 
+  it('opens historical hourly settlement evidence while keeping current monthly base editable', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({ hourly_remuneration_in_period: false,
+      hourly_wage_preview: { settlement_only: true, complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'c'.repeat(64), payable_total_minor: 0, claims: [], entitlements: [], included_allocations: [] },
+      worked_time: { month: { id: 1, row_version: 2, revision_no: 1, status: 'approved', work_source: 'entries' }, manual_summary: null, suggested_segments: [], worked_duration_units: 22500, overtime_duration_units: 0, worked_days: 1, jmhz_confirmed: true },
+    })], total: 1 }))
+    const wrapper = mountPage(); await flushPromises()
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="quick-base-mobile-12"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="quick-worked-hours-12"] [data-test="worked-hours-open"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="worked-hours-current"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
+    expect(m.hourlyEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeUndefined()
+  })
+
   it('hodinové podklady načte dávkově a panel nepovolí zápisem peněžních vstupů', async () => {
     m.canWrite.mockImplementation(permission => permission === 'payroll.inputs.write')
     m.load.mockImplementation(async period => ({ period, items: [fixture({ hourly_remuneration_in_period: true, worked_time: {
@@ -426,11 +447,14 @@ describe('PayrollQuickInputs', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="quick-worked-hours-12"]').text()).toContain('7:30')
     expect(wrapper.get('[data-testid="quick-worked-hours-mobile-12"]').text()).toContain('jmhz_pending')
+    expect(m.hourlyEvidence).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="quick-worked-hours-12"] [data-test="worked-hours-open"]').trigger('click')
     await flushPromises()
     expect(wrapper.findAll('[data-test="worked-hours-panel"]')).toHaveLength(1)
     expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="worked-hours-reopen"]').exists()).toBe(false)
+    expect(m.hourlyEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="hourly-evidence-save"]').exists()).toBe(false)
     expect(m.load).toHaveBeenCalledTimes(1)
   })
 

@@ -42,7 +42,7 @@ export interface PayrollAbsenceDecisionResult {
 export type AbsenceType =
   | 'vacation' | 'dpn' | 'quarantine' | 'ocr' | 'long_term_care' | 'ppm'
   | 'paternity' | 'parental' | 'unpaid_leave' | 'employee_obstacle'
-  | 'employer_obstacle' | 'compensatory_time_off' | 'unexcused' | 'other'
+  | 'employer_obstacle' | 'compensatory_time_off' | 'holiday_compensatory_time_off' | 'unexcused' | 'other'
   | 'public_function' | 'employee_obstacle_unpaid' | 'invalid_termination'
 
 /**
@@ -85,6 +85,8 @@ export interface AverageSnapshot {
   applicable_quarter: number
   source_kind: 'actual' | 'probable'
   average_hourly_minor: number
+  worked_minutes?: number | null
+  worked_duration_units?: number | null
   rationale: string | null
   support_status: 'manual_review'
   status: 'manual_review' | 'approved' | 'superseded'
@@ -125,6 +127,7 @@ export interface PayrollAbsence {
   /** Jen u placené překážky: druh, podle kterého se určila sazba náhrady. */
   obstacle_kind?: ObstacleKind | null
   /** Sazba náhrady v bazických bodech (10 000 = 100 % průměru). */
+  compensation_policy?: 'none' | 'average_100' | 'average_custom' | 'dpn' | 'statutory_manual_review' | 'hourly_claim'
   compensation_rate_basis_points?: number | null
   compensation_rate_reason?: string | null
   row_version: number
@@ -197,10 +200,12 @@ export interface AverageEarningSuggestion {
   actual_blockers: string[]
   probable_hourly_minor: number | null
   probable_rationale: string | null
+  probable_source?: AverageEarningCandidate['probable_source']
   probable_term_id: number | null
   gross_earnings_minor: number | null
   longer_period_allocated_minor: null
   worked_minutes: number | null
+  worked_duration_units?: number | null
   worked_days: number | null
   /**
    * Měsíce (`YYYY-MM`) vzaté z převzatých mezd předchozího programu. Jejich
@@ -214,6 +219,7 @@ export interface AverageEarningSuggestion {
     revision_no: number | null
     gross_earnings_minor: number | null
     worked_minutes: number | null
+    worked_duration_units?: number | null
     worked_days: number | null
     work_summary_id: number | null
     takeover?: boolean
@@ -236,11 +242,12 @@ export interface AverageEarningCandidate {
   ready: boolean
   blockers: string[]
   source_kind: 'actual' | 'probable' | null
-  probable_source: 'terms' | 'achieved_wage' | 'agreed_monthly_gross' | 'minimum_wage' | null
+  probable_source: 'terms' | 'achieved_wage' | 'agreed_hourly_rate' | 'agreed_monthly_gross' | 'minimum_wage' | null
   probable_hourly_minor: number | null
   probable_rationale: string | null
   gross_earnings_minor: number | null
   worked_minutes: number | null
+  worked_duration_units?: number | null
   worked_days: number | null
   input_version: string
   existing: {

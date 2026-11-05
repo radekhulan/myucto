@@ -12,6 +12,12 @@ describe('neověřené roční hodiny DPP', () => {
     expect(wrapper.attributes('title')).toContain('"remaining":"payroll.worked_hours.unknown"')
     expect(wrapper.classes()).toContain('text-warning-700')
   })
+  it('zobrazí známou přesnou dobu i při neexistující celominutové projekci', () => {
+    const wrapper = mount(DppAnnualHoursBadge, { props: { testId: 'dpp', hours: { year: 2026, total_minutes: null, total_duration_units: 900003, remaining_minutes: 0, remaining_duration_units: 0, takeover_minutes: 0, limit_minutes: 18000, warning_minutes: 14400, status: 'exceeded' } } })
+    expect(wrapper.text()).toContain('300,001')
+    expect(wrapper.text()).not.toContain('unknown')
+    expect(wrapper.attributes('title')).toContain('300,001')
+  })
   it('potvrzená nula zůstane číslem', () => {
     const wrapper = mount(DppAnnualHoursBadge, { props: { testId: 'dpp', hours: { year: 2026, total_minutes: 0, remaining_minutes: 18000, takeover_minutes: 0, limit_minutes: 18000, warning_minutes: 14400, status: 'ok' } } })
     expect(wrapper.text()).toContain('"hours":"0"')

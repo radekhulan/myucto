@@ -12,8 +12,12 @@ další krok spouštíte vědomě.
 
 Na [kartě pracovního vztahu](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu)
 lze evidovat také hodinovou mzdu nebo hodinovou odměnu s účinností a historií.
-Samotná evidence sazby zatím nepočítá mzdu z hodin a nedovolí schválit běh
-zahrnující takto odměňovaný vztah.
+Hodinový výpočet používá přesně doložené a schválené hodiny, účinné sazby
+a samostatné podklady příplatků. V rychlém měsíčním vstupu ukazuje rozpad
+nároků, zaokrouhlené částky a konkrétní chybějící podklady. Podporuje více
+sazeb i změnu způsobu odměňování během měsíce, pokud lze dobu jednoznačně
+rozdělit. Náhled nezaručuje úplnou ochranu minimální mzdy ani návazné
+výkaznictví; jejich neověřený stav stále brání schválení běhu.
 Původní vztahy zůstávají v neurčeném režimu a jejich zpracování se nemění.
 Hodinový režim se volí výslovně pro konkrétní vztah; hotová importovaná
 částka sama tento režim nezapíná.
@@ -34,7 +38,7 @@ Kapitolu otevřete, když:
 | Pořadí | Co udělat | Kde v aplikaci |
 |---:|---|---|
 | 1 | Otevřít správnou firmu a měsíc, zkontrolovat nástupy, výstupy a změny podmínek | `Mzdy → Zaměstnanci`, viz [Zaměstnanci](86_Zamestnanci.md) |
-| 2 | Doplnit absence, dovolenou, docházku a pracovní cesty a **schválit měsíc docházky** | `Mzdy → Absence a dovolená`, `Mzdy → Docházka a směny`, `Mzdy → Cestovní náhrady` |
+| 2 | Doplnit absence, dovolenou a pracovní cesty a **schválit vybraný podklad pracovní doby** (docházku nebo doložený ruční souhrn) | `Mzdy → Absence a dovolená`, `Mzdy → Docházka a směny`, `Mzdy → Cestovní náhrady` |
 | 3 | Zadat mzdy, odměny, náhrady a srážky; pro víc lidí hromadně | `Mzdy → Rychlý měsíční vstup`, `Mzdy → Mzdové složky a vstupy` |
 | 4 | Založit mzdový běh, uzamknout vstupy, spočítat mzdy a projít blokace i varování | `Mzdy → Mzdové běhy` |
 | 5 | Zkontrolovat čisté mzdy, odvody, daně, rozpad po zaměstnancích, srážky a exekuce | `Mzdy → Mzdové běhy`, [Srážky a exekuce](88_Srazky_a_exekuce.md) |

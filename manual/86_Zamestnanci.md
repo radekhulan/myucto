@@ -237,9 +237,11 @@ U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
 pravděpodobným hodinovým výdělkem.
 
 Volba **Dosavadní režim (bez výslovného určení)** zachovává původní zpracování, například dohodu
-bez sjednané měsíční částky. Na hodinový režim i zpět lze přejít pouze
-od prvního dne měsíce. Změnu samotné hodinové sazby můžete evidovat novou
-verzí i během měsíce. Před přechodem ukončete aktivní pravidelný předpis
+bez sjednané měsíční částky. Změnu sazby i přechod mezi měsíčním
+a hodinovým odměňováním můžete uložit novou verzí s účinností během
+měsíce. Výpočet vyžaduje jednoznačné rozdělení skutečné práce podle
+účinných sazeb a podklad pro měsíční část; chybějící rozvrh či rozpad
+nelze nahradit odhadem. Před přechodem ukončete aktivní pravidelný předpis
 základní mzdy. Starší verze podmínek musí obsahovat svou vlastní měsíční
 částku, aby vymazání měsíční mzdy při přechodu nezměnilo minulost.
 
@@ -248,8 +250,11 @@ podle pravidel platných k datu účinnosti. Kratší sjednaný úvazek toto
 minimum nesnižuje; při kratší zákonné týdenní době může být minimum vyšší.
 Upozornění samo mzdu ani doplatek nevytváří.
 
-Evidence hodinové sazby zatím nevytváří mzdu z odpracovaných hodin. Mzdový běh,
-do jehož období hodinové podmínky zasahují, proto nelze schválit.
+Hodinovou mzdu a její jednotlivé nároky zkontrolujete v
+[rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
+Výpočet používá přesné schválené hodiny a účinné sazby; příplatkové
+vrstvy se dokládají samostatně. Kontrola minima a navazujících výstupů
+není dokončená, takže schválení takového běhu zůstává blokované.
 Rychlý vstup ani pravidelné složky místo sazby nepoužijí dřívější měsíční mzdu.
 Dosavadní ruční a importované hotové částky bez přepnutí vztahu na nový
 hodinový způsob odměňování zůstávají podporované.

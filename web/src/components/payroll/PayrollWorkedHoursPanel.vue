@@ -2,9 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
-import { payrollApi, type PayrollManualTimeSegment, type PayrollManualTimeSummaryRevision, type PayrollWorkedTime } from '@/api/payroll'
+import { payrollApi, type PayrollManualTimeSegment, type PayrollManualTimeSummaryRevision, type PayrollWorkedTime, type PayrollHourlyWagePreview } from '@/api/payroll'
+import PayrollHourlyEvidencePanel from './PayrollHourlyEvidencePanel.vue'
+import PayrollHourlyWagePreviewView from './PayrollHourlyWagePreview.vue'
 import { apiErrorMessage } from '@/api/errors'
-import { formatPayrollDuration, parsePayrollDuration } from '@/pages/payroll/payrollDuration'
+import { formatPayrollDuration, parsePayrollDurationDraft } from '@/pages/payroll/payrollDuration'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
@@ -12,6 +14,10 @@ const props = defineProps<{
   employmentId: number
   fullName: string
   period: string
+  hourlyPreview?: PayrollHourlyWagePreview | null
+  hourlyEnabled?: boolean
+  settlementOnly?: boolean
+  canReadEvidence?: boolean
   value: PayrollWorkedTime
   closed: boolean
   canWrite: boolean
@@ -82,12 +88,6 @@ function hydrate(value: PayrollWorkedTime): void {
 hydrate(props.value)
 watch(() => props.value, value => { if (!dirty.value && !busy.value) hydrate(value) })
 
-// Cizí API může mít přesný smíšený zlomek, který nelze vyjádřit samotným
-// H:MM ani třemi desetinnými místy. Beze změny zachováme původní jednotky.
-function duration(raw: string, original: number | null | undefined): number | null {
-  return original != null && raw === formatPayrollDuration(original) ? original : parsePayrollDuration(raw)
-}
-
 async function loadHistory(offset = 0): Promise<void> {
   if (historyLoading.value) return
   historyLoading.value = true
@@ -113,8 +113,8 @@ async function save(): Promise<void> {
   if (replacementRequired.value && !replaceSource.value) { error.value = t('payroll.worked_hours.replace_required'); return }
   const payload: PayrollManualTimeSegment[] = []
   for (const segment of segments.value) {
-    const worked = duration(segment.worked, segment.original?.worked_duration_units)
-    const overtime = segment.overtime.trim() === '' ? null : duration(segment.overtime, segment.original?.overtime_duration_units)
+    const worked = parsePayrollDurationDraft(segment.worked, segment.original?.worked_duration_units)
+    const overtime = segment.overtime.trim() === '' ? null : parsePayrollDurationDraft(segment.overtime, segment.original?.overtime_duration_units)
     const days = segment.days.trim() === '' ? null : Number(segment.days)
     const span = (Date.parse(`${segment.date_to}T00:00:00Z`) - Date.parse(`${segment.date_from}T00:00:00Z`)) / 86400000 + 1
     if (worked === null || worked > span * 24 * 3000 || (segment.overtime.trim() !== '' && overtime === null) || (overtime !== null && worked !== null && overtime > worked)) { error.value = t('payroll.worked_hours.duration_invalid'); return }
@@ -184,9 +184,12 @@ async function reopen(): Promise<void> {
 <template>
   <section class="border-b border-neutral-200 bg-neutral-50 p-4" data-test="worked-hours-panel">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <h3 class="font-semibold text-neutral-900">{{ t('payroll.worked_hours.title', { name: fullName }) }}</h3>
+      <h3 class="font-semibold text-neutral-900">{{ settlementOnly ? t('payroll.hourly_preview.settlement_title') : t('payroll.worked_hours.title', { name: fullName }) }}<span v-if="settlementOnly"> · {{ fullName }}</span></h3>
       <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" :disabled="busy" @click="emit('close')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.close') }}</button>
     </div>
+    <PayrollHourlyWagePreviewView v-if="hourlyPreview" :value="hourlyPreview" />
+    <PayrollHourlyEvidencePanel v-if="hourlyEnabled && canReadEvidence" :employment-id="employmentId" :period="period" :can-write="canWrite && !closed" @updated="emit('updated')" />
+    <template v-if="!settlementOnly">
     <p class="mt-2 text-xs text-neutral-600">{{ t('payroll.worked_hours.scope_hint') }}</p>
     <p class="mt-2 text-xs font-medium text-neutral-700" data-test="worked-hours-current">
       {{ t(!current.month?.id ? 'payroll.worked_hours.source_none' : current.month.work_source === 'manual_summary' ? 'payroll.worked_hours.source_manual' : current.month.work_source === 'import_summary' ? 'payroll.worked_hours.source_import' : 'payroll.worked_hours.source_attendance') }} ·
@@ -281,5 +284,6 @@ async function reopen(): Promise<void> {
       </div>
     </div>
     <p v-if="error" role="alert" class="mt-3 rounded-md border border-danger-200 bg-danger-50 p-3 text-xs text-danger-700" data-test="worked-hours-error">{{ error }}</p>
+    </template>
   </section>
 </template>

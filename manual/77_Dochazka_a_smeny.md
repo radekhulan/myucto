@@ -44,8 +44,10 @@ Kapitolu otevřete, když:
 ## 77.3 Krok za krokem: docházka za měsíc
 
 **Sjednaná hodinová sazba** se eviduje na kartě pracovního vztahu odděleně
-od docházky a průměrného výdělku. Její uložení samo nevytváří základní mzdu
-z hodin a nenahrazuje schválený průměr pro příplatky. Pole **Hodinová sazba**
+od docházky a průměrného výdělku. Samotná sazba není mzdovou částkou:
+[hodinový výpočet](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)
+potřebuje také přesně doložené a schválené hodiny. Sazba nenahrazuje
+schválený průměr pro příplatky. Pole **Hodinová sazba**
 v importu docházky znamená pravděpodobný výdělek, nikoli sjednanou sazbu.
 Podrobnosti jsou v [Zaměstnancích](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
 
@@ -463,6 +465,13 @@ rozsahem:
 
 Podkladem jsou odpracované hodiny ze schválené docházky, u firmy po
 přechodu v průběhu roku i hodiny převzaté z předchozího programu.
+Je-li vybraný ruční souhrn, použije se jeho aktuální schválená revize
+včetně zlomků hodin; potvrzení JMHZ pro samotný limit není potřeba.
+Staré nahrazené denní zápisy ani jejich výkazový souhrn se nepřičítají.
+DPP i DPČ se posuzují bez zaokrouhlení přesné doby na minuty: také
+`300,001` hodin DPP už překračuje roční limit. Schválená nula je známý
+součet; neúplný nebo znovu otevřený ruční podklad vyvolá upozornění,
+že rozsah nelze ověřit, místo falešné nuly.
 Překročení se u revize běhu objeví jako upozornění se jménem, obdobím
 a průměrem a s odkazem na podmínky vztahu. Výpočet ani schválení nezastaví:
 odpracovanou práci je potřeba zaplatit, jen je třeba upravit rozsah práce

@@ -27,18 +27,28 @@ Kapitolu otevřete, když:
 
 ## 80.2 Než začnete
 
-Vztah s výslovně zvoleným hodinovým odměňováním zatím brání schválení
-běhu za měsíc, do kterého hodinové podmínky zasahují. Snímek uchovává
-účinné verze sazby včetně jejich podkladu; pozdější změnu ohlásí jako
-změnu podkladů a již uzavřenou revizi nepřepíše. Samotná evidence sazby
-z odpracovaných hodin mzdový vstup nevytvoří.
+Hodinový výpočet připravuje nároky z přesných schválených hodin, účinných
+sazeb a samostatně doložených příplatků. Při přípravě běhu je převádí
+do vstupů před jejich uzamčením; opakování nevytváří druhou platbu
+za tentýž nárok. Náhled a konkrétní chybějící podklady zkontrolujte
+v [rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
+
+Úspěšný náhled neznamená úplně podporovaný běh. Neověřená ochrana
+minimální mzdy a navazujících zákonných výstupů stále brání schválení
+běhu s hodinovým výpočtem. Samotným zadáním hotové částky tuto
+kontrolu nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
+a další podklady nároků; pozdější změnu ohlásí jako změnu podkladů
+a již uzavřenou revizi nepřepíše.
 
 1. **Nastavení mezd.** Zaměstnavatel, zaměstnanci, pracovní vztahy, kalendář,
    absence a mzdové vstupy musí být hotové (průvodce je v
    [Úplné mzdy](75_Uplne_mzdy.md)).
-2. **Schválená docházka.** Měsíc docházky schvalte v `Mzdy → Docházka a směny`
-   ještě před spočítáním mezd. Zákonné příplatky vznikají právě schválením
-   docházky a po uzamčení vstupů se do běhu nedostanou.
+2. **Schválená pracovní doba.** Měsíc denní docházky schvalte v
+   `Mzdy → Docházka a směny` před spočítáním mezd. Doložený ruční souhrn
+   můžete schválit i v rychlém měsíčním vstupu. U hodinového výpočtu
+   samostatně doplňte příplatkové vrstvy a nároky na volno; schválení
+   celkových hodin samo jejich úplnost nepotvrzuje. Příslušné vstupy
+   musejí vzniknout před uzamčením podkladů běhu.
 3. **Schválené vstupy.** Mzdové vstupy a nepřítomnosti měsíce musí být
    schválené. Koncepty můžete schválit hromadně i přímo z běhu.
 4. **Oprávnění.** Potřebujete mzdové oprávnění. Celý běh může dokončit jedna

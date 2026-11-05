@@ -2085,7 +2085,7 @@ onMounted(async () => {
             <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis">
             <span class="mt-1 block">{{ t('payroll.people.remuneration.basis_hint') }}</span>
           </label>
-          <p v-if="newEmployment.terms.remuneration_type === 'hourly'" class="sm:col-span-2 text-xs text-warning-800" data-test="new-employment-hourly-warning">{{ t('payroll.people.remuneration.no_calculation') }}</p>
+          <p v-if="newEmployment.terms.remuneration_type === 'hourly'" class="sm:col-span-2 text-xs text-warning-800" data-test="new-employment-hourly-warning">{{ t('payroll.people.remuneration.calculation_evidence') }}</p>
           <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
           <!-- Tytéž tři otázky pro ČSSZ jako u zakládání zaměstnance. -->
           <div class="sm:col-span-2 lg:col-span-4">
