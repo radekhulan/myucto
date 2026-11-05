@@ -10,6 +10,7 @@ use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Service\System\MaintenanceNoticeService;
 use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -32,6 +33,7 @@ final class SetupStatusAction
         // v /api/health.
         private readonly ManagedModeGuard $managed,
         private readonly OverduePolicy $overduePolicy,
+        private readonly MaintenanceNoticeService $maintenanceNotices,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -51,6 +53,9 @@ final class SetupStatusAction
             'version'     => '0.1.0',
             'managed'     => $this->managed->isManaged(),
             'overdue_includes_today' => $this->overduePolicy->includesToday(),
+            // Ohlášení plánované údržby. Je tady, protože ho musí vidět i
+            // přihlašovací stránka; běžící aplikace si payload obnovuje sama.
+            'maintenance_notices' => $this->maintenanceNotices->active(),
             'passwordless_login_enabled' =>
                 (bool) $this->config->get('auth.passwordless_login.enabled', false)
                 && $this->passkeys->isAvailable()

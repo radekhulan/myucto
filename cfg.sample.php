@@ -91,6 +91,15 @@ return [
         'lock_file'    => '',
         'retry_after'  => 300,                       // sekundy do hlavičky Retry-After u 503
     ],
+
+    // Ohlášení plánované údržby. Úloha cron-maintenance-notice stahuje hlášky
+    // provozovatele (od-do, text) a aplikace je ukazuje v pruhu nahoře. Ve
+    // spravovaném provozu běží vždy, tady si ji zapínáte sami. Hlášku lze zadat
+    // i lokálně souborem ${MYINVOICE_DATA_DIR}/storage/maintenance-notice.json.
+    'maintenance_notice' => [
+        'enabled' => false,
+        'url'     => '',                              // prázdné = license.server_url + /api/maintenance-notice
+    ],
     'epo' => [
         // Spravovaný PEM bundle pro ověřování pečeti dodejek EPO. V ostrém provozu
         // je POVINNÝ: `confirm()` u produkčního podání vyžaduje platný certifikační

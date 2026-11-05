@@ -369,6 +369,13 @@ final class Config
                 'lock_file'   => '',
                 'retry_after' => 300,
             ],
+            // Ohlášení plánované údržby ze serveru provozovatele
+            // (MaintenanceNoticeService). Ve spravovaném provozu se stahuje vždy,
+            // self-hosted instalace si úlohu zapíná sama. Prázdné `url` = licenční server.
+            'maintenance_notice' => [
+                'enabled' => false,
+                'url'     => '',
+            ],
             // Vlastní domény firem (#11) jsou opt-in a defaultně VYPNUTÉ.
             // Zapnutí mění hostname na tenantovou hranici: jiný host než ten
             // z `app.url` (a než registrovaná doména firmy) dostane 421.
@@ -435,6 +442,8 @@ final class Config
             'MYINVOICE_INSTANCE_PORTAL_URL'    => ['instance.portal_url', 'string'],
             'MYINVOICE_SETUP_PROVISION_TOKEN' => ['setup.provision_token', 'string'],
             'MYINVOICE_MAINTENANCE_LOCK_FILE' => ['maintenance.lock_file', 'string'],
+            'MYINVOICE_MAINTENANCE_NOTICE_ENABLED' => ['maintenance_notice.enabled', 'bool'],
+            'MYINVOICE_MAINTENANCE_NOTICE_URL' => ['maintenance_notice.url', 'string'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
             'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],

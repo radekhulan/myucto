@@ -9,6 +9,7 @@ const { t } = useI18n()
 import { BTN_BASE, FILLED, ICONS, OUTLINE } from '@/components/ui/buttonStyles'
 import { isPortalLoggedOut } from '@/security/portalLogout'
 import AppShell from '@/components/layout/AppShell.vue'
+import MaintenanceNoticeBanner from '@/components/layout/MaintenanceNoticeBanner.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { authApi, type DomainLoginConfirmation } from '@/api/auth'
@@ -545,6 +546,7 @@ async function resendCode() {
 <template>
   <AppShell :title="t('auth.login_title')">
     <div class="w-full max-w-sm">
+      <MaintenanceNoticeBanner />
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6">
         <h2 class="text-xl font-semibold mb-1">{{ t('auth.login_title') }}</h2>
         <p class="text-sm text-neutral-500 mb-6">{{ t('auth.login_subtitle') }}</p>

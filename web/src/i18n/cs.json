@@ -2033,6 +2033,11 @@
     "support_notice_contact": "kontaktovat naši podporu",
     "support_notice_link": "Kontaktovat podporu"
   },
+  "maintenance_notice": {
+    "title": "Plánovaná údržba",
+    "title_running": "Probíhá údržba",
+    "dismiss": "Skrýt oznámení"
+  },
   "instance_alert": {
     "storage_exhausted_title": "Instalace nepřijímá nové zápisy",
     "storage_exhausted_desc": "Zaplacený prostor je zaplněný, takže se nový doklad, příloha ani import neuloží. Uvolněte místo smazáním nepotřebných dat, nebo si prostor rozšiřte - jakmile obsazení klesne, zápis se obnoví sám.",

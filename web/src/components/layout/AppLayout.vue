@@ -30,6 +30,7 @@ import DesktopUtilityActions from './DesktopUtilityActions.vue'
 import TabletNavigationRail from './TabletNavigationRail.vue'
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
+import MaintenanceNoticeBanner from './MaintenanceNoticeBanner.vue'
 import InstancePreviewBar from './InstancePreviewBar.vue'
 import { instanceStatus } from '@/api/instanceStatus'
 import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions'
@@ -2028,6 +2029,7 @@ onBeforeUnmount(() => {
                dokud backend nic nehlásí (zdravá instalace, vypnutý režim nebo
                zatím NEZMĚŘENÁ spotřeba). -->
           <StorageQuotaBanner />
+          <MaintenanceNoticeBanner poll />
           <div
             v-if="licenseBanner"
             class="mb-5 rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2"

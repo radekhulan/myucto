@@ -543,6 +543,21 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Ohlášení plánované údržby od provozovatele. Ve spravovaném
+                // provozu povinné, self-hosted instalace si úlohu zapíná sama.
+                // 15 minut: hláška má dorazit dřív, než si ji uživatel přečte
+                // až na stránce 503.
+                'script' => 'cron-maintenance-notice',
+                'requires_config_flag' => 'maintenance_notice.enabled',
+                'managed_implies_flag' => true,
+                'recommended' => 'every_15_min',
+                'linux_cron' => '*/15 * * * *',
+                'windows_schtasks' => '/sc minute /mo 15',
+                'max_age_hours' => 4,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-version-check',
                 'recommended' => 'daily_0600',
                 'linux_cron' => '0 6 * * *',
