@@ -317,7 +317,12 @@ export interface PayrollEmploymentTaxDeclaration {
   effective_to: string | null
 }
 
+export type PayrollRemunerationType = 'monthly' | 'hourly'
+
 export interface PayrollEmploymentTerms {
+  remuneration_type?: PayrollRemunerationType
+  hourly_rate_minor?: number | null
+  remuneration_basis?: string | null
   id: number
   office_id: number | null
   office_code: string | null
@@ -2523,6 +2528,7 @@ export interface PayrollQuickClosedRun {
 }
 
 export interface PayrollQuickInputRow {
+  hourly_remuneration_in_period?: boolean
   employee_id: number
   employment_id: number
   employment_row_version: number
@@ -7250,6 +7256,7 @@ export interface PayrollRun {
  * že schválení server odmítne, dokud se podklady neobnoví a běh nepřepočítá.
  */
 export interface PayrollRunSourceDrift {
+  remuneration_changed?: number
   total: number
   inputs_added: number
   inputs_changed: number

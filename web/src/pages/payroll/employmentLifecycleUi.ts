@@ -131,6 +131,7 @@ const BOOLEAN_FIELDS = new Set(['risky_work', 'tax_declaration_signed', 'is_prim
  * text. Radši tedy syrová hodnota než `payroll.people.tax_regime.neco`.
  */
 const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
+  remuneration_type: { prefix: 'payroll.people.remuneration.mode', values: ['monthly', 'hourly'] },
   status: {
     prefix: 'payroll.people.employment_status',
     values: ['planned', 'preregistered', 'active', 'suspended', 'ended', 'archived', 'no_show'],
@@ -213,7 +214,7 @@ export function employmentDiffValue(field: string, value: unknown): EmploymentDi
     return { kind: 'date', iso: text }
   }
 
-  if (field === 'monthly_gross_minor') {
+  if (field === 'monthly_gross_minor' || field === 'hourly_rate_minor') {
     const minor = Number(text)
     if (Number.isInteger(minor)) return { kind: 'money', minor }
   }

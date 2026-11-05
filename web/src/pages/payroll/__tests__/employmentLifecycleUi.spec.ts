@@ -35,6 +35,11 @@ describe('employmentLifecycleUi', () => {
   })
 
   describe('employmentDiffValue', () => {
+    it('hodinové sjednání v historii přeloží a sazbu formátuje jako peníze', () => {
+      expect(employmentDiffValue('remuneration_type', 'hourly')).toEqual({ kind: 'key', key: 'payroll.people.remuneration.mode.hourly' })
+      expect(employmentDiffValue('hourly_rate_minor', 18050)).toEqual({ kind: 'money', minor: 18050 })
+      expect(employmentDiffValue('remuneration_basis', 'Syntetická dohoda')).toEqual({ kind: 'text', text: 'Syntetická dohoda' })
+    })
     it('stav a typ vztahu překládá, místo aby vypsal databázovou hodnotu', () => {
       expect(employmentDiffValue('status', 'ended'))
         .toEqual({ kind: 'key', key: 'payroll.people.employment_status.ended' })

@@ -399,6 +399,20 @@ describe('PayrollQuickInputs', () => {
       .toContain('payroll.quick_inputs.continue_to_runs')
   })
 
+  it('v hodinovém měsíci pouze ukáže existující základ a zablokuje jeho změnu', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_remuneration_calculation_unsupported'],
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="quick-base-mobile-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="quick-base-12"]').element).toHaveProperty('value', '42000,00')
+    expect(wrapper.find('[data-testid="quick-base-suggested-12"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.quick_inputs.blockers.hourly_remuneration_calculation_unsupported')
+  })
+
   it('keeps hour mode unavailable without an average and sends employment concurrency version', async () => {
     const wrapper = mountPage()
     await flushPromises()

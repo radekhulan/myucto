@@ -4353,6 +4353,7 @@
         "refresh_inputs": "Takes a new snapshot of the current approved inputs, absences and statutory records and returns the run to recalculation. The work-in-progress revision stays in the history as abandoned; approved revisions are never affected."
       },
       "source_drift": {
+        "remuneration_changed": "Relationships with changed agreed remuneration: {count}",
         "title": "Since the inputs were locked ({date}), sources used by this revision have changed: {count}. The run can be approved only after the inputs are refreshed and the payroll recalculated.",
         "inputs_added": "New approved payroll inputs: {count}",
         "inputs_changed": "Changed payroll inputs: {count}",
@@ -4543,6 +4544,7 @@
       "search_empty": "No employment in this month matches “{q}”.",
       "search_clear": "Clear search",
       "blockers": {
+        "hourly_remuneration_calculation_unsupported": "Hourly remuneration is currently recorded for reference; payroll calculation for this month is not yet supported.",
         "base_conflict": "Base pay is duplicated in the quick form and another input.",
         "base_managed_elsewhere": "Base pay is managed by another monthly or recurring input.",
         "base_recurring_manual_review": "The recurring base-pay assignment requires manual review.",
@@ -5984,6 +5986,27 @@
       }
     },
     "people": {
+        "remuneration": {
+        "monthly_required": "When switching to monthly remuneration, enter the agreed monthly amount. Enter 0 if the amount is zero.",
+        "mode": { "monthly": "Monthly", "hourly": "Hourly" },
+        "version_hint": "Save a change in agreed remuneration as a new version with an effective date; use correction only to fix an incorrect entry.",
+          "type": "Remuneration basis",
+          "monthly_wage": "Monthly wage",
+          "hourly_wage": "Hourly wage",
+          "monthly_reward": "Monthly agreement remuneration",
+          "hourly_reward": "Hourly agreement remuneration",
+          "hourly_rate": "Agreed hourly rate (CZK/h)",
+          "basis": "Contractual document",
+          "basis_hint": "Identify the contract, agreement or wage statement that establishes the amount.",
+          "basis_required": "Identify the contractual document for hourly remuneration.",
+          "hourly_invalid": "Enter a positive hourly rate up to CZK 10,000,000 with up to two decimal places.",
+          "no_calculation": "The hourly rate is currently recorded for reference. Payroll calculation for a month with hourly remuneration is not yet supported.",
+          "history": "Remuneration history",
+          "open_ended": "ongoing",
+          "not_agreed": "Not agreed",
+          "per_hour": "/h",
+          "edit_on_card": "Set up or change hourly remuneration on the employment relationship card."
+        },
       "title": "Employees",
       "subtitle": "An overview of people and their employment relationships in the new payroll module.",
       "person_code": "Personal number",
@@ -7446,6 +7469,9 @@
         "checklist_changed": "Duty updated"
       },
       "term_field": {
+        "remuneration_type": "Remuneration basis",
+        "hourly_rate_minor": "Agreed hourly rate (CZK/h)",
+        "remuneration_basis": "Contractual document",
         "office_id": "Payroll office",
         "monthly_gross_minor": "Regular gross pay",
         "effective_from": "Effective from",

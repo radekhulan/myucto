@@ -4353,6 +4353,7 @@
         "refresh_inputs": "Založí nový snímek z aktuálních schválených vstupů, nepřítomností i zákonné evidence a vrátí běh k přepočtu. Rozpracovaná revize zůstane v historii jako zahozená; schválené revize se to netýká."
       },
       "source_drift": {
+        "remuneration_changed": "Vztahy se změněným sjednaným odměňováním: {count}",
         "title": "Od zamknutí vstupů ({date}) se změnily podklady, se kterými revize počítá: {count}. Schválit běh půjde až po obnovení podkladů a přepočtu.",
         "inputs_added": "Nové schválené mzdové vstupy: {count}",
         "inputs_changed": "Změněné mzdové vstupy: {count}",
@@ -4543,6 +4544,7 @@
       "search_empty": "V tomto měsíci žádný pracovní vztah neodpovídá hledání „{q}“.",
       "search_clear": "Zrušit hledání",
       "blockers": {
+        "hourly_remuneration_calculation_unsupported": "Hodinové odměňování se nyní pouze eviduje; výpočet mzdy pro tento měsíc zatím není podporován.",
         "base_conflict": "Základní mzda je zadána duplicitně rychlým i jiným vstupem.",
         "base_managed_elsewhere": "Základní mzdu spravuje jiný měsíční nebo pravidelný vstup.",
         "base_recurring_manual_review": "Pravidelný předpis základní mzdy vyžaduje ruční kontrolu.",
@@ -5984,6 +5986,27 @@
       }
     },
     "people": {
+        "remuneration": {
+        "monthly_required": "Při přechodu na měsíční odměňování zadejte sjednanou měsíční částku. Pokud je nulová, zadejte 0.",
+        "mode": { "monthly": "Měsíční", "hourly": "Hodinové" },
+        "version_hint": "Skutečnou změnu sjednání uložte jako novou verzi s datem účinnosti; oprava slouží jen k opravě chybného zápisu.",
+          "type": "Způsob odměňování",
+          "monthly_wage": "Měsíční mzda",
+          "hourly_wage": "Hodinová mzda",
+          "monthly_reward": "Měsíční odměna",
+          "hourly_reward": "Hodinová odměna",
+          "hourly_rate": "Sjednaná hodinová sazba (Kč/h)",
+          "basis": "Smluvní podklad",
+          "basis_hint": "Označení smlouvy, dohody nebo mzdového výměru, který částku stanoví.",
+          "basis_required": "U hodinového odměňování vyplňte smluvní podklad.",
+          "hourly_invalid": "Zadejte kladnou hodinovou sazbu do 10 000 000 Kč s nejvýše dvěma desetinnými místy.",
+          "no_calculation": "Hodinová sazba se nyní pouze eviduje. Výpočet mzdy za měsíc s hodinovým odměňováním zatím není podporován.",
+          "history": "Historie odměňování",
+          "open_ended": "dosud",
+          "not_agreed": "Nesjednáno",
+          "per_hour": "/h",
+          "edit_on_card": "Hodinové odměňování nastavíte a změníte na kartě pracovního vztahu."
+        },
       "title": "Zaměstnanci",
       "subtitle": "Přehled osob a jejich pracovních vztahů pro nový mzdový modul.",
       "person_code": "Osobní číslo",
@@ -7446,6 +7469,9 @@
         "checklist_changed": "Povinnost aktualizována"
       },
       "term_field": {
+        "remuneration_type": "Způsob odměňování",
+        "hourly_rate_minor": "Sjednaná hodinová sazba (Kč/h)",
+        "remuneration_basis": "Smluvní podklad",
         "office_id": "Mzdová účtárna",
         "monthly_gross_minor": "Pravidelná hrubá mzda",
         "effective_from": "Účinnost od",

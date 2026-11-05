@@ -333,13 +333,18 @@ const wideRail = useMediaQuery('(min-width: 1280px)')
  *   - `version`           → PUT  …/terms, nová verze od zadaného data.
  *
  * Výchozí je oprava, protože je to častější případ (překlep, doplnění údaje);
- * nová verze si vyžádá datum, tedy vědomý úkon. Server opravu odmítne, jakmile
+ * změna způsobu odměňování, sazby nebo podkladu předvolí novou účinnou verzi.
+ * Server opravu odmítne, jakmile
  * je z období zúčtováno (`payroll_terms_settled`) — pak je jediná správná
  * cesta nová verze a karta na ni sama přepne.
  */
 type TermsSaveMode = 'correct' | 'version'
 const termsForm = ref<PayrollEmploymentTermsPayload | null>(null)
 const grossInput = ref('')
+const hourlyRateInput = ref('')
+const supportsHourly = computed(() => ['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(props.employment.relation_type))
+const remunerationNoun = computed(() => ['dpp', 'dpc'].includes(props.employment.relation_type) ? 'reward' : 'wage')
+const hourlyRemuneration = computed(() => termsForm.value?.remuneration_type === 'hourly')
 const probableEarningInput = ref('')
 /**
  * Pravděpodobný výdělek (§ 355 ZP) se u běžného vztahu nezadává — průměr se
@@ -382,12 +387,19 @@ function fingerprint(): string {
   return JSON.stringify([
     termsForm.value,
     grossInput.value.trim(),
+    hourlyRateInput.value.trim(),
     probableEarningInput.value.trim(),
     mealBasis.value,
   ])
 }
 
 const dirty = computed(() => baseline.value !== '' && fingerprint() !== baseline.value)
+
+// Skutečná změna sjednání patří do nové účinné verze. Opravu překlepu
+// může účetní zvolit výslovně v již existující volbě způsobu uložení.
+watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsForm.value?.remuneration_basis], () => {
+  if (dirty.value) saveMode.value = 'version'
+})
 
 /*
  * Úvazek se zadává v procentech s desetinnou čárkou („93,75"), server ho drží
@@ -417,6 +429,9 @@ function hydrate(employment: PayrollEmployment) {
     return
   }
   termsForm.value = {
+    remuneration_type: terms.remuneration_type ?? 'monthly',
+    hourly_rate_minor: terms.hourly_rate_minor ?? null,
+    remuneration_basis: terms.remuneration_basis ?? null,
     office_id: terms.office_id,
     effective_from: terms.effective_from,
     contract_signed_on: terms.contract_signed_on,
@@ -474,7 +489,12 @@ function hydrate(employment: PayrollEmployment) {
     // se historická hodnota netahá, jinak by se zopakovala u další změny.
     change_reason: null,
   }
-  grossInput.value = minorToInput(employment.monthly_gross_minor)
+  // Hodinový vztah může ještě nést starou projekci měsíční částky. Při
+  // přechodu na měsíční režim musí účetní novou částku zadat výslovně.
+  grossInput.value = terms.remuneration_type === 'hourly'
+    ? ''
+    : minorToInput(terms.monthly_gross_minor ?? employment.monthly_gross_minor)
+  hourlyRateInput.value = minorToInput(terms.hourly_rate_minor ?? null)
   probableEarningInput.value = minorToInput(terms.probable_hourly_earning_minor ?? null)
   probableEarningOpen.value = probableEarningInput.value !== ''
   mealBasis.value = employment.meal_entitlement_basis
@@ -647,7 +667,20 @@ async function save(): Promise<boolean> {
   const form = termsForm.value
   if (!form || busy.value) return false
   if (!dirty.value) return true
-  const gross = inputToMinor(grossInput.value)
+  const gross = hourlyRemuneration.value ? null : inputToMinor(grossInput.value)
+  const hourlyRate = hourlyRemuneration.value ? inputToMinor(hourlyRateInput.value) : null
+  if (hourlyRemuneration.value && (!supportsHourly.value || hourlyRate === null || !Number.isFinite(hourlyRate) || hourlyRate <= 0 || hourlyRate > 1_000_000_000)) {
+    saveError.value = t('payroll.people.remuneration.hourly_invalid')
+    return false
+  }
+  if (hourlyRemuneration.value && !(form.remuneration_basis ?? '').trim()) {
+    saveError.value = t('payroll.people.remuneration.basis_required')
+    return false
+  }
+  if (!hourlyRemuneration.value && currentTerms.value?.remuneration_type === 'hourly' && gross === null) {
+    saveError.value = t('payroll.people.remuneration.monthly_required')
+    return false
+  }
   if (Number.isNaN(gross)) {
     saveError.value = t('payroll.people.gross_invalid')
     return false
@@ -684,6 +717,9 @@ async function save(): Promise<boolean> {
     const { effective_from: _ignored, ...rest } = form
     const shared = {
       ...rest,
+      remuneration_type: form.remuneration_type ?? 'monthly',
+      hourly_rate_minor: hourlyRate,
+      remuneration_basis: (form.remuneration_basis ?? '').trim() || null,
       monthly_gross_minor: gross,
       probable_hourly_earning_minor: probableEarning,
       probable_earning_rationale: probableEarning === null
@@ -1390,7 +1426,18 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
 
         <div :class="GRID">
           <label :class="FIELD">
-            {{ t('payroll.people.monthly_gross') }}
+            {{ t('payroll.people.remuneration.type') }}
+            <select v-model="termsForm.remuneration_type" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-type">
+              <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}</option>
+              <option v-if="supportsHourly" value="hourly">{{ t(`payroll.people.remuneration.hourly_${remunerationNoun}`) }}</option>
+            </select>
+          </label>
+          <label v-if="hourlyRemuneration" :class="FIELD">
+            {{ t('payroll.people.remuneration.hourly_rate') }} <RequiredMark />
+            <input v-model="hourlyRateInput" inputmode="decimal" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-hourly-rate">
+          </label>
+          <label v-else :class="FIELD">
+            {{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}
             <div class="relative">
               <input
                 v-model="grossInput"
@@ -1402,6 +1449,15 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-500">Kč</span>
             </div>
           </label>
+
+          <label :class="[FIELD, 'sm:col-span-2']">
+            {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="hourlyRemuneration" />
+            <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-basis">
+            <span :class="HINT">{{ t('payroll.people.remuneration.basis_hint') }} {{ t('payroll.people.remuneration.version_hint') }}</span>
+          </label>
+          <p v-if="hourlyRemuneration" class="sm:col-span-2 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
+            {{ t('payroll.people.remuneration.no_calculation') }}
+          </p>
 
           <label :class="FIELD">
             {{ t('payroll.people.weekly_hours') }}
@@ -2001,6 +2057,21 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         </label>
       </div>
     </form>
+
+    <details class="mt-3 rounded-lg border border-neutral-200 bg-surface p-3" data-test="terms-history">
+      <summary class="cursor-pointer text-sm font-medium text-neutral-900">{{ t('payroll.people.remuneration.history') }}</summary>
+      <ul class="mt-3 divide-y divide-neutral-200">
+        <li v-for="term in employment.terms" :key="term.id" class="py-2 text-xs text-neutral-600" data-test="terms-history-row">
+          <p>{{ formatDate(term.effective_from) }} — {{ term.effective_to ? formatDate(term.effective_to) : t('payroll.people.remuneration.open_ended') }}</p>
+          <p class="mt-1 font-medium text-neutral-900">
+            {{ t(`payroll.people.remuneration.${term.remuneration_type ?? 'monthly'}_${remunerationNoun}`) }}:
+            {{ (term.remuneration_type === 'hourly' ? term.hourly_rate_minor : term.monthly_gross_minor) != null ? formatMoneyMinor((term.remuneration_type === 'hourly' ? term.hourly_rate_minor : term.monthly_gross_minor)!) : t('payroll.people.remuneration.not_agreed') }}
+            <span v-if="term.remuneration_type === 'hourly'">{{ t('payroll.people.remuneration.per_hour') }}</span>
+          </p>
+          <p v-if="term.remuneration_basis" class="mt-1 break-words">{{ term.remuneration_basis }}</p>
+        </li>
+      </ul>
+    </details>
 
     <div
       v-if="employment.start_estimated"

@@ -760,6 +760,7 @@ function commandHint(run: PayrollRun): string {
 }
 
 const SOURCE_DRIFT_KEYS = [
+  'remuneration_changed',
   'inputs_added',
   'inputs_changed',
   'inputs_removed',
@@ -776,7 +777,7 @@ function sourceDriftLines(run: PayrollRun): { key: string, text: string }[] {
   const drift = run.source_drift
   if (!drift) return []
   return SOURCE_DRIFT_KEYS
-    .filter(key => drift[key] > 0)
+    .filter(key => (drift[key] ?? 0) > 0)
     .map(key => ({ key, text: t(`payroll.runs.source_drift.${key}`, { count: drift[key] }) }))
 }
 

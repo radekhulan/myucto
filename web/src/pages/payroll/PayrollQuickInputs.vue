@@ -1208,7 +1208,8 @@ const READONLY_VALUE_CLASS = 'inline-flex h-8 items-center justify-end rounded-m
 const SUGGESTED_FIELD_CLASS = 'border-dashed border-warning-500 bg-warning-50'
 
 function baseSuggested(row: UiRow): boolean {
-  return !row.base_managed_elsewhere
+  return !row.hourly_remuneration_in_period
+    && !row.base_managed_elsewhere
     && !row.base_requires_entry
     && row.inputs.base === null
     && row.base_amount_minor > 0
@@ -2155,7 +2156,7 @@ onMounted(() => {
                       :aria-invalid="baseError(row) !== null"
                       :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
                       :class="[fieldClass(baseError(row), true, true), 'w-32', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
-                      :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.base)"
+                      :disabled="loading || saving || !canWrite || rowClosed(row) || row.hourly_remuneration_in_period || !editable(row.inputs.base)"
                       @input="markDirty(row)"
                     >
                     <PayrollQuickFieldState
@@ -2658,7 +2659,7 @@ onMounted(() => {
                   :aria-labelledby="`quick-income-label-mobile-${row.employment_id}`"
                   :aria-invalid="baseError(row) !== null"
                   :class="[fieldClass(baseError(row)), 'w-full', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
-                  :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.base)"
+                  :disabled="loading || saving || !canWrite || rowClosed(row) || row.hourly_remuneration_in_period || !editable(row.inputs.base)"
                   @input="markDirty(row)"
                 >
                 <span v-if="baseSuggested(row)" class="mt-1 block text-xs text-warning-700">
