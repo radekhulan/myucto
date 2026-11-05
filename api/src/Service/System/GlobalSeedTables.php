@@ -254,7 +254,7 @@ final class GlobalSeedTables
         'accounting_periods', 'entity_category_history',
         'accounting_account_definition_history', 'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
         // Vlastní druhy ostatních položek nesou vlastní číselné řady, které reset ponechává.
-        'other_item_kinds',
+        'other_item_kinds', 'other_item_posting_profiles',
         'accounting_fixed_exchange_rates',
         'auto_posting_policy', 'expense_classification_rules', 'revenue_classification_rules', 'posting_rules',
         'journal_entry_templates', 'journal_entry_template_lines',
@@ -428,7 +428,7 @@ final class GlobalSeedTables
         'odometer_readings',
         'offset_agreement_items', 'offset_agreements',
         'oss_filing_evidence',
-        'other_item_allocations', 'other_item_installments', 'other_item_posting_lines',
+        'other_item_allocations', 'other_item_auto_match_blocks', 'other_item_installments', 'other_item_posting_lines', 'other_item_posting_overrides',
         'other_item_schedule_occurrences', 'other_item_schedules', 'other_items',
         'password_resets',
         'payment_matches', 'payment_order_items', 'payment_orders',

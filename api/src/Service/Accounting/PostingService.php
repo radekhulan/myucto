@@ -1502,7 +1502,7 @@ final class PostingService
         // Výnos je výnos bez ohledu na to, kterému státu patří daň — OSS základ jde na
         // TÝŽ výnosový účet (a do téhož rozpadu; revenueWeights počítá váhy ze VŠECH
         // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
-        $this->appendSplit($lines, $weights, $revenue, $otherSide, $net + $ossNet + $voucherNet, $cc);
+        $this->appendSplit($lines, $weights, $revenue, self::sideBySign($net + $ossNet + $voucherNet, $otherSide, $isCreditNote), $net + $ossNet + $voucherNet, $cc);
         if ($vat !== 0.0) {
             $lines[] = $this->line($this->outputVatAccount($supplierId), $vatSide($vat), abs($vat), $cc);
         }
@@ -1815,40 +1815,40 @@ final class PostingService
             // § 76 v plné výši (krácení koeficientem jde souhrnně přes přiznání, ř. 43k/52).
             // Neodpočitatelná část daně je nákladem stejně jako u tuzemského dokladu bez nároku.
             [$supplierVat, $deductibleSelfAssessed, $deductibleSupplierVat, $nonDeductibleVat] = self::reverseChargeVatSplit($vat, $selfAssessedVat, $vatDeduction, $pct);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, round($net + $nonDeductibleVat, 2), $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign(round($net + $nonDeductibleVat, 2), $expenseSide, $isCreditNote), round($net + $nonDeductibleVat, 2), $cc);
             if ($selfAssessedVat !== 0.0) {
                 // Samovyměření: obě nohy patří na RŮZNÉ analytiky — odpočet na vstup, přiznaná
                 // daň na výstup. Na plochém 343 se okamžitě vynetovaly a v zúčtování období
                 // po nich nezůstala stopa.
                 if ($deductibleSelfAssessed !== 0.0) {
-                    $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
+                    $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSelfAssessed, $expenseSide, $isCreditNote), abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
                 }
-                $lines[] = $this->line($this->outputVatAccount($supplierId), $payableSide, abs($selfAssessedVat), $cc); // povinnost přiznat daň
+                $lines[] = $this->line($this->outputVatAccount($supplierId), self::sideBySign($selfAssessedVat, $payableSide, $isCreditNote), abs($selfAssessedVat), $cc); // povinnost přiznat daň
             }
             if ($deductibleSupplierVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleSupplierVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSupplierVat, $expenseSide, $isCreditNote), abs($deductibleSupplierVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $supplierVat, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'none') {
             $expenseAmount = round($net + $vat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'proportional') {
             $deductibleVat    = round($vat * $pct, 2);
             $nonDeductibleVat = round($vat - $deductibleVat, 2);
             $expenseAmount    = round($net + $nonDeductibleVat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $expenseSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount + $deductibleVat, $cc, $totalOnCredit);
         } else {
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($net, $expenseSide, $isCreditNote), $net, $cc);
             if ($vat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($vat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($vat, $expenseSide, $isCreditNote), abs($vat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $totalOnCredit);
@@ -2538,6 +2538,24 @@ final class PostingService
     }
 
     /**
+     * Strana řádku podle znaménka jeho částky vůči směru dokladu (#326). Směr dokladu
+     * určuje znaménko celkové částky; řádek s opačným znaménkem (záporný základ u kladné
+     * faktury, třeba vrácené zálohované obaly 0 % převáží zboží 21 %) patří na opačnou
+     * stranu. Slepé abs() by ho zapsalo na normální stranu a zápis by se rozvážil
+     * o dvojnásobek částky. Při shodném znaménku vrací `$normalSide` beze změny.
+     *
+     * @param 'debit'|'credit' $normalSide
+     * @return 'debit'|'credit'
+     */
+    private static function sideBySign(float $amount, string $normalSide, bool $isCreditNote): string
+    {
+        if (self::cents($amount) === 0 || ($amount < 0.0) === $isCreditNote) {
+            return $normalSide;
+        }
+        return $normalSide === 'debit' ? 'credit' : 'debit';
+    }
+
+    /**
      * Druhová strana dokladu (náklad u přijaté, výnos u vydané): buď jedna noha (dosud),
      * nebo rozpad dle vah z klasifikace položek.
      *
@@ -2712,10 +2730,10 @@ final class PostingService
                     || (string) ($allocation['tax_treatment'] ?? '') === 'non_deductible') {
                     $accountCode = $this->nonDeductibleExpenseAccount($supplierId, $accountCode, $entryDate, $currentRead);
                 }
-                $lines[] = $this->line($accountCode, $debitSide, abs($accountAmount), $cc);
+                $lines[] = $this->line($accountCode, self::sideBySign($accountAmount, $debitSide, $isCreditNote), abs($accountAmount), $cc);
             }
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $debitSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $debitSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $allocatedCzk = round($allocatedCzk + $accountAmount + $deductibleVat, 2);
         }

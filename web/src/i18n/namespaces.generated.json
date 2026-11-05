@@ -169,6 +169,7 @@
     "tax_evidence",
     "template_tools",
     "time_billing",
+    "user_sessions",
     "users",
     "validation",
     "vat_classifications",
@@ -571,6 +572,7 @@
       "other_items"
     ],
     "other-items": [
+      "dimensions",
       "other_items"
     ],
     "other-item-new": [
@@ -1125,6 +1127,7 @@
       "instance_admin",
       "roles",
       "settings",
+      "user_sessions",
       "users"
     ],
     "admin-roles": [
@@ -1331,6 +1334,7 @@
       "work_report_billing"
     ],
     "admin-work-report-billing-templates": [
+      "price_list",
       "work_report_billing"
     ],
     "admin-price-list-new": [

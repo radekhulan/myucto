@@ -2234,6 +2234,8 @@ const isRefundInvoice = computed(() =>
 
 const hasNonPositiveAmountToPay = computed(() =>
   requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
+  // Prázdný koncept smí zůstat uložený; připravený přenos ale položky doplní, proto ho posuzuje níž.
+  && !(editedStatus.value === 'draft' && amountItems(form.value.items).length === 0 && !wrBillingPending.value)
   // Připravený kladný přenos doplní položky až po uložení konceptu.
   && !(editedStatus.value === 'draft' && wrBillingPending.value
     && Number(wrBillingPendingPreview.value?.totals?.with_vat ?? wrBillingPendingPreview.value?.total_amount) > 0)

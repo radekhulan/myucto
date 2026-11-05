@@ -252,8 +252,12 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * těle požadavku a stavu rozvrhu. Vypnout automatiku token smí, účtování
      * tím jen zastaví.
      *
-     * Zakázané zůstává vše, co účtuje nebo páruje: `post`, `reverse`, `repost`,
-     * alokace úhrad i `schedules/{id}/generate` (u rozvrhu s automatikou by
+     * Přiřazení úhrady (`POST /allocations`) smí token provést: spáruje existující bankovní
+     * nebo pokladní platbu s potvrzenou položkou a nezapíše zápis do deníku (službu a práva
+     * k bance či pokladně hlídá akce). Odpárování (`DELETE`) zůstává v UI.
+     *
+     * Zakázané zůstává vše, co účtuje: `post`, `reverse`, `repost`, odpárování úhrad
+     * i `schedules/{id}/generate` (u rozvrhu s automatikou by
      * vzniklé koncepty rovnou zaúčtoval). Oprávnění uživatele (`other_items`
      * write) se dál ověřuje v PermissionMiddleware i v akci, výjimka ruší jen
      * read-only blokaci tokenu.
@@ -276,6 +280,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['PUT', '#^/api/accounting/other-items/[0-9]+$#'],
         ['DELETE', '#^/api/accounting/other-items/[0-9]+$#'],
         ['PUT', '#^/api/accounting/other-items/[0-9]+/installments$#'],
+        ['POST', '#^/api/accounting/other-items/[0-9]+/allocations$#'],
         ['POST', '#^/api/accounting/other-items/[0-9]+/schedule$#'],
         ['PUT', '#^/api/accounting/other-items/schedules/[0-9]+/status$#'],
         ['POST', '#^/api/accounting/accounts$#'],

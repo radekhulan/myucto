@@ -125,7 +125,10 @@ final class AutoPostingPolicyService implements TransferAutoPolicyInterface
         if ($in->crossCurrency) {
             return new PolicyDecision('blocked', 'cross_currency');
         }
+        // Pravidlo s cílovou ostatní položkou účtuje na její účet a úhradu k ní přiřadí,
+        // saldokonto tedy páruje stejně jako spárovaná platba (BankPostingRuleValidator::otherItemTarget).
         if ($in->operationType !== OperationType::BANK_PAYMENT_MATCHED
+            && ($in->rule['other_item_id'] ?? null) === null
             && ($this->hasPrefix($in->debitAccountCode, self::SALDO_PREFIXES)
                 || $this->hasPrefix($in->creditAccountCode, self::SALDO_PREFIXES))) {
             return new PolicyDecision('blocked', 'saldo_forbidden');

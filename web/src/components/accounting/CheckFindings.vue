@@ -390,6 +390,8 @@ function docLink(f: Finding): RouteLocationRaw | null {
     // Deník nemá detail route jednoho zápisu — vzor v projektu je seznam s query.
     case 'journal_entry':
       return { name: 'accounting-journal', query: { entry_id: f.doc_id } }
+    case 'other_item':
+      return { name: 'other-item-detail', params: { id: f.doc_id } }
     case 'asset':
       return { name: 'accounting-asset-detail', params: { id: f.doc_id } }
     default:
