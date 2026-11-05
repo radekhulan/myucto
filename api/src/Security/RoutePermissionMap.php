@@ -284,6 +284,7 @@ final class RoutePermissionMap
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/sensitive-reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/employments/remuneration-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/employment-evidence-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/municipalities$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll', AccessLevel::READ],

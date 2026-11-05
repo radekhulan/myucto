@@ -189,7 +189,7 @@ final class RegistrationImportNormativeTest extends TestCase
         $a1 = [$this->file('a1.xml', RegistrationXmlFixtures::regzecA1(['bno' => $birthNumber]))];
         $employmentId = (int) $this->apply($a1, [$this->previewKey($a1)])['results'][0]['employment_id'];
         $this->db->pdo()->prepare(
-            "UPDATE payroll_employment_terms SET remuneration_type = 'hourly', hourly_rate_minor = 20000,
+            "UPDATE payroll_employment_terms SET remuneration_type = 'hourly', hourly_rate_minor = 20000, remuneration_basis_kind = 'wage_statement',
                     remuneration_basis = 'Syntetický výměr', monthly_gross_minor = NULL
               WHERE supplier_id = ? AND employment_id = ?",
         )->execute([$this->supplierId, $employmentId]);

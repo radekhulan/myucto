@@ -20,6 +20,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $input = $this->terms();
         $input['remuneration_type'] = 'hourly';
         $input['hourly_rate_minor'] = 18750;
+        $input['remuneration_basis_kind'] = 'wage_statement';
         $input['remuneration_basis'] = '  Mzdový výměr 1  ';
         $result = $this->validator()->terms($input, relationType: 'employment');
         self::assertSame('hourly', $result['remuneration_type']);
@@ -36,13 +37,14 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
     public function testHourlyValidationRejectsInvalidCombinations(): void
     {
-        $valid = $this->terms() + ['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis' => 'Dohoda'];
+        $valid = $this->terms() + ['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis_kind' => 'agreement', 'remuneration_basis' => 'Dohoda'];
         foreach ([
             ['hourly_rate_minor' => 0], ['hourly_rate_minor' => 1.5],
             ['hourly_rate_minor' => '20000'], ['hourly_rate_minor' => PHP_INT_MAX], ['remuneration_basis' => ' '],
             ['remuneration_basis' => 123],
             ['remuneration_basis' => str_repeat('x', 256)], ['monthly_gross_minor' => 1],
             ['remuneration_type' => 'monthly'], ['remuneration_type' => 'other'], ['remuneration_type' => null],
+            ['remuneration_basis_kind' => null], ['remuneration_basis_kind' => 'unknown'],
         ] as $changes) {
             try {
                 $this->validator()->terms(array_replace($valid, $changes), relationType: 'employment');
@@ -57,12 +59,16 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $this->validator()->terms($valid, relationType: 'statutory_body');
     }
 
-    public function testLegacyTermsDefaultToMonthly(): void
+    public function testLegacyTermsRemainUnspecified(): void
     {
         $terms = $this->validator()->terms($this->terms());
-        self::assertSame('monthly', $terms['remuneration_type']);
+        self::assertNull($terms['remuneration_type']);
         self::assertNull($terms['hourly_rate_minor']);
+        self::assertNull($terms['remuneration_basis_kind']);
         self::assertNull($terms['remuneration_basis']);
+        $explicit = $this->terms();
+        $explicit['remuneration_type'] = null;
+        self::assertNull($this->validator()->terms($explicit)['remuneration_type']);
     }
 
     public function testInternalCorrectionBodiesPreserveHourlyTerms(): void
@@ -70,6 +76,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $current = [
             'remuneration_type' => 'hourly',
             'hourly_rate_minor' => 18750,
+            'remuneration_basis_kind' => 'agreement',
             'remuneration_basis' => 'Syntetická dohoda',
         ];
         foreach ([
@@ -78,6 +85,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         ] as $body) {
             self::assertSame('hourly', $body['remuneration_type']);
             self::assertSame(18750, $body['hourly_rate_minor']);
+            self::assertSame('agreement', $body['remuneration_basis_kind']);
             self::assertSame('Syntetická dohoda', $body['remuneration_basis']);
         }
     }

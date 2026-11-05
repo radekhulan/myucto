@@ -482,7 +482,7 @@ final class RegistrationImportWriter
     ): array {
         $keys = [
             'office_id', 'contract_signed_on', 'planned_start_on', 'actual_start_on',
-            'fixed_term_end_on', 'remuneration_type', 'hourly_rate_minor', 'remuneration_basis',
+            'fixed_term_end_on',
             'weekly_hours', 'workload_basis_points', 'work_place',
             'regular_workplace', 'jmhz_workplace_municipality_code', 'jmhz_workplace_country_code',
             'jmhz_external_codebook_overlay_key', 'jmhz_external_codebook_manifest_sha256',
@@ -503,7 +503,7 @@ final class RegistrationImportWriter
             'jmhz_assignment_user_name', 'jmhz_risk_categorization_code',
         ];
         $body = [];
-        foreach ($keys as $key) {
+        foreach ([...$keys, ...\MyInvoice\Service\Payroll\PayrollEmploymentTermsBody::REMUNERATION_KEYS] as $key) {
             $body[$key] = $current[$key] ?? null;
         }
         $override = $current['leave_entitlement_weeks_override'] ?? null;

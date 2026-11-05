@@ -76,8 +76,8 @@ final class PayrollQuickInputsApiTest extends TestCase
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, effective_from, planned_start_on, effective_to,
-                 remuneration_type, hourly_rate_minor, remuneration_basis)
-             VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-06-15", "hourly", 20000, "Syntetický výměr")'
+                 remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+             VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-06-15", "hourly", 20000, "wage_statement", "Syntetický výměr")'
         )->execute([$this->supplierId, $this->employmentId]);
         // Na konci měsíce platí měsíční mzda; první polovinu nelze přehlédnout.
         $this->db->pdo()->prepare(

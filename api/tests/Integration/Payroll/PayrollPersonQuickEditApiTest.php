@@ -131,6 +131,7 @@ final class PayrollPersonQuickEditApiTest extends TestCase
                 'terms' => array_replace($this->termsPayload('2026-01-01', '40'), [
                     'remuneration_type' => 'hourly',
                     'hourly_rate_minor' => 20000,
+                    'remuneration_basis_kind' => 'wage_statement',
                     'remuneration_basis' => 'Syntetický výměr',
                 ]),
             ]),
@@ -138,7 +139,7 @@ final class PayrollPersonQuickEditApiTest extends TestCase
             '127.0.0.1',
             'phpunit',
         );
-        $response = $this->put([
+        $payload = [
             'profile' => [
                 ...$this->profilePayload('Původní Zaměstnanec'),
                 'row_version' => $profile['row_version'],
@@ -156,13 +157,22 @@ final class PayrollPersonQuickEditApiTest extends TestCase
                 'row_version' => $employment['row_version'],
                 'terms' => $this->termsPayload('2026-08-04', '37.5'),
             ],
-        ]);
+        ];
+        $response = $this->put($payload);
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $terms = $this->json($response)['employment']['terms'][0];
         self::assertSame('hourly', $terms['remuneration_type']);
         self::assertSame(20000, $terms['hourly_rate_minor']);
         self::assertSame('Syntetický výměr', $terms['remuneration_basis']);
         self::assertNull($terms['monthly_gross_minor']);
+        $saved = $this->json($response);
+        $payload['profile']['row_version'] = $saved['profile']['row_version'];
+        $payload['employment']['row_version'] = $saved['employment']['row_version'];
+        $payload['employment']['terms']['effective_from'] = '2026-09-01';
+        $payload['employment']['monthly_gross_minor'] = null;
+        $denied = $this->put($payload);
+        self::assertSame(422, $denied->getStatusCode(), (string) $denied->getBody());
+        self::assertStringContainsString('U hodinového vztahu', (string) $denied->getBody());
     }
 
     public function testProfileTermsAndGrossAreSavedAtomicallyAndKeepHistory(): void

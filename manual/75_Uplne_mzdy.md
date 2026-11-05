@@ -14,6 +14,9 @@ Na [kartě pracovního vztahu](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-u
 lze evidovat také hodinovou mzdu nebo hodinovou odměnu s účinností a historií.
 Samotná evidence sazby zatím nepočítá mzdu z hodin a nedovolí schválit běh
 zahrnující takto odměňovaný vztah.
+Původní vztahy zůstávají v neurčeném režimu a jejich zpracování se nemění.
+Hodinový režim se volí výslovně pro konkrétní vztah; hotová importovaná
+částka sama tento režim nezapíná.
 
 ## 75.1 Kdy to potřebujete
 

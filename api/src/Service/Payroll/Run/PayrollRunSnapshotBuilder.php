@@ -580,6 +580,7 @@ final class PayrollRunSnapshotBuilder
                     ...(($row['remuneration_type'] ?? 'monthly') === 'hourly' ? [
                         'remuneration_type' => 'hourly',
                         'hourly_rate_minor' => (int) $row['hourly_rate_minor'],
+                        'remuneration_basis_kind' => $row['remuneration_basis_kind'],
                         'remuneration_basis' => $row['remuneration_basis'],
                     ] : []),
                     'weekly_hours' => $row['weekly_hours'] === null
@@ -1325,7 +1326,7 @@ final class PayrollRunSnapshotBuilder
                       AS employer_protected_labor_market,
                     employee.is_active AS employee_active,
                     profile.profile_status,
-                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis,
+                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis_kind, term.remuneration_basis,
                     term.id AS term_id,
                     term.row_version AS term_row_version,
                     term.effective_from,

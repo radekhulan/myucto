@@ -19,7 +19,7 @@ final class PayrollHourlyRemuneration
     public static function overlapsPeriodSql(): string
     {
         return 'EXISTS (
-            SELECT 1 FROM payroll_employment_terms hourly_term
+            SELECT 1 FROM payroll_employment_terms hourly_term FORCE INDEX (idx_payroll_employment_term_effective)
              WHERE hourly_term.supplier_id = employment.supplier_id
                AND hourly_term.employment_id = employment.id
                AND hourly_term.remuneration_type = "hourly"

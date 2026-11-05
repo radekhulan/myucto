@@ -15,8 +15,9 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   actual_start_on:?string,
  *   fixed_term_end_on:?string,
  *   monthly_gross_minor:?int,
- *   remuneration_type:string,
+ *   remuneration_type:?string,
  *   hourly_rate_minor:?int,
+ *   remuneration_basis_kind:?string,
  *   remuneration_basis:?string,
  *   weekly_hours:?string,
  *   leave_entitlement_weeks_override:?int,
@@ -88,6 +89,7 @@ final class PayrollEmploymentValidator
         'statutory_body',
     ];
     private const MEAL_ENTITLEMENT_BASES = ['shift', 'calendar_day'];
+    public const REMUNERATION_BASIS_KINDS = ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement'];
     public const MAX_HOURLY_RATE_MINOR = 1_000_000_000;
 
     private const INSURANCE_MODES = ['automatic', 'included', 'excluded', 'foreign'];
@@ -231,13 +233,15 @@ final class PayrollEmploymentValidator
         ?string $relationType = null,
     ): array {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
-        $remunerationType = array_key_exists('remuneration_type', $input)
-            ? $this->inputString($input['remuneration_type'])
-            : 'monthly';
-        if (!in_array($remunerationType, ['monthly', 'hourly'], true)) {
+        $remunerationType = $input['remuneration_type'] ?? null;
+        if ($remunerationType !== null && !in_array($remunerationType, ['monthly', 'hourly'], true)) {
             throw new \InvalidArgumentException('Způsob odměňování není podporován.');
         }
         $hourlyRate = $input['hourly_rate_minor'] ?? null;
+        $basisKind = $input['remuneration_basis_kind'] ?? null;
+        if ($basisKind !== null && !in_array($basisKind, self::REMUNERATION_BASIS_KINDS, true)) {
+            throw new \InvalidArgumentException('Druh podkladu odměňování není podporován.');
+        }
         if (isset($input['remuneration_basis']) && !is_string($input['remuneration_basis'])) {
             throw new \InvalidArgumentException('Označení podkladu odměňování musí být text.');
         }
@@ -246,8 +250,8 @@ final class PayrollEmploymentValidator
             if ($relationType !== null && !in_array($relationType, ['employment', 'small_scale_employment', 'dpp', 'dpc'], true)) {
                 throw new \InvalidArgumentException('Hodinové odměňování není pro tento typ vztahu podporováno.');
             }
-            if (!is_int($hourlyRate) || $hourlyRate <= 0 || $hourlyRate > self::MAX_HOURLY_RATE_MINOR || $basis === null) {
-                throw new \InvalidArgumentException('Hodinové odměňování vyžaduje kladnou sazbu v haléřích a označení podkladu.');
+            if (!is_int($hourlyRate) || $hourlyRate <= 0 || $hourlyRate > self::MAX_HOURLY_RATE_MINOR || $basisKind === null || $basis === null) {
+                throw new \InvalidArgumentException('Hodinové odměňování vyžaduje kladnou sazbu v haléřích, druh a označení podkladu.');
             }
             if ($this->optionalMonthlyGrossMinor($input) !== null) {
                 throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
@@ -400,6 +404,7 @@ final class PayrollEmploymentValidator
             'monthly_gross_minor' => $this->optionalMonthlyGrossMinor($input),
             'remuneration_type' => $remunerationType,
             'hourly_rate_minor' => $hourlyRate,
+            'remuneration_basis_kind' => $basisKind,
             'remuneration_basis' => $basis,
             'weekly_hours' => $hours === null ? null : (string) $hours,
             'leave_entitlement_weeks_override' => $this->leaveWeeksOverride(

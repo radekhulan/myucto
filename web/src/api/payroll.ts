@@ -318,10 +318,12 @@ export interface PayrollEmploymentTaxDeclaration {
 }
 
 export type PayrollRemunerationType = 'monthly' | 'hourly'
+export type PayrollRemunerationBasisKind = 'wage_statement' | 'contract' | 'agreement' | 'internal_regulation' | 'collective_agreement'
 
 export interface PayrollEmploymentTerms {
-  remuneration_type?: PayrollRemunerationType
+  remuneration_type?: PayrollRemunerationType | null
   hourly_rate_minor?: number | null
+  remuneration_basis_kind?: PayrollRemunerationBasisKind | null
   remuneration_basis?: string | null
   id: number
   office_id: number | null
@@ -1254,7 +1256,7 @@ export interface PayrollPersonProfilePayload {
 export interface PayrollPersonQuickEditEmploymentPayload {
   id: number
   row_version: number
-  monthly_gross_minor: number | null
+  monthly_gross_minor?: number | null
   terms: PayrollEmploymentTermsPayload
 }
 
@@ -7256,7 +7258,7 @@ export interface PayrollRun {
  * že schválení server odmítne, dokud se podklady neobnoví a běh nepřepočítá.
  */
 export interface PayrollRunSourceDrift {
-  remuneration_changed?: number
+  remuneration_changed: number
   total: number
   inputs_added: number
   inputs_changed: number
@@ -8572,6 +8574,10 @@ export const payrollApi = {
       .then(response => response.data.employment),
   // Mzda smí jet i s novou verzí podmínek — „od září bereš víc" je jedna
   // změna, ne dvě. Klíč je volitelný: kdo ho nepošle, mzdy se nedotkne.
+  remunerationOptions: (effectiveFrom: string) =>
+    api.get<{ minimum_hourly_40h_minor: number | null; ruleset_id: string | null }>(
+      '/payroll/employments/remuneration-options', { params: { effective_from: effectiveFrom } },
+    ).then(response => response.data),
   addEmploymentTerms: (
     employmentId: number,
     rowVersion: number,

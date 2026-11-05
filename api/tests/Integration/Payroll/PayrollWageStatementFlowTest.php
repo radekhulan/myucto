@@ -46,7 +46,7 @@ final class PayrollWageStatementFlowTest extends TestCase
         $person = $this->createEmployment($this->officeId, 'Hana Hodinová', 7, 'hpp', 'employment', 40, 10_000);
         $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 18750,
-                    remuneration_basis = "Syntetický výměr", monthly_gross_minor = NULL
+                    remuneration_basis_kind = "wage_statement", remuneration_basis = "Syntetický výměr", monthly_gross_minor = NULL
               WHERE supplier_id = ? AND employment_id = ?'
         )->execute([$this->supplierId, $person['employment_id']]);
         self::assertTrue($this->list($person['employment_id'])['readiness']['available']);
@@ -59,6 +59,8 @@ final class PayrollWageStatementFlowTest extends TestCase
         self::assertSame('hourly', $snapshot['wage']['remuneration_type']);
         self::assertSame(18750, $snapshot['wage']['hourly_rate_minor']);
         self::assertNull($snapshot['wage']['monthly_gross_minor']);
+        self::assertSame('wage_statement', $snapshot['wage']['remuneration_basis_kind']);
+        self::assertSame('Mzdový výměr', $snapshot['wage']['remuneration_basis_kind_label']);
         self::assertSame('Syntetický výměr', $snapshot['wage']['remuneration_basis']);
         self::assertSame($first['body']['id'], $this->generate($person['employment_id'], 'hourly-wage-replay')['body']['id']);
     }

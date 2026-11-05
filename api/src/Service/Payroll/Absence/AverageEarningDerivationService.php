@@ -390,7 +390,7 @@ final class AverageEarningDerivationService
     public static function probableFromAgreedGross(array $terms, string $applicationStart): ?array
     {
         $chosen = self::termForApplication($terms, $applicationStart);
-        if ($chosen === null || ($chosen['remuneration_type'] ?? 'monthly') === 'hourly') {
+        if ($chosen === null) {
             return null;
         }
         $monthlyGross = self::nullableInt($chosen['monthly_gross_minor'] ?? null);
@@ -1048,7 +1048,7 @@ final class AverageEarningDerivationService
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, effective_from,
                     probable_hourly_earning_minor, probable_earning_rationale,
-                    monthly_gross_minor, weekly_hours, remuneration_type
+                    monthly_gross_minor, weekly_hours
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?',
         );

@@ -781,3 +781,33 @@ test('koncept podle odběratele: při více konceptech se nehádá', async () =>
   );
   assert.equal(client.calls.some((call) => call.method === 'PUT'), false);
 });
+
+for (const changeKind of ['new_terms', 'correction']) {
+  test(`hodinový vztah odmítne měsíční změnu ${changeKind} před jakýmkoli zápisem`, async () => {
+    const client = new FakeClient({ 'GET /payroll/people/7': { person: { id: 7, employments: [{ id: 11, row_version: 4, terms: [{ remuneration_type: 'hourly', hourly_rate_minor: 18050 }] }] } } });
+    await assert.rejects(tool('change_payroll_salary').run(client, { employee_id: 7, employment_id: 11, change_kind: changeKind, effective_from: '2026-12-01', monthly_gross_minor: 5000000, reason: 'Syntetická změna' }, 'change_payroll_salary'), /hodinové odměňování.*pouze měsíční mzdu/s);
+    assert.deepEqual(client.calls.map(({ method }) => method), ['GET']);
+  });
+}
+for (const mode of [null, 'monthly']) {
+  test(`měsíční změna zachová dosavadní režim ${mode}`, async () => {
+    const client = new FakeClient({ 'GET /payroll/people/7': { person: { id: 7, employments: [{ id: 11, row_version: 4, terms: [{ remuneration_type: mode }] }] } } });
+    await tool('change_payroll_salary').run(client, { employee_id: 7, employment_id: 11, change_kind: 'correction', monthly_gross_minor: 5000000, reason: 'Syntetická oprava' }, 'change_payroll_salary');
+    assert.equal(client.calls[1].method, 'PATCH');
+    assert.equal(Object.hasOwn(client.calls[1].body, 'remuneration_type'), false);
+    assert.equal(client.calls[1].body.monthly_gross_minor, 5000000);
+  });
+}
+test('detail zaměstnance předá nullable režim, sazbu a druh podkladu bez odvození měsíční mzdy', async () => {
+  const detail = { person: { id: 7, employments: [{ id: 11, monthly_gross_minor: null, terms: [{ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'agreement', remuneration_basis: 'Syntetická dohoda' }] }, { id: 12, monthly_gross_minor: null, terms: [{ remuneration_type: null, hourly_rate_minor: null }] }] } };
+  const client = new FakeClient({ 'GET /payroll/people/7': detail });
+  assert.deepEqual(await tool('get_payroll_person').run(client, { employee_id: 7 }, 'get_payroll_person'), detail);
+});
+test('založení osoby nenutí měsíční režim a nepředstírá podporu hodinového založení', async () => {
+  const client = new FakeClient();
+  await tool('create_payroll_person').run(client, { full_name: 'Syntetická Osoba', birth_number: '9001010007', relation_type: 'dpp', planned_start_on: '2026-12-15' }, 'create_payroll_person');
+  assert.equal(Object.hasOwn(client.calls[0].body, 'remuneration_type'), false);
+  assert.equal(client.calls[0].body.monthly_gross, undefined);
+  assert.equal(tool('create_payroll_person').inputSchema.properties.hourly_rate_minor, undefined);
+  assert.match(tool('get_payroll_person').description, /NULL\/monthly\/hourly/);
+});

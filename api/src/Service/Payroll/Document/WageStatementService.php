@@ -295,6 +295,15 @@ final class WageStatementService
                 ...($hourly ? [
                     'remuneration_type' => 'hourly',
                     'hourly_rate_minor' => (int) $hourlyRate,
+                    'remuneration_basis_kind' => $terms['remuneration_basis_kind'],
+                    'remuneration_basis_kind_label' => match ($terms['remuneration_basis_kind']) {
+                        'wage_statement' => 'Mzdový výměr',
+                        'contract' => 'Smlouva',
+                        'agreement' => 'Dohoda',
+                        'internal_regulation' => 'Vnitřní předpis',
+                        'collective_agreement' => 'Kolektivní smlouva',
+                        default => '',
+                    },
                     'remuneration_basis' => $terms['remuneration_basis'],
                 ] : []),
                 'weekly_hours' => $weekly === null ? null : rtrim(rtrim((string) $weekly, '0'), '.'),

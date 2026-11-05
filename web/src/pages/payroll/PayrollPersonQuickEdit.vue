@@ -495,7 +495,8 @@ function termsPayload(employment: PayrollEmployment): PayrollEmploymentTermsPayl
   const terms = employment.terms[0]
   if (!terms) throw new Error('employment_terms_missing')
   return {
-    remuneration_type: terms.remuneration_type ?? 'monthly',
+    remuneration_type: terms.remuneration_type ?? null,
+    remuneration_basis_kind: terms.remuneration_basis_kind ?? null,
     hourly_rate_minor: terms.hourly_rate_minor ?? null,
     remuneration_basis: terms.remuneration_basis ?? null,
     office_id: terms.office_id,
@@ -594,7 +595,7 @@ async function save(): Promise<boolean> {
         ? {
             id: employment.id,
             row_version: employment.row_version,
-            monthly_gross_minor: hourlyRemuneration.value ? null : amountMinor(form.monthly_gross),
+            ...(!hourlyRemuneration.value ? { monthly_gross_minor: amountMinor(form.monthly_gross) } : {}),
             terms: termsPayload(employment),
           }
         : null,

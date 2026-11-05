@@ -58,6 +58,11 @@ mzdového běhu se změní na **Uzamčený během**.
 
 ## 91.4 Krok za krokem: pravidelný předpis
 
+Před přepnutím vztahu na hodinové odměňování ukončete aktivní předpis
+základní mzdy. U hodinového vztahu se předpis procentem ze sjednané
+měsíční mzdy předá k ručnímu posouzení; stará měsíční částka se nepoužije.
+Sjednaná hodinová sazba na kartě vztahu není hotovým mzdovým vstupem.
+
 1. Otevřete záložku **Pravidelné předpisy** a klikněte na **Nový předpis**.
 2. Vyberte zaměstnance, vztah a složku.
 3. Zvolte zadání pevnou částkou, nebo procentem (**Sazba (%)** jako běžné

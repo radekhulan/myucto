@@ -491,7 +491,8 @@ final class PayrollRecurringComponentRepository
         bool $creating = true,
     ): void {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT component.valid_from, component.valid_to,
+            'SELECT component.valid_from, component.valid_to, component.component_kind,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . ' AS hourly_remuneration_in_period,
                     COALESCE(
                       employment.actual_start_date,
                       employment.start_date,
@@ -511,7 +512,7 @@ final class PayrollRecurringComponentRepository
             . ' WHERE employment.supplier_id = ? AND employment.id = ?
               FOR UPDATE'
         );
-        $stmt->execute([$data['component_id'], $supplierId, $data['employment_id']]);
+        $stmt->execute([$data['valid_to'] ?? '9999-12-31', $data['valid_from'], $data['component_id'], $supplierId, $data['employment_id']]);
         $raw = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($raw === false) {
             throw new \InvalidArgumentException(
@@ -520,6 +521,15 @@ final class PayrollRecurringComponentRepository
                         . 'firmě, případně je složka neaktivní. Aktivujte složku '
                         . 'v číselníku, nebo vyberte jinou.'
                     : 'Pracovní vztah nebo pravidelná mzdová složka nepatří této firmě.'
+            );
+        }
+        // Stejný zámek vztahu serializuje i přepnutí podmínek na hodinovou
+        // odměnu. Předpis nesmí obejít zákaz opačným pořadím těchto operací.
+        if ($data['is_active'] && $raw['component_kind'] === 'base_wage'
+            && (bool) $raw['hourly_remuneration_in_period']) {
+            throw new \InvalidArgumentException(
+                'Základní měsíční předpis se překrývá s hodinovým odměňováním. '
+                . 'Ukončete jeho platnost před hodinovým obdobím nebo předpis deaktivujte.'
             );
         }
         /*

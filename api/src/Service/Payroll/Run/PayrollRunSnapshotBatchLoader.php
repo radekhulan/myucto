@@ -49,7 +49,7 @@ final class PayrollRunSnapshotBatchLoader
     ): array {
         $rows = $this->fetch(
             'SELECT term.id, term.row_version, term.effective_from, term.effective_to,
-                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis,
+                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis_kind, term.remuneration_basis,
                     term.employment_id AS ' . self::GROUP_KEY . '
                FROM payroll_employment_terms term
               WHERE term.supplier_id = ? AND term.employment_id IN (%s)

@@ -1648,6 +1648,7 @@ describe('PayrollRuns', () => {
     employments_added: 0,
     employments_removed: 0,
     statutory_evidence_changed: 1,
+    remuneration_changed: 0,
     snapshot_created_at: '2026-09-01 10:00:00',
   }
 

@@ -16,15 +16,13 @@ namespace MyInvoice\Service\Payroll;
  */
 final class PayrollEmploymentTermsBody
 {
+    public const REMUNERATION_KEYS = ['remuneration_type', 'hourly_rate_minor', 'remuneration_basis_kind', 'remuneration_basis'];
     private const KEYS = [
         'office_id',
         'contract_signed_on',
         'planned_start_on',
         'actual_start_on',
         'fixed_term_end_on',
-        'remuneration_type',
-        'hourly_rate_minor',
-        'remuneration_basis',
         'weekly_hours',
         'workload_basis_points',
         'work_place',
@@ -80,7 +78,7 @@ final class PayrollEmploymentTermsBody
     public static function fromCurrent(array $current, string $changeReason): array
     {
         $body = [];
-        foreach (self::KEYS as $key) {
+        foreach ([...self::KEYS, ...self::REMUNERATION_KEYS] as $key) {
             $body[$key] = $current[$key] ?? null;
         }
         $override = $current['leave_entitlement_weeks_override'] ?? null;

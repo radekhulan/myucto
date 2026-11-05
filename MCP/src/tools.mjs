@@ -726,7 +726,9 @@ export const TOOLS = [
       + 'agendy — z personálního systému, z docházky, ze skriptu. Nová osoba do '
       + 'mzdy sama nevstoupí: mzdový běh, schválení a podání zůstávají jen pro '
       + 'webové rozhraní. `monthly_gross` je v KORUNÁCH, na rozdíl od '
-      + '`change_payroll_salary`, které pracuje v haléřích.',
+      + '`change_payroll_salary`, které pracuje v haléřích. Bez výslovného režimu zůstává '
+      + '`remuneration_type` NULL (dosavadní chování); nástroj režim nemění. Hodinové '
+      + 'podmínky se nastavují na kartě pracovního vztahu ve webu.',
     inputSchema: schema({
       full_name: str('Celé jméno tak, jak má být na mzdových dokladech.', { minLength: 2, maxLength: 200 }),
       first_name: str('Křestní jméno; bez něj se odvodí z `full_name`.', { maxLength: 100 }),
@@ -762,7 +764,11 @@ export const TOOLS = [
     title: 'Detail zaměstnance a sjednané mzdy',
     description:
       'Vrátí osobu a všechny pracovní vztahy. `monthly_gross_minor` je aktuálně '
-      + 'sjednaná měsíční hrubá mzda v haléřích; `terms` obsahují její historické podmínky.',
+      + 'sjednaná měsíční hrubá mzda v haléřích; u hodinového vztahu je NULL. `terms` '
+      + 'obsahují historii, `remuneration_type` NULL/monthly/hourly (NULL zachovává dosavadní '
+      + 'chování), `hourly_rate_minor` a druh podkladu `remuneration_basis_kind` s označením '
+      + '`remuneration_basis`. Sjednaná sazba je oddělená od průměrného a pravděpodobného '
+      + 'hodinového výdělku; ze sazby ani úvazku se měsíční mzda neodvozuje.',
     inputSchema: schema({ employee_id: int('ID zaměstnance.') }, ['employee_id']),
     write: false,
     run: (c, a, tool) => c.get(`/payroll/people/${seg(a.employee_id)}`, null, tool),
@@ -776,7 +782,9 @@ export const TOOLS = [
       'Změní měsíční hrubou mzdu pracovního vztahu. `new_terms` založí novou verzi '
       + 'od `effective_from`, takže starší období zachovají původní mzdu. `correction` opraví '
       + 'chybnou částku v aktuální verzi bez změny účinnosti; server ji odmítne, pokud už byla '
-      + 'verze použita ve mzdovém běhu. Nástroj nesmí měnit ostatní pracovní podmínky.',
+      + 'verze použita ve mzdovém běhu. U hodinového vztahu nástroj změnu měsíční mzdy '
+      + 'odmítne; sazbu upravte na kartě vztahu. NULL režim zachová dosavadní chování. '
+      + 'Nástroj nesmí měnit režim odměňování ani ostatní pracovní podmínky.',
     inputSchema: schema({
       employee_id: int('ID zaměstnance.'),
       employment_id: int('ID pracovního vztahu, jehož mzda se mění.'),
@@ -791,6 +799,9 @@ export const TOOLS = [
     run: async (c, a, tool) => {
       const detail = await c.get(`/payroll/people/${seg(a.employee_id)}`, null, tool);
       const employment = payrollEmploymentFrom(detail, a.employment_id);
+      if (employment.terms?.[0]?.remuneration_type === 'hourly') {
+        throw new Error('Tento vztah má hodinové odměňování. Nástroj mění pouze měsíční mzdu; sjednanou hodinovou sazbu a podmínky upravte na kartě pracovního vztahu.');
+      }
       const body = {
         row_version: employment.row_version,
         monthly_gross_minor: a.monthly_gross_minor,

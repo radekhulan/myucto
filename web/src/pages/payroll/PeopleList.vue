@@ -118,8 +118,8 @@ const newEmployment = ref<PayrollEmploymentCreatePayload | null>(null)
 const newEmploymentMonthlyGross = ref<number | null>(null)
 const newEmploymentHourlyRate = ref('')
 watch(() => newEmployment.value?.relation_type, (relationType) => {
-  if (newEmployment.value && !['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(relationType ?? '')) {
-    newEmployment.value.terms.remuneration_type = 'monthly'
+  if (newEmployment.value?.terms.remuneration_type === 'hourly' && !['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(relationType ?? '')) {
+    newEmployment.value.terms.remuneration_type = null
     newEmployment.value.terms.hourly_rate_minor = null
   }
 })
@@ -982,7 +982,8 @@ function employmentDraft(
     meal_entitlement_basis: 'shift',
     monthly_gross_minor: monthlyGrossMinor,
     terms: {
-      remuneration_type: 'monthly',
+      remuneration_type: null,
+      remuneration_basis_kind: null,
       hourly_rate_minor: null,
       remuneration_basis: null,
       office_id: null,
@@ -1029,6 +1030,10 @@ async function saveNew(personId: number) {
   }
   if (hourly && !(newEmployment.value.terms.remuneration_basis ?? '').trim()) {
     newEmploymentError.value = t('payroll.people.remuneration.basis_required')
+    return
+  }
+  if (hourly && !newEmployment.value.terms.remuneration_basis_kind) {
+    newEmploymentError.value = t('payroll.people.remuneration.basis_kind_required')
     return
   }
   savingNew.value = true
@@ -2058,6 +2063,7 @@ onMounted(async () => {
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.remuneration.type') }}
             <select v-model="newEmployment.terms.remuneration_type" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-type">
+              <option :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
               <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
               <option v-if="['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(newEmployment.relation_type)" value="hourly">{{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
             </select>
@@ -2067,6 +2073,13 @@ onMounted(async () => {
             <input v-model="newEmploymentHourlyRate" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-hourly-rate">
           </label>
           <label v-else class="text-xs text-neutral-600">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="0.01" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark v-if="newEmployment.terms.remuneration_type === 'hourly'" />
+            <select v-model="newEmployment.terms.remuneration_basis_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis-kind">
+              <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
+              <option v-for="kind in ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement']" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
+            </select>
+          </label>
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="newEmployment.terms.remuneration_type === 'hourly'" />
             <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis">

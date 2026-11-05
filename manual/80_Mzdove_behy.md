@@ -27,6 +27,12 @@ Kapitolu otevřete, když:
 
 ## 80.2 Než začnete
 
+Vztah s výslovně zvoleným hodinovým odměňováním zatím brání schválení
+běhu za měsíc, do kterého hodinové podmínky zasahují. Snímek uchovává
+účinné verze sazby včetně jejich podkladu; pozdější změnu ohlásí jako
+změnu podkladů a již uzavřenou revizi nepřepíše. Samotná evidence sazby
+z odpracovaných hodin mzdový vstup nevytvoří.
+
 1. **Nastavení mezd.** Zaměstnavatel, zaměstnanci, pracovní vztahy, kalendář,
    absence a mzdové vstupy musí být hotové (průvodce je v
    [Úplné mzdy](75_Uplne_mzdy.md)).

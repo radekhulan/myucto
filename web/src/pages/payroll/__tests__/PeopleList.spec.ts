@@ -556,6 +556,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.createEmployment).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="new-employment-form"]').text()).toContain('payroll.people.remuneration.basis_required')
     await wrapper.get('[data-test="new-employment-remuneration-basis"]').setValue('Syntetická dohoda')
+    await wrapper.get('[data-test="new-employment-remuneration-basis-kind"]').setValue('agreement')
     await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
     expect(m.createEmployment).toHaveBeenCalledWith(1, expect.objectContaining({ monthly_gross_minor: null, terms: expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetická dohoda' }) }))
   })

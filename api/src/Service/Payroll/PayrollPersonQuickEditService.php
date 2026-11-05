@@ -163,8 +163,11 @@ final class PayrollPersonQuickEditService
         $current = $this->employments->currentTerms($supplierId, $id)
             ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
         // Rychlá editace způsob odměňování nenabízí; změna patří na kartu vztahu.
-        foreach (['remuneration_type', 'hourly_rate_minor', 'remuneration_basis'] as $key) {
+        foreach (PayrollEmploymentTermsBody::REMUNERATION_KEYS as $key) {
             $termsBody[$key] = $current[$key];
+        }
+        if (($current['remuneration_type'] ?? null) === 'hourly' && $replaceMonthlyGross) {
+            throw new \InvalidArgumentException('U hodinového vztahu nelze měnit měsíční mzdu. Sazbu upravte na kartě vztahu.');
         }
         $terms = $this->employmentValidator->terms(
             $termsBody,

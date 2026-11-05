@@ -229,11 +229,24 @@ režim pojištění, místo výkonu práce):
 podmínek a předchozí je uzavřená dnem před novou účinností.
 
 **Hodinová mzda a odměna.** Na kartě pracovního vztahu zvolte hodinový způsob
-odměňování, zadejte **Sjednanou hodinovou sazbu (Kč/h)** a **Smluvní podklad**
-(například označení mzdového výměru nebo dohody). Sazba může mít dvě desetinná
+odměňování, zadejte **Sjednanou hodinovou sazbu (Kč/h)**, druh podkladu
+(mzdový výměr, smlouva, dohoda, vnitřní předpis nebo kolektivní smlouva)
+a jeho označení či odkaz. Sazba může mít dvě desetinná
 místa. Každý souběžný vztah má vlastní způsob odměňování a vlastní historii.
 U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
 pravděpodobným hodinovým výdělkem.
+
+Volba **Dosavadní režim (bez výslovného určení)** zachovává původní zpracování, například dohodu
+bez sjednané měsíční částky. Na hodinový režim i zpět lze přejít pouze
+od prvního dne měsíce. Změnu samotné hodinové sazby můžete evidovat novou
+verzí i během měsíce. Před přechodem ukončete aktivní pravidelný předpis
+základní mzdy. Starší verze podmínek musí obsahovat svou vlastní měsíční
+částku, aby vymazání měsíční mzdy při přechodu nezměnilo minulost.
+
+Karta upozorní na sazbu pod hodinovým minimem pro běžný stanovený týden
+podle pravidel platných k datu účinnosti. Kratší sjednaný úvazek toto
+minimum nesnižuje; při kratší zákonné týdenní době může být minimum vyšší.
+Upozornění samo mzdu ani doplatek nevytváří.
 
 Evidence hodinové sazby zatím nevytváří mzdu z odpracovaných hodin. Mzdový běh,
 do jehož období hodinové podmínky zasahují, proto nelze schválit.

@@ -245,6 +245,30 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         );
     }
 
+    public function testLegacyAndExplicitMonthlyTermsPreserveSnapshotHashAndCalculation(): void
+    {
+        $this->seed(24);
+        $this->seedLegacyImportSource();
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = NULL WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $legacy = $this->build();
+        foreach ($legacy->data['people'] as $person) {
+            foreach ($person['employments'] as $employment) {
+                self::assertArrayNotHasKey('hourly_remuneration_terms', $employment);
+                foreach (['remuneration_type', 'hourly_rate_minor', 'remuneration_basis_kind', 'remuneration_basis'] as $key) {
+                    self::assertArrayNotHasKey($key, $employment['term']);
+                }
+            }
+        }
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "monthly" WHERE supplier_id = ?')
+            ->execute([$this->supplierId]);
+        $explicitMonthly = $this->build();
+        self::assertSame($legacy->json, $explicitMonthly->json);
+        self::assertSame($legacy->hash, $explicitMonthly->hash);
+        $calculator = new \MyInvoice\Service\Payroll\Run\PayrollRunCalculator(new \MyInvoice\Service\Payroll\Component\PayrollComponentDefinitionFactory());
+        self::assertSame($calculator->calculate($legacy->data), $calculator->calculate($explicitMonthly->data));
+    }
+
     public function testSnapshotUsesSalaryEffectiveForThePayrollPeriod(): void
     {
         $this->seed(1);
@@ -905,6 +929,15 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
             $this->actorId,
             $this->actorId,
         ]);
+    }
+
+    private function seedLegacyImportSource(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_input_imports (supplier_id, period_start, source_kind, source_name, content_hash, status) VALUES (?, ?, "csv", "synthetic-monthly-regression.csv", UNHEX(SHA2("synthetic-monthly-regression", 256)), "accepted")')
+            ->execute([$this->supplierId, PayrollRunScaleFixture::PERIOD_START]);
+        $importId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare('UPDATE payroll_inputs SET source_kind = "import", import_id = ?, external_id = "synthetic:monthly-regression" WHERE supplier_id = ? ORDER BY id LIMIT 1')
+            ->execute([$importId, $this->supplierId]);
     }
 
     private function seed(int $headcount): void

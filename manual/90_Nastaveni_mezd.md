@@ -234,6 +234,13 @@ jsou v `Mzdy → Zaměstnanci` a u vztahů je OIČ a ID PPV.
 
 Potřebujete oprávnění k zápisu mzdových vstupů.
 
+Importní pole **Hodinová sazba** je pravděpodobný hodinový výdělek pro
+náhrady a zákonnou evidenci. Sjednanou hodinovou sazbu a její podklad
+vedete zvlášť na kartě pracovního vztahu; import je nedoplňuje a nepřepíná
+způsob odměňování. U výslovně hodinového vztahu nelze převzít měsíční
+mzdu z podkladů — aplikace toto převzetí odmítne. Sjednanou sazbu upravte
+na kartě pracovního vztahu.
+
 1. Otevřete `Mzdy → Importy`, záložku **Docházka**.
 2. Zvolte měsíc mezd a nahrajte všechny soubory (XLSX, CSV) najednou. Profil
    mapování se vybere sám; jinak ho zvolte ručně nebo otevřete **Upravit

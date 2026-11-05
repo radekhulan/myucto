@@ -374,11 +374,18 @@ peněžní pohyb konkrétního projektu.
 > analytiky nic nezaúčtuje.
 >
 > **U mezd asistent pracuje jen s personálními údaji a připravovanými vstupy.**
-> Může změnit sjednanou mzdu od zadaného data, zadat přesčas, absenci nebo odměnu.
+> Může změnit sjednanou měsíční mzdu od zadaného data, zadat přesčas, absenci nebo odměnu.
 > Starší mzdová období přitom zachovají původní sjednanou částku. Nemůže spustit
 > výpočet, schválení docházky, absence nebo mzdového běhu, zaúčtování, přípravu
 > plateb, uzavření, podání ani mzdové dokumenty. Nová absence zůstane ve stavu
 > k posouzení a schválí ji člověk v aplikaci.
+
+Nástroj `get_payroll_person` zobrazí také způsob odměňování, sjednanou
+hodinovou sazbu a její podklad ve verzích podmínek. `change_payroll_salary`
+mění měsíční částku; u hodinového vztahu vrátí chybu s odkazem na úpravu
+podmínek v aplikaci. `create_payroll_person` zůstává zkratkou pro založení
+osoby s dosavadním zadáním měsíční částky. Sjednanou hodinovou sazbu
+nastavíte na kartě vztahu a nelze ji zaměňovat za pravděpodobný výdělek.
 
 ### 105.8.3 Zprovoznění
 

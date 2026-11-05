@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -30,6 +31,7 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
     private Connection $db;
     private PayrollEmploymentAction $action;
     private PayrollEmploymentRepository $employments;
+    private PayrollComponentRepository $components;
     private PayrollAttendanceImportRepository $attendance;
     private PayrollHealthNotificationRepository $healthNotifications;
     private int $supplierId;
@@ -49,6 +51,7 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         }
         $this->action = $container->get(PayrollEmploymentAction::class);
         $this->employments = $container->get(PayrollEmploymentRepository::class);
+        $this->components = $container->get(PayrollComponentRepository::class);
         $this->attendance = $container->get(PayrollAttendanceImportRepository::class);
         $this->healthNotifications = $container->get(PayrollHealthNotificationRepository::class);
 
@@ -134,6 +137,113 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         self::assertNull($terms['change_reason']);
     }
 
+    public function testModeChangeMustStartMonthButHourlyRateMayChangeMidMonth(): void
+    {
+        $employment = $this->activeEmployment();
+        $payload = ['row_version' => $employment['row_version'], 'effective_from' => '2026-03-15',
+            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'];
+        $response = $this->action->addTerms($this->request('PUT', '/terms', $payload), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $payload['effective_from'] = '2026-03-01';
+        $hourly = $this->call('addTerms', $employment, $payload);
+        $stmt = $this->db->pdo()->prepare('SELECT monthly_gross_minor FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $employment['id']]);
+        self::assertNull($stmt->fetchColumn());
+        $moved = $this->action->correctTerms($this->request('PATCH', '/terms/current', [
+            'row_version' => $hourly['row_version'], 'correct_effective_from' => true,
+            'effective_from' => '2026-03-15',
+        ]), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $moved->getStatusCode(), (string) $moved->getBody());
+        $bearer = $this->action->addTerms($this->request('PUT', '/terms', [
+            'row_version' => $hourly['row_version'], 'effective_from' => '2026-04-01',
+            'monthly_gross_minor' => 3000000, 'change_reason' => 'Syntetický pokus',
+        ])->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $bearer->getStatusCode());
+        self::assertStringContainsString('U hodinového vztahu', (string) $bearer->getBody());
+        $rate = $this->call('addTerms', $hourly, ['row_version' => $hourly['row_version'], 'effective_from' => '2026-03-15', 'hourly_rate_minor' => 21000]);
+        self::assertSame(21000, $rate['terms'][0]['hourly_rate_minor']);
+        self::assertSame(20000, $rate['terms'][1]['hourly_rate_minor']);
+        $response = $this->action->correctTerms($this->request('PATCH', '/terms/current', [
+            'row_version' => $rate['row_version'], 'remuneration_type' => 'monthly', 'hourly_rate_minor' => null, 'monthly_gross_minor' => 3000000,
+        ]), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+    }
+
+    public function testLegacyToExplicitMonthlyCanStartMidMonth(): void
+    {
+        $employment = $this->activeEmployment();
+        $changed = $this->call('addTerms', $employment, [
+            'row_version' => $employment['row_version'], 'effective_from' => '2026-02-15',
+            'remuneration_type' => 'monthly',
+        ]);
+        self::assertSame('monthly', $changed['terms'][0]['remuneration_type']);
+        self::assertSame(4000000, $changed['terms'][0]['monthly_gross_minor']);
+        self::assertNull($changed['terms'][1]['remuneration_type']);
+    }
+
+    public function testConcurrentEmploymentKeepsItsOwnRemuneration(): void
+    {
+        $monthly = $this->activeEmployment();
+        $terms = [...$monthly['terms'][0],
+            'actual_start_on' => null, 'is_primary' => false, 'activity_code' => null,
+            'jmhz_relationship_detail_code' => null, 'monthly_gross_minor' => null,
+            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 25000,
+            'remuneration_basis_kind' => 'agreement', 'remuneration_basis' => 'Syntetická dohoda',
+        ];
+        $response = $this->action->create($this->request('POST', '/employments', [
+            'code' => 'SYN-DPP', 'relation_type' => 'dpp', 'terms' => $terms,
+        ]), new Response(), ['id' => (string) $this->employeeId]);
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $hourly = $this->json($response)['employment'];
+        self::assertSame('hourly', $hourly['terms'][0]['remuneration_type']);
+        self::assertSame(25000, $hourly['terms'][0]['hourly_rate_minor']);
+        self::assertNull($hourly['monthly_gross_minor']);
+        $relationships = $this->employments->listForEmployee($this->supplierId, $this->employeeId);
+        $first = array_values(array_filter($relationships, static fn (array $item): bool => $item['id'] === $monthly['id']))[0];
+        self::assertNull($first['terms'][0]['remuneration_type']);
+        self::assertSame(4000000, $first['terms'][0]['monthly_gross_minor']);
+    }
+
+    public function testHourlyModeRejectsActiveBaseWageAndAmbiguousLegacyProjection(): void
+    {
+        $employment = $this->activeEmployment();
+        $this->components->ensureDefaults($this->supplierId);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = "MZDA_MESICNI"');
+        $stmt->execute([$this->supplierId]);
+        $component = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $component);
+        $this->db->pdo()->prepare('INSERT INTO payroll_recurring_components (supplier_id, employment_id, component_id, calculation_kind, amount_minor, valid_from, allocation_rule) VALUES (?, ?, ?, "fixed_amount", 4000000, "2026-01-01", "full_month")')
+            ->execute([$this->supplierId, $employment['id'], $component]);
+        $payload = ['row_version' => $employment['row_version'], 'effective_from' => '2026-03-01',
+            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'];
+        $response = $this->action->addTerms($this->request('PUT', '/terms', $payload), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('předpis', (string) $response->getBody());
+        $this->db->pdo()->prepare('UPDATE payroll_recurring_components SET is_active = 0 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
+        // Syntetická starší instalace: pouze projekce nese mzdu, stará verze ji nemá.
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = NULL WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
+        $response = $this->action->addTerms($this->request('PUT', '/terms', $payload), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('Starší podmínky', (string) $response->getBody());
+        $stmt = $this->db->pdo()->prepare('SELECT monthly_gross_minor FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $employment['id']]);
+        self::assertSame(4000000, (int) $stmt->fetchColumn());
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = 4000000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
+        $hourly = $this->call('addTerms', $employment, $payload);
+        self::assertSame('hourly', $hourly['terms'][0]['remuneration_type']);
+        self::assertSame(4000000, $hourly['terms'][1]['monthly_gross_minor']);
+    }
+
+    public function testDatabaseRejectsNullModeWithHourlyRate(): void
+    {
+        $employment = $this->activeEmployment();
+        $this->expectException(\PDOException::class);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = NULL, hourly_rate_minor = 20000, remuneration_basis_kind = "agreement", remuneration_basis = "Syntetický podklad", monthly_gross_minor = NULL WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $employment['id']]);
+    }
+
     public function testHourlyVersionAndPartialCorrectionsPreserveHistoryAndDoNotInheritMonthlyWage(): void
     {
         $employment = $this->activeEmployment();
@@ -142,13 +252,15 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
             'effective_from' => '2026-03-01',
             'remuneration_type' => 'hourly',
             'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement',
             'remuneration_basis' => 'Syntetický mzdový výměr',
         ]);
         self::assertCount(2, $changed['terms']);
         self::assertSame('hourly', $changed['terms'][0]['remuneration_type']);
         self::assertSame(20000, $changed['terms'][0]['hourly_rate_minor']);
+        self::assertSame('wage_statement', $changed['terms'][0]['remuneration_basis_kind']);
         self::assertNull($changed['terms'][0]['monthly_gross_minor']);
-        self::assertSame('monthly', $changed['terms'][1]['remuneration_type']);
+        self::assertNull($changed['terms'][1]['remuneration_type']);
         self::assertSame(4000000, $changed['terms'][1]['monthly_gross_minor']);
         self::assertSame('2026-02-28', $changed['terms'][1]['effective_to']);
         $salary = $this->db->pdo()->prepare(
@@ -166,6 +278,7 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         ]);
         self::assertSame('hourly', $corrected['terms'][0]['remuneration_type']);
         self::assertSame(20000, $corrected['terms'][0]['hourly_rate_minor']);
+        self::assertSame('wage_statement', $corrected['terms'][0]['remuneration_basis_kind']);
         self::assertSame('Syntetický mzdový výměr', $corrected['terms'][0]['remuneration_basis']);
         self::assertNull($corrected['terms'][0]['monthly_gross_minor']);
 
@@ -187,12 +300,13 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
             'effective_from' => '2026-03-01',
             'remuneration_type' => 'hourly',
             'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement',
             'remuneration_basis' => 'Syntetický výměr',
         ]);
         $repository = $this->employments;
         $body = $repository->currentTerms($this->supplierId, (int) $employment['id']);
         self::assertIsArray($body);
-        unset($body['remuneration_type'], $body['hourly_rate_minor'], $body['remuneration_basis']);
+        unset($body['remuneration_type'], $body['hourly_rate_minor'], $body['remuneration_basis_kind'], $body['remuneration_basis']);
         $body['effective_from'] = '2026-04-01';
         $next = $repository->addTerms(
             $this->supplierId, (int) $employment['id'], $body, (int) $changed['row_version'],
@@ -200,6 +314,7 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         );
         self::assertSame('hourly', $next['terms'][0]['remuneration_type']);
         self::assertSame(20000, $next['terms'][0]['hourly_rate_minor']);
+        self::assertSame('wage_statement', $next['terms'][0]['remuneration_basis_kind']);
         self::assertSame('Syntetický výměr', $next['terms'][0]['remuneration_basis']);
         self::assertNull($next['terms'][0]['monthly_gross_minor']);
     }
@@ -212,6 +327,7 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
             'effective_from' => '2026-03-01',
             'remuneration_type' => 'hourly',
             'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement',
             'remuneration_basis' => 'Syntetický výměr',
         ]);
         $attendance = $this->attendance->termsAt($this->supplierId, [(int) $employment['id']], '2026-03-01', '2026-03-31');

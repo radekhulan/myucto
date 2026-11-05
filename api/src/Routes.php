@@ -1564,6 +1564,7 @@ final class Routes
             $g->delete('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'delete']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
             $g->delete('/employments/{id:[0-9]+}', [PayrollEmploymentAction::class, 'delete']);
+            $g->get('/employments/remuneration-options', [PayrollEmploymentAction::class, 'remunerationOptions']);
             $g->get(
                 '/jmhz/employment-evidence-options',
                 [PayrollEmploymentAction::class, 'jmhzEvidenceOptions'],

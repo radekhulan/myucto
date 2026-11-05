@@ -132,6 +132,7 @@ const BOOLEAN_FIELDS = new Set(['risky_work', 'tax_declaration_signed', 'is_prim
  */
 const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
   remuneration_type: { prefix: 'payroll.people.remuneration.mode', values: ['monthly', 'hourly'] },
+  remuneration_basis_kind: { prefix: 'payroll.people.remuneration.basis_kinds', values: ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement'] },
   status: {
     prefix: 'payroll.people.employment_status',
     values: ['planned', 'preregistered', 'active', 'suspended', 'ended', 'archived', 'no_show'],
@@ -188,6 +189,7 @@ const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
 }
 
 export function employmentDiffValue(field: string, value: unknown): EmploymentDiffValue {
+  if (field === 'remuneration_type' && value == null) return { kind: 'key', key: 'payroll.people.remuneration.legacy' }
   if (value === null || value === undefined || value === '') return { kind: 'empty' }
 
   if (BOOLEAN_FIELDS.has(field)) {

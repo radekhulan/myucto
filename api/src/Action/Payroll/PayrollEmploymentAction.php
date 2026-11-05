@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollDeletionException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
@@ -19,6 +20,10 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -33,6 +38,7 @@ final class PayrollEmploymentAction
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmploymentDeletionRepository $deletion,
+        private readonly ?PayrollRulesetProvider $rulesets = null,
     ) {}
 
     public function jmhzEvidenceOptions(Request $request, Response $response): Response
@@ -41,6 +47,25 @@ final class PayrollEmploymentAction
             return $error;
         }
         return Json::ok($response, ['options' => $this->jmhzEvidence->options()]);
+    }
+
+    public function remunerationOptions(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorizeRead($request, $response)) !== null) return $error;
+        $date = $request->getQueryParams()['effective_from'] ?? null;
+        if (!is_string($date) || !IsoDate::isValid($date)) {
+            return Json::error($response, 'validation_failed', 'Datum účinnosti není platné.', 422);
+        }
+        try {
+            $version = $this->rulesets?->forCalculation(PayrollRulesetDomain::EmploymentThresholds, $date);
+        } catch (PayrollRulesetException) {
+            $version = null;
+        }
+        $floor = $version === null ? null : MinimumWageFloor::fromVersion($version);
+        return Json::ok($response, [
+            'minimum_hourly_40h_minor' => $floor?->baseHourlyMinor,
+            'ruleset_id' => $floor?->rulesetId,
+        ]);
     }
 
     public function jmhzMunicipalities(Request $request, Response $response): Response
@@ -470,6 +495,9 @@ final class PayrollEmploymentAction
         $current = $this->employments->currentTerms($supplierId, $employmentId);
         if ($current === null) {
             throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek.');
+        }
+        if (($current['remuneration_type'] ?? null) === 'hourly') {
+            throw new \InvalidArgumentException('U hodinového vztahu nelze měnit měsíční mzdu. Sazbu upravte na kartě vztahu.');
         }
         return [...$current, ...$body];
     }

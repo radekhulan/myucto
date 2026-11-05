@@ -33,6 +33,12 @@ a před mzdovým během (viz [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zprac
 
 ## 79.3 Krok za krokem: měsíční mzdy a odměny
 
+U vztahu s výslovně zvoleným hodinovým odměňováním se nenabízí měsíční
+základ z dřívější sjednané mzdy ani výpočet dosažené mzdy za přesčas
+z tohoto základu. Evidence sazby zatím mzdu z hodin nevytváří. Původní
+vztahy bez přepnutí na hodinový režim a jejich hotové částkové vstupy
+se zpracovávají jako dosud.
+
 1. Otevřete `Mzdy → Rychlý měsíční vstup` (nadpis stránky **Rychlý měsíční
    vstup mezd**). Ověřte firmu a nahoře v poli **Mzdové období** měsíc.
 2. Zkontrolujte pruhy nad tabulkou. Pruh **Navrženo, neuloženo** upozorňuje,

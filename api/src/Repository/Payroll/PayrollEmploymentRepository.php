@@ -263,7 +263,7 @@ final class PayrollEmploymentRepository
             $userAgent,
         ): array {
             $this->lockEmployee($supplierId, $employeeId);
-            $data['terms'] += ['remuneration_type' => 'monthly', 'hourly_rate_minor' => null, 'remuneration_basis' => null];
+            $data['terms'] += ['remuneration_type' => null, 'hourly_rate_minor' => null, 'remuneration_basis_kind' => null, 'remuneration_basis' => null];
             $data['terms']['office_id'] = $this->resolveOffice(
                 $supplierId,
                 $data['terms']['office_id'],
@@ -532,8 +532,9 @@ final class PayrollEmploymentRepository
                 throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
             }
             $data += [
-                'remuneration_type' => $previous['remuneration_type'] ?? 'monthly',
+                'remuneration_type' => $previous['remuneration_type'] ?? null,
                 'hourly_rate_minor' => $previous['hourly_rate_minor'] ?? null,
+                'remuneration_basis_kind' => $previous['remuneration_basis_kind'] ?? null,
                 'remuneration_basis' => $previous['remuneration_basis'] ?? null,
             ];
             $this->assertMonthlyTransition($previous, $data, $replaceMonthlyGross, $monthlyGrossMinor);
@@ -553,6 +554,7 @@ final class PayrollEmploymentRepository
             if (!$correctEffectiveFrom) {
                 $data['effective_from'] = $storedFrom;
             }
+            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, (int) $previous['id'], $storedTo);
             $movedFrom = (string) $data['effective_from'];
             $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
                 $supplierId,
@@ -570,6 +572,9 @@ final class PayrollEmploymentRepository
                     $employmentId,
                     (int) $previous['id'],
                 );
+                if ($predecessor !== null) {
+                    $this->assertModeChangeStartsMonth($predecessor['remuneration_type'] ?? null, $data['remuneration_type'], $movedFrom);
+                }
                 $this->assertEffectiveFromMovable(
                     $movedFrom,
                     $storedTo,
@@ -621,8 +626,8 @@ final class PayrollEmploymentRepository
                 $data['planned_start_on'],
                 $data['actual_start_on'],
                 $data['fixed_term_end_on'],
-                (int) $replaceMonthlyGross,
-                $monthlyGrossMinor,
+                (int) ($replaceMonthlyGross || $data['remuneration_type'] === 'hourly'),
+                $data['monthly_gross_minor'],
                 $supplierId,
                 $employmentId,
                 $expectedVersion,
@@ -732,8 +737,9 @@ final class PayrollEmploymentRepository
 
             $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
             $data += [
-                'remuneration_type' => $previous['remuneration_type'] ?? 'monthly',
+                'remuneration_type' => $previous['remuneration_type'] ?? null,
                 'hourly_rate_minor' => $previous['hourly_rate_minor'] ?? null,
+                'remuneration_basis_kind' => $previous['remuneration_basis_kind'] ?? null,
                 'remuneration_basis' => $previous['remuneration_basis'] ?? null,
             ];
             $this->assertMonthlyTransition($previous, $data, $replaceMonthlyGross, $monthlyGrossMinor);
@@ -745,6 +751,7 @@ final class PayrollEmploymentRepository
             // Nová verze platí od svého data napořád — nesmí začít v měsíci,
             // za který je mzda zaúčtovaná nebo vyplacená, ani před ním.
             $this->assertTermsOpenFrom($supplierId, $employmentId, (string) $data['effective_from'], null);
+            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, null, null);
             $data['monthly_gross_minor'] = $data['remuneration_type'] === 'hourly' ? null : ($replaceMonthlyGross
                 ? $monthlyGrossMinor
                 : (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
@@ -784,8 +791,8 @@ final class PayrollEmploymentRepository
                 $data['planned_start_on'],
                 $data['actual_start_on'],
                 $data['fixed_term_end_on'],
-                (int) $replaceMonthlyGross,
-                $monthlyGrossMinor,
+                (int) ($replaceMonthlyGross || $data['remuneration_type'] === 'hourly'),
+                $data['monthly_gross_minor'],
                 $supplierId,
                 $employmentId,
                 $expectedVersion,
@@ -1547,7 +1554,7 @@ final class PayrollEmploymentRepository
                     terms.contract_signed_on, terms.planned_start_on,
                     terms.actual_start_on, terms.fixed_term_end_on,
                     terms.monthly_gross_minor, terms.remuneration_type,
-                    terms.hourly_rate_minor, terms.remuneration_basis,
+                    terms.hourly_rate_minor, terms.remuneration_basis_kind, terms.remuneration_basis,
                     terms.weekly_hours, terms.leave_entitlement_weeks_override,
                     terms.probable_hourly_earning_minor,
                     terms.probable_earning_rationale,
@@ -1707,7 +1714,7 @@ final class PayrollEmploymentRepository
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
                  fixed_term_end_on, monthly_gross_minor, remuneration_type, hourly_rate_minor,
-                 remuneration_basis, weekly_hours, leave_entitlement_weeks_override,
+                 remuneration_basis_kind, remuneration_basis, weekly_hours, leave_entitlement_weeks_override,
                  probable_hourly_earning_minor, probable_earning_rationale,
                  workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
@@ -1739,7 +1746,7 @@ final class PayrollEmploymentRepository
                  jmhz_workplace_address_point_code, jmhz_workplace_street,
                  jmhz_workplace_house_number, jmhz_workplace_orientation_number,
                  jmhz_workplace_postal_code, jmhz_state_prosecutor)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?)'
         )->execute([
@@ -1754,6 +1761,7 @@ final class PayrollEmploymentRepository
             $data['monthly_gross_minor'],
             $data['remuneration_type'],
             $data['hourly_rate_minor'],
+            $data['remuneration_basis_kind'],
             $data['remuneration_basis'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
@@ -1839,7 +1847,7 @@ final class PayrollEmploymentRepository
                  office_id = ?,
                  contract_signed_on = ?, planned_start_on = ?, actual_start_on = ?,
                  fixed_term_end_on = ?, monthly_gross_minor = ?, remuneration_type = ?,
-                 hourly_rate_minor = ?, remuneration_basis = ?, weekly_hours = ?,
+                 hourly_rate_minor = ?, remuneration_basis_kind = ?, remuneration_basis = ?, weekly_hours = ?,
                  leave_entitlement_weeks_override = ?,
                  probable_hourly_earning_minor = ?, probable_earning_rationale = ?,
                  workload_basis_points = ?,
@@ -1881,6 +1889,7 @@ final class PayrollEmploymentRepository
             $data['monthly_gross_minor'],
             $data['remuneration_type'],
             $data['hourly_rate_minor'],
+            $data['remuneration_basis_kind'],
             $data['remuneration_basis'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
@@ -2095,6 +2104,44 @@ final class PayrollEmploymentRepository
             && (!$replace || $monthlyGross === null)
         ) {
             throw new \InvalidArgumentException('Přechod na měsíční odměňování vyžaduje výslovně zadanou měsíční mzdu.');
+        }
+    }
+
+    private function assertModeChangeStartsMonth(?string $previous, ?string $next, string $effectiveFrom): void
+    {
+        if (($previous === 'hourly') !== ($next === 'hourly') && substr($effectiveFrom, 8, 2) !== '01') {
+            throw new \InvalidArgumentException('Změna na hodinové odměňování nebo z něj musí začít prvním dnem měsíce.');
+        }
+    }
+
+    /** @param array<string,mixed>|null $previous @param array<string,mixed> $data @param array<string,mixed> $employment */
+    private function assertRemunerationChange(int $supplierId, int $employmentId, ?array $previous, array $data, array $employment, ?int $correctingId, ?string $effectiveTo): void
+    {
+        if ($previous !== null) {
+            $this->assertModeChangeStartsMonth($previous['remuneration_type'] ?? null, $data['remuneration_type'], (string) $data['effective_from']);
+        }
+        if ($data['remuneration_type'] !== 'hourly') return;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT recurring.id FROM payroll_recurring_components recurring FORCE INDEX (idx_payroll_recurring_effective)
+              JOIN payroll_component_definitions component ON component.supplier_id = recurring.supplier_id AND component.id = recurring.component_id
+             WHERE recurring.supplier_id = ? AND recurring.employment_id = ? AND recurring.is_active = 1
+               AND component.component_kind = "base_wage" AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
+               AND (? IS NULL OR recurring.valid_from <= ?) LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, $data['effective_from'], $effectiveTo, $effectiveTo]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new \InvalidArgumentException('Před hodinovým odměňováním ukončete aktivní předpis měsíční základní mzdy.');
+        }
+        if ($employment['monthly_gross_minor'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?
+                   AND monthly_gross_minor IS NULL AND (remuneration_type IS NULL OR remuneration_type = "monthly")
+                   AND (? IS NULL OR id <> ?) LIMIT 1'
+            );
+            $stmt->execute([$supplierId, $employmentId, $correctingId, $correctingId]);
+            if ($stmt->fetchColumn() !== false) {
+                throw new \InvalidArgumentException('Starší podmínky přebírají měsíční mzdu z pracovního vztahu. Nejdříve výslovně opravte jejich sjednanou mzdu, aby se zachovala historie.');
+            }
         }
     }
 

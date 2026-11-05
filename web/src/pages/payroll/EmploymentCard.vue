@@ -345,6 +345,13 @@ const hourlyRateInput = ref('')
 const supportsHourly = computed(() => ['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(props.employment.relation_type))
 const remunerationNoun = computed(() => ['dpp', 'dpc'].includes(props.employment.relation_type) ? 'reward' : 'wage')
 const hourlyRemuneration = computed(() => termsForm.value?.remuneration_type === 'hourly')
+const remunerationBasisKinds = ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement'] as const
+const hourlyModeChanged = computed(() => hourlyRemuneration.value !== (currentTerms.value?.remuneration_type === 'hourly'))
+function nextMonthStart(earliest: string): string {
+  if (earliest.endsWith('-01')) return earliest
+  const [year, month] = earliest.split('-').map(Number)
+  return new Date(Date.UTC(year!, month!, 1)).toISOString().slice(0, 10)
+}
 const probableEarningInput = ref('')
 /**
  * Pravděpodobný výdělek (§ 355 ZP) se u běžného vztahu nezadává — průměr se
@@ -357,6 +364,15 @@ const mealBasis = ref<PayrollMealEntitlementBasis>('shift')
 const saveMode = ref<TermsSaveMode>('correct')
 const versionEffectiveFrom = ref(todayIso())
 const saveError = ref('')
+const hourlyMinimum = ref<{ minimum_hourly_40h_minor: number | null; ruleset_id: string | null } | null>(null)
+const minimumLoading = ref(false)
+let minimumRequest = 0
+const minimumEffectiveFrom = computed(() => saveMode.value === 'version' ? versionEffectiveFrom.value : currentTerms.value?.effective_from ?? null)
+const belowHourlyMinimum = computed(() => {
+  const rate = inputToMinor(hourlyRateInput.value)
+  const floor = hourlyMinimum.value?.minimum_hourly_40h_minor
+  return rate !== null && Number.isFinite(rate) && floor != null && rate < floor
+})
 /** Otisk uloženého stavu — proti němu se pozná, jestli je co ukládat. */
 const baseline = ref('')
 
@@ -397,9 +413,31 @@ const dirty = computed(() => baseline.value !== '' && fingerprint() !== baseline
 
 // Skutečná změna sjednání patří do nové účinné verze. Opravu překlepu
 // může účetní zvolit výslovně v již existující volbě způsobu uložení.
-watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsForm.value?.remuneration_basis], () => {
-  if (dirty.value) saveMode.value = 'version'
+watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsForm.value?.remuneration_basis_kind, termsForm.value?.remuneration_basis], () => {
+  if (!dirty.value) return
+  saveMode.value = 'version'
+  if (hourlyModeChanged.value && !versionEffectiveFrom.value.endsWith('-01')) {
+    versionEffectiveFrom.value = nextMonthStart(minimumNewTermsDate.value)
+  }
 })
+
+// Minimum se čte až pro hodinový vztah a skutečné datum ukládané verze.
+// Opožděná odpověď pro jiný den nesmí přepsat právě zvolený rok/podmínky.
+watch([hourlyRemuneration, minimumEffectiveFrom], async ([hourly, effectiveFrom]) => {
+  const request = ++minimumRequest
+  hourlyMinimum.value = null
+  minimumLoading.value = false
+  if (!hourly || !effectiveFrom || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) return
+  minimumLoading.value = true
+  try {
+    const options = await payrollApi.remunerationOptions(effectiveFrom)
+    if (request === minimumRequest) hourlyMinimum.value = options
+  } catch {
+    // Nedostupné minimum je pouze neověřené varování, ne chyba formuláře.
+  } finally {
+    if (request === minimumRequest) minimumLoading.value = false
+  }
+}, { immediate: true })
 
 /*
  * Úvazek se zadává v procentech s desetinnou čárkou („93,75"), server ho drží
@@ -429,7 +467,8 @@ function hydrate(employment: PayrollEmployment) {
     return
   }
   termsForm.value = {
-    remuneration_type: terms.remuneration_type ?? 'monthly',
+    remuneration_type: terms.remuneration_type ?? null,
+    remuneration_basis_kind: terms.remuneration_basis_kind ?? null,
     hourly_rate_minor: terms.hourly_rate_minor ?? null,
     remuneration_basis: terms.remuneration_basis ?? null,
     office_id: terms.office_id,
@@ -677,8 +716,17 @@ async function save(): Promise<boolean> {
     saveError.value = t('payroll.people.remuneration.basis_required')
     return false
   }
-  if (!hourlyRemuneration.value && currentTerms.value?.remuneration_type === 'hourly' && gross === null) {
+  if (form.remuneration_type === 'monthly' && currentTerms.value?.remuneration_type === 'hourly' && gross === null) {
     saveError.value = t('payroll.people.remuneration.monthly_required')
+    return false
+  }
+  if (hourlyRemuneration.value && !form.remuneration_basis_kind) {
+    saveError.value = t('payroll.people.remuneration.basis_kind_required')
+    return false
+  }
+  const effectiveFrom = saveMode.value === 'version' ? versionEffectiveFrom.value : currentTerms.value?.effective_from
+  if (hourlyModeChanged.value && effectiveFrom && !effectiveFrom.endsWith('-01')) {
+    saveError.value = t('payroll.people.remuneration.mode_first_day')
     return false
   }
   if (Number.isNaN(gross)) {
@@ -717,7 +765,7 @@ async function save(): Promise<boolean> {
     const { effective_from: _ignored, ...rest } = form
     const shared = {
       ...rest,
-      remuneration_type: form.remuneration_type ?? 'monthly',
+      remuneration_type: form.remuneration_type ?? null,
       hourly_rate_minor: hourlyRate,
       remuneration_basis: (form.remuneration_basis ?? '').trim() || null,
       monthly_gross_minor: gross,
@@ -1428,6 +1476,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           <label :class="FIELD">
             {{ t('payroll.people.remuneration.type') }}
             <select v-model="termsForm.remuneration_type" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-type">
+              <option :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
               <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}</option>
               <option v-if="supportsHourly" value="hourly">{{ t(`payroll.people.remuneration.hourly_${remunerationNoun}`) }}</option>
             </select>
@@ -1450,6 +1499,13 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             </div>
           </label>
 
+          <label :class="FIELD">
+            {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark v-if="hourlyRemuneration" />
+            <select v-model="termsForm.remuneration_basis_kind" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-basis-kind">
+              <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
+              <option v-for="kind in remunerationBasisKinds" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
+            </select>
+          </label>
           <label :class="[FIELD, 'sm:col-span-2']">
             {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="hourlyRemuneration" />
             <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-basis">
@@ -1457,7 +1513,15 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           </label>
           <p v-if="hourlyRemuneration" class="sm:col-span-2 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
             {{ t('payroll.people.remuneration.no_calculation') }}
+            {{ t('payroll.people.remuneration.rate_distinction') }}
           </p>
+
+          <div v-if="hourlyRemuneration" class="sm:col-span-2 text-xs text-neutral-600" data-test="terms-hourly-minimum">
+            <p v-if="minimumLoading">{{ t('common.loading') }}</p>
+            <p v-else-if="hourlyMinimum?.minimum_hourly_40h_minor == null" class="text-warning-800" data-test="terms-hourly-minimum-unverified">{{ t('payroll.people.remuneration.minimum_unverified') }}</p>
+            <p v-else-if="belowHourlyMinimum" class="rounded-md border border-warning-200 bg-warning-50 p-3 text-warning-800" data-test="terms-hourly-minimum-warning">{{ t('payroll.people.remuneration.minimum_low', { minimum: formatMoneyMinor(hourlyMinimum.minimum_hourly_40h_minor), date: formatDate(minimumEffectiveFrom) }) }}</p>
+            <p class="mt-1">{{ t('payroll.people.remuneration.minimum_context') }}</p>
+          </div>
 
           <label :class="FIELD">
             {{ t('payroll.people.weekly_hours') }}
@@ -2064,10 +2128,11 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         <li v-for="term in employment.terms" :key="term.id" class="py-2 text-xs text-neutral-600" data-test="terms-history-row">
           <p>{{ formatDate(term.effective_from) }} — {{ term.effective_to ? formatDate(term.effective_to) : t('payroll.people.remuneration.open_ended') }}</p>
           <p class="mt-1 font-medium text-neutral-900">
-            {{ t(`payroll.people.remuneration.${term.remuneration_type ?? 'monthly'}_${remunerationNoun}`) }}:
+            {{ term.remuneration_type == null ? t('payroll.people.remuneration.legacy') : t(`payroll.people.remuneration.${term.remuneration_type}_${remunerationNoun}`) }}:
             {{ (term.remuneration_type === 'hourly' ? term.hourly_rate_minor : term.monthly_gross_minor) != null ? formatMoneyMinor((term.remuneration_type === 'hourly' ? term.hourly_rate_minor : term.monthly_gross_minor)!) : t('payroll.people.remuneration.not_agreed') }}
             <span v-if="term.remuneration_type === 'hourly'">{{ t('payroll.people.remuneration.per_hour') }}</span>
           </p>
+          <p v-if="term.remuneration_basis_kind" class="mt-1">{{ t(`payroll.people.remuneration.basis_kinds.${term.remuneration_basis_kind}`) }}</p>
           <p v-if="term.remuneration_basis" class="mt-1 break-words">{{ term.remuneration_basis }}</p>
         </li>
       </ul>

@@ -168,11 +168,32 @@ final class PayrollRunPersistenceTest extends TestCase
         $this->inputId = $this->approvedInput(120_000, 'BASE', 'manual');
     }
 
+    public function testHourlyDpcAndSmallScaleKeepAgreedIncomeUnknownInsteadOfStaleMonthlyProjection(): void
+    {
+        $this->db->pdo()->prepare('UPDATE payroll_employments SET monthly_gross_minor = 900000 WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000, remuneration_basis_kind = "agreement", remuneration_basis = "Syntetické sjednání", monthly_gross_minor = NULL WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        foreach (['dpc', 'small_scale_employment'] as $relationType) {
+            $this->db->pdo()->prepare('UPDATE payroll_employments SET relation_type = ? WHERE supplier_id = ? AND id = ?')
+                ->execute([$relationType, $this->supplierId, $this->employmentId]);
+            $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+            $employment = $snapshot->data['people'][0]['employments'][0];
+            self::assertNull($employment['employment']['monthly_gross_minor']);
+            self::assertNull(\MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation::agreedIncomeMeetsThreshold($employment['employment']['monthly_gross_minor'], 450000));
+            self::assertSame(20000, $employment['term']['hourly_rate_minor']);
+            self::assertSame('agreement', $employment['term']['remuneration_basis_kind']);
+            // Ručně vložená částka zůstává podkladem; sjednaný příjem se z ní nehádá.
+            self::assertSame(120000, $employment['inputs'][0]['amount_minor']);
+        }
+    }
+
     public function testHourlyIntervalBeforeMonthlyTermsStillBlocksRunAndCannotBeOverridden(): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000,
-                    remuneration_basis = "Syntetický výměr", monthly_gross_minor = NULL,
+                    remuneration_basis_kind = "wage_statement", remuneration_basis = "Syntetický výměr", monthly_gross_minor = NULL,
                     effective_to = "2026-06-15"
               WHERE supplier_id = ? AND employment_id = ?'
         )->execute([$this->supplierId, $this->employmentId]);
@@ -216,7 +237,7 @@ final class PayrollRunPersistenceTest extends TestCase
             ->execute([$this->supplierId, $this->employmentId]);
         $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000,
-                    remuneration_basis = "Syntetická dohoda", monthly_gross_minor = NULL
+                    remuneration_basis_kind = "contract", remuneration_basis = "Syntetická dohoda", monthly_gross_minor = NULL
               WHERE supplier_id = ? AND employment_id = ?'
         )->execute([$this->supplierId, $this->employmentId]);
         $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');

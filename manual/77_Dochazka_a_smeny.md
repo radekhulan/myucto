@@ -43,6 +43,12 @@ Kapitolu otevřete, když:
 
 ## 77.3 Krok za krokem: docházka za měsíc
 
+**Sjednaná hodinová sazba** se eviduje na kartě pracovního vztahu odděleně
+od docházky a průměrného výdělku. Její uložení samo nevytváří základní mzdu
+z hodin a nenahrazuje schválený průměr pro příplatky. Pole **Hodinová sazba**
+v importu docházky znamená pravděpodobný výdělek, nikoli sjednanou sazbu.
+Podrobnosti jsou v [Zaměstnancích](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
+
 Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:
 odpracovaný čas, nepřítomnosti a schválení měsíce všem.
 
