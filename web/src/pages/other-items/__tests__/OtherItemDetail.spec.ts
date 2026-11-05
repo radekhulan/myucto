@@ -93,4 +93,23 @@ describe('OtherItemDetail', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="counterparty-edit"]').exists()).toBe(false)
   })
+
+  it('u úvěru s rozdělenými splátkami ukáže zbývající jistinu, celou platbu a rozdělení úhrady', async () => {
+    m.get.mockResolvedValue({
+      id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',
+      due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 1000, remaining_amount: 2000, status: 'confirmed',
+      remaining_payment: 2070, has_split_installments: true,
+    })
+    m.allocations.mockResolvedValue([
+      { id: 1, installment_id: 5, bank_transaction_id: 41, cash_document_id: null, amount: 1000, interest_amount: 100,
+        fee_amount: 20, total_amount: 1120, payment_on: '2099-02-10', reversed_on: null },
+    ])
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(wrapper.text()).toContain('other_items.remaining_principal')
+    expect(wrapper.get('[data-test="remaining-payment"]').text()).toContain('2070 Kč')
+    expect(wrapper.get('[data-test="allocation-split"]').text())
+      .toBe('other_items.allocation_split:{"principal":"1000 Kč","interest":"100 Kč","fee":"20 Kč"}')
+    expect(wrapper.text()).toContain('1120 Kč')
+  })
 })

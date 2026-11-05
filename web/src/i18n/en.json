@@ -126,6 +126,61 @@
     "dismiss": "Dismiss"
   },
   "other_items": {
+    "posting": {
+      "title": "Posting",
+      "hint": "Posting of origin and payments. The item's own posting takes precedence over the kind's posting profile; without either, default accounts apply.",
+      "event": {
+        "origin": "Origin",
+        "payment_bank": "Bank payment",
+        "payment_cash": "Cash payment",
+        "interest": "Installment interest",
+        "fee": "Installment fee"
+      },
+      "source": {
+        "item": "Custom",
+        "kind": "Inherited from kind",
+        "default": "Default"
+      },
+      "debit": "Dr",
+      "credit": "Cr",
+      "item_account": "Always the item account (subledger)",
+      "money_account": "Money account",
+      "money_hint": {
+        "payment_bank": "221 or its analytic account; empty = bank account from the statement.",
+        "payment_cash": "211 or its analytic account; empty = cash register account.",
+        "interest": "Only for installments split into principal, interest and fee. Empty = default account.",
+        "fee": "Only for installments split into principal, interest and fee. Empty = default account."
+      },
+      "description_template": "Entry description",
+      "description_template_hint": "Placeholders: {'{title}'}, {'{document_no}'}, {'{partner}'}, {'{variable_symbol}'}.",
+      "set_own": "Custom posting",
+      "reset": "Revert to inherited",
+      "saved": "Payment posting saved.",
+      "open_kinds": "Kind settings",
+      "missing_counter": "The counter account is missing. Choose it on the item or set it in the kind's posting profile.",
+      "cash_note": "A cash payment is posted by the cash document with the item account as its counter account; the posting shows the accounts the document should use.",
+      "future_only": "Changes apply to future postings; posted entries stay unchanged.",
+      "inherited_placeholder": "From kind: {account}",
+      "default_placeholder": "Default: {account}",
+      "inherited_note": "An empty item account and counter account are filled in from the kind's posting profile when posting.",
+      "kinds": {
+        "button": "Posting",
+        "hint": "Posting the kind's items get unless they have their own. Applies to future postings; posted documents stay unchanged.",
+        "item_account": "Item account",
+        "counter_account": "Counter account",
+        "active": "Profile active",
+        "suggestion": "Origin suggestion: Dr {debit} / Cr {credit}",
+        "suggestion_unavailable": "The suggested accounts are missing from the chart or have several analytic accounts; choose your own.",
+        "use_suggestion": "Use suggestion",
+        "dimensions": "Default dimensions of a new document",
+        "saved": "Kind posting profile saved."
+      },
+      "component_account": {
+        "interest": "Interest account",
+        "fee": "Fee account"
+      },
+      "component_money": "Money side from the payment posting"
+    },
     "title": "Other receivables and payables",
     "subtitle": "Manual items, taxes and payroll liabilities in one place.",
     "new": "New other item",
@@ -360,7 +415,7 @@
       "created_for": "Item for {date}",
       "no_generated": "No later items have been created yet.",
       "installments_title": "Payment installments",
-      "installments_hint": "Installments spread payment of one document across the cash flow forecast. They do not create journal entries.",
+      "installments_hint": "Installments spread the payment of one document across the cash flow. The schedule itself creates no journal entries.",
       "due_number": "Installment {number} due:",
       "total": "Installment total",
       "add_installment": "Add installment",
@@ -386,8 +441,27 @@
       "split_quarter": "quarter",
       "split_year": "year",
       "split": "Split",
-      "split_hint": "Splits the document amount evenly; the rounding remainder goes to the last installment. Save the schedule afterwards."
-    }
+      "split_hint": "Splits the document amount evenly; the rounding remainder goes to the last installment. Save the schedule afterwards.",
+      "components": "Split installments into principal, interest and fee (loan, leasing)",
+      "components_hint": "The document amount is the principal. In double-entry bookkeeping, interest and fee are posted with the installment payment to expenses or revenues per the kind posting profile.",
+      "loan_rate": "Interest % p.a.",
+      "loan_method": "Repayment",
+      "loan_annuity": "Annuity",
+      "loan_linear": "Linear",
+      "loan_fee": "Fee per installment",
+      "loan_plan": "Calculate installments",
+      "loan_hint": "Interest is calculated from the outstanding principal and rounded to cents; the last installment absorbs the rounding. You can edit the proposal, then save the schedule.",
+      "loan_planned": "Installments calculated. Review them and save the schedule.",
+      "principal_amount": "Principal",
+      "interest_amount": "Interest",
+      "fee_amount": "Fee",
+      "principal_total": "Principal total {amount} (document amount {item})"
+    },
+    "remaining_principal": "Principal remaining",
+    "remaining_payment": "Left to pay incl. interest and fee",
+    "remaining_payment_hint": "Sum of unpaid installments. Only the principal reduces the item balance; interest and fee are posted with the payment.",
+    "allocation_split": "principal {principal}, interest {interest}, fee {fee}",
+    "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal."
   },
   "internal_documents": {
     "title": "Internal documents",

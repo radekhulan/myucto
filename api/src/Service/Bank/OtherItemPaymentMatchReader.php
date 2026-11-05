@@ -25,7 +25,7 @@ final class OtherItemPaymentMatchReader
         }
         $placeholders = implode(',', array_fill(0, count($transactionIds), '?'));
         $stmt = $pdo->prepare(
-            "SELECT a.bank_transaction_id AS tx_id, a.other_item_id, a.amount,
+            "SELECT a.bank_transaction_id AS tx_id, a.other_item_id, a.amount + a.interest_amount + a.fee_amount AS amount,
                     oi.document_no, oi.side, COALESCE(NULLIF(oi.partner_name, ''), oi.title) AS partner_name
                FROM other_item_allocations a
                JOIN other_items oi ON oi.id = a.other_item_id AND oi.supplier_id = a.supplier_id

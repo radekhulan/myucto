@@ -28,6 +28,7 @@ final class OtherItemBankMatchService
         private readonly OtherItemService $items,
         private readonly BankPostingService $bankPosting,
         private readonly OtherItemRepository $repository,
+        private readonly OtherItemPostingResolver $postingResolver,
     ) {}
 
     /**
@@ -105,6 +106,8 @@ final class OtherItemBankMatchService
         ];
         $rows = [];
         foreach ($found as $row) {
+            // Rozdělené splátky: zbývá zaplatit i úrok a poplatek, nejen jistina (saldo).
+            $row['remaining_amount'] = OtherItemService::payableOf($row, $coverage[(int) $row['id']] ?? []);
             $match = OtherItemPaymentCandidateRanker::evaluate($payment, [
                 'variable_symbol' => $row['variable_symbol'], 'counterparty_account' => $row['counterparty_account'],
                 'counterparty_bank_code' => $row['counterparty_bank_code'],
@@ -172,11 +175,14 @@ final class OtherItemBankMatchService
                     ? 'Příchozí platbu lze přiřadit jen pohledávce.'
                     : 'Odchozí platbu lze přiřadit jen závazku.', 409);
             }
-            $amount = round(min(abs((float) $tx['amount']) - (float) $tx['used_amount'],
-                (float) $item['remaining_amount']), 2);
+            // Rozdělené splátky: platí se jistina, úrok i poplatek, saldo snižuje jen jistina.
+            $payable = OtherItemService::payableOf($item,
+                $this->repository->installmentCoverage($supplierId, [$itemId])[$itemId] ?? []);
+            $amount = round(min(abs((float) $tx['amount']) - (float) $tx['used_amount'], $payable), 2);
             if ($amount <= 0) {
                 throw new OtherItemException('overpayment', 'Položka už nemá co uhradit.', 409);
             }
+            $split = $this->items->splitPayment($supplierId, $item, $amount);
             $account = $this->items->settlementAccountCode($supplierId, $item);
             if ($account !== null && !$this->hasLiveEntry($supplierId, $txId)) {
                 if (abs((float) $tx['amount']) - (float) $tx['used_amount'] - $amount > 0.005) {
@@ -188,12 +194,10 @@ final class OtherItemBankMatchService
                     throw new OtherItemException('posting_forbidden',
                         'Platbu je potřeba zaúčtovat a k tomu chybí oprávnění k účetnictví.', 403);
                 }
-                $this->bankPosting->postManual($supplierId, $txId, $side === 'receivable'
-                    ? ['debit_account_code' => '221', 'credit_account_code' => $account]
-                    : ['debit_account_code' => $account, 'credit_account_code' => '221'], $meta);
+                $this->postPayment($supplierId, $txId, $itemId, $item, $account, $split, $meta, $userId);
             }
             // Položka ze zůstatku nemá vlastní zápis a allocate() její zaúčtování nekontroluje.
-            $this->items->assertBankPaymentPosted($supplierId, $txId, $item, $amount);
+            $this->items->assertBankPaymentPosted($supplierId, $txId, $item, $split['principal']);
             $result = $this->items->allocate($supplierId, $itemId,
                 ['bank_transaction_id' => $txId, 'amount' => $amount], $userId);
             if ($ownTx) $pdo->commit();
@@ -201,6 +205,55 @@ final class OtherItemBankMatchService
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
+        }
+    }
+
+    /**
+     * Zaúčtuje pohyb podle kontace úhrady z banky (vlastní kontace položky, profil druhu,
+     * výchozí 221 / účet položky; 221 doplní analytiku podle účtu výpisu). Strana položky je
+     * vždy účet položky (saldokonto). Úhrada rozdělené splátky dá JEDEN zápis s dvojicí řádků
+     * na každou složku: jistina proti účtu položky, úrok a poplatek proti jejich účtům
+     * ({@see OtherItemPostingResolver::component}); peněžní účet je u všech stejný.
+     *
+     * @param array<string,mixed> $item
+     * @param array{principal:float,interest:float,fee:float} $split
+     * @param array<string,mixed> $meta
+     */
+    private function postPayment(int $supplierId, int $txId, int $itemId, array $item, string $account,
+        array $split, array $meta, ?int $userId): void
+    {
+        $rule = $this->postingResolver->payment($supplierId, $item, OtherItemPostingEvent::PaymentBank, $account);
+        $description = $rule['description'] !== null ? ['description' => $rule['description']] : [];
+        if ($split['interest'] + $split['fee'] <= 0) {
+            $posted = $this->bankPosting->postManual($supplierId, $txId, [
+                'debit_account_code' => $rule['debit_account_code'],
+                'credit_account_code' => $rule['credit_account_code'],
+                ...$description,
+            ], $meta);
+            if ($rule['source'] !== OtherItemPostingResolver::SOURCE_DEFAULT) {
+                $this->items->logPostingProvenance($supplierId, $itemId, $rule, (int) $posted['entry_id'], $userId);
+            }
+            return;
+        }
+        $money = $rule['money_account_code'];
+        $incoming = $item['side'] === 'receivable';
+        $parts = [['account' => $account, 'amount' => $split['principal']]];
+        $components = [];
+        foreach ([OtherItemPostingEvent::Interest, OtherItemPostingEvent::Fee] as $event) {
+            $components[$event->value] = $this->postingResolver->component($supplierId, $item, $event);
+            $parts[] = ['account' => $components[$event->value]['account_code'], 'amount' => $split[$event->value]];
+        }
+        $lines = [];
+        foreach ($parts as $part) {
+            if ($part['amount'] <= 0) continue;
+            $lines[] = ['account_code' => $incoming ? $money : $part['account'], 'side' => 'debit', 'amount' => $part['amount']];
+            $lines[] = ['account_code' => $incoming ? $part['account'] : $money, 'side' => 'credit', 'amount' => $part['amount']];
+        }
+        $posted = $this->bankPosting->postManual($supplierId, $txId, ['lines' => $lines, ...$description], $meta);
+        foreach ([$rule, ...array_values($components)] as $applied) {
+            if ($applied['source'] !== OtherItemPostingResolver::SOURCE_DEFAULT) {
+                $this->items->logPostingProvenance($supplierId, $itemId, $applied, (int) $posted['entry_id'], $userId);
+            }
         }
     }
 
@@ -222,7 +275,8 @@ final class OtherItemBankMatchService
                         AND previous.reversed_on IS NOT NULL) locked_item_ids
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
-          LEFT JOIN (SELECT bank_transaction_id, SUM(amount) used_amount FROM other_item_allocations
+          LEFT JOIN (SELECT bank_transaction_id, SUM(' . OtherItemService::ALLOCATION_TOTAL_SQL . ') used_amount
+                       FROM other_item_allocations
                       WHERE supplier_id = ? AND bank_transaction_id = ? AND reversed_on IS NULL
                       GROUP BY bank_transaction_id) a
                  ON a.bank_transaction_id = bt.id

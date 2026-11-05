@@ -642,7 +642,7 @@ final class DimensionDefaults
     private function otherItemAllocations(int $supplierId, string $column, int $paymentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT other_item_id, SUM(amount) AS amount FROM other_item_allocations
+            "SELECT other_item_id, SUM(amount + interest_amount + fee_amount) AS amount FROM other_item_allocations
               WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL
            GROUP BY other_item_id
            ORDER BY MIN(id)"

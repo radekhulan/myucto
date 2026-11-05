@@ -299,6 +299,29 @@ test('splátkový kalendář odmítne špatný součet, pořadí, datum i počet
   assert.equal(writes(client).length + writes(paid).length, 0);
 });
 
+test('rozdělená splátka úvěru: jistina dává částku dokladu, složky částku splátky', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft() });
+  const run = (installments) => tool('set_other_item_installments').run(client, { item_id: 12, installments }, 's');
+  await assert.rejects(run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 90, fee_amount: 10 },
+    { due_on: '2094-03-15', amount: 6050, principal_amount: 6000, interest_amount: 40 },
+  ]), /splátka 2: jistina, úrok a poplatek dávají 6040\.00 Kč, ale částka splátky je 6050\.00 Kč/);
+  await assert.rejects(run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100 },
+    { due_on: '2094-03-15', amount: 5050, principal_amount: 5000, interest_amount: 50 },
+  ]), /součet jistiny splátek 11000\.00 Kč neodpovídá částce dokladu 12000\.00 Kč/);
+  assert.equal(writes(client).length, 0);
+
+  await run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100 },
+    { due_on: '2094-03-15', amount: 6060, principal_amount: 6000, interest_amount: 50, fee_amount: 10 },
+  ]);
+  assert.deepEqual(writes(client)[0].body.items, [
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100, fee_amount: 0 },
+    { due_on: '2094-03-15', amount: 6060, principal_amount: 6000, interest_amount: 50, fee_amount: 10 },
+  ]);
+});
+
 test('zrušení splátkového kalendáře vyžaduje potvrzení a pošle prázdný seznam', async () => {
   const client = new FakeClient({
     'GET /accounting/other-items/12': draft(),
@@ -354,4 +377,24 @@ test('obnovení opakování s automatikou odmítne, pozastavení projde', async 
   const manual = new FakeClient({ 'GET /accounting/other-items/schedules/4': { id: 4, auto_post: false } });
   await tool('set_other_item_schedule_status').run(manual, { id: 4, status: 'active' }, 's');
   assert.deepEqual(writes(manual)[0].body, { status: 'active' });
+});
+
+test('vlastní kontace úhrad jde do konceptu jen výslovně a nezmění kontaci vzniku', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft() });
+  await tool('update_other_item').run(client, {
+    id: 12, posting_overrides: { payment_bank: { credit_account_code: '221', description_template: 'Splátka {title}' } },
+  }, 'update_other_item');
+  const [put] = writes(client);
+  assert.deepEqual(put.body.posting_overrides, {
+    payment_bank: { credit_account_code: '221', description_template: 'Splátka {title}' },
+  });
+  assert.deepEqual(put.body.posting_lines, [{ account_code: '221', amount: 12000 }]);
+
+  await tool('update_other_item').run(client, { id: 12, title: 'Jen popis' }, 'update_other_item');
+  assert.equal(Object.hasOwn(writes(client)[1].body, 'posting_overrides'), false, 'Bez pole se uložená kontace nemění.');
+
+  const posted = new FakeClient({ 'GET /accounting/other-items/12': draft({ status: 'posted' }) });
+  await assert.rejects(tool('update_other_item').run(posted, { id: 12, posting_overrides: { payment_bank: null } }, 'u'),
+    /upravit lze jen koncept/);
+  assert.equal(writes(posted).length, 0);
 });

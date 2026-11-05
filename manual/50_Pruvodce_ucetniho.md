@@ -489,7 +489,10 @@ který není vydanou ani přijatou fakturou. Zadejte titul, protistranu, částk
 v CZK, datum vzniku a splatnosti. Cizoměnové položky tato agenda zatím
 nepřijímá, protože by vyžadovaly kurzové přecenění při uzávěrce.
 V podvojném účetnictví vyberte účet
-pohledávky nebo závazku a protiúčet podle skutečného případu. Před potvrzením
+pohledávky nebo závazku a protiúčet podle skutečného případu, nebo je nechte
+prázdné a doplní je účetní profil druhu (nastavení v okně **Druhy** tlačítkem
+**Účtování**, viz [§ 52.14.14.12](52_Ucetni_denik.md#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+Profil určuje i kontaci úhrady z banky a z pokladny. Před potvrzením
 je položka konceptem. Tlačítko **Zaúčtovat** vytvoří jediný zápis v deníku a
 přidělí číslo řady OP nebo OZ. Storno vytvoří opravný zápis; položku s
 přiřazenou úhradou je třeba nejprve od úhrady odpojit.
@@ -574,6 +577,15 @@ fakturami. Stránka **Nákup → Platební příkazy** nabízí nejbližší neu
 bez kalendáře celý zbytek, s účtem protistrany a variabilním symbolem z položky.
 Zařazená splátka se podruhé nenabídne, dokud příkaz nesmažete. Zařazení závazek
 neuhradí: úhrada se zapíše až přiřazením odchozí platby z výpisu, jako u jiné platby.
+
+U úvěru, půjčky nebo leasingu je částkou položky jistina. Splátky lze rozdělit
+na jistinu, úrok a poplatek a nechat si je spočítat jako anuitní nebo lineární
+splácení. Platba splátky se pak rozdělí nejdřív na úrok, potom poplatek a nakonec
+jistinu. Saldo položky snižuje jen jistina, úrok a poplatek se v podvojném
+účetnictví zaúčtují s úhradou z banky do nákladů nebo výnosů (výchozí 562 a 568
+u přijatého úvěru, 662 a 668 u poskytnuté půjčky) a předpověď cash-flow počítá
+s celou splátkou. Podrobnosti v
+[§ 52.14.14.13](52_Ucetni_denik.md#52141413-uvery-a-leasing-jistina-urok-a-poplatek).
 
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.

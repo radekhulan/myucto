@@ -257,10 +257,13 @@ final class PaymentOrderRepository
                                   AND oi.status IN ('confirmed','posted')
                                   AND oi.deleted_at IS NULL
                                   AND oi.currency = ?
-                                  AND oi.amount - oi.settled_outside_amount
-                                      - COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a
-                                                   WHERE a.other_item_id = oi.id AND a.supplier_id = oi.supplier_id
-                                                     AND a.reversed_on IS NULL), 0) + 0.005 >= poi.amount
+                                  -- Splátka může nést i úrok a poplatek nad jistinou, její
+                                  -- zbytek hlídá otherItemInstallmentsStillPayable().
+                                  AND (poi.other_item_installment_id IS NOT NULL
+                                       OR oi.amount - oi.settled_outside_amount
+                                          - COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a
+                                                       WHERE a.other_item_id = oi.id AND a.supplier_id = oi.supplier_id
+                                                         AND a.reversed_on IS NULL), 0) + 0.005 >= poi.amount)
                              THEN 1 ELSE 0 END) AS payable_count
                FROM payment_order_items poi
           LEFT JOIN purchase_invoices pi
