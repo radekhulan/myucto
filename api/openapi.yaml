@@ -50915,6 +50915,8 @@ components:
           description: "Nákladový účet položky, včetně analytiky. NULL odvodí účet z druhu nákladu."
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381): začátek období, do kterého náklad řádku patří. NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období nákladu řádku. Část nákladu za koncem účetního období odloží uzávěrka na 381." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele z dokladu. Podle něj se řádek v návrhu příjemky páruje se skladovou kartou." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží z dokladu (jen číslice v délce 8, 12, 13 nebo 14), použije se při párování se skladovou kartou." }
         is_fixed_asset:
           type: boolean
           default: false
@@ -50953,6 +50955,8 @@ components:
         expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky; NULL odvodí účet z druhu nákladu." }
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — začátek období. Jen spolu s `accrual_to`; neplatná dvojice se uloží jako bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — konec období (včetně)." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Round-trip: uložení položek je DELETE + INSERT, nepošlete-li kód zpět, zanikne." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Round-trip stejně jako `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |

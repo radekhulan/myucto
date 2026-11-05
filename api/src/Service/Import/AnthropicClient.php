@@ -277,6 +277,8 @@ JSON schema:
   "items": [
     {
       "description": string,
+      "seller_item_code": string|null,
+      "item_ean": string|null,
       "quantity": number,
       "unit": string,
       "unit_price_without_vat": number,
@@ -673,7 +675,7 @@ Příklad — faktura NC Auto s.r.o. (BMW Service), struktura:
   DPH 21 %                     483.00 Kč
   K úhradě                   2 783.00 Kč      →  total_with_vat = 2783.00
 Výsledek: items = 4 řádky (NE 6 a NE 7); total_with_vat = 2783.00.
-EOT . "\n\n" . InvoiceExtractionPrompt::accrualFieldRules() . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
+EOT . "\n\n" . InvoiceExtractionPrompt::accrualFieldRules() . "\n\n" . InvoiceExtractionPrompt::itemCodeFieldRules() . "\n\n" . InvoiceExtractionPrompt::scanFieldRules();
 
         try {
             ['code' => $code, 'body' => $body] = $this->postWithRetry([

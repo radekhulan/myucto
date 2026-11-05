@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Migration\Pohoda\PohodaStock;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -538,6 +539,7 @@ final class PurchaseInvoiceRepository
                     pii.expense_kind, pii.expense_account_code,
                     pii.accrual_from, pii.accrual_to,
                     pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
+                    pii.seller_item_code, pii.item_ean,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en,
                     sa.id AS small_asset_id, sa.name AS small_asset_name, sa.status AS small_asset_status
                FROM purchase_invoice_items pii
@@ -2172,8 +2174,8 @@ final class PurchaseInvoiceRepository
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index,
                  vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
-                 accrual_from, accrual_to, stock_item_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 accrual_from, accrual_to, stock_item_id, seller_item_code, item_ean)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -2311,6 +2313,8 @@ final class PurchaseInvoiceRepository
                 $accrualFrom,
                 $accrualTo,
                 $stockItemId,
+                self::itemCode($item['seller_item_code'] ?? null),
+                self::itemEan($item['item_ean'] ?? null),
             ]);
 
             if ($keepDomesticItemCodes && in_array((string) $code, self::MIXED_DOCUMENT_DOMESTIC_CODES, true)) {
@@ -2617,6 +2621,19 @@ final class PurchaseInvoiceRepository
             ExpenseKind::Service, ExpenseKind::SmallIntangible => false,
             default => null,
         };
+    }
+
+    /** Kód zboží z řádku: oříznutý, prázdný nebo delší než sloupec je NULL (zkrácený by se mohl shodovat s jinou kartou). */
+    private static function itemCode(mixed $value): ?string
+    {
+        $code = is_scalar($value) ? trim((string) $value) : '';
+        return $code === '' || mb_strlen($code) > 80 ? null : $code;
+    }
+
+    /** EAN z řádku: platný tvar i kontrolní číslice, jinak NULL (špatně přečtený kód se neuloží). */
+    private static function itemEan(mixed $value): ?string
+    {
+        return is_scalar($value) ? PohodaStock::ean((string) $value) : null;
     }
 
     /**

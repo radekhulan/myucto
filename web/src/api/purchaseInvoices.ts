@@ -162,6 +162,9 @@ export interface PurchaseInvoiceItem {
   /** Joined (read-only, jen v GET odpovědi) — pro label vybrané karty po reloadu. */
   stock_sku?: string | null
   stock_name?: string | null
+  /** Kód položky dodavatele a EAN z dokladu: párují řádek s kartou. FE je MUSÍ posílat zpět (DELETE+INSERT). */
+  seller_item_code?: string | null
+  item_ean?: string | null
   /** Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — read-only join. */
   small_asset?: { id: number; name: string; status: 'in_use' | 'disposed' | 'sold' } | null
 }
