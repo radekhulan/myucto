@@ -1,6 +1,6 @@
 {
     "format": 1,
-    "database_collation": "utf8mb4_unicode_ci",
+    "database_collation": "utf8mb4_czech_ci",
     "migrations": [
         "0001_init.sql",
         "0002_work_report_approval.sql",
