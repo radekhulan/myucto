@@ -2,10 +2,13 @@
 import { reactive, watch, computed, ref, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChartAccount } from '@/api/accounting'
-import { bankPostingApi, type BankPostingRulePayload, type RuleDryRunResult } from '@/api/bankPosting'
+import { bankPostingApi, type BankPostingRulePayload, type RuleDryRunResult, type SupplierBankAccount } from '@/api/bankPosting'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { settingsApi } from '@/api/settings'
+import { useDimensions } from '@/composables/useDimensions'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import { usableDimensions } from './ruleDimensions'
 
 // Saldokontní účty nepatří do pravidla (H2) — datalist je na ne-bankovní straně filtruje.
 const SALDO_PREFIXES = ['311', '321', '314', '324', '325']
@@ -23,6 +26,8 @@ const props = defineProps<{
   initialMode?: 'suggest' | 'auto'
   /** Edit: pravidlo má 5 potvrzení beze změny, povýšení tedy není vynucené. */
   promotionCandidate?: boolean
+  /** Vlastní bankovní účet a dimenze pravidla (editor pravidla, ne rychlé pravidlo z ručního zaúčtování). */
+  showScope?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [BankPostingRulePayload] }>()
 
@@ -62,12 +67,38 @@ const nonBankOptions = computed(() => activeAccounts.value.filter(a => !isSaldo(
 const bandPercent = ref(10)
 const currencies = ref<string[]>(['CZK'])
 
+// Vlastní účet pravidla: aktivní účty a účet, na který je pravidlo už omezené (i archivovaný).
+// Rychlé pravidlo z ručního zaúčtování tyhle volby nemá, dimenze se proto načítají jen v editoru pravidla.
+const dims = props.showScope ? useDimensions() : null
+const dimensionsVisible = computed(() => !!dims && dims.enabled.value && dims.documentTypes.value.length > 0)
+const ownAccounts = ref<SupplierBankAccount[]>([])
+const ownAccountOptions = computed(() => ownAccounts.value.filter(a => !!a.is_active || a.id === form.bank_account_id))
+function ownAccountLabel(a: SupplierBankAccount): string {
+  const number = [a.account_number, a.bank_code].filter(Boolean).join('/')
+  return a.label ? `${a.label} (${number})` : number
+}
+
 onMounted(async () => {
   try {
     const available = await settingsApi.listCurrencies()
     currencies.value = [...new Set(['CZK', ...available.filter(c => c.is_active).map(c => c.code)])]
   } catch {
     currencies.value = ['CZK']
+  }
+  if (!props.showScope) return
+  try {
+    ownAccounts.value = await bankPostingApi.listAccounts()
+  } catch {
+    ownAccounts.value = []
+  }
+  try {
+    await dims?.load()
+  } catch {
+    return
+  }
+  // Nové pravidlo (z pohybu) převezme jen hodnoty, které formulář ukáže a server přijme.
+  if (dims && props.mode === 'create' && Object.keys(form.dimensions ?? {}).length > 0) {
+    form.dimensions = usableDimensions(form.dimensions ?? {}, dims.documentTypes.value, dims.valueById.value)
   }
 })
 function applyBand() {
@@ -111,6 +142,16 @@ defineExpose({ runDryRun, dryRun })
         <option value="incoming">{{ t('bank.posting.dir_incoming') }}</option>
         <option value="outgoing">{{ t('bank.posting.dir_outgoing') }}</option>
       </select>
+    </div>
+
+    <div v-if="showScope">
+      <label :for="`${idPrefix}-own-account`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_own_account') }}</label>
+      <select :id="`${idPrefix}-own-account`" v-model="form.bank_account_id" data-test="rule-own-account"
+        class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+        <option :value="null">{{ t('bank.posting.rule_own_account_any') }}</option>
+        <option v-for="a in ownAccountOptions" :key="a.id" :value="a.id">{{ ownAccountLabel(a) }}</option>
+      </select>
+      <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.rule_own_account_hint') }}</p>
     </div>
 
     <div class="grid grid-cols-2 gap-2">
@@ -193,6 +234,12 @@ defineExpose({ runDryRun, dryRun })
       </div>
     </div>
     <p class="text-xs text-neutral-500">{{ t('bank.posting.saldo_hint') }}</p>
+
+    <div v-if="dimensionsVisible" data-test="rule-dimensions">
+      <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_dimensions') }}</p>
+      <DimensionFields v-model="form.dimensions" />
+      <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.rule_dimensions_hint') }}</p>
+    </div>
 
     <div v-if="mode === 'edit'">
       <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_mode') }}</label>

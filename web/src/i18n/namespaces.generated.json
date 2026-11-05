@@ -1229,6 +1229,7 @@
       "activation",
       "automation",
       "bank",
+      "dimensions",
       "imports",
       "purchase_invoice",
       "settings",

@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Accounting\Dimension;
 
 final class DimensionAssignmentOrigin
 {
-    public const ORIGINS = ['unknown', 'explicit', 'company_default', 'entity_default', 'rule_default', 'card_default', 'module'];
+    public const ORIGINS = ['unknown', 'explicit', 'company_default', 'entity_default', 'rule_default', 'bank_rule_default', 'card_default', 'module'];
 
     /** @return array{origin:string,ref:?string} */
     public static function normalize(array $data = []): array

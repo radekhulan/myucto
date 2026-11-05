@@ -360,6 +360,7 @@ final class AiSuggestionService
             'description'          => isset($tx['description']) ? (string) $tx['description'] : null,
             'counterparty_name'    => isset($tx['counterparty_name']) ? (string) $tx['counterparty_name'] : null,
         ];
+        $matchTx = (new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db))->withOwnAccount($supplierId, $matchTx, $tx);
         foreach ($this->bankRules->findActive($supplierId, $amount > 0 ? 'incoming' : 'outgoing') as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== $currency) {
                 continue;

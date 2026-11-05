@@ -10,7 +10,8 @@ import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { bankPostingApi, bankPostingErrorMessage, type BankPostingRule } from '@/api/bankPosting'
+import { bankPostingApi, bankPostingErrorMessage, type BankPostingRule, type SupplierBankAccount } from '@/api/bankPosting'
+import DimensionChips from '@/components/dimensions/DimensionChips.vue'
 import RuleFormModal from '@/components/bank/RuleFormModal.vue'
 import RuleTemplatesModal from '@/components/bank/RuleTemplatesModal.vue'
 import RuleHistoryModal from '@/components/bank/RuleHistoryModal.vue'
@@ -57,6 +58,14 @@ function accountName(code: string): string {
   return accountByCode.value[code]?.name ?? code
 }
 
+// Vlastní účty se načítají jen pro stránku, na které je pravidlo omezené na účet.
+const ownAccounts = ref<SupplierBankAccount[]>([])
+function ownAccountLabel(id: number | null | undefined): string {
+  const a = ownAccounts.value.find(acc => acc.id === id)
+  if (!a) return t('bank.posting.rule_own_account')
+  return a.label || [a.account_number, a.bank_code].filter(Boolean).join('/')
+}
+
 async function load() {
   const supplierId = supplierStore.currentSupplierId
   const current = ++loadSequence
@@ -73,6 +82,11 @@ async function load() {
     rules.value = r.items
     total.value = r.total
     accounts.value = accs
+    const own = r.items.some(rule => rule.bank_account_id)
+      ? await bankPostingApi.listAccounts().catch(() => [])
+      : []
+    if (current !== loadSequence) return
+    ownAccounts.value = own
   } catch (e) {
     if (current === loadSequence) { rules.value = []; total.value = 0; toast.error(bankPostingErrorMessage(e, t)) }
   } finally {
@@ -260,7 +274,9 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
                   <span v-if="r.variable_symbol" class="font-mono">VS {{ r.variable_symbol }}</span>
                   <span v-if="r.message_contains" class="italic">„{{ r.message_contains }}"</span>
                   <span v-if="amountRange(r)" class="font-mono">{{ amountRange(r) }}</span>
+                  <span v-if="r.bank_account_id" data-test="rule-own-account-label">{{ t('bank.posting.rule_own_account') }}: {{ ownAccountLabel(r.bank_account_id) }}</span>
                 </div>
+                <DimensionChips v-if="r.dimensions && Object.keys(r.dimensions).length" class="mt-1" :dimensions="r.dimensions" />
               </td>
               <td v-if="tbl.isVisible('accounts')" class="px-3 py-2 font-mono text-xs whitespace-nowrap"
                 :title="`${accountName(r.debit_account_code)} / ${accountName(r.credit_account_code)}`">
@@ -343,7 +359,9 @@ watch([() => supplierStore.currentSupplierId, page], ([supplierId], [previousSup
             <span v-if="r.counterparty_account" class="font-mono">{{ r.counterparty_account }}</span>
             <span v-if="r.variable_symbol" class="font-mono">VS {{ r.variable_symbol }}</span>
             <span v-if="r.message_contains" class="italic">„{{ r.message_contains }}"</span>
+            <span v-if="r.bank_account_id">{{ t('bank.posting.rule_own_account') }}: {{ ownAccountLabel(r.bank_account_id) }}</span>
           </div>
+          <DimensionChips v-if="r.dimensions && Object.keys(r.dimensions).length" :dimensions="r.dimensions" />
           <div class="flex items-center justify-between text-xs">
             <span class="font-mono text-neutral-500">
               {{ r.debit_account_code }} / {{ r.credit_account_code }}

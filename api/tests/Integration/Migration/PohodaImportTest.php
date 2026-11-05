@@ -2343,6 +2343,40 @@ final class PohodaImportTest extends TestCase
         self::assertSame([['debit', '518.000', '1500.00'], ['credit', '221.001', '1500.00']], $this->bankEntryLines($supplierId, SyntheticPohodaExport::PROPOSAL_BY_ACCOUNT));
     }
 
+    public function testUnbookedProposalRespectsRuleLimitedToStatementAccount(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withBookedBankHistory($dir);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, 'Účet z převodu', ?, ?, ?, 'CZK', ?, 'current', 'manual', 1)"
+        )->execute([$supplierId, SyntheticPohodaExport::BANK_ACCOUNT, SyntheticPohodaExport::BANK_CODE, SyntheticPohodaExport::BANK_CODE, SyntheticPohodaExport::BANK_ACCOUNT]);
+        $ownId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, 'Jiný účet', '3000000004', '0100', '0100', 'CZK', '3000000004', 'current', 'manual', 1)"
+        )->execute([$supplierId]);
+        $otherId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_posting_rules (supplier_id, name, direction, bank_account_id, counterparty_account, debit_account_code, credit_account_code, mode, is_active, priority, applies_currency)
+             VALUES (?, 'Ruční pravidlo účtu', 'outgoing', ?, ?, '501', '221', 'suggest', 1, 100, 'CZK')"
+        )->execute([$supplierId, $otherId, SyntheticPohodaExport::PROPOSAL_ACCOUNT]);
+        $ruleId = (int) $pdo->lastInsertId();
+
+        $other = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), true);
+        self::assertFalse($other->hasErrors(), $this->explain($other));
+        self::assertSame(0, self::stepCounts($other, 'payments')['unbooked_proposal_covered_by_rule'] ?? 0, 'Pravidlo jiného účtu pohyby výpisu nepokrývá.');
+
+        $pdo->prepare('UPDATE bank_posting_rules SET bank_account_id = ? WHERE id = ?')->execute([$ownId, $ruleId]);
+
+        $dry = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), true);
+        self::assertFalse($dry->hasErrors(), $this->explain($dry));
+        $payments = self::stepCounts($dry, 'payments');
+        self::assertSame([2, 1], [$payments['unbooked_proposed'] ?? 0, $payments['unbooked_proposal_covered_by_rule'] ?? 0], $this->explain($dry));
+    }
+
     /**
      * Agenda vede i doklady následujícího roku. Jejich zápisy jdou do účetního období podle
      * skutečného data (období se založí otevřené), rok agendy zůstává neuzavřený. Zápis, který

@@ -62,12 +62,16 @@ final class BankMovementListService
         $postingByTx = $this->posting->transactionPostingInfo($supplierId, $txIds);
         $dimensionsByTx = (new DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($supplierId, 'bank_transaction', $txIds);
-        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $doubleEntry): array {
+        $ruleDimensionTypes = $dimensionsByTx !== null
+            ? (new \MyInvoice\Service\Accounting\Dimension\BankRuleDimensions($this->db))->typesFor($supplierId, $txIds)
+            : [];
+        $items = array_map(function (array $item) use ($supplierId, $postingByTx, $dimensionsByTx, $ruleDimensionTypes, $doubleEntry): array {
             $item['posting'] = $postingByTx[$item['id']] ?? null;
             // Uzavřené účetní období existuje jen v podvojném účetnictví.
             $item['period_closed'] = $doubleEntry && $item['period_closed'];
             if ($dimensionsByTx !== null) {
                 $item['dimensions'] = (object) ($dimensionsByTx[(int) $item['id']] ?? []);
+                $item['rule_dimension_types'] = $ruleDimensionTypes[(int) $item['id']] ?? [];
             }
             return $this->withCzkAmount($supplierId, $item);
         }, $result['items']);

@@ -6158,7 +6158,8 @@ paths:
                 properties:
                   rule: { $ref: '#/components/schemas/BankPostingRule' }
                   backfilled: { type: [integer, "null"] }
-        '422': { description: rule_criteria_missing / rule_account_forbidden / account_not_found }
+        '409': { description: dimensions_disabled (pravidlo s dimenzemi u firmy bez zapnutých dimenzí) }
+        '422': { description: rule_criteria_missing / rule_account_forbidden / account_not_found / invalid_bank_account / invalid_dimension / dimension_closed }
 
   /api/v1/accounting/bank-posting-rules/dry-run:
     parameters:
@@ -6309,8 +6310,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BankPostingRule' }
-        '409': { description: rule_promotion_required }
-        '422': { description: rule_account_forbidden }
+        '409': { description: rule_promotion_required / dimensions_disabled }
+        '422': { description: rule_account_forbidden / invalid_bank_account / invalid_dimension / dimension_closed }
     delete:
       tags: [Accounting]
       summary: Smazání pravidla (suggestions FK SET NULL)
@@ -44302,6 +44303,23 @@ components:
       properties:
         name: { type: string }
         direction: { type: string, enum: [incoming, outgoing] }
+        bank_account_id:
+          type: [integer, "null"]
+          format: int64
+          description: |
+            Vlastní bankovní účet (`/accounting/bank-accounts`), na jehož výpisu musí pohyb ležet.
+            NULL = pravidlo platí pro všechny účty. Pravidlo omezené na účet má při souběhu
+            se stejnou prioritou přednost před obecným. Účet, který firmě nepatří, server
+            odmítne `422 invalid_bank_account`.
+        dimensions:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          description: |
+            Dimenze pravidla jako mapa id typu → id hodnoty. Zapíší se k pohybu až při schválení
+            návrhu nebo automatickém zaúčtování (původ `bank_rule_default`) a doplní jen typy, které
+            pohyb nemá ručně ani z hrazených dokladů. Při úpravě nahradí dosavadní dimenze, prázdná
+            mapa je smaže, chybějící pole je ponechá. Neplatná hodnota vrací `422 invalid_dimension`,
+            firma bez zapnutých dimenzí `409 dimensions_disabled`.
         counterparty_account: { type: [string, "null"] }
         counterparty_bank: { type: [string, "null"] }
         counterparty_prefix: { type: [string, "null"] }
@@ -48829,6 +48847,10 @@ components:
           type: object
           description: "Dimenze pohybu (Firma → Dimenze) jako mapa id typu → id hodnoty. Jen v detailu výpisu a v seznamu pohybů a jen u firmy se zapnutými dimenzemi."
           additionalProperties: { type: integer, format: int64 }
+        rule_dimension_types:
+          type: array
+          description: "Typy dimenzí z `dimensions`, které pohybu zapsalo pravidlo účtování při zaúčtování (ostatní jsou zadané ručně). Jen tam, kde je `dimensions`."
+          items: { type: integer, format: int64 }
 
     BankMovementPage:
       type: object

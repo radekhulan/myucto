@@ -63,6 +63,8 @@ final class BankPostingRuleValidator
         return [
             'name'                 => self::nn($body['name'] ?? null) ?? 'Pravidlo',
             'direction'            => $direction,
+            // Vlastnictví účtu ověřuje volající (REST API), import ho dohledá podle čísla.
+            'bank_account_id'      => self::positiveId($body['bank_account_id'] ?? null),
             'counterparty_account' => $account,
             'counterparty_bank'    => $bank,
             'counterparty_prefix'  => $prefix,
@@ -79,6 +81,19 @@ final class BankPostingRuleValidator
             'auto_amount_cap'      => self::amount($body['auto_amount_cap'] ?? null),
             'applies_currency'     => $currency,
         ];
+    }
+
+    /** Volitelné id (vlastní účet pravidla): prázdné nebo 0 = bez omezení. */
+    public static function positiveId(mixed $raw): ?int
+    {
+        if ($raw === null || $raw === '' || $raw === 0 || $raw === '0' || $raw === false) {
+            return null;
+        }
+        $id = filter_var($raw, FILTER_VALIDATE_INT);
+        if ($id === false || $id <= 0) {
+            throw self::err('invalid_bank_account', 'Neplatný vlastní bankovní účet pravidla.');
+        }
+        return $id;
     }
 
     public function assertAccounts(int $supplierId, string $direction, string $debit, string $credit): void

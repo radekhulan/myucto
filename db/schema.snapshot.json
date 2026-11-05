@@ -1134,7 +1134,8 @@
         "2230_journal_lines_cost_center_index.sql",
         "2231_unit_prices_six_decimals.sql",
         "2232_currencies_foreign_bank_code.sql",
-        "2233_dimension_defaults_bank_account.sql"
+        "2233_dimension_defaults_bank_account.sql",
+        "2234_bank_posting_rule_dimensions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3354,6 +3355,28 @@
             },
             "checks": []
         },
+        "bank_posting_rule_dimensions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "dimension_type_id": "bigint(20) unsigned NOT NULL",
+                "dimension_value_id": "bigint(20) unsigned NOT NULL",
+                "rule_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (rule_id, dimension_type_id)",
+                "idx_bprd_supplier": "BTREE (supplier_id)",
+                "idx_bprd_type_value": "BTREE (dimension_type_id, dimension_value_id)"
+            },
+            "foreign_keys": {
+                "fk_bprd_rule": "(rule_id) -> bank_posting_rules (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_bprd_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_bprd_value": "(dimension_type_id, dimension_value_id) -> dimension_values (type_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "bank_posting_rules": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -3364,6 +3387,7 @@
                 "applies_currency": "char(3) NOT NULL DEFAULT 'CZK'",
                 "approved_streak": "tinyint(3) unsigned NOT NULL DEFAULT 0",
                 "auto_amount_cap": "decimal(14,2) NULL DEFAULT NULL",
+                "bank_account_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counterparty_account": "varchar(35) NULL DEFAULT NULL",
                 "counterparty_bank": "varchar(10) NULL DEFAULT NULL",
                 "counterparty_prefix": "varchar(6) NULL DEFAULT NULL",
@@ -3393,10 +3417,12 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_bpr_user": "BTREE (created_by)",
+                "idx_bpr_bank_account": "BTREE (bank_account_id)",
                 "idx_bpr_supplier": "BTREE (supplier_id, is_active, direction)",
                 "uq_bpr_template": "UNIQUE BTREE (supplier_id, system_template_key)"
             },
             "foreign_keys": {
+                "fk_bpr_bank_account": "(bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_bpr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_bpr_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },

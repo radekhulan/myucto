@@ -33,9 +33,10 @@ final class RuleMiner
         $stmt = $this->db->pdo()->prepare(
             "SELECT c.supplier_id, c.entity_id AS tx_id, c.final_debit, c.final_credit,
                     bt.amount, bt.counterparty_account, bt.counterparty_bank, bt.counterparty_name,
-                    bt.variable_symbol, bt.description
+                    bt.variable_symbol, bt.description, bs.account_number AS recipient_account, bs.bank_code AS recipient_bank
                FROM accounting_corrections c
                JOIN bank_transactions bt ON bt.id=c.entity_id
+               JOIN bank_statements bs ON bs.id=bt.statement_id
                JOIN supplier s ON s.id=c.supplier_id AND s.accounting_mode='double_entry'
               WHERE c.entity_type='bank_transaction'
                 AND c.event_type IN ('approve_override','manual_post')
@@ -46,6 +47,7 @@ final class RuleMiner
         $stmt->execute($supplierId === null ? [] : [$supplierId]);
 
         $clusters = [];
+        $ownAccounts = new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db);
         $noAccount = 0;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
             $account = AccountNumberNormalizer::normalize((string) ($row['counterparty_account'] ?? ''));
@@ -93,15 +95,26 @@ final class RuleMiner
                 continue;
             }
             $tenant = (int) $representative['supplier_id'];
-            $tx = $this->matchTx($representative);
+            // Shluk může mít pohyby z více vlastních účtů. Pravidlo omezené na účet ho pokrývá,
+            // jen když leží všechny na jeho účtu; posuzuje se proto každý účet shluku zvlášť.
+            $ownIds = [];
+            foreach ($rows as $row) {
+                $ownIds[(int) ($ownAccounts->idFor($tenant, $row) ?? 0)] = true;
+            }
+            $ownIds = array_keys($ownIds);
+            $txs = array_map(
+                fn (int $own): array => $this->matchTx($representative) + [BankRuleMatcher::OWN_ACCOUNT => $own > 0 ? $own : null],
+                $ownIds,
+            );
             $existing = $this->rules->listForTenant($tenant);
-            if ($this->exactRuleExists($existing, $representative, $debit, $credit)) {
+            if ($this->exactRuleExists($existing, $representative, $debit, $credit, $ownIds)) {
                 $this->skip($report, 'rule_exists');
                 continue;
             }
             $covered = false;
             foreach ($existing as $rule) {
-                if ((bool) $rule['is_active'] && $this->matcher->matching($rule, $tx)) {
+                if ((bool) $rule['is_active']
+                    && array_filter($txs, fn (array $tx): bool => !$this->matcher->matching($rule, $tx)) === []) {
                     $covered = true;
                     break;
                 }
@@ -162,11 +175,17 @@ final class RuleMiner
         }
     }
 
-    /** @param list<array<string,mixed>> $rules @param array<string,mixed> $row */
-    private function exactRuleExists(array $rules, array $row, string $debit, string $credit): bool
+    /**
+     * @param list<array<string,mixed>> $rules
+     * @param array<string,mixed> $row
+     * @param list<int> $ownIds vlastní účty pohybů shluku (0 = výpis bez vlastního účtu)
+     */
+    private function exactRuleExists(array $rules, array $row, string $debit, string $credit, array $ownIds): bool
     {
         foreach ($rules as $rule) {
-            if ((string) $rule['direction'] === (string) $row['direction']
+            $ruleAccount = (int) ($rule['bank_account_id'] ?? 0);
+            if (($ruleAccount === 0 || $ownIds === [$ruleAccount])
+                && (string) $rule['direction'] === (string) $row['direction']
                 && AccountNumberNormalizer::equals((string) ($rule['counterparty_account'] ?? ''), (string) $row['normalized_account'])
                 && (AccountNumberNormalizer::canonicalBankCode((string) ($rule['counterparty_bank'] ?? '')) ?? '') === (string) $row['normalized_bank']
                 && (string) $rule['debit_account_code'] === $debit

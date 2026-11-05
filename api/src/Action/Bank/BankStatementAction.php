@@ -1955,6 +1955,9 @@ final class BankStatementAction
         // vidět jen po rozbalení dokladů pohybu v nabídce „…".
         $dimensionsByTx = (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($sid, 'bank_transaction', $txIds);
+        $ruleDimensionTypes = $dimensionsByTx !== null
+            ? (new \MyInvoice\Service\Accounting\Dimension\BankRuleDimensions($this->db))->typesFor($sid, $txIds)
+            : [];
 
         foreach ($transactions as &$t) {
             $t['card'] = $cardByTx[(int) $t['id']] ?? null;
@@ -1974,6 +1977,7 @@ final class BankStatementAction
             unset($t['processing_pending_at'], $t['processing_error']);
             if ($dimensionsByTx !== null) {
                 $t['dimensions'] = (object) ($dimensionsByTx[$t['id']] ?? []);
+                $t['rule_dimension_types'] = $ruleDimensionTypes[$t['id']] ?? [];
             }
         }
         unset($t);

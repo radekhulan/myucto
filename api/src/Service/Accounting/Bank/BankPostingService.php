@@ -15,6 +15,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
 use MyInvoice\Service\Accounting\AdvanceSettlementSync;
+use MyInvoice\Service\Accounting\Dimension\BankRuleDimensions;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
@@ -369,7 +370,8 @@ final class BankPostingService
             // Jediný hook detektorů před obecným FX guardem. Matched platby mají
             // přednost; stejnoměnný cizoměnový vlastní převod smí projít tierem 20.
             if (!$isMatched) {
-                $detected = $this->detectors?->run($supplierId, $tx, $userId, $suggestOnly);
+                // Pravidla s přednostní prioritou porovnává řetězec i podle vlastního účtu výpisu.
+                $detected = $this->detectors?->run($supplierId, (new StatementOwnAccount($this->db))->withOwnAccount($supplierId, $tx, $tx), $userId, $suggestOnly);
                 if ($detected !== null) {
                     return $detected instanceof DetectionResult
                         ? $this->applyDetection($supplierId, $tx, $detected, $userId, $suggestOnly)
@@ -578,14 +580,19 @@ final class BankPostingService
         }
 
         try {
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
-                'entry_date'    => $postedAt,
-                'document_date' => $postedAt,
-                'description'   => $this->entryDescription($tx),
-                'posted'        => true,
-                'user_id'       => $userId,
-                'posted_by'     => $userId,
-            ]);
+            // Úhrada dokladu není použití pravidla: přepisuje-li zápis pohybu zaúčtovaného
+            // pravidlem, dimenze pravidla z pohybu zmizí. Savepoint je vrátí, když zápis selže.
+            $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $txId, $postedLines, $postedAt, $tx, $userId): int {
+                (new BankRuleDimensions($this->db))->clearFromTransaction($supplierId, $txId);
+                return $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
+                    'entry_date'    => $postedAt,
+                    'document_date' => $postedAt,
+                    'description'   => $this->entryDescription($tx),
+                    'posted'        => true,
+                    'user_id'       => $userId,
+                    'posted_by'     => $userId,
+                ]);
+            });
         } catch (PostingException $e) {
             if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'entry_reversed'], true)) {
                 return $this->paymentMatchSuggestion($supplierId, $tx, 'period_closed');
@@ -2271,7 +2278,7 @@ final class BankPostingService
         }
         $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
         $currency = strtoupper($this->effectiveCurrency($tx));
-        $match = $this->matchTxArray($tx);
+        $match = $this->matchTxArray($supplierId, $tx);
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== $currency
                 || !$this->ruleMatcher->matching($rule, $match)) {
@@ -2340,7 +2347,7 @@ final class BankPostingService
         }
         $direction = $amount > 0 ? 'incoming' : 'outgoing';
 
-        $matchTx = $this->matchTxArray($tx);
+        $matchTx = $this->matchTxArray($supplierId, $tx);
         $matches = [];
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== strtoupper($this->effectiveCurrency($tx))) {
@@ -2355,11 +2362,11 @@ final class BankPostingService
         }
 
         if (count($matches) === 1
-            || (count($matches) >= 2 && (int) $matches[0]['priority'] < (int) $matches[1]['priority'])) {
+            || (count($matches) >= 2 && BankRuleMatcher::rank($matches[0]) < BankRuleMatcher::rank($matches[1]))) {
             return $this->applySingleRule($supplierId, $tx, $matches[0], $userId, $suggestOnly);
         }
         if (count($matches) >= 2) {
-            // Stejná nejvyšší priorita → vítěz dle hit_count, ale nikdy auto.
+            // Stejná nejvyšší priorita i omezení na účet → vítěz dle hit_count, ale nikdy auto.
             return $this->ruleSuggestion($supplierId, $tx, $matches[0], 'rule_conflict');
         }
 
@@ -2472,7 +2479,7 @@ final class BankPostingService
         if ($this->suggestions->hasRejected($supplierId, $txId, (int) $rule['id'])) {
             return 'rule_rejected';
         }
-        return $this->ruleMatcher->matching($rule, $this->matchTxArray($tx)) ? null : 'rule_not_matched';
+        return $this->ruleMatcher->matching($rule, $this->matchTxArray($supplierId, $tx)) ? null : 'rule_not_matched';
     }
 
     /**
@@ -2750,24 +2757,13 @@ final class BankPostingService
                 return $this->ruleSuggestion($supplierId, $tx, $rule, 'period_closed', 'blocked', $absAmount);
             }
             try {
-                $entryId = $this->posting->postDocument($supplierId, 'bank', (int) $tx['id'], $this->withBankAnalytic($supplierId, $tx, [
-                    $fxRate === null
-                        ? $this->line((string) $rule['debit_account_code'], 'debit', $absAmount)
-                        : $this->withFxTrace($this->line((string) $rule['debit_account_code'], 'debit', $absAmount), $currency, $fxRate, $foreignAmount),
-                    $fxRate === null
-                        ? $this->line((string) $rule['credit_account_code'], 'credit', $absAmount)
-                        : $this->withFxTrace($this->line((string) $rule['credit_account_code'], 'credit', $absAmount), $currency, $fxRate, $foreignAmount),
-                ]), [
-                    'entry_date'    => $postedAt,
-                    'document_date' => $postedAt,
-                    // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
-                    // stejné místo u detektoru výš.
-                    'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
-                    'posted'        => true,
-                    'user_id'       => $userId,
-                    'posted_by'     => $userId,
-                ]);
+                // Dimenze pravidla a zápis buď spolu, nebo vůbec: chybějící povinná dimenze
+                // vrátí obojí a pohyb skončí jako návrh k doplnění.
+                $entryId = (new DimensionPeriodGuard($this->db))->transaction(fn (): int => $this->postByRule($supplierId, $tx, $rule, $absAmount, $fxRate, $currency, $foreignAmount, $userId));
             } catch (PostingException $e) {
+                if ($e->errorCode === 'dimension_required') {
+                    return $this->ruleSuggestion($supplierId, $tx, $rule, 'dimension_required', 'needs_input', $absAmount);
+                }
                 if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'entry_reversed'], true)) {
                     return $this->ruleSuggestion($supplierId, $tx, $rule, 'period_closed', 'blocked', $absAmount);
                 }
@@ -2810,6 +2806,35 @@ final class BankPostingService
             $this->anomalies?->recordDegraded($supplierId);
         }
         return $result;
+    }
+
+    /**
+     * Automatické zaúčtování pohybu podle pravidla včetně zápisu jeho dimenzí k pohybu.
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed> $rule
+     */
+    private function postByRule(int $supplierId, array $tx, array $rule, float $absAmount, ?float $fxRate, string $currency, float $foreignAmount, ?int $userId): int
+    {
+        $postedAt = (string) $tx['posted_at'];
+        (new BankRuleDimensions($this->db))->applyToTransaction($supplierId, (int) $tx['id'], (int) $rule['id']);
+        return $this->posting->postDocument($supplierId, 'bank', (int) $tx['id'], $this->withBankAnalytic($supplierId, $tx, [
+            $fxRate === null
+                ? $this->line((string) $rule['debit_account_code'], 'debit', $absAmount)
+                : $this->withFxTrace($this->line((string) $rule['debit_account_code'], 'debit', $absAmount), $currency, $fxRate, $foreignAmount),
+            $fxRate === null
+                ? $this->line((string) $rule['credit_account_code'], 'credit', $absAmount)
+                : $this->withFxTrace($this->line((string) $rule['credit_account_code'], 'credit', $absAmount), $currency, $fxRate, $foreignAmount),
+        ]), [
+            'entry_date'    => $postedAt,
+            'document_date' => $postedAt,
+            // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
+            // stejné místo u detektoru výš.
+            'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
+            'posted'        => true,
+            'user_id'       => $userId,
+            'posted_by'     => $userId,
+        ]);
     }
 
     /**
@@ -3138,7 +3163,7 @@ final class BankPostingService
                     || $selectedRule === null
                     || !(bool) $selectedRule['is_active']
                     || (string) $selectedRule['direction'] !== $direction
-                    || !$this->ruleMatcher->matching($selectedRule, $this->matchTxArray($tx))) {
+                    || !$this->ruleMatcher->matching($selectedRule, $this->matchTxArray($supplierId, $tx))) {
                     throw new PostingException('invalid_rule_selection', 'Vybrané pravidlo už této transakci neodpovídá.', 422);
                 }
                 $pdo->prepare(
@@ -3201,14 +3226,21 @@ final class BankPostingService
                 }
             }
 
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
-                'entry_date'    => (string) $tx['posted_at'],
-                'document_date' => (string) $tx['posted_at'],
-                'description'   => $this->entryDescription($tx),
-                'posted'        => true,
-                'user_id'       => $meta['user_id'] ?? null,
-                'posted_by'     => $meta['posted_by'] ?? ($meta['user_id'] ?? null),
-            ]);
+            // Dimenze pravidla a zápis buď spolu, nebo vůbec: schválení volané uvnitř cizí
+            // transakce (použití pravidla na pohyby) při chybě zápisu nesmí nechat dimenze na pohybu.
+            $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $txId, $tx, $lines, $rule, $meta): int {
+                if ($rule !== null) {
+                    (new BankRuleDimensions($this->db))->applyToTransaction($supplierId, $txId, (int) $rule['id']);
+                }
+                return $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
+                    'entry_date'    => (string) $tx['posted_at'],
+                    'document_date' => (string) $tx['posted_at'],
+                    'description'   => $this->entryDescription($tx),
+                    'posted'        => true,
+                    'user_id'       => $meta['user_id'] ?? null,
+                    'posted_by'     => $meta['posted_by'] ?? ($meta['user_id'] ?? null),
+                ]);
+            });
 
             $this->suggestions->markApproved($supplierId, $suggestionId, $entryId, $meta['user_id'] ?? null);
             $this->markSchedulePaid($supplierId, $sug['tax_advance_schedule_id'] ?? null, $tx);
@@ -3661,7 +3693,7 @@ final class BankPostingService
         }
         // Aktivní pravidlo tx nechytá (jinak by hint duplikoval pravidlo).
         $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
-        $matchTx = $this->matchTxArray($tx);
+        $matchTx = $this->matchTxArray($supplierId, $tx);
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if ($this->ruleMatcher->matching($rule, $matchTx)) {
                 return null;
@@ -3839,6 +3871,8 @@ final class BankPostingService
         array $meta,
         string $requeueNote,
     ): void {
+        // Dimenze z pravidla patří jen zápisu, který pravidlo vytvořilo.
+        (new BankRuleDimensions($this->db))->clearFromTransaction($supplierId, $txId);
         if ($sourceSuggestion !== null) {
             $this->corrections?->fromSuggestion(
                 $supplierId,
@@ -4805,7 +4839,7 @@ final class BankPostingService
     {
         $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
         $currency = strtoupper($this->effectiveCurrency($tx));
-        $match = $this->matchTxArray($tx);
+        $match = $this->matchTxArray($supplierId, $tx);
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) === $currency
                 && $this->ruleMatcher->matching($rule, $match)) {
@@ -4843,16 +4877,16 @@ final class BankPostingService
      * @return array{amount:float, variable_symbol:?string, counterparty_account:?string,
      *   counterparty_bank:?string, description:?string}
      */
-    private function matchTxArray(array $tx): array
+    private function matchTxArray(int $supplierId, array $tx): array
     {
-        return [
+        return (new StatementOwnAccount($this->db))->withOwnAccount($supplierId, [
             'amount'               => (float) $tx['amount'],
             'variable_symbol'      => $tx['variable_symbol'] !== null ? (string) $tx['variable_symbol'] : null,
             'counterparty_account' => $tx['counterparty_account'] !== null ? (string) $tx['counterparty_account'] : null,
             'counterparty_bank'    => $tx['counterparty_bank'] !== null ? (string) $tx['counterparty_bank'] : null,
             'description'          => $tx['description'] !== null ? (string) $tx['description'] : null,
             'counterparty_name'    => ($tx['counterparty_name'] ?? null) !== null ? (string) $tx['counterparty_name'] : null,
-        ];
+        ], $tx);
     }
 
     // ── data access ─────────────────────────────────────────────────────────────

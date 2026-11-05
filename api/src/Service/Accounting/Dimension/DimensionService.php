@@ -1346,6 +1346,12 @@ final class DimensionService
         return $value;
     }
 
+    /** Zápis hodnot dimenzí mimo doklady (pravidlo bankovních pohybů) jen se zapnutými dimenzemi. */
+    public function requireEnabledFor(int $supplierId): void
+    {
+        $this->requireEnabled($supplierId);
+    }
+
     private function requireEnabled(int $supplierId): void
     {
         if (!$this->repo->enabled($supplierId)) {
