@@ -3107,8 +3107,9 @@ paths:
       description: |
         Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
         jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
-        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
-        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
+        v konceptu (`draft`) odstraní všechny položky a přepočítá součty na nulu.
+        U nedraftového dokladu s položkami se odmítne s 422 `no_items`, i při `force=1`.
+        Poslané neprázdné `items` řádky nahradí
         (DELETE + INSERT), takže payload musí nést kompletní seznam.
 
         Vynucená úprava vystaveného dokladu (`force=1`, u zaúčtovaného dokladu
@@ -3125,8 +3126,8 @@ paths:
         Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""` vymaže nullable pole; `issue_date`
         a `currency_id` se při `null` vrátí na výchozí hodnotu (dnes, měna
         projektu/klienta/dodavatele). `items`, `payment_schedule` a `cash_register_id` jsou při
-        vynechání beze změny, při poslání se nahradí (`items: []` u dokladu s položkami vrátí 422
-        `no_items`).
+        vynechání beze změny, při poslání se nahradí (`items: []` lze uložit v konceptu;
+        u nedraftového dokladu s položkami vrátí 422 `no_items`).
 
         Výjimky a odvozená pole: (1) změní-li se `client_id` a `project_id` je vynechané, zakázka se
         odebere, protože patří klientovi. (2) `revenue_category` a `revenue_category_id` tvoří
@@ -3172,7 +3173,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: '`items: []` by doklad připravilo o všechny položky (`no_items`)'
+          description: '`items: []` by nedraftový doklad připravilo o všechny položky (`no_items`)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8860,10 +8861,10 @@ paths:
       description: |
         Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
         jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
-        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
-        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
-        (DELETE + INSERT), takže payload musí nést kompletní seznam. Vyprázdnit řádky
-        draftu lze dedikovaným `PUT /api/v1/purchase-invoices/{id}/items`.
+        v konceptu (`draft`) odstraní všechny položky, stejně jako dedikovaný
+        `PUT /api/v1/purchase-invoices/{id}/items`. U nedraftového dokladu s položkami
+        se odmítne s 422 `no_items`, i při `force=1`. Poslané neprázdné `items` řádky
+        nahradí (DELETE + INSERT), takže payload musí nést kompletní seznam.
 
         Částečná aktualizace (viz úvod). Schéma `PurchaseInvoicePayload` je sdílené s POST, kde jsou
         povinné `vendor_id`, `vendor_invoice_number`, `issue_date`, `due_date`, `currency_id` a
@@ -8945,7 +8946,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: |
-            `items: []` by doklad připravilo o všechny položky (`no_items`), chybí
+            `items: []` by nedraftový doklad připravilo o všechny položky (`no_items`), chybí
             `force_mode` u zaúčtovaného dokladu v uzavřeném období (`force_mode_required`),
             `force_mode=notes_only` narazil na změnu účetního pole
             (`financial_change_not_allowed`), nebo změnu nároku v hlavičce nejde jednoznačně
@@ -47512,6 +47513,7 @@ components:
             i prázdný řetězec jsou vědomé vyprázdnění a výchozí text nepřepíšou.
         items:
           type: array
+          description: "Kompletní seznam položek. Koncept může být prázdný; při PUT vynechaný klíč nebo null zachová položky, [] je v konceptu odstraní."
           items: { $ref: '#/components/schemas/InvoiceItemInput' }
 
     InvoiceImportInput:
@@ -50648,6 +50650,7 @@ components:
         vat_classification_code: { type: [string, "null"] }
         items:
           type: array
+          description: "Kompletní seznam položek. Koncept může být prázdný; při PUT vynechaný klíč nebo null zachová položky, [] je v konceptu odstraní."
           items: { $ref: '#/components/schemas/PurchaseInvoiceItemPayload' }
 
     InboxScanResult:

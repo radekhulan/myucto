@@ -95,7 +95,8 @@ Přílohy jsou volitelné a **Chybí** neznamená chybu účetního dokladu.
 2. Přetáhněte PDF nebo fotku (JPG, PNG, WEBP, HEIC) do zóny nad formulářem. Soubor se připraví jako příloha.
 3. Vyplňte povinná pole (viz [§ 23.11.5](#23115-povinna-pole)): **Dodavatel**, **Číslo dokladu dodavatele**, **Typ dokladu**,
    **Datum vystavení**, **DUZP**, **Splatnost**, **Měna faktury**.
-4. Přidejte položky tlačítkem **+ Přidat položku**. Souhrn dole se přepočítá sám.
+4. Přidejte položky tlačítkem **+ Přidat položku**. Souhrn dole se přepočítá sám. Koncept
+   lze uložit i bez položek a doplnit později.
 5. Uložte. Originál se po prvním uložení automaticky archivuje mimo webroot.
 
 Pro nestrukturované PDF můžete podle oprávnění použít také [AI extrakci](25_AI_extrakce.md).
