@@ -59,6 +59,36 @@ final class StockValuationCategoryGroups
      */
     public function summarize(int $supplierId, ?int $parentId, iterable $rows): array
     {
+        $plan = $this->plan($supplierId, $parentId);
+        $sums = [];
+        $counts = [];
+        $totalC = 0;
+        $total = 0;
+        foreach ($rows as $row) {
+            $key = $plan['groupOf'][(int) $row['stock_item_id']] ?? 'uncategorized';
+            $valueC = StockValuation::valueToC((string) $row['value_total']);
+            $sums[$key] = ($sums[$key] ?? 0) + $valueC;
+            $counts[$key] = ($counts[$key] ?? 0) + 1;
+            $totalC += $valueC;
+            $total++;
+        }
+
+        return [
+            'parent' => $plan['parent'] !== null ? ['id' => $plan['parent']['id'], 'code' => $plan['parent']['code'], 'name' => $plan['parent']['name']] : null,
+            'groups' => $this->build($plan, $counts, $sums),
+            'value_total' => StockValuation::cToDecimal($totalC),
+            'count' => $total,
+        ];
+    }
+
+    /**
+     * Zařazení karet do skupin předem (jeden dotaz), aby šlo řádky sčítat průběžně;
+     * `$itemIds` zúží zařazení na dávku karet (prázdné pole = jen strom kategorií).
+     *
+     * @return array{parent:?array<string,mixed>, prefix:string, categories:array<int,array<string,mixed>>, groupOf:array<int,int|string>}
+     */
+    public function plan(int $supplierId, ?int $parentId, ?array $itemIds = null): array
+    {
         $categories = $this->categories($supplierId);
         $parent = null;
         $prefix = '/';
@@ -72,7 +102,7 @@ final class StockValuationCategoryGroups
 
         // Skupina každé karty: id přímé podkategorie, 'parent' nebo (chybí) ostatní.
         $groupOf = [];
-        foreach ($this->assignedCategories($supplierId, $prefix) as $itemId => $categoryId) {
+        foreach ($this->assignedCategories($supplierId, $prefix, $itemIds) as $itemId => $categoryId) {
             if ($categoryId === $parentId) {
                 $groupOf[$itemId] = 'parent';
                 continue;
@@ -83,40 +113,34 @@ final class StockValuationCategoryGroups
                 $groupOf[$itemId] = $childId;
             }
         }
+        return ['parent' => $parent, 'prefix' => $prefix, 'categories' => $categories, 'groupOf' => $groupOf];
+    }
 
-        $sums = [];
-        $counts = [];
-        $totalC = 0;
-        $total = 0;
-        foreach ($rows as $row) {
-            $key = $groupOf[(int) $row['stock_item_id']] ?? 'uncategorized';
-            $valueC = StockValuation::valueToC((string) $row['value_total']);
-            $sums[$key] = ($sums[$key] ?? 0) + $valueC;
-            $counts[$key] = ($counts[$key] ?? 0) + 1;
-            $totalC += $valueC;
-            $total++;
-        }
-
+    /**
+     * Skupiny v pořadí stromu, „přímo v kategorii“ a „ostatní“ na konci.
+     *
+     * @param array<string,mixed> $plan výstup {@see plan()}
+     * @param array<int|string,int> $counts
+     * @param array<int|string,int> $sums haléře
+     * @return list<array{kind:string,category_id:?int,code:string,name:string,count:int,value_total:string}>
+     */
+    public function build(array $plan, array $counts, array $sums): array
+    {
+        $parentId = $plan['parent']['id'] ?? null;
         $groups = [];
-        foreach ($categories as $id => $category) {
+        foreach ($plan['categories'] as $id => $category) {
             if ($category['parent_id'] !== $parentId || ($category['archived'] && !isset($counts[$id]))) {
                 continue;
             }
             $groups[] = self::group('category', $category, $counts[$id] ?? 0, $sums[$id] ?? 0);
         }
         if (isset($counts['parent'])) {
-            $groups[] = self::group('parent', $parent, $counts['parent'], $sums['parent']);
+            $groups[] = self::group('parent', $plan['parent'], $counts['parent'], $sums['parent']);
         }
         if (isset($counts['uncategorized'])) {
             $groups[] = self::group('uncategorized', null, $counts['uncategorized'], $sums['uncategorized']);
         }
-
-        return [
-            'parent' => $parent !== null ? ['id' => $parent['id'], 'code' => $parent['code'], 'name' => $parent['name']] : null,
-            'groups' => $groups,
-            'value_total' => StockValuation::cToDecimal($totalC),
-            'count' => $total,
-        ];
+        return $groups;
     }
 
     /**
@@ -165,15 +189,18 @@ final class StockValuationCategoryGroups
      *
      * @return array<int,int> stock_item_id => category_id
      */
-    private function assignedCategories(int $supplierId, string $prefix): array
+    private function assignedCategories(int $supplierId, string $prefix, ?array $itemIds = null): array
     {
+        if ($itemIds === []) {
+            return [];
+        }
         $stmt = $this->db->pdo()->prepare("SELECT stock_item_id, category_id FROM (
                 SELECT sic.stock_item_id, sic.category_id,
                        ROW_NUMBER() OVER (PARTITION BY sic.stock_item_id
                                           ORDER BY sic.is_primary DESC, sic.display_order, sic.category_id) AS pick
                   FROM stock_item_categories sic
                   JOIN stock_categories sc ON sc.id = sic.category_id AND sc.supplier_id = sic.supplier_id
-                 WHERE sic.supplier_id = ? AND sc.path LIKE ?
+                 WHERE sic.supplier_id = ? AND sc.path LIKE ?" . ($itemIds !== null ? ' AND sic.stock_item_id IN (' . implode(',', array_map('intval', $itemIds)) . ')' : '') . "
             ) ranked WHERE pick = 1");
         $stmt->execute([$supplierId, addcslashes($prefix, '%_\\') . '%']);
         $out = [];

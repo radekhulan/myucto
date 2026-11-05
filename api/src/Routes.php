@@ -4488,6 +4488,10 @@ final class Routes
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobResult']);
             $g->get   ('/reports/valuation-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valuationJobStatus']);
             $g->post  ('/reports/valuation-jobs/{id:[0-9]+}/cancel', [\MyInvoice\Action\Stock\StockReportAction::class, 'cancelValuationJob']);
+            $g->post  ('/reports/value-trend-jobs',       [\MyInvoice\Action\Stock\StockReportAction::class, 'createValueTrendJob']);
+            $g->get   ('/reports/value-trend-jobs/{id:[0-9]+}', [\MyInvoice\Action\Stock\StockReportAction::class, 'valueTrendJobResult']);
+            $g->get   ('/reports/value-trend-jobs/{id:[0-9]+}/status', [\MyInvoice\Action\Stock\StockReportAction::class, 'valueTrendJobStatus']);
+            $g->post  ('/reports/value-trend-jobs/{id:[0-9]+}/cancel', [\MyInvoice\Action\Stock\StockReportAction::class, 'cancelValueTrendJob']);
             $g->get   ('/reports/{name}/export',          [\MyInvoice\Action\Stock\StockReportAction::class, 'export']);
         });
 

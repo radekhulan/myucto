@@ -31,6 +31,7 @@ final class CatalogJobAction
         private readonly CatalogJobService $jobs,
         private readonly CatalogPriceJobService $prices,
         private readonly CatalogJobItemRepository $items,
+        private readonly \MyInvoice\Service\Stock\StockValueTrendService $valueTrend,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -110,7 +111,7 @@ final class CatalogJobAction
         if (!CatalogJobAccessPolicy::allows($request, $job['kind'], write: true)) {
             return Json::error($response, 'forbidden', 'K této operaci nemáte oprávnění.', 403);
         }
-        if ($job['kind'] === 'stock_valuation'
+        if (in_array($job['kind'], ['stock_valuation', 'stock_value_trend'], true)
             && !$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::WRITE, $err)) {
             return $err;
         }
@@ -138,7 +139,11 @@ final class CatalogJobAction
         if (!$changed) {
             return Json::error($response, 'job_state_conflict', 'Aktuální stav úlohy tuto operaci nepovoluje.', 409);
         }
-        return Json::ok($response, $this->present($this->jobs->find($supplierId, $id)));
+        $changed = $this->jobs->find($supplierId, $id);
+        if ($args['operation'] === 'cancel' && $changed['kind'] === \MyInvoice\Service\Stock\StockValueTrendService::KIND && $changed['status'] === 'cancelled') {
+            $this->valueTrend->dropQueue($supplierId, $id); // běžící úloha se uklidí v další dávce
+        }
+        return Json::ok($response, $this->present($changed));
     }
 
     public function prices(Request $request, Response $response): Response
@@ -186,6 +191,9 @@ final class CatalogJobAction
             $job['apply_job_id'] = $applyId === false ? null : (int) $applyId;
         }
         unset($job['input']);
+        if ($job['kind'] === 'stock_value_trend') {
+            $job['report'] = []; // průběžné součty po kategoriích patří jen výsledku s kontrolou práv
+        }
         return $job;
     }
 }
