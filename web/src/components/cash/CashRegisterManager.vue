@@ -38,6 +38,9 @@ interface RegisterRow {
   is_default: boolean
   own_series: boolean
   is_active: boolean
+  /** Počáteční stav valutové pokladny ve valutě a jeho den; prázdné = bez počátečního stavu. */
+  opening_amount: string
+  opening_date: string
   remove: boolean
 }
 
@@ -67,6 +70,8 @@ function toRow(r: CashRegister): RegisterRow {
     is_default: r.is_default,
     own_series: r.own_series === true,
     is_active: r.is_active,
+    opening_amount: r.opening_foreign_amount != null ? String(r.opening_foreign_amount) : '',
+    opening_date: r.opening_foreign_date ?? '',
     remove: false,
   }
 }
@@ -104,6 +109,15 @@ function pickNewDefault(value: boolean) {
   if (value) for (const r of rows.value) r.is_default = false
 }
 
+function isForeignRow(r: RegisterRow): boolean {
+  return !!r.source.currency_code && r.source.currency_code !== 'CZK'
+}
+function openingChanged(r: RegisterRow): boolean {
+  if (!isForeignRow(r)) return false
+  const amount = r.opening_amount.trim() === '' ? null : Number(r.opening_amount.trim().replace(',', '.'))
+  return amount !== (r.source.opening_foreign_amount ?? null) || r.opening_date !== (r.source.opening_foreign_date ?? '')
+}
+
 function rowChanged(r: RegisterRow): boolean {
   return r.remove
     || r.name.trim() !== r.source.name
@@ -111,6 +125,7 @@ function rowChanged(r: RegisterRow): boolean {
     || r.is_default !== r.source.is_default
     || r.own_series !== (r.source.own_series === true)
     || r.is_active !== r.source.is_active
+    || openingChanged(r)
 }
 const changedRows = computed(() => rows.value.filter(rowChanged))
 const removedRows = computed(() => rows.value.filter(r => r.remove))
@@ -119,6 +134,9 @@ const dirty = computed(() => changedRows.value.length > 0 || creating.value)
 /** Věta, proč Uložit nejde (konvence BTN_DISABLED_NOTE). */
 const blockedReason = computed<string | null>(() => {
   if (rows.value.some(r => !r.remove && r.name.trim() === '')) return t('cash.validation.name')
+  if (rows.value.some(r => !r.remove && isForeignRow(r) && (r.opening_amount.trim() === '') !== (r.opening_date === ''))) {
+    return t('cash.register_opening_foreign_hint')
+  }
   if (creating.value && !isTaxEvidence.value && !isForeignForm.value && !form.value.account_code) {
     return t('cash.validation.account')
   }
@@ -153,6 +171,10 @@ async function saveAll() {
         is_default: r.is_default,
         own_series: r.own_series,
         is_active: r.is_active,
+        ...(isForeignRow(r) ? {
+          opening_foreign_amount: r.opening_amount.trim() === '' ? null : r.opening_amount.trim(),
+          opening_foreign_date: r.opening_date || null,
+        } : {}),
       })
     }
     if (creating.value) {
@@ -213,6 +235,17 @@ async function saveAll() {
                   <input v-model="r.name" type="text" :disabled="r.remove"
                     :aria-label="t('cash.register_name')"
                     class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-100" />
+                  <div v-if="isForeignRow(r)" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-600"
+                    :title="t('cash.register_opening_foreign_hint')">
+                    <span>{{ t('cash.register_opening_foreign') }}</span>
+                    <input v-model="r.opening_amount" type="text" inputmode="decimal" :disabled="r.remove"
+                      :aria-label="t('cash.register_opening_foreign')"
+                      class="w-24 h-7 px-2 border border-neutral-300 rounded-md text-right font-mono disabled:bg-neutral-100" />
+                    <span class="font-mono">{{ r.source.currency_code }}</span>
+                    <input v-model="r.opening_date" type="date" :disabled="r.remove"
+                      :aria-label="t('cash.register_opening_foreign_date')" :title="t('cash.register_opening_foreign_date')"
+                      class="h-7 px-2 border border-neutral-300 rounded-md disabled:bg-neutral-100" />
+                  </div>
                 </td>
                 <td class="px-3 py-2">
                   <span class="font-mono">{{ r.account_code }}</span>

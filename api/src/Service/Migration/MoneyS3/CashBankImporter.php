@@ -51,17 +51,40 @@ final class CashBankImporter
         // Název a účet pokladny bere převod z prvního roku, měnu z posledního (`Mena`,
         // prázdná = Kč) - pozdější rok přepíše dřívější stejně jako u bankovních účtů.
         $meta = [];
+        // Počáteční stav valutové pokladny ve valutě (`PocStav`) z prvního převáděného roku:
+        // doklady převod bere až od něj, starší peníze v pokladně by valutový zůstatek neznal.
+        $firstYear = $ctx->periods !== [] ? min(array_keys($ctx->periods)) : null;
         foreach ($ctx->backup->rowsAcrossYears('SzUcPokl') as $r) {
             $code = trim((string) ($r['Zkrat'] ?? ''));
             if ($code === '' || strtoupper(trim((string) ($r['UcPokl'] ?? ''))) !== 'P') {
                 continue;
             }
-            $meta[$code] ??= ['name' => trim((string) ($r['Popis'] ?? '')) ?: $code, 'primary' => (string) ($r['PrimUcet'] ?? '')];
+            $meta[$code] ??= ['name' => trim((string) ($r['Popis'] ?? '')) ?: $code, 'primary' => (string) ($r['PrimUcet'] ?? ''), 'opening' => null];
             $meta[$code]['currency'] = self::currency((string) ($r['Mena'] ?? ''));
+            $year = $ctx->yearOf($r);
+            if ($year !== null && $firstYear !== null && $year >= $firstYear
+                && ($meta[$code]['opening'] === null || $year < $meta[$code]['opening']['year'])) {
+                $meta[$code]['opening'] = [
+                    'year' => $year,
+                    'amount' => round((float) ($r['PocStav'] ?? 0), 2),
+                    'date' => (string) ($ctx->periods[$year]['starts_on'] ?? ($year . '-01-01')),
+                ];
+            }
         }
         $registers = [];
+        // Počáteční stav zadaný v MyÚčtu převod nepřepisuje.
+        $setOpening = $pdo->prepare(
+            'UPDATE cash_registers SET opening_foreign_amount = ?, opening_foreign_date = ?
+              WHERE id = ? AND supplier_id = ? AND currency_code <> "CZK" AND opening_foreign_date IS NULL'
+        );
         foreach ($meta as $code => $m) {
             $registers[$code] = $this->ensureRegister($ctx, (string) $code, $m['name'], $m['primary'], $m['currency']);
+            if ($registers[$code] !== null && $registers[$code]['currency'] !== 'CZK' && $m['opening'] !== null) {
+                $setOpening->execute([$m['opening']['amount'], $m['opening']['date'], $registers[$code]['id'], $ctx->supplierId]);
+                if ($setOpening->rowCount() > 0) {
+                    $p->count(self::STEP_CASH, 'opening_foreign');
+                }
+            }
         }
 
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_DOCUMENT);

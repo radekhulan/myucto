@@ -16,6 +16,7 @@ use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
+use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Migration\MoneyS3\AgendaInfo;
@@ -340,6 +341,16 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
         self::assertSame(1, $this->rowCount('cash_documents', $supplierId,
             "doc_number = 'CVH250001' AND doc_type = 'out' AND currency_code = 'HUF' AND fx_rate = 0.06121 AND amount_foreign = 10120 AND total_amount = 619"));
         self::assertSame(0, $this->rowCount('cash_documents', $supplierId, "doc_number NOT IN ('CPE250001', 'CVH250001') AND currency_code <> 'CZK'"));
+        // Počáteční stav ve valutě z `PocStav` prvního převáděného roku: bez něj by valutový
+        // zůstatek znal jen doklady (EUR 289,20, HUF -10 120).
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.002' AND opening_foreign_amount = 100 AND opening_foreign_date IS NOT NULL"));
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.003' AND opening_foreign_amount = 50000 AND opening_foreign_date IS NOT NULL"));
+        $cash = $this->container->get(CashRegisterService::class);
+        $ids = $this->db->pdo()->prepare('SELECT account_code, id FROM cash_registers WHERE supplier_id = ?');
+        $ids->execute([$supplierId]);
+        $byAccount = $ids->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertSame(389.2, $cash->documentsSignedForeignTotal($supplierId, (int) $byAccount['211.002'], '2025-12-31'));
+        self::assertSame(39880.0, $cash->documentsSignedForeignTotal($supplierId, (int) $byAccount['211.003'], '2025-12-31'));
     }
 
     /** @return list<array{0:string,1:string,2:float,3:float}> datum, měna, kurz, částka ve valutě */

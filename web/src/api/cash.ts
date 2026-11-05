@@ -45,6 +45,9 @@ export interface CashRegister {
   is_default: boolean; is_active: boolean
   /** L-3: pokladna má vlastní číselnou řadu PPD/VPD; false = společná řada firmy. */
   own_series?: boolean
+  /** Počáteční stav valutové pokladny ve valutě k začátku dne `opening_foreign_date`. */
+  opening_foreign_amount?: number | null
+  opening_foreign_date?: string | null
   documents_count: number
   balance: number; balance_date: string   // v list i detail response (O12 — bez /balance endpointu)
   balance_foreign?: number | null          // duální zůstatek valutové pokladny (§11); null u CZK
@@ -53,6 +56,7 @@ export interface CashRegister {
 
 export interface CashRegisterPayload {
   name: string; account_code: string; currency_code?: string; is_default?: boolean; own_series?: boolean
+  opening_foreign_amount?: string | number | null; opening_foreign_date?: string | null
 }
 
 export interface CashDocument {
