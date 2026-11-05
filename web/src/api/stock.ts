@@ -910,6 +910,15 @@ export interface StockValuationRow {
   value_total: string
 }
 
+export interface StockValueTrendReport {
+  job_id: number
+  computed_at: string | null
+  dates: string[]
+  parent: { id: number; code: string; name: string } | null
+  groups: Array<{ kind: 'category' | 'parent' | 'uncategorized'; category_id: number | null; code: string; name: string; values: Record<string, string> }>
+  totals: Record<string, { value_total: string; count: number }>
+}
+
 export interface StockValuationReport {
   date: string
   items: StockValuationRow[]
@@ -1258,7 +1267,7 @@ export const stockApi = {
     api.get<StockValuationReport>('/stock/reports/valuation', { params: toParams(filters) }).then(r => r.data),
   reportSales: (filters: StockSalesFilters = {}) =>
     api.get<StockSalesReport>('/stock/reports/sales', { params: toParams(filters) }).then(r => r.data),
-  reportExportUrl: (name: 'status' | 'valuation' | 'sales', format: 'pdf' | 'xlsx', filters: Record<string, unknown> = {}) => {
+  reportExportUrl: (name: 'status' | 'valuation' | 'value-trend' | 'sales', format: 'pdf' | 'xlsx', filters: Record<string, unknown> = {}) => {
     const params = new URLSearchParams(toParams({ ...filters, format }) as Record<string, string>)
     return downloadUrl(`/stock/reports/${name}/export?${params.toString()}`)
   },
