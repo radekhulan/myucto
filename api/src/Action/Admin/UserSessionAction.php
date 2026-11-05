@@ -74,9 +74,11 @@ final class UserSessionAction
         if ($target === null) return Json::error($response, 'not_found', 'Relace již není aktivní.', 404);
         // destroy() odvolá celou family i při souběžné rotaci jejího tokenu.
         $actor = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $this->manager->destroy($target['token'], fn () => $this->audit->log(
+        $revoked = $this->manager->destroy($target['token'], fn () => $this->audit->log(
             'auth.session_revoked', (int) ($actor['id'] ?? 0), 'user', (int) $target['user_id'],
+            ['session_family' => $family],
         ));
+        if ($revoked === 0) return Json::error($response, 'not_found', 'Relace již není aktivní.', 404);
         return Json::ok($response, ['current_session_revoked' => hash_equals($this->currentFamily($request), $family)]);
     }
 
@@ -100,12 +102,19 @@ final class UserSessionAction
             return Json::error($response, 'session_selection_stale', 'Některá relace již není aktivní. Obnovte přehled.', 409);
         }
         $actor = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $this->manager->destroyMany(array_column($targets, 'token'), fn () => $this->audit->log(
+        $terminated = $this->manager->destroyMany(array_column($targets, 'token'), fn (int $count) => $this->audit->log(
             'auth.sessions_revoked', (int) ($actor['id'] ?? 0), 'user', null,
-            ['count' => count($targets), 'user_ids' => array_values(array_unique(array_map(intval(...), array_column($targets, 'user_id'))))],
+            [
+                'count' => $count,
+                'user_ids' => array_values(array_unique(array_map(intval(...), array_column($targets, 'user_id')))),
+                'session_families' => array_column($targets, 'family'),
+            ],
         ));
+        if ($terminated === 0) {
+            return Json::error($response, 'session_selection_stale', 'Některá relace již není aktivní. Obnovte přehled.', 409);
+        }
         return Json::ok($response, [
-            'terminated' => count($targets),
+            'terminated' => $terminated,
             'current_session_revoked' => in_array($this->currentFamily($request), $ids, true),
         ]);
     }

@@ -181,7 +181,8 @@ přihlášení. Jednotlivé relace lze označit a hromadně ukončit; **Vybrat v
 řádky. Potvrzení hromadného ukončení upozorní, pokud výběr zahrnuje vlastní relaci. Akce se zaznamená do Logu jako
 `auth.session_revoked` (hromadná akce jako `auth.sessions_revoked`).
 
-API tokeny ani MCP připojení přehled nezobrazuje a tlačítko **Ukončit relaci** je neodvolává.
+API tokeny ani MCP připojení přehled nezobrazuje a tlačítko **Ukončit relaci** je neodvolává. Přihlášení technických
+účtů správce instance v přehledu nejsou a superadmin je odtud ukončit nemůže.
 
 ## 101.10 Když něco nejde
 

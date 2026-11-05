@@ -92,6 +92,40 @@ final class UserSessionAdminTest extends TestCase
         self::assertSame(1, (int) $audit->fetchColumn());
     }
 
+    public function testInstanceAdministratorSessionsAreNeitherListedNorTerminated(): void
+    {
+        $response = $this->request('GET', '/api/admin/user-sessions', $this->admin);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $page = $this->json($response);
+        $ids = array_column($page['data'], 'id');
+        self::assertContains($this->staff['family'], $ids);
+        self::assertNotContains($this->technical['family'], $ids);
+        self::assertStringNotContainsString($this->technical['family'], (string) $response->getBody());
+        self::assertSame(404, $this->request('DELETE', '/api/admin/user-sessions/' . $this->technical['family'], $this->admin)->getStatusCode());
+        $bulk = $this->request('POST', '/api/admin/user-sessions/terminate', $this->admin, true, ['ids' => [$this->staff['family'], $this->technical['family']]]);
+        self::assertSame(409, $bulk->getStatusCode(), (string) $bulk->getBody());
+        self::assertNotNull($this->manager->load($this->technical['token']));
+        self::assertNotNull($this->manager->load($this->staff['token']));
+        self::assertNull((new UserSessionRepository($this->db))->revocable($this->technical['family']));
+    }
+
+    public function testRevocationReportsOnlyNewlyRevokedFamiliesAndAuditsSessionIdentity(): void
+    {
+        $calls = 0;
+        self::assertSame(1, $this->manager->destroy($this->staff['token'], static function () use (&$calls): void { $calls++; }));
+        self::assertSame(0, $this->manager->destroy($this->staff['token'], static function () use (&$calls): void { $calls++; }));
+        self::assertSame(1, $calls);
+        $other = $this->session($this->staff['user_id']);
+        $response = $this->request('DELETE', '/api/admin/user-sessions/' . $other['family'], $this->admin);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $audit = $this->db->pdo()->prepare("SELECT payload FROM activity_log WHERE user_id = ? AND action = 'auth.session_revoked' ORDER BY id DESC LIMIT 1");
+        $audit->execute([$this->admin['user_id']]);
+        $payload = (string) $audit->fetchColumn();
+        self::assertStringContainsString($other['family'], $payload);
+        self::assertStringNotContainsString($other['token'], $payload);
+        self::assertStringNotContainsString($other['csrf_token'], $payload);
+    }
+
     public function testOwnSessionCanBeTerminatedAndCsrfIsRequired(): void
     {
         self::assertSame(403, $this->request('DELETE', '/api/admin/user-sessions/' . $this->admin['family'], $this->admin, false)->getStatusCode());

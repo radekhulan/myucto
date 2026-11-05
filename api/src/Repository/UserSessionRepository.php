@@ -16,6 +16,10 @@ final class UserSessionRepository
                     UNIX_TIMESTAMP(s.expires_at) AS expires_at, s.locked_at,
                     s.last_seen >= DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 5 MINUTE) AS recent_contact';
 
+    // Technické účty správce instance do přehledu superadmina nepatří: jejich relace nevidí ani neukončí.
+    private const MANAGEABLE_USER = 'u.is_active = 1 AND NOT EXISTS (SELECT 1 FROM roles r WHERE r.id = u.role_id
+                    AND (r.role_type = \'instance_admin\' OR r.system_key = \'instance_admin\'))';
+
     public function __construct(private readonly Connection $db) {}
 
     public function page(string $beforeSeen, string $beforeFamily, int $limit, string $currentFamily): array
@@ -26,7 +30,7 @@ final class UserSessionRepository
             'SELECT ' . self::PROJECTION . '
                FROM sessions s JOIN users u ON u.id = s.user_id
               WHERE s.revoked_at IS NULL AND s.replaced_at IS NULL
-                AND s.expires_at > CURRENT_TIMESTAMP(6) AND u.is_active = 1
+                AND s.expires_at > CURRENT_TIMESTAMP(6) AND ' . self::MANAGEABLE_USER . '
                 AND s.session_family_id <> UNHEX(?)
                 AND (s.last_seen < FROM_UNIXTIME(?) OR (s.last_seen = FROM_UNIXTIME(?) AND s.session_family_id < UNHEX(?)))
               ORDER BY s.last_seen DESC, s.session_family_id DESC LIMIT ' . ($limit + 1)
@@ -41,7 +45,7 @@ final class UserSessionRepository
         $stmt = $this->db->pdo()->prepare('SELECT ' . self::PROJECTION . '
             FROM sessions s JOIN users u ON u.id = s.user_id
             WHERE s.session_family_id = UNHEX(?) AND s.revoked_at IS NULL AND s.replaced_at IS NULL
-              AND s.expires_at > CURRENT_TIMESTAMP(6) AND u.is_active = 1
+              AND s.expires_at > CURRENT_TIMESTAMP(6) AND ' . self::MANAGEABLE_USER . '
             ORDER BY s.generation DESC LIMIT 1');
         $stmt->execute([$family]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
@@ -58,10 +62,12 @@ final class UserSessionRepository
     {
         $placeholders = implode(',', array_fill(0, count($families), 'UNHEX(?)'));
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id AS token, user_id, LOWER(HEX(session_family_id)) AS family FROM sessions
-              WHERE session_family_id IN (' . $placeholders . ') AND revoked_at IS NULL
-                AND replaced_at IS NULL AND expires_at > CURRENT_TIMESTAMP(6)
-              ORDER BY generation DESC'
+            'SELECT s.id AS token, s.user_id, LOWER(HEX(s.session_family_id)) AS family
+               FROM sessions s JOIN users u ON u.id = s.user_id
+              WHERE s.session_family_id IN (' . $placeholders . ') AND s.revoked_at IS NULL
+                AND s.replaced_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP(6)
+                AND ' . self::MANAGEABLE_USER . '
+              ORDER BY s.generation DESC'
         );
         $stmt->execute($families);
         $byFamily = [];
