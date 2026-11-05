@@ -1142,7 +1142,8 @@
         "2238_other_item_posting_profiles.sql",
         "2239_other_item_auto_matching.sql",
         "2240_payment_order_other_items.sql",
-        "2241_other_item_installment_components.sql"
+        "2241_other_item_installment_components.sql",
+        "2242_sessions_admin_last_seen.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -23783,6 +23784,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_sess_user": "BTREE (user_id, expires_at)",
+                "idx_sessions_admin_last_seen": "BTREE (revoked_at, replaced_at, last_seen, session_family_id, expires_at)",
                 "idx_sessions_family_revocation": "BTREE (session_family_id, revoked_at)",
                 "idx_sessions_user_revocation": "BTREE (user_id, revoked_at, expires_at)",
                 "uq_sessions_family_generation": "UNIQUE BTREE (session_family_id, generation)"
