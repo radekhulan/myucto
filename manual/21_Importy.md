@@ -672,8 +672,27 @@ Při chybě 401 se token vyřadí a automaticky obnoví, nemusíte nic dělat.
 |---|---|
 | **Subjekty (kontakty)** | Klienti |
 | **Vydané faktury** | Faktury s položkami a DPH klasifikací |
-| **Dobropisy** | Dobropisy |
+| **Zálohové faktury** | Zálohové faktury (proformy) |
+| **Daňové doklady k přijaté platbě** | Daňové doklady k přijaté platbě, navázané na zálohovou fakturu |
+| **Konečné faktury** | Faktury s odpočtem záloh, navázané na zálohové faktury |
+| **Opravné doklady** | Dobropisy, navázané na opravovaný doklad |
 | **Přijaté** (Fakturoid "expenses") | Přijaté faktury |
+
+**Zálohy a vazby dokladů.** Import zachová zálohový cyklus tak, jak ho vede
+Fakturoid. Daňový doklad k přijaté platbě dostane vazbu na zálohovou fakturu,
+jejíž platbu dokumentuje, a je uhrazený. Konečná faktura převezme odpočty
+zdaněných záloh jako záporné řádky v sazbě, v jaké byl daňový doklad vystavený
+(i když je jiná než sazba plnění), takže se už zdaněná záloha nezdaní podruhé
+a částky sedí na Fakturoid. Odečítá-li konečná faktura zálohy jediné zálohové
+faktury, dostane na ni vazbu. Vyúčtuje-li zálohy více zálohových faktur, zapíše
+se čerpání každé zálohy zvlášť (stejné jako akce **Vyrovnat** v saldokontu).
+Úhrada zálohy, ke které daňový doklad vystavený není, sníží částku k úhradě
+konečné faktury. Převyšuje-li uhrazená záloha konečnou fakturu, doklad se označí
+ke kontrole s výší přeplatku. Dobropis dostane vazbu na opravovaný doklad. Vazby
+se navazují až po převzetí všech dokladů, na pořadí dokladů ve Fakturoidu proto
+nezáleží. Doklad, na který vazba ukazuje a který v importu není, se nahlásí ke
+kontrole a vazbu doplníte ručně. Čísla dokladů, variabilní symboly a úhrady se
+přebírají beze změny.
 
 **Platební stav.** Stejně jako u iDokladu se přebírá skutečný stav z Fakturoidu:
 doklad **Zaplaceno** se importuje jako Zaplacená (datum úhrady `paid_on`),
@@ -698,7 +717,10 @@ externí ID téhož zdroje, založí se karta nová.
 Import přebírá ceny tak, jak jsou ve Fakturoidu. U dokladů s cenami včetně DPH
 se daň počítá shora, takže 1 210 Kč včetně 21 % dá základ 1 000 Kč a DPH 210 Kč.
 U přijatých faktur se převezme zaokrouhlení a rekapitulace DPH dokladu; haléřový
-rozdíl se srovná ruční rekapitulací DPH. Liší-li se částky po přenosu od
+rozdíl se srovná ruční rekapitulací DPH. Vydaný doklad s cenami bez DPH, jehož
+řádek má cenu na víc než haléře (typicky řádek **Zaokrouhlení**), počítá Fakturoid
+z ceny s DPH. Takový doklad se převezme v režimu cen včetně DPH, pokud tak základ
+i DPH přesně odpovídají Fakturoidu. Liší-li se částky po přenosu od
 Fakturoidu víc, než vysvětlí zaokrouhlení, doklad se označí ke kontrole. Doklady
 bez DPH (neplátci, nulová sazba) se přenášejí beze změny.
 

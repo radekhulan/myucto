@@ -107,6 +107,82 @@ final class FakturoidSourceDocument
     }
 
     /**
+     * Jednotková cena s DPH (`unit_price_with_vat`), kterou Fakturoid u řádku vede vedle
+     * ceny bez DPH. Null, když ji řádek nemá.
+     *
+     * @param array<string,mixed> $line
+     */
+    public static function lineUnitPriceWithVat(array $line): ?float
+    {
+        $value = $line['unit_price_with_vat'] ?? null;
+        return is_numeric($value) ? (float) $value : null;
+    }
+
+    /**
+     * Druh vydaného dokladu Fakturoidu (`document_type`) v MyÚčtu. Daňový doklad
+     * k přijaté platbě (`tax_document`) je náš `tax_document`, konečná faktura
+     * k záloze (`final_invoice`) je běžná faktura s odpočtem zálohy, opravný doklad
+     * (`correction`) dobropis.
+     *
+     * @param array<string,mixed> $doc
+     */
+    public static function issuedType(array $doc): string
+    {
+        return match ((string) ($doc['document_type'] ?? $doc['kind'] ?? 'invoice')) {
+            'proforma'     => 'proforma',
+            'correction'   => 'credit_note',
+            'tax_document' => 'tax_document',
+            default        => 'invoice',
+        };
+    }
+
+    /**
+     * Odpočty zdaněných záloh konečné faktury (`paid_advances`): každý řádek je daňový
+     * doklad k přijaté platbě, jehož základ a daň konečná faktura odečítá (§ 37a ZDPH).
+     * Fakturoid je vede mimo `lines` se zápornou cenou bez DPH (`price`) a daní (`vat`).
+     *
+     * @param array<string,mixed> $doc
+     * @return list<array{id:int, number:string, rate:float, base:float, vat:float}>
+     */
+    public static function paidAdvances(array $doc): array
+    {
+        $out = [];
+        foreach (($doc['paid_advances'] ?? []) as $row) {
+            if (!is_array($row) || !is_numeric($row['price'] ?? null)) {
+                continue;
+            }
+            $out[] = [
+                'id'     => (int) ($row['id'] ?? 0),
+                'number' => trim((string) ($row['number'] ?? '')),
+                'rate'   => (float) ($row['vat_rate'] ?? 0),
+                'base'   => -abs(round((float) $row['price'], 2)),
+                'vat'    => -abs(round((float) ($row['vat'] ?? 0), 2)),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Odpočet nezdaněné zálohy na konečné faktuře: úhrada zálohové faktury, ke které
+     * Fakturoid daňový doklad nevystavil. Tržbu ani daň nemění, jen snižuje částku
+     * k úhradě. Fakturoid ji nevede v položkách, ale v rozdílu celkové a zbývající
+     * částky dokladu (`total` − `remaining_amount`); vlastní úhrady konečné faktury
+     * zbývající částku nesnižují. Vrací celou zaplacenou zálohu (může převyšovat
+     * fakturu, strop řeší volající), u jiného druhu dokladu nulu.
+     *
+     * @param array<string,mixed> $doc
+     */
+    public static function untaxedAdvance(array $doc): float
+    {
+        if ((string) ($doc['document_type'] ?? '') !== 'final_invoice'
+            || !is_numeric($doc['total'] ?? null) || !is_numeric($doc['remaining_amount'] ?? null)) {
+            return 0.0;
+        }
+        $advance = round((float) $doc['total'] - (float) $doc['remaining_amount'], 2);
+        return $advance > self::EPSILON ? $advance : 0.0;
+    }
+
+    /**
      * Zdrojová rekapitulace DPH (`vat_rates_summary`). Hlavičkové `subtotal` může
      * obsahovat zaokrouhlení, proto se porovnává s rekapitulací. Prázdná nebo
      * chybějící rekapitulace = není s čím porovnat.
