@@ -212,7 +212,7 @@ describe('router guard vynuceného nastavení MFA', () => {
     const auth = signIn({ role: { type: roleType } })
     for (const stockEnabled of [false, true]) {
       useSupplierStore().setAvailable([{ id: 7, accounting_mode: 'double_entry', stock_enabled: stockEnabled }] as never, 7)
-      for (const level of [0, 1, 2]) {
+      for (const level of [0, 1, 2] as const) {
         auth.permissions = { price_list: level }
         const result = await authorizationGuard(resolveTarget({ name: 'admin-work-report-billing-templates' }))
         expect(result === true).toBe(level > 0)

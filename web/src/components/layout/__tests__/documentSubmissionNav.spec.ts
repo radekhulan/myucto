@@ -134,7 +134,7 @@ describe('AppLayout účtování výkazů v Prodeji', () => {
   it.each<Role>(['admin', 'accountant', 'client'])('%s má šablony i při zapnutém skladu', role => {
     const wrapper = renderNavigation(role, { price_list: true }, { stockEnabled: true })
     expect(wrapper.find('a[href="/admin/price-list"]').exists()).toBe(false)
-    expect(wrapper.get('[data-section="sales"] a[href="/admin/work-report-billing-templates"]').exists()).toBe(true)
+    expect(wrapper.find('[data-section="sales"] a[href="/admin/work-report-billing-templates"]').exists()).toBe(true)
     wrapper.unmount()
   })
 })

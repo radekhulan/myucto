@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
+import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
 import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
 import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
@@ -2232,7 +2233,7 @@ const isRefundInvoice = computed(() =>
 
 const hasNonPositiveAmountToPay = computed(() =>
   requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
-    && !(amountItems(form.value.items).length === 0 && wrBillingPending.value && wrBillingPendingAmount.value > 0)
+    && !(editedStatus.value === 'draft' && amountItems(form.value.items).length === 0)
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
@@ -2309,11 +2310,11 @@ const wrBillingStale = ref(false)
 const wrBillingReportId = ref<number | null>(null)
 const wrBillingCurrentPreview = ref<WorkReportBillingPreview | null>(null)
 const wrBillingPending = ref(false)
-const wrBillingPendingAmount = ref(0)
+const wrBillingPendingPreview = ref<WorkReportBillingPreview | null>(null)
 const billingDraftId = ref<number | null>(null)
 const wrBillingLegacyItemId = ref<number | null>(null)
 function queueWrBilling(preview: WorkReportBillingPreview) {
-  wrBillingPendingAmount.value = preview.total_amount
+  wrBillingPendingPreview.value = preview
   wrBillingPending.value = true
 }
 const wrOpen = ref(false)
@@ -3408,6 +3409,10 @@ useWindowTitle(
         <div v-if="requiresPositiveAmountToPay" class="px-5 py-3 border-b border-neutral-100 text-xs text-neutral-500">
           {{ t(refundInvoiceAllowed ? 'refundInvoice.negative_item_hint' : 'invoice.negative_item_hint') }}
           <template v-if="showLineDiscountInput">{{ t('invoice.line_discount.table_hint') }}</template>
+        </div>
+        <div v-if="wrBillingPending && wrBillingPendingPreview" class="m-4 rounded-md border border-success-500/40 bg-success-50/30 p-3 space-y-3" data-test="pending-billing-items">
+          <p role="status" class="text-sm font-medium text-success-700">{{ t('work_report_billing.pending', { count: wrBillingPendingPreview.items.length }) }}</p>
+          <BillingRecap :preview="wrBillingPendingPreview" :currency="form.currency" :prices-include-vat="form.prices_include_vat" />
         </div>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">

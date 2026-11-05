@@ -60,10 +60,10 @@ async function calculate(transfer = false) {
       </label>
       <p v-if="snapshot.currency !== currency" class="text-sm text-danger-600">{{ t('work_report_billing.currency_mismatch') }}</p>
       <p v-if="stale && !pending" class="text-sm text-warning-600">{{ t('work_report_billing.stale') }}</p>
-      <p v-if="pending" class="text-sm text-success-600">{{ t('work_report_billing.pending') }}</p>
+      <p v-if="pending" role="status" class="rounded-md border border-success-500/40 bg-success-50 px-3 py-2 text-sm font-medium text-success-700">{{ t('work_report_billing.pending', { count: preview?.items.length ?? 0 }) }}</p>
       <div class="flex flex-wrap gap-2">
         <button type="button" :class="btnOutline('neutral')" :disabled="busy || snapshot.currency !== currency" @click="calculate()"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.eye" /></svg>{{ t('work_report_billing.preview') }}</button>
-        <button type="button" :class="btnOutline('primary')" :disabled="busy || snapshot.currency !== currency" @click="calculate(true)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.swap" /></svg>{{ t('invoice.wr_push_to_item') }}</button>
+        <button type="button" data-test="billing-prepare-transfer" :class="btnOutline(pending ? 'success' : 'primary')" :disabled="busy || snapshot.currency !== currency" @click="calculate(true)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="pending ? ICONS.check : ICONS.swap" /></svg>{{ t(pending ? 'work_report_billing.ready_to_save' : 'work_report_billing.prepare_transfer') }}</button>
       </div>
       <BillingRecap v-if="preview" :preview="preview" :currency="currency" :prices-include-vat="pricesIncludeVat" />
     </template>

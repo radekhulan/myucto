@@ -41217,7 +41217,7 @@
     "override": "Customize this report’s rules",
     "currency_mismatch": "Template currency must match the invoice currency.",
     "stale": "The report or its rules have changed. Transfer billing again to update the invoice items.",
-    "pending": "Billing will be transferred to invoice items when you save the invoice.",
+    "pending": "Transfer prepared — no new items; changes will take effect after saving the invoice. | Transfer prepared — {count} item will be inserted after saving the invoice. | Transfer prepared — {count} items will be inserted after saving the invoice.",
     "preview": "Billing preview",
     "recap": "Billing recap",
     "hours_recap": "Included: {included} h · Extra: {extra} h",
@@ -41228,6 +41228,8 @@
     "prices_incl_vat": "Prices and amounts include VAT.",
     "prices_excl_vat": "Prices and amounts exclude VAT.",
     "saved_copy": "Saved template copy",
-    "save_unsynced_confirm": "Billing for work report “{description}” has not been transferred yet or has changed. Save the report without updating the invoice items?"
+    "save_unsynced_confirm": "Billing for work report “{description}” has not been transferred yet or has changed. Save the report without updating the invoice items?",
+    "prepare_transfer": "Prepare transfer",
+    "ready_to_save": "Ready to save"
   }
 }

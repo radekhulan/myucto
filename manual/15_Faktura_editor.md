@@ -54,6 +54,8 @@ nebo z detailu klienta či zakázky).
    (`Nastavení`, záložka **Fakturace**, viz [§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura)).
 10. Klikněte na **Odeslat klientovi**. Odeslání e-mailem je samostatný krok po vystavení.
 
+Koncept lze uložit i bez položek; fakturu bez alespoň jedné položky nelze **vystavit**.
+
 **Jak poznáte, že je hotovo:** v seznamu `Prodej → Vydané faktury` má faktura stav
 **Vystaveno**, po odeslání **Odesláno**.
 
@@ -194,7 +196,7 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 <!-- cols: 32 34 34 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| „Faktura musí mít aspoň jednu položku.“ | Vystavit nelze doklad bez položek; textové řádky se mezi položky nepočítají | Přidejte položku tlačítkem **+ Přidat položku** |
+| „Faktura musí mít aspoň jednu položku.“ | Vystavit nelze doklad bez položek; textové řádky se mezi položky nepočítají. Koncept bez položek uložit lze | Před vystavením přidejte položku tlačítkem **+ Přidat položku** |
 | „Výsledná částka k úhradě musí být větší než 0. Pro čistě záporný nebo nulový doklad použij dobropis.“ | Faktura nesmí skončit zápornou částkou | Vystavte dobropis, nebo zapněte vyúčtování s částkou k vyplacení ([§ 15.9.4](#1594-sumar-vpravo)) |
 | Chyba „Číslo už existuje…“ | Ručně zadané číslo už je u jiné faktury téhož dodavatele | Číslo změňte, nebo pole nechte prázdné |
 | Tlačítko **Vystavit** je zablokované | Zakázka vyžaduje schválení výkazu zákazníkem | Pošlete výkaz ke schválení ([§ 15.6](#156-krok-za-krokem-nechat-vykaz-schvalit-zakaznikem)) |
@@ -588,7 +590,7 @@ Textový řádek je jen text na dokladu:
   kontrolního hlášení, OSS ani zaúčtování nevstupuje,
 - nevydává nic ze skladu a neprodává majetek,
 - prázdný textový řádek se při uložení zahodí,
-- doklad jen z textových řádků vystavit nejde, potřebuje aspoň jednu položku.
+- doklad jen z textových řádků vystavit nejde, potřebuje aspoň jednu položku; koncept pouze s textovými řádky uložit lze.
 
 Kopie dokladu i dobropis textový řádek převezmou na stejné místo. U kopie s posunem
 měsíce se posune i měsíc v jeho textu. Jak se textový řádek přenáší do exportů,
@@ -837,8 +839,10 @@ cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 Výkaz může používat **šablonu účtování** s paušálem a pásmy hodin ze stránky
 `Prodej → Šablony účtování výkazů`. Po výběru šablony se
 v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
-`RRRR-MM`. Tlačítko **Přenést do faktury** připraví položky, ale přenos se provede až
-po uložení faktury. Při nahrazení starší souhrnné položky ji vyberte v nabídce, jinak
+`RRRR-MM`. Tlačítkem **Připravit přenos** zařadíte účtovací položky k uložení;
+po akci se zobrazí **Připraveno k uložení**, počet čekajících položek a jejich náhled
+u položek faktury. Samotný přenos se provede až po uložení faktury. Při nahrazení
+starší souhrnné položky ji vyberte v nabídce, jinak
 by se mohla částka účtovat dvakrát. Propojené položky mají stabilní vazbu na výkaz a
 na PDF odkazují na jeho podrobný rozpis. Při ukládání nepřeneseného nebo změněného
 účtování se aplikace zeptá, zda chcete pokračovat bez aktualizace položek faktury.

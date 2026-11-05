@@ -109,6 +109,91 @@ final class WorkReportBillingIntegrationTest extends TestCase
         } catch (\Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
     }
 
+    /** Skutečný editor ukládá odstranění starého souhrnu před přenosem nových pásem. */
+    public function testExistingDraftCanBeEmptiedBeforeTransferringBillingRows(): void
+    {
+        $repo = $this->container->get(InvoiceRepository::class);
+        $repo->replaceItems($this->invoice, [['description' => 'Původní souhrn práce', 'quantity' => 1,
+            'unit' => 'ks', 'unit_price_without_vat' => 700, 'vat_rate_id' => $this->vat]]);
+        $this->container->get(\MyInvoice\Service\Invoice\InvoiceCalculator::class)->recompute($this->invoice);
+        $this->save(['title' => 'Práce', 'items' => [['description' => 'Syntetická práce', 'duration_minutes' => 180, 'rate' => 300]]]);
+        $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/invoices/' . $this->invoice)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withParsedBody(['items' => []]);
+        $response = ($this->container->get(\MyInvoice\Action\Invoice\UpdateInvoiceAction::class))($request, new Response(), ['id' => $this->invoice]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $empty = $repo->find($this->invoice);
+        self::assertSame('draft', $empty['status']);
+        self::assertSame([], $empty['items']);
+        self::assertEquals(0, $empty['total_with_vat']);
+        $issue = ($this->container->get(\MyInvoice\Action\Invoice\IssueInvoiceAction::class))(
+            $request->withMethod('POST')->withParsedBody([]), new Response(), ['id' => $this->invoice]);
+        self::assertSame(422, $issue->getStatusCode(), (string) $issue->getBody());
+        self::assertSame('no_items', json_decode((string) $issue->getBody(), true)['error']['code']);
+        self::assertSame('draft', $repo->find($this->invoice)['status']);
+        $report = $this->save(['billing_snapshot' => WorkReportBillingTest::settings(), 'billing_period' => '2026-11']);
+        $transferred = $this->transfer($report);
+        self::assertCount(2, $transferred['items']);
+        self::assertSame(['fixed', 'band:0'], array_column($transferred['items'], 'work_report_billing_key'));
+    }
+
+    public function testIssuedInvoiceCannotLoseAllRowsEvenWithForce(): void
+    {
+        $repo = $this->container->get(InvoiceRepository::class);
+        $repo->replaceItems($this->invoice, [['description' => 'Vystavené plnění', 'quantity' => 1,
+            'unit' => 'ks', 'unit_price_without_vat' => 700, 'vat_rate_id' => $this->vat]]);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$this->invoice]);
+        $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/invoices/' . $this->invoice)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withQueryParams(['force' => '1'])
+            ->withParsedBody(['items' => []]);
+        $response = ($this->container->get(\MyInvoice\Action\Invoice\UpdateInvoiceAction::class))($request, new Response(), ['id' => $this->invoice]);
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('no_items', json_decode((string) $response->getBody(), true)['error']['code']);
+        self::assertCount(1, $repo->itemsFor($this->invoice));
+    }
+
+    /** Táž stavová politika platí i pro obecný PUT přijatého konceptu. */
+    public function testPurchaseDraftCanBeEmptiedButReceivedDocumentCannot(): void
+    {
+        $invoice = $this->container->get(InvoiceRepository::class)->find($this->invoice);
+        $this->db->pdo()->prepare('UPDATE clients SET is_vendor = 1 WHERE id = ?')->execute([$invoice['client_id']]);
+        $body = ['vendor_id' => $invoice['client_id'], 'vendor_invoice_number' => 'SYN-EMPTY-DRAFT',
+            'document_kind' => 'invoice', 'issue_date' => '2026-11-01', 'tax_date' => '2026-11-01',
+            'due_date' => '2026-11-15', 'received_at' => '2026-11-01', 'currency_id' => $invoice['currency_id'],
+            'items' => [['description' => 'Syntetické přijaté plnění', 'quantity' => 1, 'unit' => 'ks',
+                'unit_price_without_vat' => 700, 'vat_rate_id' => $this->vat]]];
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/purchase-invoices')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withParsedBody($body);
+        $created = ($this->container->get(\MyInvoice\Action\PurchaseInvoice\CreatePurchaseInvoiceAction::class))($request, new Response());
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $id = (int) json_decode((string) $created->getBody(), true)['id'];
+        $repo = $this->container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class);
+        $update = $this->container->get(\MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction::class);
+        try {
+            $emptyRequest = $request->withMethod('PUT')->withParsedBody(['items' => []]);
+            $response = $update($emptyRequest, new Response(), ['id' => $id]);
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            $empty = $repo->find($id, $this->supplier);
+            self::assertSame([], $empty['items']);
+            self::assertSame('draft', $empty['status']);
+            self::assertEquals(0, $empty['total_with_vat']);
+            $restored = $update($request->withMethod('PUT')->withParsedBody(['items' => $body['items']]), new Response(), ['id' => $id]);
+            self::assertSame(200, $restored->getStatusCode(), (string) $restored->getBody());
+            $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'received' WHERE id = ?")->execute([$id]);
+            $rejected = $update($emptyRequest->withQueryParams(['force' => '1']), new Response(), ['id' => $id]);
+            self::assertSame(422, $rejected->getStatusCode(), (string) $rejected->getBody());
+            self::assertSame('no_items', json_decode((string) $rejected->getBody(), true)['error']['code']);
+            self::assertCount(1, $repo->find($id, $this->supplier)['items']);
+        } finally {
+            $this->db->pdo()->prepare('DELETE FROM purchase_invoices WHERE id = ? AND supplier_id = ?')->execute([$id, $this->supplier]);
+        }
+    }
+
     public function testTransferIsRepeatableKeepsUnrelatedRowsAndStableLinks(): void
     {
         $repo = $this->container->get(InvoiceRepository::class);

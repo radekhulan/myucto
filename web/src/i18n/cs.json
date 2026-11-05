@@ -41217,7 +41217,7 @@
     "override": "Upravit pravidla tohoto výkazu",
     "currency_mismatch": "Měna šablony se musí shodovat s měnou dokladu.",
     "stale": "Výkaz nebo jeho pravidla se změnily. Přeneste účtování znovu, aby položky faktury odpovídaly.",
-    "pending": "Účtování se přenese do položek při uložení dokladu.",
+    "pending": "Přenos připraven — žádné nové položky; změny se provedou po uložení faktury. | Přenos připraven — {count} položka se vloží po uložení faktury. | Přenos připraven — {count} položky se vloží po uložení faktury. | Přenos připraven — {count} položek se vloží po uložení faktury.",
     "preview": "Náhled účtování",
     "recap": "Rekapitulace účtování",
     "hours_recap": "Zahrnuto: {included} h · Navíc: {extra} h",
@@ -41228,6 +41228,8 @@
     "prices_incl_vat": "Ceny a částky včetně DPH.",
     "prices_excl_vat": "Ceny a částky bez DPH.",
     "saved_copy": "Uložená kopie šablony",
-    "save_unsynced_confirm": "Účtování výkazu „{description}“ dosud nebylo přeneseno nebo se změnilo. Uložit výkaz bez aktualizace položek faktury?"
+    "save_unsynced_confirm": "Účtování výkazu „{description}“ dosud nebylo přeneseno nebo se změnilo. Uložit výkaz bez aktualizace položek faktury?",
+    "prepare_transfer": "Připravit přenos",
+    "ready_to_save": "Připraveno k uložení"
   }
 }

@@ -8,7 +8,7 @@ vi.mock('@/api/workReportBilling', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/workReportBilling')>(),
   workReportBillingApi: { previewDraft: vi.fn() },
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { count?: number }) => params?.count == null ? key : `${key}:${params.count}`, locale: ref('cs') }) }))
 const template = { ...newBillingSnapshot(), id: 7, name: 'Servis', fixed_fee: 5000, included_hours: 5 }
 const preview: WorkReportBillingPreview = { items: [], total_hours: 0, included_hours: 0, extra_hours: 0, total_amount: 5000, fingerprint: 'canonical-fingerprint' }
 function mountEditor() {
@@ -30,7 +30,7 @@ describe('ReportBillingEditor', () => {
   it('přenos předá přesně kanonický náhled až po výslovném kliknutí', async () => {
     const wrapper = mountEditor()
     expect(workReportBillingApi.previewDraft).not.toHaveBeenCalled()
-    await wrapper.findAll('button').find(button => button.text() === 'invoice.wr_push_to_item')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.attributes('data-test') === 'billing-prepare-transfer')!.trigger('click')
     await flushPromises()
     expect(wrapper.emitted('transfer')).toEqual([[preview]])
   })
@@ -46,11 +46,30 @@ describe('ReportBillingEditor', () => {
     const wrapper = mountEditor()
     let resolve!: (value: WorkReportBillingPreview) => void
     vi.mocked(workReportBillingApi.previewDraft).mockReturnValueOnce(new Promise(done => { resolve = done }))
-    await wrapper.findAll('button').find(button => button.text() === 'invoice.wr_push_to_item')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.attributes('data-test') === 'billing-prepare-transfer')!.trigger('click')
     await wrapper.setProps({ items: [{ description: 'Analýza', hours: 2, rate: 0, order_index: 0 }] })
     resolve(preview)
     await flushPromises()
     expect(wrapper.emitted('changed')).toBeDefined()
     expect(wrapper.emitted('transfer')).toBeUndefined()
   })
+})
+
+
+it('příprava ukáže počet kanonických řádků a jasně vyžaduje uložení faktury', async () => {
+  const wrapper = mountEditor()
+  const rows = [
+    { description: 'Paušál', quantity: 1, unit: 'ks', unit_price_without_vat: 5000, vat_rate_id: 1, billing_key: 'fixed', total_amount: 5000 },
+    { description: 'Hodiny navíc', quantity: 2, unit: 'h', unit_price_without_vat: 1500, vat_rate_id: 1, billing_key: 'band:0', total_amount: 3000 },
+  ]
+  vi.mocked(workReportBillingApi.previewDraft).mockResolvedValueOnce({ ...preview, items: rows, total_hours: 7, extra_hours: 2, total_amount: 8000 })
+  expect(wrapper.get('[data-test="billing-prepare-transfer"]').text()).toBe('work_report_billing.prepare_transfer')
+  await wrapper.get('[data-test="billing-prepare-transfer"]').trigger('click')
+  await flushPromises()
+  await wrapper.setProps({ pending: true })
+  expect(wrapper.get('[data-test="billing-prepare-transfer"]').text()).toBe('work_report_billing.ready_to_save')
+  expect(wrapper.get('[role="status"]').text()).toBe('work_report_billing.pending:2')
+  expect(wrapper.findComponent({ name: 'BillingRecap' }).props('preview').items).toHaveLength(2)
+  expect(wrapper.emitted('transfer')).toHaveLength(1)
+  wrapper.unmount()
 })
