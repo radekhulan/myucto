@@ -162,6 +162,10 @@
       "future_only": "Changes apply to future postings; posted entries stay unchanged.",
       "inherited_placeholder": "From kind: {account}",
       "default_placeholder": "Default: {account}",
+      "suggested_for_kind": "Suggested accounts for kind {kind}: Dr {debit} / Cr {credit}",
+      "suggestion_use": "Use",
+      "suggestion_save": "Save as kind default",
+      "repost_hint": "The item account is changed by re-posting the origin; payments then follow it.",
       "inherited_note": "An empty item account and counter account are filled in from the kind's posting profile when posting.",
       "kinds": {
         "button": "Posting",

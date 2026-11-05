@@ -6,10 +6,11 @@ import { accountingApi, type ChartAccount } from '@/api/accounting'
 import type { Client } from '@/api/clients'
 import { otherItemKindsApi, otherItemsApi, type OtherItemKind, type OtherItemPayload, type OtherItemPostingLine, type OtherItemSide } from '@/api/otherItems'
 import { useSupplierStore } from '@/stores/supplier'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { appIsoDate } from '@/utils/date'
 import { isCounterpartyAccountFormat, joinAccountBankCode } from '@/utils/bankAccount'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
@@ -21,6 +22,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const supplier = useSupplierStore()
+const auth = useAuthStore()
 const toast = useToast()
 const editId = computed(() => Number(route.params.id || 0))
 const isEdit = computed(() => editId.value > 0)
@@ -88,6 +90,52 @@ const accountPlaceholder = computed(() => inheritedAccount.value
 const counterPlaceholder = computed(() => inheritedCounter.value
   ? t('other_items.posting.inherited_placeholder', { account: inheritedCounter.value })
   : t('other_items.choose_account'))
+
+const canSaveKindProfile = computed(() => auth.canWrite('other_items'))
+const savingSuggestion = ref(false)
+/** Návrh kontace vzniku se nabízí jen druhu bez uloženého profilu vzniku a při prázdných účtech. */
+const originSuggestion = computed(() => {
+  const kind = selectedKind.value
+  const suggestion = kind?.posting_suggestion
+  if (!isDoubleEntry.value || splitPosting.value || !kind || !suggestion?.available) return null
+  if (kind.posting_profiles?.origin || form.account_code || form.counter_account_code) return null
+  const receivable = form.side === 'receivable'
+  return {
+    debit: suggestion.debit_account_code,
+    credit: suggestion.credit_account_code,
+    account: receivable ? suggestion.debit_account_code : suggestion.credit_account_code,
+    counter: receivable ? suggestion.credit_account_code : suggestion.debit_account_code,
+  }
+})
+function applySuggestion() {
+  const suggestion = originSuggestion.value
+  if (!suggestion) return
+  form.account_code = suggestion.account
+  form.counter_account_code = suggestion.counter
+}
+async function saveSuggestionAsDefault() {
+  const kind = selectedKind.value
+  const suggestion = originSuggestion.value
+  if (!kind || !suggestion || savingSuggestion.value) return
+  savingSuggestion.value = true
+  try {
+    await otherItemKindsApi.savePostingProfiles(kind, {
+      origin: {
+        debit_account_code: suggestion.debit,
+        credit_account_code: suggestion.credit,
+        description_template: null,
+        dimensions: [],
+        is_active: true,
+      },
+    })
+    kinds.value = await otherItemKindsApi.list()
+    toast.success(t('other_items.posting.kinds.saved'))
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    savingSuggestion.value = false
+  }
+}
 
 // Výchozí dimenze z profilu druhu doplní nový doklad tam, kde typ ještě nemá hodnotu.
 watch(() => [form.kind, dimsReady.value, originProfile.value] as const, () => {
@@ -309,6 +357,11 @@ onMounted(load)
           <label v-if="!splitPosting" class="text-sm font-medium">{{ t('other_items.counter_account_code') }}
             <ChartAccountSelect v-model="form.counter_account_code" :accounts="accountChoices" :placeholder="counterPlaceholder" class="mt-1 block" />
           </label>
+        </div>
+        <div v-if="originSuggestion" class="mt-2 flex flex-wrap items-center gap-2 text-xs" data-test="origin-suggestion">
+          <span class="text-neutral-600">{{ t('other_items.posting.suggested_for_kind', { kind: selectedKind?.name || t(`other_items.kind_by_side.${form.side}.${form.kind}`), debit: originSuggestion.debit, credit: originSuggestion.credit }) }}</span>
+          <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="origin-suggestion-use" @click="applySuggestion">{{ t('other_items.posting.suggestion_use') }}</button>
+          <button v-if="canSaveKindProfile" type="button" :disabled="savingSuggestion" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-test="origin-suggestion-save" @click="saveSuggestionAsDefault">{{ t('other_items.posting.suggestion_save') }}</button>
         </div>
         <p v-if="originProfile" class="mt-2 text-xs text-neutral-500" data-test="origin-inherited">{{ t('other_items.posting.inherited_note') }}</p>
         <div v-if="splitPosting" class="mt-4">

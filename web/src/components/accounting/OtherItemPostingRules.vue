@@ -19,8 +19,9 @@ const props = defineProps<{
   item: OtherItem
   accounts: ChartAccount[]
   canWrite: boolean
+  canRepost?: boolean
 }>()
-const emit = defineEmits<{ (e: 'changed', item: OtherItem): void }>()
+const emit = defineEmits<{ (e: 'changed', item: OtherItem): void; (e: 'repost'): void }>()
 
 const { t } = useI18n()
 const toast = useToast()
@@ -36,6 +37,19 @@ const events = computed<OtherItemPostingEvent[]>(() => [
   'payment_bank', 'payment_cash',
   ...(showComponents.value ? ['interest' as const, 'fee' as const] : []),
 ])
+const showPosted = computed(() => ['confirmed', 'posted'].includes(String(props.item.status)))
+/** Vznik tak, jak je v položce: účet položky a protiúčet nebo rozpad na protiřádky. */
+const postedOrigin = computed(() => {
+  const receivable = props.item.side === 'receivable'
+  const itemCode = props.item.account_code || (receivable ? '315' : '325')
+  const own = (props.item.posting_lines || []).map(line => ({ account_code: line.account_code, amount: Number(line.amount) }))
+  const counters = own.length > 0 ? own
+    : props.item.counter_account_code ? [{ account_code: props.item.counter_account_code, amount: Number(props.item.amount) }] : []
+  return {
+    item: { account_code: itemCode, side: receivable ? 'debit' : 'credit', amount: Number(props.item.amount) },
+    counters: counters.map(line => ({ ...line, side: receivable ? 'credit' : 'debit' })),
+  }
+})
 const active = computed(() => ['draft', 'confirmed', 'posted'].includes(String(props.item.status)))
 const rule = (event: OtherItemPostingEvent): OtherItemEffectivePosting | undefined => props.item.posting_rules?.[event]
 /** Upravovaný sloupec: peněžní účet úhrady, u úroku a poplatku účet nákladu (závazek) či výnosu (pohledávka). */
@@ -86,6 +100,27 @@ async function save(event: OtherItemOverrideEvent, reset = false) {
   <section class="mt-4 rounded-lg border border-neutral-200 bg-surface p-4" data-test="other-item-posting-rules">
     <h2 class="font-semibold">{{ t('other_items.posting.title') }}</h2>
     <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.posting.hint') }}</p>
+    <div v-if="showPosted" class="mt-3 border-b border-neutral-100 pb-3" data-test="posted-origin">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0 text-sm">
+          <span class="font-medium">{{ t('other_items.posting.event.origin') }}</span>
+          <ul class="mt-1 space-y-0.5 tabular-nums">
+            <li v-for="(line, index) in [postedOrigin.item, ...postedOrigin.counters]" :key="index" class="flex flex-wrap gap-2">
+              <span class="w-8 text-neutral-500">{{ t(line.side === 'debit' ? 'other_items.posting.debit' : 'other_items.posting.credit') }}</span>
+              <span class="font-mono">{{ line.account_code }}</span>
+              <span class="text-neutral-500">{{ formatMoney(line.amount, item.currency) }}</span>
+            </li>
+            <li v-if="postedOrigin.counters.length === 0" class="text-warning-700">{{ t('other_items.posting.missing_counter') }}</li>
+          </ul>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.posting.repost_hint') }}</p>
+        </div>
+        <button v-if="canRepost" type="button" :disabled="Number(item.paid_amount) > 0" :title="Number(item.paid_amount) > 0 ? t('other_items.repost_paid') : undefined"
+                :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="posting-repost" @click="emit('repost')">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+          {{ t('other_items.repost') }}
+        </button>
+      </div>
+    </div>
     <div class="mt-3 divide-y divide-neutral-100">
       <div v-for="event in events" :key="event" class="py-3" :data-test="`posting-rule-${event}`">
         <div v-if="rule(event)" class="flex flex-wrap items-start justify-between gap-3">

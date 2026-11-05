@@ -162,6 +162,10 @@
       "future_only": "Změna platí pro další zaúčtování, zaúčtované zápisy se nemění.",
       "inherited_placeholder": "Z druhu: {account}",
       "default_placeholder": "Výchozí: {account}",
+      "suggested_for_kind": "Navržené účty pro druh {kind}: MD {debit} / D {credit}",
+      "suggestion_use": "Použít",
+      "suggestion_save": "Uložit jako výchozí pro druh",
+      "repost_hint": "Účet položky se mění přeúčtováním vzniku, úhrady ho pak následují.",
       "inherited_note": "Prázdný účet položky a protiúčet doplní při zaúčtování účetní profil druhu.",
       "kinds": {
         "button": "Účtování",
