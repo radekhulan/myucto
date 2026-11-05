@@ -5,8 +5,9 @@
  * Token smí založit, upravit a smazat KONCEPT, připojit k němu dokument
  * (smlouvu), nastavit jeho dimenze, splátkový kalendář
  * a založit nebo pozastavit opakování bez automatického účtování. Nic z toho
- * nezapisuje do deníku. Potvrzení a zaúčtování, storno, přeúčtování, párování
- * úhrad, generování opakování a zapnutí automatického účtování tu nejsou
+ * nezapisuje do deníku. Výjimkou je přiřazení úhrady (allocate_other_item_payment):
+ * spáruje existující platbu s potvrzenou položkou, nic neúčtuje. Potvrzení a zaúčtování,
+ * storno, přeúčtování, odpárování úhrad, generování opakování a zapnutí automatického účtování tu nejsou
  * a server je tokenu odmítne (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS).
  *
  * Kontroly tvaru (součet kontace, součet a pořadí splátek, stav dokladu) běží
@@ -455,6 +456,41 @@ export const OTHER_ITEM_TOOLS = [
       }
       requireConfirm(a, `Zrušit se má splátkový kalendář (${existing.length} splátek)`, itemLabel(item));
       return { cleared: existing, result: await c.put(`${BASE}/${seg(a.item_id)}/installments`, { items: [] }, tool) };
+    },
+  },
+  {
+    name: 'allocate_other_item_payment',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Přiřadit úhradu k ostatní položce',
+    description:
+      'Přiřadí jednu bankovní transakci (`bank_transaction_id`) NEBO jeden pokladní doklad (`cash_document_id`) '
+      + 'k potvrzené nebo zaúčtované ostatní položce na zadanou částku. Kandidáty vypíše other_item_payment_candidates. '
+      + 'Splátku, kterou úhrada hradí, určí server sám: otevřená splátka se zbytkem přesně ve výši částky, jinak první '
+      + 'otevřená; přebytek pokryje další splátky. Server odmítne přeplatek, jinou měnu než Kč, platbu opačného směru, '
+      + 'platbu bez volné částky i koncept. Je to zápis do evidence úhrad a vyžaduje potvrzení uživatele; nic se nezaúčtuje, '
+      + 'jen se spáruje existující platba. Odpárování a účtování řeší účetní ve webovém rozhraní.',
+    inputSchema: schema({
+      item_id: id('ID ostatní položky.'),
+      bank_transaction_id: id('ID bankovní transakce z other_item_payment_candidates. Zadej právě jedno z '
+        + 'bank_transaction_id a cash_document_id.'),
+      cash_document_id: id('ID pokladního dokladu z other_item_payment_candidates.'),
+      amount: num('Přiřazená částka v Kč na haléře; nejvýše zbývající dluh položky a volná část platby.',
+        { exclusiveMinimum: 0 }),
+    }, ['item_id', 'amount']),
+    write: true,
+    run: (c, a, tool) => {
+      if ((a.bank_transaction_id === undefined) === (a.cash_document_id === undefined)) {
+        throw new Error('NEPROVEDENO: zadej právě jedno z bank_transaction_id a cash_document_id.');
+      }
+      if (!Number.isFinite(a.amount) || a.amount <= 0 || Math.round(a.amount * 100) / 100 !== a.amount) {
+        throw new Error('NEPROVEDENO: amount musí být kladná částka na haléře.');
+      }
+      return c.post(`${BASE}/${seg(a.item_id)}/allocations`, {
+        ...(a.bank_transaction_id !== undefined ? { bank_transaction_id: a.bank_transaction_id } : {}),
+        ...(a.cash_document_id !== undefined ? { cash_document_id: a.cash_document_id } : {}),
+        amount: a.amount,
+      }, tool);
     },
   },
   {

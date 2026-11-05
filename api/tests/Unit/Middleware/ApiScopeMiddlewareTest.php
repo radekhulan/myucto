@@ -224,6 +224,7 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['PUT', '/api/accounting/other-items/12/installments'],
             ['POST', '/api/accounting/other-items/12/schedule'],
             ['PUT', '/api/accounting/other-items/schedules/3/status'],
+            ['POST', '/api/accounting/other-items/12/allocations'],
         ] as [$method, $path]) {
             $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
             self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
@@ -295,7 +296,6 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/accounting/other-items/12/post'],
             ['POST', '/api/accounting/other-items/12/reverse'],
             ['POST', '/api/accounting/other-items/12/repost'],
-            ['POST', '/api/accounting/other-items/12/allocations'],
             ['DELETE', '/api/accounting/other-items/12/allocations/5'],
             ['POST', '/api/accounting/other-items/schedules/3/generate'],
             ['PUT', '/api/accounting/other-items'],

@@ -240,6 +240,7 @@ final class ClosingService
         // Časové rozlišení z řádků dokladů s obdobím (381/384): výběr řádků, účty a poměr
         // dnů sdílí uzávěrka s výkazy s průběžným časovým rozlišením.
         private readonly AccrualDeferralService $accruals,
+        private readonly \MyInvoice\Service\Accounting\OtherItemMonthlyCheck $otherItemChecks,
     ) {}
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
@@ -5221,6 +5222,16 @@ final class ClosingService
 
         if ($wants('payment_match_audit')) {
             $checks[] = $this->checkPaymentMatchAudit($supplierId, $rangeFrom, $rangeTo);
+        }
+
+        if ($wants('other_item_installments_overdue')) {
+            $checks[] = $this->otherItemChecks->overdueInstallments($supplierId, $rangeTo);
+        }
+        if ($wants('other_item_account_balance')) {
+            $otherItemBalance = $this->otherItemChecks->accountBalanceDifference($supplierId, $rangeTo);
+            if ($otherItemBalance !== null) {
+                $checks[] = $otherItemBalance;
+            }
         }
 
         // Doklad × vytěžení jeho přílohy. DUZP přílohy v jiném měsíci než DUZP dokladu, který

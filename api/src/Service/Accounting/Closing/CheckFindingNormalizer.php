@@ -227,7 +227,8 @@ final class CheckFindingNormalizer
             'account_code' => (string) ($row['account_code'] ?? ''),
             'name'         => (string) ($row['name'] ?? ''),
             'amount'       => self::pick($row, self::AMOUNT_KEYS),
-            'note'         => isset($row['line_count']) ? (int) $row['line_count'] . '×' : null,
+            'note'         => isset($row['note']) ? (string) $row['note']
+                : (isset($row['line_count']) ? (int) $row['line_count'] . '×' : null),
         ];
     }
 

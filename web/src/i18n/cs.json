@@ -20016,6 +20016,8 @@
         "dimension_account_map_invalid": "Mapa účtotvorné dimenze míří na analytiku, která už neodpovídá syntetice (rodič, druh nebo daňová uznatelnost)",
         "cnb_rate_deviation": "Kurz na dokladu se odchyluje od denního kurzu ČNB",
         "payment_match_audit": "Spárované platby, které nesedí (měna, částka, kurzový rozdíl, protistrana)",
+        "other_item_installments_overdue": "Splátky ostatních položek po splatnosti bez úhrady",
+        "other_item_account_balance": "Zůstatek účtů ostatních pohledávek a závazků nesedí na otevřené položky",
         "clearing_accounts_open": "Zúčtovací (průběžné) účty s otevřeným zůstatkem k rozvahovému dni",
         "card_clearing_open": "Mezičlen plateb kartou (378.x) se zůstatkem - nevypořádané platby kartou k rozvahovému dni",
         "card_payments_unmatched": "Platby kartou bez dokladu starší než lhůta z nastavení účtování karet",
