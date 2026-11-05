@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatMoney, formatHourlyRate } from '@/composables/useFormat'
 import { useI18n } from 'vue-i18n'
 import type { PublicWorkReportBillingPreview } from '@/api/workReportBilling'
 import type { WorkReportDisplayOptions } from '@/api/invoices'
@@ -17,10 +18,10 @@ function number(value: number | null | undefined, digits = 3, minimum = 0) {
     <div v-for="item in props.preview.items" :key="item.billing_key" class="flex flex-wrap justify-between gap-2">
       <span class="whitespace-pre-wrap">{{ item.description }}</span>
       <span class="flex flex-wrap justify-end gap-x-3 font-mono">
-        <span class="whitespace-nowrap"><span v-if="displayOptions?.hours !== false">{{ number(item.quantity) }} {{ item.unit }}</span><span v-if="displayOptions?.rate !== false"><span v-if="displayOptions?.hours !== false"> × </span>{{ number(item.unit_price_without_vat, 6) }} {{ currency }}</span></span>
-        <span v-if="displayOptions?.amount !== false && item.total_amount != null" class="whitespace-nowrap font-medium">{{ number(item.total_amount, 2, 2) }} {{ currency }}</span>
+        <span class="whitespace-nowrap"><span v-if="displayOptions?.hours !== false">{{ number(item.quantity) }} {{ item.unit }}</span><span v-if="displayOptions?.rate !== false"><span v-if="displayOptions?.hours !== false"> × </span>{{ item.unit_price_without_vat == null ? '' : formatHourlyRate(item.unit_price_without_vat, currency, language || locale) }}</span></span>
+        <span v-if="displayOptions?.amount !== false && item.total_amount != null" class="whitespace-nowrap font-medium">{{ formatMoney(item.total_amount, currency, undefined, language || locale) }}</span>
       </span>
     </div>
-    <div v-if="displayOptions?.amount !== false" class="font-semibold text-right font-mono">{{ number(props.preview.total_amount, 2, 2) }} {{ currency }}</div>
+    <div v-if="displayOptions?.amount !== false" class="font-semibold text-right font-mono">{{ formatMoney(props.preview.total_amount, currency, undefined, language || locale) }}</div>
   </div>
 </template>

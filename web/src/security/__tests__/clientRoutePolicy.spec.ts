@@ -470,7 +470,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
 
   it('pokrývá každý literální cíl klientské navigace manifestem a routerem', () => {
     const paths = [...new Set(clientNavigationPaths())]
-    expect(paths).toHaveLength(26)
+    expect(paths).toHaveLength(25)
 
     const routeNames = new Set(clientDomainRoutes.map(route => route.name))
     for (const path of paths) {
@@ -483,7 +483,6 @@ describe('sdílená klientská plocha vlastní domény', () => {
 
     expect([...new Set(paths.map(path => String(router.resolve(path).name)))].sort()).toEqual([
       'admin-price-list',
-      'admin-work-report-billing-templates',
       'bank-statements',
       'client-new',
       'clients',

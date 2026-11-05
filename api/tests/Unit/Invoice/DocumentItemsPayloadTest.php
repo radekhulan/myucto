@@ -35,17 +35,6 @@ final class DocumentItemsPayloadTest extends TestCase
             'Doklad bez položek nemá co ztratit — prázdné pole je no-op.');
     }
 
-    public function testEmptyUpdateIsAllowedOnlyForAnExistingDraft(): void
-    {
-        $stored = [['description' => 'Pracovní souhrn', 'quantity' => 1]];
-        self::assertFalse(DocumentItemsPayload::emptiesExisting(['items' => []], $stored, 'draft'));
-        foreach (['issued', 'sent', 'received', 'booked', 'paid', 'cancelled', ''] as $status) {
-            self::assertTrue(DocumentItemsPayload::emptiesExisting(['items' => []], $stored, $status), $status);
-        }
-        self::assertFalse(DocumentItemsPayload::emptiesExisting([], $stored, 'draft'));
-        self::assertFalse(DocumentItemsPayload::emptiesExisting(['items' => null], $stored, 'draft'));
-    }
-
     public function testChangedComparesContentNotFormatting(): void
     {
         // Uložený řádek přichází z DB jako float, tělo requestu jako string z formuláře.

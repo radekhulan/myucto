@@ -41,7 +41,7 @@ final class WorkReportBillingService
         if ($report === null || $report['billing_snapshot'] === null) throw new \InvalidArgumentException('Výkaz nemá cenové ujednání.');
         $preview = $report['billing_preview'];
         if (!hash_equals($preview['fingerprint'], $fingerprint)) throw new \DomainException('Náhled je zastaralý. Obnovte jej před přenosem.');
-        $storedItems = $this->invoices->itemsFor($invoiceId);
+        $storedItems = \MyInvoice\Service\Stock\InvoiceItemTracking::fromStored($this->invoices->itemsFor($invoiceId));
         if ($legacyItemId !== null) {
             $legacy = array_column($storedItems, null, 'id')[$legacyItemId] ?? null;
             if ($legacy === null || ($legacy['item_kind'] ?? 'standard') !== 'standard' || !empty($legacy['stock_item_id'])

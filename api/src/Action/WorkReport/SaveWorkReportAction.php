@@ -79,7 +79,12 @@ final class SaveWorkReportAction
         // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (items = jeho řádky).
         $stored = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         // project_id je volitelné — faktura nemusí mít zakázku, výkaz pak také ne.
-        $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id'] : ($stored['project_id'] ?? $invoice['project_id'] ?? null);
+        $inheritsBillingProject = $stored === null && (($body['billing_snapshot'] ?? null) !== null
+            || ($body['billing_template_id'] ?? null) !== null
+            || (!array_key_exists('billing_snapshot', $body) && !array_key_exists('billing_template_id', $body)
+                && !empty($invoice['project_billing_template_id'])));
+        $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id']
+            : ($stored['project_id'] ?? ($inheritsBillingProject ? ($invoice['project_id'] ?? null) : null));
         $projectId = ($projectIdRaw !== null && $projectIdRaw !== '' && (int) $projectIdRaw > 0)
             ? (int) $projectIdRaw
             : null;
@@ -127,7 +132,7 @@ final class SaveWorkReportAction
                 } else {
                     if (!filter_var($templateId, FILTER_VALIDATE_INT) || (int) $templateId <= 0) throw new \InvalidArgumentException('Neplatné cenové ujednání.');
                     // Uložený otisk funguje i po archivaci šablony. Novou vazbu vždy ověřujeme proti firmě.
-                    if ((int) $templateId !== (int) ($stored['billing_template_id'] ?? 0) || !array_key_exists('billing_snapshot', $body)) {
+                    if ((int) $templateId !== (int) ($stored['billing_template_id'] ?? 0)) {
                         $snapshot = $this->billingTemplates->find((int) $templateId, SupplierGuard::currentId($request));
                         if ($snapshot === null) throw new \InvalidArgumentException('Cenové ujednání nepatří aktuální firmě.');
                     }
@@ -141,6 +146,12 @@ final class SaveWorkReportAction
             $period = \MyInvoice\Service\WorkReport\WorkReportBilling::period(array_key_exists('billing_period', $body) ? $body['billing_period'] : ($stored['billing_period'] ?? null));
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+
+        if ($invoice['status'] !== 'draft' && ($snapshot != ($stored['billing_snapshot'] ?? null)
+            || $period !== ($stored['billing_period'] ?? null)
+            || ($templateId === null ? null : (int) $templateId) !== ($stored['billing_template_id'] ?? null))) {
+            return Json::error($response, 'billing_conflict', 'Cenové ujednání a období lze měnit pouze na konceptu faktury.', 409);
         }
 
         if ($snapshot === null && ($stored['billing_snapshot'] ?? null) !== null && $items === null) $items = $stored['items'];
@@ -176,7 +187,7 @@ final class SaveWorkReportAction
             }
         }
 
-        if ($snapshot !== null) {
+        if ($snapshot !== null && $invoice['status'] === 'draft') {
             try {
                 \MyInvoice\Service\WorkReport\WorkReportBilling::calculate([
                     'title' => $title, 'billing_snapshot' => $snapshot, 'billing_period' => $period,

@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { WorkReportItem, InvoiceItem } from '@/api/invoices'
 import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingTemplate, type WorkReportBillingPreview } from '@/api/workReportBilling'
 import BillingTemplateSelect from './BillingTemplateSelect.vue'
 import BillingSnapshotEditor from './BillingSnapshotEditor.vue'
 import BillingRecap from './BillingRecap.vue'
+import { appIsoDate } from '@/utils/date'
 import { apiErrorMessage } from '@/api/errors'
+import { useWorkReportBillingTemplates } from '@/composables/useWorkReportBillingTemplates'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 const snapshot = defineModel<WorkReportBillingSnapshot | null>('snapshot', { required: true })
 const templateId = defineModel<number | null>('templateId', { required: true })
@@ -14,7 +16,13 @@ const period = defineModel<string>('period', { required: true })
 const legacyItemId = defineModel<number | null>('legacyItemId', { default: null })
 const props = defineProps<{ currency: string; title: string; items: WorkReportItem[]; projectName?: string; vatRateId: number | null; pricesIncludeVat?: boolean; reverseCharge?: boolean; stale?: boolean; pending?: boolean; invoiceItems?: InvoiceItem[] }>()
 const emit = defineEmits<{ transfer: [preview: WorkReportBillingPreview]; changed: []; modeSelected: [] }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const catalog = useWorkReportBillingTemplates()
+const periodYear = computed(() => period.value.slice(0, 4) || appIsoDate().slice(0, 4))
+const periodMonth = computed(() => period.value.slice(5, 7))
+const monthOptions = computed(() => Array.from({ length: 12 }, (_, index) => ({ value: String(index + 1).padStart(2, '0'), label: new Intl.DateTimeFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', { month: 'long' }).format(new Date(2000, index, 1)) })))
+function setPeriodMonth(month: string): void { period.value = month ? `${periodYear.value}-${month}` : '' }
+function setPeriodYear(year: string): void { period.value = year ? `${year}-${periodMonth.value || '01'}` : '' }
 const preview = ref<WorkReportBillingPreview | null>(null)
 const busy = ref(false)
 const error = ref('')
@@ -44,11 +52,20 @@ async function calculate(transfer = false) {
 }
 </script>
 <template>
-  <div class="border border-neutral-200 rounded-md p-3 space-y-3">
-    <BillingTemplateSelect v-model="templateId" :currency="currency" @selected="selected" />
+  <div v-if="snapshot || templateId != null || catalog.templates.value.length > 0" class="border border-neutral-200 rounded-md p-3 space-y-3" data-test="report-billing-editor">
+    <BillingTemplateSelect v-model="templateId" :currency="currency" :templates="catalog.templates.value" :has-snapshot="!!snapshot" @selected="selected" />
     <template v-if="snapshot">
       <div class="flex flex-wrap items-end gap-3">
-        <label class="block text-sm font-medium text-neutral-700">{{ t('work_report_billing.period') }}<input v-model="period" type="month" class="block mt-1 h-10 px-3 border border-neutral-300 rounded-md bg-surface" /></label>
+        <div class="text-sm font-medium text-neutral-700">
+          <span class="block">{{ t('work_report_billing.period') }}</span>
+          <div class="mt-1 flex flex-wrap gap-2">
+            <select :value="periodMonth" :aria-label="t('common.month')" data-test="billing-period-month" @change="setPeriodMonth(($event.target as HTMLSelectElement).value)" class="h-10 px-3 border border-neutral-300 rounded-md bg-surface">
+              <option value="">{{ t('work_report_billing.no_period') }}</option>
+              <option v-for="month in monthOptions" :key="month.value" :value="month.value">{{ month.label }}</option>
+            </select>
+            <input :value="periodYear" :aria-label="t('common.year')" @input="setPeriodYear(($event.target as HTMLInputElement).value)" type="number" min="1000" max="9999" class="h-10 w-24 px-3 border border-neutral-300 rounded-md bg-surface" />
+          </div>
+        </div>
         <button type="button" :class="btnOutline('neutral')" @click="expanded = !expanded"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('work_report_billing.override') }}</button>
       </div>
       <BillingSnapshotEditor v-if="expanded" v-model="snapshot" />
@@ -68,6 +85,6 @@ async function calculate(transfer = false) {
       </div>
       <BillingRecap v-if="preview" :preview="preview" :currency="currency" :prices-include-vat="pricesIncludeVat" />
     </template>
-    <p v-if="error" class="text-sm text-danger-600">{{ error }}</p>
+    <p v-if="error || catalog.error.value" class="text-sm text-danger-600">{{ error || catalog.error.value }}</p>
   </div>
 </template>

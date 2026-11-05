@@ -331,26 +331,6 @@ v návrhu nebo ve frontě **K doúčtování**.
 
 Podrobnosti o pořadí pojistek a limitech jsou v [§ 96.16.8](#96168-automaticke-uctovani-podrobnosti).
 
-### Šablony účtování výkazů
-
-Na stránce `Prodej → Šablony účtování výkazů`, hned pod **Ceníkem**, spravujte účtování práce.
-Zobrazení vyžaduje právo **Ceník** ke čtení; přidání, úprava a smazání právo **Ceník** k zápisu.
-Stránka je dostupná i firmám se zapnutým skladem.
-Přidat lze pojmenované ceníky v měně firmy. Ceník může obsahovat pevný paušál včetně
-počtu hodin a navazující pásma hodinových sazeb; poslední pásmo je bez horního limitu.
-U položek lze nastavit popis s proměnnými `{nazev}`, `{zakazka}`, `{obdobi}`, `{limit}`,
-`{od}`, `{do}` a `{hodiny}`.
-
-Ceník lze nastavit jako výchozí na zakázce. V novém výkazu se předvybere, lze ho však
-změnit. Uložený výkaz má vlastní kopii ceníku, takže úprava nebo archivace šablony
-nepřepíše již uložené výkazy. Paušál se účtuje i při nulovém počtu hodin; nevyužité
-hodiny se nepřevádějí a limit platí zvlášť pro každý výkaz. Při archivaci ceníku se
-odstraní jeho použití jako výchozího ceníku zakázek.
-
-Volby zobrazení výkazu určují také, zda klient na veřejném odkazu uvidí hodiny,
-sazby a částky. Podrobný rozpis času i cenová rekapitulace se řídí těmito volbami.
-
-
 ## 96.10 Krok za krokem: kategorie nákladů a tržeb
 
 Stránka `Firma → Kategorie` obsahuje číselníky platné jen pro aktuální firmu:

@@ -124,20 +124,10 @@ describe('AppLayout client tax submissions', () => {
 })
 
 
-describe('AppLayout účtování výkazů v Prodeji', () => {
-  it.each<Role>(['admin', 'accountant', 'client'])('%s vidí šablony hned pod Ceníkem se čtecím právem', role => {
-    const wrapper = renderNavigation(role, { price_list: true }, { writeOverrides: { price_list: false } })
-    const links = wrapper.get('[data-section="sales"]').findAll('a').map(link => link.attributes('href'))
-    expect(links[links.indexOf('/admin/price-list') + 1]).toBe('/admin/work-report-billing-templates')
-    wrapper.unmount()
-    const denied = renderNavigation(role, { price_list: false })
-    expect(denied.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
-    denied.unmount()
-  })
-  it.each<Role>(['admin', 'accountant', 'client'])('%s má šablony i při zapnutém skladu', role => {
-    const wrapper = renderNavigation(role, { price_list: true }, { stockEnabled: true })
-    expect(wrapper.find('a[href="/admin/price-list"]').exists()).toBe(false)
-    expect(wrapper.find('[data-section="sales"] a[href="/admin/work-report-billing-templates"]').exists()).toBe(true)
+describe('AppLayout bez další položky menu pro účtování výkazů', () => {
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s nemá šablony v hlavní ani klientské navigaci', role => {
+    const wrapper = renderNavigation(role, { price_list: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

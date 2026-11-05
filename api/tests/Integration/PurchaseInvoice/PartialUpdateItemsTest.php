@@ -136,9 +136,9 @@ final class PartialUpdateItemsTest extends TestCase
     }
 
     /**
-     * Koncept smí zůstat prázdný; po explicitním [] se přepočítá na nulu.
+     * BEZ OPRAVY PADÁ: prázdné pole doklad tiše vyprázdnilo se stavem 200.
      */
-    public function testDraftUpdateWithExplicitEmptyItemsClearsRows(): void
+    public function testUpdateWithExplicitEmptyItemsIsRejected(): void
     {
         $id = $this->createInvoice();
 
@@ -146,9 +146,9 @@ final class PartialUpdateItemsTest extends TestCase
         $body['items'] = [];
 
         $res = $this->put($id, $body);
-        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
-        self::assertSame(0, $this->itemCount($id));
-        self::assertEqualsWithDelta(0, $this->totalWithVat($id), 0.005);
+        self::assertSame(422, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('no_items', $res['body']['error']['code'] ?? null);
+        self::assertSame(2, $this->itemCount($id), 'Odmítnutý požadavek nesmí nic smazat.');
     }
 
     /** Regrese: poslané neprázdné `items` řádky dál nahrazují. */

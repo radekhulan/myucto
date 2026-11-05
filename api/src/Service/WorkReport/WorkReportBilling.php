@@ -80,6 +80,41 @@ final class WorkReportBilling
         return $value;
     }
 
+    /** Vystavený výkaz čte fakturované ceny a daň z řádků dokladu; číselníky už je nesmějí změnit. */
+    public static function fromInvoiceItems(array $report, array $storedItems, bool $gross): array
+    {
+        $rows = [];
+        $amounts = [];
+        $extraHours = 0.0;
+        foreach ($storedItems as $item) {
+            $minutes = isset($item['duration_minutes']) ? (int) $item['duration_minutes'] : null;
+            $quantity = $minutes !== null ? $minutes / 60 : (float) $item['quantity'];
+            $key = (string) $item['work_report_billing_key'];
+            if (str_starts_with($key, 'band:')) $extraHours += $quantity;
+            $row = [
+                'billing_key' => $key, 'work_report_billing_key' => $key,
+                'linked_work_report_id' => (int) $report['id'], 'description' => (string) $item['description'],
+                'quantity' => $quantity, 'duration_minutes' => $minutes, 'unit' => (string) $item['unit'],
+                'unit_price_without_vat' => (float) $item['unit_price_without_vat'],
+                'vat_rate_id' => (int) $item['vat_rate_id'], 'vat_rate_snapshot' => (float) $item['vat_rate_snapshot'],
+                'item_kind' => (string) $item['item_kind'],
+                'total_without_vat' => (float) $item['total_without_vat'], 'total_vat' => (float) $item['total_vat'],
+                'total_with_vat' => (float) $item['total_with_vat'],
+                'total_amount' => (float) $item[$gross ? 'total_with_vat' : 'total_without_vat'],
+            ];
+            $rows[] = $row;
+            $amounts[] = ['base' => $row['total_without_vat'], 'vat' => $row['total_vat'],
+                'with' => $row['total_with_vat'], 'rate' => $row['vat_rate_snapshot']];
+        }
+        // Evidence času může být opravena i po vystavení. Fakturované hodiny nad limit
+        // však pocházejí pouze z položek dokladu, stejně jako jejich ceny a popisy.
+        $hours = (float) $report['total_hours'];
+        return ['items' => $rows, 'total_hours' => $hours,
+            'included_hours' => min($hours, (float) ($report['billing_snapshot']['included_hours'] ?? 0)),
+            'extra_hours' => $extraHours, 'total_amount' => round(array_sum(array_column($rows, 'total_amount')), 2),
+            'fingerprint' => $report['billing_transferred_fingerprint'] ?? ''] + InvoiceMath::summarize($amounts);
+    }
+
     public static function calculate(array $report, array $invoice = [], float $vatRate = 0): array
     {
         foreach (['title', 'project_name'] as $field) {

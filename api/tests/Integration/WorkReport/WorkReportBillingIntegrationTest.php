@@ -109,35 +109,6 @@ final class WorkReportBillingIntegrationTest extends TestCase
         } catch (\Throwable $e) { if ($pdo->inTransaction()) $pdo->rollBack(); throw $e; }
     }
 
-    /** Skutečný editor ukládá odstranění starého souhrnu před přenosem nových pásem. */
-    public function testExistingDraftCanBeEmptiedBeforeTransferringBillingRows(): void
-    {
-        $repo = $this->container->get(InvoiceRepository::class);
-        $repo->replaceItems($this->invoice, [['description' => 'Původní souhrn práce', 'quantity' => 1,
-            'unit' => 'ks', 'unit_price_without_vat' => 700, 'vat_rate_id' => $this->vat]]);
-        $this->container->get(\MyInvoice\Service\Invoice\InvoiceCalculator::class)->recompute($this->invoice);
-        $this->save(['title' => 'Práce', 'items' => [['description' => 'Syntetická práce', 'duration_minutes' => 180, 'rate' => 300]]]);
-        $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/invoices/' . $this->invoice)
-            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
-            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withParsedBody(['items' => []]);
-        $response = ($this->container->get(\MyInvoice\Action\Invoice\UpdateInvoiceAction::class))($request, new Response(), ['id' => $this->invoice]);
-        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-        $empty = $repo->find($this->invoice);
-        self::assertSame('draft', $empty['status']);
-        self::assertSame([], $empty['items']);
-        self::assertEquals(0, $empty['total_with_vat']);
-        $issue = ($this->container->get(\MyInvoice\Action\Invoice\IssueInvoiceAction::class))(
-            $request->withMethod('POST')->withParsedBody([]), new Response(), ['id' => $this->invoice]);
-        self::assertSame(422, $issue->getStatusCode(), (string) $issue->getBody());
-        self::assertSame('no_items', json_decode((string) $issue->getBody(), true)['error']['code']);
-        self::assertSame('draft', $repo->find($this->invoice)['status']);
-        $report = $this->save(['billing_snapshot' => WorkReportBillingTest::settings(), 'billing_period' => '2026-11']);
-        $transferred = $this->transfer($report);
-        self::assertCount(2, $transferred['items']);
-        self::assertSame(['fixed', 'band:0'], array_column($transferred['items'], 'work_report_billing_key'));
-    }
-
     public function testIssuedInvoiceCannotLoseAllRowsEvenWithForce(): void
     {
         $repo = $this->container->get(InvoiceRepository::class);
@@ -153,45 +124,6 @@ final class WorkReportBillingIntegrationTest extends TestCase
         self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
         self::assertSame('no_items', json_decode((string) $response->getBody(), true)['error']['code']);
         self::assertCount(1, $repo->itemsFor($this->invoice));
-    }
-
-    /** Táž stavová politika platí i pro obecný PUT přijatého konceptu. */
-    public function testPurchaseDraftCanBeEmptiedButReceivedDocumentCannot(): void
-    {
-        $invoice = $this->container->get(InvoiceRepository::class)->find($this->invoice);
-        $this->db->pdo()->prepare('UPDATE clients SET is_vendor = 1 WHERE id = ?')->execute([$invoice['client_id']]);
-        $body = ['vendor_id' => $invoice['client_id'], 'vendor_invoice_number' => 'SYN-EMPTY-DRAFT',
-            'document_kind' => 'invoice', 'issue_date' => '2026-11-01', 'tax_date' => '2026-11-01',
-            'due_date' => '2026-11-15', 'received_at' => '2026-11-01', 'currency_id' => $invoice['currency_id'],
-            'items' => [['description' => 'Syntetické přijaté plnění', 'quantity' => 1, 'unit' => 'ks',
-                'unit_price_without_vat' => 700, 'vat_rate_id' => $this->vat]]];
-        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/purchase-invoices')
-            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
-            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withParsedBody($body);
-        $created = ($this->container->get(\MyInvoice\Action\PurchaseInvoice\CreatePurchaseInvoiceAction::class))($request, new Response());
-        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
-        $id = (int) json_decode((string) $created->getBody(), true)['id'];
-        $repo = $this->container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class);
-        $update = $this->container->get(\MyInvoice\Action\PurchaseInvoice\UpdatePurchaseInvoiceAction::class);
-        try {
-            $emptyRequest = $request->withMethod('PUT')->withParsedBody(['items' => []]);
-            $response = $update($emptyRequest, new Response(), ['id' => $id]);
-            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
-            $empty = $repo->find($id, $this->supplier);
-            self::assertSame([], $empty['items']);
-            self::assertSame('draft', $empty['status']);
-            self::assertEquals(0, $empty['total_with_vat']);
-            $restored = $update($request->withMethod('PUT')->withParsedBody(['items' => $body['items']]), new Response(), ['id' => $id]);
-            self::assertSame(200, $restored->getStatusCode(), (string) $restored->getBody());
-            $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'received' WHERE id = ?")->execute([$id]);
-            $rejected = $update($emptyRequest->withQueryParams(['force' => '1']), new Response(), ['id' => $id]);
-            self::assertSame(422, $rejected->getStatusCode(), (string) $rejected->getBody());
-            self::assertSame('no_items', json_decode((string) $rejected->getBody(), true)['error']['code']);
-            self::assertCount(1, $repo->find($id, $this->supplier)['items']);
-        } finally {
-            $this->db->pdo()->prepare('DELETE FROM purchase_invoices WHERE id = ? AND supplier_id = ?')->execute([$id, $this->supplier]);
-        }
     }
 
     public function testTransferIsRepeatableKeepsUnrelatedRowsAndStableLinks(): void
@@ -216,6 +148,233 @@ final class WorkReportBillingIntegrationTest extends TestCase
         $last = $this->transfer($changed);
         self::assertCount(3, $last['items']);
         self::assertSame(['fixed', 'band:0'], array_values(array_filter(array_column($last['items'], 'work_report_billing_key'))));
+    }
+
+    public function testOnlyBillingReportInheritsInvoiceProject(): void
+    {
+        $pdo = $this->db->pdo();
+        $invoice = $this->container->get(InvoiceRepository::class)->find($this->invoice);
+        $templateId = $this->container->get(WorkReportBillingTemplateRepository::class)->save($this->supplier, null, WorkReportBillingTest::settings());
+        $pdo->prepare('INSERT INTO projects (client_id, name, currency_id) VALUES (?, ?, ?)')
+            ->execute([$invoice['client_id'], 'Syntetický projekt', $invoice['currency_id']]);
+        $projectId = (int) $pdo->lastInsertId();
+        $reports = $this->container->get(WorkReportRepository::class);
+        try {
+            $pdo->prepare('UPDATE invoices SET project_id = ? WHERE id = ?')->execute([$projectId, $this->invoice]);
+            $legacy = $this->save(['title' => 'Běžný výkaz', 'items' => []]);
+            self::assertNull($legacy['project_id']);
+            $reports->deleteByInvoice($this->invoice, $this->supplier);
+            $billing = $this->save(['title' => 'Pásmový výkaz', 'billing_template_id' => $templateId, 'billing_period' => '2026-11', 'items' => []]);
+            self::assertSame($projectId, (int) $billing['project_id']);
+            $reports->deleteByInvoice($this->invoice, $this->supplier);
+            $pdo->prepare('UPDATE projects SET billing_template_id = ? WHERE id = ?')->execute([$templateId, $projectId]);
+            $default = $this->save(['title' => 'Výchozí účtování', 'billing_period' => '2026-11', 'items' => []]);
+            self::assertSame($projectId, (int) $default['project_id']);
+            self::assertSame($templateId, $default['billing_template_id']);
+            $reports->deleteByInvoice($this->invoice, $this->supplier);
+            $disabled = $this->save(['title' => 'Výslovně bez šablony', 'billing_template_id' => null, 'items' => []]);
+            self::assertNull($disabled['project_id']);
+            self::assertNull($disabled['billing_snapshot']);
+        } finally {
+            $reports->deleteByInvoice($this->invoice, $this->supplier);
+            $pdo->prepare('UPDATE invoices SET project_id = NULL WHERE id = ?')->execute([$this->invoice]);
+            $pdo->prepare('DELETE FROM projects WHERE id = ?')->execute([$projectId]);
+        }
+    }
+
+    public function testInvoiceItemsRemainUsableWithoutBillingColumns(): void
+    {
+        $repo = $this->container->get(InvoiceRepository::class);
+        $row = ['description' => 'Běžná položka', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 100, 'vat_rate_id' => $this->vat];
+        $repo->replaceItems($this->invoice, [$row]);
+        $this->db->hasColumn('invoice_items', 'work_report_billing_key');
+        $cacheProperty = new \ReflectionProperty(Connection::class, 'schemaCache');
+        $cache = $cacheProperty->getValue($this->db);
+        $compatCache = $cache;
+        $compatCache['column:invoice_items.work_report_billing_key'] = false;
+        $compatCache['column:invoice_items.linked_work_report_id'] = false;
+        $compatCache['column:work_reports.billing_snapshot'] = false;
+        $cacheProperty->setValue($this->db, $compatCache);
+        $actual = $this->db->pdo();
+        $proxy = new BillingIssueObservedPdo($actual, static function (string $sql): void {
+            if (str_contains($sql, 'work_report_billing_key') || str_contains($sql, 'linked_work_report_id')) {
+                throw new \RuntimeException('Starší schéma neobsahuje sloupce účtování výkazů.');
+            }
+        });
+        $pdoProperty = new \ReflectionProperty(Connection::class, 'pdo');
+        $pdoProperty->setValue($this->db, $proxy);
+        try {
+            $stored = $repo->itemsFor($this->invoice);
+            self::assertNull($stored[0]['linked_work_report_id']);
+            self::assertNull($stored[0]['work_report_billing_key']);
+            $repo->replaceItems($this->invoice, [$row]);
+            self::assertCount(1, $repo->itemsFor($this->invoice));
+            $copy = $this->container->get(BulkReissueAction::class)->cloneOne($this->invoice, '2026-12-02', false, $this->user);
+            $this->invoiceIds[] = $copy;
+            self::assertCount(1, $repo->itemsFor($copy));
+        } finally {
+            $pdoProperty->setValue($this->db, $actual);
+            $cacheProperty->setValue($this->db, $cache);
+            if ($actual->inTransaction()) $actual->rollBack();
+        }
+    }
+
+    public function testLegacyCopyDoesNotCarryWorkReport(): void
+    {
+        $this->save(['title' => 'Běžný výkaz', 'items' => [['description' => 'Minulá práce', 'hours' => 3, 'rate' => 100]]]);
+        $newId = $this->container->get(BulkReissueAction::class)->cloneOne($this->invoice, '2026-12-02', false, $this->user);
+        $this->invoiceIds[] = $newId;
+        self::assertNull($this->container->get(WorkReportRepository::class)->findByInvoice($newId, $this->supplier));
+    }
+
+    public function testBillingCopyCarriesSettingsWithoutTimeOrMaterials(): void
+    {
+        $report = $this->setupReport();
+        $repo = $this->container->get(WorkReportRepository::class);
+        $repo->saveMaterials($this->invoice, $this->supplier, null, 'Minulý materiál', $this->vat,
+            [['description' => 'Dodaný díl', 'quantity' => 2, 'unit' => 'ks', 'unit_price' => 100]]);
+        $this->transfer($report);
+        $newId = $this->container->get(BulkReissueAction::class)->cloneOne($this->invoice, '2026-12-02', false, $this->user);
+        $this->invoiceIds[] = $newId;
+        $copy = $repo->findByInvoice($newId, $this->supplier);
+        self::assertSame($report['billing_snapshot'], $copy['billing_snapshot']);
+        self::assertSame($report['billing_period'], $copy['billing_period']);
+        self::assertSame([], $copy['items']);
+        self::assertSame([], $copy['materials']);
+        self::assertNull($copy['material_title']);
+        self::assertEquals(0, $copy['material_total']);
+        self::assertEquals(0, $copy['total_hours']);
+        self::assertTrue($copy['billing_stale']);
+    }
+
+    public static function trackingSelections(): array
+    {
+        return [
+            ['serial', ['quantity' => '1.000', 'serial_number' => 'TEST-SERIAL-1']],
+            ['lot', ['quantity' => '1.000', 'lot_code' => 'TEST-LOT-1', 'expires_on' => '2099-12-31']],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('trackingSelections')]
+    public function testBillingTransferKeepsStoredTrackingSelections(string $mode, array $selection): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO stock_items (supplier_id, sku, name, tracking_mode) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplier, 'TEST-TRACKING', 'Syntetická karta', $mode]);
+        $stockId = (int) $pdo->lastInsertId();
+        $invoices = $this->container->get(InvoiceRepository::class);
+        $invoices->replaceItems($this->invoice, [['description' => 'Skladová položka', 'quantity' => 1, 'unit' => 'ks',
+            'unit_price_without_vat' => 100, 'vat_rate_id' => $this->vat, 'stock_item_id' => $stockId,
+            'tracking_json' => json_encode([$selection], JSON_THROW_ON_ERROR)]]);
+        $before = $invoices->itemsFor($this->invoice)[0]['tracking_allocations'];
+        self::assertNotEmpty($before);
+        $this->transfer($this->setupReport());
+        $after = $invoices->itemsFor($this->invoice);
+        self::assertSame($before, $after[0]['tracking_allocations']);
+        self::assertSame($stockId, $after[0]['stock_item_id']);
+    }
+
+    public static function issuedBillingModes(): array
+    {
+        return [[false, false], [true, false], [false, true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('issuedBillingModes')]
+    public function testIssuedBillingRecapUsesStoredInvoiceTotals(bool $gross, bool $reverse): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE invoices SET prices_include_vat = ?, reverse_charge = ? WHERE id = ?')->execute([(int) $gross, (int) $reverse, $this->invoice]);
+        $report = $this->setupReport();
+        $result = $this->transfer($report);
+        $pdo->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$this->invoice]);
+        $zero = (int) $pdo->query('SELECT id FROM vat_rates WHERE rate_percent = 0 AND is_reverse_charge = 0 LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, $zero);
+        // Simuluje změnu výchozí sazby i vynucenou editaci sazby výkazu po vydání.
+        $pdo->prepare('UPDATE supplier SET default_vat_rate_id = ? WHERE id = ?')->execute([$zero, $this->supplier]);
+        $pdo->prepare('UPDATE work_reports SET vat_rate_id = NULL WHERE invoice_id = ?')->execute([$this->invoice]);
+        $reports = $this->container->get(WorkReportRepository::class);
+        $single = $reports->findByInvoice($this->invoice, $this->supplier);
+        $batch = $reports->findByInvoiceIds([$this->invoice], $this->supplier)[$this->invoice];
+        foreach ([$single, $batch] as $stored) {
+            self::assertEquals($result['preview']['totals'], $stored['billing_preview']['totals']);
+            self::assertSame(array_column($result['items'], 'description'), array_column($stored['billing_preview']['items'], 'description'));
+            self::assertEquals(array_column($result['items'], 'vat_rate_snapshot'), array_column($stored['billing_preview']['items'], 'vat_rate_snapshot'));
+            self::assertEquals($result['preview']['total_amount'], $stored['total_amount']);
+            self::assertFalse($stored['billing_stale']);
+        }
+    }
+
+    public static function issuedBillingChanges(): array
+    {
+        $settings = WorkReportBillingTest::settings();
+        $settings['fixed_fee'] = 9999;
+        return [[['billing_period' => '2026-12']], [['billing_snapshot' => $settings]], [['billing_template_id' => null]]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('issuedBillingChanges')]
+    public function testForceCannotChangeIssuedBillingConfiguration(array $body): void
+    {
+        $template = $this->container->get(WorkReportBillingTemplateRepository::class)->save($this->supplier, null, WorkReportBillingTest::settings());
+        $report = $this->save(['title' => 'Podpora', 'billing_template_id' => $template, 'billing_period' => '2026-11', 'items' => []]);
+        $this->transfer($report);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$this->invoice]);
+        $response = $this->forceSave($body);
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $after = $this->container->get(WorkReportRepository::class)->findByInvoice($this->invoice, $this->supplier);
+        self::assertSame($report['billing_snapshot'], $after['billing_snapshot']);
+        self::assertSame($report['billing_period'], $after['billing_period']);
+        self::assertSame($report['billing_template_id'], $after['billing_template_id']);
+    }
+
+    private function forceSave(array $body): \Psr\Http\Message\ResponseInterface
+    {
+        $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/invoices/' . $this->invoice . '/work-report')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withQueryParams(['force' => '1'])->withParsedBody($body);
+        return ($this->container->get(SaveWorkReportAction::class))($request, new Response(), ['id' => $this->invoice]);
+    }
+
+    public function testForceTimeEditKeepsIssuedBillingAmounts(): void
+    {
+        $report = $this->setupReport();
+        $result = $this->transfer($report);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$this->invoice]);
+        $response = $this->forceSave(['items' => [['description' => 'Opravený popis času', 'hours' => 9, 'rate' => 0]]]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $after = json_decode((string) $response->getBody(), true);
+        self::assertEquals($result['preview']['totals'], $after['billing_preview']['totals']);
+        self::assertEquals($report['total_amount'], $after['total_amount']);
+        $stmt = $this->db->pdo()->prepare('SELECT total_amount FROM work_reports WHERE invoice_id = ?');
+        $stmt->execute([$this->invoice]);
+        self::assertEquals($report['total_amount'], $stmt->fetchColumn());
+    }
+
+    public function testApprovalRequestRejectsStaleBillingBeforeRecipientsAndAllocation(): void
+    {
+        $report = $this->setupReport();
+        $this->transfer($report);
+        $this->save(['billing_period' => '2026-12']);
+        $pdo = $this->db->pdo();
+        $invoice = $this->container->get(InvoiceRepository::class)->find($this->invoice);
+        $pdo->prepare('INSERT INTO projects (client_id, name, currency_id, requires_work_report_approval) VALUES (?, ?, ?, 1)')
+            ->execute([$invoice['client_id'], 'Syntetické schvalování', $invoice['currency_id']]);
+        $projectId = (int) $pdo->lastInsertId();
+        try {
+            $pdo->prepare('UPDATE invoices SET project_id = ? WHERE id = ?')->execute([$projectId, $this->invoice]);
+            // Test se nikdy nedostane k reálnému odesílání, ani bez nové pojistky.
+            $pdo->prepare("UPDATE clients SET main_email = NULL WHERE id = ?")->execute([$invoice['client_id']]);
+            $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/invoices/' . $this->invoice . '/request-approval')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin']);
+            $response = ($this->container->get(\MyInvoice\Action\Approval\RequestApprovalAction::class))($request, new Response(), ['id' => $this->invoice]);
+            self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame('billing_stale', json_decode((string) $response->getBody(), true)['error']['code']);
+            self::assertEmpty($this->container->get(InvoiceRepository::class)->find($this->invoice)['varsymbol']);
+        } finally {
+            $pdo->prepare('UPDATE invoices SET project_id = NULL WHERE id = ?')->execute([$this->invoice]);
+            $pdo->prepare('DELETE FROM projects WHERE id = ?')->execute([$projectId]);
+        }
     }
 
     public function testSnapshotIsIndependentFromTemplateAndCloneRemapsLinks(): void

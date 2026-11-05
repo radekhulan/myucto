@@ -21,6 +21,7 @@ export interface WorkReportBillingPreview {
   included_hours: number
   extra_hours: number
   total_amount: number
+  totals?: import('./invoices').InvoiceTotals
   fingerprint: string
 }
 /** Veřejná rekapitulace respektuje skryté hodiny, sazby i částky. */
@@ -31,8 +32,8 @@ export interface PublicWorkReportBillingPreview {
   extra_hours: number | null
   total_amount: number | null
 }
-export function newBillingSnapshot(currency = 'CZK'): WorkReportBillingSnapshot {
-  return { name: '', currency, fixed_fee: null, included_hours: 0, fixed_description: '{nazev} – {obdobi}', bands: [{ up_to_hours: null, rate: 1500, description: '{nazev} – {od}–{do} h ({obdobi})' }] }
+export function newBillingSnapshot(currency = 'CZK', hourlyRate = 0): WorkReportBillingSnapshot {
+  return { name: '', currency, fixed_fee: null, included_hours: 0, fixed_description: '{nazev} – {obdobi}', bands: [{ up_to_hours: null, rate: Number.isFinite(hourlyRate) && hourlyRate >= 0 ? hourlyRate : 0, description: '{nazev} – {od}–{do} h ({obdobi})' }] }
 }
 export const workReportBillingApi = {
   list: () => api.get<WorkReportBillingTemplate[]>('/work-report-billing-templates').then(r => r.data),

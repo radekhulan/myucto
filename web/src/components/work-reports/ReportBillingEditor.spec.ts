@@ -6,9 +6,10 @@ import { newBillingSnapshot, workReportBillingApi, type WorkReportBillingPreview
 
 vi.mock('@/api/workReportBilling', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/workReportBilling')>(),
-  workReportBillingApi: { previewDraft: vi.fn() },
+  workReportBillingApi: { previewDraft: vi.fn(), list: vi.fn().mockResolvedValue([]) },
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: { count?: number }) => params?.count == null ? key : `${key}:${params.count}`, locale: ref('cs') }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('vue-i18n', async importOriginal => ({ ...await importOriginal<typeof import('vue-i18n')>(), useI18n: () => ({ t: (key: string, params?: { count?: number }) => params?.count == null ? key : `${key}:${params.count}`, locale: ref('cs') }) }))
 const template = { ...newBillingSnapshot(), id: 7, name: 'Servis', fixed_fee: 5000, included_hours: 5 }
 const preview: WorkReportBillingPreview = { items: [], total_hours: 0, included_hours: 0, extra_hours: 0, total_amount: 5000, fingerprint: 'canonical-fingerprint' }
 function mountEditor() {
@@ -72,5 +73,16 @@ it('příprava ukáže počet kanonických řádků a jasně vyžaduje uložení
   expect(wrapper.get('[role="status"]').text()).toBe('work_report_billing.pending:2')
   expect(wrapper.findComponent({ name: 'BillingRecap' }).props('preview').items).toHaveLength(2)
   expect(wrapper.emitted('transfer')).toHaveLength(1)
+  wrapper.unmount()
+})
+
+
+it('období nabízí názvy měsíců a stále odesílá YYYY-MM', async () => {
+  const wrapper = mountEditor()
+  const months = wrapper.get('[data-test="billing-period-month"]')
+  expect(months.text()).toContain('březen')
+  expect(months.text()).toContain('prosinec')
+  await months.setValue('12')
+  expect(wrapper.emitted('update:period')).toEqual([['2096-12']])
   wrapper.unmount()
 })

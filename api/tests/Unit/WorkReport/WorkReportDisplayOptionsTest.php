@@ -156,6 +156,23 @@ final class WorkReportDisplayOptionsTest extends TestCase
         }
     }
 
+    public function testEnglishApprovalEmailFormatsBillingAmountsWithEnglishSeparators(): void
+    {
+        $twig = new Environment(new FilesystemLoader(dirname(__DIR__, 3) . '/templates/email'));
+        foreach (['html', 'txt'] as $format) {
+            $context = $this->context(Display::DEFAULTS);
+            $context['locale'] = 'en';
+            $context['invoice']['language'] = 'en';
+            $context['work_report']['billing_snapshot'] = ['name' => 'Synthetic billing template'];
+            $context['work_report']['billing_preview'] = [
+                'items' => [['description' => 'Fixed fee', 'total_amount' => 12345.67]],
+            ];
+            $email = $twig->render('invoice_approval.en.' . $format . '.twig', $context);
+            self::assertStringContainsString('12,345.67 CZK', $email, $format);
+            self::assertStringNotContainsString('12 345,67 CZK', $email, $format);
+        }
+    }
+
     /** BEZ OPRAVY PADÁ: skrytá částka práce skryla i součet výkazu, který obsahuje jen materiál. */
     public function testApprovalEmailKeepsMaterialTotalsWhenWorkAmountsAreHidden(): void
     {

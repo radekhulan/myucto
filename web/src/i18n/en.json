@@ -41228,7 +41228,7 @@
     "add_band": "Add band",
     "placeholders": "Variables: {'{nazev}'}, {'{zakazka}'}, {'{obdobi}'}, {'{limit}'}, {'{od}'}, {'{do}'}, {'{hodiny}'}.",
     "template": "Billing template",
-    "legacy": "Individual row prices (legacy mode)",
+    "legacy": "No template (rates per row)",
     "add_template": "Add template",
     "snapshot_hint": "Each report stores its own copy of the rules. Updating a company template does not change existing reports.",
     "delete_confirm": "Delete template “{name}”? Saved copies in reports will be preserved.",
@@ -41236,7 +41236,7 @@
     "override": "Customize this report’s rules",
     "currency_mismatch": "Template currency must match the invoice currency.",
     "stale": "The report or its rules have changed. Transfer billing again to update the invoice items.",
-    "pending": "Transfer prepared — no new items; changes will take effect after saving the invoice. | Transfer prepared — {count} item will be inserted after saving the invoice. | Transfer prepared — {count} items will be inserted after saving the invoice.",
+    "pending": "Transfer prepared. no new items; changes will take effect after saving the invoice. | Transfer prepared. {count} item will be inserted after saving the invoice. | Transfer prepared. {count} items will be inserted after saving the invoice.",
     "preview": "Billing preview",
     "recap": "Billing recap",
     "hours_recap": "Included: {included} h · Extra: {extra} h",
@@ -41249,6 +41249,7 @@
     "saved_copy": "Saved template copy",
     "save_unsynced_confirm": "Billing for work report “{description}” has not been transferred yet or has changed. Save the report without updating the invoice items?",
     "prepare_transfer": "Prepare transfer",
-    "ready_to_save": "Ready to save"
+    "ready_to_save": "Ready to save",
+    "no_period": "No period"
   }
 }

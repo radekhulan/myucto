@@ -177,13 +177,13 @@ final class UpdateInvoiceAction
             }
         }
 
-        // Vyprázdnění položek mimo koncept → 422 ({@see DocumentItemsPayload}).
+        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
         // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
         // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
         // níž. 400 `validation_failed` je tu vyhrazené pro schéma pole po poli (mapa `fields`).
         // Musí to být PŘED přečíslováním při změně typu: to už sahá na čítač řady, takže
         // pozdější odmítnutí by po sobě nechalo spálené číslo.
-        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []), (string) $existing['status'])) {
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
             return Json::error(
                 $response,
                 DocumentItemsPayload::EMPTY_ERROR_CODE,

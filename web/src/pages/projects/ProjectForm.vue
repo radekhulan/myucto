@@ -361,7 +361,7 @@ async function submit() {
           </div>
         </div>
 
-        <div class="md:col-span-2"><BillingTemplateSelect v-model="form.billing_template_id" :currency="currencies.find(c => c.id === form.currency_id)?.code" /></div>
+        <BillingTemplateSelect v-model="form.billing_template_id" :currency="currencies.find(c => c.id === form.currency_id)?.code" />
 
         <!-- Schvalování výkazu zákazníkem -->
         <div class="border-t border-neutral-200 pt-4">

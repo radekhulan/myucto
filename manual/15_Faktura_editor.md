@@ -54,8 +54,6 @@ nebo z detailu klienta či zakázky).
    (`Nastavení`, záložka **Fakturace**, viz [§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura)).
 10. Klikněte na **Odeslat klientovi**. Odeslání e-mailem je samostatný krok po vystavení.
 
-Koncept lze uložit i bez položek; fakturu bez alespoň jedné položky nelze **vystavit**.
-
 **Jak poznáte, že je hotovo:** v seznamu `Prodej → Vydané faktury` má faktura stav
 **Vystaveno**, po odeslání **Odesláno**.
 
@@ -196,7 +194,7 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 <!-- cols: 32 34 34 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| „Faktura musí mít aspoň jednu položku.“ | Vystavit nelze doklad bez položek; textové řádky se mezi položky nepočítají. Koncept bez položek uložit lze | Před vystavením přidejte položku tlačítkem **+ Přidat položku** |
+| „Faktura musí mít aspoň jednu položku.“ | Vystavit nelze doklad bez položek; textové řádky se mezi položky nepočítají | Přidejte položku tlačítkem **+ Přidat položku** |
 | „Výsledná částka k úhradě musí být větší než 0. Pro čistě záporný nebo nulový doklad použij dobropis.“ | Faktura nesmí skončit zápornou částkou | Vystavte dobropis, nebo zapněte vyúčtování s částkou k vyplacení ([§ 15.9.4](#1594-sumar-vpravo)) |
 | Chyba „Číslo už existuje…“ | Ručně zadané číslo už je u jiné faktury téhož dodavatele | Číslo změňte, nebo pole nechte prázdné |
 | Tlačítko **Vystavit** je zablokované | Zakázka vyžaduje schválení výkazu zákazníkem | Pošlete výkaz ke schválení ([§ 15.6](#156-krok-za-krokem-nechat-vykaz-schvalit-zakaznikem)) |
@@ -590,7 +588,7 @@ Textový řádek je jen text na dokladu:
   kontrolního hlášení, OSS ani zaúčtování nevstupuje,
 - nevydává nic ze skladu a neprodává majetek,
 - prázdný textový řádek se při uložení zahodí,
-- doklad jen z textových řádků vystavit nejde, potřebuje aspoň jednu položku; koncept pouze s textovými řádky uložit lze.
+- doklad jen z textových řádků vystavit nejde, potřebuje aspoň jednu položku.
 
 Kopie dokladu i dobropis textový řádek převezmou na stejné místo. U kopie s posunem
 měsíce se posune i měsíc v jeho textu. Jak se textový řádek přenáší do exportů,
@@ -836,8 +834,9 @@ V editoru klikněte na ikonu **Přidat výkaz práce** v řádku položky. Zobra
 Přidejte řádky a výkaz uložte. Součet práce se přenáší jako jedna položka `1 ks × celková
 cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 
-Výkaz může používat **šablonu účtování** s paušálem a pásmy hodin ze stránky
-`Prodej → Šablony účtování výkazů`. Po výběru šablony se
+Výkaz může používat **šablonu účtování výkazů** s paušálem a pásmy hodin. Šablony
+spravujete na stránce `Prodej → Šablony účtování výkazů` pod **Ceníkem**. Zobrazení
+vyžaduje právo **Ceník** ke čtení; úprava a archivace vyžadují právo zápisu. Po výběru šablony se
 v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
 `RRRR-MM`. Tlačítkem **Připravit přenos** zařadíte účtovací položky k uložení;
 po akci se zobrazí **Připraveno k uložení**, počet čekajících položek a jejich náhled
@@ -848,12 +847,17 @@ na PDF odkazují na jeho podrobný rozpis. Při ukládání nepřeneseného nebo
 účtování se aplikace zeptá, zda chcete pokračovat bez aktualizace položek faktury.
 Pokud už jste přenos připravili tlačítkem, další potvrzení se nezobrazuje. Nesoulad
 výkazu a položek blokuje vystavení faktury; nejprve zkontrolujte výkaz a přeneste jej znovu.
+Bez šablony zadejte sazbu pro každý řádek výkazu zvlášť.
 
-Jednotlivý výkaz si uchovává vlastní kopii ceníku. Změna firemního ceníku tedy nemění
+Jednotlivý výkaz si uchovává vlastní kopii šablony. Změna firemní šablony tedy nemění
 již uložený výkaz. Paušál se účtuje i při nulovém počtu hodin, nevyčerpané hodiny se
 nepřevádějí do dalšího období a limit hodin platí samostatně pro každý výkaz/fakturu.
 Popis položky může obsahovat `{nazev}` (název výkazu), `{zakazka}`, `{obdobi}`, `{limit}`,
 `{od}`, `{do}` a `{hodiny}`.
+
+Volby zobrazení výkazu určují také, zda zákazník v PDF, e-mailu ke schválení a na veřejném
+odkazu uvidí hodiny, sazby a částky. Úprava šablony nebo její archivace neovlivní již
+uložené výkazy; archivace zároveň zruší její předvolbu na zakázkách.
 
 Čas lze zadat také přímo do množství fakturační položky s hodinovou jednotkou (`h`, `hod`,
 `hod.`). Například `0:01` při sazbě 1 000 Kč/h znamená 16,67 Kč. Sazba `333,33333 Kč/h` při
@@ -1095,8 +1099,9 @@ materiálu**.
 | Cena/MJ | Jednotková cena až na šest desetinných míst - **bez DPH, nebo s DPH podle režimu faktury** (viz níže). PDF ukazuje víc než dvě místa jen u ceny, která je skutečně má |
 | Celkem | Automaticky: množství × cena/MJ |
 
-**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH**. U účtování podle ceníku práce
-ji přebírají všechny položky paušálu a pásem, u původního přenosu jedna souhrnná položka. U výkazu práce je volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
+**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH**. U účtování podle šablony
+účtování výkazů ji přebírají všechny položky paušálu a pásem; bez šablony se přenese
+jedna souhrnná položka. U výkazu práce je sazba volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
 výchozí **12 %**. Sazbu vyberete v záhlaví příslušné sekce. Materiál a práce tak mohou mít
 **různou sazbu DPH** na jednom dokladu, DPH se na faktuře rekapituluje správně po sazbách.
 

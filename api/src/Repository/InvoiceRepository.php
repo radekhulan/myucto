@@ -151,6 +151,13 @@ final class InvoiceRepository
 
     private ?bool $hasLineDiscount = null;
 
+    /** Stabilní vazby pásmového účtování; běžné položky fungují i před příslušnou migrací. */
+    public function supportsWorkReportBilling(): bool
+    {
+        return $this->db->hasColumn('invoice_items', 'linked_work_report_id')
+            && $this->db->hasColumn('invoice_items', 'work_report_billing_key');
+    }
+
     /** Ceníková cena a sleva řádku (migrace 2035); starší instance je nemají. */
     private function supportsLineDiscount(): bool
     {
@@ -701,11 +708,14 @@ final class InvoiceRepository
         if ($this->supportsLineDiscount()) {
             $ossSelect .= ', ii.list_unit_price, ii.line_discount_pct';
         }
+        if ($this->supportsWorkReportBilling()) {
+            $ossSelect .= ', ii.linked_work_report_id, ii.work_report_billing_key';
+        }
         $stmt = $this->db->pdo()->prepare(
              'SELECT ii.id, ii.invoice_id, ii.description, ii.quantity, ii.duration_minutes, ii.unit,
                     ii.unit_price_without_vat, ii.vat_rate_id, ii.vat_rate_snapshot,
                     ii.total_without_vat, ii.total_vat, ii.total_with_vat,
-                    ii.order_index, ii.item_kind, ii.linked_work_report_id, ii.work_report_billing_key,
+                    ii.order_index, ii.item_kind,
                     ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id,
                     ii.small_asset_id, ii.asset_id, ii.accrual_from, ii.accrual_to, ii.revenue_account_code,
                     ii.seller_item_code,
@@ -1821,27 +1831,31 @@ final class InvoiceRepository
     {
         $pdo = $this->db->pdo();
 
-        // Vazba výkazu je stabilní i po DELETE + INSERT. Z cizí faktury ji převzít nelze.
-        $reportStmt = $pdo->prepare('SELECT id FROM work_reports WHERE invoice_id = ?');
-        $reportStmt->execute([$invoiceId]);
-        $reportId = (int) ($reportStmt->fetchColumn() ?: 0);
-        $storedLinks = array_column($this->itemsFor($invoiceId), null, 'id');
-        $seenBillingKeys = [];
-        foreach ($items as &$item) {
-            $storedItem = $storedLinks[(int) ($item['id'] ?? 0)] ?? [];
-            foreach (['linked_work_report_id', 'work_report_billing_key'] as $key) {
-                if (!array_key_exists($key, $item) && array_key_exists($key, $storedItem)) $item[$key] = $storedItem[$key];
+        $supportsBilling = $this->supportsWorkReportBilling();
+        if ($supportsBilling) {
+            // Vazba výkazu je stabilní i po DELETE + INSERT. Z cizí faktury ji převzít nelze.
+            $reportStmt = $pdo->prepare('SELECT id FROM work_reports WHERE invoice_id = ?');
+            $reportStmt->execute([$invoiceId]);
+            $reportId = (int) ($reportStmt->fetchColumn() ?: 0);
+            $storedLinks = array_column($this->itemsFor($invoiceId), null, 'id');
+            $seenBillingKeys = [];
+            foreach ($items as &$item) {
+                $storedItem = $storedLinks[(int) ($item['id'] ?? 0)] ?? [];
+                foreach (['linked_work_report_id', 'work_report_billing_key'] as $key) {
+                    if (!array_key_exists($key, $item) && array_key_exists($key, $storedItem)) $item[$key] = $storedItem[$key];
+                }
+                if (!empty($item['linked_work_report_id']) && (int) $item['linked_work_report_id'] !== $reportId) {
+                    throw new \InvalidArgumentException('Výkaz položky nepatří této faktuře.');
+                }
+                $key = $item['work_report_billing_key'] ?? null;
+                if ($key !== null && (empty($item['linked_work_report_id']) || !preg_match('/^(fixed|band:[0-9]{1,3})$/D', (string) $key) || isset($seenBillingKeys[$key]))) {
+                    throw new \InvalidArgumentException('Neplatná nebo duplicitní vazba účtování výkazu.');
+                }
+                if ($key !== null) $seenBillingKeys[$key] = true;
             }
-            if (!empty($item['linked_work_report_id']) && (int) $item['linked_work_report_id'] !== $reportId) {
-                throw new \InvalidArgumentException('Výkaz položky nepatří této faktuře.');
-            }
-            $key = $item['work_report_billing_key'] ?? null;
-            if ($key !== null && (empty($item['linked_work_report_id']) || !preg_match('/^(fixed|band:[0-9]{1,3})$/D', (string) $key) || isset($seenBillingKeys[$key]))) {
-                throw new \InvalidArgumentException('Neplatná nebo duplicitní vazba účtování výkazu.');
-            }
-            if ($key !== null) $seenBillingKeys[$key] = true;
+            unset($item);
+
         }
-        unset($item);
 
         // Textový řádek (InvoiceItemKind::TEXT) se zapisuje vždy vynulovaný: popis + sazba,
         // nic dalšího. Normalizace před TimeBilling, ať z něj nevznikne časová položka.
@@ -1929,7 +1943,7 @@ final class InvoiceRepository
             $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::PERCENT_COLUMN;
         }
 
-        array_push($ossColumns, 'linked_work_report_id', 'work_report_billing_key');
+        if ($supportsBilling) array_push($ossColumns, 'linked_work_report_id', 'work_report_billing_key');
 
         $stmt = $pdo->prepare(
             'INSERT INTO invoice_items
@@ -2074,7 +2088,7 @@ final class InvoiceRepository
             if ($supportsLineDiscount) {
                 array_push($params, ...\MyInvoice\Service\Invoice\LineDiscount::columns($item));
             }
-            array_push($params, $item['linked_work_report_id'] ?? null, $item['work_report_billing_key'] ?? null);
+            if ($supportsBilling) array_push($params, $item['linked_work_report_id'] ?? null, $item['work_report_billing_key'] ?? null);
             $stmt->execute($params);
 
             $maxOrder = max($maxOrder, $orderIndex);
@@ -3103,7 +3117,8 @@ final class InvoiceRepository
         foreach (['total_without_vat', 'total_vat', 'total_with_vat'] as $f) {
             $row[$f] = (float) $row[$f];
         }
-        $row['linked_work_report_id'] = $row['linked_work_report_id'] !== null ? (int) $row['linked_work_report_id'] : null;
+        $row['linked_work_report_id'] = isset($row['linked_work_report_id']) ? (int) $row['linked_work_report_id'] : null;
+        $row['work_report_billing_key'] = $row['work_report_billing_key'] ?? null;
         $row['item_kind'] = (string) ($row['item_kind'] ?? 'standard');
         // Vybraná sériová čísla / šarže (2016) jdou ven jako seznam, prázdný bez výběru.
         // Řádek bez karty (smazaná karta: FK ON DELETE SET NULL) výběr nenabízí, jinak

@@ -1,5 +1,5 @@
 import { nextTick } from 'vue'
-import { shallowMount } from '@vue/test-utils'
+import { shallowMount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia } from 'pinia'
@@ -13,46 +13,15 @@ vi.mock('@/api/vatClassifications', () => ({ vatClassificationsApi: { list: vi.f
 vi.mock('@/api/revenueCategories', () => ({ revenueCategoriesApi: { list: vi.fn() } }))
 import InvoiceEditor from './InvoiceEditor.vue'
 
-async function mountEditor(path = '/invoices/new') {
+async function mountEditor(path = '/invoices/new', realBillingUi = false) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id', component: InvoiceEditor }] })
   await router.push(path)
   await router.isReady()
   const wrapper = shallowMount(InvoiceEditor, {
-    global: { plugins: [router, createPinia(), createI18n({ legacy: false, locale: 'cs', messages: { cs: {} }, missingWarn: false, fallbackWarn: false })], directives: { math: {} } },
+    global: { plugins: [router, createPinia(), createI18n({ legacy: false, locale: 'cs', messages: { cs: {} }, missingWarn: false, fallbackWarn: false })], directives: { math: {} }, stubs: { ReportBillingEditor: !realBillingUi } },
   })
-  return { wrapper, vm: wrapper.vm as unknown as { form: { items: InvoiceItem[]; project_id: number | null; currency: string }; projects: { id: number; hourly_rate: number }[]; matOpen: boolean; matItems: import('@/api/invoices').WorkReportMaterial[]; wrItems: import('@/api/invoices').WorkReportItem[]; wrOpen: boolean; wrBillingSnapshot: WorkReportBillingSnapshot | null; wrBillingModeChosen: boolean; wrBillingProjectName: string; setLoadedProjectBillingContext: (invoice: { project_id: number; project_name: string; project_billing_template_id: number }) => void; openWorkReport: () => Promise<void>; wrBillingStale: boolean; wrBillingReportId: number | null; wrBillingCurrentPreview: WorkReportBillingPreview | null; wrBillingLegacyItemId: number | null; editedStatus: string; loaded: boolean; loadWorkReport: () => Promise<void>; submit: () => Promise<void>; blankItem: () => InvoiceItem; error: string; hasNonPositiveAmountToPay: boolean; wrBillingPending: boolean; queueWrBilling: (preview: WorkReportBillingPreview) => void } }
+  return { wrapper, vm: wrapper.vm as unknown as { form: { items: InvoiceItem[]; project_id: number | null; currency: string }; projects: { id: number; hourly_rate: number }[]; matOpen: boolean; matItems: import('@/api/invoices').WorkReportMaterial[]; wrItems: import('@/api/invoices').WorkReportItem[]; wrOpen: boolean; wrBillingSnapshot: WorkReportBillingSnapshot | null; wrBillingPeriod: string; wrBillingModeChosen: boolean; wrBillingProjectName: string; setLoadedProjectBillingContext: (invoice: { project_id: number; project_name: string; project_billing_template_id: number }) => void; openWorkReport: () => Promise<void>; wrBillingStale: boolean; wrBillingReportId: number | null; wrBillingCurrentPreview: WorkReportBillingPreview | null; wrBillingLegacyItemId: number | null; editedStatus: string; loaded: boolean; loadWorkReport: () => Promise<void>; submit: () => Promise<void>; blankItem: () => InvoiceItem; error: string; hasNonPositiveAmountToPay: boolean; wrBillingPending: boolean; queueWrBilling: (preview: WorkReportBillingPreview) => void } }
 }
-
-describe('InvoiceEditor prázdný koncept', () => {
-  it.each(['/invoices/new', '/invoices/42'])('uloží prázdný koncept %s i bez připraveného přenosu', async path => {
-    const { vm, wrapper } = await mountEditor(path)
-    vm.form.items = []
-    const saved = { id: 42, project_id: null, items: [] } as any
-    const create = vi.spyOn(invoicesApi, 'create').mockResolvedValue(saved)
-    const update = vi.spyOn(invoicesApi, 'update').mockResolvedValue(saved)
-    try {
-      expect(vm.hasNonPositiveAmountToPay).toBe(false)
-      await vm.submit()
-      expect(vm.error).toBe('')
-      if (path.endsWith('new')) expect(create).toHaveBeenCalledWith(expect.objectContaining({ items: [] }))
-      else expect(update).toHaveBeenCalledWith(42, expect.objectContaining({ items: [] }), false)
-    } finally { create.mockRestore(); update.mockRestore(); wrapper.unmount() }
-  })
-  it('prázdný vystavený doklad dál vyžaduje kladnou částku i při připraveném přenosu', async () => {
-    const { vm, wrapper } = await mountEditor('/invoices/42')
-    vm.form.items = []
-    vm.editedStatus = 'sent'
-    vm.queueWrBilling({ total_amount: 5000 } as WorkReportBillingPreview)
-    expect(vm.hasNonPositiveAmountToPay).toBe(true)
-    wrapper.unmount()
-  })
-  it('nulová běžná položka se nestává prázdným konceptem', async () => {
-    const { vm, wrapper } = await mountEditor('/invoices/42')
-    vm.form.items = [{ description: 'Služba', quantity: 1, unit: 'ks', unit_price_without_vat: 0, vat_rate_id: 1, order_index: 0 }]
-    expect(vm.hasNonPositiveAmountToPay).toBe(true)
-    wrapper.unmount()
-  })
-})
 
 describe('InvoiceEditor uložení po přenosu výkazu', () => {
   it.each([
@@ -97,6 +66,24 @@ describe('InvoiceEditor uložení po přenosu výkazu', () => {
 })
 
 
+describe('InvoiceEditor kladný připravený přenos', () => {
+  it('prázdný vystavený doklad dál vyžaduje kladnou částku i při připraveném přenosu', async () => {
+    const { vm, wrapper } = await mountEditor('/invoices/42')
+    vm.form.items = []
+    vm.editedStatus = 'sent'
+    vm.queueWrBilling({ total_amount: 5000 } as WorkReportBillingPreview)
+    expect(vm.hasNonPositiveAmountToPay).toBe(true)
+    wrapper.unmount()
+  })
+  it.each([0, -10, 5000])('výjimka pro uložení konceptu vyžaduje kladný kanonický součet (%i)', async total => {
+    const { vm, wrapper } = await mountEditor('/invoices/42')
+    vm.form.items = []
+    vm.queueWrBilling({ total_amount: 5000, totals: { without_vat: total, vat: 0, with_vat: total } } as WorkReportBillingPreview)
+    expect(vm.hasNonPositiveAmountToPay).toBe(total <= 0)
+    wrapper.unmount()
+  })
+})
+
 describe('InvoiceEditor ochrana ručně upravených položek při přenosu', () => {
   it.each(['price', 'quantity', 'persisted', 'stock', 'without-transfer'] as const)('zachová řádek %s a nechá server vyžadovat popis', async change => {
     const { vm, wrapper } = await mountEditor()
@@ -121,31 +108,6 @@ describe('InvoiceEditor ochrana ručně upravených položek při přenosu', () 
 
 
 describe('InvoiceEditor potvrzení uložení bez přenosu', () => {
-  it('po potvrzení uloží zastaralý výkaz k prázdnému konceptu bez přenosu a bez chyby kladné částky', async () => {
-    const { vm, wrapper } = await mountEditor('/invoices/42')
-    vm.editedStatus = 'draft'
-    vm.form.items = []
-    vm.wrOpen = true
-    vm.wrBillingSnapshot = { ...newBillingSnapshot(), name: 'Paušál', fixed_fee: 5000, included_hours: 5 }
-    vm.wrBillingReportId = 7
-    vm.wrBillingStale = true
-    vm.wrBillingPending = false
-    const update = vi.spyOn(invoicesApi, 'update').mockResolvedValue({ id: 42, project_id: null, items: [] } as any)
-    const saveReport = vi.spyOn(invoicesApi, 'saveWorkReport').mockResolvedValue({} as any)
-    const preview = vi.spyOn(workReportBillingApi, 'preview').mockResolvedValue({} as any)
-    const transfer = vi.spyOn(workReportBillingApi, 'transfer').mockImplementation(async () => ({ work_report: { id: 7 }, items: vm.form.items, preview: { fingerprint: 'current' } }) as any)
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    try {
-      await vm.submit()
-      expect(confirm).toHaveBeenCalledWith('work_report_billing.save_unsynced_confirm')
-      expect(update).toHaveBeenCalledWith(42, expect.objectContaining({ items: [] }), false)
-      expect(saveReport).toHaveBeenCalledWith(42, expect.objectContaining({ items: [], billing_snapshot: vm.wrBillingSnapshot }), false)
-      expect(preview).not.toHaveBeenCalled()
-      expect(transfer).not.toHaveBeenCalled()
-      expect(vm.error).toBe('')
-    } finally { [update, saveReport, preview, transfer, confirm].forEach(mock => mock.mockRestore()); wrapper.unmount() }
-  })
-
   it.each([
     { state: 'new', accept: false, prompt: true },
     { state: 'stale', accept: false, prompt: true },
@@ -270,14 +232,16 @@ describe('InvoiceEditor opakování částečně uloženého účtování', () =
     vm.wrOpen = true
     vm.wrBillingReportId = 7
     vm.wrBillingSnapshot = null
+    vm.wrBillingPeriod = '2099-01'
     vm.wrItems = []
-    vm.form.items = []
+    vm.form.items = [{ description: 'Ruční služba', quantity: 1, unit: 'ks', unit_price_without_vat: 100, vat_rate_id: 1, order_index: 0 }]
     const update = vi.spyOn(invoicesApi, 'update').mockResolvedValue({ id: 42, project_id: null, items: [] } as any)
     const report = vi.spyOn(invoicesApi, 'saveWorkReport').mockResolvedValue({} as any)
     try {
       await vm.submit()
       expect(vm.error).toBe('')
       expect(report).toHaveBeenCalledWith(42, expect.objectContaining({ billing_snapshot: null, items: [] }), false)
+      expect(report.mock.calls[0]![1]).not.toHaveProperty('billing_period')
     } finally { update.mockRestore(); report.mockRestore(); wrapper.unmount() }
   })
 })
@@ -322,5 +286,22 @@ describe('InvoiceEditor výchozí účtování z kontextu faktury bez seznamu za
       if (mode === 'failure') { expect(vm.wrOpen).toBe(false); expect(vm.error).toBeTruthy() }
       if (mode !== 'different-project') expect(vm.wrBillingProjectName).toBe('Syntetická zakázka')
     } finally { [get, list, projectGet, projectList].forEach(mock => mock.mockRestore()); wrapper.unmount() }
+  })
+})
+
+
+describe('InvoiceEditor opt-in ovládání účtování', () => {
+  it.each([false, true])('bez firemních šablon je nové UI vidět jen s vlastním snapshotem (%s)', async hasSnapshot => {
+    const list = vi.spyOn(workReportBillingApi, 'list').mockResolvedValue([])
+    const { vm, wrapper } = await mountEditor('/invoices/42', true)
+    try {
+      vm.loaded = true
+      vm.wrOpen = true
+      vm.wrItems = [{ description: 'Běžná práce', hours: 1, rate: 100, order_index: 0 }]
+      vm.wrBillingSnapshot = hasSnapshot ? { ...newBillingSnapshot(), name: 'Uložený paušál', fixed_fee: 5000 } : null
+      await flushPromises()
+      expect(wrapper.find('[data-test="report-billing-editor"]').exists()).toBe(hasSnapshot)
+      expect(wrapper.text()).toContain('invoice.work_report')
+    } finally { list.mockRestore(); wrapper.unmount() }
   })
 })

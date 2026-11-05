@@ -333,7 +333,7 @@ async function save() {
         project_id: projectId.value,
         billing_template_id: billingTemplateId.value,
         billing_snapshot: billingSnapshot.value,
-        billing_period: billingPeriod.value || null,
+        ...(billingSnapshot.value ? { billing_period: billingPeriod.value || null } : {}),
         display_options: displayOptions.value,
         title: wrTitle.value.trim() || t('invoice.work_report'),
         vat_rate_id: workVatRateId.value,

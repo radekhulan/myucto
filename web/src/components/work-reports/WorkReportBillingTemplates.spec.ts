@@ -9,8 +9,8 @@ vi.mock('@/api/workReportBilling', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/workReportBilling')>(),
   workReportBillingApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
 }))
-vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: vi.fn().mockResolvedValue([{ code: 'EUR', is_default: true }]) } }))
-vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: vi.fn().mockResolvedValue([{ id: 1, code: 'EUR', is_default: true }, { id: 2, code: 'CZK' }]) } }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { default_hourly_rate: 2400 } }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (permission: string) => permission === 'price_list' && state.canWrite }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }) }))
 const template: WorkReportBillingTemplate = { ...newBillingSnapshot(), id: 7, name: 'Servis', fixed_fee: 5000 }
@@ -60,6 +60,12 @@ describe('stránka šablon účtování: oprávnění Ceníku', () => {
     await wrapper.findAll('button').find(button => button.text() === 'work_report_billing.add_template')!.trigger('click')
     const manager = wrapper.findComponent(Manager).vm as unknown as { editing: { currency: string } }
     expect(manager.editing.currency).toBe('EUR')
+    const currency = wrapper.get('[data-test="billing-currency"]')
+    expect(currency.element.tagName).toBe('SELECT')
+    expect(currency.findAll('option').map(option => option.text())).toEqual(['EUR', 'CZK'])
+    await currency.setValue('CZK')
+    expect(manager.editing.currency).toBe('CZK')
+    expect((manager.editing as unknown as { bands: { rate: number }[] }).bands[0]?.rate).toBe(2400)
     wrapper.unmount()
   })
 })

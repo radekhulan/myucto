@@ -18,12 +18,12 @@ final class ProjectRepository
         $project = $current->fetch(PDO::FETCH_ASSOC);
         $templateId = array_key_exists('billing_template_id', $data) ? $data['billing_template_id'] : ($project['billing_template_id'] ?? null);
         if ($templateId !== null) {
-            if (!filter_var($templateId, FILTER_VALIDATE_INT) || (int) $templateId <= 0
-                || (new WorkReportBillingTemplateRepository($this->db))->find((int) $templateId, $supplierId) === null) {
+            if (!filter_var($templateId, FILTER_VALIDATE_INT) || (int) $templateId <= 0) {
                 throw new \InvalidArgumentException('Cenové ujednání nepatří aktuální firmě.');
             }
             $templateId = (int) $templateId;
             $template = (new WorkReportBillingTemplateRepository($this->db))->find($templateId, $supplierId);
+            if ($template === null) throw new \InvalidArgumentException('Cenové ujednání nepatří aktuální firmě.');
             if ($template['currency'] !== $project['code']) throw new \InvalidArgumentException('Měna cenového ujednání se liší od měny zakázky.');
         }
         $this->db->pdo()->prepare('UPDATE projects SET billing_template_id = ? WHERE id = ?')->execute([$templateId, $id]);

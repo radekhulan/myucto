@@ -27,7 +27,7 @@ import EetCreditNoteRefundDialog from '@/components/eet/EetCreditNoteRefundDialo
 import { eetApi, type EetCreditNoteRefundInfo, type EetInvoiceSummaryItem } from '@/api/eet'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { stockApi, type StockDocument } from '@/api/stock'
-import { formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { formatPeriod, formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
 import { durationTotal, formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { invoiceIssuedBy } from '@/pages/invoices/invoiceIssuedBy'
 import { useAuthStore } from '@/stores/auth'
@@ -3335,7 +3335,7 @@ useWindowRefresh(async () => {
           <span class="text-sm text-neutral-700">{{ workReport.title }}</span>
         </header>
         <div v-if="workReport.billing_snapshot" class="px-5 py-3 space-y-3">
-          <p v-if="workReport.billing_period" class="text-sm text-neutral-500">{{ t('work_report_billing.period') }}: {{ workReport.billing_period }}</p>
+          <p v-if="workReport.billing_period" class="text-sm text-neutral-500">{{ t('work_report_billing.period') }}: {{ formatPeriod(workReport.billing_period) }}</p>
           <p v-if="workReport.billing_stale" class="text-sm text-warning-600">{{ t('work_report_billing.stale') }}</p>
           <BillingRecap v-if="workReport.billing_preview" :preview="workReport.billing_preview" :currency="invoice.currency" :prices-include-vat="!!invoice.prices_include_vat" />
         </div>

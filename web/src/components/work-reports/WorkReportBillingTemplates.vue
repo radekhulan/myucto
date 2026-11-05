@@ -3,7 +3,7 @@ import { ref, watch, onActivated, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { workReportBillingApi, newBillingSnapshot, type WorkReportBillingSnapshot, type WorkReportBillingTemplate } from '@/api/workReportBilling'
 import { useSupplierStore } from '@/stores/supplier'
-import { codebooksApi } from '@/api/codebooks'
+import { codebooksApi, type Currency } from '@/api/codebooks'
 import { apiErrorMessage } from '@/api/errors'
 import BillingSnapshotEditor from '@/components/work-reports/BillingSnapshotEditor.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -12,6 +12,7 @@ const { t } = useI18n()
 const supplier = useSupplierStore()
 const list = ref<WorkReportBillingTemplate[]>([])
 const defaultCurrency = ref('CZK')
+const currencies = ref<Currency[]>([])
 const editing = ref<WorkReportBillingSnapshot | null>(null)
 const editingId = ref<number | null>(null)
 const error = ref('')
@@ -23,8 +24,8 @@ async function load(resetEditor = true) {
   list.value = []
   error.value = ''
   try {
-    const [result, currencies] = await Promise.all([workReportBillingApi.list(), props.currency ? Promise.resolve([]) : codebooksApi.currencies().catch(() => [])])
-    if (request === generation) { list.value = result; defaultCurrency.value = currencies.find(currency => currency.is_default)?.code || 'CZK' }
+    const [result, currencyList] = await Promise.all([workReportBillingApi.list(), props.currency ? Promise.resolve([]) : codebooksApi.currencies().catch(() => [])])
+    if (request === generation) { list.value = result; currencies.value = currencyList; defaultCurrency.value = currencyList.find(currency => currency.is_default)?.code || 'CZK' }
   }
   catch (e) { if (request === generation) error.value = apiErrorMessage(e, t('common.error')) }
 }
@@ -38,7 +39,7 @@ onBeforeUnmount(() => { generation++ })
 function edit(template?: WorkReportBillingTemplate) {
   if (props.readOnly && !template) return
   editingId.value = template?.id ?? null
-  editing.value = template ? JSON.parse(JSON.stringify(template)) : newBillingSnapshot(props.currency || defaultCurrency.value)
+  editing.value = template ? JSON.parse(JSON.stringify(template)) : newBillingSnapshot(props.currency || defaultCurrency.value, Number(supplier.currentSupplier?.default_hourly_rate) || 0)
 }
 async function save() {
   if (props.readOnly || !editing.value || busy.value) return
@@ -74,7 +75,7 @@ async function remove(template: WorkReportBillingTemplate) {
       </div>
     </div>
     <div v-if="editing" class="border border-neutral-200 rounded-lg p-4 space-y-4">
-      <BillingSnapshotEditor v-model="editing" :read-only="readOnly" />
+      <BillingSnapshotEditor v-model="editing" :read-only="readOnly" :currencies="currencies" />
       <div class="flex flex-wrap gap-2">
         <button v-if="!readOnly" type="button" :class="btnFilled('primary')" :disabled="busy" @click="save"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ busy ? t('common.saving') : t('common.save') }}</button>
         <button type="button" :class="btnOutline('neutral')" @click="editing = null"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t(readOnly ? 'common.close' : 'common.cancel') }}</button>

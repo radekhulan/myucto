@@ -3111,9 +3111,8 @@ paths:
       description: |
         Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
         jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
-        v konceptu (`draft`) odstraní všechny položky a přepočítá součty na nulu.
-        U nedraftového dokladu s položkami se odmítne s 422 `no_items`, i při `force=1`.
-        Poslané neprázdné `items` řádky nahradí
+        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
+        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
         (DELETE + INSERT), takže payload musí nést kompletní seznam.
 
         Vynucená úprava vystaveného dokladu (`force=1`, u zaúčtovaného dokladu
@@ -3130,8 +3129,8 @@ paths:
         Vynechaný klíč zachová uloženou hodnotu, `null` nebo `""` vymaže nullable pole; `issue_date`
         a `currency_id` se při `null` vrátí na výchozí hodnotu (dnes, měna
         projektu/klienta/dodavatele). `items`, `payment_schedule` a `cash_register_id` jsou při
-        vynechání beze změny, při poslání se nahradí (`items: []` lze uložit v konceptu;
-        u nedraftového dokladu s položkami vrátí 422 `no_items`).
+        vynechání beze změny, při poslání se nahradí (`items: []` u dokladu s položkami vrátí 422
+        `no_items`).
 
         Výjimky a odvozená pole: (1) změní-li se `client_id` a `project_id` je vynechané, zakázka se
         odebere, protože patří klientovi. (2) `revenue_category` a `revenue_category_id` tvoří
@@ -3177,7 +3176,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
-          description: '`items: []` by nedraftový doklad připravilo o všechny položky (`no_items`)'
+          description: '`items: []` by doklad připravilo o všechny položky (`no_items`)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4093,7 +4092,7 @@ paths:
         (bez ohledu na status). Vynucená úprava i smazání výkazu vystavené faktury
         jdou jen z relace, API token dostane 403 `token_write_forbidden`.
 
-        Suma `total_hours` se přepočítá ze `items` na serveru. Při `billing_snapshot` se cena počítá z paušálu a pásem; jinak ze sazeb jednotlivých činností. Vynechané cenové nastavení zůstane zachované.
+        Suma `total_hours` se přepočítá ze `items` na serveru. V konceptu se při `billing_snapshot` cena počítá z paušálu a pásem; jinak ze sazeb jednotlivých činností. Mimo koncept se účtovaný souhrn bere z navázaných položek faktury a změna šablony, cenového nastavení nebo období je odmítnuta i při `force=1`. Vynechané cenové nastavení zůstane zachované.
 
         **Pozor:** výkaz víceprací je samostatná entita — ukládá se jen jako
         příloha (2. strana PDF) a **NEmění položky ani částku faktury**. Pokud chceš
@@ -4126,7 +4125,7 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '409':
-          description: Faktura není draft a požadavek není vynucená úprava s oprávněním (`not_editable`)
+          description: Faktura není draft a požadavek není vynucená úprava s oprávněním (`not_editable`), nebo se mění cenové ujednání či období mimo koncept / ruší již přenesené účtování (`billing_conflict`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4153,7 +4152,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Faktura není draft a požadavek není vynucené smazání s oprávněním (`not_editable`)
+          description: Faktura není draft a požadavek není vynucené smazání s oprávněním (`not_editable`), nebo na výkaz stále odkazují položky účtování (`billing_conflict`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -4202,7 +4201,7 @@ paths:
                     type: array
                     items: { type: string, format: email }
         '409':
-          description: Faktura není draft / nemá výkaz / projekt nevyžaduje schválení
+          description: Faktura není draft / nemá výkaz / projekt nevyžaduje schválení / cenová rekapitulace není aktuálně přenesena do faktury (`billing_stale`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -8916,10 +8915,10 @@ paths:
       description: |
         Vynechaný klíč `items` znamená „položky neměň" — částečný payload (jen DUZP,
         jen poznámka) doklad nevyprázdní. Explicitně poslané prázdné pole `items: []`
-        v konceptu (`draft`) odstraní všechny položky, stejně jako dedikovaný
-        `PUT /api/v1/purchase-invoices/{id}/items`. U nedraftového dokladu s položkami
-        se odmítne s 422 `no_items`, i při `force=1`. Poslané neprázdné `items` řádky
-        nahradí (DELETE + INSERT), takže payload musí nést kompletní seznam.
+        na dokladu, který položky má, se odmítne s 422 `no_items`: součty se počítají
+        z řádků, takže by vznikl doklad na nulu. Poslané neprázdné `items` řádky nahradí
+        (DELETE + INSERT), takže payload musí nést kompletní seznam. Vyprázdnit řádky
+        draftu lze dedikovaným `PUT /api/v1/purchase-invoices/{id}/items`.
 
         Částečná aktualizace (viz úvod). Schéma `PurchaseInvoicePayload` je sdílené s POST, kde jsou
         povinné `vendor_id`, `vendor_invoice_number`, `issue_date`, `due_date`, `currency_id` a
@@ -9001,7 +9000,7 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: |
-            `items: []` by nedraftový doklad připravilo o všechny položky (`no_items`), chybí
+            `items: []` by doklad připravilo o všechny položky (`no_items`), chybí
             `force_mode` u zaúčtovaného dokladu v uzavřeném období (`force_mode_required`),
             `force_mode=notes_only` narazil na změnu účetního pole
             (`financial_change_not_allowed`), nebo změnu nároku v hlavičce nejde jednoznačně
@@ -46280,6 +46279,7 @@ components:
     SupplierBrief:
       type: object
       properties:
+        default_hourly_rate: { type: number, minimum: 0, readOnly: true, description: "Výchozí hodinová sazba firmy v přehledu firem session endpointu /api/auth/me." }
         work_report_display_options: { $ref: '#/components/schemas/WorkReportDisplayOptions' }
         id: { type: integer }
         company_name: { type: string }
@@ -47576,7 +47576,6 @@ components:
             i prázdný řetězec jsou vědomé vyprázdnění a výchozí text nepřepíšou.
         items:
           type: array
-          description: "Kompletní seznam položek. Koncept může být prázdný; při PUT vynechaný klíč nebo null zachová položky, [] je v konceptu odstraní."
           items: { $ref: '#/components/schemas/InvoiceItemInput' }
 
     InvoiceImportInput:
@@ -50800,7 +50799,6 @@ components:
         vat_classification_code: { type: [string, "null"] }
         items:
           type: array
-          description: "Kompletní seznam položek. Koncept může být prázdný; při PUT vynechaný klíč nebo null zachová položky, [] je v konceptu odstraní."
           items: { $ref: '#/components/schemas/PurchaseInvoiceItemPayload' }
 
     InboxScanResult:

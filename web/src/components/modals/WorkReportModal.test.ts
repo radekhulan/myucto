@@ -1,4 +1,4 @@
-import { shallowMount } from '@vue/test-utils'
+import { shallowMount, mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -36,6 +36,7 @@ function modalVm() {
     wrItems: Array<{ description: string; hours: number; duration_minutes: number | null; rate: number }>
     billingSnapshot: ReturnType<typeof newBillingSnapshot> | null
     projectName: string
+    billingPeriod: string
     billingPending: boolean
     billingStale: boolean
     billingReportId: number | null
@@ -133,6 +134,23 @@ describe('WorkReportModal účtování výkazu', () => {
 })
 
 
+it('výkaz bez šablony neposílá automaticky předvyplněné období jako změnu ujednání', async () => {
+  const vm = modalVm()
+  vm.billingSnapshot = null
+  vm.billingPeriod = '2099-01'
+  vm.wrItems = [{ description: 'Služba', hours: 1, duration_minutes: 60, rate: 100 }]
+  const invoice = { id: 42, invoice_type: 'invoice', items: [] }
+  const get = vi.spyOn(invoicesApi, 'get').mockResolvedValue(invoice as any)
+  const report = vi.spyOn(invoicesApi, 'saveWorkReport').mockResolvedValue({} as any)
+  const materials = vi.spyOn(invoicesApi, 'saveWorkReportMaterials').mockResolvedValue({} as any)
+  const update = vi.spyOn(invoicesApi, 'update').mockResolvedValue(invoice as any)
+  try {
+    await vm.save()
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(report.mock.calls[0]![1]).not.toHaveProperty('billing_period')
+  } finally { [get, report, materials, update].forEach(mock => mock.mockRestore()) }
+})
+
 describe('WorkReportModal potvrzení uložení bez přenosu', () => {
   it.each([
     { state: 'new', accept: false, prompt: true },
@@ -221,5 +239,22 @@ describe('WorkReportModal výchozí účtování bez práva číst zakázky', ()
       else if (mode === 'snapshot') expect(vm.billingSnapshot).toEqual(custom)
       else expect(vm.billingSnapshot).toBeNull()
     } finally { [get, report, list, projectGet, projectList, units, vat].forEach(mock => mock.mockRestore()) }
+  })
+})
+
+
+describe('WorkReportModal opt-in ovládání účtování', () => {
+  it.each([false, true])('bez firemních šablon ukáže nové ovládání jen pro uložený snapshot (%s)', async hasSnapshot => {
+    const get = vi.spyOn(invoicesApi, 'get').mockResolvedValue({ id: 42, project_id: null, items: [], currency: 'CZK', issue_date: '2096-03-10' } as any)
+    const report = vi.spyOn(invoicesApi, 'getWorkReport').mockResolvedValue({ id: 7, title: 'Syntetický výkaz', items: [{ description: 'Syntetická práce', hours: 1, rate: 100, order_index: 0 }], materials: [], billing_snapshot: hasSnapshot ? { ...newBillingSnapshot(), name: 'Uložený paušál', fixed_fee: 5000 } : null } as any)
+    const units = vi.spyOn(codebooksApi, 'units').mockResolvedValue([])
+    const vat = vi.spyOn(codebooksApi, 'vatRates').mockResolvedValue([])
+    const list = vi.spyOn(workReportBillingApi, 'list').mockResolvedValue([])
+    const wrapper = mount(WorkReportModal, { props: { modelValue: true, invoiceId: 42 }, global: { plugins: [createPinia(), createI18n({ legacy: false, locale: 'cs', messages: { cs: {} }, missingWarn: false, fallbackWarn: false })], stubs: { Modal: { template: '<div><slot /><slot name="footer" /></div>' }, DateInput: true, DurationInput: true, WorkReportDisplaySettings: true } } })
+    try {
+      await flushPromises()
+      expect(wrapper.find('[data-test="report-billing-editor"]').exists()).toBe(hasSnapshot)
+      expect(wrapper.find('input[maxlength="100"]').exists()).toBe(true)
+    } finally { [get, report, units, vat, list].forEach(mock => mock.mockRestore()); wrapper.unmount() }
   })
 })

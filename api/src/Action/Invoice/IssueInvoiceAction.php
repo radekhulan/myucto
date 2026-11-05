@@ -71,6 +71,7 @@ final class IssueInvoiceAction
         private readonly ClientRepository $clients,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -109,9 +110,7 @@ final class IssueInvoiceAction
         }
 
         try {
-            (new \MyInvoice\Service\WorkReport\WorkReportBillingService($this->db,
-                new \MyInvoice\Repository\WorkReportRepository($this->db), $this->repo,
-                new \MyInvoice\Service\Invoice\InvoiceCalculator($this->db)))->assertCurrent($id, (int) $invoice['supplier_id']);
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
         } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
             return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         }
@@ -362,9 +361,7 @@ final class IssueInvoiceAction
         try {
             $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
             $billingLock->execute([$supplierId, $id]);
-            (new \MyInvoice\Service\WorkReport\WorkReportBillingService($this->db,
-                new \MyInvoice\Repository\WorkReportRepository($this->db), $this->repo,
-                new \MyInvoice\Service\Invoice\InvoiceCalculator($this->db)))->assertCurrent($id, $supplierId);
+            $this->billing->assertCurrent($id, $supplierId);
             if ($varsymbol === null) {
                 try {
                     // Zjednodušený doklad má vlastní řadu, je-li ve firmě nastavená.

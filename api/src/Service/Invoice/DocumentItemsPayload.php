@@ -22,16 +22,22 @@ namespace MyInvoice\Service\Invoice;
  *    chybějícímu klíči; shovívavost je tu levná a integrace, které dnes data ničí,
  *    začnou fungovat správně. `items: null` se počítá jako „klíč nepřišel" — je to
  *    typický artefakt serializace částečného těla, ne pokyn k mazání.
- * 2. Explicitně poslané prázdné pole smí vyprázdnit existující koncept (`draft`).
- *    Je to pracovní stav stejně jako nový koncept bez řádků; součty se přepočítají
- *    z prázdné sady. Vystavení/přijetí a další účetní přechody mají vlastní kontroly.
- * 3. Doklad mimo koncept nesmí úplnou náhradou přijít o všechny existující řádky
- *    ({@see emptiesExisting()}). Výjimku neuděluje ani vynucená editace.
- * 4. Prázdné pole na dokladu, který žádné položky nemá, je no-op — nemá co zničit.
+ * 2. Explicitně poslané PRÁZDNÉ pole na dokladu, který položky MÁ, je vada požadavku,
+ *    ne příkaz k vyprázdnění ({@see emptiesExisting()}). Součty dokladu se počítají
+ *    výhradně z řádků ({@see InvoiceCalculator::recompute()}, {@see PurchaseInvoiceCalculator}),
+ *    takže by vznikl doklad na nulu — v seznamu k nerozeznání od záměrně vystaveného
+ *    a v žádném výkazu. Týž závěr si vynutil import vydaných dokladů, který doklad bez
+ *    jediné položky rovnou odmítá ({@see \MyInvoice\Service\Import\InvoiceImportService}).
+ * 3. Prázdné pole na dokladu, který žádné položky nemá, je no-op — nemá co zničit.
  *
- * Stejná pravidla platí pro obecný PUT vydaného i přijatého dokladu. Dedikovaný
- * `PUT /purchase-invoices/{id}/items` pracuje pouze s konceptem a prázdné pole také
- * přijímá; chybějící klíč tam ovšem není částečná aktualizace, ale neplatný vstup.
+ * ODLIŠNOSTI, které jsou ZÁMĚR:
+ *  - ZALOŽENÍ dokladu (POST) tenhle guard nemá: nemá co smazat a oba endpointy zakládají
+ *    `draft`, kde je prázdný doklad pracovní stav (týž výklad, jaký import používá pro
+ *    přijaté faktury). Doklad bez řádků se zastaví až tam, kde by se stal účetním faktem.
+ *  - Dedikovaný `PUT /purchase-invoices/{id}/items` prázdné pole PŘIJÍMÁ: tam je `items`
+ *    celý obsah požadavku, takže `[]` je jednoznačný pokyn, a endpoint jede jen nad
+ *    draftem. Naopak CHYBĚJÍCÍ klíč je tam vada požadavku, ne „neměň" — viz
+ *    {@see \MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceItemsAction}.
  */
 final class DocumentItemsPayload
 {
@@ -54,15 +60,14 @@ final class DocumentItemsPayload
     }
 
     /**
-     * Odmítá vyprázdnění existujících řádků mimo koncept; neznámý stav výjimku nemá.
+     * Explicitně poslané prázdné pole na dokladu, který nějaké položky má → 422.
      *
      * @param array<string,mixed>        $body
      * @param array<int,mixed>           $existingItems položky uloženého dokladu
      */
-    public static function emptiesExisting(array $body, array $existingItems, ?string $storedStatus = null): bool
+    public static function emptiesExisting(array $body, array $existingItems): bool
     {
-        return $storedStatus !== 'draft'
-            && self::replaces($body)
+        return self::replaces($body)
             && is_array($body['items'])
             && $body['items'] === []
             && $existingItems !== [];
@@ -71,8 +76,10 @@ final class DocumentItemsPayload
     /** Hláška k {@see EMPTY_ERROR_CODE} — stejná na obou stranách evidence. */
     public static function emptyErrorMessage(): string
     {
-        return 'Doklad mimo koncept nesmí zůstat bez jediné položky. '
-            . 'Pokud jste položky měnit nechtěli, klíč „items“ v požadavku vynechte.';
+        return 'Doklad by zůstal bez jediné položky. Součty se počítají z řádků, takže by z něj '
+            . 'byl doklad na nulu — v seznamu k nerozeznání od záměrně vystaveného a v žádném '
+            . 'výkazu. Pokud jste položky měnit nechtěli, klíč „items" v požadavku vynechte; '
+            . 'pokud má doklad zaniknout, smažte ho.';
     }
 
     /**
