@@ -523,6 +523,41 @@ final class WorkReportBillingIntegrationTest extends TestCase
         self::assertSame($stored, (string) $pdo->query('SELECT billing_snapshot FROM work_reports WHERE id = ' . (int) $report['id'])->fetchColumn());
     }
 
+    /** @return iterable<string,array{?string,int,bool}> */
+    public static function foreignClientTransfers(): iterable
+    {
+        yield 'OSS spotřebitel v NL' => [null, 0, true];
+        yield 'plátce v NL s přenesením daňové povinnosti' => ['NL123456789B01', 1, false];
+        yield 'plátce v NL bez přenesení v hlavičce' => ['NL123456789B01', 0, false];
+    }
+
+    /**
+     * Po přenosu rekapitulace do faktury pro zahraničního odběratele (OSS sazba cílové
+     * země nebo režim přenesení) musí kontrola před vystavením projít. Sazba cílové země
+     * se hledá podle stejného procenta, takže otisk náhledu i uložený řádek nesou totéž
+     * `vat_rate_snapshot` a vystavení se nezablokuje trvalým konfliktem.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('foreignClientTransfers')]
+    public function testForeignClientTransferPassesIssueCheck(?string $dic, int $reverseCharge, bool $oss): void
+    {
+        $pdo = $this->db->pdo();
+        $country = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'NL'")->fetchColumn();
+        $pdo->prepare("INSERT INTO vat_rates (code, rate_percent, country, label_cs, label_en, valid_from)
+            VALUES (?, 21, 'NL', 'Syntetická NL sazba', 'Synthetic NL rate', '2020-01-01')")->execute(['TNL-' . bin2hex(random_bytes(6))]);
+        $this->foreignVat = (int) $pdo->lastInsertId();
+        $pdo->prepare("UPDATE supplier SET oss_enabled = 1, oss_valid_from = '2020-01-01', oss_valid_to = NULL WHERE id = ?")->execute([$this->supplier]);
+        $pdo->prepare("UPDATE clients SET country_id = ?, dic = ?, oss_mode = 'auto', oss_default_supply_type = 'goods' WHERE supplier_id = ?")->execute([$country, $dic, $this->supplier]);
+        $pdo->prepare('UPDATE invoices SET reverse_charge = ? WHERE id = ?')->execute([$reverseCharge, $this->invoice]);
+        $result = $this->transfer($this->setupReport());
+        self::assertCount(3, $result['items']);
+        foreach ($result['items'] as $index => $item) {
+            self::assertSame($oss, (bool) $item['oss_applicable']);
+            if ($oss) self::assertSame($this->foreignVat, (int) $item['vat_rate_id']);
+            self::assertEqualsWithDelta((float) $result['preview']['items'][$index]['vat_rate_snapshot'], (float) $item['vat_rate_snapshot'], 0.000001);
+        }
+        $this->container->get(WorkReportBillingService::class)->assertCurrent($this->invoice, $this->supplier);
+    }
+
     public function testReportChangedBetweenIssueChecksReturnsConflictWithoutNumberAllocation(): void
     {
         $report = $this->setupReport();
