@@ -213,12 +213,12 @@ final class UpdatePurchaseInvoiceAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
-        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // Vyprázdnění položek mimo koncept → 422 ({@see DocumentItemsPayload}).
         // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
         // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
         // a `financial_change_not_allowed` níž. 400 `validation_failed` je v téhle codebase
         // vyhrazené pro schéma pole po poli (nese mapu `fields`).
-        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []), (string) $existing['status'])) {
             return Json::error(
                 $response,
                 DocumentItemsPayload::EMPTY_ERROR_CODE,

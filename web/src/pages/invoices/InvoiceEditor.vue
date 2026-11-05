@@ -2210,6 +2210,7 @@ const isRefundInvoice = computed(() =>
 
 const hasNonPositiveAmountToPay = computed(() =>
   requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
+    && !(editedStatus.value === 'draft' && amountItems(form.value.items).length === 0)
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
