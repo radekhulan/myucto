@@ -882,7 +882,8 @@ const navSections = computed<NavSection[]>(() => {
         ] : []),
         ...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers', label: t('nav.suppliers'), icon: ICONS.suppliers }] : []),
         ...(isAdmin ? [
-          { to: '/admin/users',        label: t('nav.users'),      icon: ICONS.users },
+          // Uživatelé a jejich relace jsou na ukázkové instanci skutečné účty, ne demo data.
+          ...(auth.isDemo ? [] : [{ to: '/admin/users', label: t('nav.users'), icon: ICONS.users }]),
           { to: '/admin/roles',        label: t('nav.roles'),      icon: ICONS.approvals },
           { to: '/admin/emails',       label: t('nav.emails'),     icon: ICONS.email },
           { to: '/admin/activity-log', label: t('nav.log'),        icon: ICONS.log },

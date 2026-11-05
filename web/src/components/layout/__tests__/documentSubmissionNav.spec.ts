@@ -31,14 +31,14 @@ const navigationCode = ts.transpileModule(declarations.map(declaration => declar
   compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None },
 }).outputText
 
-function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}, options: { stockEnabled?: boolean; writeOverrides?: Record<string, boolean> } = {}) {
+function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}, options: { stockEnabled?: boolean; writeOverrides?: Record<string, boolean>; demo?: boolean } = {}) {
   const profile = profiles[role]
   const can = (permission: string, access = 'read') => profile.isSuperadmin
     || (access === 'write' && options.writeOverrides?.[permission] !== undefined ? options.writeOverrides[permission]! : permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
   const auth = {
     ...profile,
     isAdminPlusRole: false, hasCommercialFeatures: true, hasPayrollFeatures: true,
-    isManagedInstallation: false, isDemo: false, can, canRead: can, canWrite: (permission: string) => can(permission, 'write'),
+    isManagedInstallation: false, isDemo: options.demo === true, can, canRead: can, canWrite: (permission: string) => can(permission, 'write'),
   }
   const evaluate = new Function('computed', 'auth', 'supplierStore', 'clientExperience', 't', 'ICONS',
     'approvalCount', 'accountantSigningProfilesEnabled', 'hostingAttention', 'automationStore', 'canUsePurchaseAiExtraction', 'OPERATIONAL_SETTINGS_KEYS', 'hasFrameworkScope', `${navigationCode}\nreturn navSections;`)
@@ -142,5 +142,16 @@ describe('AppLayout a položka menu pro účtování výkazů', () => {
     const wrapper = renderNavigation('accountant', { price_list: false }, { stockEnabled: true })
     expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
     wrapper.unmount()
+  })
+})
+
+describe('AppLayout na ukázkové instanci', () => {
+  it('superadmin v demu nemá v menu Uživatele (ani Aktivní relace), mimo demo ano', () => {
+    const demo = renderNavigation('superadmin', {}, { demo: true })
+    expect(demo.find('a[href="/admin/users"]').exists()).toBe(false)
+    demo.unmount()
+    const regular = renderNavigation('superadmin')
+    expect(regular.find('a[href="/admin/users"]').exists()).toBe(true)
+    regular.unmount()
   })
 })

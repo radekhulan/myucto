@@ -55,6 +55,8 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
         // `sent-emails` čte tentýž `activity_log` jako `activity-log` níž — bez něj
         // by byl seznam nekonzistentní sám se sebou.
         '/api/admin/users',
+        // Aktivní relace nesou e-maily, IP adresy a zařízení skutečných přihlášení.
+        '/api/admin/user-sessions',
         '/api/admin/roles',
         '/api/admin/sent-emails',
         '/api/admin/email-templates',

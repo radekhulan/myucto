@@ -134,6 +134,48 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
         ];
     }
 
+    /**
+     * Uživatelé a jejich aktivní relace jsou na ukázkové instanci skutečné účty
+     * (e-maily, IP adresy, zařízení), ne demo data: ani superadmin je nepřečte.
+     */
+    #[DataProvider('usersAndSessionsProvider')]
+    public function testDemoSuperadminCannotReachUsersOrSessions(string $method, string $path): void
+    {
+        $handlerCalled = false;
+        $handler = new class($handlerCalled) implements RequestHandlerInterface {
+            public function __construct(private bool &$called) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                $this->called = true;
+                return (new ResponseFactory())->createResponse(204);
+            }
+        };
+        $request = $this->request($method, $path)->withAttribute(
+            AuthMiddleware::ATTR_USER,
+            ['id' => 1, 'role' => 'superadmin'],
+        );
+
+        $response = $this->middleware(true)->process($request, $handler);
+
+        self::assertSame(403, $response->getStatusCode(), $method . ' ' . $path);
+        self::assertFalse($handlerCalled, 'Users and sessions must not reach the action handler in demo.');
+    }
+
+    public static function usersAndSessionsProvider(): array
+    {
+        return [
+            ['GET', '/api/admin/users'],
+            ['HEAD', '/api/admin/users'],
+            ['GET', '/api/admin/users/1/technical-suppliers'],
+            ['GET', '/api/admin/user-sessions'],
+            ['HEAD', '/api/admin/user-sessions'],
+            ['GET', '/api/%61dmin/user-sessions'],
+            ['POST', '/api/admin/user-sessions/terminate'],
+            ['DELETE', '/api/admin/user-sessions/abc123'],
+        ];
+    }
+
     public function testInstanceSmtpPathPassesThroughWhenDemoIsDisabled(): void
     {
         $called = false;

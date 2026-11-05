@@ -36,6 +36,8 @@ declare module 'vue-router' {
     access?: AccessLevel
     staffOnly?: boolean
     superadminOnly?: boolean
+    /** Na ukázkové instanci (demo) se stránka nesmí otevřít vůbec, ani superadminovi. */
+    demoHidden?: boolean
     instanceAdminOnly?: boolean
     adminPlusOnly?: boolean
     companyAdminOnly?: boolean
@@ -566,6 +568,8 @@ export async function authorizationGuard(
   }
 
   if (auth.isClientRole && to.matched.some(r => r.meta.staffOnly)) return denyFallback(to.name, auth)
+
+  if (auth.isDemo && to.matched.some((r) => r.meta.demoHidden)) return denyFallback(to.name, auth)
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
   if (superadminOnly && !auth.isSuperadmin) {
