@@ -49,4 +49,4 @@
 {% endif %}
   </tbody>
 </table>
-{% if work_report.billing_snapshot|default(null) and wr_original_display.amount %}{% include 'work_report_billing.twig' %}{% endif %}
+{% if work_report.billing_snapshot|default(null) and work_report.billing_preview|default(null) and wr_original_display.amount %}{% include 'work_report_billing.twig' %}{% endif %}

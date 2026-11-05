@@ -1267,6 +1267,8 @@ export interface WorkReport {
   billing_snapshot?: WorkReportBillingSnapshot | null
   billing_period?: string | null
   billing_stale?: boolean
+  /** Důvod, proč uložené ujednání nejde vyhodnotit; rekapitulace pak chybí. */
+  billing_error?: string | null
   display_options?: Partial<WorkReportDisplayOptions> | null
   effective_display_options?: WorkReportDisplayOptions
   id: number

@@ -41413,6 +41413,7 @@
     "period": "Billing period",
     "override": "Customize this report’s rules",
     "currency_mismatch": "Template currency must match the invoice currency.",
+    "invalid": "The work report billing cannot be evaluated: {message} Fix the report; until then the invoice cannot be issued or sent for approval.",
     "stale": "The report or its rules have changed. Transfer billing again to update the invoice items.",
     "pending": "Transfer prepared. No new items; changes will take effect after saving the invoice. | Transfer prepared. {count} item will be inserted after saving the invoice. | Transfer prepared. {count} items will be inserted after saving the invoice.",
     "preview": "Billing preview",

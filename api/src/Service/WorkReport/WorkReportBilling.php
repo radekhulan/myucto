@@ -71,6 +71,22 @@ final class WorkReportBilling
         return $value;
     }
 
+    /**
+     * Období kopie se posune o tolik měsíců, o kolik se posunulo DUZP (u zálohy datum
+     * vystavení) mezi zdrojovou fakturou a kopií. Odstup účtovaného období od DUZP
+     * (např. účtování za předchozí měsíc) tak zůstane zachovaný.
+     */
+    public static function shiftPeriod(?string $period, string $sourceDate, string $targetDate): ?string
+    {
+        $period = self::period($period);
+        if ($period === null) return null;
+        $months = ((int) substr($targetDate, 0, 4) - (int) substr($sourceDate, 0, 4)) * 12
+            + (int) substr($targetDate, 5, 2) - (int) substr($sourceDate, 5, 2);
+        if ($months === 0) return $period;
+        $index = (int) substr($period, 0, 4) * 12 + (int) substr($period, 5, 2) - 1 + $months;
+        return sprintf('%04d-%02d', intdiv($index, 12), $index % 12 + 1);
+    }
+
     public static function period(mixed $value): ?string
     {
         if ($value === null || $value === '') return null;

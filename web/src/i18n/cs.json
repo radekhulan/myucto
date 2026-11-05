@@ -41413,6 +41413,7 @@
     "period": "Fakturované období",
     "override": "Upravit pravidla tohoto výkazu",
     "currency_mismatch": "Měna šablony se musí shodovat s měnou dokladu.",
+    "invalid": "Cenové ujednání výkazu nelze vyhodnotit: {message} Opravte výkaz; do té doby fakturu nelze vystavit ani odeslat ke schválení.",
     "stale": "Výkaz nebo jeho pravidla se změnily. Přeneste účtování znovu, aby položky faktury odpovídaly.",
     "pending": "Přenos připraven. Žádné nové položky; změny se provedou po uložení faktury. | Přenos připraven. {count} položka se vloží po uložení faktury. | Přenos připraven. {count} položky se vloží po uložení faktury. | Přenos připraven. {count} položek se vloží po uložení faktury.",
     "preview": "Náhled účtování",

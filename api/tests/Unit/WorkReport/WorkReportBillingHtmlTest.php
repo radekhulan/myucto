@@ -30,6 +30,13 @@ final class WorkReportBillingHtmlTest extends TestCase
         self::assertStringNotContainsString('15 000', $html);
     }
 
+    public function testInvalidBillingPrintsWorkReportWithoutRecap(): void
+    {
+        $html = $this->render(true, null, null);
+        self::assertStringContainsString('Činnost', $html);
+        self::assertStringNotContainsString('Cenová rekapitulace', $html);
+    }
+
     public function testFixedFeeWithoutTimeEntriesStillPrints(): void
     {
         self::assertStringContainsString('Paušál syntetický', $this->render(true, []));
@@ -55,7 +62,10 @@ final class WorkReportBillingHtmlTest extends TestCase
         self::assertStringContainsString('<a name="work-report"></a>', $html);
     }
 
-    private function render(bool $amount, ?array $items = null): string
+    private function render(bool $amount, ?array $items = null, ?array $preview = ['total_amount' => 15000, 'items' => [
+        ['description' => 'Paušál syntetický', 'quantity' => 1, 'duration_minutes' => null, 'unit' => 'ks', 'unit_price_without_vat' => 10000, 'total_amount' => 10000],
+        ['description' => 'Přesah syntetický', 'quantity' => 5, 'duration_minutes' => 300, 'unit' => 'h', 'unit_price_without_vat' => 1000, 'total_amount' => 5000],
+    ]]): string
     {
         $twig = new Environment(new FilesystemLoader(dirname(__DIR__, 3) . '/templates/invoice'));
         $twig->addFunction(new TwigFunction('t', static fn (string $cs, string $en): string => $cs));
@@ -66,10 +76,7 @@ final class WorkReportBillingHtmlTest extends TestCase
                 'effective_display_options' => ['compact' => false, 'date' => true, 'hours' => true, 'rate' => true, 'amount' => $amount],
                 'total_hours' => 15, 'total_amount' => 15000,
                 'items' => $items ?? [['description' => 'Činnost', 'work_date' => null, 'hours' => 15, 'rate' => 999, 'total_amount' => 14985]],
-                'billing_preview' => ['total_amount' => 15000, 'items' => [
-                    ['description' => 'Paušál syntetický', 'quantity' => 1, 'duration_minutes' => null, 'unit' => 'ks', 'unit_price_without_vat' => 10000, 'total_amount' => 10000],
-                    ['description' => 'Přesah syntetický', 'quantity' => 5, 'duration_minutes' => 300, 'unit' => 'h', 'unit_price_without_vat' => 1000, 'total_amount' => 5000],
-                ]],
+                'billing_preview' => $preview,
             ],
         ]);
     }

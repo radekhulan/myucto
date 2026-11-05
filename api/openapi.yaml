@@ -48248,6 +48248,7 @@ components:
         billing_period: { type: [string, "null"], pattern: '^\d{4}-(0[1-9]|1[0-2])$', description: "Období pro popisy položek; limit platí pro výkaz, nikoli napříč měsícem." }
         billing_transferred_fingerprint: { type: [string, "null"], readOnly: true, description: "Otisk posledního explicitního přenosu do položek faktury." }
         billing_stale: { type: boolean, description: "Cenová rekapitulace se liší od přenesených položek faktury; před vystavením je nutný nový přenos." }
+        billing_error: { type: [string, "null"], description: "Důvod, proč uložené cenové ujednání nejde vyhodnotit (např. hodiny nad zahrnutý limit bez neomezeného pásma). Rekapitulace (`billing_preview`) pak chybí a vystavení je blokované." }
         billing_preview:
           oneOf:
             - { $ref: '#/components/schemas/WorkReportBillingPreview' }

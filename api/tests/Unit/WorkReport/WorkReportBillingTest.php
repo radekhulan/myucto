@@ -18,6 +18,23 @@ final class WorkReportBillingTest extends TestCase
                 ['up_to_hours' => null, 'rate' => 200, 'description' => '{zakazka}: {hodiny}']]];
     }
 
+    /** @return iterable<string,array{?string,string,string,?string}> */
+    public static function periodShifts(): iterable
+    {
+        yield 'další měsíc' => ['2026-11', '2026-11-01', '2026-12-02', '2026-12'];
+        yield 'stejný měsíc' => ['2026-11', '2026-11-01', '2026-11-28', '2026-11'];
+        yield 'za předchozí měsíc přes přelom roku' => ['2026-11', '2026-12-01', '2027-01-01', '2026-12'];
+        yield 'o čtvrtletí' => ['2026-12', '2026-12-31', '2027-03-31', '2027-03'];
+        yield 'zpět v čase' => ['2027-01', '2027-01-15', '2026-12-15', '2026-12'];
+        yield 'bez období' => [null, '2026-11-01', '2026-12-01', null];
+    }
+
+    #[DataProvider('periodShifts')]
+    public function testCopyShiftsPeriodByInvoiceDateMonths(?string $period, string $source, string $target, ?string $expected): void
+    {
+        self::assertSame($expected, WorkReportBilling::shiftPeriod($period, $source, $target));
+    }
+
     #[DataProvider('thresholds')]
     public function testMarginalBandsAndFullFixedFee(float $hours, float $expected, array $quantities): void
     {
