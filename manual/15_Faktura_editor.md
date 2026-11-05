@@ -857,6 +857,15 @@ nepřevádějí do dalšího období a limit hodin platí samostatně pro každ�
 Popis položky může obsahovat `{nazev}` (název výkazu), `{zakazka}`, `{obdobi}`, `{limit}`,
 `{od}`, `{do}` a `{hodiny}`.
 
+Kopie faktury i hromadné vystavení převezmou cenové ujednání výkazu bez odpracovaného času
+a období účtování posunou o tolik měsíců, o kolik se posunulo DUZP kopie. Účtování za
+předchozí měsíc tak zůstane za předchozí měsíc.
+
+Pokud uložené ujednání nejde vyhodnotit (například měna ujednání neodpovídá faktuře nebo
+hodiny přesahují zahrnutý limit a chybí neomezené pásmo), detail faktury zobrazí varování
+s důvodem a PDF vynechá cenovou rekapitulaci. Fakturu nelze vystavit ani odeslat ke schválení,
+dokud výkaz neopravíte a rekapitulaci znovu nepřenesete.
+
 Volby zobrazení výkazu určují také, zda zákazník v PDF, e-mailu ke schválení a na veřejném
 odkazu uvidí hodiny, sazby a částky. Úprava šablony nebo její archivace neovlivní již
 uložené výkazy; archivace zároveň zruší její předvolbu na zakázkách.
