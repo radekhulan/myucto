@@ -1134,6 +1134,39 @@ a karty. Šarže dovoluje množství a volitelné datum expirace. Detail karty u
 aktuální rozpad i historii od příjmu přes převody a výdeje po vratku. Storno použije
 přesně stejné identity a množství jako původní doklad.
 
+Překlep v kódu šarže nebo v datu spotřeby opravíte na úpravě skladové karty
+(`Sklad → Skladové karty`, tlačítko **Upravit**, právo **Spravovat skladové karty**).
+V rámečku **Šarže karty** pod polem **Sledování zásoby** přepíšete kód nebo datum
+spotřeby přímo v poli, jako ostatní údaje karty, a uložíte běžným **Uložit**.
+Rámeček ukazuje i šarže s nulovým stavem. Karta se uloží první a pak změněné šarže.
+Šarže, kterou systém odmítne, zůstane v poli označená hláškou a po opravě ji uložíte
+znovu. Stejnou opravu umí REST API
+(`PUT /api/v1/stock/items/{id}/tracking-units/{unitId}`). Opravit jde jen šarži,
+ne sériové číslo, a šarže se nesloučí: šarže, která by měla stejný kód a datum
+spotřeby jako jiná šarže téže karty, se odmítne (porovnání nerozlišuje velikost
+písmen ani diakritiku).
+
+Pohyby šarže zůstávají a nový kód a datum se propíšou do rozpracovaných dokladů
+této karty:
+
+- konceptů faktur,
+- nezaúčtovaných i zaúčtovaných skladových dokladů (příjemka, výdejka, převodka,
+  protidoklad storna),
+- rozpracované expedice,
+- vystavených zálohových faktur, ze kterých ještě nevznikla finální faktura,
+  aby finální faktura vydala opravenou šarži.
+
+Dobropis k vystavené faktuře a obnovení stornované faktury vezmou opravenou
+šarži samy: vrací nebo znovu vydávají kusy, které výdejka faktury skutečně
+vydala. Oprava se zapisuje do historie změn.
+
+Beze změny zůstávají vystavené a stornované faktury, vyúčtované zálohové
+faktury, expedované zásilky a jejich vratky. U vystavené faktury zůstává i uložené
+PDF s původním kódem, protože odešlo zákazníkovi. U nevyúčtované zálohové
+faktury se přepisuje text šarže na dokladu: uložené PDF zálohy zůstane, ale při
+příštím přegenerování (například po aktualizaci MyÚčta) se vykreslí
+s opraveným kódem.
+
 Převodní jednotky šarží se definují přesným zlomkem vůči základní jednotce karty,
 například 12 kusů jako 12/1, a slouží jen k zadání množství v alokacích šarží
 a sériových čísel. Systém přijme jen převod, který lze beze zbytku vyjádřit
@@ -1794,8 +1827,11 @@ Pokud fyzický tok faktury spravuje objednávka nebo vychystání, její vystave
 následný dobropis nevytvoří další automatický skladový pohyb. Fyzickou vratku
 zaznamenejte u zásilky. Běžné faktury mimo tento tok používají dosavadní nastavení
 automatického výdeje a vratky. Snapshot komponent, sledovaných jednotek, šarží
-a sériových čísel zůstává u zásilky a vratky, takže pozdější změna karty nebo složení
-setu historii nepřepíše.
+a sériových čísel zůstává u expedované zásilky a vratky, takže pozdější změna karty
+nebo složení setu historii nepřepíše. Oprava kódu nebo data spotřeby šarže
+([§ 37.12.6](#37126-sklady-vice-skladu)) přepíše jen rozpracovanou zásilku a otevřenou
+úlohu vychystání; vratka k expedované zásilce vybírá šarži podle původního snapshotu
+zásilky.
 
 Právo **Vychystání a expedice** dovoluje skenovat, balit, expedovat a přijímat
 vratky. Právo **Odchylky při vychystání** navíc dovoluje potvrdit výslovně zdůvodněnou
