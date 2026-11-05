@@ -1039,6 +1039,14 @@ jejichž součet musí přesně odpovídat částce dokladu. Agenda je jen v Kč
 nezmění. Jediný protiřádek se při změně částky přepočte, u více protiřádků se
 asistent zeptá na nové rozdělení. Upravit a smazat lze jen koncept.
 
+**Účetní profily.** `list_other_item_kinds` vrací u druhů účetní profil
+(`posting_profiles`: vznik, úhrada z banky a z pokladny) a u vestavěných druhů
+nezávazný návrh kontace. Prázdný účet položky a protiúčet konceptu doplní při
+zaúčtování profil druhu. `get_other_item` ukazuje v `posting_rules`, co se
+zaúčtuje a odkud kontace pochází. Vlastní kontaci úhrad (`posting_overrides`)
+může asistent nastavit jen konceptu; profily druhů a kontaci potvrzené položky
+mění účetní v aplikaci ([§ 52.14.14.12](52_Ucetni_denik.md#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+
 **Smlouva u dokladu.** Analyzovaný soubor (např. PDF smlouvy o zápůjčce)
 asistent nahraje nástrojem `upload_document` a koncept založí s `document_id`,
 takže se smlouva připojí hned. Jde to i opačně: `upload_document` s typem

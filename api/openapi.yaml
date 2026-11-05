@@ -18327,6 +18327,43 @@ paths:
         '200': { description: Druhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemKind' } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/other-items/kinds/{id}/posting-profiles:
+    get:
+      tags: [Accounting]
+      summary: Účetní profily druhu
+      description: |
+        Kontace vzniku a úhrad, kterou druh předává svým položkám, pokud položka nemá vlastní.
+        Profily vestavěného druhu bez řádku nastavení vrací přehled druhů (posting_profiles).
+        Jen podvojné účetnictví (409 other_items.error.not_double_entry). Profily se mění jen ve
+        webovém rozhraní.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Profily, content: { application/json: { schema: { type: object, properties: { profiles: { $ref: '#/components/schemas/OtherItemPostingProfiles' } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Firma vede daňovou evidenci (other_items.error.not_double_entry), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/posting-overrides:
+    put:
+      tags: [Accounting]
+      summary: Vlastní kontace úhrad potvrzené nebo zaúčtované položky
+      description: |
+        Platí pro budoucí úhrady, zaúčtované úhrady se nemění. Koncept nese vlastní kontaci
+        úhrad v těle úpravy (posting_overrides). Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { posting_overrides: { $ref: '#/components/schemas/OtherItemPostingOverridesInput' } } } } }
+      responses:
+        '200': { description: Položka s novou kontací, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Položka není aktivní nebo firma vede daňovou evidenci (other_items.error.invalid_status|not_double_entry)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/other-items/{id}:
     parameters:
       - { $ref: '#/components/parameters/SupplierIdHeader' }
@@ -40905,6 +40942,80 @@ components:
           description: Protiřádky kontace v CZK; součet musí přesně odpovídat amount_czk. U starých dokladů se jednořádková kontace vrací synteticky.
           items: { $ref: '#/components/schemas/OtherItemPostingLine' }
         note: { type: [string, 'null'] }
+        posting_overrides:
+          $ref: '#/components/schemas/OtherItemPostingOverridesInput'
+    OtherItemPostingRuleInput:
+      type: object
+      description: |
+        Kontace jedné účetní události. NULL na straně položky znamená účet položky (u vzniku účet
+        z položky, jinak výchozí 315/325); NULL na peněžní straně úhrady znamená účet banky podle
+        výpisu (221) nebo pokladny (211). U úhrady musí strana položky zůstat prázdná
+        (422 other_items.error.profile_breaks_saldo), peněžní účet je 221 nebo 211 a jejich
+        analytiky (422 invalid_payment_account). Účty musí být aktivní v osnově, syntetika s víc
+        analytikami se odmítne (422 account_not_posting_level).
+      properties:
+        debit_account_code: { type: [string, 'null'], maxLength: 20 }
+        credit_account_code: { type: [string, 'null'], maxLength: 20 }
+        description_template: { type: [string, 'null'], maxLength: 255, description: 'Popis zápisu se zástupnými znaky {title}, {document_no}, {partner}, {variable_symbol}.' }
+        dimensions:
+          type: array
+          maxItems: 20
+          description: Výchozí dimenze hlavičky nového dokladu druhu; jen profil vzniku druhu.
+          items: { type: object, required: [type_id, value_id], properties: { type_id: { type: integer }, value_id: { type: integer } } }
+        is_active: { type: boolean, description: Jen profil druhu; vypnutý profil se neuplatní. }
+    OtherItemPostingRule:
+      allOf:
+        - { $ref: '#/components/schemas/OtherItemPostingRuleInput' }
+        - type: object
+          properties:
+            id: { type: integer }
+            event: { type: string, enum: [origin, payment_bank, payment_cash] }
+            kind_id: { type: integer }
+            updated_at: { type: [string, 'null'], format: date-time }
+    OtherItemPostingOverridesInput:
+      type: object
+      additionalProperties: false
+      description: |
+        Vlastní kontace úhrad položky podle události; vynechaná událost se nemění, null vrátí
+        kontaci zděděnou z druhu. Vlastní kontaci vzniku nesou account_code, counter_account_code
+        a posting_lines (422 invalid_posting_override pro origin). Jen podvojné účetnictví.
+      properties:
+        payment_bank: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRuleInput' }, { type: 'null' }] }
+        payment_cash: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRuleInput' }, { type: 'null' }] }
+    OtherItemPostingProfiles:
+      type: object
+      description: Účetní profily druhu podle události; null = událost bez profilu.
+      properties:
+        origin: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+        payment_bank: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+        payment_cash: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+    OtherItemEffectivePosting:
+      type: object
+      description: |
+        Účinná kontace události a její původ: item = vlastní kontace položky, kind = účetní profil
+        druhu, default = výchozí kontace aplikace. Vznik se skládá po částech (account_source,
+        counter_source) a nese náhled řádků (lines); úhrada nese debit_account_code
+        a credit_account_code. U zaúčtované položky jde o kontaci dalšího zaúčtování, zaúčtované
+        zápisy se nemění.
+      required: [event, source]
+      properties:
+        event: { type: string, enum: [origin, payment_bank, payment_cash] }
+        source: { type: string, enum: [item, kind, default] }
+        account_code: { type: string }
+        account_source: { type: string, enum: [item, kind, default] }
+        counter_source: { type: [string, 'null'], enum: [item, kind, null] }
+        posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
+        lines:
+          type: array
+          items: { type: object, properties: { account_code: { type: string }, side: { type: string, enum: [debit, credit] }, amount: { type: number } } }
+        debit_account_code: { type: string }
+        credit_account_code: { type: string }
+        money_account_code: { type: string }
+        description: { type: [string, 'null'] }
+        description_template: { type: [string, 'null'] }
+        dimensions: { type: array, items: { type: object, properties: { type_id: { type: integer }, value_id: { type: integer } } } }
+        kind_id: { type: [integer, 'null'] }
+        profile_id: { type: [integer, 'null'] }
     OtherItemKind:
       type: object
       required: [id, side, builtin, builtin_code, name, own_series, is_active]
@@ -40919,6 +41030,13 @@ components:
         is_active: { type: boolean, description: Skrytý druh nejde zvolit pro nový koncept; koncept a opakování, které ho nesou, ho ponechají. }
         created_at: { type: [string, 'null'], format: date-time }
         updated_at: { type: [string, 'null'], format: date-time }
+        posting_profiles: { $ref: '#/components/schemas/OtherItemPostingProfiles' }
+        posting_suggestion:
+          type: [object, 'null']
+          description: Nezávazný návrh kontace vzniku vestavěného druhu; aplikace ho sama neuloží. Jen podvojné účetnictví.
+          properties:
+            debit_account_code: { type: string }
+            credit_account_code: { type: string }
     OtherItem:
       allOf:
         - { $ref: '#/components/schemas/OtherItemInput' }
@@ -40936,6 +41054,13 @@ components:
             journal_entry_id: { type: [integer, 'null'], format: int64 }
             reversal_entry_id: { type: [integer, 'null'], format: int64 }
             posted_at: { type: [string, 'null'], format: date-time }
+            posting_rules:
+              type: object
+              description: Účinná kontace vzniku a úhrad (prázdný objekt v daňové evidenci).
+              properties:
+                origin: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
+                payment_bank: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
+                payment_cash: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
     OtherItemList:
       type: object
       required: [items, total, page, per_page, sources]

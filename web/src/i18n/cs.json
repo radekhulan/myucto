@@ -126,6 +126,52 @@
     "dismiss": "Nepoužívat"
   },
   "other_items": {
+    "posting": {
+      "title": "Účtování",
+      "hint": "Kontace vzniku a úhrad. Vlastní kontace položky má přednost před účetním profilem druhu, bez obou platí výchozí účty.",
+      "event": {
+        "origin": "Vznik",
+        "payment_bank": "Úhrada z banky",
+        "payment_cash": "Úhrada z pokladny"
+      },
+      "source": {
+        "item": "Vlastní",
+        "kind": "Zděděno z druhu",
+        "default": "Výchozí"
+      },
+      "debit": "MD",
+      "credit": "D",
+      "item_account": "Vždy účet položky (saldokonto)",
+      "money_account": "Peněžní účet",
+      "money_hint": {
+        "payment_bank": "221 nebo jeho analytika; prázdné pole = účet banky podle výpisu.",
+        "payment_cash": "211 nebo jeho analytika; prázdné pole = účet pokladny."
+      },
+      "description_template": "Popis zápisu",
+      "description_template_hint": "Zástupné znaky: {'{title}'}, {'{document_no}'}, {'{partner}'}, {'{variable_symbol}'}.",
+      "set_own": "Vlastní kontace",
+      "reset": "Vrátit na zděděnou",
+      "saved": "Kontace úhrady uložena.",
+      "open_kinds": "Nastavení druhu",
+      "missing_counter": "Protiúčet chybí. Vyberte ho v položce nebo ho nastavte v účetním profilu druhu.",
+      "cash_note": "Úhradu z pokladny zaúčtuje pokladní doklad s protiúčtem na účet položky; kontace ukazuje účty, které má doklad použít.",
+      "future_only": "Změna platí pro další zaúčtování, zaúčtované zápisy se nemění.",
+      "inherited_placeholder": "Z druhu: {account}",
+      "default_placeholder": "Výchozí: {account}",
+      "inherited_note": "Prázdný účet položky a protiúčet doplní při zaúčtování účetní profil druhu.",
+      "kinds": {
+        "button": "Účtování",
+        "hint": "Kontace, kterou dostanou položky druhu, pokud nemají vlastní. Platí pro další zaúčtování, zaúčtované doklady se nemění.",
+        "item_account": "Účet položky",
+        "counter_account": "Protiúčet",
+        "active": "Profil platí",
+        "suggestion": "Návrh vzniku: MD {debit} / D {credit}",
+        "suggestion_unavailable": "Účty návrhu v osnově chybí nebo mají víc analytik, vyberte vlastní.",
+        "use_suggestion": "Použít návrh",
+        "dimensions": "Výchozí dimenze nového dokladu",
+        "saved": "Účetní profil druhu uložen."
+      }
+    },
     "title": "Ostatní pohledávky a závazky",
     "subtitle": "Ručně evidované položky, daně a mzdové závazky na jednom místě.",
     "new": "Nová ostatní položka",

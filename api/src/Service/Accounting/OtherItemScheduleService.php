@@ -18,6 +18,7 @@ final class OtherItemScheduleService
         private readonly Connection $db,
         private readonly OtherItemRepository $items,
         private readonly OtherItemService $service,
+        private readonly OtherItemPostingProfileService $postingProfiles,
     ) {}
 
     public function create(int $supplierId, int $itemId, array $input, ?int $userId): array
@@ -58,6 +59,16 @@ final class OtherItemScheduleService
                 if ($field === 'posting_lines' && $item[$field] === []) continue;
                 $template[$field] = $item[$field];
             }
+            // Vlastní kontace úhrad jde s šablonou na každý výskyt (vznik nesou pole výše).
+            $overrides = [];
+            foreach ($this->postingProfiles->overridesForItem($supplierId, $itemId) as $event => $rule) {
+                $overrides[$event] = [
+                    'debit_account_code' => $rule['debit_account_code'],
+                    'credit_account_code' => $rule['credit_account_code'],
+                    'description_template' => $rule['description_template'],
+                ];
+            }
+            if ($overrides !== []) $template['posting_overrides'] = $overrides;
             $stmt = $pdo->prepare('INSERT INTO other_item_schedules
                 (supplier_id, source_item_id, frequency, anchor_on, due_days, ends_on, template_json, created_by, auto_post)
                 VALUES (?,?,?,?,?,?,?,?,?)');

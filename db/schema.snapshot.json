@@ -1137,7 +1137,8 @@
         "2233_dimension_defaults_bank_account.sql",
         "2234_bank_posting_rule_dimensions.sql",
         "2235_cash_register_foreign_opening.sql",
-        "2236_invoice_defaults_role_permission.sql"
+        "2236_invoice_defaults_role_permission.sql",
+        "2238_other_item_posting_profiles.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10206,6 +10207,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_other_item_kind_user": "BTREE (created_by)",
+                "idx_other_item_kind_tenant": "BTREE (id, supplier_id)",
                 "uq_other_item_kind_builtin": "UNIQUE BTREE (supplier_id, side, builtin_code)",
                 "uq_other_item_kind_name": "UNIQUE BTREE (supplier_id, side, name)"
             },
@@ -10238,6 +10240,74 @@
             },
             "checks": {
                 "chk_other_item_posting_amount": "`amount` > 0"
+            }
+        },
+        "other_item_posting_overrides": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "debit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "description_template": "varchar(255) NULL DEFAULT NULL",
+                "dimensions_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "event": "varchar(30) NOT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_item_posting_override_created": "BTREE (created_by)",
+                "fk_other_item_posting_override_item": "BTREE (other_item_id, supplier_id)",
+                "idx_other_item_posting_override_tenant": "BTREE (supplier_id, other_item_id)",
+                "uq_other_item_posting_override": "UNIQUE BTREE (other_item_id, event)"
+            },
+            "foreign_keys": {
+                "fk_other_item_posting_override_created": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_posting_override_item": "(other_item_id, supplier_id) -> other_items (id, supplier_id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "dimensions_json": "json_valid(`dimensions_json`)"
+            }
+        },
+        "other_item_posting_profiles": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "debit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "description_template": "varchar(255) NULL DEFAULT NULL",
+                "dimensions_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "event": "varchar(30) NOT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "kind_id": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_item_posting_profile_created": "BTREE (created_by)",
+                "fk_other_item_posting_profile_updated": "BTREE (updated_by)",
+                "idx_other_item_posting_profile_kind": "BTREE (kind_id, supplier_id)",
+                "uq_other_item_posting_profile": "UNIQUE BTREE (supplier_id, kind_id, event)"
+            },
+            "foreign_keys": {
+                "fk_other_item_posting_profile_created": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_posting_profile_kind": "(kind_id, supplier_id) -> other_item_kinds (id, supplier_id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_item_posting_profile_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_item_posting_profile_updated": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "dimensions_json": "json_valid(`dimensions_json`)"
             }
         },
         "other_item_schedule_occurrences": {

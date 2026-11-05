@@ -126,6 +126,52 @@
     "dismiss": "Dismiss"
   },
   "other_items": {
+    "posting": {
+      "title": "Posting",
+      "hint": "Posting of origin and payments. The item's own posting takes precedence over the kind's posting profile; without either, default accounts apply.",
+      "event": {
+        "origin": "Origin",
+        "payment_bank": "Bank payment",
+        "payment_cash": "Cash payment"
+      },
+      "source": {
+        "item": "Custom",
+        "kind": "Inherited from kind",
+        "default": "Default"
+      },
+      "debit": "Dr",
+      "credit": "Cr",
+      "item_account": "Always the item account (subledger)",
+      "money_account": "Money account",
+      "money_hint": {
+        "payment_bank": "221 or its analytic account; empty = bank account from the statement.",
+        "payment_cash": "211 or its analytic account; empty = cash register account."
+      },
+      "description_template": "Entry description",
+      "description_template_hint": "Placeholders: {'{title}'}, {'{document_no}'}, {'{partner}'}, {'{variable_symbol}'}.",
+      "set_own": "Custom posting",
+      "reset": "Revert to inherited",
+      "saved": "Payment posting saved.",
+      "open_kinds": "Kind settings",
+      "missing_counter": "The counter account is missing. Choose it on the item or set it in the kind's posting profile.",
+      "cash_note": "A cash payment is posted by the cash document with the item account as its counter account; the posting shows the accounts the document should use.",
+      "future_only": "Changes apply to future postings; posted entries stay unchanged.",
+      "inherited_placeholder": "From kind: {account}",
+      "default_placeholder": "Default: {account}",
+      "inherited_note": "An empty item account and counter account are filled in from the kind's posting profile when posting.",
+      "kinds": {
+        "button": "Posting",
+        "hint": "Posting the kind's items get unless they have their own. Applies to future postings; posted documents stay unchanged.",
+        "item_account": "Item account",
+        "counter_account": "Counter account",
+        "active": "Profile active",
+        "suggestion": "Origin suggestion: Dr {debit} / Cr {credit}",
+        "suggestion_unavailable": "The suggested accounts are missing from the chart or have several analytic accounts; choose your own.",
+        "use_suggestion": "Use suggestion",
+        "dimensions": "Default dimensions of a new document",
+        "saved": "Kind posting profile saved."
+      }
+    },
     "title": "Other receivables and payables",
     "subtitle": "Manual items, taxes and payroll liabilities in one place.",
     "new": "New other item",
