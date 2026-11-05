@@ -42,6 +42,7 @@ describe('delegované výchozí hodnoty dokladů', () => {
     expect(m.update).toHaveBeenCalledWith({ default_payment_due_days: 0, default_payment_due_unit: 'days',
       default_hourly_rate: 12.123456, default_note_below_items_enabled: true,
       default_note_below_items_cs: 'Poznámka', default_note_below_items_en: null }, 3)
+    expect(m.patch).toHaveBeenCalledWith(3, expect.objectContaining({ default_hourly_rate: 12.123456, default_payment_due_days: 0 }))
     expect(m.success).toHaveBeenCalled()
     wrapper.unmount()
   })

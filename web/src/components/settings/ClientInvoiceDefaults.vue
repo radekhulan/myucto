@@ -66,6 +66,7 @@ function save() {
       settings.value = result
       supplier.patchSupplier(id, { default_payment_due_days: result.default_payment_due_days,
         default_payment_due_unit: result.default_payment_due_unit,
+        default_hourly_rate: result.default_hourly_rate,
         default_note_below_items_enabled: result.default_note_below_items_enabled,
         default_note_below_items_cs: result.default_note_below_items_cs, default_note_below_items_en: result.default_note_below_items_en })
       toast.success(t('common.saved'))
