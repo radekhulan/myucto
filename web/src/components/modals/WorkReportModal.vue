@@ -430,8 +430,6 @@ onMounted(() => {
 
       <div v-else-if="loadFailed" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
       <div v-else ref="modalContent" class="space-y-6">
-        <WorkReportDisplaySettings v-model="displayOptions" inheritable
-          :defaults="supplierStore.currentSupplier?.work_report_display_options" />
         <!-- ════════ Sekce: Výkaz práce ════════ -->
         <section class="space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 pb-1">
@@ -755,6 +753,9 @@ onMounted(() => {
           </div>
           </div>
         </section>
+
+        <WorkReportDisplaySettings v-model="displayOptions" inheritable
+          :defaults="supplierStore.currentSupplier?.work_report_display_options" />
 
         <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           {{ error }}

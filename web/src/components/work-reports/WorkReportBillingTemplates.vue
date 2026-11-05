@@ -17,17 +17,20 @@ const editing = ref<WorkReportBillingSnapshot | null>(null)
 const editingId = ref<number | null>(null)
 const error = ref('')
 const busy = ref(false)
+const loading = ref(false)
 let generation = 0
 async function load(resetEditor = true) {
   const request = ++generation
   if (resetEditor) editing.value = null
   list.value = []
   error.value = ''
+  loading.value = true
   try {
     const [result, currencyList] = await Promise.all([workReportBillingApi.list(), props.currency ? Promise.resolve([]) : codebooksApi.currencies().catch(() => [])])
     if (request === generation) { list.value = result; currencies.value = currencyList; defaultCurrency.value = currencyList.find(currency => currency.is_default)?.code || 'CZK' }
   }
   catch (e) { if (request === generation) error.value = apiErrorMessage(e, t('common.error')) }
+  finally { if (request === generation) loading.value = false }
 }
 watch(() => supplier.currentSupplierId, () => load(), { immediate: true })
 let activatedOnce = false
@@ -67,6 +70,8 @@ async function remove(template: WorkReportBillingTemplate) {
       <button type="button" :class="btnOutline('primary')" @click="edit()"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('work_report_billing.add_template') }}</button>
     </header>
     <p class="text-xs text-neutral-500">{{ t('work_report_billing.snapshot_hint') }}</p>
+    <p v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
+    <p v-else-if="!error && list.length === 0" class="rounded-md border border-dashed border-neutral-300 p-4 text-center text-sm text-neutral-500">{{ t('work_report_billing.empty') }}</p>
     <div v-for="template in list" :key="template.id" class="flex flex-wrap gap-2 items-center justify-between rounded-md border border-neutral-200 p-3">
       <span class="text-sm">{{ template.name }} <span class="text-neutral-500">({{ template.currency }})</span></span>
       <div class="flex flex-wrap gap-2">

@@ -258,3 +258,28 @@ describe('WorkReportModal opt-in ovládání účtování', () => {
     } finally { [get, report, units, vat, list].forEach(mock => mock.mockRestore()); wrapper.unmount() }
   })
 })
+
+describe('WorkReportModal pořadí sekcí', () => {
+  it('začíná výkazem práce a zobrazení výkazu umístí až pod výkaz materiálu', async () => {
+    const get = vi.spyOn(invoicesApi, 'get').mockResolvedValue({ id: 42, project_id: null, items: [], currency: 'CZK', issue_date: '2096-03-10' } as any)
+    const report = vi.spyOn(invoicesApi, 'getWorkReport').mockResolvedValue(null as any)
+    const units = vi.spyOn(codebooksApi, 'units').mockResolvedValue([])
+    const vat = vi.spyOn(codebooksApi, 'vatRates').mockResolvedValue([])
+    const list = vi.spyOn(workReportBillingApi, 'list').mockResolvedValue([])
+    const wrapper = mount(WorkReportModal, { props: { modelValue: true, invoiceId: 42 }, global: { plugins: [createPinia(), createI18n({ legacy: false, locale: 'cs', messages: { cs: {} }, missingWarn: false, fallbackWarn: false })], stubs: { Modal: { template: '<div><slot /><slot name="footer" /></div>' }, DateInput: true, DurationInput: true, WorkReportDisplaySettings: { template: '<div data-test="display-settings-stub" />' } } } })
+    try {
+      await flushPromises()
+      const html = wrapper.html()
+      const work = html.indexOf('invoice.work_report<')
+      const material = html.indexOf('invoice.work_report_material')
+      const display = html.indexOf('data-test="display-settings-stub"')
+      expect(work).toBeGreaterThan(-1)
+      expect(html.indexOf('invoice.wr_add')).toBeGreaterThan(work)
+      expect(material).toBeGreaterThan(work)
+      expect(display).toBeGreaterThan(material)
+      const sections = wrapper.findAll('section')
+      expect(sections[0]?.text()).toContain('invoice.work_report')
+      expect(sections[0]?.text()).not.toContain('invoice.work_report_material')
+    } finally { [get, report, units, vat, list].forEach(mock => mock.mockRestore()); wrapper.unmount() }
+  })
+})

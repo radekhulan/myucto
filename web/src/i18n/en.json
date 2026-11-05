@@ -41381,6 +41381,8 @@
   },
   "work_report_billing": {
     "templates": "Work report billing templates",
+    "templates_subtitle": "Fixed fees and hourly bands for billing work reports on invoices.",
+    "empty": "You have no work report billing templates yet.",
     "name": "Name",
     "currency": "Currency",
     "fixed_fee": "Fixed fee (empty = no fee)",

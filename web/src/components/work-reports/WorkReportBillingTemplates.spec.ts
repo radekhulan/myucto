@@ -1,21 +1,23 @@
-import { mount, flushPromises } from '@vue/test-utils'
+import { config, mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import Page from '@/pages/admin/WorkReportBillingTemplates.vue'
 import Manager from './WorkReportBillingTemplates.vue'
 import { newBillingSnapshot, workReportBillingApi, type WorkReportBillingTemplate } from '@/api/workReportBilling'
-const state = vi.hoisted(() => ({ canWrite: false }))
+const state = vi.hoisted(() => ({ canWrite: false, stock: false }))
+config.global.stubs = { RouterLink: { props: ['to'], template: '<a data-test="price-list-link"><slot /></a>' } }
 vi.mock('@/api/workReportBilling', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/workReportBilling')>(),
   workReportBillingApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
 }))
 vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: vi.fn().mockResolvedValue([{ id: 1, code: 'EUR', is_default: true }, { id: 2, code: 'CZK' }]) } }))
-vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { default_hourly_rate: 2400 } }) }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (permission: string) => permission === 'price_list' && state.canWrite }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { default_hourly_rate: 2400, stock_enabled: state.stock } }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: (permission: string) => permission === 'price_list', canWrite: (permission: string) => permission === 'price_list' && state.canWrite }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }) }))
 const template: WorkReportBillingTemplate = { ...newBillingSnapshot(), id: 7, name: 'Servis', fixed_fee: 5000 }
 beforeEach(() => {
   state.canWrite = false
+  state.stock = false
   vi.mocked(workReportBillingApi.list).mockReset().mockResolvedValue([template])
   vi.mocked(workReportBillingApi.create).mockReset().mockResolvedValue(template)
   vi.mocked(workReportBillingApi.update).mockReset().mockResolvedValue(template)
@@ -67,5 +69,26 @@ describe('stránka šablon účtování: oprávnění Ceníku', () => {
     expect(manager.editing.currency).toBe('CZK')
     expect((manager.editing as unknown as { bands: { rate: number }[] }).bands[0]?.rate).toBe(2400)
     wrapper.unmount()
+  })
+  it('ukáže načítání, prázdný stav a odkaz zpět na Ceník jen firmě bez skladu', async () => {
+    let resolve!: (value: WorkReportBillingTemplate[]) => void
+    vi.mocked(workReportBillingApi.list).mockReturnValue(new Promise(done => { resolve = done }))
+    const wrapper = mount(Page)
+    await flushPromises()
+    expect(wrapper.text()).toContain('common.loading')
+    expect(wrapper.text()).not.toContain('work_report_billing.empty')
+    expect(wrapper.find('[data-test="price-list-link"]').text()).toContain('price_list.back_to_list')
+    resolve([])
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('common.loading')
+    expect(wrapper.text()).toContain('work_report_billing.empty')
+    wrapper.unmount()
+    state.stock = true
+    vi.mocked(workReportBillingApi.list).mockResolvedValue([template])
+    const stocked = mount(Page)
+    await flushPromises()
+    expect(stocked.find('[data-test="price-list-link"]').exists()).toBe(false)
+    expect(stocked.text()).not.toContain('work_report_billing.empty')
+    stocked.unmount()
   })
 })

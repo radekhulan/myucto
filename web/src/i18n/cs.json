@@ -41381,6 +41381,8 @@
   },
   "work_report_billing": {
     "templates": "Šablony účtování výkazů",
+    "templates_subtitle": "Paušály a hodinová pásma pro účtování výkazů práce na fakturách.",
+    "empty": "Zatím nemáte žádnou šablonu účtování výkazů.",
     "name": "Název",
     "currency": "Měna",
     "fixed_fee": "Paušál (prázdné = bez paušálu)",

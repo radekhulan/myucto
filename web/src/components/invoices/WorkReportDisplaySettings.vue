@@ -29,19 +29,21 @@ function setOption(key: keyof WorkReportDisplayOptions, event: Event) {
         @change="emit('update:modelValue', ($event.target as HTMLInputElement).checked ? null : { ...options })" />
       {{ t('workReportDisplay.inherit') }}
     </label>
-    <label class="flex items-center gap-2 text-sm">
-      <input type="checkbox" :checked="options.compact" :disabled="inherited" data-test="work-report-compact"
-        class="rounded border-neutral-300 text-primary-600" @change="setOption('compact', $event)" />
-      {{ t('workReportDisplay.compact') }}
-    </label>
-    <div class="flex flex-wrap gap-x-5 gap-y-2 text-sm">
-      <span class="text-neutral-500">{{ t('workReportDisplay.columns') }}</span>
-      <label v-for="key in (['date', 'hours', 'rate', 'amount'] as const)" :key="key" class="flex items-center gap-2 whitespace-nowrap">
-        <input type="checkbox" :checked="options[key]" :disabled="inherited" :data-test="`work-report-column-${key}`"
-          class="rounded border-neutral-300 text-primary-600" @change="setOption(key, $event)" />
-        {{ t(`workReportDisplay.${key}`) }}
+    <template v-if="!inherited">
+      <label class="flex items-center gap-2 text-sm">
+        <input type="checkbox" :checked="options.compact" data-test="work-report-compact"
+          class="rounded border-neutral-300 text-primary-600" @change="setOption('compact', $event)" />
+        {{ t('workReportDisplay.compact') }}
       </label>
-    </div>
-    <p class="text-xs text-neutral-500">{{ t('workReportDisplay.hint') }}</p>
+      <div class="flex flex-wrap gap-x-5 gap-y-2 text-sm">
+        <span class="text-neutral-500">{{ t('workReportDisplay.columns') }}</span>
+        <label v-for="key in (['date', 'hours', 'rate', 'amount'] as const)" :key="key" class="flex items-center gap-2 whitespace-nowrap">
+          <input type="checkbox" :checked="options[key]" :data-test="`work-report-column-${key}`"
+            class="rounded border-neutral-300 text-primary-600" @change="setOption(key, $event)" />
+          {{ t(`workReportDisplay.${key}`) }}
+        </label>
+      </div>
+      <p class="text-xs text-neutral-500">{{ t('workReportDisplay.hint') }}</p>
+    </template>
   </fieldset>
 </template>
