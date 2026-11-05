@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
+use DI\Container;
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMyUctoSampleProfile;
@@ -170,6 +173,34 @@ final class AttendanceSampleSeedTest extends TestCase
         self::assertFalse($profiles[$myucto]['upgrade_available']);
         self::assertSame($custom, $profiles[$giriton]['rules']);
         self::assertTrue($profiles[$giriton]['upgrade_available']);
+    }
+
+    /**
+     * Veřejná ukázka je jen ke čtení: otevření importu nezaloží chybějící vzory,
+     * nenastaví značky na firmě ani nepřevede nedotčený starší vzor na novou verzi.
+     */
+    public function testDemoNeitherSeedsNorUpgradesSamples(): void
+    {
+        $staleMyUcto = array_values(array_filter(
+            AttendanceMyUctoSampleProfile::rules(),
+            static fn (array $rule): bool => $rule['meaning'] !== 'net_other_deduction',
+        ));
+        $myucto = $this->insertSample(AttendanceMyUctoSampleProfile::NAME, $staleMyUcto, AttendanceMyUctoSampleProfile::components(), 0, 'myucto');
+        $container = Bootstrap::buildContainer();
+        self::assertInstanceOf(Container::class, $container);
+        $container->set(DemoMode::class, new DemoMode(new Config(['demo' => ['enabled' => true]])));
+        $service = $container->get(AttendanceImportService::class);
+        self::assertInstanceOf(AttendanceImportService::class, $service);
+
+        $profiles = $service->profiles($this->supplierId());
+
+        self::assertSame([$myucto], array_column($profiles, 'id'));
+        self::assertSame(['myucto' => 1], $this->sampleCounts());
+        self::assertSame($staleMyUcto, $this->samplesByKey()['myucto']['rules']);
+        self::assertSame(0, $this->samplesByKey()['myucto']['sample_version']);
+        self::assertNull($this->marker('payroll_attendance_sample_seeded_at'));
+        self::assertNull($this->marker('payroll_attendance_myucto_sample_seeded_at'));
+        self::assertNull($this->marker('payroll_attendance_pamica_sample_seeded_at'));
     }
 
     /**
