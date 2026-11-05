@@ -14,6 +14,10 @@ declare(strict_types=1);
  *   - Windows/Scheduler: každých 15 minut, akce: php.exe api\bin\cron-maintenance-notice.php
  *
  * Idempotentní. Při chybě sítě zůstává poslední známá hláška.
+ *
+ * Před dotazem čeká náhodně 0–90 s. Všechny instance mají stejný rozvrh
+ * (:00, :15, …), bez rozptylu by na server dorazily ve stejné sekundě.
+ * `--now` čekání vypne (ruční spuštění).
  */
 
 require __DIR__ . '/../vendor/autoload.php';
@@ -29,6 +33,10 @@ use MyInvoice\Service\System\MaintenanceNoticeService;
 
 $container = Bootstrap::buildContainer();
 $conn = $container->get(Connection::class);
+
+if (!in_array('--now', $argv ?? [], true)) {
+    sleep(random_int(0, 90));
+}
 
 $run = CronRun::start($conn->pdo(), 'cron-maintenance-notice');
 
