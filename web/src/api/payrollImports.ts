@@ -789,7 +789,7 @@ export interface AttendanceBatchRow {
 }
 
 /** Vestavěné vzory profilu: docházkový systém GIRITON a obecná šablona MyÚčto. */
-export type AttendanceSampleKey = 'giriton' | 'myucto'
+export type AttendanceSampleKey = 'giriton' | 'myucto' | 'pamica'
 
 export interface AttendanceProfile {
   id: number
@@ -951,9 +951,17 @@ export const payrollImportsApi = {
     api.post<{ profile: AttendanceProfile; restored: boolean }>('/payroll/imports/attendance/profiles/sample', {
       sample_key: sampleKey,
     }).then(response => response.data),
-  /** Šablona XLSX pro Vzor MyÚčto (ukázkové řádky a list Návod). */
-  downloadAttendanceTemplate: (fallbackFilename: string) =>
-    downloadApiFile('/payroll/imports/attendance/template', fallbackFilename),
+  /**
+   * Šablona ke vzoru: XLSX pro Vzor MyÚčto (ukázkové řádky a list Návod),
+   * u Vzoru PAMICA ukázkový XML export se smyšlenými osobami za zvolený měsíc.
+   */
+  downloadAttendanceTemplate: (fallbackFilename: string, sampleKey: AttendanceSampleKey = 'myucto', period?: string) => {
+    const query = new URLSearchParams()
+    if (sampleKey !== 'myucto') query.set('sample', sampleKey)
+    if (period) query.set('period', period)
+    const qs = query.toString()
+    return downloadApiFile(`/payroll/imports/attendance/template${qs ? `?${qs}` : ''}`, fallbackFilename)
+  },
   copyAttendanceProfile: (id: number, targetSupplierId: number) =>
     api.post<{ profile: AttendanceProfile }>(`/payroll/imports/attendance/profiles/${id}/copy`, {
       target_supplier_id: targetSupplierId,

@@ -582,6 +582,7 @@ final class GlobalSeedTables
     public const SAMPLE_MARKERS = [
         'payroll_attendance_sample_seeded_at' => 'payroll_import_profiles',
         'payroll_attendance_myucto_sample_seeded_at' => 'payroll_import_profiles',
+        'payroll_attendance_pamica_sample_seeded_at' => 'payroll_import_profiles',
         'integration_sample_seeded_at'        => 'integration_connections',
     ];
 

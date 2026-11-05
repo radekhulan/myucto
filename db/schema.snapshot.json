@@ -1142,7 +1142,8 @@
         "2238_other_item_posting_profiles.sql",
         "2239_other_item_auto_matching.sql",
         "2240_payment_order_other_items.sql",
-        "2241_other_item_installment_components.sql"
+        "2241_other_item_installment_components.sql",
+        "2244_payroll_import_profile_pamica_sample.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26283,6 +26284,7 @@
                 "payment_thanks_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "payment_thanks_max_age_days": "smallint(5) unsigned NOT NULL DEFAULT 30",
                 "payroll_attendance_myucto_sample_seeded_at": "datetime NULL DEFAULT NULL",
+                "payroll_attendance_pamica_sample_seeded_at": "datetime NULL DEFAULT NULL",
                 "payroll_attendance_sample_seeded_at": "datetime NULL DEFAULT NULL",
                 "payroll_enabled": "tinyint(1) NOT NULL DEFAULT 0",
                 "pdf_logo_show_name": "tinyint(1) NOT NULL DEFAULT 0",

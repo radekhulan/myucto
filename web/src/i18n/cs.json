@@ -34705,7 +34705,9 @@
     "template": {
       "download": "Stáhnout šablonu XLSX",
       "hint": "Prázdná šablona pro Vzor MyÚčto: jeden řádek = osoba za měsíc, s ukázkovými řádky a návodem. Vyplněnou ji nahrajte do importu docházky.",
-      "failed": "Šablonu se nepodařilo stáhnout."
+      "failed": "Šablonu se nepodařilo stáhnout.",
+      "pamica_download": "Stáhnout ukázkový XML",
+      "pamica_hint": "Ukázkový export docházky pro PAMICA (XML „Docházka zaměstnanců“) se třemi smyšlenými osobami za vybraný měsíc. Podle něj poznáte, jaký soubor import čeká."
     },
     "profiles_load_failed": "Profily mapování se nepodařilo načíst. Import docházky může pokračovat s automatickým návrhem podle hlaviček.",
     "relation_types": {
@@ -35198,7 +35200,7 @@
       "upgrade_notice": "Použitý profil „{name}“ vznikl ze starší verze vzoru (verze {version}, aktuální {latest}) a upravili jste ho, proto se sám neaktualizoval. Nová verze může rozpoznat víc sloupců. Aktualizujte profil v Mapování sloupců.",
       "upgrade_open": "Otevřít mapování",
       "reload_preview": "Načíst náhled znovu",
-      "drop_hint": "Přetáhněte sem soubory z docházkového systému (hlavní i pomocné) nebo je vyberte",
+      "drop_hint": "Přetáhněte sem soubory z docházkového systému (XLSX, CSV nebo XML exportu pro PAMICA) nebo je vyberte",
       "load_preview": "Načíst náhled",
       "next_summary": "Pokračovat na souhrn",
       "back": "Zpět",
@@ -35500,6 +35502,7 @@
       "updated_at": "Upraveno {date}",
       "sample_hint": "Ukázkový profil pro docházkový systém GIRITON, který dostane každá firma. Upravte ho podle svých souborů, nebo si ho duplikujte a upravujte kopii.",
       "sample_hint_myucto": "Obecný ukázkový profil pro podklady ze šablony XLSX MyÚčto (list Podklady, jeden řádek = osoba za měsíc). Hodí se pro firmy bez docházkového systému, třeba s brigádníky na DPP a DPČ. Neznámé sloupce ignoruje.",
+      "sample_hint_pamica": "Ukázkový profil pro docházku exportovanou pro mzdový program PAMICA: XML „Docházka zaměstnanců“ nebo denní CSV z téhož docházkového systému. Import oba soubory sečte na souhrn osoby za měsíc: fond, odpracováno, přesčas a nadúvazek, nepřítomnosti podle kódů PAMICA (i zkrácené dny), hodiny noci, víkendu a svátku pro příplatky a mzdové složky (úkolová mzda, prémie, osobní ohodnocení, korunové příplatky, stravenkový paušál). Co nejde převést bezpečně, ukáže jako varování.",
       "upgrade_badge": "Nová verze vzoru",
       "upgrade_title": "K dispozici je nová verze vzoru",
       "upgrade_hint": "Profil vznikl ze starší verze vzoru a upravili jste ho, proto se sám neaktualizoval. Aktualizace nahradí pravidla a složky profilu novou verzí vzoru a vlastní úpravy se ztratí. Chcete-li je zachovat, profil nejdřív duplikujte.",
@@ -35523,6 +35526,8 @@
       "restore_sample_hint": "Znovu založí vzorový profil GIRITON v aktuální verzi, třeba po omylem smazaném.",
       "restore_sample_myucto": "Obnovit vzor MyÚčto",
       "restore_sample_myucto_hint": "Znovu založí obecný Vzor MyÚčto v aktuální verzi, třeba po omylem smazaném.",
+      "restore_sample_pamica": "Obnovit vzor PAMICA",
+      "restore_sample_pamica_hint": "Znovu založí Vzor PAMICA v aktuální verzi, třeba po omylem smazaném.",
       "sample_restored": "Vzor „{name}“ byl obnoven.",
       "sample_exists": "Vzor „{name}“ ve firmě už je.",
       "sample_restore_failed": "Vzor se nepodařilo obnovit.",

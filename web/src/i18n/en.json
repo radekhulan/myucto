@@ -34705,7 +34705,9 @@
     "template": {
       "download": "Download XLSX template",
       "hint": "Blank template for the MyÚčto sample: one row = one person per month, with sample rows and instructions. Upload it filled in to the attendance import.",
-      "failed": "The template could not be downloaded."
+      "failed": "The template could not be downloaded.",
+      "pamica_download": "Download sample XML",
+      "pamica_hint": "Sample attendance export for PAMICA (XML \"Docházka zaměstnanců\") with three fictitious people for the selected month. It shows which file the import expects."
     },
     "profiles_load_failed": "Mapping profiles could not be loaded. The attendance import can continue with the automatic suggestion from headers.",
     "relation_types": {
@@ -35198,7 +35200,7 @@
       "upgrade_notice": "The profile used, “{name}”, was created from an older sample version (version {version}, current {latest}) and you edited it, so it was not updated automatically. The new version may recognise more columns. Update the profile on the Column mapping tab.",
       "upgrade_open": "Open mapping",
       "reload_preview": "Reload preview",
-      "drop_hint": "Drag files from the attendance system here (main and auxiliary) or choose them",
+      "drop_hint": "Drag files from the attendance system here (XLSX, CSV or the XML export for PAMICA) or choose them",
       "load_preview": "Load preview",
       "next_summary": "Continue to summary",
       "back": "Back",
@@ -35500,6 +35502,7 @@
       "updated_at": "Updated {date}",
       "sample_hint": "Sample profile for the GIRITON attendance system that every company gets. Adjust it to your files, or duplicate it and edit the copy.",
       "sample_hint_myucto": "General sample profile for data from the MyÚčto XLSX template (sheet Podklady, one row = one person per month). Suits companies without an attendance system, e.g. with temporary workers on DPP and DPČ agreements. Unknown columns are ignored.",
+      "sample_hint_pamica": "Sample profile for attendance exported for the PAMICA payroll program: the XML \"Docházka zaměstnanců\" or the daily CSV from the same attendance system. The import sums both into a monthly summary per person: fund, worked hours, overtime and extra hours, absences by PAMICA codes (including partial days), night, weekend and holiday hours for premiums, and pay items (piece-rate pay, bonuses, personal rating, fixed premiums, meal allowance). Anything that cannot be converted safely is shown as a warning.",
       "upgrade_badge": "New sample version",
       "upgrade_title": "A new sample version is available",
       "upgrade_hint": "The profile was created from an older sample version and you edited it, so it was not updated automatically. Updating replaces the profile rules and components with the new sample version and your own changes are lost. To keep them, duplicate the profile first.",
@@ -35523,6 +35526,8 @@
       "restore_sample_hint": "Creates the GIRITON sample profile again in the current version, e.g. after it was deleted by mistake.",
       "restore_sample_myucto": "Restore MyÚčto sample",
       "restore_sample_myucto_hint": "Creates the general MyÚčto sample profile again in the current version, e.g. after it was deleted by mistake.",
+      "restore_sample_pamica": "Restore PAMICA sample",
+      "restore_sample_pamica_hint": "Creates the PAMICA sample profile again in the current version, e.g. after it was deleted by mistake.",
       "sample_restored": "Sample “{name}” was restored.",
       "sample_exists": "Sample “{name}” already exists in the company.",
       "sample_restore_failed": "The sample could not be restored.",
