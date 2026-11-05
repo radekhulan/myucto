@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminApi, type AdminSupplierSearchItem, type AdminUser, type UserSupplierAssignment } from '@/api/admin'
 import { rolesApi, type RoleListItem } from '@/api/roles'
@@ -23,6 +23,21 @@ const seatWarning = computed(() => {
   return ''
 })
 const tab = ref<'users' | 'sessions'>('users')
+const USER_TABS = [
+  { key: 'users', label: 'users.title', icon: ICONS.user },
+  { key: 'sessions', label: 'user_sessions.title', icon: ICONS.lock },
+] as const
+
+/** Šipky vlevo a vpravo přepínají záložky (WAI-ARIA tabs). */
+function onTabKey(event: KeyboardEvent) {
+  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  event.preventDefault()
+  const index = USER_TABS.findIndex(item => item.key === tab.value)
+  const next = USER_TABS[(index + (event.key === 'ArrowRight' ? 1 : USER_TABS.length - 1)) % USER_TABS.length]
+  tab.value = next.key
+  const list = (event.currentTarget as HTMLElement | null)?.parentElement
+  void nextTick(() => list?.querySelector<HTMLElement>(`[data-tab="${next.key}"]`)?.focus())
+}
 const users = ref<AdminUser[]>([])
 const roles = ref<RoleListItem[]>([])
 const loading = ref(false)
@@ -265,10 +280,16 @@ onMounted(load)
 <template>
   <div>
     <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button v-if="tab === 'users'" :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
-    <nav class="mb-4 flex flex-wrap gap-2" :aria-label="t('users.title')">
-      <button type="button" :class="tab === 'users' ? btnFilled('primary') : btnOutline('neutral')" class="whitespace-nowrap" :aria-pressed="tab === 'users'" @click="tab = 'users'"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.user" /></svg>{{ t('users.title') }}</button>
-      <button type="button" :class="tab === 'sessions' ? btnFilled('primary') : btnOutline('neutral')" class="whitespace-nowrap" :aria-pressed="tab === 'sessions'" data-sessions-tab @click="tab = 'sessions'"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('user_sessions.title') }}</button>
-    </nav>
+    <!-- Přepínač pohledů je záložka, ne tlačítko: tlačítka na stránce jsou akce. -->
+    <div role="tablist" class="mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('users.title')">
+      <button v-for="item in USER_TABS" :key="item.key" type="button" role="tab" :data-tab="item.key" :data-sessions-tab="item.key === 'sessions' ? '' : undefined"
+        :aria-selected="tab === item.key" :tabindex="tab === item.key ? 0 : -1"
+        class="-mb-px inline-flex cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors"
+        :class="tab === item.key ? 'border-primary-600 font-medium text-primary-700' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
+        @click="tab = item.key" @keydown="onTabKey">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="item.icon" /></svg>{{ t(item.label) }}
+      </button>
+    </div>
     <ActiveSessions v-if="tab === 'sessions'" />
     <template v-else>
     <p v-if="seatWarning" class="mb-4 rounded-md border border-warning-200 bg-warning-50 px-3 py-2 text-sm text-warning-800">{{ seatWarning }}</p>
