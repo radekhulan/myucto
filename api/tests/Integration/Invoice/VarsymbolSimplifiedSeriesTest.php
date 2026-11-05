@@ -159,6 +159,21 @@ final class VarsymbolSimplifiedSeriesTest extends TestCase
         self::assertSame('FV20960004', $this->gen->preview($this->supplierId, 'simplified', $this->date));
     }
 
+    public function testUnknownPlaceholderInStoredFormatIsRejectedWithoutBurningCounter(): void
+    {
+        // Šablona uložená před validací placeholderů: `{1YY}` by prošlo do čísla doslova.
+        $this->db->pdo()->prepare('UPDATE supplier SET simplified_number_format = ? WHERE id = ?')
+            ->execute(['PK{YY0}{CCC}', $this->supplierId]);
+
+        try {
+            $this->issue('simplified');
+            self::fail('Neplatná šablona musí vystavení odmítnout.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('neznámý placeholder', $e->getMessage());
+        }
+        self::assertSame(0, $this->counter('simplified'), 'Odmítnuté číslo nesmí posunout počítadlo.');
+    }
+
     public function testWithoutOwnFormatSimplifiedKeepsClientSeries(): void
     {
         // Dosavadní chování: zjednodušený doklad klienta s vlastní řadou jde do řady klienta.

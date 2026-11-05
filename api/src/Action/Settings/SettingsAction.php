@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Settings;
 use MyInvoice\Http\Json;
 use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
+use MyInvoice\Service\Invoice\InvoiceNumberFormat;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -1114,6 +1115,15 @@ final class SettingsAction
                     }
                     if (!preg_match('/\{C+\}/', $v)) {
                         return Json::error($response, 'validation_failed', "Pole '$f' musí obsahovat counter placeholder, např. {CCC}.", 400);
+                    }
+                    // Řady vydaných dokladů renderuje VarsymbolGenerator — neznámý placeholder
+                    // (`{1YY}`) by prošel do čísla faktury doslova.
+                    if (in_array($f, InvoiceNumberFormat::SUPPLIER_COLUMNS, true)) {
+                        try {
+                            InvoiceNumberFormat::templateOrNull($v, $f);
+                        } catch (\InvalidArgumentException $e) {
+                            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+                        }
                     }
                     $body[$f] = $v;
                 }
