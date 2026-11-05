@@ -70,8 +70,47 @@ final class ResetStorageScopeTest extends TestCase
         self::assertSame(12, ResetStorageScope::supplierIdOf('sup-12'));
         self::assertSame(12, ResetStorageScope::supplierIdOf('supplier-12'));
         self::assertSame(12, ResetStorageScope::supplierIdOf('sup-12.png'));
+        self::assertSame(12, ResetStorageScope::supplierIdOf('sup-12-brand-3-0123456789ab.png'));
         self::assertNull(ResetStorageScope::supplierIdOf('sources'));
         self::assertNull(ResetStorageScope::supplierIdOf('sup-12-old'));
+    }
+
+    public function testPlanIncludesPurchaseInvoiceSources(): void
+    {
+        mkdir($this->root . '/purchase-invoices/sources/supplier-1/ab', 0777, true);
+
+        self::assertContains($this->root . '/purchase-invoices/sources/supplier-1', ResetStorageScope::plan($this->root, [1], false)['own']);
+    }
+
+    /**
+     * `delete-company.php --files` dřív hledal jen `sup-N` ve dvou úrovních a nechal na
+     * disku PDF přijatých faktur (`supplier-N`), jejich zdroje (`sources/supplier-N`),
+     * podpisové profily a loga brandingových profilů.
+     */
+    public function testSupplierPathsFindsAllFilesOfOneCompanyOnly(): void
+    {
+        foreach (['purchase-invoices/sources/supplier-1/ab', 'purchase-invoices/sources/supplier-12', 'signing/profiles/supplier-1', 'documents/sup-12', 'cache/x/y/sup-1'] as $dir) {
+            mkdir($this->root . '/' . $dir, 0777, true);
+        }
+        file_put_contents($this->root . '/supplier-logos/sup-1-brand-2-0123456789ab.png', 'x');
+        file_put_contents($this->root . '/supplier-logos/sup-12.png', 'x');
+
+        self::assertSame([
+            $this->root . '/documents/sup-1',
+            $this->root . '/invoices/sup-1',
+            $this->root . '/purchase-invoices/sources/supplier-1',
+            $this->root . '/purchase-invoices/supplier-1',
+            $this->root . '/signing/profiles/supplier-1',
+            $this->root . '/supplier-logos/sup-1-brand-2-0123456789ab.png',
+            $this->root . '/supplier-logos/sup-1.png',
+        ], ResetStorageScope::supplierPaths($this->root, 1));
+    }
+
+    public function testDeleteCompanyUsesTheScope(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 4) . '/bin/delete-company.php');
+
+        self::assertStringContainsString('ResetStorageScope::supplierPaths(', $source);
     }
 
     public function testResetScriptUsesTheScope(): void
