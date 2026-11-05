@@ -401,7 +401,7 @@ final class AnonymizationPolicy
         'integration_outbox' => ['entity_id' => 'keep', 'entity_type' => 'keep', 'event_type' => 'keep', 'event_uuid' => 'keep', 'idempotency_key' => 'keep', 'last_error_code' => 'keep', 'lease_token' => 'keep', 'payload_json' => 'json', 'payload_sha256' => 'keep'],
         'invoice_attachments' => ['filename' => 'file_path', 'mime_type' => 'keep', 'original_name' => 'file_name', 'sha256' => 'keep'],
         'invoice_counters' => ['period' => 'keep'],
-        'invoice_items' => ['description' => 'text', 'oss_consumer_country' => 'keep', 'oss_original_period' => 'keep', 'oss_rate_type' => 'keep', 'revenue_account_code' => 'keep', 'seller_item_code' => 'keep', 'tracking_json' => 'keep', 'unit' => 'keep', 'vat_classification_code' => 'keep'],
+        'invoice_items' => ['work_report_billing_key' => 'keep', 'description' => 'text', 'oss_consumer_country' => 'keep', 'oss_original_period' => 'keep', 'oss_rate_type' => 'keep', 'revenue_account_code' => 'keep', 'seller_item_code' => 'keep', 'tracking_json' => 'keep', 'unit' => 'keep', 'vat_classification_code' => 'keep'],
         'invoice_payment_schedule' => ['note' => 'text'],
         'invoice_payments' => ['bank_reference' => 'keep', 'currency' => 'keep', 'note' => 'text', 'variable_symbol' => 'symbol'],
         'invoice_pdfs' => ['filename' => 'file_path', 'reason' => 'keep', 'sent_to' => 'json', 'sha256' => 'keep'],
@@ -816,7 +816,8 @@ final class AnonymizationPolicy
         'work_report_links' => ['token' => 'token'],
         'work_report_materials' => ['description' => 'text', 'unit' => 'keep'],
         // Volby zobrazení obsahují jen validované logické hodnoty, bez osobních údajů.
-        'work_reports' => ['display_options' => 'keep', 'material_title' => 'text', 'title' => 'text'],
+        'work_report_billing_templates' => ['name' => 'text', 'settings' => 'json'],
+        'work_reports' => ['billing_period' => 'keep', 'billing_snapshot' => 'json', 'billing_transferred_fingerprint' => 'keep', 'display_options' => 'keep', 'material_title' => 'text', 'title' => 'text'],
     ];
 
     /** Strategie, které zpracuje první průchod (strukturované hodnoty plní slovník). */

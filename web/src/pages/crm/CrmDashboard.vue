@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -42,6 +42,34 @@ const expenses = ref<ExpenseCategoryRow[]>([])
 const revenues = ref<RevenueCategoryRow[]>([])
 const churn = ref<ChurnRiskClient[]>([])
 const cashFlow = ref<CashFlowResult | null>(null)
+const includeDrafts = ref(false)
+const cashFlowLoading = ref(false)
+let cashFlowGeneration = 0
+let confirmedIncludeDrafts = false
+function applyCashFlow(result: CashFlowResult, drafts: boolean, generation: number): void {
+  if (generation !== cashFlowGeneration) return
+  cashFlow.value = result
+  confirmedIncludeDrafts = drafts
+  includeDrafts.value = drafts
+}
+async function reloadCashFlow() {
+  const generation = ++cashFlowGeneration
+  const drafts = includeDrafts.value
+  cashFlowLoading.value = true
+  try {
+    const cur = currencyFilter.value && currencyFilter.value !== ALL_CURRENCIES ? currencyFilter.value : 'CZK'
+    const result = await crmApi.cashFlowForecast(4, cur, drafts)
+    applyCashFlow(result, drafts, generation)
+  } catch (e) {
+    if (generation === cashFlowGeneration) {
+      includeDrafts.value = confirmedIncludeDrafts
+      toast.error(apiErrorMessage(e))
+    }
+  } finally {
+    if (generation === cashFlowGeneration) cashFlowLoading.value = false
+  }
+}
+onBeforeUnmount(() => { cashFlowGeneration++ })
 const lateRisk = ref<LateRiskClient[]>([])
 const reminderEff = ref<ReminderEffectiveness | null>(null)
 const paymentHist = ref<PaymentTimeHistogram | null>(null)
@@ -61,6 +89,9 @@ const displayCurrency = computed(() => currencyFilter.value === ALL_CURRENCIES ?
 const availableCurrencies = computed(() => overview.value?.currencies || [])
 
 async function loadAll() {
+  const cashFlowRequest = ++cashFlowGeneration
+  const drafts = includeDrafts.value
+  cashFlowLoading.value = true
   loading.value = true
   try {
     const ov = await crmApi.overview()
@@ -85,7 +116,7 @@ async function loadAll() {
       crmApi.expenseBreakdown(periodMonths.value, cur),
       crmApi.revenueBreakdown(periodMonths.value, cur),
       crmApi.churnRisk(60, 10),
-      crmApi.cashFlowForecast(4, cur || 'CZK'),
+      crmApi.cashFlowForecast(4, cur || 'CZK', drafts),
       crmApi.lateRisk(10),
       crmApi.reminderEffectiveness(periodMonths.value),
       crmApi.paymentTimeHistogram(periodMonths.value),
@@ -106,14 +137,18 @@ async function loadAll() {
     expenses.value = exp
     revenues.value = rev
     churn.value = ch
-    cashFlow.value = cf
+    applyCashFlow(cf, drafts, cashFlowRequest)
     lateRisk.value = lr
     reminderEff.value = re
     paymentHist.value = ph
     monthly24.value = m24
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    if (cashFlowRequest === cashFlowGeneration) {
+      includeDrafts.value = confirmedIncludeDrafts
+      toast.error(apiErrorMessage(e))
+    }
   } finally {
+    if (cashFlowRequest === cashFlowGeneration) cashFlowLoading.value = false
     loading.value = false
   }
 }
@@ -1195,12 +1230,29 @@ onMounted(async () => {
 
       <!-- ═══ Cash flow forecast (4 týdny) ═══ -->
       <div v-if="cashFlow && cashFlow.weeks.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
             💰 {{ t('crm.cash_flow.title') }} ({{ cashFlow.currency }})
           </h3>
-          <div class="text-xs text-neutral-500">{{ t('crm.cash_flow.next_n_weeks', { n: cashFlow.weeks.length }) }}</div>
+          <div class="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+            <span>{{ t('crm.cash_flow.next_n_weeks', { n: cashFlow.weeks.length }) }}</span>
+            <label class="flex items-center gap-2 whitespace-nowrap">
+              <input v-model="includeDrafts" type="checkbox" :disabled="cashFlowLoading || loading" data-test="cashflow-include-drafts"
+                class="rounded border-neutral-300 text-primary-600" @change="reloadCashFlow" />
+              {{ t('crm.cash_flow.include_drafts') }}
+            </label>
+          </div>
         </header>
+        <div v-if="includeDrafts && cashFlow.total_draft_in !== undefined" class="px-5 py-3 text-xs text-neutral-500 space-y-2">
+          <p>{{ t('crm.cash_flow.draft_hint') }}</p>
+          <RouterLink v-if="cashFlow.unscheduled_draft_count && auth.canRead('invoices')"
+            :to="{ name: 'invoices', query: { cashflow_draft_unscheduled: '1', currency: cashFlow.currency, year: 'all' } }"
+            :class="btnOutline('warning')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
+            {{ t('crm.cash_flow.unscheduled_drafts', { count: cashFlow.unscheduled_draft_count }) }}
+          </RouterLink>
+          <p v-else-if="cashFlow.unscheduled_draft_count">{{ t('crm.cash_flow.unscheduled_drafts', { count: cashFlow.unscheduled_draft_count }) }}</p>
+        </div>
         <div class="overflow-x-auto">
         <table class="w-full text-sm min-w-[560px]">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
@@ -1210,6 +1262,9 @@ onMounted(async () => {
               <th class="text-right px-3 py-2">{{ t('crm.cash_flow.out') }}</th>
               <th class="text-right px-3 py-2">{{ t('crm.cash_flow.net') }}</th>
               <th class="text-right px-5 py-2">{{ t('crm.cash_flow.running') }}</th>
+              <th v-if="includeDrafts" class="text-right px-3 py-2 text-warning-600">{{ t('crm.cash_flow.draft_in') }}</th>
+              <th v-if="includeDrafts" class="text-right px-3 py-2 text-warning-600">{{ t('crm.cash_flow.outlook_net') }}</th>
+              <th v-if="includeDrafts" class="text-right px-5 py-2 text-warning-600">{{ t('crm.cash_flow.outlook_running') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -1226,6 +1281,9 @@ onMounted(async () => {
               <td class="px-5 py-2 text-right font-mono font-medium" :class="w.running >= 0 ? 'text-neutral-700' : 'text-danger-500'">
                 {{ formatMoneyWhole(w.running, cashFlow.currency) }}
               </td>
+              <td v-if="includeDrafts" class="px-3 py-2 text-right font-mono text-warning-600">{{ formatMoneyWhole(w.draft_in ?? 0, cashFlow.currency) }}</td>
+              <td v-if="includeDrafts" class="px-3 py-2 text-right font-mono text-warning-600">{{ formatMoneyWhole(w.outlook_net ?? w.net, cashFlow.currency) }}</td>
+              <td v-if="includeDrafts" class="px-5 py-2 text-right font-mono text-warning-600">{{ formatMoneyWhole(w.outlook_running ?? w.running, cashFlow.currency) }}</td>
             </tr>
           </tbody>
           <tfoot class="bg-neutral-50">
@@ -1236,6 +1294,8 @@ onMounted(async () => {
               <td colspan="2" class="px-5 py-2 text-right font-mono font-bold" :class="cashFlow.total_net >= 0 ? 'text-success-600' : 'text-danger-500'">
                 {{ cashFlow.total_net >= 0 ? '+' : '' }}{{ formatMoneyWhole(cashFlow.total_net, cashFlow.currency) }}
               </td>
+              <td v-if="includeDrafts" class="px-3 py-2 text-right font-mono text-warning-600 font-medium">{{ formatMoneyWhole(cashFlow.total_draft_in ?? 0, cashFlow.currency) }}</td>
+              <td v-if="includeDrafts" colspan="2" class="px-5 py-2 text-right font-mono text-warning-600 font-bold">{{ formatMoneyWhole(cashFlow.total_outlook_net ?? cashFlow.total_net, cashFlow.currency) }}</td>
             </tr>
           </tfoot>
         </table>

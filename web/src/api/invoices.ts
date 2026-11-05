@@ -1,3 +1,4 @@
+import type { WorkReportBillingSnapshot, WorkReportBillingPreview } from './workReportBilling'
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { api } from './client'
 import type { DocumentLock } from './locks'
@@ -142,6 +143,7 @@ export interface InvoiceItem {
   // 'text' = textový řádek mezi položkami: jen popis, do částek ani DPH nevstupuje.
   item_kind?: 'standard' | 'discount' | 'text'
   linked_work_report_id?: number | null
+  work_report_billing_key?: string | null
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
@@ -384,6 +386,7 @@ export interface Invoice {
   /** Odběratelem je systémový koncový zákazník (zjednodušený doklad bez odběratele, § 30). */
   client_is_walk_in?: boolean
   project_name?: string | null
+  project_billing_template_id?: number | null
   project_hourly_rate?: number | null
   project_payment_due_days?: number | null
   currency_symbol?: string
@@ -623,6 +626,8 @@ export interface InvoicePayload {
     list_unit_price?: number | null
     vat_rate_id: number
     order_index: number
+    linked_work_report_id?: number | null
+    work_report_billing_key?: string | null
     stock_item_id?: number | null
     warehouse_id?: number | null
     tracking_allocations?: InvoiceItemTrackingAllocation[]
@@ -680,6 +685,7 @@ export interface ListFilters {
   date_to?: string
   currency?: string
   unpaid_only?: boolean
+  cashflow_draft_unscheduled?: boolean
   overdue?: boolean
   /**
    * Neuhrazené K DATU X (YYYY-MM-DD) — na rozdíl od `unpaid_only` (dnešní status) jde
@@ -811,6 +817,7 @@ function listFilterParams(filters: ListFilters): Record<string, string | number>
   if (filters.date_to)     params['filter[date_to]']     = filters.date_to
   if (filters.currency)    params['filter[currency]']    = filters.currency
   if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
+  if (filters.cashflow_draft_unscheduled) params['filter[cashflow_draft_unscheduled]'] = 1
   if (filters.overdue)     params['filter[overdue]']     = 1
   if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
   if (filters.booked)      params['filter[booked]']      = filters.booked
@@ -1255,6 +1262,11 @@ export interface WorkReportDisplayOptions {
 }
 
 export interface WorkReport {
+  billing_preview?: WorkReportBillingPreview | null
+  billing_template_id?: number | null
+  billing_snapshot?: WorkReportBillingSnapshot | null
+  billing_period?: string | null
+  billing_stale?: boolean
   display_options?: Partial<WorkReportDisplayOptions> | null
   effective_display_options?: WorkReportDisplayOptions
   id: number
@@ -1273,6 +1285,10 @@ export interface WorkReport {
 }
 
 export interface WorkReportPayload {
+  billing_template_id?: number | null
+  billing_snapshot?: WorkReportBillingSnapshot | null
+  billing_period?: string | null
+  billing_stale?: boolean
   display_options?: Partial<WorkReportDisplayOptions> | null
   project_id: number | null
   title: string

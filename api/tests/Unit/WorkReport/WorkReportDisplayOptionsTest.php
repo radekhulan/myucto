@@ -52,6 +52,35 @@ final class WorkReportDisplayOptionsTest extends TestCase
         self::assertSame(2468.0, $report['total_amount']);
     }
 
+    public function testPublicBillingProjectionDoesNotExposeSnapshotOrHiddenPrices(): void
+    {
+        $report = $this->report(['hours' => false, 'rate' => false, 'amount' => false]);
+        $report['billing_snapshot'] = ['name' => 'Syntetická dohoda', 'fixed_fee' => 9876, 'bands' => [['rate' => 4321]]];
+        $report['billing_template_id'] = 12;
+        $report['billing_transferred_fingerprint'] = 'internal-fingerprint';
+        $report['billing_stale'] = true;
+        $report['billing_preview'] = [
+            'items' => [['billing_key' => 'fixed', 'description' => 'Služby', 'unit' => 'ks', 'quantity' => 1.0,
+                'unit_price_without_vat' => 9876.0, 'total_amount' => 9876.0, 'total_with_vat' => 11949.96, 'linked_work_report_id' => 99]],
+            'total_hours' => 8.0, 'included_hours' => 4.0, 'extra_hours' => 4.0, 'total_amount' => 9876.0,
+            'fingerprint' => 'internal-fingerprint', 'totals' => ['with_vat' => 11949.96], 'vat_breakdown' => [21 => 2073.96],
+        ];
+        $public = Display::forPublic($report);
+        foreach (['billing_snapshot', 'billing_template_id', 'billing_transferred_fingerprint', 'billing_stale'] as $key) self::assertArrayNotHasKey($key, $public);
+        self::assertTrue($public['billing_enabled']);
+        foreach (['quantity', 'unit_price_without_vat', 'total_amount'] as $key) self::assertNull($public['billing_preview']['items'][0][$key]);
+        foreach (['total_hours', 'included_hours', 'extra_hours', 'total_amount'] as $key) self::assertNull($public['billing_preview'][$key]);
+        foreach (['fingerprint', 'totals', 'vat_breakdown'] as $key) self::assertArrayNotHasKey($key, $public['billing_preview']);
+        self::assertArrayNotHasKey('linked_work_report_id', $public['billing_preview']['items'][0]);
+        self::assertSame(9876.0, $report['billing_preview']['total_amount']);
+        self::assertSame('internal-fingerprint', $report['billing_transferred_fingerprint']);
+
+        $report['effective_display_options'] = Display::DEFAULTS;
+        $visible = Display::forPublic($report);
+        self::assertSame(9876.0, $visible['billing_preview']['total_amount']);
+        self::assertSame(4321, $report['billing_snapshot']['bands'][0]['rate']);
+    }
+
     #[DataProvider('columnCombinations')]
     public function testPdfTableKeepsWidthsAndCellCountsForEveryColumnCombination(array $options): void
     {
@@ -124,6 +153,23 @@ final class WorkReportDisplayOptionsTest extends TestCase
                 $shown = $twig->render('invoice_approval.' . $locale . '.' . $format . '.twig', $context);
                 self::assertStringContainsString($locale === 'cs' ? 'K vyúčtování' : 'Amount', $shown);
             }
+        }
+    }
+
+    public function testEnglishApprovalEmailFormatsBillingAmountsWithEnglishSeparators(): void
+    {
+        $twig = new Environment(new FilesystemLoader(dirname(__DIR__, 3) . '/templates/email'));
+        foreach (['html', 'txt'] as $format) {
+            $context = $this->context(Display::DEFAULTS);
+            $context['locale'] = 'en';
+            $context['invoice']['language'] = 'en';
+            $context['work_report']['billing_snapshot'] = ['name' => 'Synthetic billing template'];
+            $context['work_report']['billing_preview'] = [
+                'items' => [['description' => 'Fixed fee', 'total_amount' => 12345.67]],
+            ];
+            $email = $twig->render('invoice_approval.en.' . $format . '.twig', $context);
+            self::assertStringContainsString('12,345.67 CZK', $email, $format);
+            self::assertStringNotContainsString('12 345,67 CZK', $email, $format);
         }
     }
 

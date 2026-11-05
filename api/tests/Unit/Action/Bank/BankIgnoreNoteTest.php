@@ -167,9 +167,8 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->exec('CREATE TABLE invoices (id INTEGER, status TEXT)');
         $sqlite->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER, supplier_id INTEGER, purchase_invoice_id INTEGER, invoice_id INTEGER)');
         $sqlite->exec('CREATE TABLE journal_entries (supplier_id INTEGER, source_type TEXT, source_id INTEGER, reversed_by INTEGER, posted_at TEXT)');
-        // Zrušení párování stornuje i přiřazení pohybu k ostatní položce.
         $sqlite->exec('CREATE TABLE other_item_allocations (supplier_id INTEGER, bank_transaction_id INTEGER, reversed_on TEXT)');
-        $sqlite->createFunction('CURDATE', static fn (): string => date('Y-m-d'));
+        $sqlite->createFunction('CURDATE', static fn (): string => '2099-01-01', 0);
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
         $scope = $this->createStub(\PDOStatement::class);

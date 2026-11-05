@@ -266,7 +266,8 @@ final class CrmDashboardAction
         $q = $request->getQueryParams();
         $weeks = max(1, min(12, (int) ($q['weeks'] ?? 4)));
         $currency = isset($q['currency']) ? (string) $q['currency'] : 'CZK';
-        $forecast = $this->crm->cashFlowForecast($supplierId, $weeks, $currency);
+        $includeDrafts = in_array($q['include_drafts'] ?? null, ['1', 'true', 1, true], true);
+        $forecast = $this->crm->cashFlowForecast($supplierId, $weeks, $currency, $includeDrafts);
         $from = date('Y-m-d');
         $to = date('Y-m-d', strtotime('+' . ($weeks * 7) . ' days'));
         $sources = [];
@@ -278,7 +279,9 @@ final class CrmDashboardAction
             array_push($sources, ...$this->obligations->payrollLiabilities($supplierId, $from, $to));
             array_push($sources, ...$this->obligations->payrollForecasts($supplierId, $from, $to));
         }
-        return Json::ok($response, OtherItemForecastService::mergeSourceWeekly($forecast, $sources));
+        return Json::ok($response, \MyInvoice\Service\Crm\DraftCashFlow::withOutlook(
+            OtherItemForecastService::mergeSourceWeekly($forecast, $sources),
+        ));
     }
 
     /** Late payment risk score per klient. */

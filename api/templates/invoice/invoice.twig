@@ -299,10 +299,11 @@
       {%- set _wr_d = item.description|trim|lower -%}
       {%- set _mat_title = work_report.material_title|default('')|trim|lower -%}
       {%- set _is_mat_item = work_report and work_report.material_total > 0 and item.item_kind != 'discount'
-            and _mat_title != '' and _wr_d == _mat_title -%}
+            and not item.work_report_billing_key|default(null) and _mat_title != '' and _wr_d == _mat_title -%}
       {%- set _is_wr_item = work_report and not _is_mat_item and item.item_kind != 'discount'
-            and (_wr_d == (work_report.title|default('')|trim|lower)
-                 or 'výkaz' in _wr_d or 'work report' in _wr_d) -%}
+            and ((item.linked_work_report_id|default(null) and item.linked_work_report_id == work_report.id)
+                 or (not item.linked_work_report_id|default(null) and not work_report.billing_snapshot|default(null)
+                     and (_wr_d == (work_report.title|default('')|trim|lower) or 'výkaz' in _wr_d or 'work report' in _wr_d))) -%}
       {%- set _base_qty = item.base_qty is defined and item.base_qty is not null
             ? item.base_qty|number_format(item.base_qty == item.base_qty|round(0) ? 0 : (item.base_qty == item.base_qty|round(1) ? 1 : (item.base_qty == item.base_qty|round(2) ? 2 : 3)), decimal_sep, thousand_sep)
             : null -%}
@@ -717,7 +718,7 @@
 {% endif %}
 
 {# ─── VÝKAZ VÍCEPRACÍ + VÝKAZ MATERIÁLU — 2. stránka ─── #}
-{% set _has_work = work_report and (work_report.items|length) > 0 %}
+{% set _has_work = work_report and ((work_report.items|length) > 0 or work_report.billing_snapshot|default(null)) %}
 {% set _has_material = work_report and work_report.material_total > 0 and (work_report.materials|default([])|length) > 0 %}
 {% if _has_work or _has_material %}
 {% set _doc_type = (_has_work and _has_material)

@@ -27,6 +27,7 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class CrmCashFlowForecastTest extends TestCase
 {
+    use \MyInvoice\Tests\Support\IsolatedSupplierTrait;
     private Connection $db;
     private CrmAggregationService $crm;
     private \PDO $pdo;
@@ -52,16 +53,28 @@ final class CrmCashFlowForecastTest extends TestCase
         }
         $this->pdo = $this->db->pdo();
 
-        $this->supplierId = (int) ($this->pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        $this->userId = (int) ($this->pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        $this->czId = (int) ($this->pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
-        $this->czkId = (int) ($this->pdo->query("SELECT id FROM currencies WHERE supplier_id = {$this->supplierId} AND code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
-        if ($this->supplierId === 0 || $this->userId === 0 || $this->czId === 0 || $this->czkId === 0) {
-            $this->markTestSkipped('Chybí supplier/user/country/CZK.');
-        }
-
+        self::assertStringEndsWith('_test', (string) $this->pdo->query('SELECT DATABASE()')->fetchColumn());
         $this->pdo->beginTransaction();
         $this->inTx = true;
+        $this->czId = (int) $this->pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        $vatId = (int) $this->pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, $this->czId);
+        self::assertGreaterThan(0, $vatId);
+        // Supplier a jeho výchozí měna tvoří kruhový FK; po založení obou je hned opravíme.
+        $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        try {
+            $this->pdo->prepare("INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
+                VALUES ('Syntetické cashflow', 'Test 1', 'Praha', '11000', ?, 'cashflow@example.invalid', 0, ?)")->execute([$this->czId, $vatId]);
+            $this->supplierId = (int) $this->pdo->lastInsertId();
+            $this->pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en) VALUES (?, 'CZK', 'CZK', 'Kč', 'Koruna', 'Crown')")->execute([$this->supplierId]);
+            $this->czkId = (int) $this->pdo->lastInsertId();
+            $this->pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$this->czkId, $this->supplierId]);
+        } finally {
+            $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        }
+        $this->pdo->prepare("INSERT INTO users (email, password_hash, name) VALUES (?, ?, 'Syntetický cashflow uživatel')")
+            ->execute(['cashflow-' . bin2hex(random_bytes(6)) . '@example.invalid', password_hash('Syntetické nepoužité heslo', PASSWORD_BCRYPT, ['cost' => 4])]);
+        $this->userId = (int) $this->pdo->lastInsertId();
     }
 
     protected function tearDown(): void
@@ -115,6 +128,82 @@ final class CrmCashFlowForecastTest extends TestCase
             0.01,
             'running[1] = net[0] + net[1].',
         );
+    }
+
+    public function testDraftLayerIsOptionalAndUsesStoredAmountsAndWeekBoundaries(): void
+    {
+        $client = $this->party('CF Koncept', true, false);
+        $today = new \DateTimeImmutable('today');
+        $end = $today->modify('Sunday this week');
+        $monday = $end->modify('+1 day');
+        $endNext = $monday->modify('Sunday this week');
+        $baseline = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK');
+        $baseDraft = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK', true);
+        $draft = $this->invoice($client, $today->format('Y-m-d'), 1000);
+        $this->pdo->prepare("UPDATE invoices SET status = 'draft', advance_paid_amount = 100, paid_total = 200 WHERE id = ?")->execute([$draft]);
+        foreach ([[$end, 50], [$monday, 200], [$endNext, 300], [$endNext->modify('+1 day'), 10000]] as [$date, $gross]) {
+            $id = $this->invoice($client, $date->format('Y-m-d'), $gross);
+            $this->pdo->prepare("UPDATE invoices SET status = 'draft' WHERE id = ?")->execute([$id]);
+        }
+        $without = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK');
+        self::assertSame($baseline, $without, 'Výchozí odpověď zůstává beze změny včetně tvaru JSON.');
+        self::assertSame($without, $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK', false));
+        $with = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK', true);
+        self::assertEqualsWithDelta($baseDraft['weeks'][0]['draft_in'] + 750, $with['weeks'][0]['draft_in'], 0.001);
+        self::assertEqualsWithDelta($baseDraft['weeks'][1]['draft_in'] + 500, $with['weeks'][1]['draft_in'], 0.001);
+        self::assertEqualsWithDelta($baseDraft['total_draft_in'] + 1250, $with['total_draft_in'], 0.001);
+        self::assertSame($without['total_in'], $with['total_in']);
+        self::assertEqualsWithDelta($with['total_net'] + $with['total_draft_in'], $with['total_outlook_net'], 0.001);
+        self::assertEqualsWithDelta($with['total_outlook_net'], $with['weeks'][1]['outlook_running'], 0.001);
+        // Vystavení pouze přesune uloženou částku mezi vrstvami, součet se nezmění.
+        $this->pdo->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$draft]);
+        $issued = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK', true);
+        self::assertEqualsWithDelta($with['total_in'] + 700, $issued['total_in'], 0.001);
+        self::assertEqualsWithDelta($with['total_draft_in'] - 700, $issued['total_draft_in'], 0.001);
+        self::assertSame($with['total_outlook_net'], $issued['total_outlook_net']);
+    }
+
+    public function testDraftScopeCurrencyTenantAndUnscheduledDrilldown(): void
+    {
+        $client = $this->party('CF Filtry', true, false);
+        $today = date('Y-m-d');
+        $base = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK', true);
+        $overdue = $this->invoice($client, date('Y-m-d', strtotime('-1 day')), 125);
+        $this->pdo->prepare("UPDATE invoices SET status = 'draft' WHERE id = ?")->execute([$overdue]);
+        foreach (['proforma', 'rent_calendar', 'advance_calendar', 'tax_document', 'invoice'] as $type) {
+            $id = $this->invoice($client, $today, 9999);
+            $this->pdo->prepare("UPDATE invoices SET status = 'draft', invoice_type = ?, advance_paid_amount = IF(? IN ('invoice','tax_document'), total_with_vat, 0) WHERE id = ?")->execute([$type, $type, $id]);
+        }
+        $this->pdo->prepare("INSERT INTO currencies (supplier_id, code, symbol, label, name_cs, name_en) VALUES (?, 'XCF', 'X', 'Testovací měna', 'Testovací měna', 'Test currency')")->execute([$this->supplierId]);
+        $foreignCurrency = (int) $this->pdo->lastInsertId();
+        $foreign = $this->invoice($client, $today, 777);
+        $this->pdo->prepare("UPDATE invoices SET status = 'draft', currency_id = ? WHERE id = ?")->execute([$foreignCurrency, $foreign]);
+        $otherSupplier = $this->createIsolatedSupplier($this->pdo, $this->supplierId);
+        $ownSupplier = $this->supplierId;
+        $ownCzk = $this->czkId;
+        $this->supplierId = $otherSupplier;
+        try {
+            $this->pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en) VALUES (?, 'CZK', 'CZK', 'Kč', 'Koruna', 'Crown')")->execute([$otherSupplier]);
+            $this->czkId = (int) $this->pdo->lastInsertId();
+            $otherClient = $this->party('CF Jiná firma', true, false);
+            $otherInvoice = $this->invoice($otherClient, $today, 888);
+            $this->pdo->prepare("UPDATE invoices SET status = 'draft' WHERE id = ?")->execute([$otherInvoice]);
+        } finally {
+            $this->supplierId = $ownSupplier;
+            $this->czkId = $ownCzk;
+        }
+        $after = $this->crm->cashFlowForecast($this->supplierId, 2, 'CZK', true);
+        self::assertSame($base['total_draft_in'], $after['total_draft_in']);
+        self::assertSame($base['unscheduled_draft_count'] + 1, $after['unscheduled_draft_count']);
+        $repository = Bootstrap::buildContainer()->get(\MyInvoice\Repository\InvoiceRepository::class);
+        [$where, $params] = $repository->listWhere(['supplier_id' => $this->supplierId, 'cashflow_draft_unscheduled' => true, 'currency' => 'CZK']);
+        $stmt = $this->pdo->prepare("SELECT i.id FROM invoices i JOIN currencies cur ON cur.id = i.currency_id WHERE $where");
+        $stmt->execute($params);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        self::assertContains($overdue, $ids);
+        self::assertNotContains($foreign, $ids);
+        self::assertNotContains($otherInvoice, $ids);
+        self::assertCount($after['unscheduled_draft_count'], $ids);
     }
 
     // ── seed helpers ───────────────────────────────────────────────────────────

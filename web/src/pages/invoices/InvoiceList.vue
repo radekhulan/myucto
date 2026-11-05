@@ -94,6 +94,7 @@ const yearFilter = ref<number | ''>('')
 const monthFilter = ref<number | ''>('')
 const dateFrom = ref<string>('')
 const dateTo = ref<string>('')
+const cashflowDraftUnscheduled = ref(false)
 const overdueOnly = ref(false)
 const unpaidOnly = ref(false)
 // Neuhrazené K DATU X (task #4) — historický protějšek unpaidOnly (dnešní status).
@@ -158,6 +159,7 @@ const activeFilterCount = computed(() => {
   if (currencyFilter.value) n++
   if (monthFilter.value !== '') n++
   if (dateFrom.value || dateTo.value) n++
+  if (cashflowDraftUnscheduled.value) n++
   if (overdueOnly.value) n++
   if (unpaidOnly.value) n++
   if (unpaidAsOf.value) n++
@@ -192,6 +194,7 @@ const filterChips = computed<FilterChip[]>(() => {
   if (dateFrom.value || dateTo.value) {
     chips.push({ key: 'dates', value: `${dateFrom.value ? formatDate(dateFrom.value) : '…'} – ${dateTo.value ? formatDate(dateTo.value) : '…'}` })
   }
+  if (cashflowDraftUnscheduled.value) chips.push({ key: 'cashflow_draft_unscheduled', value: t('crm.cash_flow.unscheduled_drafts_filter') })
   if (overdueOnly.value) chips.push({ key: 'overdue', value: t('invoice.overdue_only') })
   if (unpaidOnly.value) chips.push({ key: 'unpaid', value: t('invoice.unpaid_only') })
   if (unpaidAsOf.value) {
@@ -231,6 +234,7 @@ function clearFilter(key: string) {
     case 'currency': currencyFilter.value = ''; break
     case 'month': monthFilter.value = ''; break
     case 'dates': dateFrom.value = ''; dateTo.value = ''; break
+    case 'cashflow_draft_unscheduled': cashflowDraftUnscheduled.value = false; break
     case 'overdue': overdueOnly.value = false; break
     case 'unpaid': unpaidOnly.value = false; break
     case 'unpaid_as_of': unpaidAsOf.value = ''; break
@@ -927,6 +931,7 @@ function listParams(): InvoiceListParams {
     date_from: dateFrom.value || undefined,
     date_to:   dateTo.value || undefined,
     currency:  currencyFilter.value || undefined,
+    cashflow_draft_unscheduled: cashflowDraftUnscheduled.value || undefined,
     overdue: overdueOnly.value || undefined,
     unpaid_only: unpaidOnly.value || undefined,
     unpaid_as_of: unpaidAsOf.value || undefined,
@@ -1123,6 +1128,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   statusFilter.value = typeof q.status === 'string' ? q.status : ''
   typeFilter.value   = typeof q.type === 'string' ? q.type : ''
   clientFilter.value = typeof q.client_id === 'string' && q.client_id !== '' ? Number(q.client_id) : ''
+  cashflowDraftUnscheduled.value = q.cashflow_draft_unscheduled === '1' || q.cashflow_draft_unscheduled === 'true'
   overdueOnly.value  = q.overdue === '1' || q.overdue === 'true'
   unpaidOnly.value   = q.unpaid === '1' || q.unpaid === 'true'
   unpaidAsOf.value   = typeof q.unpaid_as_of === 'string' ? q.unpaid_as_of : ''
@@ -1137,7 +1143,7 @@ function loadFiltersFromQuery(q: typeof route.query) {
   // jako u „nezaúčtováno".
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
     ? (q.year === 'all' ? '' : Number(q.year))
-    : ((overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
+    : ((cashflowDraftUnscheduled.value || overdueOnly.value || unpaidOnly.value || unpaidAsOf.value || bookedFilter.value === '0' || ossReviewFilter.value) ? '' : DEFAULT_YEAR)
   monthFilter.value  = typeof q.month === 'string' && q.month !== '' ? Number(q.month) : ''
   dateFrom.value     = typeof q.from === 'string' ? q.from : ''
   dateTo.value       = typeof q.to === 'string' ? q.to : ''
@@ -1164,6 +1170,7 @@ function buildQuery(): Record<string, string> {
   if (dateFrom.value) q.from = dateFrom.value
   if (dateTo.value) q.to = dateTo.value
   if (currencyFilter.value) q.currency = currencyFilter.value
+  if (cashflowDraftUnscheduled.value) q.cashflow_draft_unscheduled = '1'
   if (overdueOnly.value) q.overdue = '1'
   if (unpaidOnly.value) q.unpaid = '1'
   if (unpaidAsOf.value) q.unpaid_as_of = unpaidAsOf.value
@@ -1203,7 +1210,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
+       cashflowDraftUnscheduled, overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
        revenueCategoryIds, revenueCategoryMode], () => {
   if (suppressUrlSync) return
   syncFiltersToUrl()

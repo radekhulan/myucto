@@ -113,6 +113,9 @@ Správce instance používá oddělené technické přiřazení popsané níže;
 trvalé a aplikace ho odmítne, pokud jsou na uživatele navázaná firemní, účetní nebo auditní data. V takovém případě účet
 ponechte deaktivovaný.
 
+**Aktivní relace:** superadmin otevře přehled všech přihlášení přes `Systém → Uživatelé → Aktivní relace`.
+Podrobnosti a odvolání relace popisuje [§ 101.9.1](101_Bezpecnost.md#10191-aktivni-relace).
+
 **Role a oprávnění:** `Systém → Role a oprávnění`. Superadmin může vytvořit interní roli typu **staff** nebo externí
 roli typu **client** a pro každou nastavit oprávnění po modulech a významných akcích (viz [§ 96.16.4](#96164-role-a-opravneni)).
 
