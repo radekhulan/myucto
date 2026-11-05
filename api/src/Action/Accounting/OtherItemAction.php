@@ -122,6 +122,27 @@ final class OtherItemAction
         });
     }
 
+    /**
+     * Změna účtu protistrany u potvrzeného nebo zaúčtovaného dokladu (párování úhrad).
+     * API token ho nesmí (ApiScopeMiddleware), token a MCP upravují jen koncepty.
+     */
+    public function updateCounterpartyAccount(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->service->updateCounterpartyAccount($supplierId, $id, (array) ($request->getParsedBody() ?? []));
+            if ($result['before'] !== $result['after']) {
+                $this->logger->log('other_item.counterparty_account_changed', $this->userId($request), 'other_item', $id,
+                    ['before' => $result['before'], 'after' => $result['after']],
+                    $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    $request->getHeaderLine('User-Agent'), $supplierId);
+            }
+            return $result['item'];
+        });
+    }
+
     public function delete(Request $request, Response $response, array $args): Response
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;

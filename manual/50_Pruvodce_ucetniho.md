@@ -503,12 +503,14 @@ Pole **Účet protistrany** je nepovinné. Zadejte český účet ve tvaru
 Český účet se ověří kontrolou modulo 11, IBAN kontrolními číslicemi. Český
 IBAN se uloží jako národní číslo účtu s kódem banky. Účet se zobrazí na detailu
 a opakování ho přenáší do každé nově vzniklé položky. Podle účtu aplikace
-nabízí úhrady z banky.
+nabízí úhrady z banky. U potvrzené nebo zaúčtované položky účet doplníte či
+opravíte přímo v detailu tlačítkem **Upravit** u pole **Účet protistrany**.
+Změna nemění zaúčtování ani saldo a zapíše se do aktivity položky.
 
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
-akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Úhrady
-se párují ručně, automaticky je aplikace nepřiřazuje. Výběr nabízí platby
-seřazené podle síly shody a u každé ukáže důvod:
+akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Bez
+zapnutého automatického párování (níže) se úhrady párují jen ručně. Výběr
+nabízí platby seřazené podle síly shody a u každé ukáže důvod:
 
 | Pořadí | Shoda |
 |---|---|
@@ -538,6 +540,33 @@ a saldo se nemění. Stejně podle pořadí se započte i část uhrazená mimo 
 pokladnu. Tabulka splátek ukazuje u každé splátky stav **Neuhrazeno**,
 **Částečně** (se zbývající částkou), **Uhrazeno** nebo **Po splatnosti**.
 Podle zbytků splátek počítá i předpověď cash-flow.
+
+**Automatické párování z banky.** Volba **Automaticky párovat ostatní
+pohledávky a závazky** v Nastavení firmy na záložce **Daně a účetnictví** je výchozí vypnutá.
+Se zapnutou volbou MyÚčto při importu výpisu a při **Přepárovat výpis** přiřadí
+bankovní pohyb ostatní položce samo, ale jen když pohyb nespárovala žádná
+faktura a právě jedna položka má jistou shodu:
+
+| Jistá shoda | Podmínka |
+|---|---|
+| VS a účet | variabilní symbol i účet protistrany |
+| VS a splátka | variabilní symbol a částka příští neuhrazené splátky |
+| VS a zbytek | variabilní symbol a celý zbývající dluh |
+| Účet a splátka | účet protistrany a částka příští neuhrazené splátky splatné nejvýše 15 dní od platby |
+
+Platba vyšší než zbývající dluh se automaticky nepřiřadí nikdy. Přiřazení
+jde stejnou cestou jako ruční párování: nezaúčtovaný pohyb se zaúčtuje proti
+účtu položky (v daňové evidenci se nic neúčtuje) a uzavřené období nebo pohyb
+zaúčtovaný jinam přiřazení zastaví. Slabší nebo nejednoznačná shoda zůstane
+k ručnímu výběru v okně **Spárovat** u pohybu. Automaticky přiřazená úhrada má
+v detailu položky štítek **automaticky** s důvodem shody. Přiřazení, které
+zrušíte nebo které storno zápisu pohybu stornuje, automatika znovu nevytvoří.
+
+Opakované platby bez VS lze vázat na položku i **pravidlem účtování banky**
+s vybranou položkou (pole **Přiřadit k ostatní položce**, viz
+[§ 29.13.14](29_Banka.md#291314-pravidla-uctovani-opakovanych-plateb)).
+Pravidlo účtuje na účet položky a úhradu k ní přiřadí jedním zápisem; když
+položku uhradit nejde, vytvoří jen návrh ke kontrole.
 
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.

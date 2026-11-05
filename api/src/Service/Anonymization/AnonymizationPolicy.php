@@ -431,6 +431,7 @@ final class AnonymizationPolicy
         'odometer_readings' => ['note' => 'text', 'source' => 'keep'],
         'offset_agreements' => ['document_no' => 'keep', 'note' => 'text'],
         'other_items' => ['account_code' => 'keep', 'counter_account_code' => 'keep', 'counterparty_account' => 'bank_account', 'counterparty_bank_code' => 'keep', 'currency' => 'keep', 'document_no' => 'keep', 'kind' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'title' => 'text', 'variable_symbol' => 'symbol'],
+        'other_item_allocations' => ['auto_match_reason' => 'keep'],
         'other_item_kinds' => ['builtin_code' => 'keep', 'name' => 'text'],
         'other_item_posting_lines' => ['account_code' => 'keep'],
         'other_item_schedules' => ['template_json' => 'json'],

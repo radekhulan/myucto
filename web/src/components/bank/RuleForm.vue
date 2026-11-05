@@ -9,6 +9,7 @@ import { useDimensions } from '@/composables/useDimensions'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { usableDimensions } from './ruleDimensions'
+import { otherItemsApi, type OtherItem } from '@/api/otherItems'
 
 // Saldokontní účty nepatří do pravidla (H2) — datalist je na ne-bankovní straně filtruje.
 const SALDO_PREFIXES = ['311', '321', '314', '324', '325']
@@ -28,6 +29,8 @@ const props = defineProps<{
   promotionCandidate?: boolean
   /** Vlastní bankovní účet a dimenze pravidla (editor pravidla, ne rychlé pravidlo z ručního zaúčtování). */
   showScope?: boolean
+  /** Nabídnout cílovou ostatní položku pravidla (editor pravidla); bez práva číst položky se skryje. */
+  otherItemTarget?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [BankPostingRulePayload] }>()
 
@@ -85,6 +88,7 @@ onMounted(async () => {
   } catch {
     currencies.value = ['CZK']
   }
+  void loadOtherItems()
   if (!props.showScope) return
   try {
     ownAccounts.value = await bankPostingApi.listAccounts()
@@ -101,6 +105,37 @@ onMounted(async () => {
     form.dimensions = usableDimensions(form.dimensions ?? {}, dims.documentTypes.value, dims.valueById.value)
   }
 })
+// Cílová ostatní položka: potvrzené či zaúčtované otevřené položky v CZK podle směru pravidla.
+// Uživatel bez práva číst ostatní položky dostane 403 a volba se neukáže.
+const otherItemsLoaded = ref(false)
+const otherItemsVisible = computed(() => !!props.otherItemTarget && (otherItemsLoaded.value || !!form.other_item_id))
+const otherItemOptions = ref<OtherItem[]>([])
+async function loadOtherItems() {
+  if (!props.otherItemTarget) return
+  try {
+    const result = await otherItemsApi.list({
+      side: form.direction === 'incoming' ? 'receivable' : 'payable', status: 'open', from: '1000-01-01', to: '9999-12-31',
+    })
+    otherItemOptions.value = result.items
+      .map(item => ({ ...item, id: Number((item as { source_id?: number }).source_id ?? item.id) }))
+      .filter(item => ['confirmed', 'posted'].includes(String(item.status)) && item.currency === 'CZK')
+    otherItemsLoaded.value = true
+  } catch {
+    otherItemOptions.value = []
+  }
+}
+watch(() => form.direction, () => { void loadOtherItems() })
+function otherItemLabel(item: OtherItem): string {
+  return [item.document_no, item.partner_name || item.title, formatMoney(item.remaining_amount, item.currency)].filter(Boolean).join(' · ')
+}
+// Pravidlo s položkou účtuje na její účet; výběr položky ho předvyplní na ne-bankovní straně.
+watch(() => form.other_item_id, (id) => {
+  const item = otherItemOptions.value.find(option => option.id === id)
+  if (!item?.account_code) return
+  if (nonBankSide.value === 'debit') form.debit_account_code = item.account_code
+  else form.credit_account_code = item.account_code
+})
+
 function applyBand() {
   if (props.baseAmount == null) return
   const base = Math.abs(props.baseAmount)
@@ -234,6 +269,17 @@ defineExpose({ runDryRun, dryRun })
       </div>
     </div>
     <p class="text-xs text-neutral-500">{{ t('bank.posting.saldo_hint') }}</p>
+
+    <div v-if="otherItemsVisible">
+      <label :for="`${idPrefix}-other-item`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_other_item') }}</label>
+      <select :id="`${idPrefix}-other-item`" v-model="form.other_item_id" data-test="rule-other-item"
+        class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+        <option :value="null">{{ t('bank.posting.rule_other_item_none') }}</option>
+        <option v-if="form.other_item_id && !otherItemOptions.some(item => item.id === form.other_item_id)" :value="form.other_item_id">#{{ form.other_item_id }}</option>
+        <option v-for="item in otherItemOptions" :key="item.id" :value="item.id">{{ otherItemLabel(item) }}</option>
+      </select>
+      <p class="text-xs text-neutral-500 mt-0.5">{{ t('bank.posting.rule_other_item_hint') }}</p>
+    </div>
 
     <div v-if="dimensionsVisible" data-test="rule-dimensions">
       <p class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank.posting.rule_dimensions') }}</p>

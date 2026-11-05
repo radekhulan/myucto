@@ -1138,7 +1138,8 @@
         "2234_bank_posting_rule_dimensions.sql",
         "2235_cash_register_foreign_opening.sql",
         "2236_invoice_defaults_role_permission.sql",
-        "2237_other_item_payment_matching.sql"
+        "2237_other_item_payment_matching.sql",
+        "2239_other_item_auto_matching.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3410,6 +3411,7 @@
                 "mode_set_manually_at": "datetime NULL DEFAULT NULL",
                 "name": "varchar(120) NOT NULL",
                 "operation_type": "varchar(40) NULL DEFAULT NULL",
+                "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "priority": "smallint(5) unsigned NOT NULL DEFAULT 100",
                 "rejected_streak": "tinyint(3) unsigned NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -3421,11 +3423,13 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_bpr_user": "BTREE (created_by)",
                 "idx_bpr_bank_account": "BTREE (bank_account_id)",
+                "idx_bpr_other_item": "BTREE (other_item_id)",
                 "idx_bpr_supplier": "BTREE (supplier_id, is_active, direction)",
                 "uq_bpr_template": "UNIQUE BTREE (supplier_id, system_template_key)"
             },
             "foreign_keys": {
                 "fk_bpr_bank_account": "(bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_bpr_other_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_bpr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_bpr_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
@@ -10131,6 +10135,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "amount": "decimal(14,2) NOT NULL",
+                "auto_match_reason": "varchar(40) NULL DEFAULT NULL",
                 "bank_transaction_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "cash_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
@@ -10165,6 +10170,28 @@
                 "chk_other_allocation_amount": "`amount` > 0",
                 "chk_other_allocation_target": "`bank_transaction_id` is not null <> (`cash_document_id` is not null)"
             }
+        },
+        "other_item_auto_match_blocks": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "bank_transaction_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (bank_transaction_id, other_item_id)",
+                "idx_other_auto_block_item": "BTREE (other_item_id)",
+                "idx_other_auto_block_supplier": "BTREE (supplier_id, bank_transaction_id)"
+            },
+            "foreign_keys": {
+                "fk_other_auto_block_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_auto_block_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_auto_block_tx": "(bank_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "other_item_installments": {
             "type": "BASE TABLE",
@@ -26070,6 +26097,7 @@
                 "anthropic_extractions_count": "int(10) unsigned NOT NULL DEFAULT 0",
                 "anthropic_workspace_id": "varchar(128) NULL DEFAULT NULL",
                 "auto_generate_recurring": "tinyint(1) NOT NULL DEFAULT 1",
+                "auto_match_other_items": "tinyint(1) NOT NULL DEFAULT 0",
                 "auto_post_invoices": "tinyint(1) NOT NULL DEFAULT 0",
                 "auto_post_purchases": "tinyint(1) NOT NULL DEFAULT 0",
                 "auto_send_reminders": "tinyint(1) NOT NULL DEFAULT 0",
