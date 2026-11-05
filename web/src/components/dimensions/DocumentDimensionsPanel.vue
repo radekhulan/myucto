@@ -152,7 +152,7 @@ watch(() => JSON.stringify(props.prefill ?? {}), () => { if (!loading.value) voi
   <section v-if="dims.enabled.value && dims.documentTypes.value.length > 0 && collapsible"
            class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden"
            data-test="document-dimensions">
-    <div class="flex items-center justify-between gap-2 pr-5" :class="open ? 'border-b border-neutral-200' : ''">
+    <div class="flex items-center justify-between gap-2" :class="[open ? 'border-b border-neutral-200' : '', editable && dirty ? 'pr-5' : '']">
       <button type="button" class="flex-1 min-w-0 px-5 py-3 flex items-center justify-between gap-2 text-left hover:bg-neutral-50 cursor-pointer"
         :aria-expanded="open" data-test="document-dimensions-toggle" @click="open = !open">
         <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('dimensions.panel_title') }}</h3>

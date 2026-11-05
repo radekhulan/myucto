@@ -4229,8 +4229,6 @@ useWindowTitle(
           </div>
         </header>
         <div v-if="wrOpen" class="p-5 space-y-3">
-          <WorkReportDisplaySettings v-model="wrDisplayOptions" inheritable
-            :defaults="supplierStore.currentSupplier?.work_report_display_options" />
           <div class="flex flex-col sm:flex-row gap-2">
             <input v-model="wrTitle" type="text" :placeholder="t('invoice.wr_title')"
               class="flex-1 h-10 px-3 border border-neutral-300 rounded-md text-sm" />
@@ -4369,6 +4367,10 @@ useWindowTitle(
               <span v-if="!wrBillingSnapshot" class="font-mono">{{ formatMoney(wrTotalAmount, form.currency) }}</span>
             </div>
           </div>
+
+          <!-- Nejdřív data výkazu, nastavení jeho zobrazení až pod nimi (stejně jako v dialogu Výkaz). -->
+          <WorkReportDisplaySettings v-model="wrDisplayOptions" inheritable
+            :defaults="supplierStore.currentSupplier?.work_report_display_options" />
 
           <p v-if="!wrBillingSnapshot" class="text-xs text-neutral-500">
             {{ t('invoice.wr_hint', { title: wrTitle, hours: wrTotalHours.toFixed(2), rate: wrItems[0]?.rate || 0, currency: form.currency }) }}

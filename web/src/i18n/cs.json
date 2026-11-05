@@ -1882,6 +1882,7 @@
     "vat_hint": "Smíšené užívání vyžaduje poměrný odpočet podle § 75 ZDPH, soukromé vozidlo odpočet nemá. Tankování, jehož doklad uplatňuje jiný odpočet, se zobrazí s upozorněním."
   },
   "nav": {
+    "work_report_billing_templates": "Šablony účtování výkazů",
     "ai_assistant": "AI asistent",
     "group_stats": "Všechny firmy",
     "main_menu": "Hlavní menu",

@@ -1882,6 +1882,7 @@
     "vat_hint": "Mixed use requires a proportional deduction under § 75 of the VAT Act, a private vehicle has no deduction. Refuellings whose document claims a different deduction are flagged."
   },
   "nav": {
+    "work_report_billing_templates": "Work report billing templates",
     "ai_assistant": "AI assistant",
     "group_stats": "All companies",
     "main_menu": "Main menu",
