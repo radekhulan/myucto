@@ -164,7 +164,7 @@ async function load() {
     reverseCharge.value = !!inv.reverse_charge
     projectName.value = inv.project_name ?? ''
     if (!wr && inv.project_billing_template_id) {
-      const template = (await workReportBillingApi.list()).find(item => item.id === inv.project_billing_template_id)
+      const template = (await workReportBillingApi.list().catch(() => [])).find(item => item.id === inv.project_billing_template_id)
       if (template && template.currency === inv.currency) { billingTemplateId.value = template.id; billingSnapshot.value = JSON.parse(JSON.stringify(template)) }
     }
     displayOptions.value = wr?.display_options ?? null

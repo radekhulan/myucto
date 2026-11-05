@@ -41236,7 +41236,7 @@
     "override": "Customize this report’s rules",
     "currency_mismatch": "Template currency must match the invoice currency.",
     "stale": "The report or its rules have changed. Transfer billing again to update the invoice items.",
-    "pending": "Transfer prepared. no new items; changes will take effect after saving the invoice. | Transfer prepared. {count} item will be inserted after saving the invoice. | Transfer prepared. {count} items will be inserted after saving the invoice.",
+    "pending": "Transfer prepared. No new items; changes will take effect after saving the invoice. | Transfer prepared. {count} item will be inserted after saving the invoice. | Transfer prepared. {count} items will be inserted after saving the invoice.",
     "preview": "Billing preview",
     "recap": "Billing recap",
     "hours_recap": "Included: {included} h · Extra: {extra} h",

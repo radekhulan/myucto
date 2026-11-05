@@ -271,7 +271,7 @@ async function submit() {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('project.currency') }}</label>
-            <select v-model.number="form.currency_id"
+            <select v-model.number="form.currency_id" @change="form.billing_template_id = null"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
               <option v-for="c in currencies" :key="c.id" :value="c.id">{{ c.label }}</option>
             </select>
