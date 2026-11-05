@@ -301,4 +301,21 @@ describe('Membership workspace', () => {
     expect(document.activeElement?.getAttribute('data-focus')).toBe('members-heading')
     w.unmount()
   })
+
+  it('shows the first steps in order when no member exists yet', async () => {
+    api.members.mockResolvedValue(page([]))
+    const w = mounted()
+    await flushPromises()
+    const steps = w.findAll('[data-section="members-steps"] li').map(li => li.text())
+    expect(steps).toEqual(cs.nonprofitMembership.firstSteps)
+    w.unmount()
+  })
+
+  it('places the period check below the member list', async () => {
+    const w = mounted()
+    await flushPromises()
+    const sections = Array.from<Element>(w.element.querySelectorAll('[data-section="members"], [data-stub="reconciliation"]')).map(el => el.getAttribute('data-section') ?? 'reconciliation')
+    expect(sections).toEqual(['members', 'reconciliation'])
+    w.unmount()
+  })
 })

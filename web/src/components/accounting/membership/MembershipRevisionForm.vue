@@ -13,7 +13,7 @@ import { useGuardedCommit } from './useGuardedCommit'
 interface RevisionCommand { member: number; body: MemberRevisionInput }
 
 const props = defineProps<{ supplier: number; canManage: boolean; member: MemberIdentity; history: MemberRevision[] }>()
-const emit = defineEmits<{ done: []; lock: [locked: boolean] }>()
+const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean] }>()
 const { t } = useI18n()
 
 const inputForm = ref<HTMLFormElement | null>(null)
@@ -65,6 +65,7 @@ watch(() => props.supplier, () => { commit.reset(); notice.value = '' })
 watch(commit.locked, locked => emit('lock', locked))
 
 const actions = computed<ActionItem[]>(() => [
+  { key: 'rev-close', label: t('nonprofitMembership.close'), icon: 'x', show: !!last.value, disabled: commit.locked.value, run: () => emit('close') },
   { key: 'rev-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: 'primary', disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalid.value || undefined, run: review },
 ])
 </script>

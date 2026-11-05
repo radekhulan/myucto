@@ -122,7 +122,6 @@ const actions = computed<ActionItem[]>(() => [
       <dl class="grid gap-3 sm:grid-cols-3">
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.reverseDate') }}</dt><dd>{{ formatDate(frozenRequest.accounting_date) }}</dd></div>
         <div v-if="commit.review.value.target_period"><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.accountingPeriod') }}</dt><dd>{{ formatDateRange(commit.review.value.target_period.starts_on, commit.review.value.target_period.ends_on) }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.caseVersion') }}</dt><dd>{{ t('nonprofitMembership.caseExisting', { version: commit.review.value.expected_case_version }) }}</dd></div>
       </dl>
       <div v-if="accounts?.receivable && accounts?.revenue" class="overflow-x-auto">
       <table class="w-full text-sm" data-section="reverse-plan">

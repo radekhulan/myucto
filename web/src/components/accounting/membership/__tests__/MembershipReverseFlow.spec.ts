@@ -188,4 +188,13 @@ describe('Membership reverse flow', () => {
     expect(w.get('[data-field="reverse-period"]').text()).toContain(formatDateRange('2000-01-01', '2099-12-31'))
     w.unmount()
   })
+
+  it('does not show the internal case version in the reversal preview', async () => {
+    const w = mounted()
+    await fill(w)
+    await review(w)
+    expect(w.get('[data-section="reverse-preview"]').text()).not.toContain(cs.nonprofitMembership.caseVersion)
+    expect(w.get('[data-section="reverse-preview"]').text()).not.toMatch(/verze|version/i)
+    w.unmount()
+  })
 })
