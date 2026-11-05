@@ -127,6 +127,44 @@ final class OtherItemService
     }
 
     /**
+     * Účet protistrany jde změnit i u potvrzeného nebo zaúčtovaného dokladu: zaúčtování
+     * ani saldo neovlivní, slouží jen k párování úhrad. Stornovaný a zrušený doklad se už
+     * nepáruje, koncept se upravuje celý ({@see update}). Bez kódu banky v těle se uložený
+     * kód smaže stejně jako v {@see mergeStored}.
+     *
+     * @return array{item:array<string,mixed>,before:array{counterparty_account:?string,counterparty_bank_code:?string},
+     *     after:array{counterparty_account:?string,counterparty_bank_code:?string}}
+     */
+    public function updateCounterpartyAccount(int $supplierId, int $id, array $input): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $existing = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if (!in_array($existing['status'], ['confirmed', 'posted'], true)) {
+                throw new OtherItemException('counterparty_not_editable',
+                    'Účet protistrany lze takto změnit jen u potvrzeného nebo zaúčtovaného dokladu.', 409);
+            }
+            $after = OtherItemCounterpartyAccount::normalize($input['counterparty_account'] ?? null,
+                $input['counterparty_bank_code'] ?? null);
+            $before = [
+                'counterparty_account' => $existing['counterparty_account'] ?? null,
+                'counterparty_bank_code' => $existing['counterparty_bank_code'] ?? null,
+            ];
+            $pdo->prepare('UPDATE other_items SET counterparty_account = ?, counterparty_bank_code = ?, row_version = row_version + 1
+                WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL')
+                ->execute([$after['counterparty_account'], $after['counterparty_bank_code'], $id, $supplierId]);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id), 'before' => $before, 'after' => $after];
+    }
+
+    /**
      * Částečná úprava: chybějící klíč = uložená hodnota, explicitní null/'' = smazat.
      * Rozpad protiúčtů (2+ řádky) bez klíče posting_lines zůstává, ledaže tělo posílá
      * jiný neprázdný protiúčet — to je přepnutí na jednu kontaci. Jediný uložený
@@ -395,7 +433,7 @@ final class OtherItemService
     {
         $this->get($supplierId, $id);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, installment_id, bank_transaction_id, cash_document_id, amount, payment_on, reversed_on, created_at
+            'SELECT id, installment_id, bank_transaction_id, cash_document_id, amount, payment_on, auto_match_reason, reversed_on, created_at
                FROM other_item_allocations WHERE supplier_id = ? AND other_item_id = ? ORDER BY payment_on, id'
         );
         $stmt->execute([$supplierId, $id]);
@@ -721,6 +759,11 @@ final class OtherItemService
             $stmt = $pdo->prepare('DELETE FROM other_item_allocations WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
             $stmt->execute([$allocationId, $supplierId, $id]);
             if ($stmt->rowCount() === 0) throw new OtherItemException('payment_not_found', 'Úhrada nebyla nalezena.', 404);
+            if ($paymentRow !== false && $paymentRow['bank_transaction_id'] !== null) {
+                // Zrušené přiřazení automatika neobnoví ({@see OtherItemAutoMatcher}).
+                $pdo->prepare('INSERT IGNORE INTO other_item_auto_match_blocks (supplier_id, bank_transaction_id, other_item_id)
+                    VALUES (?, ?, ?)')->execute([$supplierId, (int) $paymentRow['bank_transaction_id'], $id]);
+            }
             if ($paymentRow !== false) {
                 $this->posting->restampDimensions($supplierId,
                     $paymentRow['bank_transaction_id'] !== null ? 'bank' : 'cash',

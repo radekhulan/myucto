@@ -17,7 +17,7 @@ final class BankPostingRuleRepository
         variable_symbol, message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
         description, mode, mode_set_manually_at, is_active, hit_count, last_hit_at, rejected_streak, last_rejected_tx_id,
         priority, operation_type, system_template_key, auto_amount_cap, applies_currency,
-        counterparty_prefix, approved_streak, created_by, created_at, updated_at';
+        counterparty_prefix, approved_streak, other_item_id, created_by, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -145,8 +145,8 @@ final class BankPostingRuleRepository
                 (supplier_id, name, direction, bank_account_id, counterparty_account, counterparty_bank, variable_symbol,
                  message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
                  description, mode, mode_set_manually_at, is_active, priority, operation_type, system_template_key,
-                 auto_amount_cap, applies_currency, counterparty_prefix, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 auto_amount_cap, applies_currency, counterparty_prefix, other_item_id, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
@@ -170,6 +170,7 @@ final class BankPostingRuleRepository
             $data['auto_amount_cap'] ?? null,
             $data['applies_currency'] ?? 'CZK',
             $data['counterparty_prefix'] ?? null,
+            $data['other_item_id'] ?? null,
             $createdBy,
         ]);
         return (int) $pdo->lastInsertId();
@@ -187,6 +188,7 @@ final class BankPostingRuleRepository
             'message_contains', 'amount_min', 'amount_max', 'debit_account_code', 'credit_account_code',
             'description', 'mode', 'mode_set_manually_at', 'is_active',
             'priority', 'operation_type', 'auto_amount_cap', 'applies_currency', 'counterparty_prefix',
+            'other_item_id',
         ];
         $sets = [];
         $params = [];
@@ -348,6 +350,7 @@ final class BankPostingRuleRepository
         $r['rejected_streak'] = (int) $r['rejected_streak'];
         $r['last_rejected_tx_id'] = $r['last_rejected_tx_id'] === null ? null : (int) $r['last_rejected_tx_id'];
         $r['created_by'] = $r['created_by'] === null ? null : (int) $r['created_by'];
+        $r['other_item_id'] = ($r['other_item_id'] ?? null) === null ? null : (int) $r['other_item_id'];
         if (array_key_exists('created_by_name', $r)) {
             $r['created_by_name'] = $r['created_by_name'] === null ? null : (string) $r['created_by_name'];
         }

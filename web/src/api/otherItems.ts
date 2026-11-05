@@ -90,8 +90,13 @@ export interface OtherItemAllocation {
   cash_document_id: number | null
   amount: number
   payment_on: string
+  /** Kód automatického přiřazení (OtherItemAutoMatchPolicy, pravidlo banky); null = ručně. */
+  auto_match_reason?: OtherItemAutoMatchReason | null
   reversed_on: string | null
 }
+
+export type OtherItemAutoMatchReason = 'other_item_vs_account' | 'other_item_vs_installment' | 'other_item_vs_remaining'
+  | 'other_item_account_installment' | 'bank_rule'
 
 export interface OtherItemAllocationPayload {
   bank_transaction_id?: number
@@ -181,6 +186,9 @@ export const otherItemsApi = {
   get: (id: number) => api.get<OtherItem>(`/accounting/other-items/${id}`).then(r => r.data),
   create: (payload: OtherItemPayload) => api.post<OtherItem>('/accounting/other-items', payload).then(r => r.data),
   update: (id: number, payload: OtherItemPayload) => api.put<OtherItem>(`/accounting/other-items/${id}`, payload).then(r => r.data),
+  /** Účet protistrany potvrzeného či zaúčtovaného dokladu (`číslo/kód` nebo IBAN, prázdné = smazat). */
+  updateCounterpartyAccount: (id: number, counterpartyAccount: string | null) =>
+    api.put<OtherItem>(`/accounting/other-items/${id}/counterparty-account`, { counterparty_account: counterpartyAccount }).then(r => r.data),
   remove: (id: number) => api.delete(`/accounting/other-items/${id}`).then(r => r.data),
   post: (id: number) => api.post<OtherItem>(`/accounting/other-items/${id}/post`).then(r => r.data),
   reverse: (id: number, payload: { reason: string; entry_date?: string }) =>

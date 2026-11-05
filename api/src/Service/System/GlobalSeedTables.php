@@ -427,7 +427,7 @@ final class GlobalSeedTables
         'odometer_readings',
         'offset_agreement_items', 'offset_agreements',
         'oss_filing_evidence',
-        'other_item_allocations', 'other_item_installments', 'other_item_posting_lines',
+        'other_item_allocations', 'other_item_auto_match_blocks', 'other_item_installments', 'other_item_posting_lines',
         'other_item_schedule_occurrences', 'other_item_schedules', 'other_items',
         'password_resets',
         'payment_matches', 'payment_order_items', 'payment_orders',

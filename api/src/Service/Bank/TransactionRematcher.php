@@ -48,7 +48,8 @@ final class TransactionRematcher
 
         foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
             $s = (string) ($r['status'] ?? 'unmatched');
-            if ($s === 'auto_exact' && empty($r['already_recorded'])) $out['newly_matched']++;
+            // Přiřazení ostatní položce nechává `match_status` nespárovaný, pohyb je ale vyřízený.
+            if (!empty($r['other_item_id']) || ($s === 'auto_exact' && empty($r['already_recorded']))) $out['newly_matched']++;
             elseif ($s === 'auto_partial') $out['newly_partial']++;
             elseif ($s === 'unmatched') $out['still_unmatched']++;
             // Zaúčtování po párování (no-op mimo podvojné účetnictví).

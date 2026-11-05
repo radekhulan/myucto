@@ -656,6 +656,7 @@ async function saveSupplier() {
       // Auto-post hook (A2) — auto-zaúčtování FV/PF; účinek jen v double_entry.
       auto_post_invoices: supplier.value.auto_post_invoices ?? false,
       auto_post_purchases: supplier.value.auto_post_purchases ?? false,
+      auto_match_other_items: supplier.value.auto_match_other_items ?? false,
       // Účet závazku pro účtenky (2204) — jen v podvojném účetnictví, kde ho pole ukazuje.
       ...(supplier.value.accounting_mode === 'double_entry'
         ? { receipt_payable_account_code: (supplier.value.receipt_payable_account_code ?? '').trim() || null }
@@ -1722,6 +1723,13 @@ async function confirmTaxRepDelete() {
                 <p class="text-xs text-neutral-500 mt-1">{{ t('settings.receipt_payable_account_hint') }}</p>
               </div>
             </div>
+            <label class="md:col-span-2 flex items-start gap-2 cursor-pointer" data-test="settings-auto-match-other-items">
+              <input v-model="supplier.auto_match_other_items" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+              <span>
+                <span class="text-sm text-neutral-800">{{ t('settings.auto_match_other_items') }}</span>
+                <span class="block text-xs text-neutral-500">{{ t('settings.auto_match_other_items_hint') }}</span>
+              </span>
+            </label>
             <AutomationPolicyBox
               v-if="auth.hasCommercialFeatures && supplier.accounting_mode === 'double_entry'"
               class="md:col-span-2"

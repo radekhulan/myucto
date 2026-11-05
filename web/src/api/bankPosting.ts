@@ -30,6 +30,8 @@ export interface BankPostingRule {
   auto_amount_cap: number | null
   applies_currency: string
   counterparty_prefix: string | null
+  /** Ostatní pohledávka či závazek, které pravidlo pohyb po zaúčtování přiřadí; null = jen zaúčtovat. */
+  other_item_id?: number | null
   approved_streak: number
   promotion_candidate: boolean
   debit_account_code: string

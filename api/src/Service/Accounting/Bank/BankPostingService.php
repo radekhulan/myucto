@@ -125,6 +125,12 @@ final class BankPostingService
          * dorovnat, jinak 314/324 zůstane rozjeté proti saldokontu.
          */
         private readonly ?AdvanceSettlementSync $advanceSettlement = null,
+        /**
+         * Pravidlo s cílovou ostatní položkou (`bank_posting_rules.other_item_id`) pohyb
+         * po zaúčtování rovnou přiřadí položce. Nullable kvůli ručním konstrukcím v testech;
+         * bez služby pravidlo pohyb jen zaúčtuje.
+         */
+        private readonly ?\MyInvoice\Service\Accounting\OtherItemService $otherItems = null,
     ) {}
 
     /**
@@ -2758,8 +2764,16 @@ final class BankPostingService
             }
             try {
                 // Dimenze pravidla a zápis buď spolu, nebo vůbec: chybějící povinná dimenze
-                // vrátí obojí a pohyb skončí jako návrh k doplnění.
-                $entryId = (new DimensionPeriodGuard($this->db))->transaction(fn (): int => $this->postByRule($supplierId, $tx, $rule, $absAmount, $fxRate, $currency, $foreignAmount, $userId));
+                // vrátí obojí a pohyb skončí jako návrh k doplnění. Totéž přiřazení cílové
+                // položce: zápis bez přiřazení by na jejím účtu založil přeplatek.
+                $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $tx, $rule, $absAmount, $fxRate, $currency, $foreignAmount, $userId): int {
+                    $entryId = $this->postByRule($supplierId, $tx, $rule, $absAmount, $fxRate, $currency, $foreignAmount, $userId);
+                    $this->allocateRuleTarget($supplierId, $tx, $rule, $userId);
+                    return $entryId;
+                });
+            } catch (\MyInvoice\Service\Accounting\OtherItemException) {
+                // Položka už je uhrazená, stornovaná nebo platba převyšuje dluh: rozhodne člověk.
+                return $this->ruleSuggestion($supplierId, $tx, $rule, 'other_item_unavailable', 'pending', $absAmount);
             } catch (PostingException $e) {
                 if ($e->errorCode === 'dimension_required') {
                     return $this->ruleSuggestion($supplierId, $tx, $rule, 'dimension_required', 'needs_input', $absAmount);
@@ -2806,6 +2820,34 @@ final class BankPostingService
             $this->anomalies?->recordDegraded($supplierId);
         }
         return $result;
+    }
+
+    /**
+     * Přiřadí zaúčtovaný pohyb cílové ostatní položce pravidla stejnou cestou jako ruční
+     * přiřazení ({@see \MyInvoice\Service\Accounting\OtherItemService::allocate}: stav,
+     * směr, měna, přeplatek a zaúčtování na účet položky). Pravidlo účtuje na účet položky
+     * ({@see BankPostingRuleValidator::otherItemTarget}), takže druhý zápis nevzniká.
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed> $rule
+     * @throws \MyInvoice\Service\Accounting\OtherItemException
+     */
+    private function allocateRuleTarget(int $supplierId, array $tx, array $rule, ?int $userId): void
+    {
+        if ($this->otherItems === null || ($rule['other_item_id'] ?? null) === null) {
+            return;
+        }
+        $itemId = (int) $rule['other_item_id'];
+        $txId = (int) $tx['id'];
+        $amount = round(abs((float) $tx['amount']), 2);
+        $this->otherItems->allocate($supplierId, $itemId, ['bank_transaction_id' => $txId, 'amount' => $amount], $userId);
+        $this->db->pdo()->prepare(
+            "UPDATE other_item_allocations SET auto_match_reason = 'bank_rule'
+              WHERE supplier_id = ? AND other_item_id = ? AND bank_transaction_id = ? AND reversed_on IS NULL"
+        )->execute([$supplierId, $itemId, $txId]);
+        $this->activity->log('other_item.payment_auto_matched', $userId, 'other_item', $itemId,
+            ['bank_transaction_id' => $txId, 'match' => 'bank_rule', 'rule_id' => (int) $rule['id']],
+            null, null, $supplierId);
     }
 
     /**
@@ -3033,7 +3075,7 @@ final class BankPostingService
             $this->assertPostableTx($tx, $isForeignRule, false);
             $debit = (string) $sug['debit_account_code'];
             $credit = (string) $sug['credit_account_code'];
-            $this->assertSaldoBlacklist((float) $tx['amount'], $debit, $credit);
+            $this->assertRuleAccounts($tx, $rule, $debit, $credit, false);
             $foreignAmount = round(abs((float) $tx['amount']), 2);
             if ($isForeignRule) {
                 $this->assertFxResultAccounts((float) $tx['amount'], $debit, $credit);
@@ -3208,7 +3250,7 @@ final class BankPostingService
             } else {
                 $debit = $overrides['debit_account_code'] ?? (string) $sug['debit_account_code'];
                 $credit = $overrides['credit_account_code'] ?? (string) $sug['credit_account_code'];
-                $this->assertSaldoBlacklist((float) $tx['amount'], $debit, $credit);
+                $this->assertRuleAccounts($tx, $rule, $debit, $credit, $overrides !== []);
                 $foreignAmount = round(abs((float) $tx['amount']), 2);
                 if ($isForeignRule) {
                     $this->assertFxResultAccounts((float) $tx['amount'], $debit, $credit);
@@ -3241,6 +3283,17 @@ final class BankPostingService
                     'posted_by'     => $meta['posted_by'] ?? ($meta['user_id'] ?? null),
                 ]);
             });
+            // Schválený návrh pravidla s cílovou položkou ji uhradí jako automatika. Přepsaná
+            // kontace míří jinam; nedostupnou položku (uhrazenou, stornovanou) přiřadí člověk
+            // z jejího detailu, zápis schválení zůstává.
+            if ($rule !== null && $overrides === [] && ($rule['other_item_id'] ?? null) !== null) {
+                try {
+                    (new DimensionPeriodGuard($this->db))->transaction(
+                        fn () => $this->allocateRuleTarget($supplierId, $tx, $rule, $meta['user_id'] ?? null),
+                    );
+                } catch (\MyInvoice\Service\Accounting\OtherItemException) {
+                }
+            }
 
             $this->suggestions->markApproved($supplierId, $suggestionId, $entryId, $meta['user_id'] ?? null);
             $this->markSchedulePaid($supplierId, $sug['tax_advance_schedule_id'] ?? null, $tx);
@@ -4145,6 +4198,24 @@ final class BankPostingService
      * v ruce. Jednorázové ruční zaúčtování člověka, který doklad má, si volá jen
      * {@see assertBankSide()} (stejně jako ruční rozúčtování na víc řádků).
      */
+    /**
+     * Kontace návrhu: zákaz saldokonta (H2) neplatí pro účet cílové ostatní položky pravidla
+     * ({@see BankPostingRuleValidator::otherItemTarget}), dokud ho uživatel nepřepsal;
+     * úhradu tam páruje přiřazení k položce. Bankovní strana se hlídá vždy.
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed>|null $rule
+     */
+    private function assertRuleAccounts(array $tx, ?array $rule, string $debit, string $credit, bool $overridden): void
+    {
+        if (!$overridden && $rule !== null && ($rule['other_item_id'] ?? null) !== null
+            && $debit === (string) $rule['debit_account_code'] && $credit === (string) $rule['credit_account_code']) {
+            $this->assertBankSide((float) $tx['amount'], $debit, $credit);
+            return;
+        }
+        $this->assertSaldoBlacklist((float) $tx['amount'], $debit, $credit);
+    }
+
     private function assertSaldoBlacklist(float $amount, string $debit, string $credit): void
     {
         foreach (self::SALDO_BLACKLIST as $prefix) {

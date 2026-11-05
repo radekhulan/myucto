@@ -120,7 +120,8 @@ final class OtherItemPaymentCandidateRanker
         return $found;
     }
 
-    private static function withinDays(string $dueOn, string $paymentOn): bool
+    /** Platba přišla nejvýš {@see DUE_WINDOW_DAYS} dní před splatností nebo po ní. */
+    public static function withinDays(string $dueOn, string $paymentOn): bool
     {
         $due = \DateTimeImmutable::createFromFormat('!Y-m-d', substr($dueOn, 0, 10));
         $paid = \DateTimeImmutable::createFromFormat('!Y-m-d', substr($paymentOn, 0, 10));

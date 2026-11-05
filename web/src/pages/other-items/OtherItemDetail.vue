@@ -145,6 +145,29 @@ async function allocate() {
   }
 }
 
+// Účet protistrany jde u potvrzeného či zaúčtovaného dokladu změnit samostatně (párování úhrad).
+const canEditCounterparty = computed(() => auth.canWrite('other_items')
+  && (item.value?.status === 'confirmed' || item.value?.status === 'posted'))
+const counterpartyEditing = ref(false)
+const counterpartyInput = ref('')
+function startCounterpartyEdit() {
+  counterpartyInput.value = formatAccountNumber(item.value?.counterparty_account, item.value?.counterparty_bank_code) || ''
+  counterpartyEditing.value = true
+}
+async function saveCounterparty() {
+  if (!item.value || busy.value) return
+  busy.value = true
+  try {
+    item.value = await otherItemsApi.updateCounterpartyAccount(id.value, counterpartyInput.value.trim() || null)
+    counterpartyEditing.value = false
+    toast.success(t('other_items.counterparty_saved'))
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
 async function unallocate(allocation: OtherItemAllocation) {
   if (busy.value || !window.confirm(t('other_items.confirm_unlink_payment'))) return
   busy.value = true
@@ -341,7 +364,30 @@ onMounted(load)
             <div><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd>{{ item.due_on ? formatDate(item.due_on) : '–' }}</dd></div>
             <div v-if="isDoubleEntry"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd>{{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.variable_symbol') }}</dt><dd>{{ item.variable_symbol || '–' }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.counterparty_account') }}</dt><dd class="font-mono" data-test="counterparty-account">{{ formatAccountNumber(item.counterparty_account, item.counterparty_bank_code) || '–' }}</dd></div>
+            <div>
+              <dt class="text-neutral-500">{{ t('other_items.counterparty_account') }}</dt>
+              <dd v-if="!counterpartyEditing" class="flex flex-wrap items-center gap-2">
+                <span class="font-mono" data-test="counterparty-account">{{ formatAccountNumber(item.counterparty_account, item.counterparty_bank_code) || '–' }}</span>
+                <button v-if="canEditCounterparty" type="button" data-test="counterparty-edit" class="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline whitespace-nowrap" @click="startCounterpartyEdit">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  {{ t('common.edit') }}
+                </button>
+              </dd>
+              <dd v-else>
+                <form class="flex flex-wrap items-center gap-2" data-test="counterparty-form" @submit.prevent="saveCounterparty">
+                  <input v-model="counterpartyInput" type="text" maxlength="60" :aria-label="t('other_items.counterparty_account')" :placeholder="t('other_items.counterparty_account_placeholder')" class="h-9 w-56 rounded-md border border-neutral-300 bg-surface px-2 font-mono text-sm" />
+                  <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                    {{ t('common.save') }}
+                  </button>
+                  <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="counterpartyEditing = false">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                    {{ t('common.cancel') }}
+                  </button>
+                </form>
+                <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.counterparty_edit_hint') }}</p>
+              </dd>
+            </div>
             <div v-if="item.currency !== 'CZK'"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd>{{ item.exchange_rate || '–' }}</dd></div>
             <div class="sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.note') }}</dt><dd class="whitespace-pre-wrap">{{ item.note || '–' }}</dd></div>
           </dl>
@@ -388,6 +434,7 @@ onMounted(load)
             <div>
               <span class="font-medium">{{ t(allocation.bank_transaction_id ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ allocation.bank_transaction_id || allocation.cash_document_id }}</span>
               <span class="ml-2 text-neutral-500">{{ formatDate(allocation.payment_on) }}</span>
+              <span v-if="allocation.auto_match_reason" class="ml-2 inline-flex rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700" data-test="allocation-auto" :title="t(`other_items.auto_match_reason.${allocation.auto_match_reason}`)">{{ t('other_items.auto_matched') }}</span>
               <span v-if="allocation.reversed_on" class="ml-2 text-warning-700">{{ t('other_items.payment_reversed_on', { date: formatDate(allocation.reversed_on) }) }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-3">

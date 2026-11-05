@@ -18426,6 +18426,37 @@ paths:
         '200': { description: Přeúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/other-items/{id}/counterparty-account:
+    put:
+      tags: [Accounting]
+      summary: Změní účet protistrany potvrzeného nebo zaúčtovaného dokladu
+      description: |
+        Účet protistrany slouží jen k párování úhrad (automatické párování, kandidáti v dialogu
+        Spárovat), zaúčtování ani saldo nemění. Koncept se upravuje přes `PUT /accounting/other-items/{id}`,
+        stornovaný a zrušený doklad vrací `409 other_items.error.counterparty_not_editable`.
+        Změna se zapíše do aktivity dokladu (`other_item.counterparty_account_changed`).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                counterparty_account:
+                  type: [string, 'null']
+                  maxLength: 60
+                  description: Český účet `předčíslí-číslo/kód banky` (modulo 11) nebo IBAN; prázdná hodnota účet smaže.
+                counterparty_bank_code: { type: [string, 'null'], pattern: '^[0-9]{4}$' }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Doklad není potvrzený ani zaúčtovaný (`other_items.error.counterparty_not_editable`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Neplatný účet protistrany (`other_items.error.invalid_counterparty_account`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/other-items/{id}/allocations:
     get:
       tags: [Accounting]
@@ -41062,6 +41093,10 @@ components:
         cash_document_id: { type: [integer, 'null'], format: int64 }
         amount: { type: number }
         payment_on: { type: string, format: date }
+        auto_match_reason:
+          type: [string, 'null']
+          enum: [other_item_vs_account, other_item_vs_installment, other_item_vs_remaining, other_item_account_installment, bank_rule, null]
+          description: Kód automatického přiřazení (shoda VS s účtem protistrany, příští splátkou nebo celým zbytkem, účet protistrany s příští splátkou, nebo pravidlo účtování banky). Null u ručního přiřazení.
         reversed_on: { type: [string, 'null'], format: date }
     OtherItemBankCandidate:
       type: object
@@ -44383,6 +44418,17 @@ components:
         operation_type: { type: [string, "null"] }
         auto_amount_cap: { type: [number, "null"], minimum: 0 }
         applies_currency: { type: string, pattern: '^[A-Z]{3}$' }
+        other_item_id:
+          type: [integer, "null"]
+          format: int64
+          description: |
+            Ostatní pohledávka nebo závazek (`/accounting/other-items`), kterým pravidlo pohyb po
+            zaúčtování rovnou uhradí. Položka musí být potvrzená nebo zaúčtovaná, v CZK, pohledávka
+            u příchozího a závazek u odchozího pravidla a ne-bankovní strana kontace musí být její
+            účet. Jinak `422 rule_other_item_invalid|rule_other_item_currency|rule_other_item_direction|rule_other_item_account`.
+            Automatické pravidlo pohyb zaúčtuje a přiřadí jedním krokem; když položku uhradit nejde
+            (uhrazená, stornovaná, přeplatek), vznikne návrh s poznámkou `other_item_unavailable`.
+            Schválení návrhu takového pravidla úhradu přiřadí také. NULL = pravidlo jen zaúčtuje.
         backfill_suggestions: { type: boolean }
 
     BankPostingRule:
@@ -49150,6 +49196,7 @@ components:
           readOnly: true
           description: "Měsíční limit klientských pokusů o vytěžení přijatých dokladů. Počítá se každý platný upload předaný ke zpracování včetně neúspěchu, duplicity a strukturovaného dokladu. Nula jejich vytěžování blokuje."
         dimensions_enabled: { type: boolean, description: "Uložený příznak dimenzí. Dostupnost funkce navíc závisí na platné licenci účetnictví." }
+        auto_match_other_items: { type: boolean, default: false, description: "Automatické párování bankovních pohybů s ostatními pohledávkami a závazky. Pohyb, který nespárovala žádná faktura, se přiřadí položce jen při jisté shodě (VS s účtem protistrany, příští splátkou nebo celým zbytkem; nebo účet protistrany s příští splátkou v okně splatnosti). V daňové evidenci se úhrada jen přiřadí, v podvojném účetnictví se nezaúčtovaný pohyb zaúčtuje na účet položky." }
         receipt_payable_account_code: { type: [string, "null"], description: "Účet závazku pro účtenky a paragony (document_kind=receipt); null = závazek z předkontace (321). Úhrady odúčtují účet, na kterém závazek dokladu vznikl." }
         vat_status_history:
           type: array
