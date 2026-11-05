@@ -290,6 +290,158 @@ final class StockTrackingRepository
         return $out;
     }
 
+    /**
+     * Kusy, které výdejka faktury skutečně vydala, po řádcích faktury (`invoice_item_id`)
+     * a s AKTUÁLNÍM textem kmene šarže. `$documentStatus` je `posted` (platná výdejka,
+     * vstup dobropisu) nebo `reversed` (výdejka vrácená stornem, vstup obnovení faktury).
+     * U řádku se bere jen jeho poslední výdejní řádek, takže opakované vydání a storno
+     * kusy nezdvojí.
+     *
+     * @return array<int, list<array{quantity:string, serial_number:?string, lot_code:?string, expires_on:?string}>> invoice_item_id => kusy
+     */
+    public function issuedUnitsByInvoiceItem(int $supplierId, int $invoiceId, string $documentStatus = 'posted'): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT l.invoice_item_id, u.serial_number, u.lot_code, u.expires_on, SUM(a.quantity) AS quantity FROM stock_documents d JOIN stock_document_lines l ON l.document_id = d.id AND l.supplier_id = d.supplier_id JOIN stock_tracking_allocations a ON a.stock_document_line_id = l.id AND a.supplier_id = l.supplier_id JOIN stock_tracking_units u ON u.id = a.stock_tracking_unit_id AND u.supplier_id = a.supplier_id WHERE d.supplier_id = ? AND d.invoice_id = ? AND d.doc_type = 'issue' AND d.status = ? AND a.direction = 'out' AND l.invoice_item_id IS NOT NULL AND l.id = (SELECT MAX(l2.id) FROM stock_documents d2 JOIN stock_document_lines l2 ON l2.document_id = d2.id WHERE d2.supplier_id = d.supplier_id AND d2.invoice_id = d.invoice_id AND d2.doc_type = 'issue' AND d2.status = d.status AND l2.invoice_item_id = l.invoice_item_id) GROUP BY l.invoice_item_id, u.id, u.serial_number, u.lot_code, u.expires_on ORDER BY l.invoice_item_id, u.id");
+        $stmt->execute([$supplierId, $invoiceId, $documentStatus]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['invoice_item_id']][] = [
+                'quantity' => (string) $row['quantity'],
+                'serial_number' => $row['serial_number'] === null ? null : (string) $row['serial_number'],
+                'lot_code' => $row['lot_code'] === null ? null : (string) $row['lot_code'],
+                'expires_on' => $row['expires_on'] === null ? null : (string) $row['expires_on'],
+            ];
+        }
+        return $out;
+    }
+
+    /** Oprava kódu a expirace šarže; klíč odvozuje volající ({@see \MyInvoice\Service\Stock\TrackingAllocationService::trackingKey()}). */
+    public function updateUnitIdentity(int $supplierId, int $itemId, int $unitId, string $key, string $lot, ?string $expires): void
+    {
+        $stmt = $this->db->pdo()->prepare("UPDATE stock_tracking_units SET tracking_key = ?, lot_code = ?, expires_on = ? WHERE supplier_id = ? AND stock_item_id = ? AND id = ? AND tracking_type = 'lot'");
+        $stmt->execute([$key, $lot, $expires, $supplierId, $itemId, $unitId]);
+    }
+
+    /**
+     * Řádky konceptů faktur karty s výběrem kusů (`tracking_json`), zamčené k přepisu.
+     * Vystavené a stornované faktury sem nepatří: jejich výběr je doklad, který odešel,
+     * a obnovení stornované faktury bere kusy z vrácené výdejky.
+     *
+     * @return list<array{id:int, invoice_id:int, json:string}>
+     */
+    public function lockDraftInvoiceTracking(int $supplierId, int $itemId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT ii.id, ii.invoice_id, ii.tracking_json AS json FROM invoices i STRAIGHT_JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.supplier_id = ? AND i.status = 'draft' AND ii.stock_item_id = ? AND ii.tracking_json IS NOT NULL FOR UPDATE");
+        $stmt->execute([$supplierId, $itemId]);
+        return array_map(
+            static fn (array $row): array => ['id' => (int) $row['id'], 'invoice_id' => (int) $row['invoice_id'], 'json' => (string) $row['json']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
+    }
+
+    /**
+     * Řádky vystavených zálohových faktur karty s výběrem kusů, ze kterých ještě nevznikla
+     * finální faktura (nemá potomka `invoice_type = 'invoice'` přes `parent_invoice_id`),
+     * zamčené k přepisu. Finální faktura výběr z proformy kopíruje, takže po opravě šarže
+     * musí kopírovat už nový text; PDF proformy zůstává (odešlo zákazníkovi). Vyúčtovaná
+     * proforma se nepřepisuje.
+     *
+     * @return list<array{id:int, invoice_id:int, json:string}>
+     */
+    public function lockUnsettledProformaTracking(int $supplierId, int $itemId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT ii.id, ii.invoice_id, ii.tracking_json AS json FROM invoices i STRAIGHT_JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.supplier_id = ? AND i.status IN ('issued','sent','reminded','paid') AND i.invoice_type = 'proforma' AND ii.stock_item_id = ? AND ii.tracking_json IS NOT NULL AND NOT EXISTS (SELECT 1 FROM invoices f WHERE f.supplier_id = i.supplier_id AND f.parent_invoice_id = i.id AND f.invoice_type = 'invoice') FOR UPDATE");
+        $stmt->execute([$supplierId, $itemId]);
+        return array_map(
+            static fn (array $row): array => ['id' => (int) $row['id'], 'invoice_id' => (int) $row['invoice_id'], 'json' => (string) $row['json']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
+    }
+
+    public function updateInvoiceItemTracking(int $itemRowId, string $json): void
+    {
+        $this->db->pdo()->prepare('UPDATE invoice_items SET tracking_json = ? WHERE id = ?')->execute([$json, $itemRowId]);
+    }
+
+    /**
+     * Řádky nezaúčtovaných skladových dokladů karty s výběrem kusů, zamčené k přepisu.
+     *
+     * @return list<array{id:int, json:string}>
+     */
+    public function lockDraftDocumentLineTracking(int $supplierId, int $itemId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT l.id, l.tracking_input_json AS json FROM stock_documents d JOIN stock_document_lines l ON l.document_id = d.id WHERE d.supplier_id = ? AND d.status = 'draft' AND l.supplier_id = d.supplier_id AND l.stock_item_id = ? AND l.tracking_input_json IS NOT NULL FOR UPDATE");
+        $stmt->execute([$supplierId, $itemId]);
+        return $this->castJsonRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Další dávka pohybů šarže po kurzoru `$afterAllocationId`: kurzor a řádky dokladů,
+     * kterých se pohyby týkají (zaúčtované a stornované doklady, protidoklad storna).
+     * Index je vynucený, aby `ORDER BY a.id LIMIT` nešel po primárním klíči přes pohyby všech šarží.
+     *
+     * @return array{cursor:int, rows:int, line_ids:list<int>}
+     */
+    public function allocationLineBatch(int $supplierId, int $unitId, int $afterAllocationId, int $limit): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT a.id, a.stock_document_line_id FROM stock_tracking_allocations a FORCE INDEX (ix_tracking_history) WHERE a.supplier_id = ? AND a.stock_tracking_unit_id = ? AND a.id > ? ORDER BY a.id LIMIT ' . max(1, $limit));
+        $stmt->execute([$supplierId, $unitId, $afterAllocationId]);
+        $cursor = $afterAllocationId;
+        $lineIds = [];
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $cursor = (int) $row['id'];
+            $lineIds[(int) $row['stock_document_line_id']] = true;
+        }
+        return ['cursor' => $cursor, 'rows' => count($rows), 'line_ids' => array_keys($lineIds)];
+    }
+
+    /**
+     * Zamkne řádky skladových dokladů a vrátí jejich výběr kusů (jen řádky, které ho mají).
+     *
+     * @param list<int> $lineIds
+     * @return list<array{id:int, json:string}>
+     */
+    public function lockLineTracking(int $supplierId, array $lineIds): array
+    {
+        if ($lineIds === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($lineIds), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT l.id, l.tracking_input_json AS json FROM stock_document_lines l WHERE l.supplier_id = ? AND l.id IN ($in) AND l.tracking_input_json IS NOT NULL ORDER BY l.id FOR UPDATE");
+        $stmt->execute([$supplierId, ...$lineIds]);
+        return $this->castJsonRows($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Zapíše výběr kusů více řádků skladových dokladů jedním UPDATE.
+     *
+     * @param array<int,string> $jsonByLineId id řádku => nový JSON
+     */
+    public function updateLinesTracking(int $supplierId, array $jsonByLineId): void
+    {
+        if ($jsonByLineId === []) {
+            return;
+        }
+        $when = implode(' ', array_fill(0, count($jsonByLineId), 'WHEN ? THEN ?'));
+        $in = implode(',', array_fill(0, count($jsonByLineId), '?'));
+        $params = [];
+        foreach ($jsonByLineId as $lineId => $json) {
+            array_push($params, $lineId, $json);
+        }
+        $this->db->pdo()->prepare("UPDATE stock_document_lines SET tracking_input_json = CASE id $when END WHERE supplier_id = ? AND id IN ($in)")
+            ->execute([...$params, $supplierId, ...array_keys($jsonByLineId)]);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array{id:int, json:string}>
+     */
+    private function castJsonRows(array $rows): array
+    {
+        return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'json' => (string) $row['json']], $rows);
+    }
+
     private function castLocation(array $row): array
     {
         foreach (['id', 'supplier_id', 'warehouse_id'] as $key) $row[$key] = (int) $row[$key];

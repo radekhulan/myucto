@@ -10,8 +10,12 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockTrackingRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stock\ExactUnitConversion;
 use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\TrackingUnitRenameService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -23,6 +27,10 @@ final class StockTrackingAction
     public function __construct(
         private readonly Connection $db,
         private readonly StockTrackingRepository $tracking,
+        private readonly TrackingUnitRenameService $unitRename,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
+        private readonly InvoicePdfRenderer $invoicePdf,
     ) {}
 
     public function item(Request $request, Response $response, array $args): Response
@@ -144,6 +152,56 @@ final class StockTrackingAction
             if ($this->db->pdo()->inTransaction()) $this->db->pdo()->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * Oprava kódu šarže a data spotřeby. Chybějící klíč v těle hodnotu ponechá,
+     * `expires_on: null` expiraci smaže. Propsání do konceptů a zaúčtovaných skladových
+     * dokladů řeší {@see TrackingUnitRenameService}; audit se zapisuje až po commitu.
+     */
+    public function updateUnit(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'stock.items.write', AccessLevel::WRITE, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        $itemId = (int) $args['id'];
+        if ($this->tracking->item($supplierId, $itemId) === null) {
+            return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $changes = array_intersect_key($body, ['lot_code' => true, 'expires_on' => true]);
+        try {
+            $result = $this->unitRename->rename($supplierId, $itemId, (int) $args['unitId'], $changes);
+        } catch (StockException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
+        }
+        // Cache PDF přepsaných konceptů faktur je po opravě zastaralá (stejně jako po úpravě
+        // konceptu); soubory se mažou až po commitu, aby rollback nenechal smazané PDF.
+        foreach ($result['invoice_ids'] as $invoiceId) {
+            try {
+                $this->invoicePdf->invalidate($invoiceId, 'invalidate_update');
+            } catch (\Throwable $e) {
+                error_log('Neplatnost PDF konceptu ' . $invoiceId . ' po opravě šarže selhala: ' . $e->getMessage());
+            }
+        }
+        if ($result['changed']) {
+            $this->logger->log(
+                'stock.tracking_unit_updated',
+                $this->userId($request),
+                'stock_item',
+                $itemId,
+                [
+                    'stock_tracking_unit_id' => $result['unit']['id'],
+                    'from' => $result['previous'],
+                    'to' => ['lot_code' => $result['unit']['lot_code'], 'expires_on' => $result['unit']['expires_on']],
+                    'updated' => $result['updated'],
+                ],
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+                $supplierId,
+            );
+        }
+        return Json::ok($response, ['unit' => $result['unit'], 'updated' => $result['updated']]);
     }
 
     public function locations(Request $request, Response $response): Response
