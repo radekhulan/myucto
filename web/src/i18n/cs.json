@@ -26181,7 +26181,7 @@
     "invoice_pdf_line_discount_hint": "U položky se slevou vytiskne sloupce Cena/j před slevou, Sleva a Cena/j po slevě. Jen když má faktura aspoň jednu takovou položku, přirážka se nerozepisuje. Ceníkovou cenu doplní nacenění skladové karty. Editor faktury pak u položky nabídne pole Sleva %.",
     "invoice_pdf_compact_items": "Kompaktní řádky položek na PDF faktury",
     "invoice_pdf_compact_items_hint": "Menší odsazení a písmo v tabulce položek, širší sloupec popisu, rozpis balení a sériová čísla na řádku popisu. Faktura s mnoha položkami má zhruba o polovinu méně stran, s rozpisem slevy u řádku o něco víc. U už vystavených dokladů se projeví až po přegenerování PDF.",
-    "invoice_pdf_bank_in_footer": "Bankovní spojení jen v patičce PDF faktury (doporučujeme nezapínat)",
+    "invoice_pdf_bank_in_footer": "Bankovní spojení jen v patičce PDF faktury (nestandardní umístění)",
     "invoice_pdf_bank_in_footer_hint": "Číslo účtu, IBAN, BIC a banka se vytisknou v patičce každé strany, u součtu zůstane jen QR platba v rámečku. Variabilní symbol je v údajích dokladu. Uhrazená faktura a platba hotově nebo kartou vypadají jako dosud. U už vystavených dokladů se projeví až po přegenerování PDF.",
     "default_hourly_rate": "Výchozí hodinová sazba",
     "auto_send_reminders": "Posílat automatické upomínky",

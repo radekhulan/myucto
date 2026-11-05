@@ -26181,7 +26181,7 @@
     "invoice_pdf_line_discount_hint": "Items with a discount get the columns Unit price before discount, Discount and Unit price after discount. Only when the invoice has at least one such item; a markup is not itemised. The list price comes from pricing the stock card. The invoice editor then offers a Discount % field on each item.",
     "invoice_pdf_compact_items": "Compact item rows on the invoice PDF",
     "invoice_pdf_compact_items_hint": "Smaller padding and font in the item table, a wider description column, package breakdown and serial numbers on the description line. An invoice with many items needs roughly half as many pages, slightly more with the per-line discount breakdown. On already issued documents it shows only after their PDF is regenerated.",
-    "invoice_pdf_bank_in_footer": "Bank details only in the invoice PDF footer (not recommended)",
+    "invoice_pdf_bank_in_footer": "Bank details only in the invoice PDF footer (non-standard placement)",
     "invoice_pdf_bank_in_footer_hint": "Account number, IBAN, BIC and bank are printed in the footer of every page, only the QR payment stays in a box next to the totals. The variable symbol is in the document details. Paid invoices and cash or card payments look as before. On already issued documents it shows only after their PDF is regenerated.",
     "default_hourly_rate": "Default hourly rate",
     "auto_send_reminders": "Send automatic reminders",
