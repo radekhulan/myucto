@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   listAccounts: vi.fn(),
   listKinds: vi.fn(),
+  saveProfiles: vi.fn(),
   dimsSave: vi.fn(),
   dimsLoad: vi.fn(),
   toastError: vi.fn(),
@@ -19,12 +20,14 @@ vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number) => Stri
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { get: m.get, update: m.update, create: vi.fn() },
-  otherItemKindsApi: { list: m.listKinds },
+  otherItemKindsApi: { list: m.listKinds, savePostingProfiles: m.saveProfiles },
 }))
 
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: m.supplier }),
 }))
+
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: m.toastError, success: vi.fn() }),
@@ -285,5 +288,50 @@ describe('OtherItemEditor partner', () => {
       counter_account_code: null,
       posting_lines: [{ account_code: '518', amount: 700 }, { account_code: '378', amount: 500 }],
     }))
+  })
+
+  it('nabídne návrh účtů druhu bez profilu a uloží ho jako výchozí jen po kliknutí', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    const suggested = { id: null, side: 'payable', builtin: true, builtin_code: 'rent', name: null, is_active: true,
+      posting_profiles: {}, posting_suggestion: { debit_account_code: '381', credit_account_code: '325', available: true } }
+    m.listKinds.mockResolvedValue([suggested])
+    m.saveProfiles.mockResolvedValue({})
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.get('[data-test="origin-suggestion"]').text()).toContain('other_items.posting.suggested_for_kind')
+
+    await wrapper.get('[data-test="origin-suggestion-use"]').trigger('click')
+    expect(wrapper.find('[data-test="origin-suggestion"]').exists()).toBe(false)
+    const pickers = wrapper.findAllComponents({ name: 'ChartAccountSelect' })
+    expect(pickers[0]!.props('modelValue')).toBe('325')
+    expect(pickers[1]!.props('modelValue')).toBe('381')
+    expect(m.saveProfiles).not.toHaveBeenCalled()
+  })
+
+  it('návrh uloží jako profil vzniku druhu a znovu načte druhy', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.listKinds.mockResolvedValue([{ id: null, side: 'payable', builtin: true, builtin_code: 'rent', name: null, is_active: true,
+      posting_profiles: {}, posting_suggestion: { debit_account_code: '381', credit_account_code: '325', available: true } }])
+    m.saveProfiles.mockResolvedValue({})
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('[data-test="origin-suggestion-save"]').trigger('click')
+    await flushPromises()
+    expect(m.saveProfiles).toHaveBeenCalledWith(expect.objectContaining({ builtin_code: 'rent' }), {
+      origin: { debit_account_code: '381', credit_account_code: '325', description_template: null, dimensions: [], is_active: true },
+    })
+    expect(m.listKinds).toHaveBeenCalledTimes(2)
+  })
+
+  it('nenabízí návrh, když není použitelný nebo je v daňové evidenci', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.listKinds.mockResolvedValue([{ id: null, side: 'payable', builtin: true, builtin_code: 'rent', name: null, is_active: true,
+      posting_profiles: {}, posting_suggestion: { debit_account_code: '381', credit_account_code: '325', available: false } }])
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="origin-suggestion"]').exists()).toBe(false)
   })
 })

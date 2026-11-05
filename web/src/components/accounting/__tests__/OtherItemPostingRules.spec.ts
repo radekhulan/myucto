@@ -110,4 +110,17 @@ describe('OtherItemPostingRules', () => {
     const plain = factory({ item: item('posted') })
     expect(plain.find('[data-test="posting-rule-interest"]').exists()).toBe(false)
   })
+
+  it('u zaúčtované položky ukáže vznik jen ke čtení a vyvolá přeúčtování', async () => {
+    const posted = { ...item('posted'), account_code: '353', counter_account_code: '602', amount: 1200, paid_amount: 0 }
+    const wrapper = factory({ item: posted, canRepost: true })
+    const origin = wrapper.get('[data-test="posted-origin"]')
+    expect(origin.text()).toContain('353')
+    expect(origin.text()).toContain('602')
+    await wrapper.get('[data-test="posting-repost"]').trigger('click')
+    expect(wrapper.emitted('repost')).toHaveLength(1)
+
+    expect(factory({ item: posted }).find('[data-test="posting-repost"]').exists()).toBe(false)
+    expect(factory({ item: item('draft') }).find('[data-test="posted-origin"]').exists()).toBe(false)
+  })
 })

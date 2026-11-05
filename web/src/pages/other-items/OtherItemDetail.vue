@@ -429,7 +429,7 @@ onMounted(load)
         </div>
       </section>
       <OtherItemPostingRules v-if="isDoubleEntry && item.posting_rules?.payment_bank" :item="item" :accounts="postingAccounts"
-                             :can-write="auth.canWrite('other_items')" @changed="item = $event" />
+                             :can-write="auth.canWrite('other_items')" :can-repost="canRepost" @changed="item = $event" @repost="openRepost" />
       <OtherItemJournalContext v-if="isDoubleEntry && item.journal_entry_id" :entry-id="Number(item.journal_entry_id)" />
       <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
       <OtherItemPlans :item="item" />
