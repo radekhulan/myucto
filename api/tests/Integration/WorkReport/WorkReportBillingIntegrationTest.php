@@ -233,6 +233,14 @@ final class WorkReportBillingIntegrationTest extends TestCase
         self::assertNull($this->container->get(WorkReportRepository::class)->findByInvoice($newId, $this->supplier));
     }
 
+    public function testBillingCopyInSameMonthKeepsPeriod(): void
+    {
+        $this->transfer($this->setupReport());
+        $newId = $this->container->get(BulkReissueAction::class)->cloneOne($this->invoice, '2026-11-20', true, $this->user);
+        $this->invoiceIds[] = $newId;
+        self::assertSame('2026-11', $this->container->get(WorkReportRepository::class)->findByInvoice($newId, $this->supplier)['billing_period']);
+    }
+
     public function testBillingCopyCarriesSettingsWithoutTimeOrMaterials(): void
     {
         $report = $this->setupReport();
@@ -244,7 +252,9 @@ final class WorkReportBillingIntegrationTest extends TestCase
         $this->invoiceIds[] = $newId;
         $copy = $repo->findByInvoice($newId, $this->supplier);
         self::assertSame($report['billing_snapshot'], $copy['billing_snapshot']);
-        self::assertSame($report['billing_period'], $copy['billing_period']);
+        // DUZP 2026-11-01 → 2026-12-02: období se posune o měsíc stejně jako faktura.
+        self::assertSame('2026-11', $report['billing_period']);
+        self::assertSame('2026-12', $copy['billing_period']);
         self::assertSame([], $copy['items']);
         self::assertSame([], $copy['materials']);
         self::assertNull($copy['material_title']);

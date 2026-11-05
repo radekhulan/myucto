@@ -270,8 +270,11 @@ final class WorkReportRepository
         return $report;
     }
 
-    /** Kopie nese jen hlavičku cenového ujednání. Minulá práce ani materiál do nového období nepatří. */
-    public function cloneForInvoice(int $sourceInvoiceId, int $targetInvoiceId, int $supplierId): ?int
+    /**
+     * Kopie nese jen hlavičku cenového ujednání. Minulá práce ani materiál do nového období nepatří.
+     * Období účtování se posouvá s DUZP kopie ({@see WorkReportBilling::shiftPeriod()}).
+     */
+    public function cloneForInvoice(int $sourceInvoiceId, int $targetInvoiceId, int $supplierId, ?string $sourceDate = null, ?string $targetDate = null): ?int
     {
         if (!$this->db->hasColumn('work_reports', 'billing_snapshot')) return null;
         $source = $this->findByInvoice($sourceInvoiceId, $supplierId);
@@ -281,6 +284,10 @@ final class WorkReportRepository
         $pdo->prepare('INSERT INTO work_reports (invoice_id, ' . $columns . ') SELECT ?, ' . $columns . ' FROM work_reports WHERE id = ?')
             ->execute([$targetInvoiceId, $source['id']]);
         $id = (int) $pdo->lastInsertId();
+        if ($sourceDate !== null && $targetDate !== null && $source['billing_period'] !== null) {
+            $period = WorkReportBilling::shiftPeriod($source['billing_period'], $sourceDate, $targetDate);
+            if ($period !== $source['billing_period']) $pdo->prepare('UPDATE work_reports SET billing_period = ? WHERE id = ?')->execute([$period, $id]);
+        }
         return $id;
     }
 

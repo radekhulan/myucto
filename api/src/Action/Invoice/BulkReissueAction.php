@@ -255,7 +255,8 @@ final class BulkReissueAction
             $newId = (int) $pdo->lastInsertId();
             $supportsBilling = $this->repo->supportsWorkReportBilling();
             $newWorkReportId = $supportsBilling
-                ? $this->workReports->cloneForInvoice($sourceId, $newId, (int) $source['supplier_id']) : null;
+                ? $this->workReports->cloneForInvoice($sourceId, $newId, (int) $source['supplier_id'],
+                    (string) (($source['tax_date'] ?? null) ?: $source['issue_date']), $taxDate ?? $issueDate) : null;
 
             // Zkopíruj položky s případným inkrementem měsíce
             // Zachovává vat_classification_code ze source položky pokud existuje,
