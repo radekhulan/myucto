@@ -33,8 +33,9 @@ test('shared manifest persists the audited client surface and legacy aliases', (
   // 42 → 44: bank-statements a bank-detail (#160). Čtení banky je pro klienta
   // volitelné; obě routy i jejich API vyžadují přidělené bankovní oprávnění.
   // Současně zahrnuje klientská podání i vlastní MCP připojení.
-  assert.equal(manifest.routes.length, 60)
-  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 60)
+  // Šablony účtování výkazů sdílejí oprávnění Ceníku i na vlastní doméně.
+  assert.equal(manifest.routes.length, 61)
+  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 61)
   assert.deepEqual(
     manifest.routes.find(route => route.name === 'reports-submissions'),
     {
