@@ -42,6 +42,7 @@ final class PayrollWageStatementRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, effective_from, effective_to, monthly_gross_minor, weekly_hours,
+                    remuneration_type, hourly_rate_minor, remuneration_basis,
                     workload_basis_points, work_place, regular_workplace, row_version
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?

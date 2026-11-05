@@ -71,6 +71,65 @@ final class PayrollQuickInputsApiTest extends TestCase
         }
     }
 
+    public function testHourlyMonthHasNoMonthlyProposalAndCannotMaterializeMonthlyRecurringBase(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, effective_to,
+                 remuneration_type, hourly_rate_minor, remuneration_basis)
+             VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-06-15", "hourly", 20000, "Syntetický výměr")'
+        )->execute([$this->supplierId, $this->employmentId]);
+        // Na konci měsíce platí měsíční mzda; první polovinu nelze přehlédnout.
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor)
+             VALUES (?, ?, "2026-06-16", "2026-01-01", 4200000)'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $response = $this->action->list($this->request('GET')->withQueryParams(['period' => '2026-06']), new Response());
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $item = $this->json($response)['month']['items'][0];
+        self::assertTrue($item['hourly_remuneration_in_period']);
+        self::assertSame(0, $item['base_amount_minor']);
+        self::assertContains('hourly_remuneration_calculation_unsupported', $item['blockers']);
+        // Zakázaný měsíční základ nesmí znemožnit uložení jiné ruční složky.
+        $payload = [
+            'period' => '2026-06',
+            'rows' => [[
+                'employment_id' => $this->employmentId,
+                'employment_row_version' => $item['employment_row_version'],
+                'base_amount_minor' => 0,
+                'overtime_mode' => 'amount',
+                'overtime_hours_milli' => null,
+                'overtime_amount_minor' => 0,
+                'bonus_amount_minor' => 10000,
+                'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+            ]],
+        ];
+        $saved = $this->action->save($this->request('PUT')->withParsedBody($payload), new Response());
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertNull($this->quickInput('MZDA_MESICNI'));
+        self::assertSame(10000, (int) $this->quickInput('ODMENA')['amount_minor']);
+        $payload['rows'][0]['base_amount_minor'] = 4200000;
+        $payload['rows'][0]['versions']['bonus'] = (int) $this->quickInput('ODMENA')['row_version'];
+        $rejected = $this->action->save($this->request('PUT')->withParsedBody($payload), new Response());
+        self::assertSame(409, $rejected->getStatusCode(), (string) $rejected->getBody());
+        self::assertNull($this->quickInput('MZDA_MESICNI'));
+        $component = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = "MZDA_MESICNI"');
+        $component->execute([$this->supplierId]);
+        $componentId = (int) $component->fetchColumn();
+        self::assertGreaterThan(0, $componentId);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_recurring_components
+                (supplier_id, employment_id, component_id, calculation_kind, amount_minor, valid_from, allocation_rule)
+             VALUES (?, ?, ?, "fixed_amount", 4200000, "2026-01-01", "full_month")'
+        )->execute([$this->supplierId, $this->employmentId, $componentId]);
+        $materialized = $this->container->get(PayrollRecurringMaterializer::class)->materialize($this->supplierId, '2026-06', $this->userId);
+        self::assertSame(0, $materialized['created_count']);
+        self::assertSame(1, $materialized['manual_review_count']);
+        $response = $this->action->list($this->request('GET')->withQueryParams(['period' => '2026-06']), new Response());
+        self::assertSame(0, $this->json($response)['month']['items'][0]['base_amount_minor']);
+    }
+
     public function testListsMaskedMonthlyRowsAndAtomicallyUpsertsDrafts(): void
     {
         $before = $this->action->list(

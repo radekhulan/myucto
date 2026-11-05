@@ -168,6 +168,64 @@ final class PayrollRunPersistenceTest extends TestCase
         $this->inputId = $this->approvedInput(120_000, 'BASE', 'manual');
     }
 
+    public function testHourlyIntervalBeforeMonthlyTermsStillBlocksRunAndCannotBeOverridden(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000,
+                    remuneration_basis = "Syntetický výměr", monthly_gross_minor = NULL,
+                    effective_to = "2026-06-15"
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, office_id, effective_from, planned_start_on,
+                 actual_start_on, weekly_hours, monthly_gross_minor)
+             SELECT supplier_id, employment_id, office_id, "2026-06-16", planned_start_on,
+                    actual_start_on, weekly_hours, 4200000
+               FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $hourly = array_values(array_filter($snapshot->validations,
+            static fn (PayrollRunValidation $row): bool => $row->code === 'hourly_remuneration_calculation_unsupported'));
+        self::assertCount(1, $hourly);
+        self::assertSame('blocker', $hourly[0]->severity);
+        self::assertFalse($hourly[0]->requiresOverride);
+        $employment = $snapshot->data['people'][0]['employments'][0];
+        self::assertSame('2026-06-16', $employment['term']['effective_from']);
+        self::assertSame(20000, $employment['hourly_remuneration_terms'][0]['hourly_rate_minor']);
+        self::assertSame('2026-06-15', $employment['hourly_remuneration_terms'][0]['effective_to']);
+        $july = $builder->build($this->supplierId, '2026-07-01', '2026-08-15');
+        self::assertNotContains('hourly_remuneration_calculation_unsupported', array_map(
+            static fn (PayrollRunValidation $row): string => $row->code, $july->validations,
+        ));
+        self::assertArrayNotHasKey('hourly_remuneration_terms', $july->data['people'][0]['employments'][0]);
+
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'hourly-lock', $this->actors[0]);
+        $calculated = $this->service->calculate($this->supplierId, (int) $run['id'], (int) $locked->run['row_version'], 'hourly-calculate', $this->actors[0]);
+        $reviewed = $this->service->review($this->supplierId, (int) $run['id'], (int) $calculated->run['row_version'], 'hourly-review', $this->actors[1]);
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('blokující validace');
+        $this->service->approve($this->supplierId, (int) $run['id'], (int) $reviewed->run['row_version'], 'hourly-approve', $this->actors[2]);
+    }
+
+    public function testHourlyTermsDoNotUseLegacyMonthlyGrossInSnapshot(): void
+    {
+        $this->db->pdo()->prepare('UPDATE payroll_employments SET monthly_gross_minor = 4200000 WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000,
+                    remuneration_basis = "Syntetická dohoda", monthly_gross_minor = NULL
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $employment = $snapshot->data['people'][0]['employments'][0];
+        self::assertNull($employment['employment']['monthly_gross_minor']);
+        self::assertSame('hourly', $employment['term']['remuneration_type']);
+        self::assertSame(20000, $employment['term']['hourly_rate_minor']);
+    }
+
     public function testSessionApiCreatesListsAndLocksRunIdempotently(): void
     {
         $role = new EffectiveRole(

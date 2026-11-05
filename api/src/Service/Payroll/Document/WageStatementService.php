@@ -240,12 +240,14 @@ final class WageStatementService
             ],
             $this->repository->recurringComponentsOn($supplierId, $employmentId, $effectiveFrom),
         );
-        $monthly = $terms['monthly_gross_minor'] ?? null;
-        if ($terms === null || (((int) $monthly) <= 0 && $components === [])) {
+        $hourly = ($terms['remuneration_type'] ?? 'monthly') === 'hourly';
+        $hourlyRate = $hourly ? ($terms['hourly_rate_minor'] ?? null) : null;
+        $monthly = $hourly ? null : ($terms['monthly_gross_minor'] ?? null);
+        if ($terms === null || ($hourly ? (int) $hourlyRate <= 0 : (((int) $monthly) <= 0 && $components === []))) {
             throw new WageStatementReadinessException(
                 'wage_statement_wage_missing',
                 sprintf(
-                    'K %s nemá pracovní vztah sjednanou mzdu: doplňte měsíční mzdu v podmínkách '
+                    'K %s nemá pracovní vztah sjednanou mzdu: doplňte mzdu v podmínkách '
                     . 'vztahu nebo opakující se mzdovou složku na kartě pracovního vztahu.',
                     $effectiveFrom,
                 ),
@@ -290,6 +292,11 @@ final class WageStatementService
             'effective_from' => $effectiveFrom,
             'wage' => [
                 'monthly_gross_minor' => ((int) $monthly) > 0 ? (int) $monthly : null,
+                ...($hourly ? [
+                    'remuneration_type' => 'hourly',
+                    'hourly_rate_minor' => (int) $hourlyRate,
+                    'remuneration_basis' => $terms['remuneration_basis'],
+                ] : []),
                 'weekly_hours' => $weekly === null ? null : rtrim(rtrim((string) $weekly, '0'), '.'),
                 'workload_basis_points' => (int) ($terms['workload_basis_points'] ?? 10_000),
             ],

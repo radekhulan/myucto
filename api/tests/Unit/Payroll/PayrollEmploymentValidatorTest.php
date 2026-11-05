@@ -7,12 +7,81 @@ namespace MyInvoice\Tests\Unit\Payroll;
 use MyInvoice\Service\Payroll\CzIscoCodebook;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
+use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
+use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollEmploymentValidatorTest extends TestCase
 {
+    public function testHourlyTermsRequireRateBasisAndSupportedRelationship(): void
+    {
+        $input = $this->terms();
+        $input['remuneration_type'] = 'hourly';
+        $input['hourly_rate_minor'] = 18750;
+        $input['remuneration_basis'] = '  Mzdový výměr 1  ';
+        $result = $this->validator()->terms($input, relationType: 'employment');
+        self::assertSame('hourly', $result['remuneration_type']);
+        self::assertSame(18750, $result['hourly_rate_minor']);
+        self::assertSame('Mzdový výměr 1', $result['remuneration_basis']);
+        self::assertNull($result['monthly_gross_minor']);
+
+        $input['activity_code'] = null;
+        $input['jmhz_relationship_detail_code'] = null;
+        foreach (['dpp', 'dpc', 'small_scale_employment'] as $type) {
+            self::assertSame('hourly', $this->validator()->terms($input, relationType: $type)['remuneration_type']);
+        }
+    }
+
+    public function testHourlyValidationRejectsInvalidCombinations(): void
+    {
+        $valid = $this->terms() + ['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis' => 'Dohoda'];
+        foreach ([
+            ['hourly_rate_minor' => 0], ['hourly_rate_minor' => 1.5],
+            ['hourly_rate_minor' => '20000'], ['hourly_rate_minor' => PHP_INT_MAX], ['remuneration_basis' => ' '],
+            ['remuneration_basis' => 123],
+            ['remuneration_basis' => str_repeat('x', 256)], ['monthly_gross_minor' => 1],
+            ['remuneration_type' => 'monthly'], ['remuneration_type' => 'other'], ['remuneration_type' => null],
+        ] as $changes) {
+            try {
+                $this->validator()->terms(array_replace($valid, $changes), relationType: 'employment');
+                self::fail('Neplatná kombinace byla přijata: ' . json_encode($changes));
+            } catch (\InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+        }
+        $valid['activity_code'] = null;
+        $valid['jmhz_relationship_detail_code'] = null;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->validator()->terms($valid, relationType: 'statutory_body');
+    }
+
+    public function testLegacyTermsDefaultToMonthly(): void
+    {
+        $terms = $this->validator()->terms($this->terms());
+        self::assertSame('monthly', $terms['remuneration_type']);
+        self::assertNull($terms['hourly_rate_minor']);
+        self::assertNull($terms['remuneration_basis']);
+    }
+
+    public function testInternalCorrectionBodiesPreserveHourlyTerms(): void
+    {
+        $current = [
+            'remuneration_type' => 'hourly',
+            'hourly_rate_minor' => 18750,
+            'remuneration_basis' => 'Syntetická dohoda',
+        ];
+        foreach ([
+            PayrollEmploymentTermsBody::fromCurrent($current, 'Oprava'),
+            RegistrationImportWriter::termsBody($current),
+        ] as $body) {
+            self::assertSame('hourly', $body['remuneration_type']);
+            self::assertSame(18750, $body['hourly_rate_minor']);
+            self::assertSame('Syntetická dohoda', $body['remuneration_basis']);
+        }
+    }
+
     public function testAcceptsSmallScaleEmploymentAndHistoricalInputs(): void
     {
         $result = $this->validator()->create([

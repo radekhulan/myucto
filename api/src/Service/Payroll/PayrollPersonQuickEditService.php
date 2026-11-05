@@ -80,7 +80,7 @@ final class PayrollPersonQuickEditService
                     $userId,
                     $ip,
                     $userAgent,
-                    true,
+                    $normalizedEmployment['replace_monthly_gross'],
                     $normalizedEmployment['monthly_gross_minor'],
                 );
             }
@@ -144,6 +144,7 @@ final class PayrollPersonQuickEditService
      *   id:int,
      *   row_version:int,
      *   monthly_gross_minor:?int,
+     *   replace_monthly_gross:bool,
      *   terms:TermsInput
      * }
      */
@@ -151,29 +152,36 @@ final class PayrollPersonQuickEditService
     {
         $id = $this->version($input['id'] ?? null, false);
         $rowVersion = $this->version($input['row_version'] ?? null, false);
-        if (!array_key_exists('monthly_gross_minor', $input)) {
-            throw new \InvalidArgumentException('employment.monthly_gross_minor je povinné.');
-        }
-        $monthlyGross = $input['monthly_gross_minor'];
+        $replaceMonthlyGross = array_key_exists('monthly_gross_minor', $input);
+        $monthlyGross = $input['monthly_gross_minor'] ?? null;
         if ($monthlyGross !== null && (!is_int($monthlyGross) || $monthlyGross < 0)) {
             throw new \InvalidArgumentException(
                 'Pravidelná hrubá mzda musí být nezáporná částka v haléřích.',
             );
         }
+        $termsBody = $this->object($input['terms'] ?? null, 'employment.terms');
+        $current = $this->employments->currentTerms($supplierId, $id)
+            ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
+        // Rychlá editace způsob odměňování nenabízí; změna patří na kartu vztahu.
+        foreach (['remuneration_type', 'hourly_rate_minor', 'remuneration_basis'] as $key) {
+            $termsBody[$key] = $current[$key];
+        }
         $terms = $this->employmentValidator->terms(
-            $this->object($input['terms'] ?? null, 'employment.terms'),
+            $termsBody,
             // Rychlá editace mění hlavně mzdu a osobní údaje — historický kód
             // CZ-ISCO mimo číselník ji nesmí zablokovat, dokud na něj nikdo nesáhne.
             $this->employments->currentCzIscoCode($supplierId, $id),
             // Zařazení pro srážkovou daň rychlá editace vůbec nenabízí, takže
             // ho nesmí přepsat na „neurčeno" — přebírá se uložené.
             $this->employments->currentOtherWithholdingEligibility($supplierId, $id),
+            $this->employments->currentRelationType($supplierId, $id),
         );
 
         return [
             'id' => $id,
             'row_version' => $rowVersion,
             'monthly_gross_minor' => $monthlyGross,
+            'replace_monthly_gross' => $replaceMonthlyGross,
             'terms' => $terms,
         ];
     }

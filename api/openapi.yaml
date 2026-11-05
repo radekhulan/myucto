@@ -27714,7 +27714,10 @@ paths:
     get:
       tags: [Payroll]
       summary: Detail zaměstnance
-      description: Vrací osobu a její pracovní vztahy. `monthly_gross_minor` je aktuálně sjednaná měsíční hrubá mzda v haléřích.
+      description: >-
+        Vrací osobu a její pracovní vztahy včetně historie způsobu odměňování.
+        `monthly_gross_minor` je aktuálně sjednaná měsíční hrubá mzda v haléřích;
+        u hodinového odměňování je null a sazbu nese účinná verze podmínek.
       responses:
         '200':
           description: Detail zaměstnance
@@ -27738,6 +27741,8 @@ paths:
         Opraví chybnou částku aktuální sjednané mzdy bez změny její účinnosti.
         Bearer token na této cestě nesmí změnit žádnou jinou pracovní, daňovou
         ani pojistnou podmínku.
+        Způsob odměňování, hodinovou sazbu ani podklad sjednání zde token měnit
+        nemůže. Zadání měsíční mzdy hodinově odměňovanému vztahu vrací 422.
       requestBody:
         required: true
         content:
@@ -27769,6 +27774,8 @@ paths:
         data. Starší mzdová období dál používají částku ze své tehdy účinné
         verze. Bearer token na této cestě nesmí změnit žádnou jinou pracovní,
         daňovou ani pojistnou podmínku.
+        Způsob odměňování, hodinovou sazbu ani podklad sjednání zde token měnit
+        nemůže. Zadání měsíční mzdy hodinově odměňovanému vztahu vrací 422.
       requestBody:
         required: true
         content:
@@ -43576,7 +43583,7 @@ components:
 
     PayrollEmploymentTerm:
       type: object
-      required: [id, effective_from, planned_start_on, workload_basis_points, row_version]
+      required: [id, effective_from, planned_start_on, workload_basis_points, row_version, remuneration_type, hourly_rate_minor, remuneration_basis]
       additionalProperties: true
       properties:
         id: { type: integer, format: int64 }
@@ -43584,10 +43591,25 @@ components:
         effective_to: { type: [string, "null"], format: date }
         planned_start_on: { type: string, format: date }
         actual_start_on: { type: [string, "null"], format: date }
+        remuneration_type:
+          type: string
+          enum: [monthly, hourly]
+          description: Způsob odměňování platný pro tuto verzi podmínek vztahu.
+        hourly_rate_minor:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 1000000000
+          description: >-
+            Sjednaná hrubá hodinová sazba v haléřích za hodinu. U měsíčního
+            odměňování je null. Jde o jiný údaj než průměrný či pravděpodobný výdělek.
+        remuneration_basis:
+          type: [string, "null"]
+          maxLength: 255
+          description: Identifikace podkladu sjednání sazby, například mzdového výměru nebo dohody; u hodinového odměňování povinná.
         monthly_gross_minor:
           type: [integer, "null"]
           minimum: 0
-          description: Sjednaná měsíční hrubá mzda v haléřích platná pro tuto verzi.
+          description: Sjednaná měsíční hrubá mzda v haléřích platná pro tuto verzi; u hodinového odměňování null.
         weekly_hours: { type: [string, "null"] }
         probable_hourly_earning_minor:
           type: [integer, "null"]

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringAmountCalculator;
 use MyInvoice\Service\Payroll\Calculation\DecimalRate;
@@ -767,6 +768,8 @@ final class PayrollQuickInputRepository
                  )
              SELECT employment.id AS employment_id, employment.employee_id,
                     employment.code AS employment_code, employment.relation_type,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . '
+                      AS hourly_remuneration_in_period,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                       AS monthly_gross_minor,
                     employment.start_date,
@@ -844,6 +847,8 @@ final class PayrollQuickInputRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodStart,
             $periodEnd,
             $periodEnd,
             $periodEnd,
@@ -957,6 +962,8 @@ final class PayrollQuickInputRepository
              SELECT recurring.*, component.code AS component_code,
                     component.component_kind, component.value_kind,
                     component.tax_treatment,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . '
+                      AS hourly_remuneration_in_period,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                       AS monthly_gross_minor,
                     COALESCE(
@@ -991,6 +998,8 @@ final class PayrollQuickInputRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodStart,
             $periodEnd,
             $periodEnd,
             $supplierId,
@@ -1313,6 +1322,14 @@ final class PayrollQuickInputRepository
                     $userId,
                     $autoApprove,
                 ): void {
+                    if (($item['hourly_remuneration_in_period'] ?? false) === true) {
+                        if ($row['base_amount_minor'] !== null
+                            && $row['base_amount_minor'] !== (int) $item['base_amount_minor']
+                        ) {
+                            throw new \DomainException(PayrollHourlyRemuneration::MESSAGE);
+                        }
+                        return;
+                    }
                     if ((bool) $item['base_conflict']) {
                         throw new \DomainException(
                             'Základní mzda je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte v měsíčních vstupech.'
@@ -1607,7 +1624,8 @@ final class PayrollQuickInputRepository
             $managed[$kind->value] = false;
             $managedAmounts[$kind->value] = 0;
         }
-        $blockers = [];
+        $hourlyRemuneration = (bool) ($employment['hourly_remuneration_in_period'] ?? false);
+        $blockers = $hourlyRemuneration ? [PayrollHourlyRemuneration::BLOCKER] : [];
         /** @var array<string,bool> $fromAttendance */
         $fromAttendance = [];
         $other = 0;
@@ -1855,6 +1873,7 @@ final class PayrollQuickInputRepository
         if (($awayInMonth || $importSummaryMonth || $partialMonth)
             && !$suspendedInMonth
             && !$managed['base']
+            && !$hourlyRemuneration
             && $employment['monthly_gross_minor'] !== null
         ) {
             $proration = ($importSummaryMonth
@@ -1889,7 +1908,7 @@ final class PayrollQuickInputRepository
         $base = $managed['base']
             ? $managedAmounts['base'] + ($quick['base']['amount_minor'] ?? 0)
             : ($quick['base']['amount_minor'] ?? (
-                $baseRequiresEntry || $employment['monthly_gross_minor'] === null
+                $hourlyRemuneration || $baseRequiresEntry || $employment['monthly_gross_minor'] === null
                     ? 0
                     : ($proration['amount_minor'] ?? PayrollTimeValue::int(
                         $employment['monthly_gross_minor'],
@@ -2042,6 +2061,7 @@ final class PayrollQuickInputRepository
             'suspended_in_month' => $suspendedInMonth,
             'away_in_month' => $awayInMonth,
             'base_amount_minor' => $base,
+            'hourly_remuneration_in_period' => $hourlyRemuneration,
             'base_managed_elsewhere' => $managed['base'],
             // Pravidelné složky účinné v měsíci, ze kterých ještě nevznikl vstup.
             // Mzdový běh je nevidí, dokud je někdo nevytvoří a neschválí.
@@ -2082,7 +2102,7 @@ final class PayrollQuickInputRepository
                 is_int($averageVersion) ? $averageVersion : null,
             'overtime_hours_relation_supported' => $overtimeHoursRelationSupported,
             'overtime_hours_available' =>
-                $overtimeHoursRelationSupported && is_int($rate) && $rate > 0,
+                !$hourlyRemuneration && $overtimeHoursRelationSupported && is_int($rate) && $rate > 0,
             'overtime_managed_elsewhere' => $managed['overtime'],
             'overtime_conflict' => $conflicts['overtime'],
             'bonus_amount_minor' => $bonus,
@@ -2338,6 +2358,10 @@ final class PayrollQuickInputRepository
                 'wage_source' => $storedWage['source_snapshot'],
                 'premium_source' => $storedPremium['source_snapshot'],
             ];
+        }
+
+        if (($item['hourly_remuneration_in_period'] ?? false) === true) {
+            throw new \DomainException(PayrollHourlyRemuneration::MESSAGE);
         }
 
         $rate = $item['overtime_hourly_rate_minor'];

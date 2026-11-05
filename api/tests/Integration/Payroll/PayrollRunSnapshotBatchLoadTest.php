@@ -217,11 +217,14 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // prepare + execute): snímek bere jen schválené, takže bez ní běh
         // s hodinovou mzdou neschválenou DPN tiše vynechal. Jeden dotaz na běh.
         //
+        // Hodinové podmínky se načítají jednou množinovou dávkou za celé období,
+        // aby neunikla změna sazby či způsobu odměňování uprostřed měsíce.
+        // Prepare + execute přidávají dva round-tripy bez ohledu na počet osob.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            88,
+            90,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 88 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 90 round-tripů.',
         );
     }
 

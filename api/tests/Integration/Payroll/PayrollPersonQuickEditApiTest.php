@@ -111,6 +111,60 @@ final class PayrollPersonQuickEditApiTest extends TestCase
         }
     }
 
+    public function testQuickEditWithoutMonthlyGrossPreservesHourlyTerms(): void
+    {
+        $profile = $this->profiles->save(
+            $this->supplierId,
+            $this->employeeId,
+            $this->profileValidator->validate($this->profilePayload('Původní Zaměstnanec')),
+            0,
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $employment = $this->employments->create(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentValidator->create([
+                'code' => 'SYN-HOD',
+                'relation_type' => 'employment',
+                'terms' => array_replace($this->termsPayload('2026-01-01', '40'), [
+                    'remuneration_type' => 'hourly',
+                    'hourly_rate_minor' => 20000,
+                    'remuneration_basis' => 'Syntetický výměr',
+                ]),
+            ]),
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $response = $this->put([
+            'profile' => [
+                ...$this->profilePayload('Původní Zaměstnanec'),
+                'row_version' => $profile['row_version'],
+                'identity_history' => [[
+                    'id' => $profile['identity_history'][0]['id'],
+                    'full_name' => 'Původní Zaměstnanec',
+                    'first_name' => 'Původní',
+                    'last_name' => 'Zaměstnanec',
+                    'effective_from' => '2026-01-01',
+                    'effective_to' => null,
+                ]],
+            ],
+            'employment' => [
+                'id' => $employment['id'],
+                'row_version' => $employment['row_version'],
+                'terms' => $this->termsPayload('2026-08-04', '37.5'),
+            ],
+        ]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $terms = $this->json($response)['employment']['terms'][0];
+        self::assertSame('hourly', $terms['remuneration_type']);
+        self::assertSame(20000, $terms['hourly_rate_minor']);
+        self::assertSame('Syntetický výměr', $terms['remuneration_basis']);
+        self::assertNull($terms['monthly_gross_minor']);
+    }
+
     public function testProfileTermsAndGrossAreSavedAtomicallyAndKeepHistory(): void
     {
         $profile = $this->profiles->save(

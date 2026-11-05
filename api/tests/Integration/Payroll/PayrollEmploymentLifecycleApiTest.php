@@ -471,6 +471,21 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(422, $newTermsAttack->getStatusCode());
 
+        foreach (['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis' => 'Syntetický výměr'] as $field => $value) {
+            $response = $this->action->addTerms(
+                $this->request('PUT', "/api/payroll/employments/{$employment['id']}/terms", [
+                    'row_version' => $employment['row_version'],
+                    'effective_from' => '2026-03-01',
+                    'monthly_gross_minor' => 4_600_000,
+                    'change_reason' => 'Neoprávněný zápis',
+                    $field => $value,
+                ], authMethod: 'bearer'),
+                new Response(),
+                ['id' => (string) $employment['id']],
+            );
+            self::assertSame(422, $response->getStatusCode(), $field);
+        }
+
         $correctionAttack = $this->action->correctTerms(
             $this->request(
                 'PATCH',

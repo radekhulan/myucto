@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
@@ -174,6 +175,10 @@ final class PayrollRunSnapshotBuilder
             $employmentIds,
         );
 
+        $hourlyTerms = $this->batch->hourlyRemunerationTerms(
+            $supplierId, $employmentIds, $periodStart, $periodEnd,
+        );
+
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -257,6 +262,16 @@ final class PayrollRunSnapshotBuilder
         foreach ($employments as $row) {
             $employmentId = (int) $row['employment_id'];
             $employeeId = (int) $row['employee_id'];
+            if (($hourlyTerms[$employmentId] ?? []) !== []) {
+                $validations[] = new PayrollRunValidation(
+                    'blocker',
+                    PayrollHourlyRemuneration::BLOCKER,
+                    'employment',
+                    $employmentId,
+                    PayrollHourlyRemuneration::MESSAGE,
+                    "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
+                );
+            }
             if ($row['term_id'] === null) {
                 $validations[] = new PayrollRunValidation(
                     'blocker',
@@ -562,6 +577,11 @@ final class PayrollRunSnapshotBuilder
                     'row_version' => (int) $row['term_row_version'],
                     'effective_from' => (string) $row['effective_from'],
                     'effective_to' => $row['effective_to'],
+                    ...(($row['remuneration_type'] ?? 'monthly') === 'hourly' ? [
+                        'remuneration_type' => 'hourly',
+                        'hourly_rate_minor' => (int) $row['hourly_rate_minor'],
+                        'remuneration_basis' => $row['remuneration_basis'],
+                    ] : []),
                     'weekly_hours' => $row['weekly_hours'] === null
                         ? null
                         : (string) $row['weekly_hours'],
@@ -690,6 +710,9 @@ final class PayrollRunSnapshotBuilder
                         : (bool) $row['term_is_primary'],
                 ],
                 'term' => $termSnapshot,
+                ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
+                    'hourly_remuneration_terms' => $hourlyTerms[$employmentId],
+                ]),
                 'ordinary_evidence_profile' => $row['term_id'] === null
                     ? null
                     : [
@@ -838,6 +861,7 @@ final class PayrollRunSnapshotBuilder
      *   eligible_employment_ids:list<int>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
+     *   hourly_remuneration_terms:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * }
      */
@@ -889,6 +913,9 @@ final class PayrollRunSnapshotBuilder
 
         return [
             'eligible_employment_ids' => $eligible,
+            'hourly_remuneration_terms' => $this->batch->hourlyRemunerationTerms(
+                $supplierId, $allEmployments, $periodStart, $periodEnd,
+            ),
             'inputs' => $inputs,
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,
@@ -1287,8 +1314,9 @@ final class PayrollRunSnapshotBuilder
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor)
-                      AS monthly_gross_minor,
+                    CASE WHEN term.remuneration_type = "hourly" THEN NULL
+                         ELSE COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor)
+                    END AS monthly_gross_minor,
                     employee.full_name,
                     employee.birth_date AS employee_birth_date,
                     (SELECT regzel_profile.protected_labor_market
@@ -1297,6 +1325,7 @@ final class PayrollRunSnapshotBuilder
                       AS employer_protected_labor_market,
                     employee.is_active AS employee_active,
                     profile.profile_status,
+                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis,
                     term.id AS term_id,
                     term.row_version AS term_row_version,
                     term.effective_from,

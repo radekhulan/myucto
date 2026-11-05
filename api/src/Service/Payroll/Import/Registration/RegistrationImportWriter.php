@@ -482,7 +482,8 @@ final class RegistrationImportWriter
     ): array {
         $keys = [
             'office_id', 'contract_signed_on', 'planned_start_on', 'actual_start_on',
-            'fixed_term_end_on', 'weekly_hours', 'workload_basis_points', 'work_place',
+            'fixed_term_end_on', 'remuneration_type', 'hourly_rate_minor', 'remuneration_basis',
+            'weekly_hours', 'workload_basis_points', 'work_place',
             'regular_workplace', 'jmhz_workplace_municipality_code', 'jmhz_workplace_country_code',
             'jmhz_external_codebook_overlay_key', 'jmhz_external_codebook_manifest_sha256',
             'jmhz_apz_contribution_status', 'jmhz_apz_instrument_code',

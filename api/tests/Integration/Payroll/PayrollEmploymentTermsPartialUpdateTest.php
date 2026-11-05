@@ -8,6 +8,10 @@ use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
+use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
+use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -25,6 +29,9 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
 
     private Connection $db;
     private PayrollEmploymentAction $action;
+    private PayrollEmploymentRepository $employments;
+    private PayrollAttendanceImportRepository $attendance;
+    private PayrollHealthNotificationRepository $healthNotifications;
     private int $supplierId;
     private int $employeeId;
     private int $officeId;
@@ -41,6 +48,9 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
             $this->markTestSkipped('Migrace 1195 neproběhla.');
         }
         $this->action = $container->get(PayrollEmploymentAction::class);
+        $this->employments = $container->get(PayrollEmploymentRepository::class);
+        $this->attendance = $container->get(PayrollAttendanceImportRepository::class);
+        $this->healthNotifications = $container->get(PayrollHealthNotificationRepository::class);
 
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
@@ -122,6 +132,126 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         self::assertSame($this->officeId, $terms['office_id']);
         // Důvod změny patří k zápisu, ze staré verze se nepřebírá.
         self::assertNull($terms['change_reason']);
+    }
+
+    public function testHourlyVersionAndPartialCorrectionsPreserveHistoryAndDoNotInheritMonthlyWage(): void
+    {
+        $employment = $this->activeEmployment();
+        $changed = $this->call('addTerms', $employment, [
+            'row_version' => $employment['row_version'],
+            'effective_from' => '2026-03-01',
+            'remuneration_type' => 'hourly',
+            'hourly_rate_minor' => 20000,
+            'remuneration_basis' => 'Syntetický mzdový výměr',
+        ]);
+        self::assertCount(2, $changed['terms']);
+        self::assertSame('hourly', $changed['terms'][0]['remuneration_type']);
+        self::assertSame(20000, $changed['terms'][0]['hourly_rate_minor']);
+        self::assertNull($changed['terms'][0]['monthly_gross_minor']);
+        self::assertSame('monthly', $changed['terms'][1]['remuneration_type']);
+        self::assertSame(4000000, $changed['terms'][1]['monthly_gross_minor']);
+        self::assertSame('2026-02-28', $changed['terms'][1]['effective_to']);
+        $salary = $this->db->pdo()->prepare(
+            'SELECT ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+               FROM payroll_employments employment WHERE supplier_id = ? AND id = ?',
+        );
+        $salary->execute(['2026-02-28', '2026-02-28', $this->supplierId, $employment['id']]);
+        self::assertSame(4000000, (int) $salary->fetchColumn());
+        $salary->execute(['2026-03-01', '2026-03-01', $this->supplierId, $employment['id']]);
+        self::assertNull($salary->fetchColumn());
+
+        $corrected = $this->call('correctTerms', $changed, [
+            'row_version' => $changed['row_version'],
+            'weekly_hours' => '30',
+        ]);
+        self::assertSame('hourly', $corrected['terms'][0]['remuneration_type']);
+        self::assertSame(20000, $corrected['terms'][0]['hourly_rate_minor']);
+        self::assertSame('Syntetický mzdový výměr', $corrected['terms'][0]['remuneration_basis']);
+        self::assertNull($corrected['terms'][0]['monthly_gross_minor']);
+
+        $next = $this->call('addTerms', $corrected, [
+            'row_version' => $corrected['row_version'],
+            'effective_from' => '2026-04-01',
+            'hourly_rate_minor' => 21000,
+        ]);
+        self::assertSame(21000, $next['terms'][0]['hourly_rate_minor']);
+        self::assertSame(20000, $next['terms'][1]['hourly_rate_minor']);
+        self::assertNull($next['terms'][0]['monthly_gross_minor']);
+    }
+
+    public function testLegacyRepositoryCallerPreservesHourlyTermsWhenKeysAreMissing(): void
+    {
+        $employment = $this->activeEmployment();
+        $changed = $this->call('addTerms', $employment, [
+            'row_version' => $employment['row_version'],
+            'effective_from' => '2026-03-01',
+            'remuneration_type' => 'hourly',
+            'hourly_rate_minor' => 20000,
+            'remuneration_basis' => 'Syntetický výměr',
+        ]);
+        $repository = $this->employments;
+        $body = $repository->currentTerms($this->supplierId, (int) $employment['id']);
+        self::assertIsArray($body);
+        unset($body['remuneration_type'], $body['hourly_rate_minor'], $body['remuneration_basis']);
+        $body['effective_from'] = '2026-04-01';
+        $next = $repository->addTerms(
+            $this->supplierId, (int) $employment['id'], $body, (int) $changed['row_version'],
+            $this->userId, null, null,
+        );
+        self::assertSame('hourly', $next['terms'][0]['remuneration_type']);
+        self::assertSame(20000, $next['terms'][0]['hourly_rate_minor']);
+        self::assertSame('Syntetický výměr', $next['terms'][0]['remuneration_basis']);
+        self::assertNull($next['terms'][0]['monthly_gross_minor']);
+    }
+
+    public function testReturnToMonthlyRequiresExplicitWageAndHourlyReadersNeverUseOldProjection(): void
+    {
+        $employment = $this->activeEmployment();
+        $hourly = $this->call('addTerms', $employment, [
+            'row_version' => $employment['row_version'],
+            'effective_from' => '2026-03-01',
+            'remuneration_type' => 'hourly',
+            'hourly_rate_minor' => 20000,
+            'remuneration_basis' => 'Syntetický výměr',
+        ]);
+        $attendance = $this->attendance->termsAt($this->supplierId, [(int) $employment['id']], '2026-03-01', '2026-03-31');
+        self::assertNull($attendance[(int) $employment['id']]['monthly_gross_minor']);
+
+        // Člen družstva se podle předpokládané účasti opírá o sjednaný měsíční příjem.
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET health_association_member = 1 WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $employment['id']]);
+        $monthlyFacts = $this->healthNotifications->findNotificationFacts($this->supplierId, (int) $employment['id'], '2026-02-15');
+        $hourlyFacts = $this->healthNotifications->findNotificationFacts($this->supplierId, (int) $employment['id'], '2026-03-15');
+        self::assertTrue($monthlyFacts['participates']);
+        self::assertFalse($hourlyFacts['participates']);
+        $listed = $this->healthNotifications->listNotificationFacts($this->supplierId, '2026-03-01', '2026-03-31');
+        self::assertFalse($listed[0]['participates']);
+
+        foreach (['addTerms', 'correctTerms'] as $method) {
+            foreach ([[], ['monthly_gross_minor' => null]] as $amount) {
+                $response = $this->action->{$method}(
+                    $this->request('PUT', '/api/payroll/employments/' . $employment['id'] . '/terms', [
+                        'row_version' => $hourly['row_version'],
+                        'effective_from' => '2026-04-01',
+                        'remuneration_type' => 'monthly',
+                        'hourly_rate_minor' => null,
+                        ...$amount,
+                    ]),
+                    new Response(),
+                    ['id' => (string) $employment['id']],
+                );
+                self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+            }
+        }
+        $monthly = $this->call('addTerms', $hourly, [
+            'row_version' => $hourly['row_version'],
+            'effective_from' => '2026-04-01',
+            'remuneration_type' => 'monthly',
+            'hourly_rate_minor' => null,
+            'monthly_gross_minor' => 3500000,
+        ]);
+        self::assertSame(3500000, $monthly['terms'][0]['monthly_gross_minor']);
+        self::assertNull($monthly['terms'][1]['monthly_gross_minor']);
     }
 
     /** @return array<string,mixed> */

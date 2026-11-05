@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
@@ -294,6 +295,8 @@ final class PayrollRecurringComponentRepository
                      WHERE employment.supplier_id = ?
                  )
              SELECT recurring.*, employment.employee_id,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . '
+                      AS hourly_remuneration_in_period,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                       AS monthly_gross_minor,
                     employment.code AS employment_code,
@@ -350,12 +353,14 @@ final class PayrollRecurringComponentRepository
         );
         $stmt->execute([
             // Pořadí odpovídá výskytu `?` v dotazu: účinný stav (1), okno
-            // událostí (2), firma v CTE (1), účinná měsíční mzda (2), zdroj
+            // událostí (2), firma v CTE (1), hodinové podmínky (2), měsíční mzda (2), zdroj
             // docházky měsíce (1), firma a účinnost předpisu (5).
             $periodEnd,
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodStart,
             $periodEnd,
             $periodEnd,
             $periodStart,

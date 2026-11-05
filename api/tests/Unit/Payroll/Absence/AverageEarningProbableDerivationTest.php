@@ -57,6 +57,14 @@ final class AverageEarningProbableDerivationTest extends TestCase
         self::assertNull(Derivation::probableFromAchievedWage([]));
     }
 
+    public function testHourlyTermsNeverUseResidualMonthlyAmountAsProbableEarning(): void
+    {
+        self::assertNull(Derivation::probableFromAgreedGross([
+            ['id' => 7, 'effective_from' => '2026-06-01', 'remuneration_type' => 'hourly',
+             'hourly_rate_minor' => 20_000, 'monthly_gross_minor' => '4500000', 'weekly_hours' => '40.00'],
+        ], '2026-04-01'));
+    }
+
     public function testAgreedMonthlyGrossIsConvertedWithTheStatutoryCoefficient(): void
     {
         $probable = Derivation::probableFromAgreedGross([

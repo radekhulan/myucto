@@ -9,6 +9,24 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRunSourceDriftTest extends TestCase
 {
+    public function testHourlyTermsAddedAfterLockPreventApprovalOfOldMonthlySnapshot(): void
+    {
+        $current = $this->current();
+        $current['hourly_remuneration_terms'] = [7 => [[
+            'id' => 21, 'effective_from' => '2026-06-01', 'effective_to' => '2026-06-15',
+            'hourly_rate_minor' => 20_000, 'remuneration_basis' => 'Syntetický výměr',
+        ]]];
+        $drift = PayrollRunSourceDrift::between($this->frozen(), $current);
+        self::assertSame(1, $drift->total());
+        self::assertSame(1, $drift->remunerationChanged);
+
+        $frozen = $this->frozen();
+        $frozen['people'][0]['employments'][0]['hourly_remuneration_terms'] = $current['hourly_remuneration_terms'][7];
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        $current['hourly_remuneration_terms'][7][0]['hourly_rate_minor'] = 21_000;
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->remunerationChanged);
+    }
+
     public function testIdenticalSourcesReportNoChange(): void
     {
         $drift = PayrollRunSourceDrift::between(

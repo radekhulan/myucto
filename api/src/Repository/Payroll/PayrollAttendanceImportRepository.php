@@ -180,7 +180,7 @@ final class PayrollAttendanceImportRepository
         $stmt = $this->db->pdo()->prepare(
             "WITH ranked AS (
                 SELECT terms.id, terms.employment_id, terms.effective_from, terms.effective_to,
-                       terms.monthly_gross_minor,
+                       terms.monthly_gross_minor, terms.remuneration_type,
                        ROW_NUMBER() OVER (
                            PARTITION BY terms.employment_id
                            ORDER BY terms.effective_from DESC, terms.id DESC
@@ -189,7 +189,8 @@ final class PayrollAttendanceImportRepository
                  WHERE terms.supplier_id = ? AND terms.employment_id IN ({$placeholders})
              )
              SELECT ranked.id, ranked.employment_id, ranked.effective_from, ranked.effective_to,
-                    COALESCE(ranked.monthly_gross_minor, employment.monthly_gross_minor) AS monthly_gross_minor,
+                    CASE WHEN ranked.remuneration_type = 'hourly' THEN NULL
+                         ELSE COALESCE(ranked.monthly_gross_minor, employment.monthly_gross_minor) END AS monthly_gross_minor,
                     ranked.recency, employment.status
                FROM ranked
                JOIN payroll_employments employment

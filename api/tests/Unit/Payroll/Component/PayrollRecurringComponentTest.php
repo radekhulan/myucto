@@ -11,6 +11,35 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRecurringComponentTest extends TestCase
 {
+    public function testHourlyMonthCannotMaterializeMonthlyBaseOrMonthlyPercentage(): void
+    {
+        $calculator = new PayrollRecurringAmountCalculator(new MoneyRateCalculator());
+        $base = [
+            'hourly_remuneration_in_period' => true,
+            'component_kind' => 'base_wage',
+            'calculation_kind' => 'fixed_amount',
+            'amount_minor' => 4_200_000,
+            'monthly_gross_minor' => 4_200_000,
+            'rate_basis_points' => 1000,
+            'allocation_rule' => 'full_month',
+            'employment_start' => '2026-01-01',
+            'employment_end' => null,
+            'employment_effective_status' => 'active',
+            'employment_suspended_in_month' => false,
+        ];
+        foreach ([$base, array_replace($base, [
+            'component_kind' => 'bonus',
+            'calculation_kind' => 'employment_gross_basis_points',
+        ])] as $row) {
+            $result = $calculator->calculate($row, '2026-06-01');
+            self::assertSame('manual_review', $result['status']);
+            self::assertNull($result['amount_minor']);
+        }
+        // Pevná odměna není měsíční základ ani podíl ze smluvní měsíční mzdy.
+        $bonus = $calculator->calculate(array_replace($base, ['component_kind' => 'bonus']), '2026-06-01');
+        self::assertSame(4_200_000, $bonus['amount_minor']);
+    }
+
     public function testValidatorAcceptsClosedFormulaAndRejectsAmbiguousAmount(): void
     {
         $validator = new PayrollRecurringComponentValidator();

@@ -263,6 +263,7 @@ final class PayrollEmploymentRepository
             $userAgent,
         ): array {
             $this->lockEmployee($supplierId, $employeeId);
+            $data['terms'] += ['remuneration_type' => 'monthly', 'hourly_rate_minor' => null, 'remuneration_basis' => null];
             $data['terms']['office_id'] = $this->resolveOffice(
                 $supplierId,
                 $data['terms']['office_id'],
@@ -530,9 +531,19 @@ final class PayrollEmploymentRepository
             if ($previous === null) {
                 throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
             }
-            $data['monthly_gross_minor'] = $replaceMonthlyGross
+            $data += [
+                'remuneration_type' => $previous['remuneration_type'] ?? 'monthly',
+                'hourly_rate_minor' => $previous['hourly_rate_minor'] ?? null,
+                'remuneration_basis' => $previous['remuneration_basis'] ?? null,
+            ];
+            $this->assertMonthlyTransition($previous, $data, $replaceMonthlyGross, $monthlyGrossMinor);
+            $data['monthly_gross_minor'] = $data['remuneration_type'] === 'hourly' ? null : ($replaceMonthlyGross
                 ? $monthlyGrossMinor
-                : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
+                : (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
+                    ? null : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor'])));
+            if ($data['remuneration_type'] === 'hourly' && $replaceMonthlyGross && $monthlyGrossMinor !== null) {
+                throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+            }
             $storedFrom = (string) $previous['effective_from'];
             $storedTo = $previous['effective_to'] === null
                 ? null
@@ -720,6 +731,12 @@ final class PayrollEmploymentRepository
             );
 
             $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
+            $data += [
+                'remuneration_type' => $previous['remuneration_type'] ?? 'monthly',
+                'hourly_rate_minor' => $previous['hourly_rate_minor'] ?? null,
+                'remuneration_basis' => $previous['remuneration_basis'] ?? null,
+            ];
+            $this->assertMonthlyTransition($previous, $data, $replaceMonthlyGross, $monthlyGrossMinor);
             if ($previous !== null && $data['effective_from'] <= (string) $previous['effective_from']) {
                 throw new \DomainException(
                     'Nová smluvní verze musí začínat později než dosud poslední verze.'
@@ -728,9 +745,13 @@ final class PayrollEmploymentRepository
             // Nová verze platí od svého data napořád — nesmí začít v měsíci,
             // za který je mzda zaúčtovaná nebo vyplacená, ani před ním.
             $this->assertTermsOpenFrom($supplierId, $employmentId, (string) $data['effective_from'], null);
-            $data['monthly_gross_minor'] = $replaceMonthlyGross
+            $data['monthly_gross_minor'] = $data['remuneration_type'] === 'hourly' ? null : ($replaceMonthlyGross
                 ? $monthlyGrossMinor
-                : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
+                : (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
+                    ? null : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor'])));
+            if ($data['remuneration_type'] === 'hourly' && $replaceMonthlyGross && $monthlyGrossMinor !== null) {
+                throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+            }
             if ($previous !== null) {
                 $previousEnd = (new \DateTimeImmutable($data['effective_from']))
                     ->modify('-1 day')
@@ -1525,7 +1546,8 @@ final class PayrollEmploymentRepository
                     terms.effective_from, terms.effective_to,
                     terms.contract_signed_on, terms.planned_start_on,
                     terms.actual_start_on, terms.fixed_term_end_on,
-                    terms.monthly_gross_minor,
+                    terms.monthly_gross_minor, terms.remuneration_type,
+                    terms.hourly_rate_minor, terms.remuneration_basis,
                     terms.weekly_hours, terms.leave_entitlement_weeks_override,
                     terms.probable_hourly_earning_minor,
                     terms.probable_earning_rationale,
@@ -1684,7 +1706,8 @@ final class PayrollEmploymentRepository
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
-                 fixed_term_end_on, monthly_gross_minor, weekly_hours, leave_entitlement_weeks_override,
+                 fixed_term_end_on, monthly_gross_minor, remuneration_type, hourly_rate_minor,
+                 remuneration_basis, weekly_hours, leave_entitlement_weeks_override,
                  probable_hourly_earning_minor, probable_earning_rationale,
                  workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
@@ -1716,7 +1739,7 @@ final class PayrollEmploymentRepository
                  jmhz_workplace_address_point_code, jmhz_workplace_street,
                  jmhz_workplace_house_number, jmhz_workplace_orientation_number,
                  jmhz_workplace_postal_code, jmhz_state_prosecutor)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?)'
         )->execute([
@@ -1729,6 +1752,9 @@ final class PayrollEmploymentRepository
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
             $data['monthly_gross_minor'],
+            $data['remuneration_type'],
+            $data['hourly_rate_minor'],
+            $data['remuneration_basis'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
             $data['probable_hourly_earning_minor'],
@@ -1812,7 +1838,8 @@ final class PayrollEmploymentRepository
             'UPDATE payroll_employment_terms SET
                  office_id = ?,
                  contract_signed_on = ?, planned_start_on = ?, actual_start_on = ?,
-                 fixed_term_end_on = ?, monthly_gross_minor = ?, weekly_hours = ?,
+                 fixed_term_end_on = ?, monthly_gross_minor = ?, remuneration_type = ?,
+                 hourly_rate_minor = ?, remuneration_basis = ?, weekly_hours = ?,
                  leave_entitlement_weeks_override = ?,
                  probable_hourly_earning_minor = ?, probable_earning_rationale = ?,
                  workload_basis_points = ?,
@@ -1852,6 +1879,9 @@ final class PayrollEmploymentRepository
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
             $data['monthly_gross_minor'],
+            $data['remuneration_type'],
+            $data['hourly_rate_minor'],
+            $data['remuneration_basis'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
             $data['probable_hourly_earning_minor'],
@@ -2055,6 +2085,17 @@ final class PayrollEmploymentRepository
         $stmt->execute([$supplierId, $employmentId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $this->cast($this->row($row));
+    }
+
+    /** @param array<string,mixed>|null $previous @param array<string,mixed> $data */
+    private function assertMonthlyTransition(?array $previous, array $data, bool $replace, ?int $monthlyGross): void
+    {
+        if (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
+            && $data['remuneration_type'] === 'monthly'
+            && (!$replace || $monthlyGross === null)
+        ) {
+            throw new \InvalidArgumentException('Přechod na měsíční odměňování vyžaduje výslovně zadanou měsíční mzdu.');
+        }
     }
 
     /** @param array<string,mixed> $diff */
@@ -2571,6 +2612,7 @@ final class PayrollEmploymentRepository
             'employee_id',
             'office_id',
             'monthly_gross_minor',
+            'hourly_rate_minor',
             'probable_hourly_earning_minor',
             'workload_basis_points',
             'row_version',

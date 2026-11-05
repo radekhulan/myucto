@@ -38,6 +38,40 @@ final class PayrollRunSnapshotBatchLoader
     public function __construct(private readonly Connection $db) {}
 
     /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function hourlyRemunerationTerms(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $rows = $this->fetch(
+            'SELECT term.id, term.row_version, term.effective_from, term.effective_to,
+                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis,
+                    term.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_employment_terms term
+              WHERE term.supplier_id = ? AND term.employment_id IN (%s)
+                AND term.remuneration_type = "hourly"
+                AND term.effective_from <= ?
+                AND (term.effective_to IS NULL OR term.effective_to >= ?)
+              ORDER BY term.effective_from, term.id',
+            [$supplierId],
+            $employmentIds,
+            [$periodEnd, $periodStart],
+        );
+        foreach ($rows as &$row) {
+            foreach (['id', 'row_version', 'hourly_rate_minor'] as $field) {
+                $row[$field] = (int) $row[$field];
+            }
+        }
+        unset($row);
+
+        return $this->grouped($rows);
+    }
+
+    /**
      * Docházkové měsíce podle pracovního vztahu.
      *
      * `payroll_time_months` má UNIQUE (supplier_id, employment_id, period_start),

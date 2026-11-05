@@ -41,6 +41,28 @@ final class PayrollWageStatementFlowTest extends TestCase
         $this->tearDownPayrollFullFlow();
     }
 
+    public function testHourlyWageStatementFreezesRateWithoutMonthlyFallback(): void
+    {
+        $person = $this->createEmployment($this->officeId, 'Hana Hodinová', 7, 'hpp', 'employment', 40, 10_000);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 18750,
+                    remuneration_basis = "Syntetický výměr", monthly_gross_minor = NULL
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$this->supplierId, $person['employment_id']]);
+        self::assertTrue($this->list($person['employment_id'])['readiness']['available']);
+        $first = $this->generate($person['employment_id'], 'hourly-wage-statement');
+        self::assertSame(201, $first['status'], json_encode($first['body']) ?: '');
+        $snapshot = json_decode((string) $this->scalar(
+            'SELECT snapshot_json FROM payroll_wage_statement_revisions WHERE supplier_id = ? AND employment_id = ? AND revision_no = 1',
+            [$this->supplierId, $person['employment_id']],
+        ), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('hourly', $snapshot['wage']['remuneration_type']);
+        self::assertSame(18750, $snapshot['wage']['hourly_rate_minor']);
+        self::assertNull($snapshot['wage']['monthly_gross_minor']);
+        self::assertSame('Syntetický výměr', $snapshot['wage']['remuneration_basis']);
+        self::assertSame($first['body']['id'], $this->generate($person['employment_id'], 'hourly-wage-replay')['body']['id']);
+    }
+
     public function testWageStatementIsIssuedVersionedAndReplaced(): void
     {
         $person = $this->createEmployment($this->officeId, 'Věra Výměrová', 1, 'hpp', 'employment', 40, 10_000);

@@ -308,6 +308,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'
             => 'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
+        'payroll.ts::PayrollRemunerationType'
+            => 'db:payroll_employment_terms.remuneration_type',
         'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
         // Sloupec z migrace 1403 do výpočtu daně už nevstupuje (§ 6 odst. 4
