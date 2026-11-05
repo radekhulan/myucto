@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\WorkReport;
 
 use MyInvoice\Action\Settings\SettingsAction;
+use MyInvoice\Action\Settings\ClientBrandingSettingsAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -15,6 +16,7 @@ use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
@@ -22,68 +24,87 @@ final class WorkReportDisplayDefaultsTest extends TestCase
 {
     use IsolatedSupplierTrait;
 
-    public function testDefaultsAreValidatedAndIsolatedPerCompany(): void
+    private function createSupplier(\PDO $pdo): int
+    {
+        $source = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
+        self::assertGreaterThan(0, $source, 'Test vyžaduje výchozí syntetickou firmu.');
+        $id = $this->createIsolatedSupplier($pdo, $source);
+        $pdo->prepare('UPDATE supplier SET work_report_display_options = NULL WHERE id = ?')->execute([$id]);
+        return $id;
+    }
+
+    public static function settingsPaths(): array
+    {
+        return ['běžné nastavení' => [false], 'delegovaný vzhled' => [true]];
+    }
+
+    #[DataProvider('settingsPaths')]
+    public function testDefaultsAreValidatedAndIsolatedPerCompany(bool $delegated): void
     {
         $container = Bootstrap::buildContainer();
         $pdo = $container->get(Connection::class)->pdo();
-        $settings = $container->get(SettingsAction::class);
+        $settings = $container->get($delegated ? ClientBrandingSettingsAction::class : SettingsAction::class);
+        $updateMethod = $delegated ? 'update' : 'updateSupplier';
+        $getMethod = $delegated ? 'get' : 'getSupplier';
         $pdo->beginTransaction();
         try {
-            $supplier = $this->createIsolatedSupplier($pdo, 1);
-            $other = $this->createIsolatedSupplier($pdo, 1);
+            $supplier = $this->createSupplier($pdo);
+            $other = $this->createSupplier($pdo);
             $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/settings/supplier')
                 ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
                 ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
-                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin']);
-            $response = $settings->updateSupplier($request->withParsedBody([
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn(), 'role' => 'admin']);
+            $response = $settings->$updateMethod($request->withParsedBody([
                 'work_report_display_options' => ['compact' => true, 'rate' => false, 'amount' => false],
             ]), new Response());
             self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
             $read = static fn ($response): array => json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
-            $actual = $read($settings->getSupplier($request, new Response()))['work_report_display_options'];
+            $actual = $read($settings->$getMethod($request, new Response()))['work_report_display_options'];
             self::assertTrue($actual['compact']);
             self::assertFalse($actual['rate']);
             self::assertFalse($actual['amount']);
             self::assertSame(WorkReportDisplayOptions::DEFAULTS,
-                $read($settings->getSupplier($request->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $other), new Response()))['work_report_display_options']);
+                $read($settings->$getMethod($request->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $other), new Response()))['work_report_display_options']);
 
-            $invalid = $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => ['rate' => 'false']]), new Response());
+            $invalid = $settings->$updateMethod($request->withParsedBody(['work_report_display_options' => ['rate' => 'false']]), new Response());
             self::assertSame(400, $invalid->getStatusCode());
-            self::assertSame($actual, $read($settings->getSupplier($request, new Response()))['work_report_display_options']);
+            self::assertSame($actual, $read($settings->$getMethod($request, new Response()))['work_report_display_options']);
 
-            $response = $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => null]), new Response());
+            $response = $settings->$updateMethod($request->withParsedBody(['work_report_display_options' => null]), new Response());
             self::assertSame(200, $response->getStatusCode());
             self::assertSame(WorkReportDisplayOptions::DEFAULTS,
-                $read($settings->getSupplier($request, new Response()))['work_report_display_options']);
+                $read($settings->$getMethod($request, new Response()))['work_report_display_options']);
         } finally {
             if ($pdo->inTransaction()) $pdo->rollBack();
         }
     }
 
     /** BEZ OPRAVY PADÁ: uložení formuláře s výchozí podobou zapsalo firmě bez nastavení výslovnou hodnotu. */
-    public function testSavingDefaultOptionsKeepsCompanyWithoutSetting(): void
+    #[DataProvider('settingsPaths')]
+    public function testSavingDefaultOptionsKeepsCompanyWithoutSetting(bool $delegated): void
     {
         $container = Bootstrap::buildContainer();
         $pdo = $container->get(Connection::class)->pdo();
-        $settings = $container->get(SettingsAction::class);
+        $settings = $container->get($delegated ? ClientBrandingSettingsAction::class : SettingsAction::class);
+        $updateMethod = $delegated ? 'update' : 'updateSupplier';
         $pdo->beginTransaction();
         try {
-            $supplier = $this->createIsolatedSupplier($pdo, 1);
+            $supplier = $this->createSupplier($pdo);
             $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/settings/supplier')
                 ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
                 ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
-                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin']);
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn(), 'role' => 'admin']);
             $stored = static function () use ($pdo, $supplier): mixed {
                 $stmt = $pdo->prepare('SELECT work_report_display_options FROM supplier WHERE id = ?');
                 $stmt->execute([$supplier]);
                 return $stmt->fetchColumn();
             };
             foreach ([WorkReportDisplayOptions::DEFAULTS, ['compact' => false, 'amount' => true]] as $options) {
-                $response = $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => $options]), new Response());
+                $response = $settings->$updateMethod($request->withParsedBody(['work_report_display_options' => $options]), new Response());
                 self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
                 self::assertNull($stored());
             }
-            $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => ['compact' => true]]), new Response());
+            $settings->$updateMethod($request->withParsedBody(['work_report_display_options' => ['compact' => true]]), new Response());
             self::assertSame(['compact' => true], json_decode((string) $stored(), true));
         } finally {
             if ($pdo->inTransaction()) $pdo->rollBack();
@@ -94,17 +115,19 @@ final class WorkReportDisplayDefaultsTest extends TestCase
      * BEZ OPRAVY PADÁ: výkaz vystavené faktury dědil výchozí podobu firmy živě, takže po
      * její změně by znovu vygenerované PDF vystaveného dokladu zpětně změnilo sloupce.
      */
-    public function testChangingCompanyDefaultsDoesNotRestyleIssuedInvoices(): void
+    #[DataProvider('settingsPaths')]
+    public function testChangingCompanyDefaultsDoesNotRestyleIssuedInvoices(bool $delegated): void
     {
         $container = Bootstrap::buildContainer();
         $pdo = $container->get(Connection::class)->pdo();
-        $settings = $container->get(SettingsAction::class);
+        $settings = $container->get($delegated ? ClientBrandingSettingsAction::class : SettingsAction::class);
+        $updateMethod = $delegated ? 'update' : 'updateSupplier';
         $repo = $container->get(WorkReportRepository::class);
         $pdf = $container->get(InvoicePdfRenderer::class);
         $invoices = $container->get(InvoiceRepository::class);
         $pdo->beginTransaction();
         try {
-            $supplier = $this->createIsolatedSupplier($pdo, 1);
+            $supplier = $this->createSupplier($pdo);
             $pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
                 VALUES (?, 'CZK', 'CZK', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)")->execute([$supplier]);
             $currency = (int) $pdo->lastInsertId();
@@ -131,9 +154,9 @@ final class WorkReportDisplayDefaultsTest extends TestCase
             $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/settings/supplier')
                 ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
                 ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
-                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role' => 'admin']);
-            $update = static function (?array $options) use ($settings, $request): void {
-                $response = $settings->updateSupplier($request->withParsedBody(['work_report_display_options' => $options]), new Response());
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn(), 'role' => 'admin']);
+            $update = static function (?array $options) use ($settings, $request, $updateMethod): void {
+                $response = $settings->$updateMethod($request->withParsedBody(['work_report_display_options' => $options]), new Response());
                 self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
             };
             $effective = static fn (int $id): array => $repo->findByInvoice($id, $supplier)['effective_display_options'];

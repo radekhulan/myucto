@@ -68,6 +68,7 @@ final class RoutePermissionMap
         ['*', '#^/api/settings/client/branding(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['*', '#^/api/settings/branding-profiles(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['*', '#^/api/settings/client/payment-qr(/|$)#', 'settings.payment_qr', AccessLevel::WRITE],
+        ['*', '#^/api/settings/client/invoice-defaults$#', 'settings.invoice_defaults', AccessLevel::WRITE],
         ['*', '#^/api/settings/client/(signing|pdf-signing)(/|$)#', 'settings.signing_profiles', AccessLevel::WRITE],
         ['GET', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::READ],
         ['*', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::WRITE],

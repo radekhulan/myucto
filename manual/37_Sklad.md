@@ -77,12 +77,10 @@ oprávnění neotevírají. Odchylky při vychystání jsou vyhrazené interním
 
 1. Otevřete `Firma → Nastavení` a záložku **Daně a účetnictví**.
 2. V oddílu **Vést skladovou evidenci** zaškrtněte **Vést skladovou evidenci**.
-3. Podle potřeby nastavte tři navazující volby:
+3. Podle potřeby nastavte dvě navazující volby. Rozpis balení na PDF faktury je mezi volbami **Vzhled PDF dokladů** (viz níže).
    - **Automatická výdejka při vystavení faktury** (výchozí zapnuto). Má-li faktura
      řádky napojené na skladovou kartu, při vystavení se sama založí a zaúčtuje
      výdejka. Vypněte ji, chcete-li výdejky zakládat ručně.
-   - **Na PDF faktury rozepsat balení na základní jednotky** (výchozí zapnuto).
-     U řádku fakturovaného v balení doplní PDF množství v základní jednotce.
    - **Zboží se počítá „na cestě“ od stavu**: **Odeslaná objednávka** (výchozí),
      nebo **Až potvrzená dodavatelem**.
 4. Uložte nastavení tlačítkem v záhlaví stránky.
@@ -584,9 +582,11 @@ vůbec nezobrazí a skladové funkce odmítnou i čtecí požadavky, aby se ven 
   se automaticky založí a zaúčtuje výdejka. Vypnutím přejdete na ruční vydávání zboží.
   Použijte to, chcete-li mít nad výdejem plnou kontrolu nebo výdejky slučujete
   jinak, než fakturujete.
-- **Na PDF faktury rozepsat balení na základní jednotky** se zobrazí jen po zapnutí
-  evidence (výchozí zapnuto). U řádku fakturovaného v balení doplní PDF množství
-  v základní jednotce ([§ 37.12.5.1](#371251-automaticky-vydej-pri-vystaveni-faktury)).
+- **Na PDF faktury rozepsat balení na základní jednotky** (výchozí zapnuto) je mezi
+  volbami **Vzhled PDF dokladů** (interně `Firma → Nastavení`, klientsky
+  `Firma → Nastavení firmy → Branding`). Účinek má jen se zapnutou evidencí skladu:
+  u řádku fakturovaného v balení doplní PDF množství v základní jednotce
+  ([§ 37.12.5.1](#371251-automaticky-vydej-pri-vystaveni-faktury)).
 - **Zboží se počítá „na cestě“ od stavu** určuje, kdy se objednávka počítá jako
   zboží na cestě ([§ 37.12.9.3](#371293-na-ceste)).
 

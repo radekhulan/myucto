@@ -15,6 +15,21 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class ApiScopeMiddlewareTest extends TestCase
 {
+    public function testDelegatedInvoiceDefaultsRemainSessionOnly(): void
+    {
+        foreach (['GET', 'PUT'] as $method) {
+            $path = '/api/settings/client/invoice-defaults';
+            foreach (['read', 'read_write'] as $scope) {
+                $response = $this->middleware()->process($this->bearer($method, $path, $scope), $this->okHandler());
+                self::assertSame(403, $response->getStatusCode());
+                self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+            }
+            $session = (new ServerRequestFactory())->createServerRequest($method, $path)
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+            self::assertSame(204, $this->middleware()->process($session, $this->okHandler())->getStatusCode());
+        }
+    }
+
     public function testMembershipCatalogTokenReadsRegisteredAccountingRoutesOnly(): void
     {
         $app = \Slim\Factory\AppFactory::create();

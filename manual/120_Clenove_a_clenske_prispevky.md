@@ -2,15 +2,25 @@
 
 V podvojném účetnictví podle vyhlášky 504 otevřete **Účetnictví → Členské příspěvky spolku**. Evidence spojuje člena spolku s kontaktem, právním titulem členství a účetně doloženými předpisy příspěvků.
 
+Postup je vždy stejný: založte člena, zapište mu první revizi členství a teprve potom předpis příspěvku. Dokud není evidován žádný člen, stránka tyto tři kroky vypíše.
+
 ## 120.1 Založení a historie člena
 
-Vyberte kontakt a vyplňte jedinečné členské číslo. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění.
+Vyberte kontakt a vyplňte jedinečné členské číslo. Kontakt i číslo smí v organizaci patřit jen jednomu členovi. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění. První revize musí mít stav **Aktivní**.
 
-Změny stavu se zapisují jako další revize. Původní historie zůstává zachovaná. Budoucí pozastavení nebo ukončení nemění dnešní stav ani starší předpisy. Detail odlišuje dnešní stav od budoucích změn.
+Změny stavu se zapisují jako další revize přes **Změnit stav členství** v detailu člena. Nová revize musí začínat po datu účinnosti poslední revize. Původní historie zůstává zachovaná. Budoucí pozastavení nebo ukončení nemění dnešní stav ani starší předpisy. Detail odlišuje dnešní stav od budoucích změn.
+
+Člena nejde smazat, přiřazený kontakt ani členské číslo nejde změnit a zapsanou revizi nejde vzít zpět. Před založením člena i před potvrzením revize proto údaje zkontrolujte.
 
 ## 120.2 Předpis příspěvku
 
-Zvolte **Nový předpis příspěvku**. Vyberte otevřené účetní období, účetní datum, splatnost a období, za které příspěvek náleží. Vyplňte jednoznačný identifikátor titulu, částku, pohledávkový a výnosový účet z rozvrhu, odkaz na titul a doložení částky.
+Zvolte **Nový předpis příspěvku**. Pokud firmě nebo zvolenému období chybí některý předpoklad (otevřené účetní období, potvrzený právní profil spolku, osy činnosti, druhu činnosti a daňového režimu v dimenzích, výnosový účet 684 v účtové osnově), formulář ho hned nahoře vypíše s odkazem, kde ho doplnit.
+
+Vyberte otevřené účetní období, účetní datum, splatnost a období, za které příspěvek náleží. Vyplňte označení příspěvku (například `CP-2027`), částku, pohledávkový a výnosový účet z rozvrhu, odkaz na titul a doložení částky. Jakmile začnete formulář vyplňovat, vypíše pod sebou všechno, co ještě chybí.
+
+Stejné označení nejde u člena předepsat dvakrát na překrývající se období. Po stornu předpisu lze stejné označení a období předepsat znovu. Členství musí být aktivní k účetnímu datu a po celé období příspěvku, od prvního do posledního dne. Pokud není, formulář na to upozorní ještě před náhledem a náhled skončí chybou.
+
+Výnos se účtuje na účet 684 (přijaté členské příspěvky) nebo jeho analytiku. Když období příspěvku přesahuje rozvahový den účetního období, náhled to oznámí a krok uzávěrky **Časové rozlišení** odloží část připadající na další období na účet 384 a v dalším období ji rozpustí.
 
 Výslovně vyberte činnost, druh činnosti a daňový režim z účetních dimenzí firmy. Hodnoty se nepředvyplňují podle výnosového účtu. V náhledu zkontrolujte také ověřené členění; bez jeho shody s vaší volbou nelze předpis potvrdit.
 
@@ -24,9 +34,11 @@ Zvolte **Zobrazit náhled**, zkontrolujte člena, období, částku a účty a p
 
 Pohledávky se zobrazují po stránkách. Přehled rozlišuje předepsanou částku a prokázaný otevřený zůstatek. Úhrada je doložená teprve přes skutečné párování s nativním bankovním nebo pokladním dokladem.
 
-U neprokázané nebo nejednoznačné úhrady se částka nevydává za potvrzený dluh. Otevřete související účetní doklady a opravte párování ve společné evidenci plateb.
+Párování se nedělá na této stránce. Otevřete opis účtu pohledávky v hlavní knize, přepněte na **Otevřené položky - párování** a spojte řádek předpisu s řádkem platby do okruhu ([kap. 55.8.5.1](55_Hlavni_kniha.md)). Úhrada se prokáže jen u okruhu, ve kterém je jediná pohledávka z této evidence.
 
-Kontrola vybraného účetního období porovnává členské pohledávky, potvrzené operace a pohledávkové i výnosové řádky účetního deníku. Případný rozdíl vyžaduje kontrolu původu dokladů.
+U neprokázané nebo nejednoznačné úhrady se částka nevydává za potvrzený dluh. Opravte párování v opisu účtu pohledávky.
+
+Kontrola vybraného účetního období pod seznamem členů porovnává členské pohledávky, potvrzené operace a pohledávkové i výnosové řádky účetního deníku. Po zápisu předpisu, storna nebo revize se dřívější výsledek kontroly skryje; spusťte ji znovu. Případný rozdíl vyžaduje kontrolu původu dokladů.
 
 ## 120.4 Storno a opakování požadavku
 

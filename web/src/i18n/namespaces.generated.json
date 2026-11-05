@@ -257,8 +257,11 @@
     ],
     "portal-company-settings": [
       "company_email_templates",
+      "invoice_default_note",
       "settings",
-      "users"
+      "stock",
+      "users",
+      "workReportDisplay"
     ],
     "clients": [
       "purchase_invoice"
@@ -748,7 +751,11 @@
       "dimensions"
     ],
     "accounting-nonprofit-membership": [
-      "dimensions"
+      "dimensions",
+      "errors",
+      "payment_method",
+      "purchase_invoice",
+      "settings"
     ],
     "accounting-nonprofit-tax": [
       "nonprofitTaxJ6"
@@ -1134,7 +1141,9 @@
       "activation"
     ],
     "admin-branding": [
-      "settings"
+      "settings",
+      "stock",
+      "workReportDisplay"
     ],
     "admin-suppliers": [
       "aiGateway",

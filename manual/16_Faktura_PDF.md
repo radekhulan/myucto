@@ -343,28 +343,27 @@ Vygenerované PDF obsahuje:
    maďarský Adószám (viz [§ 18.7.3](18_Klienti.md#1873-slovensky-klient-a-narodni-danova-cisla)).
 3. **Číslo faktury** a **typ** (Faktura, Proforma, Dobropis, Storno).
 4. **Data** - vystaveno, DUZP, splatnost. Se zapnutou volbou **Tisknout na faktuře,
-   kdo ji vystavil** (Nastavení → Fakturace) přibude řádek **Vystavil** se jménem
+   kdo ji vystavil** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`) přibude řádek **Vystavil** se jménem
    uživatele, který doklad vystavil. Jméno se uloží při vystavení, takže pozdější
    přejmenování uživatele už vystavený doklad nezmění. Doklad vystavený před zapnutím
    této evidence, převzatý importem nebo zobrazený jako koncept ukáže autora dokladu.
    Doklad vystavený bez přihlášeného uživatele (schválení výkazu klientem přes odkaz
    nebo pravidelná fakturace spuštěná automaticky) ukáže také autora. Stejné jméno vidíte
    v detailu faktury. U už vystavených dokladů se řádek objeví až po přegenerování
-   jejich PDF (například po úpravě dokladu nebo aktualizaci aplikace), dříve vytvořené
-   PDF se samo nemění.
+   jejich PDF (například po úpravě dokladu), dříve uložené PDF se samo nemění.
 5. **Bankovní spojení** - číslo účtu nebo IBAN, BIC, banka, variabilní symbol.
-   Se zapnutou volbou **Bankovní spojení v patičce PDF faktury** (`Nastavení → Doklady`,
+   Se zapnutou volbou **Bankovní spojení v patičce PDF faktury** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) se číslo účtu, IBAN, BIC a banka tisknou v patičce každé strany
    a platební panel u součtu ukáže jen QR platbu v rámečku s popiskem. Variabilní symbol
    zůstává v údajích dokladu nad položkami. Uhrazená faktura, platba hotově nebo kartou
    a vyúčtování k vrácení vypadají stejně jako bez volby. Projeví se na konceptech a na PDF
-   vytvořených po zapnutí, už vygenerovaná PDF vystavených dokladů se nemění.
+   vytvořených po zapnutí. Již uložená PDF vystavených dokladů zůstávají zachována.
 6. **Položky** - tabulka (Popis, Množství, Cena, DPH, Celkem). U položky s vybranými
    kusy skladové karty se pod popisem vypíšou sériová čísla („Výr. č.: …“, například VIN)
    nebo šarže s expirací a množstvím („Šarže: …“), viz [§ 37.5.1](37_Sklad.md#3751-vydej-fakturou).
    Textový řádek ([§ 15.9.3](15_Faktura_editor.md#1593-polozky)) se tiskne přes celou
    šířku tabulky, bez množství a cen.
-   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny** (`Nastavení → Doklady`,
+   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) má tabulka místo sloupce Cena/j sloupce **Cena/j před slevou**, **Sleva**
    a **Cena/j po slevě**, pokud má faktura aspoň jednu položku se slevou z ceníkové ceny.
    Položka bez ceníkové ceny nebo s přirážkou ukáže jen výslednou cenu. U faktury s cenami
@@ -372,14 +371,14 @@ Vygenerované PDF obsahuje:
    a POHODA. Slevu lze zadat i přímo u řádku v editoru, viz
    [§ 15.9.3](15_Faktura_editor.md#1593-polozky).
    Faktury s mnoha položkami zhustí volba **Kompaktní řádky položek na PDF faktury**
-   (`Nastavení → Doklady`, výchozí vypnuto): tabulka položek má menší odsazení a písmo,
+   (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`, výchozí vypnuto): tabulka položek má menší odsazení a písmo,
    sloupec popisu je širší na úkor rezervy číselných sloupců (milionové částky se do nich
    pořád vejdou) a rozpis balení („celkem 80 ks“) i sériová čísla a šarže se tisknou drobným
    písmem za popisem položky na stejném řádku. Faktura s 50 položkami a dvouřádkovými názvy
    dílů má místo čtyř stran dvě, se sloupci rozpisu slevy u řádku místo pěti tři.
    Volba mění jen vzhled tabulky, částky ani ostatní části dokladu ne. Projeví se na
-   konceptech a na PDF vytvořených po zapnutí, už vygenerovaná PDF vystavených dokladů
-   se nemění.
+   konceptech a na PDF vytvořených po zapnutí. Již uložená PDF vystavených dokladů
+   zůstávají zachována. PDF může také zobrazit rozpis základního množství a počtu balení.
 7. **Sumář** - mezisoučet, sleva, rozpis DPH, **CELKEM**.
 8. **Přepočet do CZK** (EUR a cizí měna) - u českého odběratele kurz ČNB a tabulka
    základů a DPH v CZK; u zahraničního odběratele pouze česká DPH v CZK, pokud na
@@ -391,6 +390,11 @@ Vygenerované PDF obsahuje:
     přímo na stránku s výkazem. Při ceníku práce se na této straně zobrazí detailní
     časový rozpis a cenová rekapitulace; viditelnost hodin, sazby a částek respektuje
     nastavení zobrazení výkazu.
+
+   Výchozí sloupce a kompaktní rozvržení výkazu práce nastavíte interně v `Firma → Nastavení`,
+   klientsky v `Firma → Nastavení firmy → Branding`. Výkaz vystavené faktury si zachová
+   původní podobu i po přegenerování PDF. Nové nastavení se použije u konceptů bez vlastní
+   výjimky; podrobnosti uvádí [§ 15.9.6](15_Faktura_editor.md#1596-vykaz-vicepraci).
 
 > [!TIP]
 > **Branding hlavičky.** Má-li dodavatel v Nastavení zapnutý branding, PDF přebere jeho

@@ -41,7 +41,7 @@ export const PERMISSION_KEYS = [
   'property.opening.manage', 'property.opening.post', 'property.opening.revise',
   'property.payments.manage', 'property.payments.post', 'property.payments.reverse',
   'settings.company', 'settings.company.write', 'settings.domains', 'settings.bank_accounts',
-  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.signing_profiles',
+  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.invoice_defaults', 'settings.signing_profiles',
   'settings.branding', 'settings.ai_provider', 'settings.signing',
   'utilities', 'utilities.export', 'utilities.import', 'utilities.archives',
   'profile', 'profile.tokens', 'profile.mcp',
@@ -64,7 +64,7 @@ export const CLIENT_PERMISSION_KEYS = [
   'bank', 'bank.import', 'bank.match', 'bank.ignore',
   'reports.submissions', 'reports.submit',
   'documents.submit', 'settings.company', 'settings.branding',
-  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.signing_profiles',
+  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.invoice_defaults', 'settings.signing_profiles',
   'projects', 'projects.create', 'projects.archive',
   'logbook', 'logbook.write', 'logbook.import', 'logbook.delete',
   'stock', 'stock.items.write', 'stock.fulfillment.write', 'profile', 'profile.mcp',
@@ -109,7 +109,7 @@ export function setRolePermission(
   }
 }
 
-export const OPERATIONAL_SETTINGS_KEYS = ['settings.email_profiles', 'settings.email_templates', 'settings.branding', 'settings.payment_qr', 'settings.signing_profiles'] as const satisfies readonly PermissionKey[]
+export const OPERATIONAL_SETTINGS_KEYS = ['settings.email_profiles', 'settings.email_templates', 'settings.branding', 'settings.payment_qr', 'settings.invoice_defaults', 'settings.signing_profiles'] as const satisfies readonly PermissionKey[]
 
 /** Úrovně nabízené editorem respektují omezení klientských agend a samostatných akcí. */
 export function rolePermissionLevels(roleType: 'staff' | 'client', key: string): readonly PermissionValue[] {

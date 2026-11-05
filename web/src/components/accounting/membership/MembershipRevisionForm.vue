@@ -5,14 +5,15 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberRevision, type MemberRevisionInput, type MemberStatus } from '@/api/nonprofitMembership'
-import { isIsoDate, lastRevision } from './membershipFormat'
+import { formatDate } from '@/composables/useFormat'
+import { errorBox, isIsoDate, lastRevision } from './membershipFormat'
 import MembershipConfirmBar from './MembershipConfirmBar.vue'
 import { useGuardedCommit } from './useGuardedCommit'
 
 interface RevisionCommand { member: number; body: MemberRevisionInput }
 
 const props = defineProps<{ supplier: number; canManage: boolean; member: MemberIdentity; history: MemberRevision[] }>()
-const emit = defineEmits<{ done: []; lock: [locked: boolean] }>()
+const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean] }>()
 const { t } = useI18n()
 
 const inputForm = ref<HTMLFormElement | null>(null)
@@ -37,7 +38,7 @@ const invalid = computed(() => {
   const date = form.effectiveFrom
   if (!statuses.value.includes(form.status)) return t('nonprofitMembership.revisionStatusInvalid')
   if (!isIsoDate(date)) return t('nonprofitMembership.dateInvalid')
-  if (last.value && date <= last.value.effective_from) return t('nonprofitMembership.revisionAfterLast', { date: last.value.effective_from })
+  if (last.value && date <= last.value.effective_from) return t('nonprofitMembership.revisionAfterLast', { date: formatDate(last.value.effective_from) })
   const reference = form.reference.trim(), evidence = form.evidence.trim()
   if (!reference || reference.length > 1000 || !evidence || evidence.length > 2000) return t('nonprofitMembership.revisionEvidenceRequired')
   return ''
@@ -64,6 +65,7 @@ watch(() => props.supplier, () => { commit.reset(); notice.value = '' })
 watch(commit.locked, locked => emit('lock', locked))
 
 const actions = computed<ActionItem[]>(() => [
+  { key: 'rev-close', label: t('nonprofitMembership.close'), icon: 'x', show: !!last.value, disabled: commit.locked.value, run: () => emit('close') },
   { key: 'rev-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: 'primary', disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalid.value || undefined, run: review },
 ])
 </script>
@@ -72,8 +74,8 @@ const actions = computed<ActionItem[]>(() => [
   <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="revision-form">
     <h3 class="font-semibold">{{ t('nonprofitMembership.revisionTitle') }}</h3>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.revisionHelp') }}</p>
-    <p v-if="notice" role="status" class="text-sm text-success-700">{{ notice }}</p>
-    <p v-if="commit.error.value" role="alert" class="rounded border border-danger-300 p-3 text-sm">{{ commit.error.value }}</p>
+    <p v-if="notice" role="status" class="text-sm text-success-600">{{ notice }}</p>
+    <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="rev-error">{{ commit.error.value }}</p>
     <form ref="inputForm" @submit.prevent="review" @input="commit.touch">
     <fieldset :disabled="commit.locked.value" class="grid gap-3 sm:grid-cols-2">
       <label :class="formLabel">{{ t('nonprofitMembership.revisionStatus') }}
@@ -93,7 +95,7 @@ const actions = computed<ActionItem[]>(() => [
       <h4 class="font-semibold">{{ t('nonprofitMembership.revisionReview') }}</h4>
       <dl class="grid gap-3 sm:grid-cols-3">
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.revisionStatus') }}</dt><dd>{{ t(`nonprofitMembership.status_${commit.review.value.body.status}`) }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.effectiveFrom') }}</dt><dd>{{ commit.review.value.body.effective_from }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.effectiveFrom') }}</dt><dd>{{ formatDate(commit.review.value.body.effective_from) }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.expectedRevision') }}</dt><dd>{{ commit.review.value.body.expected_revision }}</dd></div>
       </dl>
       <p class="text-sm">{{ commit.review.value.body.legal_basis.reference }}</p>

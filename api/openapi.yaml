@@ -7213,6 +7213,18 @@ paths:
         `pdf_logo_show_name`, `invoice_pdf_monochrome`, `display_name`, `tagline`). Brandingová pole jsou
         původním nastavením dodavatele. Logo se nahrává zvlášť
         (není součástí tohoto endpointu).
+        Změna brandingu a vzhledu PDF vyžaduje také `settings.branding` se zápisem:
+        `email_branding_enabled`, `email_accent_color`, `pdf_logo_show_name`,
+        `invoice_pdf_monochrome`, `branding_profiles_enabled`, `invoice_pdf_compact_items`,
+        `invoice_pdf_show_issued_by`, `invoice_pdf_show_line_discount`,
+        `invoice_pdf_show_base_qty`, `invoice_pdf_bank_in_footer` a `work_report_display_options`.
+        Samotné `settings.company.write` toto oprávnění nenahrazuje; změna bez něj
+        vrátí `403 forbidden_permission`. Nezměněné hodnoty vrácené formulářem se neukládají.
+        Výchozí splatnost (`default_payment_due_days`, `default_payment_due_unit`),
+        hodinová sazba (`default_hourly_rate`) a poznámka (`default_note_below_items_enabled`,
+        `default_note_below_items_cs`, `default_note_below_items_en`) vyžadují navíc
+        zápis `settings.invoice_defaults`. Obecné oprávnění ke správě firmy jej nenahrazuje.
+        Změna těchto výchozích hodnot nepřepisuje existující koncepty ani vystavené doklady.
         `dimensions_enabled=true` lze nově nastavit jen během zkušební doby
         nebo s platnou licencí, která odemyká účetnictví.
         `person_title` je nepovinný titul fyzické osoby (nejvýše 10 znaků po
@@ -7233,7 +7245,7 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
         '403':
-          description: Uživatel není admin, token nemá scope `read_write` nebo chybí účetní licence pro zapnutí dimenzí
+          description: Chybí oprávnění k nastavení firmy, `settings.branding` ke změně vzhledu nebo `settings.invoice_defaults` ke změně výchozích hodnot (`forbidden_permission`), token nemá scope `read_write` nebo chybí účetní licence pro zapnutí dimenzí
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -49041,6 +49053,12 @@ components:
         mass-assign whitelist `PUT /api/v1/settings/supplier`; níže veřejný
         subset (fakturační údaje, defaulty, číslování, branding). `logo_path`
         a `signature_path` přes tento endpoint změnit NELZE (bezpečnost).
+        Pole brandingu a vzhledu PDF včetně `work_report_display_options` vyžadují
+        samostatné oprávnění `settings.branding` se zápisem, i když má role
+        `settings.company.write`. Chybějící oprávnění odmítne změnu celého požadavku.
+        Výchozí splatnost, hodinová sazba a tři pole výchozí poznámky vyžadují obdobně
+        zápis `settings.invoice_defaults`; nemění existující doklady. Nezahrnuje to
+        výchozí měnu, sazbu DPH, ceny s DPH ani zaokrouhlování.
       properties:
         accounting_framework:
           type: string
@@ -49079,8 +49097,9 @@ components:
         web: { type: [string, "null"] }
         tagline: { type: [string, "null"], description: "Podtitulek v patičce PDF a e-mailů" }
         default_currency_id: { type: integer }
-        default_payment_due_days: { type: integer }
-        default_payment_due_unit: { type: string, enum: [days, month] }
+        default_payment_due_days: { type: integer, minimum: 0, maximum: 4294967295, description: "Počet dnů nebo měsíců podle default_payment_due_unit. Nula znamená splatnost ihned; vyžaduje zápis settings.invoice_defaults." }
+        default_payment_due_unit: { type: string, enum: [days, month], description: "Jednotka výchozí splatnosti; vyžaduje zápis settings.invoice_defaults." }
+        default_hourly_rate: { type: number, minimum: 0, maximum: 99999999.999999, multipleOf: 0.000001, description: "Výchozí hodinová sazba v měně firmy, nejvýše šest desetinných míst; vyžaduje zápis settings.invoice_defaults." }
         default_prices_include_vat: { type: boolean }
         default_rounding_mode:
           type: string
@@ -49119,6 +49138,8 @@ components:
         email_branding_enabled: { type: boolean, description: "Původní branding dodavatele používaný při vypnutých brandingových profilech" }
         email_accent_color: { type: string, example: "#3B2D83", description: "Hex #RRGGBB; akcentní barva e-mailů a PDF faktur" }
         pdf_logo_show_name: { type: boolean, description: "Zobrazit vedle loga v PDF i název dodavatele" }
+        invoice_pdf_show_base_qty: { type: boolean, default: true, description: "Na PDF faktury zobrazit množství v základní jednotce u položek v balení; vyžaduje zápis settings.branding." }
+        invoice_pdf_show_line_discount: { type: boolean, default: false, description: "Na PDF faktury rozepsat slevu z ceníkové ceny; vyžaduje zápis settings.branding." }
         invoice_pdf_show_issued_by: { type: boolean, default: false, description: "Tisknout na PDF faktury řádek „Vystavil\" se jménem uživatele, který doklad vystavil (migrace 2032)." }
         invoice_pdf_monochrome: { type: boolean, default: false, description: "Úsporná černobílá faktura: PDF faktury a výkazu bez plných ploch, černý text, tenké čáry; nahrazuje akcentní barvu (migrace 2033)" }
         work_report_display_options:

@@ -720,7 +720,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals, dividerBefore: true },
         { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
         ...(nonprofitScope ? [
-          { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals },
+          { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals, dividerBefore: true },
           { to: '/accounting/nonprofit-funding', label: t('nonprofitFunding.title'), icon: ICONS.approvals },
           { to: '/accounting/nonprofit-membership', label: t('nonprofitMembership.title'), icon: ICONS.approvals },
         ] : []),
@@ -1009,7 +1009,7 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
         // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde.
         if (auth.isSuperadmin) return false
         return auth.canWrite('settings.email_profiles') || (!auth.canWrite('settings.company.write')
-          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.email_templates')))
+          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.invoice_defaults') || auth.canWrite('settings.email_templates')))
       }
       const permission = navPermission(item)
       if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.canWrite('settings.company.write')

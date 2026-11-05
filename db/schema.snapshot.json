@@ -1137,7 +1137,8 @@
         "2233_dimension_defaults_bank_account.sql",
         "2234_bank_posting_rule_dimensions.sql",
         "2235_cash_register_foreign_opening.sql",
-        "2236_work_report_billing.sql"
+        "2236_invoice_defaults_role_permission.sql",
+        "2237_work_report_billing.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

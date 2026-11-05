@@ -223,7 +223,7 @@ describe('router guard vynuceného nastavení MFA', () => {
   it.each(['client', 'staff'])('opens operational settings for independent %s grants and denies read/revocation', async (roleType) => {
     const auth = signIn({ role: { type: roleType } })
     useSupplierStore().setAvailable([{ id: 7, accounting_mode: 'double_entry', stock_enabled: false }] as never, 7)
-    for (const permission of ['settings.email_profiles', 'settings.email_templates', 'settings.branding', 'settings.payment_qr']) {
+    for (const permission of ['settings.email_profiles', 'settings.email_templates', 'settings.branding', 'settings.payment_qr', 'settings.invoice_defaults']) {
       auth.permissions = { [permission]: 2 }
       await expect(authorizationGuard(resolveTarget({ name: 'portal-company-settings' }))).resolves.toBe(true)
       auth.permissions = { [permission]: 1, 'settings.company': 2 }

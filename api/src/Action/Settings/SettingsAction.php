@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Settings;
 
 use MyInvoice\Http\Json;
-use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\InvoiceNumberFormat;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
@@ -16,7 +15,6 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
-use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\OperationalSettingsAccess;
 use MyInvoice\Security\RequestAuthorization;
@@ -38,6 +36,8 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
 use MyInvoice\Service\Epo\EpoStepUpService;
 use MyInvoice\Service\Epo\EpoSubmissionException;
 use MyInvoice\Service\Supplier\SupplierCarryOver;
+use MyInvoice\Service\Supplier\SupplierBrandingSettings;
+use MyInvoice\Service\Supplier\SupplierInvoiceDefaults;
 use MyInvoice\Service\Supplier\SupplierCreator;
 use MyInvoice\Service\Supplier\SupplierDirectory;
 use MyInvoice\Service\Supplier\SupplierDirectoryQuery;
@@ -64,12 +64,6 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SettingsAction
 {
-    /**
-     * Strop výchozí poznámky pod položkami (#79). Sloupec je TEXT, limit je tu
-     * proti překlepu typu vložená smlouva — na doklad se text tiskne celý.
-     */
-    private const DEFAULT_NOTE_MAX_LENGTH = 5000;
-
     private const UNIT_DECIMALS_ERROR = 'Desetinná místa množství musí být 0 až 3, nebo prázdné (bez omezení).';
 
     /**
@@ -79,7 +73,6 @@ final class SettingsAction
      * Hodnota v mapě je to, co se místo prázdného pole uloží (nullable sloupec → NULL).
      */
     private const SUPPLIER_BLANK_VALUES = [
-        'default_hourly_rate' => '0',
         'oss_valid_from' => null,
         'oss_valid_to' => null,
         'tax_entity_status_date' => null,
@@ -88,7 +81,7 @@ final class SettingsAction
     /** NOT NULL sloupce bez smysluplné prázdné hodnoty: prázdné pole nechá uloženou hodnotu. */
     private const SUPPLIER_BLANK_KEEPS_CURRENT = [
         'country_id', 'default_currency_id', 'default_vat_rate_id',
-        'default_payment_due_days', 'reminder_days_after_due', 'fiscal_year_start_month',
+        'reminder_days_after_due', 'fiscal_year_start_month',
     ];
 
     /**
@@ -155,7 +148,7 @@ final class SettingsAction
         private readonly EpoStepUpService $stepUp,
         private readonly AccountingFrameworkService $accountingFramework,
         private readonly AccountingDecreeService $accountingDecree,
-        private readonly WorkReportRepository $workReports,
+        private readonly SupplierBrandingSettings $brandingSettings,
     ) {}
 
     /**
@@ -540,7 +533,7 @@ final class SettingsAction
         // přepínat i účetní, ne jen admin — cílený bypass guard() JEN pro tato pole
         // (least-invasive: guard() zůstává admin-only pro všechno ostatní; sem se
         // accountant dostane pouze pokud body neobsahuje NIC jiného než tato pole).
-        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from', 'invoice_pdf_show_base_qty'];
+        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from'];
         $isStockOnlyUpdate = $body !== [] && array_diff(array_keys($body), $stockOnlyFields) === [];
         if ($isStockOnlyUpdate) {
             if (!RequestAuthorization::allows($request, 'stock', AccessLevel::WRITE)) {
@@ -581,11 +574,19 @@ final class SettingsAction
             $accountingFrameworkEffectiveFrom = trim($body['accounting_framework_effective_from']);
         }
 
+        try {
+            $body = SupplierBrandingSettings::validate($body, blankColorUsesDefault: true);
+            $body = SupplierInvoiceDefaults::validate($body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+
         // Široká správa firmy nesmí obnovit odvolané provozní oprávnění.
         // Starší formuláře posílají i nezměněné hodnoty; ty odstraňujeme z UPDATE.
         foreach ([
             [OperationalSettingsAccess::paymentQr($request), SupplierPaymentQrSettingsRepository::FIELDS],
-            [OperationalSettingsAccess::branding($request), ['email_branding_enabled', 'email_accent_color', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled']],
+            [OperationalSettingsAccess::branding($request), SupplierBrandingSettings::FIELDS],
+            [OperationalSettingsAccess::invoiceDefaults($request), SupplierInvoiceDefaults::FIELDS],
         ] as [$allowedArea, $fields]) {
             if ($allowedArea) continue;
             $postedFields = array_values(array_intersect($fields, array_keys($body)));
@@ -594,9 +595,9 @@ final class SettingsAction
             $current->execute([$id]);
             $stored = $current->fetch(\PDO::FETCH_ASSOC);
             foreach ($postedFields as $field) {
-                $same = $stored !== false && ($field === 'email_accent_color'
-                    ? strtoupper((string) $body[$field]) === strtoupper((string) $stored[$field])
-                    : (bool) $body[$field] === (bool) $stored[$field]);
+                $same = $stored !== false && (in_array($field, SupplierInvoiceDefaults::FIELDS, true)
+                    ? SupplierInvoiceDefaults::sameValue($field, $body[$field], $stored[$field])
+                    : SupplierBrandingSettings::sameValue($field, $body[$field], $stored[$field]));
                 if (!$same) return Json::error($response, 'forbidden_permission', 'Nemáš oprávnění měnit toto provozní nastavení firmy.', 403);
                 unset($body[$field]);
             }
@@ -768,35 +769,6 @@ final class SettingsAction
                 "purchase_import_received_at musí být 'issue_date' nebo 'import_date'.",
                 400,
             );
-        }
-
-        // Výchozí poznámka pod položkami (#79). Text se ukládá tak, jak ho uživatel
-        // napsal (včetně odřádkování), jen oříznutý o okrajové mezery; prázdný text
-        // je NULL, ať „nevyplněno" a „vyplněno mezerou" neznamenají dvě různé věci.
-        foreach (DefaultInvoiceNote::COLUMNS as $lang => $column) {
-            if (!array_key_exists($column, $body)) continue;
-            if ($body[$column] !== null && !is_string($body[$column])) {
-                return Json::error($response, 'validation_failed', "$column musí být text.", 400);
-            }
-            $text = trim((string) ($body[$column] ?? ''));
-            if (mb_strlen($text) > self::DEFAULT_NOTE_MAX_LENGTH) {
-                return Json::error(
-                    $response,
-                    'validation_failed',
-                    "Výchozí poznámka pod položkami ($lang) je delší než " . self::DEFAULT_NOTE_MAX_LENGTH . ' znaků.',
-                    400,
-                );
-            }
-            $body[$column] = $text === '' ? null : $text;
-        }
-
-        // Prázdnou sazbu už převedl normalizeSupplierBlankFields(); tady se čistí zápis čísla.
-        if (array_key_exists('default_hourly_rate', $body)) {
-            $rate = str_replace([' ', "\u{00A0}", ','], ['', '', '.'], trim((string) $body['default_hourly_rate']));
-            if (!is_numeric($rate) || (float) $rate < 0) {
-                return Json::error($response, 'validation_failed', 'Výchozí hodinová sazba musí být nezáporné číslo.', 400);
-            }
-            $body['default_hourly_rate'] = $rate;
         }
 
         // F7 — ENUM validace AI provider selection (§3.8).
@@ -1091,15 +1063,6 @@ final class SettingsAction
             $body,
             array_flip(['taxpayer_type', 'payroll_enabled', ...PayrollEmployerLegacyIdentifierCarryOver::LEGACY_FIELDS]),
         ) !== [];
-        // Validace email_accent_color — musí být hex (#RRGGBB)
-        if (array_key_exists('email_accent_color', $body)) {
-            $v = trim((string) ($body['email_accent_color'] ?? ''));
-            if ($v === '') {
-                $body['email_accent_color'] = '#3B2D83';
-            } elseif (!preg_match('/^#[0-9A-Fa-f]{6}$/', $v)) {
-                return Json::error($response, 'validation_failed', "email_accent_color musí být hex barva (#RRGGBB).", 400);
-            }
-        }
         // Validace per-supplier varsymbol templatů: prázdný string → NULL (= fallback na cfg);
         // jinak max 60 znaků a musí obsahovat alespoň jeden counter placeholder {C+}.
         foreach (['invoice_number_format', 'proforma_number_format', 'credit_note_number_format', 'simplified_number_format', 'purchase_invoice_number_format',
@@ -1157,11 +1120,6 @@ final class SettingsAction
         ) {
             return Json::error($response, 'validation_failed', "Neplatné invoice_number_period (year|month|none).", 400);
         }
-        if (array_key_exists('default_payment_due_unit', $body)
-            && !in_array($body['default_payment_due_unit'], ['days', 'month'], true)
-        ) {
-            return Json::error($response, 'validation_failed', "default_payment_due_unit musí být 'days' nebo 'month'.", 400);
-        }
         // Legacy: pokud frontend pošle 'default_currency' jako code, převedeme na id (scoped to supplier)
         if (isset($body['default_currency']) && !isset($body['default_currency_id'])) {
             $stmt = $this->db->pdo()->prepare(
@@ -1203,26 +1161,6 @@ final class SettingsAction
                 }
                 $body['self_copy'] = $clean === [] ? null : json_encode($clean, JSON_UNESCAPED_UNICODE);
             }
-        }
-        $pinWorkReportDisplay = false;
-        $currentWorkReportDisplay = null;
-        if (array_key_exists('work_report_display_options', $body)) {
-            try {
-                $options = WorkReportDisplayOptions::validate($body['work_report_display_options']);
-                // Firma nemá odkud dědit: výchozí podoba se ukládá jako NULL, ne jako výslovná hodnota.
-                if ($options !== null && WorkReportDisplayOptions::resolve(null, $options) === WorkReportDisplayOptions::DEFAULTS) {
-                    $options = null;
-                }
-                $body['work_report_display_options'] = $options === null ? null : json_encode((object) $options, JSON_THROW_ON_ERROR);
-            } catch (\InvalidArgumentException $e) {
-                return Json::error($response, 'validation_failed', $e->getMessage(), 400);
-            }
-            $stmt = $this->db->pdo()->prepare('SELECT work_report_display_options FROM supplier WHERE id = ?');
-            $stmt->execute([$id]);
-            $currentWorkReportDisplay = $stmt->fetchColumn();
-            // Vystavené doklady si podobu výkazu ponechají; jen mění-li se výsledné zobrazení.
-            $pinWorkReportDisplay = WorkReportDisplayOptions::resolve($currentWorkReportDisplay ?: null)
-                !== WorkReportDisplayOptions::resolve($body['work_report_display_options']);
         }
         $paymentQrBody = [];
         foreach (SupplierPaymentQrSettingsRepository::FIELDS as $field) {
@@ -1305,14 +1243,12 @@ final class SettingsAction
                             . 'změna účetního roku se řeší přechodným obdobím na stránce Účetní období.', 409);
                 }
             }
-            if ($pinWorkReportDisplay) {
-                // Před změnou výchozí podoby, aby ji vystavené výkazy nepřevzaly zpětně.
-                $this->workReports->pinIssuedDisplayOptions($id, $currentWorkReportDisplay ?: null);
-            }
             if (!empty($sets)) {
                 $params[] = $id;
                 $sql = 'UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?';
-                $persist = fn (): bool => $this->db->pdo()->prepare($sql)->execute($params);
+                $persist = fn (): bool => $this->brandingSettings->persist(
+                    $id, $body, fn (): bool => $this->db->pdo()->prepare($sql)->execute($params),
+                );
                 try {
                     if (array_key_exists('payroll_enabled', $body)) {
                         $this->licenseCapacity->mutateSeats($persist);
@@ -1388,16 +1324,7 @@ final class SettingsAction
             // Branding (barva/toggle) se v PDF renderuje živě → po změně invaliduj cached
             // draft PDF dodavatele, ať se přegenerují s novou barvou (mtime cache je sama
             // od sebe neobnoví). Vystavené regenerují přes ?regenerate=1.
-            if (array_key_exists('email_accent_color', $body)
-                || array_key_exists('email_branding_enabled', $body)
-                || array_key_exists('pdf_logo_show_name', $body)
-                || array_key_exists('invoice_pdf_show_issued_by', $body)
-                || array_key_exists('invoice_pdf_monochrome', $body)
-                || array_key_exists('invoice_pdf_show_line_discount', $body)
-                || array_key_exists('invoice_pdf_compact_items', $body)
-                || array_key_exists('work_report_display_options', $body)
-                || array_key_exists('invoice_pdf_bank_in_footer', $body)
-            ) {
+            if (array_intersect(SupplierBrandingSettings::FIELDS, array_keys($body)) !== []) {
                 $this->pdf->invalidateDraftsBySupplier($id);
             }
             // Epic F1: zapnutí podvojného účetnictví → naseeduj směrnou osnovu (idempotentní,
@@ -1672,9 +1599,7 @@ final class SettingsAction
         $row['oss_return_currency']      = (string) ($row['oss_return_currency'] ?? 'EUR');
         $row['default_vat_rate_id']      = (int) $row['default_vat_rate_id'];
         $row['default_currency_id']      = (int) $row['default_currency_id'];
-        $row['default_payment_due_days'] = (int) $row['default_payment_due_days'];
-        $row['default_payment_due_unit'] = (string) ($row['default_payment_due_unit'] ?? 'days');
-        $row['default_hourly_rate']      = (float) $row['default_hourly_rate'];
+        $row = SupplierInvoiceDefaults::normalizeResponse($row);
         $row['auto_send_reminders']      = (bool) $row['auto_send_reminders'];
         $row['reminder_days_after_due']  = (int) ($row['reminder_days_after_due'] ?? 3);
         $row['auto_generate_recurring']  = (bool) ($row['auto_generate_recurring'] ?? true);
@@ -1715,17 +1640,6 @@ final class SettingsAction
         // v InTransitRepository::inTransitStates(), jinak by obrazovka ukazovala
         // jiný stav, než podle kterého se doopravdy počítá.
         $row['stock_in_transit_from']    = (string) ($row['stock_in_transit_from'] ?? 'sent');
-        // Rozpis balení na PDF faktury (migrace 1832) — výchozí zapnuto.
-        $row['invoice_pdf_show_base_qty'] = (bool) ($row['invoice_pdf_show_base_qty'] ?? true);
-        // Řádek „Vystavil" na PDF faktury (migrace 2032), výchozí vypnuto.
-        $row['invoice_pdf_show_issued_by'] = (bool) ($row['invoice_pdf_show_issued_by'] ?? false);
-        // Ceníková cena a sleva u položky na PDF faktury (migrace 2035), výchozí vypnuto.
-        $row['invoice_pdf_show_line_discount'] = (bool) ($row['invoice_pdf_show_line_discount'] ?? false);
-        // Kompaktní řádky položek na PDF faktury (migrace 2199), výchozí vypnuto.
-        $row['work_report_display_options'] = WorkReportDisplayOptions::resolve($row['work_report_display_options'] ?? null);
-        $row['invoice_pdf_compact_items'] = (bool) ($row['invoice_pdf_compact_items'] ?? false);
-        // Bankovní spojení v patičce PDF faktury (migrace 2200), výchozí vypnuto.
-        $row['invoice_pdf_bank_in_footer'] = (bool) ($row['invoice_pdf_bank_in_footer'] ?? false);
         // Auto-post hook (A2, migrace 1035) — opt-in auto-zaúčtování; FE gatuje na double_entry.
         $row['auto_post_invoices']       = (bool) ($row['auto_post_invoices'] ?? false);
         $row['auto_post_purchases']      = (bool) ($row['auto_post_purchases'] ?? false);
@@ -1737,24 +1651,13 @@ final class SettingsAction
             true,
         ) ? (string) $row['purchase_import_received_at']
           : \MyInvoice\Service\Import\ImportedReceivedDatePolicy::DEFAULT_MODE;
-        // Výchozí poznámka pod položkami (#79, migrace 1855). Chybějící sloupce =
-        // nedoběhlá migrace; fallback drží dnešní chování (vypnuto, prázdno), ať
-        // formulář nastavení nevykreslí `undefined` do textarey.
-        $row[DefaultInvoiceNote::ENABLED_COLUMN] = (bool) ($row[DefaultInvoiceNote::ENABLED_COLUMN] ?? false);
-        foreach (DefaultInvoiceNote::COLUMNS as $column) {
-            $row[$column] = isset($row[$column]) ? (string) $row[$column] : null;
-        }
         // F7 — AI provider selection (non-secret; klíče `*_enc` jsou níže redigovány).
         $row['ai_provider']              = (string) ($row['ai_provider'] ?? 'anthropic');
         $row['ai_data_region']           = (string) ($row['ai_data_region'] ?? 'us');
         $row['client_ai_extraction_enabled'] = (bool) ($row['client_ai_extraction_enabled'] ?? false);
         $row['client_ai_extraction_monthly_limit'] = (int) ($row['client_ai_extraction_monthly_limit'] ?? 100);
         $row['ai_eu_residency_required'] = (bool) ($row['ai_eu_residency_required'] ?? false);
-        $row['email_branding_enabled']   = (bool) ($row['email_branding_enabled'] ?? false);
-        $row['email_accent_color']       = (string) ($row['email_accent_color'] ?? '#3B2D83');
-        $row['pdf_logo_show_name']       = (bool) ($row['pdf_logo_show_name'] ?? false);
-        $row['invoice_pdf_monochrome']   = (bool) ($row['invoice_pdf_monochrome'] ?? false);
-        $row['branding_profiles_enabled'] = (bool) ($row['branding_profiles_enabled'] ?? false);
+        $row = SupplierBrandingSettings::normalizeResponse($row);
         $row['default_branding_profile_id'] = $row['default_branding_profile_id'] !== null
             ? (int) $row['default_branding_profile_id']
             : null;

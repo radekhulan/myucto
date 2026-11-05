@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, KeepAlive, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
@@ -30,8 +31,9 @@ const ClientSearchSelect = defineComponent({
     },
   }, [h('option', { value: '' }), h('option', { value: '3' }, 'Synthetic client 3')]),
 })
-const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }) })
-const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
+const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
+const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
+const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
 const row = (id: number, revision: Partial<MemberRow> = {}): MemberRow => ({
   id, supplier_id: 5, client_id: id + 10, member_number: `M-${id}`, created_by: 1, company_name: `Synthetic member ${id}`,
@@ -45,7 +47,7 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+      stubs: { ActionBar, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
     },
   })
 }
@@ -97,10 +99,12 @@ describe('Membership workspace', () => {
     expect(w.findAll('[data-section="member-row"]')).toHaveLength(3)
     const current = w.get('[data-member="1"] [data-field="member-revision"]')
     expect(current.text()).toContain(cs.nonprofitMembership.status_active)
-    expect(current.text()).toContain('2020-01-01')
+    expect(current.text()).toContain(formatDate('2020-01-01'))
+    expect(current.text()).not.toContain('2020-01-01')
+    expect(current.get('[data-field="member-status"]').classes()).toEqual(expect.arrayContaining(['rounded-full', 'bg-success-50', 'text-success-600']))
     expect(current.classes()).not.toContain('text-warning-700')
     const future = w.get('[data-member="2"] [data-field="member-revision"]')
-    expect(future.text()).toBe(cs.nonprofitMembership.futureRevision.replace('{status}', cs.nonprofitMembership.status_ended).replace('{date}', '2999-01-01'))
+    expect(future.text()).toBe(cs.nonprofitMembership.futureRevision.replace('{status}', cs.nonprofitMembership.status_ended).replace('{date}', formatDate('2999-01-01')))
     expect(future.classes()).toContain('text-warning-700')
     expect(w.get('[data-member="3"] [data-field="member-revision"]').text()).toBe(cs.nonprofitMembership.noRevision)
     expect(w.get('[data-member="3"]').text()).toContain(cs.nonprofitMembership.clientFallback.replace('{id}', '13'))
@@ -178,6 +182,23 @@ describe('Membership workspace', () => {
     w.unmount()
   })
 
+  it('creates a new contact in the shared client dialog and selects it for the member', async () => {
+    api.createMember.mockResolvedValue({ id: 9, client_id: 44 })
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-stub="client-modal"]').exists()).toBe(false)
+    await w.get('[data-action="member-new-client"]').trigger('click')
+    w.findComponent(ClientFormModal).vm.$emit('created', { id: 44, company_name: 'Synthetic new contact' })
+    await flushPromises()
+    expect(w.find('[data-stub="client-modal"]').exists()).toBe(false)
+    expect(w.findComponent(ClientSearchSelect).props()).toMatchObject({ modelValue: 44, selectedLabel: 'Synthetic new contact' })
+    await w.get('[data-field="member-number"]').setValue('M-44')
+    await w.get('[data-action="create-member"]').trigger('click')
+    await flushPromises()
+    expect(api.createMember).toHaveBeenCalledWith(5, { client_id: 44, member_number: 'M-44' })
+    w.unmount()
+  })
+
   it('shows a server refusal of a duplicate identity and does not open a member', async () => {
     api.createMember.mockRejectedValue({ response: { status: 409, data: { error: { code: 'nonprofit_membership_identity_conflict', message: 'Synthetic identity conflict' } } } })
     const w = mounted()
@@ -232,7 +253,87 @@ describe('Membership workspace', () => {
     const w = mounted()
     await flushPromises()
     expect(w.get('[data-section="workspace-error"]').text()).toContain('Synthetic forbidden')
+    expect(w.get('[data-section="workspace-error"]').classes()).toEqual(expect.arrayContaining(['bg-danger-50', 'text-danger-700']))
     expect(w.find('[data-section="members-empty"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('shows a loading state before the first page of members arrives', async () => {
+    api.members.mockReturnValue(new Promise(() => {}))
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-section="members-loading"]').exists()).toBe(true)
+    expect(w.find('[data-section="members-empty"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('moves focus into the opened detail and back to the row button after closing it', async () => {
+    const w = mount(Workspace, {
+      attachTo: document.body,
+      props: { supplier: 5, canManage: true },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+        stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+      },
+    })
+    await flushPromises()
+    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
+    await flushPromises()
+    expect(document.activeElement?.getAttribute('data-focus')).toBe('member-heading')
+    w.findComponent(Detail).vm.$emit('close')
+    await flushPromises()
+    expect(document.activeElement).toBe(w.get('[data-member="2"] [data-action="open-member"]').element)
+    w.unmount()
+  })
+
+  it('tells the period check that its result is outdated after a write in the member detail', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.findComponent(Reconciliation).props('dataVersion')).toBe(0)
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click')
+    await flushPromises()
+    w.findComponent(Detail).vm.$emit('changed')
+    await flushPromises()
+    expect(w.findComponent(Reconciliation).props('dataVersion')).toBe(1)
+    expect(api.members).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+
+  it('returns focus to the list heading when the closed member is no longer in the list', async () => {
+    const w = mount(Workspace, {
+      attachTo: document.body,
+      props: { supplier: 5, canManage: true },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+        stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+      },
+    })
+    await flushPromises()
+    await w.get('[data-member="2"] [data-action="open-member"]').trigger('click')
+    await flushPromises()
+    api.members.mockResolvedValue(page([row(1)]))
+    w.findComponent(Detail).vm.$emit('changed')
+    await flushPromises()
+    w.findComponent(Detail).vm.$emit('close')
+    await flushPromises()
+    expect(document.activeElement?.getAttribute('data-focus')).toBe('members-heading')
+    w.unmount()
+  })
+
+  it('shows the first steps in order when no member exists yet', async () => {
+    api.members.mockResolvedValue(page([]))
+    const w = mounted()
+    await flushPromises()
+    const steps = w.findAll('[data-section="members-steps"] li').map(li => li.text())
+    expect(steps).toEqual(cs.nonprofitMembership.firstSteps)
+    w.unmount()
+  })
+
+  it('places the period check below the member list', async () => {
+    const w = mounted()
+    await flushPromises()
+    const sections = Array.from<Element>(w.element.querySelectorAll('[data-section="members"], [data-stub="reconciliation"]')).map(el => el.getAttribute('data-section') ?? 'reconciliation')
+    expect(sections).toEqual(['members', 'reconciliation'])
     w.unmount()
   })
 })

@@ -64,6 +64,7 @@ use MyInvoice\Action\Admin\SupplierSearchAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
 use MyInvoice\Action\Settings\BrandingProfilesAction;
 use MyInvoice\Action\Settings\ClientBrandingSettingsAction;
+use MyInvoice\Action\Settings\ClientInvoiceDefaultsSettingsAction;
 use MyInvoice\Action\Settings\ClientPaymentQrSettingsAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\SupplierEmailTemplateAction;
@@ -3781,6 +3782,8 @@ final class Routes
         $app->post   ('/api/settings/client/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
         $app->put    ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
         $app->delete ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
+        $app->get    ('/api/settings/client/invoice-defaults', [ClientInvoiceDefaultsSettingsAction::class, 'get']);
+        $app->put    ('/api/settings/client/invoice-defaults', [ClientInvoiceDefaultsSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'get']);
         $app->put    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/payment-qr', [ClientPaymentQrSettingsAction::class, 'get']);
