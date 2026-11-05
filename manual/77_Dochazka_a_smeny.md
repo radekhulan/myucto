@@ -91,6 +91,13 @@ a období je připravené pro [mzdový běh](80_Mzdove_behy.md).
 
 ## 77.4 Krok za krokem: import docházky z CSV nebo XLSX
 
+Pro doložení hodin bez vedení jednotlivých docházkových záznamů slouží také
+ruční souhrn v [Rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79811-dolozene-odpracovane-hodiny).
+Je to samostatný zdroj za celý měsíc vztahu: jeho hodiny se s docházkou ani
+importem nesčítají. Nahrazení zdroje vyžaduje výslovné potvrzení a důvod,
+schválený měsíc je nutné nejprve znovu otevřít. Schválení ručního souhrnu
+hodin samo nepotvrzuje všechny údaje pro JMHZ.
+
 1. V `Mzdy → Docházka a směny` klikněte na **Import**.
 2. Vyberte soubor CSV nebo XLSX s povinnými sloupci (viz
    [§ 77.9.1](#7791-format-importu-dochazky)).

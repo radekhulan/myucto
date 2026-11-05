@@ -177,6 +177,40 @@ jen neaktivní. V řádku zůstává jen ikona stavu u pole (**Koncept**,
 Docházka není povinná. Formulář ukládá měsíční podklady samostatně pro každý
 pracovní vztah a schválené ani uzamčené vstupy nikdy nepřepisuje.
 
+### 79.8.1.1 Doložené odpracované hodiny
+
+U hodinově odměňovaného vztahu otevřete podklad odpracované doby přímo
+z jeho řádku. Panel ukazuje vybraný zdroj a stav měsíce. Můžete použít
+docházku, souhrn importu nebo doložený ruční souhrn; vždy platí jediný zdroj
+pro celý pracovní vztah a měsíc.
+
+1. Zadejte dobu jako **H:MM** nebo desetinné hodiny, například `7:30`,
+   `7,5` či `7.5`. Desetinný zápis má nejvýše tři místa. Prázdné pole
+   není nula; neodpracovaný měsíc potvrďte výslovným `0`.
+2. **Skutečně odpracováno (včetně přesčasu)** zahrnuje i přesčas. Údaj **Z toho přesčas** jej
+   pouze rozlišuje a k celku se znovu nepřičítá. Neznámý přesčas ani počet
+   odpracovaných dnů nevyplňujte nulou.
+3. Při změně podmínek v měsíci vyplňte hodiny zvlášť pro jednotlivé úseky.
+   Úsek musí ležet v trvání vztahu a jedné účinné verzi podmínek; úseky se
+   nesmějí překrývat. Rozvržený fond se za skutečně odpracované hodiny
+   nedoplňuje.
+4. Uveďte důvod a podklad. Jestliže už měsíc obsahuje docházku nebo souhrn
+   importu, výslovně potvrďte nahrazení zdroje. Původní evidence zůstane
+   zachovaná, ale její hodiny se k ručnímu souhrnu nepřičtou.
+5. Souhrn uložte a schvalte. Zápis vyžaduje právo zapisovat docházku,
+   schválení právo schvalovat docházku. Schválený měsíc před opravou
+   znovu otevřete s důvodem; potřebujete právo znovuotevření. Každá změna
+   uchová původní revizi.
+
+Schválení samotných hodin nepotvrzuje úplnost pracovního měsíce pro JMHZ
+ani nevytváří příplatky. Výkazové údaje doplňte v **Docházce a směnách**;
+již schválený měsíc nejprve znovu otevřete a pak schvalte s úplným souhrnem.
+Pokud existují vypočtené příplatky nebo pohotovost z původního zdroje,
+změnu zdroje nejprve vyřešte opravou těchto vstupů.
+
+Podklad hodin sám není mzdovou částkou. Automatický výpočet hodinové mzdy
+zatím není dostupný a běh s hodinovými podmínkami nelze schválit.
+
 ### 79.8.2 Krácení měsíční mzdy o absence
 
 Nabídnutá měsíční mzda je už zkrácená o evidované absence. Mzda přísluší za
