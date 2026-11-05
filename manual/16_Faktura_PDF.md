@@ -352,7 +352,7 @@ Vygenerované PDF obsahuje:
    v detailu faktury. U už vystavených dokladů se řádek objeví až po přegenerování
    jejich PDF (například po úpravě dokladu), dříve uložené PDF se samo nemění.
 5. **Bankovní spojení** - číslo účtu nebo IBAN, BIC, banka, variabilní symbol.
-   Se zapnutou volbou **Bankovní spojení v patičce PDF faktury** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
+   Se zapnutou volbou **Bankovní spojení jen v patičce PDF faktury (doporučujeme nezapínat)** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) se číslo účtu, IBAN, BIC a banka tisknou v patičce každé strany
    a platební panel u součtu ukáže jen QR platbu v rámečku s popiskem. Variabilní symbol
    zůstává v údajích dokladu nad položkami. Uhrazená faktura, platba hotově nebo kartou
