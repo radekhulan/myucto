@@ -77,12 +77,13 @@ it('příprava ukáže počet kanonických řádků a jasně vyžaduje uložení
 })
 
 
-it('období nabízí názvy měsíců a stále odesílá YYYY-MM', async () => {
+it('období je jedno pole měsíc a rok a odesílá YYYY-MM', async () => {
   const wrapper = mountEditor()
-  const months = wrapper.get('[data-test="billing-period-month"]')
-  expect(months.text()).toContain('březen')
-  expect(months.text()).toContain('prosinec')
-  await months.setValue('12')
+  const period = wrapper.get('[data-test="billing-period"]')
+  expect(period.attributes('type')).toBe('month')
+  await period.setValue('2096-12')
   expect(wrapper.emitted('update:period')).toEqual([['2096-12']])
+  await period.setValue('')
+  expect(wrapper.emitted('update:period')?.at(-1)).toEqual([''])
   wrapper.unmount()
 })
