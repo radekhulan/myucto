@@ -379,7 +379,8 @@ export interface CronJobsResponse {
   /** Úlohy, které instalace nehlídá, protože nemají co dělat: skript => důvod. */
   inactive?: Record<string, string> | []
   server_time: string
-  install?: CronInstallContext
+  /** Ve spravovaném provozu null: cesty serveru nájemníkovi nepatří. */
+  install?: CronInstallContext | null
   schedule?: CronScheduleContext
 }
 
