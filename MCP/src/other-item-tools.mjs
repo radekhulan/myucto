@@ -61,6 +61,10 @@ const ITEM_INPUT = {
   due_on: date('Splatnost (YYYY-MM-DD).'),
   amount: num('Celková částka v Kč na haléře. Agenda je jen v CZK.', { exclusiveMinimum: 0 }),
   variable_symbol: nullable(str('Variabilní symbol, jen číslice.', { pattern: '^[0-9]{1,20}$' })),
+  counterparty_account: nullable(str('Účet protistrany pro párování úhrad: český účet ve tvaru '
+    + '„předčíslí-číslo/kód banky" (ověří se modulo 11) nebo IBAN. Prázdná hodnota účet smaže.', { maxLength: 60 })),
+  counterparty_bank_code: nullable(str('Kód banky českého účtu, když ho counterparty_account neobsahuje za lomítkem. '
+    + 'U IBANu se nezadává.', { pattern: '^[0-9]{4}$' })),
   account_code: nullable(str('Rozvahový účet pohledávky nebo závazku (např. 378, 379, 461). '
     + 'Musí být aktivní a odpovídat straně; ověří se při zaúčtování.', { maxLength: 20 })),
   counter_account_code: nullable(str('Jediný protiúčet (jednořádková kontace). Nekombinuj s posting_lines.', {
@@ -73,7 +77,7 @@ const ITEM_INPUT = {
 /** Pole hlavičky, která PUT přepisuje vždy celá. Kontace se skládá zvlášť. */
 const HEAD_KEYS = [
   'side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
-  'due_on', 'amount', 'variable_symbol', 'account_code', 'note',
+  'due_on', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
 ];
 const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines'];
 
@@ -142,6 +146,8 @@ function updateBody(current, a) {
   if (body.kind_id !== undefined) body.kind_id = numeric(body.kind_id);
   // Jiný vestavěný druh než other bez kind_id = přepnutí z vlastního druhu (shodně se serverem).
   if (a.kind !== undefined && a.kind !== 'other' && a.kind_id === undefined) body.kind_id = null;
+  // Nový účet nese kód banky za lomítkem nebo je to IBAN; uložený kód by mu odporoval (shodně se serverem).
+  if (a.counterparty_account !== undefined && a.counterparty_bank_code === undefined) body.counterparty_bank_code = null;
   if (a.issued_on !== undefined && a.accounting_on === undefined
     && current?.accounting_on && current.accounting_on === current.issued_on) {
     body.accounting_on = a.issued_on;

@@ -40853,6 +40853,8 @@ components:
             amount: { type: number }
             exchange_rate: { type: [number, 'null'] }
             variable_symbol: { type: [string, 'null'] }
+            counterparty_account: { type: [string, 'null'] }
+            counterparty_bank_code: { type: [string, 'null'] }
             account_code: { type: [string, 'null'] }
             counter_account_code: { type: [string, 'null'] }
             posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
@@ -40871,6 +40873,9 @@ components:
           properties:
             id: { type: integer, format: int64 }
             position: { type: integer }
+            paid_amount: { type: number, description: Uhrazeno ze splátky. Úhrada s installment_id pokryje nejdřív svou splátku, přebytek a ostatní úhrady (včetně settled_outside_amount) pokrývají otevřené splátky podle pořadí. }
+            remaining_amount: { type: number }
+            status: { type: string, enum: [unpaid, partial, paid, overdue], description: overdue = po splatnosti s neuhrazeným zbytkem (i částečně uhrazená). }
     OtherItemPostingLine:
       type: object
       required: [account_code, amount]
@@ -40896,6 +40901,11 @@ components:
         amount: { type: number, exclusiveMinimum: 0 }
         exchange_rate: { type: [number, 'null'], description: Ignorováno, pro tuto agendu je podporována pouze CZK }
         variable_symbol: { type: [string, 'null'] }
+        counterparty_account:
+          type: [string, 'null']
+          maxLength: 60
+          description: Účet protistrany pro párování úhrad. Český účet `předčíslí-číslo/kód banky` (ověří se modulo 11; kód banky lze poslat i zvlášť v counterparty_bank_code) nebo IBAN. Uloží se kanonicky - český účet i český IBAN jako `předčíslí-číslo` bez vodicích nul s kódem banky, zahraniční IBAN beze změny a bez kódu banky. Prázdná hodnota účet smaže. Při úpravě nový účet bez counterparty_bank_code smaže uložený kód banky.
+        counterparty_bank_code: { type: [string, 'null'], pattern: '^[0-9]{4}$', description: Kód banky českého účtu protistrany; u IBANu se nezadává. }
         account_code: { type: [string, 'null'], description: Rozvahový účet pohledávky nebo závazku }
         counter_account_code: { type: [string, 'null'], description: Původní jednořádková kontace; při více protiřádcích je null }
         posting_lines:
@@ -41047,6 +41057,7 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64 }
+        installment_id: { type: [integer, 'null'], format: int64, description: Splátka, kterou úhrada hradí (přesná shoda částky s otevřenou splátkou, jinak první otevřená). Přebytek pokrývá další otevřené splátky podle pořadí. Null u položky bez splátek. }
         bank_transaction_id: { type: [integer, 'null'], format: int64 }
         cash_document_id: { type: [integer, 'null'], format: int64 }
         amount: { type: number }
@@ -41070,8 +41081,13 @@ components:
         paid: { type: boolean }
         currency_mismatch: { type: boolean }
         side: { type: string, enum: [receivable, payable] }
+        match_score: { $ref: '#/components/schemas/OtherItemMatchScore' }
+        match_confidence: { type: number, minimum: 0, maximum: 1, description: match_score / 100. }
+        match_reasons: { $ref: '#/components/schemas/OtherItemMatchReasons' }
+        installment: { $ref: '#/components/schemas/OtherItemMatchInstallment' }
     OtherItemPaymentCandidate:
       type: object
+      description: Volná bankovní nebo pokladní platba k přiřazení položce, seřazená podle match_score a pak od nejnovější.
       properties:
         source: { type: string, enum: [bank, cash] }
         id: { type: integer, format: int64 }
@@ -41079,6 +41095,26 @@ components:
         amount: { type: number }
         currency: { type: string }
         description: { type: string }
+        match_score: { $ref: '#/components/schemas/OtherItemMatchScore' }
+        match_confidence: { type: number, minimum: 0, maximum: 1, description: match_score / 100. }
+        match_reasons: { $ref: '#/components/schemas/OtherItemMatchReasons' }
+        installment: { $ref: '#/components/schemas/OtherItemMatchInstallment' }
+    OtherItemMatchScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+      description: 'Síla shody platby s položkou - 100 VS + účet protistrany + částka splátky, 80 až 88 VS, 70 až 75 účet + částka splátky, 60 částka splátky do 15 dnů od její splatnosti, 50 až 55 celý zbývající dluh, 40 částka splátky mimo okno splatnosti, 30 jen účet protistrany, 0 jen výsledek hledání.'
+    OtherItemMatchReasons:
+      type: array
+      items: { type: string, enum: [variable_symbol, counterparty_account, installment_amount, installment_due, remaining_amount] }
+    OtherItemMatchInstallment:
+      type: [object, 'null']
+      description: Otevřená splátka, jejíž zbytek odpovídá částce platby (±0,01 Kč); null bez shody se splátkou.
+      properties:
+        id: { type: integer, format: int64 }
+        position: { type: integer }
+        due_on: { type: string, format: date }
+        remaining_amount: { type: number }
     ShoptetFeed:
       type: object
       description: Kořen `SHOP` feedu pro automatický import produktů Shoptetu.

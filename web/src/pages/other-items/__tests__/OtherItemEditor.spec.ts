@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   listKinds: vi.fn(),
   dimsSave: vi.fn(),
   dimsLoad: vi.fn(),
+  toastError: vi.fn(),
   supplier: { accounting_mode: 'tax_evidence' },
 }))
 
@@ -26,7 +27,7 @@ vi.mock('@/stores/supplier', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn() }),
+  useToast: () => ({ error: m.toastError, success: vi.fn() }),
 }))
 
 vi.mock('vue-router', () => ({
@@ -218,6 +219,44 @@ describe('OtherItemEditor partner', () => {
     expect(pickers).toHaveLength(2)
     expect(pickers[0]!.props('accounts').map((account: { account_code: string }) => account.account_code)).toEqual(['325.100'])
     expect(pickers[1]!.props('accounts')).toHaveLength(3)
+  })
+
+  it('načte účet protistrany jako číslo/kód banky a odešle ho bez samostatného kódu', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), counterparty_account: '19-1000000005', counterparty_bank_code: '0100' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const account = wrapper.get('[data-test="counterparty-account"]')
+    expect((account.element as HTMLInputElement).value).toBe('19-1000000005/0100')
+    await account.setValue('CZ18 0100 0000 0010 0000 0005')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({
+      counterparty_account: 'CZ18 0100 0000 0010 0000 0005',
+      counterparty_bank_code: null,
+    }))
+  })
+
+  it('účet protistrany v neplatném tvaru neodešle', async () => {
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('[data-test="counterparty-account"]').setValue('1000000005')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('other_items.counterparty_account_invalid')
+  })
+
+  it('prázdný účet protistrany pošle jako null', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), counterparty_account: '1000000005', counterparty_bank_code: '0100' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('[data-test="counterparty-account"]').setValue('  ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({ counterparty_account: null, counterparty_bank_code: null }))
   })
 
   it('při úpravě zachová rozdělenou kontaci a odešle oba protiřádky', async () => {

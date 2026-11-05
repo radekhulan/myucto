@@ -14,11 +14,17 @@ export interface OtherItemSchedule {
   occurrences?: Array<{ occurrence_index: number; item_id: number; issued_on: string; status: string }>
 }
 
+export type OtherItemInstallmentStatus = 'unpaid' | 'partial' | 'paid' | 'overdue'
+
 export interface OtherItemInstallment {
   id?: number
   position?: number
   due_on: string
   amount: number
+  /** Jen uložené splátky: uhrazeno, zbývá a stav podle přiřazených úhrad. */
+  paid_amount?: number
+  remaining_amount?: number
+  status?: OtherItemInstallmentStatus
 }
 
 export const otherItemPlansApi = {

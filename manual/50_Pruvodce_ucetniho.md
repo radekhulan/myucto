@@ -498,14 +498,46 @@ Zadáte nový účet, protiúčet, datum a důvod. Systém v jedné operaci stor
 původní zápis a vytvoří nový, doklad si zachová ID a číslo. Datum musí
 spadat do otevřeného období.
 
+Pole **Účet protistrany** je nepovinné. Zadejte český účet ve tvaru
+`předčíslí-číslo/kód banky` (například `19-1000000005/0100`) nebo IBAN.
+Český účet se ověří kontrolou modulo 11, IBAN kontrolními číslicemi. Český
+IBAN se uloží jako národní číslo účtu s kódem banky. Účet se zobrazí na detailu
+a opakování ho přenáší do každé nově vzniklé položky. Podle účtu aplikace
+nabízí úhrady z banky.
+
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
-přiřadit volnou bankovní či pokladní úhradu. Částečná úhrada sníží zbývající
-částku. U zaúčtované položky musí být bankovní nebo pokladní zápis veden
-proti stejnému účtu pohledávky či závazku. Cizoměnové úhrady vyžadují
-samostatné kurzové vypořádání a v této agendě se automaticky nepárují.
+akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Úhrady
+se párují ručně, automaticky je aplikace nepřiřazuje. Výběr nabízí platby
+seřazené podle síly shody a u každé ukáže důvod:
+
+| Pořadí | Shoda |
+|---|---|
+| 1 | variabilní symbol, účet protistrany a částka splátky |
+| 2 | variabilní symbol |
+| 3 | účet protistrany a částka splátky |
+| 4 | částka splátky, platba nejvýše 15 dní od splatnosti splátky |
+| 5 | celý zbývající dluh |
+| 6 | částka splátky dál od splatnosti |
+| 7 | jen účet protistrany |
+
+Částka splátky znamená neuhrazený zbytek splátky z kalendáře, tolerance je
+±0,01 Kč. Bez hledání se pod shodami nabízejí i nejnovější volné platby.
+Částečná úhrada sníží zbývající částku, přeplatek aplikace odmítne. U
+zaúčtované položky musí být bankovní nebo pokladní zápis veden proti stejnému
+účtu pohledávky či závazku. Úhrady v cizí měně tato agenda nepřiřazuje,
+vyžadují samostatné kurzové vypořádání.
 Storno účetního zápisu platby znovu otevře zůstatek. Pokud stejnou platbu
 zaúčtujete znovu, přiřaďte ji k položce znovu ve stejné částce. Původní
 úhrada tak zůstane správně započtená v historickém saldu před stornem.
+
+Má-li položka **splátkový kalendář**, každá úhrada se váže ke splátce. Platba
+ve výši neuhrazeného zbytku některé splátky uhradí tuto splátku, jiná platba
+hradí první neuhrazenou splátku. Část platby nad zbytek splátky pokryje další
+neuhrazené splátky podle pořadí; platba zůstává u položky jedním řádkem
+a saldo se nemění. Stejně podle pořadí se započte i část uhrazená mimo banku a
+pokladnu. Tabulka splátek ukazuje u každé splátky stav **Neuhrazeno**,
+**Částečně** (se zbývající částkou), **Uhrazeno** nebo **Po splatnosti**.
+Podle zbytků splátek počítá i předpověď cash-flow.
 
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.

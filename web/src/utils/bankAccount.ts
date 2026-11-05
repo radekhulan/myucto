@@ -39,3 +39,20 @@ export function formatAccountNumber(
   const code = inlineBank || (bankCode != null ? String(bankCode).trim() : '')
   return code !== '' ? `${num} / ${code}` : num
 }
+
+/**
+ * Tvar účtu protistrany před odesláním: český účet `[předčíslí-]číslo/kód banky`
+ * nebo IBAN (mezery se ignorují). Modulo 11 a kontrolní číslice IBANu ověří server.
+ */
+export function isCounterpartyAccountFormat(value: string): boolean {
+  const compact = value.replace(/\s+/g, '').toUpperCase()
+  return /^(\d{1,6}-)?\d{1,16}\/\d{4}$/.test(compact) || /^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(compact)
+}
+
+/** Uložený účet (`předčíslí-číslo` + kód banky, nebo IBAN) jako jeden vstup `číslo/kód`. */
+export function joinAccountBankCode(account: string | null | undefined, bankCode: string | null | undefined): string {
+  const number = (account ?? '').trim()
+  if (number === '') return ''
+  const code = (bankCode ?? '').trim()
+  return code !== '' ? `${number}/${code}` : number
+}

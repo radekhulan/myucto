@@ -273,6 +273,17 @@
     "payment_unlinked": "Úhrada byla odpojena.",
     "confirm_unlink_payment": "Odpojit tuto úhradu?",
     "foreign_payment_hint": "Párování úhrady v cizí měně vyžaduje kurzové vypořádání.",
+    "counterparty_account": "Účet protistrany",
+    "counterparty_account_placeholder": "předčíslí-číslo/kód banky nebo IBAN",
+    "counterparty_account_hint": "Podle účtu se k položce nabízejí úhrady z banky.",
+    "counterparty_account_invalid": "Zadejte účet protistrany ve tvaru předčíslí-číslo/kód banky nebo IBAN.",
+    "match_reason": {
+      "variable_symbol": "VS",
+      "counterparty_account": "Účet protistrany",
+      "installment_amount": "Splátka {number}",
+      "installment_due": "U splatnosti",
+      "remaining_amount": "Celý zbytek"
+    },
     "documents": "dokumentů",
     "forecast": "Odhad",
     "result_impact_title": "Ostatní položky ve výsledku hospodaření",
@@ -348,6 +359,13 @@
       "confirm_clear": "Zrušit splátkový kalendář?",
       "installments_cleared": "Splátkový kalendář byl zrušen.",
       "paid_locked": "Po přiřazení úhrady už nelze kalendář měnit.",
+      "installment_status": {
+        "unpaid": "Neuhrazeno",
+        "partial": "Částečně",
+        "paid": "Uhrazeno",
+        "overdue": "Po splatnosti"
+      },
+      "installment_remaining": "zbývá {amount}",
       "delete_schedule": "Zrušit opakování",
       "confirm_delete_schedule": "Zrušit opakování? Už vytvořené položky zůstanou jako samostatné doklady.",
       "schedule_deleted": "Opakování bylo zrušeno.",
@@ -24701,6 +24719,13 @@
     "candidate_purchase": "Přijatá",
     "candidate_other_receivable": "Ostatní pohledávka",
     "candidate_other_payable": "Ostatní závazek",
+    "other_item_match": {
+      "variable_symbol": "VS",
+      "counterparty_account": "Účet protistrany",
+      "installment_amount": "Splátka {number}",
+      "installment_due": "U splatnosti",
+      "remaining_amount": "Celý zbytek"
+    },
     "other_item_matched": "Platba přiřazena k {ref}",
     "other_item_matched_hint": "Platba je přiřazena ostatní pohledávce nebo závazku. Přiřazení zrušíte v detailu položky.",
     "candidate_paid": "Zaplaceno",

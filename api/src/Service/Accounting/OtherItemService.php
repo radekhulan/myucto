@@ -148,8 +148,13 @@ final class OtherItemService
         if (($input['kind'] ?? 'other') !== 'other' && !array_key_exists('kind_id', $input)) {
             $input['kind_id'] = null;
         }
+        // Nový účet bez kódu banky nese kód v sobě (`číslo/kód`) nebo je to IBAN; uložený kód by mu odporoval.
+        if (array_key_exists('counterparty_account', $input) && !array_key_exists('counterparty_bank_code', $input)) {
+            $input['counterparty_bank_code'] = null;
+        }
         foreach (['side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
-            'currency', 'amount', 'variable_symbol', 'account_code', 'counter_account_code', 'note'] as $key) {
+            'currency', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code',
+            'account_code', 'counter_account_code', 'note'] as $key) {
             if (!array_key_exists($key, $input)) {
                 $input[$key] = $existing[$key] ?? null;
             }
@@ -390,13 +395,19 @@ final class OtherItemService
     {
         $this->get($supplierId, $id);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, bank_transaction_id, cash_document_id, amount, payment_on, reversed_on, created_at
+            'SELECT id, installment_id, bank_transaction_id, cash_document_id, amount, payment_on, reversed_on, created_at
                FROM other_item_allocations WHERE supplier_id = ? AND other_item_id = ? ORDER BY payment_on, id'
         );
         $stmt->execute([$supplierId, $id]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Volné bankovní a pokladní platby k přiřazení položce. Řadí podle síly shody
+     * ({@see OtherItemPaymentCandidateRanker}: VS, účet protistrany, částka splátky
+     * v okně splatnosti, celý zbývající dluh), pak od nejnovější. Bez hledání nabízí
+     * i nejnovější platby bez shody, jako dřív.
+     */
     public function paymentCandidates(int $supplierId, int $id, string $search, int $limit,
         bool $includeBank = true, bool $includeCash = true): array
     {
@@ -405,6 +416,22 @@ final class OtherItemService
             || !in_array($item['status'], ['posted', 'confirmed'], true) || $item['currency'] !== 'CZK') return [];
         $limit = max(1, min(50, $limit));
         $term = '%' . addcslashes(trim($search), '%_\\') . '%';
+        $coverage = $this->installmentCoverage($supplierId, $id);
+        // Hledané částky: zbývající dluh a zbytky otevřených splátek (nejvýš 12 nejbližších).
+        $amounts = [round((float) $item['remaining_amount'], 2)];
+        foreach (OtherItemInstallmentCoverage::open($coverage) as $row) {
+            $amounts[] = round((float) $row['remaining_amount'], 2);
+        }
+        $amounts = array_slice(array_values(array_unique($amounts)), 0, 13);
+        $tolerance = sprintf('%.4F', OtherItemPaymentCandidateRanker::AMOUNT_TOLERANCE + 0.0001);
+        $amountMatch = static fn (string $free): string => '(' . implode(' OR ',
+            array_fill(0, count($amounts), "ABS({$free} - ?) <= {$tolerance}")) . ')';
+        $vs = (string) ($item['variable_symbol'] ?? '');
+        // Předvýběr účtu protistrany podle čísla bez předčíslí (GPC, národní tvar i IBAN ho obsahují);
+        // přesnou shodu rozhodne OtherItemCounterpartyAccount v řazení.
+        $account = (string) ($item['counterparty_account'] ?? '');
+        $accountTerm = $account === '' ? '' : '%' . addcslashes(
+            str_contains($account, '-') ? substr($account, strpos($account, '-') + 1) : $account, '%_\\') . '%';
         $rows = [];
         if ($includeBank) {
             $direction = $item['side'] === 'receivable' ? 'bt.amount > 0' : 'bt.amount < 0';
@@ -412,6 +439,7 @@ final class OtherItemService
                 'SELECT bt.id, bt.posted_at payment_on, ABS(bt.amount) amount,
                         COALESCE(bt.currency, bs.currency, \'CZK\') currency,
                         COALESCE(bt.description, bt.counterparty_name, \'\') description,
+                        bt.variable_symbol, bt.counterparty_account, bt.counterparty_bank,
                         COALESCE(a.used_amount, 0) used_amount
                    FROM bank_transactions bt
                    JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
@@ -431,15 +459,21 @@ final class OtherItemService
                                       AND previous.other_item_id = ? AND previous.reversed_on IS NOT NULL)
                     )
                     AND (bt.variable_symbol LIKE ? OR bt.counterparty_name LIKE ? OR bt.description LIKE ?)
-                  ORDER BY bt.posted_at DESC, bt.id DESC LIMIT ' . $limit
+                  ORDER BY COALESCE(? <> \'\' AND bt.variable_symbol = ?, 0) * 4
+                         + COALESCE(' . $amountMatch('ABS(bt.amount) - COALESCE(a.used_amount, 0)') . ', 0) * 2
+                         + COALESCE(? <> \'\' AND bt.counterparty_account LIKE ?, 0) DESC,
+                           bt.posted_at DESC, bt.id DESC LIMIT ' . $limit
             );
-            $stmt->execute([$supplierId, $supplierId, $id, $term, $term, $term]);
+            $stmt->execute([$supplierId, $supplierId, $id, $term, $term, $term, $vs, $vs, ...$amounts,
+                $accountTerm, $accountTerm]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
                     'source' => 'bank', 'id' => (int) $row['id'], 'payment_on' => $row['payment_on'],
                     'amount' => (float) $row['amount'] - (float) $row['used_amount'],
                     'currency' => $row['currency'], 'description' => $row['description'],
                     'used_amount' => (float) $row['used_amount'],
+                    'variable_symbol' => $row['variable_symbol'], 'counterparty_account' => $row['counterparty_account'],
+                    'counterparty_bank' => $row['counterparty_bank'],
                 ];
             }
         }
@@ -467,15 +501,17 @@ final class OtherItemService
                                       AND previous.other_item_id = ? AND previous.reversed_on IS NOT NULL)
                     )
                     AND (cd.doc_number LIKE ? OR cd.partner_name LIKE ? OR cd.description LIKE ?)
-                  ORDER BY cd.issue_date DESC, cd.id DESC LIMIT ' . $limit
+                  ORDER BY COALESCE(' . $amountMatch('cd.total_amount - COALESCE(a.used_amount, 0)') . ', 0) DESC,
+                           cd.issue_date DESC, cd.id DESC LIMIT ' . $limit
             );
-            $stmt->execute([$supplierId, $supplierId, $cashDirection, $id, $term, $term, $term]);
+            $stmt->execute([$supplierId, $supplierId, $cashDirection, $id, $term, $term, $term, ...$amounts]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
                     'source' => 'cash', 'id' => (int) $row['id'], 'payment_on' => $row['payment_on'],
                     'amount' => (float) $row['amount'] - (float) $row['used_amount'],
                     'currency' => $row['currency'], 'description' => $row['description'],
                     'used_amount' => (float) $row['used_amount'],
+                    'variable_symbol' => null, 'counterparty_account' => null, 'counterparty_bank' => null,
                 ];
             }
         }
@@ -492,8 +528,27 @@ final class OtherItemService
                 }
             }));
         }
-        $rows = array_map(static function (array $row): array { unset($row['used_amount']); return $row; }, $rows);
-        usort($rows, static fn (array $a, array $b): int => [$b['payment_on'], $b['id']] <=> [$a['payment_on'], $a['id']]);
+        $matchItem = [
+            'variable_symbol' => $item['variable_symbol'] ?? null,
+            'counterparty_account' => $item['counterparty_account'] ?? null,
+            'counterparty_bank_code' => $item['counterparty_bank_code'] ?? null,
+            'remaining_amount' => (float) $item['remaining_amount'],
+            'installments' => $coverage,
+        ];
+        $rows = array_map(static function (array $row) use ($matchItem): array {
+            $match = OtherItemPaymentCandidateRanker::evaluate([
+                'amount' => (float) $row['amount'], 'variable_symbol' => $row['variable_symbol'],
+                'counterparty_account' => $row['counterparty_account'], 'counterparty_bank' => $row['counterparty_bank'],
+                'payment_on' => (string) $row['payment_on'],
+            ], $matchItem);
+            unset($row['used_amount'], $row['variable_symbol'], $row['counterparty_account'], $row['counterparty_bank']);
+            return $row + [
+                'match_score' => $match['score'], 'match_confidence' => $match['confidence'],
+                'match_reasons' => $match['reasons'], 'installment' => $match['installment'],
+            ];
+        }, $rows);
+        usort($rows, static fn (array $a, array $b): int =>
+            [$b['match_score'], $b['payment_on'], $b['id']] <=> [$a['match_score'], $a['payment_on'], $a['id']]);
         return array_slice($rows, 0, $limit);
     }
 
@@ -600,21 +655,23 @@ final class OtherItemService
                     throw new OtherItemException('payment_reallocation_amount',
                         'Po stornu lze znovu přiřadit stejnou částku původní úhrady.', 409);
                 }
+                // Vazba na splátku zůstává; po novém splátkovém kalendáři (smazaná splátka) se dopočítá.
                 $reactivate = $pdo->prepare(
-                    'UPDATE other_item_allocations SET reversed_on = NULL
+                    'UPDATE other_item_allocations SET reversed_on = NULL, installment_id = COALESCE(installment_id, ?)
                       WHERE id = ? AND supplier_id = ? AND reversed_on IS NOT NULL'
                 );
-                $reactivate->execute([(int) $prior['id'], $supplierId]);
+                $reactivate->execute([$this->installmentFor($supplierId, $id, $amount), (int) $prior['id'], $supplierId]);
                 $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
                 if ($ownTx) $pdo->commit();
                 return $this->get($supplierId, $id);
             }
             $stmt = $pdo->prepare(
                 'INSERT INTO other_item_allocations
-                   (supplier_id, other_item_id, bank_transaction_id, cash_document_id, amount, payment_on, created_by)
-                 VALUES (?,?,?,?,?,?,?)'
+                   (supplier_id, other_item_id, installment_id, bank_transaction_id, cash_document_id, amount, payment_on, created_by)
+                 VALUES (?,?,?,?,?,?,?,?)'
             );
-            $stmt->execute([$supplierId, $id, $bankId ?: null, $cashId ?: null, $amount, $payment['payment_on'], $userId]);
+            $stmt->execute([$supplierId, $id, $this->installmentFor($supplierId, $id, $amount),
+                $bankId ?: null, $cashId ?: null, $amount, $payment['payment_on'], $userId]);
             // Úhrada přebírá dimenze položky (DimensionDefaults::bankDocuments / forCash).
             $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
             if ($ownTx) $pdo->commit();
@@ -623,6 +680,27 @@ final class OtherItemService
             throw $e;
         }
         return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Splátka, kterou úhrada hradí ({@see OtherItemInstallmentCoverage::target}): přesná shoda
+     * s otevřenou splátkou, jinak první otevřená. Volá se pod zámkem položky a jejích úhrad
+     * ({@see lockForAllocation}); null u položky bez splátkového kalendáře.
+     */
+    private function installmentFor(int $supplierId, int $id, float $amount): ?int
+    {
+        $coverage = $this->items->installmentCoverage($supplierId, [$id])[$id] ?? [];
+        return OtherItemInstallmentCoverage::target($coverage, $amount);
+    }
+
+    /**
+     * Stav splátek položky (zaplaceno, zbývá, unpaid / partial / paid / overdue).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function installmentCoverage(int $supplierId, int $id): array
+    {
+        return $this->items->installmentCoverage($supplierId, [$id])[$id] ?? [];
     }
 
     public function unallocate(int $supplierId, int $id, int $allocationId): array
@@ -968,6 +1046,8 @@ final class OtherItemService
         if ($vs !== '' && !preg_match('/^[0-9]{1,20}$/', $vs)) {
             throw new OtherItemException('invalid_variable_symbol', 'Variabilní symbol smí obsahovat jen číslice.');
         }
+        $counterparty = OtherItemCounterpartyAccount::normalize($input['counterparty_account'] ?? null,
+            $input['counterparty_bank_code'] ?? null);
         $account = trim((string) ($input['account_code'] ?? ''));
         $counter = trim((string) ($input['counter_account_code'] ?? ''));
         if (strlen($account) > 20 || strlen($counter) > 20) {
@@ -988,6 +1068,8 @@ final class OtherItemService
             'currency' => $currency, 'amount' => round((float) $amount, 2),
             'exchange_rate' => $rate, 'amount_czk' => round((float) $amount * $rate, 2),
             'variable_symbol' => $vs === '' ? null : $vs,
+            'counterparty_account' => $counterparty['counterparty_account'],
+            'counterparty_bank_code' => $counterparty['counterparty_bank_code'],
             'account_code' => $account === '' ? null : $account,
             'counter_account_code' => $counter === '' ? null : $counter,
             'posting_lines' => $postingLines,

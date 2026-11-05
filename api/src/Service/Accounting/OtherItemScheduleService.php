@@ -53,7 +53,8 @@ final class OtherItemScheduleService
             }
             $template = [];
             foreach (['side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'currency', 'amount',
-                      'exchange_rate', 'variable_symbol', 'account_code', 'counter_account_code',
+                      'exchange_rate', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code',
+                      'account_code', 'counter_account_code',
                       'posting_lines', 'note'] as $field) {
                 if ($field === 'posting_lines' && $item[$field] === []) continue;
                 $template[$field] = $item[$field];
@@ -222,13 +223,14 @@ final class OtherItemScheduleService
         return ['created_ids' => $created, 'posted_ids' => $posted, 'schedule' => $this->get($supplierId, $id)];
     }
 
+    /**
+     * Splátkový kalendář se stavem každé splátky ({@see OtherItemInstallmentCoverage}):
+     * uhrazeno, zbývá a stav unpaid / partial / paid / overdue.
+     */
     public function installments(int $supplierId, int $itemId): array
     {
         $this->service->get($supplierId, $itemId);
-        $stmt = $this->db->pdo()->prepare('SELECT id, position, due_on, amount FROM other_item_installments
-            WHERE supplier_id = ? AND other_item_id = ? ORDER BY position');
-        $stmt->execute([$supplierId, $itemId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $this->service->installmentCoverage($supplierId, $itemId);
     }
 
     public function setInstallments(int $supplierId, int $itemId, array $rows): array

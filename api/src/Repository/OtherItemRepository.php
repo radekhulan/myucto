@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\OtherItemInstallmentCoverage;
 use MyInvoice\Service\Accounting\OtherItemSort;
 use PDO;
 
@@ -133,14 +134,16 @@ final class OtherItemRepository
             'INSERT INTO other_items
               (supplier_id, side, kind, kind_id, title, partner_id, partner_name, issued_on, accounting_on,
                due_on, currency, amount, exchange_rate, amount_czk, variable_symbol,
+               counterparty_account, counterparty_bank_code,
                account_code, counter_account_code, note, created_by, updated_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
             $supplierId, $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'],
             $data['partner_name'], $data['issued_on'], $data['accounting_on'], $data['due_on'],
             $data['currency'], $data['amount'], $data['exchange_rate'], $data['amount_czk'],
-            $data['variable_symbol'], $data['account_code'], $data['counter_account_code'],
+            $data['variable_symbol'], $data['counterparty_account'] ?? null, $data['counterparty_bank_code'] ?? null,
+            $data['account_code'], $data['counter_account_code'],
             $data['note'], $userId, $userId,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
@@ -151,14 +154,16 @@ final class OtherItemRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE other_items SET side = ?, kind = ?, kind_id = ?, title = ?, partner_id = ?, partner_name = ?,
                     issued_on = ?, accounting_on = ?, due_on = ?, currency = ?, amount = ?,
-                    exchange_rate = ?, amount_czk = ?, variable_symbol = ?, account_code = ?,
+                    exchange_rate = ?, amount_czk = ?, variable_symbol = ?, counterparty_account = ?,
+                    counterparty_bank_code = ?, account_code = ?,
                     counter_account_code = ?, note = ?, updated_by = ?, row_version = row_version + 1
               WHERE id = ? AND supplier_id = ? AND status = \'draft\' AND deleted_at IS NULL'
         );
         $stmt->execute([
             $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'], $data['partner_name'],
             $data['issued_on'], $data['accounting_on'], $data['due_on'], $data['currency'], $data['amount'],
-            $data['exchange_rate'], $data['amount_czk'], $data['variable_symbol'], $data['account_code'],
+            $data['exchange_rate'], $data['amount_czk'], $data['variable_symbol'],
+            $data['counterparty_account'] ?? null, $data['counterparty_bank_code'] ?? null, $data['account_code'],
             $data['counter_account_code'], $data['note'], $userId, $id, $supplierId,
         ]);
     }
@@ -218,5 +223,50 @@ final class OtherItemRepository
         );
         $stmt->execute([$accountCode, $counterCode, $accountingOn, $entryId, $reversalId,
             $userId, $id, $supplierId]);
+    }
+
+    /**
+     * Stav splátek položek ({@see OtherItemInstallmentCoverage::compute}) třemi dotazy bez
+     * ohledu na počet položek. Položka bez splátek v mapě chybí.
+     *
+     * @param list<int> $itemIds
+     * @param bool $lock zamknout aktivní úhrady (přiřazení úhrady pod zámkem položky)
+     * @return array<int, list<array{id:int,position:int,due_on:string,amount:float,paid_amount:float,
+     *     remaining_amount:float,status:string}>>
+     */
+    public function installmentCoverage(int $supplierId, array $itemIds, ?string $today = null, bool $lock = false): array
+    {
+        $itemIds = array_values(array_unique(array_map('intval', $itemIds)));
+        if ($itemIds === []) return [];
+        $in = implode(',', array_fill(0, count($itemIds), '?'));
+        $pdo = $this->db->pdo();
+        $installments = $pdo->prepare("SELECT id, other_item_id, position, due_on, amount FROM other_item_installments
+            WHERE supplier_id = ? AND other_item_id IN ({$in}) ORDER BY other_item_id, position");
+        $installments->execute([$supplierId, ...$itemIds]);
+        $plan = [];
+        foreach ($installments->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $plan[(int) $row['other_item_id']][] = $row;
+        }
+        if ($plan === []) return [];
+        $planned = array_keys($plan);
+        $in = implode(',', array_fill(0, count($planned), '?'));
+        $allocations = $pdo->prepare("SELECT other_item_id, installment_id, amount FROM other_item_allocations
+            WHERE supplier_id = ? AND other_item_id IN ({$in}) AND reversed_on IS NULL
+            ORDER BY other_item_id, payment_on, id" . ($lock ? ' FOR UPDATE' : ''));
+        $allocations->execute([$supplierId, ...$planned]);
+        $paid = [];
+        foreach ($allocations->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $paid[(int) $row['other_item_id']][] = $row;
+        }
+        $settled = $pdo->prepare("SELECT id, settled_outside_amount FROM other_items WHERE supplier_id = ? AND id IN ({$in})");
+        $settled->execute([$supplierId, ...$planned]);
+        $outside = $settled->fetchAll(PDO::FETCH_KEY_PAIR);
+        $today ??= (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $result = [];
+        foreach ($plan as $itemId => $rows) {
+            $result[$itemId] = OtherItemInstallmentCoverage::compute($rows, $paid[$itemId] ?? [],
+                (float) ($outside[$itemId] ?? 0), $today);
+        }
+        return $result;
     }
 }

@@ -213,6 +213,10 @@ export interface MatchCandidate {
   id: number
   /** Jen u `other_item`: strana položky. */
   side?: 'receivable' | 'payable'
+  /** Jen u `other_item`: síla shody 0 až 100, důvody a splátka, jejíž zbytek odpovídá platbě. */
+  match_score?: number
+  match_reasons?: Array<'variable_symbol' | 'counterparty_account' | 'installment_amount' | 'installment_due' | 'remaining_amount'>
+  installment?: { id: number; position: number; due_on: string; remaining_amount: number } | null
   ref: string | null
   amount: number
   currency: string

@@ -8,6 +8,7 @@ import { otherItemKindsApi, otherItemsApi, type OtherItemKind, type OtherItemPay
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { appIsoDate } from '@/utils/date'
+import { isCounterpartyAccountFormat, joinAccountBankCode } from '@/utils/bankAccount'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
@@ -46,6 +47,7 @@ const form = reactive({
   due_on: today,
   amount: null as number | null,
   variable_symbol: '',
+  counterparty_account: '',
   account_code: '',
   counter_account_code: '',
   note: '',
@@ -115,6 +117,7 @@ async function load() {
       form.due_on = item.due_on || today
       form.amount = Number(item.amount)
       form.variable_symbol = item.variable_symbol || ''
+      form.counterparty_account = joinAccountBankCode(item.counterparty_account, item.counterparty_bank_code)
       form.account_code = item.account_code || ''
       form.counter_account_code = item.counter_account_code || ''
       const lines = item.posting_lines || []
@@ -151,6 +154,10 @@ async function save() {
     toast.error(t('other_items.posting_lines_invalid'))
     return
   }
+  if (form.counterparty_account.trim() && !isCounterpartyAccountFormat(form.counterparty_account)) {
+    toast.error(t('other_items.counterparty_account_invalid'))
+    return
+  }
   const customKindId = form.kind.startsWith(CUSTOM_PREFIX) ? Number(form.kind.slice(CUSTOM_PREFIX.length)) : null
   const payload: OtherItemPayload = {
     side: form.side,
@@ -166,6 +173,9 @@ async function save() {
     exchange_rate: null,
     amount: Number(form.amount),
     variable_symbol: form.variable_symbol.trim() || null,
+    // Kód banky jde v čísle za lomítkem; uložený kód by u nového účtu nebo IBANu odporoval.
+    counterparty_account: form.counterparty_account.trim() || null,
+    counterparty_bank_code: null,
     account_code: isDoubleEntry.value ? form.account_code || null : null,
     counter_account_code: isDoubleEntry.value && !splitPosting.value ? form.counter_account_code || null : null,
     // Úprava je částečná — bez rozpadu se posílá prázdný seznam, jinak by zůstal uložený.
@@ -239,6 +249,10 @@ onMounted(load)
           </label>
           <label class="text-sm font-medium">{{ t('other_items.variable_symbol') }}
             <input v-model="form.variable_symbol" maxlength="20" inputmode="numeric" pattern="[0-9]*" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
+          </label>
+          <label class="text-sm font-medium">{{ t('other_items.counterparty_account') }}
+            <input v-model="form.counterparty_account" maxlength="60" autocomplete="off" spellcheck="false" :placeholder="t('other_items.counterparty_account_placeholder')" data-test="counterparty-account" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 font-mono" />
+            <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('other_items.counterparty_account_hint') }}</span>
           </label>
           <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="other-item-dimensions">
             <p class="mb-1 block text-sm font-medium text-neutral-700">{{ t('dimensions.header_title') }}</p>

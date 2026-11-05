@@ -1037,7 +1037,9 @@ potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuj
 jejichž součet musí přesně odpovídat částce dokladu. Agenda je jen v Kč. Při
 úpravě asistent načte současný stav a pošle celý doklad, takže nezadaná pole se
 nezmění. Jediný protiřádek se při změně částky přepočte, u více protiřádků se
-asistent zeptá na nové rozdělení. Upravit a smazat lze jen koncept.
+asistent zeptá na nové rozdělení. Upravit a smazat lze jen koncept. Koncept může
+nést i účet protistrany (`counterparty_account`, český účet `číslo/kód banky`
+nebo IBAN), podle kterého aplikace nabízí úhrady k přiřazení.
 
 **Smlouva u dokladu.** Analyzovaný soubor (např. PDF smlouvy o zápůjčce)
 asistent nahraje nástrojem `upload_document` a koncept založí s `document_id`,

@@ -20,6 +20,7 @@ import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import { formatAccountNumber } from '@/utils/bankAccount'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -71,6 +72,12 @@ const selectedPayment = ref<OtherItemPaymentCandidate | null>(null)
 const allocationAmount = ref<number | null>(null)
 let paymentTimer: ReturnType<typeof setTimeout> | null = null
 let paymentRequest = 0
+
+/** Štítky důvodů shody kandidáta (VS, účet protistrany, splátka, zbývající dluh). */
+function matchLabels(candidate: OtherItemPaymentCandidate): string[] {
+  return (candidate.match_reasons || []).map(reason => t(`other_items.match_reason.${reason}`,
+    { number: candidate.installment?.position ?? '' }))
+}
 
 function statusLabel(value: string): string {
   const key = `other_items.status.${value}`
@@ -334,6 +341,7 @@ onMounted(load)
             <div><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd>{{ item.due_on ? formatDate(item.due_on) : '–' }}</dd></div>
             <div v-if="isDoubleEntry"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd>{{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.variable_symbol') }}</dt><dd>{{ item.variable_symbol || '–' }}</dd></div>
+            <div><dt class="text-neutral-500">{{ t('other_items.counterparty_account') }}</dt><dd class="font-mono" data-test="counterparty-account">{{ formatAccountNumber(item.counterparty_account, item.counterparty_bank_code) || '–' }}</dd></div>
             <div v-if="item.currency !== 'CZK'"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd>{{ item.exchange_rate || '–' }}</dd></div>
             <div class="sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.note') }}</dt><dd class="whitespace-pre-wrap">{{ item.note || '–' }}</dd></div>
           </dl>
@@ -398,7 +406,12 @@ onMounted(load)
             <div v-if="candidatesLoading" class="mt-2 text-xs text-neutral-500">{{ t('common.loading') }}</div>
             <div v-if="paymentCandidates.length" class="mt-2 max-h-52 overflow-y-auto rounded-md border border-neutral-200">
               <button v-for="candidate in paymentCandidates" :key="`${candidate.source}:${candidate.id}`" type="button" class="flex w-full flex-wrap items-center justify-between gap-2 border-b border-neutral-100 px-3 py-2 text-left text-sm hover:bg-neutral-50" @click="selectPayment(candidate)">
-                <span><span class="font-medium">{{ t(candidate.source === 'bank' ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ candidate.id }}</span><span class="ml-2 text-neutral-500">{{ formatDate(candidate.payment_on) }} · {{ candidate.description }}</span></span>
+                <span>
+                  <span class="font-medium">{{ t(candidate.source === 'bank' ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ candidate.id }}</span><span class="ml-2 text-neutral-500">{{ formatDate(candidate.payment_on) }} · {{ candidate.description }}</span>
+                  <span v-if="matchLabels(candidate).length" class="mt-1 flex flex-wrap gap-1" data-test="match-reasons">
+                    <span v-for="label in matchLabels(candidate)" :key="label" class="rounded bg-success-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-success-700">{{ label }}</span>
+                  </span>
+                </span>
                 <strong class="tabular-nums">{{ formatMoney(Math.abs(candidate.amount), candidate.currency) }}</strong>
               </button>
             </div>

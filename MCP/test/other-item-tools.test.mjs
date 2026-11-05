@@ -219,6 +219,18 @@ test('úprava konceptu s vlastním druhem ho drží, vestavěný druh ho zruší
   assert.equal(writes(client)[2].body.kind_id, null);
 });
 
+test('úprava konceptu drží účet protistrany a nový účet bez kódu banky uložený kód zahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({
+    counterparty_account: '1000000005', counterparty_bank_code: '0100' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický úvěr' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.counterparty_account, '1000000005');
+  assert.equal(writes(client)[0].body.counterparty_bank_code, '0100');
+
+  await tool('update_other_item').run(client, { id: 12, counterparty_account: 'CZ1801000000001000000005' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.counterparty_account, 'CZ1801000000001000000005');
+  assert.equal(writes(client)[1].body.counterparty_bank_code, null);
+});
+
 test('úprava s více protiřádky změnu částky bez nové kontace odmítne', async () => {
   const lines = [{ account_code: '518', amount: 7000 }, { account_code: '548', amount: 5000 }];
   const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ posting_lines: lines, counter_account_code: null }) });

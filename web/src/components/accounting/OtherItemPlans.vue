@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { otherItemPlansApi, type OtherItemInstallment, type OtherItemSchedule } from '@/api/otherItemPlans'
+import { otherItemPlansApi, type OtherItemInstallment, type OtherItemInstallmentStatus, type OtherItemSchedule } from '@/api/otherItemPlans'
 import type { OtherItem } from '@/api/otherItems'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -177,7 +177,15 @@ async function clearInstallments() {
   }
 }
 
-watch(() => props.item.id, () => void load(), { immediate: true })
+const INSTALLMENT_STATUS_CLASS: Record<OtherItemInstallmentStatus, string> = {
+  paid: 'bg-success-50 text-success-700',
+  partial: 'bg-warning-50 text-warning-700',
+  overdue: 'bg-danger-50 text-danger-700',
+  unpaid: 'bg-neutral-100 text-neutral-600',
+}
+
+// Přiřazená nebo odpojená úhrada mění stav splátek, proto se načítá i při změně uhrazené částky.
+watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immediate: true })
 </script>
 
 <template>
@@ -280,6 +288,9 @@ watch(() => props.item.id, () => void load(), { immediate: true })
           <label class="text-sm font-medium">{{ t('other_items.amount') }}
             <input v-model.number="row.amount" type="number" min="0.01" step="0.01" :disabled="!canEditInstallments" class="mt-1 block h-9 w-32 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
           </label>
+          <span v-if="row.status" :class="INSTALLMENT_STATUS_CLASS[row.status]" class="mb-2 whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium" data-test="installment-status">
+            {{ t(`other_items.plans.installment_status.${row.status}`) }}<template v-if="row.status === 'partial' || (row.status === 'overdue' && Number(row.paid_amount || 0) > 0)"> · {{ t('other_items.plans.installment_remaining', { amount: formatMoney(row.remaining_amount ?? 0, item.currency) }) }}</template>
+          </span>
           <button v-if="canEditInstallments" type="button" :class="btnOutline('danger')" @click="installments.splice(index, 1)">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ t('common.delete') }}

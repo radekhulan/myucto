@@ -37,6 +37,12 @@ function candidateLabel(c: MatchCandidate): string {
   return c.type === 'invoice' ? t('bank.candidate_issued') : t('bank.candidate_purchase')
 }
 
+/** Proč se ostatní položka nabízí: VS, účet protistrany, splátka, celý zbývající dluh. */
+function otherItemReasons(c: MatchCandidate): string[] {
+  if (c.type !== 'other_item') return []
+  return (c.match_reasons || []).map(reason => t(`bank.other_item_match.${reason}`, { number: c.installment?.position ?? '' }))
+}
+
 function candidateBadgeClass(c: MatchCandidate): string {
   if (c.type === 'other_item') return 'bg-primary-50 text-primary-600'
   return c.type === 'invoice' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'
@@ -133,6 +139,10 @@ function candidateBadgeClass(c: MatchCandidate): string {
                 </span>
                 <span class="font-mono text-sm ml-1">{{ c.ref || `#${c.id}` }}</span>
                 <span v-if="c.party" class="text-xs text-neutral-500 block truncate">{{ c.party }}</span>
+                <span v-if="otherItemReasons(c).length" class="mt-0.5 flex flex-wrap gap-1" data-testid="other-item-reasons">
+                  <span v-for="label in otherItemReasons(c)" :key="label"
+                    class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-success-50 text-success-700">{{ label }}</span>
+                </span>
               </span>
               <span class="text-right whitespace-nowrap shrink-0">
                 <span class="font-mono text-sm">{{ formatMoney(c.amount, c.currency) }}</span>

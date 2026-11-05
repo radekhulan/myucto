@@ -273,6 +273,17 @@
     "payment_unlinked": "Payment unlinked.",
     "confirm_unlink_payment": "Unlink this payment?",
     "foreign_payment_hint": "Matching a foreign currency payment requires exchange rate settlement.",
+    "counterparty_account": "Counterparty account",
+    "counterparty_account_placeholder": "prefix-number/bank code or IBAN",
+    "counterparty_account_hint": "Bank payments from this account are offered for the item.",
+    "counterparty_account_invalid": "Enter the counterparty account as prefix-number/bank code or IBAN.",
+    "match_reason": {
+      "variable_symbol": "Reference",
+      "counterparty_account": "Counterparty account",
+      "installment_amount": "Installment {number}",
+      "installment_due": "Near due date",
+      "remaining_amount": "Full balance"
+    },
     "documents": "documents",
     "forecast": "Forecast",
     "result_impact_title": "Other items in the profit forecast",
@@ -348,6 +359,13 @@
       "confirm_clear": "Remove the installment schedule?",
       "installments_cleared": "Installment schedule removed.",
       "paid_locked": "The schedule cannot be changed after a payment is allocated.",
+      "installment_status": {
+        "unpaid": "Unpaid",
+        "partial": "Partial",
+        "paid": "Paid",
+        "overdue": "Overdue"
+      },
+      "installment_remaining": "{amount} left",
       "delete_schedule": "Remove recurrence",
       "confirm_delete_schedule": "Remove the recurrence? Items already created remain as separate documents.",
       "schedule_deleted": "Recurrence removed.",
@@ -24701,6 +24719,13 @@
     "candidate_purchase": "Received",
     "candidate_other_receivable": "Other receivable",
     "candidate_other_payable": "Other payable",
+    "other_item_match": {
+      "variable_symbol": "Reference",
+      "counterparty_account": "Counterparty account",
+      "installment_amount": "Installment {number}",
+      "installment_due": "Near due date",
+      "remaining_amount": "Full balance"
+    },
     "other_item_matched": "Payment allocated to {ref}",
     "other_item_matched_hint": "The payment is allocated to an other receivable or payable. Remove the allocation in the item detail.",
     "candidate_paid": "Paid",

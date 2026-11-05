@@ -39,6 +39,9 @@ export interface OtherItem {
   document_count: number
   source_url: string | null
   variable_symbol?: string | null
+  /** Účet protistrany: český `předčíslí-číslo` s kódem banky, nebo IBAN bez kódu banky. */
+  counterparty_account?: string | null
+  counterparty_bank_code?: string | null
   account_code?: string | null
   counter_account_code?: string | null
   posting_lines?: OtherItemPostingLine[]
@@ -61,6 +64,9 @@ export interface OtherItemPayload {
   exchange_rate: number | null
   amount: number
   variable_symbol: string | null
+  /** `předčíslí-číslo/kód banky` nebo IBAN; server ho ověří a uloží kanonicky. */
+  counterparty_account?: string | null
+  counterparty_bank_code?: string | null
   account_code: string | null
   counter_account_code: string | null
   posting_lines?: OtherItemPostingLine[]
@@ -78,6 +84,8 @@ export interface OtherItemsResult {
 
 export interface OtherItemAllocation {
   id: number
+  /** Splátka, kterou úhrada hradí; přebytek pokrývá další splátky podle pořadí. */
+  installment_id?: number | null
   bank_transaction_id: number | null
   cash_document_id: number | null
   amount: number
@@ -91,6 +99,16 @@ export interface OtherItemAllocationPayload {
   amount: number
 }
 
+/** Důvod shody platby s položkou (OtherItemPaymentCandidateRanker). */
+export type OtherItemMatchReason = 'variable_symbol' | 'counterparty_account' | 'installment_amount' | 'installment_due' | 'remaining_amount'
+
+export interface OtherItemMatchInstallment {
+  id: number
+  position: number
+  due_on: string
+  remaining_amount: number
+}
+
 export interface OtherItemPaymentCandidate {
   source: 'bank' | 'cash'
   id: number
@@ -98,6 +116,10 @@ export interface OtherItemPaymentCandidate {
   amount: number
   currency: string
   description: string
+  /** 0 až 100; řazení kandidátů od nejsilnější shody. */
+  match_score?: number
+  match_reasons?: OtherItemMatchReason[]
+  installment?: OtherItemMatchInstallment | null
 }
 
 export interface OtherItemRepostPayload {
