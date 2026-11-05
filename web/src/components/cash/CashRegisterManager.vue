@@ -203,7 +203,7 @@ async function saveAll() {
 
 <template>
   <div class="fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto" @click.self="emit('close')">
-    <div class="bg-surface rounded-xl shadow-lg max-w-2xl w-full my-8">
+    <div class="bg-surface rounded-xl shadow-lg max-w-4xl w-full my-8">
       <header class="px-5 py-4 border-b border-neutral-200 flex items-center justify-between gap-3">
         <h3 class="text-lg font-semibold">{{ t('cash.registers_manage') }}</h3>
         <button type="button" @click="emit('close')" :title="t('common.close')" :aria-label="t('common.close')"
@@ -234,7 +234,7 @@ async function saveAll() {
                 <td class="px-3 py-2">
                   <input v-model="r.name" type="text" :disabled="r.remove"
                     :aria-label="t('cash.register_name')"
-                    class="w-full h-8 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-100" />
+                    class="w-full min-w-40 h-8 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-100" />
                   <div v-if="isForeignRow(r)" class="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-600"
                     :title="t('cash.register_opening_foreign_hint')">
                     <span>{{ t('cash.register_opening_foreign') }}</span>
