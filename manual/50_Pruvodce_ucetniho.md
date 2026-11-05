@@ -568,6 +568,13 @@ s vybranou položkou (pole **Přiřadit k ostatní položce**, viz
 Pravidlo účtuje na účet položky a úhradu k ní přiřadí jedním zápisem; když
 položku uhradit nejde, vytvoří jen návrh ke kontrole.
 
+Potvrzený nebo zaúčtovaný **závazek s účtem protistrany** zaplatíte i
+[platebním příkazem](26_Platebni_prikazy.md#26812-ostatni-zavazky) spolu s přijatými
+fakturami. Stránka **Nákup → Platební příkazy** nabízí nejbližší neuhrazenou splátku,
+bez kalendáře celý zbytek, s účtem protistrany a variabilním symbolem z položky.
+Zařazená splátka se podruhé nenabídne, dokud příkaz nesmažete. Zařazení závazek
+neuhradí: úhrada se zapíše až přiřazením odchozí platby z výpisu, jako u jiné platby.
+
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.
 Další položky se načítají při posunu dolů. Na počítači zůstávají filtry a názvy

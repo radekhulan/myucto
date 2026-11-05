@@ -121,6 +121,39 @@ export interface PaymentOrderCandidatesResponse {
   refund_candidates?: RefundCandidate[]
   /** Daně firmy finančnímu úřadu (DPH z podaných přiznání, zálohy na daň z příjmů). */
   tax_candidates?: TaxPaymentCandidate[]
+  /** Ostatní závazky k úhradě (jen CZK): nejbližší splátka, nebo celý zbytek. */
+  other_candidates?: OtherPayablePaymentCandidate[]
+}
+
+/**
+ * Ostatní závazek k úhradě. Jeden řádek = nejbližší otevřená splátka, která ještě
+ * není v příkazu, nebo celý zbytek bez kalendáře. Zařazené splátky chodí s `ordered_at`
+ * a `payable: false`. Účet, VS i částku určuje server, do příkazu se posílá jen ID.
+ */
+export interface OtherPayablePaymentCandidate {
+  key: string
+  other_item_id: number
+  installment_id: number | null
+  installment_position: number | null
+  installment_count: number | null
+  side: 'payable'
+  kind: string
+  kind_name: string | null
+  title: string
+  partner_name: string | null
+  document_no: string | null
+  due_date: string
+  amount: number
+  currency: 'CZK'
+  account_number: string | null
+  bank_code: string | null
+  iban: string | null
+  variable_symbol: string | null
+  has_account: boolean
+  abo_eligible: boolean
+  ordered_at: string | null
+  payable: boolean
+  reason: 'no_account' | 'already_ordered' | null
 }
 
 /** Daň k úhradě FÚ. Účet, VS i částku určuje server, do příkazu se posílá jen ID. */
@@ -147,6 +180,8 @@ export interface PaymentOrderItem {
   invoice_id?: number
   tax_submission_id?: number
   tax_advance_schedule_id?: number
+  other_item_id?: number
+  other_item_installment_id?: number
   payee_name: string | null
   account_number: string | null
   bank_code: string | null
@@ -209,6 +244,8 @@ export interface CreatePaymentOrderPayload {
   tax_submission_ids?: number[]
   /** Zálohy na daň z příjmů (tax_advance_schedules.id). */
   tax_advance_ids?: number[]
+  /** Ostatní závazky: ID položky a splátka, kterou seznam nabídl. */
+  other_items?: Array<{ id: number; installment_id: number | null }>
   payer_currency_id: number
   payment_date: string
   constant_symbol?: string
@@ -225,11 +262,12 @@ export type PaymentOrderSkipReason =
   | 'refund_disabled'
   | 'cash'
   | 'invalid_account'
+  | 'already_ordered'
 
 export interface CreatePaymentOrderResponse {
   order_id: number
   view: PaymentOrderView
-  skipped: Array<{ id: number; reason: PaymentOrderSkipReason | string; document?: 'invoice' }>
+  skipped: Array<{ id: number; reason: PaymentOrderSkipReason | string; document?: 'invoice' | 'tax_vat' | 'tax_advance' | 'other_item' }>
   clamped_date: boolean
 }
 
