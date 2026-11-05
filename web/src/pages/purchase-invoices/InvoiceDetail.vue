@@ -1504,10 +1504,6 @@ useWindowRefresh(async () => {
       <PurchaseApprovalPanel v-if="showApprovalPanel" :invoice-id="invoice.id"
         :approval-status="invoice.approval_status ?? 'none'" :refresh-key="approvalRefreshKey" />
 
-      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
-           se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
-
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
       <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
@@ -1605,6 +1601,9 @@ useWindowRefresh(async () => {
           </table>
         </div>
       </DocumentPostingPanel>
+      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
+           se přerazítkují. Sbalené pod zaúčtováním, stejně jako u vydané faktury. -->
+      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" collapsible :initially-open="missingDimensions(invoice).length > 0" @saved="postingPanelRef?.reload()" />
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>

@@ -2774,7 +2774,7 @@ useWindowRefresh(async () => {
         @reposted="onReposted" />
       <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
            se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
+      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" collapsible @saved="postingPanelRef?.reload()" />
 
       <!-- Položky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
