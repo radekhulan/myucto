@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Absence;
 
 use InvalidArgumentException;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\Time\PayrollDuration;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
 final class AverageEarningCalculator
@@ -22,10 +23,31 @@ final class AverageEarningCalculator
         ?string $probableRationale = null,
         ?int $weeklyMinutes = null,
     ): AverageEarningResult {
+        $result = $this->calculateExact(
+            $applicationDate, $grossEarningsMinor, $longerPeriodAllocatedMinor,
+            PayrollDuration::fromMinutes($workedMinutes), $workedDays,
+            $probableHourlyMinor, $probableRationale, $weeklyMinutes,
+        );
+        // Staré volání zachovává i tvar stopy uložených měsíčních průměrů.
+        $trace = $result->trace;
+        unset($trace['worked_duration_units']);
+        return new AverageEarningResult($result->sourceKind, $result->averageHourlyMinor, $result->supportStatus, $trace);
+    }
+
+    public function calculateExact(
+        string $applicationDate,
+        int $grossEarningsMinor,
+        int $longerPeriodAllocatedMinor,
+        int $workedDurationUnits,
+        int $workedDays,
+        ?int $probableHourlyMinor = null,
+        ?string $probableRationale = null,
+        ?int $weeklyMinutes = null,
+    ): AverageEarningResult {
         if ($grossEarningsMinor < 0 || $longerPeriodAllocatedMinor < 0) {
             throw new InvalidArgumentException('Započitatelná mzda nesmí být záporná.');
         }
-        if ($workedMinutes < 0 || $workedDays < 0) {
+        if ($workedDurationUnits < 0 || $workedDays < 0) {
             throw new InvalidArgumentException('Odpracovaná doba nesmí být záporná.');
         }
 
@@ -54,7 +76,8 @@ final class AverageEarningCalculator
                 'manual_review',
                 [
                     'worked_days' => $workedDays,
-                    'worked_minutes' => $workedMinutes,
+                    'worked_minutes' => PayrollDuration::exactMinutes($workedDurationUnits),
+                'worked_duration_units' => $workedDurationUnits,
                     'minimum_worked_days' => $minimumWorkedDays,
                     'probable_hourly_minor' => $probableHourlyMinor,
                     'rationale' => $rationale,
@@ -63,18 +86,20 @@ final class AverageEarningCalculator
             );
         }
 
-        if ($workedMinutes <= 0 || $earningsMinor <= 0) {
+        if ($workedDurationUnits <= 0 || $earningsMinor <= 0) {
             throw new InvalidArgumentException(
                 'Skutečný průměr vyžaduje kladnou započitatelnou mzdu a odpracované minuty.'
             );
         }
-        if ($earningsMinor > intdiv(PHP_INT_MAX, 60)) {
+        $divisor = self::gcd($workedDurationUnits, PayrollDuration::UNITS_PER_HOUR);
+        $factor = intdiv(PayrollDuration::UNITS_PER_HOUR, $divisor);
+        if ($earningsMinor > intdiv(PHP_INT_MAX, $factor)) {
             throw new \OverflowException('Výpočet hodinového průměru překročil celočíselný rozsah.');
         }
 
         $computedHourlyMinor = RoundingMode::HalfUp->roundFraction(
-            $earningsMinor * 60,
-            $workedMinutes,
+            $earningsMinor * $factor,
+            intdiv($workedDurationUnits, $divisor),
         );
         $hourlyMinor = $floor->apply($computedHourlyMinor);
 
@@ -86,12 +111,21 @@ final class AverageEarningCalculator
                 'gross_earnings_minor' => $grossEarningsMinor,
                 'longer_period_allocated_minor' => $longerPeriodAllocatedMinor,
                 'worked_days' => $workedDays,
-                'worked_minutes' => $workedMinutes,
+                'worked_minutes' => PayrollDuration::exactMinutes($workedDurationUnits),
+                'worked_duration_units' => $workedDurationUnits,
                 'minimum_worked_days' => $minimumWorkedDays,
                 'average_hourly_minor' => $hourlyMinor,
                 'rounding' => 'half-up-to-minor-unit',
                 'rule' => 'gross-earnings-divided-by-worked-time',
             ] + $floor->trace($computedHourlyMinor),
         );
+    }
+
+    private static function gcd(int $left, int $right): int
+    {
+        while ($right !== 0) {
+            [$left, $right] = [$right, $left % $right];
+        }
+        return $left;
     }
 }

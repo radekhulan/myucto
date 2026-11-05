@@ -60,6 +60,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_apz_contribution_status' => 'field',
         'jmhz_apz_instrument_code' => 'field',
         'jmhz_codebook' => 'field',
+        // Boolean potvrzení výkazového souhrnu v PayrollQuickInputRepository::workedTimeForPage.
+        'jmhz_confirmed' => 'field',
         'jmhz_correction_evidence' => 'field',
         'jmhz_deep_mining_work_applies' => 'table',
         'jmhz_default_interpretations' => 'field',

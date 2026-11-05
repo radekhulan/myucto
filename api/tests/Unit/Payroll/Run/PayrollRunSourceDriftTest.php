@@ -9,6 +9,23 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRunSourceDriftTest extends TestCase
 {
+    public function testManualTimeRevisionChangesAreDetectedWithoutJmhz(): void
+    {
+        $frozen = ['people' => [['employee' => ['id' => 1], 'employments' => [[
+            'employment' => ['id' => 2],
+            'worked_time_evidence' => ['work_source' => 'manual_summary', 'revision_no' => 1, 'source_sha256' => 'before'],
+        ]]]]];
+        $current = ['eligible_employment_ids' => [2], 'inputs' => [], 'absences' => [], 'statutory_evidence' => null,
+            'worked_time_evidence' => [2 => ['work_source' => 'manual_summary', 'revision_no' => 2, 'source_sha256' => 'after']]];
+        $drift = PayrollRunSourceDrift::between($frozen, $current);
+        self::assertSame(1, $drift->total());
+        self::assertSame(1, $drift->toArray()['worked_time_changed']);
+        $current['worked_time_evidence'][2] = $frozen['people'][0]['employments'][0]['worked_time_evidence'];
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        unset($frozen['people'][0]['employments'][0]['worked_time_evidence']);
+        self::assertTrue(PayrollRunSourceDrift::between($frozen, $current)->hasChanges(), 'Nový ruční zdroj zastaví i starý snímek.');
+    }
+
     public function testHourlyTermsAddedAfterLockPreventApprovalOfOldMonthlySnapshot(): void
     {
         $current = $this->current();

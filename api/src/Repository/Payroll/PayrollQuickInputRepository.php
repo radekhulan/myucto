@@ -16,6 +16,8 @@ use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence;
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeSource;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollAchievedWage;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollQuickSurchargeCalculator;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeCompensationMode;
@@ -1038,11 +1040,12 @@ final class PayrollQuickInputRepository
             $periodStart,
             $employmentIdsOnPage,
         );
+        $workedTime = $this->workedTimeForPage($supplierId, $periodStart, $periodEnd, $rows, $employmentIdsOnPage);
 
         $items = [];
         foreach ($rows as $row) {
             $employmentId = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
-            $items[] = $this->buildItem(
+            $item = $this->buildItem(
                 $supplierId,
                 $period,
                 $row,
@@ -1057,8 +1060,59 @@ final class PayrollQuickInputRepository
                 $policies[$employmentId] ?? $employerDefault,
                 $claims[$employmentId] ?? [],
             );
+            $item['worked_time'] = $workedTime[$employmentId];
+            $items[] = $item;
         }
         return ['period' => $period, 'items' => $items, 'total' => $total];
+    }
+
+    /** @param list<array<string,mixed>> $rows @param list<int> $ids @return array<int,array<string,mixed>> */
+    private function workedTimeForPage(int $supplierId, string $periodStart, string $periodEnd, array $rows, array $ids): array
+    {
+        $evidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $ids, $periodStart);
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $terms = $this->db->pdo()->prepare("SELECT employment_id, effective_from, effective_to FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id IN ($in) AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) ORDER BY employment_id, effective_from, id");
+        $terms->execute([$supplierId, ...$ids, $periodEnd, $periodStart]);
+        $byEmployment = [];
+        foreach ($terms->fetchAll(PDO::FETCH_ASSOC) as $term) $byEmployment[(int) $term['employment_id']][] = $term;
+        $confirmed = $this->db->pdo()->prepare("SELECT month_row.employment_id FROM payroll_time_months month_row JOIN payroll_jmhz_work_month_revisions summary ON summary.supplier_id = month_row.supplier_id AND summary.time_month_id = month_row.id AND summary.time_month_revision_no = month_row.revision_no WHERE month_row.supplier_id = ? AND month_row.period_start = ? AND month_row.status = 'approved' AND month_row.employment_id IN ($in) GROUP BY month_row.employment_id");
+        $confirmed->execute([$supplierId, $periodStart, ...$ids]);
+        $confirmedIds = array_fill_keys(array_map('intval', $confirmed->fetchAll(PDO::FETCH_COLUMN)), true);
+        $imports = $this->db->pdo()->prepare("SELECT DISTINCT employment_id FROM payroll_time_month_import_summaries WHERE supplier_id = ? AND period_start = ? AND employment_id IN ($in)");
+        $imports->execute([$supplierId, $periodStart, ...$ids]);
+        $importIds = array_fill_keys(array_map('intval', $imports->fetchAll(PDO::FETCH_COLUMN)), true);
+        $result = [];
+        foreach ($rows as $row) {
+            $id = (int) $row['employment_id'];
+            $start = max($periodStart, (string) ($row['actual_start_date'] ?? $row['start_date'] ?? $periodStart));
+            $end = min($periodEnd, (string) ($row['end_date'] ?? $periodEnd));
+            $ranges = [];
+            foreach ($byEmployment[$id] ?? [] as $term) {
+                $from = max($start, (string) $term['effective_from']);
+                $to = min($end, (string) ($term['effective_to'] ?? $end));
+                if ($from <= $to) $ranges[] = ['date_from' => $from, 'date_to' => $to];
+            }
+            $source = $evidence[$id] ?? null;
+            $hasExplicitSource = $source !== null && ($source['work_source'] !== 'entries' || ($source['time_entries'] ?? []) !== []);
+            $value = $source !== null && $source['status'] === 'approved' && $hasExplicitSource
+                ? PayrollWorkedTimeSource::fromSnapshot($source, $periodStart) : null;
+            if ($value !== null && $value['issues'] !== []) $value = null;
+            $result[$id] = [
+                'month' => $source === null ? null : [
+                    'id' => $source['time_month_id'], 'status' => $source['status'],
+                    'revision_no' => $source['revision_no'], 'row_version' => $source['row_version'],
+                    'work_source' => $source['work_source'],
+                ],
+                'manual_summary' => $source['manual_summary'] ?? null,
+                'suggested_segments' => $ranges,
+                'worked_duration_units' => $value['worked_duration_units'] ?? null,
+                'overtime_duration_units' => $value['overtime_duration_units'] ?? null,
+                'worked_days' => $value['worked_days'] ?? null,
+                'jmhz_confirmed' => isset($confirmedIds[$id]),
+                'available_sources' => isset($importIds[$id]) ? ['entries', 'import_summary'] : ['entries'],
+            ];
+        }
+        return $result;
     }
 
     /**

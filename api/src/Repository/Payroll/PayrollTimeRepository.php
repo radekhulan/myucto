@@ -754,9 +754,10 @@ final class PayrollTimeRepository
                 $monthVersion,
                 $userId,
             );
-            if (($month['work_source'] ?? 'entries') === 'import_summary') {
+            if (($month['work_source'] ?? 'entries') !== 'entries') {
+                $sourceLabel = $month['work_source'] === 'import_summary' ? 'docházku ze souhrnu importu' : 'hodiny z ručního souhrnu';
                 throw new \InvalidArgumentException(
-                    'Pracovní měsíc bere docházku ze souhrnu importu. Časový záznam by byl druhým '
+                    "Pracovní měsíc bere {$sourceLabel}. Časový záznam by byl druhým "
                     . 'zdrojem téhož měsíce, proto se neuložil.'
                 );
             }
@@ -860,6 +861,9 @@ final class PayrollTimeRepository
                 PayrollTimeValue::string($current['timezone_name'] ?? null, 'timezone_name'),
             ))->format('Y-m-01');
             $month = $this->lockOpenMonth($supplierId, $employmentId, $periodStart, $monthVersion, $userId);
+            if ($kind === 'entry' && ($month['work_source'] ?? 'entries') !== 'entries') {
+                throw new \InvalidArgumentException('Časové záznamy lze měnit jen při zvoleném zdroji docházky.');
+            }
             $currentVersion = PayrollTimeValue::int($current['row_version'] ?? null, 'row_version');
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollTimeConflictException($currentVersion);
@@ -906,6 +910,8 @@ final class PayrollTimeRepository
                 $expectedVersion,
                 $userId,
             );
+            $now = gmdate('Y-m-d H:i:s');
+            if (($month['work_source'] ?? 'entries') !== 'manual_summary') {
             [$startsAtUtc, $endsAtUtc] = self::utcMonthBounds($periodStart);
             [$candidateStart, $candidateEnd] = self::candidateBounds(
                 $startsAtUtc,
@@ -933,7 +939,6 @@ final class PayrollTimeRepository
                 }
             }
 
-            $now = gmdate('Y-m-d H:i:s');
             $draftEntries = $pdo->prepare(
                 "SELECT id, starts_at_utc, timezone_name
                    FROM payroll_time_entries
@@ -965,6 +970,11 @@ final class PayrollTimeRepository
                     $employmentId,
                     PayrollTimeValue::int($draftEntry['id'] ?? null, 'id'),
                 ]);
+            }
+            } elseif ($this->manualSummary($supplierId, $employmentId, $periodStart) === null) {
+                throw new \InvalidArgumentException('Pracovní měsíc nemá ruční souhrn hodin.');
+            } else {
+                $this->assertManualSourceHasNoMaterializedAmounts($supplierId, $employmentId, $periodStart);
             }
             $confirmedJmhzSummary = null;
             $jmhzSpecPackageId = null;
@@ -1072,6 +1082,8 @@ final class PayrollTimeRepository
                 throw new \InvalidArgumentException('Znovu otevřít lze pouze schválený měsíc.');
             }
             $now = gmdate('Y-m-d H:i:s');
+            $previousManual = ($month['work_source'] ?? 'entries') === 'manual_summary'
+                ? $this->manualSummary($supplierId, $employmentId, $periodStart) : null;
             $nextVersion = $expectedVersion + 1;
             $nextRevision = PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no') + 1;
             $pdo->prepare(
@@ -1101,6 +1113,13 @@ final class PayrollTimeRepository
             $month['revision_no'] = $nextRevision;
             $month['row_version'] = $nextVersion;
             $month['reopen_reason'] = $reason;
+            if ($previousManual !== null) {
+                $pdo->prepare('INSERT INTO payroll_time_month_manual_summaries (supplier_id, time_month_id, time_month_revision_no, employment_id, period_start, content_sha256, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                    ->execute([$supplierId, $month['id'], $nextRevision, $employmentId, $periodStart, $previousManual['content_sha256'], $reason, $userId]);
+                $newSummaryId = (int) $pdo->lastInsertId();
+                $copy = $pdo->prepare('INSERT INTO payroll_time_month_manual_segments (supplier_id, summary_id, sequence_no, date_from, date_to, worked_duration_units, overtime_duration_units, worked_days) SELECT supplier_id, ?, sequence_no, date_from, date_to, worked_duration_units, overtime_duration_units, worked_days FROM payroll_time_month_manual_segments WHERE supplier_id = ? AND summary_id = ?');
+                $copy->execute([$newSummaryId, $supplierId, $previousManual['id']]);
+            }
             $this->insertMonthEvent($month, 'reopened', $reason, $userId);
             $this->commitTransactionScope($scope);
         } catch (\Throwable $e) {
@@ -1140,6 +1159,186 @@ final class PayrollTimeRepository
         );
         $stmt->execute([$supplierId, $employmentId, $periodStart]);
         return self::row($stmt);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function manualSummary(int $supplierId, int $employmentId, string $periodStart): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT summary.id, summary.time_month_revision_no, summary.content_sha256, summary.reason
+               FROM payroll_time_month_manual_summaries summary
+               JOIN payroll_time_months month_row ON month_row.supplier_id = summary.supplier_id
+                AND month_row.id = summary.time_month_id AND month_row.revision_no = summary.time_month_revision_no
+              WHERE summary.supplier_id = ? AND summary.employment_id = ? AND summary.period_start = ?
+                AND month_row.work_source = "manual_summary"'
+        );
+        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) return null;
+        $segments = $this->db->pdo()->prepare(
+            'SELECT date_from, date_to, worked_duration_units, overtime_duration_units, worked_days
+               FROM payroll_time_month_manual_segments WHERE supplier_id = ? AND summary_id = ? ORDER BY sequence_no'
+        );
+        $segments->execute([$supplierId, $row['id']]);
+        $items = [];
+        foreach ($segments->fetchAll(PDO::FETCH_ASSOC) as $segment) {
+            $items[] = [
+                'date_from' => (string) $segment['date_from'], 'date_to' => (string) $segment['date_to'],
+                'worked_duration_units' => (int) $segment['worked_duration_units'],
+                'overtime_duration_units' => $segment['overtime_duration_units'] === null ? null : (int) $segment['overtime_duration_units'],
+                'worked_days' => $segment['worked_days'] === null ? null : (int) $segment['worked_days'],
+            ];
+        }
+        return ['id' => (int) $row['id'], 'time_month_revision_no' => (int) $row['time_month_revision_no'],
+            'content_sha256' => (string) $row['content_sha256'], 'reason' => (string) $row['reason'], 'segments' => $items];
+    }
+
+    /** @param list<string> $periods @return array<string,list<array<string,mixed>>> */
+    public function manualSummaryHistory(int $supplierId, int $employmentId, array $periods, int $offset = 0): array
+    {
+        if ($periods === []) return [];
+        $in = implode(',', array_fill(0, count($periods), '?'));
+        $stmt = $this->db->pdo()->prepare("WITH ranked AS (
+            SELECT summary.*, ROW_NUMBER() OVER (PARTITION BY summary.period_start ORDER BY summary.time_month_revision_no DESC, summary.id DESC) AS position
+              FROM payroll_time_month_manual_summaries summary
+             WHERE summary.supplier_id = ? AND summary.employment_id = ? AND summary.period_start IN ($in)
+        ) SELECT ranked.id, ranked.period_start, ranked.time_month_revision_no, ranked.content_sha256,
+                 ranked.reason, ranked.created_by, ranked.created_at, actor.name AS created_by_name,
+                 segment.date_from, segment.date_to, segment.worked_duration_units, segment.overtime_duration_units, segment.worked_days
+            FROM ranked LEFT JOIN users actor ON actor.id = ranked.created_by
+            LEFT JOIN payroll_time_month_manual_segments segment ON segment.supplier_id = ranked.supplier_id AND segment.summary_id = ranked.id
+           WHERE ranked.position > ? AND ranked.position <= ? ORDER BY ranked.period_start, ranked.position, segment.sequence_no");
+        $stmt->execute([$supplierId, $employmentId, ...$periods, $offset, $offset + 21]);
+        $groups = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $period = (string) $row['period_start'];
+            $id = (int) $row['id'];
+            $groups[$period][$id] ??= [
+                'id' => $id, 'time_month_revision_no' => (int) $row['time_month_revision_no'],
+                'content_sha256' => (string) $row['content_sha256'], 'reason' => (string) $row['reason'],
+                'created_by' => $row['created_by'] === null ? null : (int) $row['created_by'],
+                'created_by_name' => $row['created_by_name'] === null ? null : (string) $row['created_by_name'],
+                'created_at' => (string) $row['created_at'], 'segments' => [],
+            ];
+            if ($row['date_from'] !== null) {
+                $groups[$period][$id]['segments'][] = [
+                    'date_from' => (string) $row['date_from'], 'date_to' => (string) $row['date_to'],
+                    'worked_duration_units' => (int) $row['worked_duration_units'],
+                    'overtime_duration_units' => $row['overtime_duration_units'] === null ? null : (int) $row['overtime_duration_units'],
+                    'worked_days' => $row['worked_days'] === null ? null : (int) $row['worked_days'],
+                ];
+            }
+        }
+        foreach ($groups as $period => $summaries) $groups[$period] = array_values($summaries);
+        return $groups;
+    }
+
+    /** @param list<array<string,mixed>> $segments @return array<string,mixed> */
+    public function saveManualSummary(int $supplierId, int $employmentId, string $periodStart, int $expectedVersion, string $reason, bool $replaceSource, array $segments, ?int $userId): array
+    {
+        $pdo = $this->db->pdo();
+        $scope = $this->beginTransactionScope();
+        try {
+            $month = $this->lockOpenMonth($supplierId, $employmentId, $periodStart, $expectedVersion, $userId);
+            $source = (string) ($month['work_source'] ?? 'entries');
+            if ($source !== 'manual_summary' && !$replaceSource
+                && ($source === 'import_summary' || $this->hasEntriesInPeriod($supplierId, $employmentId, $periodStart))) {
+                throw new \InvalidArgumentException('Měsíc již má jiný zdroj hodin; jeho nahrazení je nutné výslovně potvrdit.');
+            }
+            $this->assertManualSourceHasNoMaterializedAmounts($supplierId, $employmentId, $periodStart);
+            $check = $pdo->prepare(
+                'SELECT terms.effective_from, terms.effective_to,
+                        COALESCE(employment.actual_start_date, employment.start_date) AS started_on, employment.end_date
+                   FROM payroll_employment_terms terms JOIN payroll_employments employment
+                   ON employment.supplier_id = terms.supplier_id AND employment.id = terms.employment_id
+                  WHERE terms.supplier_id = ? AND terms.employment_id = ?
+                    AND terms.effective_from <= ? AND (terms.effective_to IS NULL OR terms.effective_to >= ?)'
+            );
+            $check->execute([$supplierId, $employmentId, $segments[count($segments) - 1]['date_to'], $segments[0]['date_from']]);
+            $terms = $check->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($segments as $segment) {
+                $matching = 0;
+                foreach ($terms as $term) {
+                    if ($term['started_on'] !== null && $term['started_on'] <= $segment['date_from']
+                        && ($term['end_date'] === null || $term['end_date'] >= $segment['date_to'])
+                        && $term['effective_from'] <= $segment['date_from']
+                        && ($term['effective_to'] === null || $term['effective_to'] >= $segment['date_to'])) {
+                        ++$matching;
+                    }
+                }
+                if ($matching !== 1) {
+                    throw new \InvalidArgumentException('Každý úsek musí ležet v trvání vztahu a jedné verzi jeho podmínek.');
+                }
+            }
+            $existing = $this->manualSummary($supplierId, $employmentId, $periodStart);
+            if ($existing !== null) {
+                $month['revision_no'] = (int) $month['revision_no'] + 1;
+            }
+            $version = (int) $month['row_version'];
+            $stmt = $pdo->prepare('UPDATE payroll_time_months SET work_source = "manual_summary", revision_no = ?, row_version = row_version + 1, last_changed_by = ? WHERE supplier_id = ? AND id = ? AND row_version = ?');
+            $stmt->execute([$month['revision_no'], $userId, $supplierId, $month['id'], $version]);
+            if ($stmt->rowCount() !== 1) throw new PayrollTimeConflictException($version);
+            $month['row_version'] = $version + 1;
+            $month['work_source'] = 'manual_summary';
+            $hash = hash('sha256', CanonicalJson::encode($segments));
+            $pdo->prepare('INSERT INTO payroll_time_month_manual_summaries (supplier_id, time_month_id, time_month_revision_no, employment_id, period_start, content_sha256, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+                ->execute([$supplierId, $month['id'], $month['revision_no'], $employmentId, $periodStart, $hash, $reason, $userId]);
+            $summaryId = (int) $pdo->lastInsertId();
+            $insert = $pdo->prepare('INSERT INTO payroll_time_month_manual_segments (supplier_id, summary_id, sequence_no, date_from, date_to, worked_duration_units, overtime_duration_units, worked_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+            foreach ($segments as $index => $segment) {
+                $insert->execute([$supplierId, $summaryId, $index + 1, $segment['date_from'], $segment['date_to'], $segment['worked_duration_units'], $segment['overtime_duration_units'], $segment['worked_days']]);
+            }
+            $eventReason = $source === 'manual_summary' ? $reason : mb_substr("Zdroj {$source} → manual_summary: {$reason}", 0, 500);
+            $this->insertMonthEvent($month, 'changed', $eventReason, $userId);
+            $this->commitTransactionScope($scope);
+        } catch (\Throwable $e) {
+            $this->rollBackTransactionScope($scope);
+            throw $e;
+        }
+        return ['month' => $this->monthState($supplierId, $employmentId, $periodStart), 'manual_summary' => $this->manualSummary($supplierId, $employmentId, $periodStart)];
+    }
+
+    private function assertManualSourceHasNoMaterializedAmounts(int $supplierId, int $employmentId, string $periodStart): void
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT component_id FROM payroll_inputs WHERE supplier_id = ? AND employment_id = ? AND period_start = ? AND source_kind = "time" AND status <> "cancelled" AND (external_id LIKE ? OR external_id LIKE ?) GROUP BY component_id HAVING SUM(amount_minor) <> 0 LIMIT 1');
+        $stmt->execute([$supplierId, $employmentId, $periodStart, 'surcharge:%:' . $periodStart . ':%', 'standby:' . $periodStart . ':%']);
+        if ($stmt->fetchColumn() !== false) {
+            throw new PayrollTimeLockedException('Zdroj má navázané vypočtené příplatky nebo pohotovost; nejdříve je opravte nebo stornujte.');
+        }
+    }
+
+    /** @return array<string,mixed> */
+    public function restoreEntries(int $supplierId, int $employmentId, string $periodStart, int $expectedVersion, string $reason, string $source, ?int $userId): array
+    {
+        $scope = $this->beginTransactionScope();
+        try {
+            $month = $this->lockOpenMonth($supplierId, $employmentId, $periodStart, $expectedVersion, $userId);
+            $this->assertManualSourceHasNoMaterializedAmounts($supplierId, $employmentId, $periodStart);
+            if (($month['work_source'] ?? 'entries') !== $source) {
+                $import = null;
+                if ($source === 'import_summary') {
+                    $query = $this->db->pdo()->prepare('SELECT * FROM payroll_time_month_import_summaries WHERE supplier_id = ? AND time_month_id = ? ORDER BY time_month_revision_no DESC, id DESC LIMIT 1 FOR UPDATE');
+                    $query->execute([$supplierId, $month['id']]);
+                    $import = $query->fetch(PDO::FETCH_ASSOC);
+                    if (!is_array($import)) throw new \InvalidArgumentException('Pro tento měsíc není dřívější souhrn importu.');
+                }
+                $month['revision_no'] = (int) $month['revision_no'] + 1;
+                $month['row_version'] = (int) $month['row_version'] + 1;
+                $month['work_source'] = $source;
+                $this->db->pdo()->prepare('UPDATE payroll_time_months SET work_source = ?, revision_no = ?, row_version = ?, last_changed_by = ? WHERE supplier_id = ? AND id = ?')
+                    ->execute([$source, $month['revision_no'], $month['row_version'], $userId, $supplierId, $month['id']]);
+                if ($import !== null) {
+                    $this->db->pdo()->prepare('INSERT INTO payroll_time_month_import_summaries (supplier_id, time_month_id, time_month_revision_no, employment_id, period_start, attendance_import_id, values_json, worked_days, sources_json, content_sha256, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+                        ->execute([$supplierId, $month['id'], $month['revision_no'], $employmentId, $periodStart, $import['attendance_import_id'], $import['values_json'], $import['worked_days'], $import['sources_json'], $import['content_sha256'], $userId]);
+                }
+                $this->insertMonthEvent($month, 'changed', mb_substr("Změna zdroje na {$source}: {$reason}", 0, 500), $userId);
+            }
+            $this->commitTransactionScope($scope);
+        } catch (\Throwable $e) {
+            $this->rollBackTransactionScope($scope);
+            throw $e;
+        }
+        return ['month' => $this->monthState($supplierId, $employmentId, $periodStart)];
     }
 
     /**
@@ -1334,6 +1533,9 @@ final class PayrollTimeRepository
                 );
             }
             $month ??= $this->lockOpenMonth($supplierId, $employmentId, $periodStart, 0, $userId);
+            if (($month['work_source'] ?? 'entries') === 'manual_summary') {
+                throw new \InvalidArgumentException('Měsíc používá ruční souhrn; import jej nesmí bez výslovné změny zdroje přepsat.');
+            }
             $monthId = PayrollTimeValue::int($month['id'] ?? null, 'id');
             $revisionNo = PayrollTimeValue::int($month['revision_no'] ?? null, 'revision_no');
 

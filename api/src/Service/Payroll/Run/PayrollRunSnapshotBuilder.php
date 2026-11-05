@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
@@ -179,6 +180,7 @@ final class PayrollRunSnapshotBuilder
             $supplierId, $employmentIds, $periodStart, $periodEnd,
         );
 
+        $workedTimeEvidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $employmentIds, $periodStart);
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -730,6 +732,7 @@ final class PayrollRunSnapshotBuilder
                     ],
                 'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
+                'worked_time_evidence' => $workedTimeEvidence[$employmentId] ?? null,
                 'absences' => $absences,
                 'inputs' => $inputs,
                 'risky_savings_evidence' => $riskySavingsEvidence,
@@ -862,6 +865,7 @@ final class PayrollRunSnapshotBuilder
      *   eligible_employment_ids:list<int>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
+     *   worked_time_evidence:array<int,array<string,mixed>>,
      *   hourly_remuneration_terms:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * }
@@ -914,6 +918,7 @@ final class PayrollRunSnapshotBuilder
 
         return [
             'eligible_employment_ids' => $eligible,
+            'worked_time_evidence' => (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $allEmployments, $periodStart),
             'hourly_remuneration_terms' => $this->batch->hourlyRemunerationTerms(
                 $supplierId, $allEmployments, $periodStart, $periodEnd,
             ),

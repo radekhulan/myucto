@@ -661,6 +661,7 @@ final class AnonymizationPolicy
         'payroll_time_imports' => ['content_hash' => 'keep', 'original_name' => 'file_name'],
         'payroll_time_month_events' => ['jmhz_work_summary_hash' => 'keep', 'reason' => 'text', 'snapshot_hash' => 'keep'],
         'payroll_time_month_import_summaries' => ['content_sha256' => 'keep', 'sources_json' => 'json', 'values_json' => 'keep'],
+        'payroll_time_month_manual_summaries' => ['content_sha256' => 'keep', 'reason' => 'text'],
         'payroll_time_months' => ['reopen_reason' => 'text'],
         'payroll_travel_compensation_links' => ['source_reference' => 'text', 'source_system' => 'keep'],
         'payroll_wage_statement_revisions' => ['snapshot_hash' => 'keep', 'snapshot_json' => 'json', 'source_manifest_hash' => 'keep'],

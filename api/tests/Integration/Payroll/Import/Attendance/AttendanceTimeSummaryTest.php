@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Time\PayrollEmploymentCalendarProvisioner;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportSummaryWriter;
+use MyInvoice\Service\Payroll\Time\PayrollTimeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Unit\Payroll\Import\Attendance\AttendanceFixture;
 use PDO;
@@ -191,6 +192,47 @@ final class AttendanceTimeSummaryTest extends TestCase
         $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
         self::assertSame('import_summary', $month['work_source'] ?? null);
         self::assertSame('open', $month['status'] ?? null, 'Souhrn měsíc neschvaluje.');
+    }
+
+    public function testManualReplacementRejectsImplicitImportAndCanRestoreOriginalImport(): void
+    {
+        $employmentId = $this->employment('ZAM-MANUAL', 'employment', '2026-01-01', '40.00');
+        $importId = $this->batch([$this->hoursRows($employmentId)]);
+        $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
+        $original = $this->time->importSummary($this->supplierId, $employmentId, self::JULY);
+        self::assertNotNull($original);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        $service = $this->service(PayrollTimeService::class);
+        $input = [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+            'reason' => 'Syntetická oprava', 'replace_source' => false,
+            'segments' => [['date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+                'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null]],
+        ];
+        try {
+            $service->saveManualSummary($this->supplierId, '2026-07', $input, $this->userId);
+            self::fail('Nahrazení importu bez potvrzení se musí odmítnout.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame('import_summary', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+        }
+        $input['replace_source'] = true;
+        $manual = $service->saveManualSummary($this->supplierId, '2026-07', $input, $this->userId);
+        self::assertSame('manual_summary', $manual['month']['work_source']);
+        try {
+            $this->time->saveImportSummary($this->supplierId, $employmentId, self::JULY, $importId, $original['values'], $original['sources'], $original['content_sha256'], $this->userId);
+            self::fail('Import nesmí ruční zdroj tiše přepsat.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame('manual_summary', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+        }
+        $restored = $service->restoreEntries($this->supplierId, '2026-07', [
+            'employment_id' => $employmentId, 'row_version' => (int) $manual['month']['row_version'],
+            'reason' => 'Návrat k importu', 'replace_source' => true, 'source' => 'import_summary',
+        ], $this->userId);
+        self::assertSame('import_summary', $restored['month']['work_source']);
+        $recovered = $this->time->importSummary($this->supplierId, $employmentId, self::JULY);
+        self::assertSame($original['values'], $recovered['values']);
+        self::assertSame($original['content_sha256'], $recovered['content_sha256']);
+        self::assertSame($original['attendance_import_id'], $recovered['attendance_import_id']);
     }
 
     public function testReplayDoesNotDuplicate(): void

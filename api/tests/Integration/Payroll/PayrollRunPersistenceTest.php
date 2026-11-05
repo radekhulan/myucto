@@ -189,6 +189,44 @@ final class PayrollRunPersistenceTest extends TestCase
         }
     }
 
+    public function testManualTimeSnapshotPreservesExactSourceWithoutJmhzAndDetectsReopen(): void
+    {
+        $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
+        $saved = $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0,
+            'Syntetický ručně doložený souhrn', false, [[
+                'date_from' => '2026-06-01', 'date_to' => '2026-06-30',
+                'worked_duration_units' => 53, 'overtime_duration_units' => null, 'worked_days' => null,
+            ]], $this->actors[0]);
+        $preview = $this->container->get(\MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder::class)
+            ->preview($this->supplierId, $this->employmentId, '2026-06-01');
+        self::assertSame('manual_summary', $preview['work_source']);
+        self::assertSame('0.018', $preview['suggestions']['worked_hours']);
+        self::assertNull($preview['suggestions']['worked_days']);
+        self::assertNull($preview['suggestions']['overtime_hours']);
+        self::assertNull($preview['suggestions']['unworked_hours_occurred']);
+        $source = json_decode($preview['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(53, $source['manual_summary']['segments'][0]['worked_duration_units']);
+        self::assertSame(['overtime_millihours' => null, 'rounding' => 'half_up', 'unit' => 'millihour', 'worked_millihours' => 18], $source['export_projection']);
+        $approved = $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $saved['month']['row_version'], null, $this->actors[0]);
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $employment = $snapshot->data['people'][0]['employments'][0];
+        self::assertNull($employment['time_month']['jmhz_work_summary']);
+        $frozen = $employment['worked_time_evidence'];
+        self::assertSame('approved', $frozen['status']);
+        self::assertSame('manual_summary', $frozen['work_source']);
+        self::assertSame(53, $frozen['manual_summary']['segments'][0]['worked_duration_units']);
+        $current = $builder->currentSources($this->supplierId, '2026-06-01', '2026-07-15', null, [$this->employmentId], [$this->employeeId]);
+        self::assertSame($frozen, $current['worked_time_evidence'][$this->employmentId]);
+        self::assertSame([], (new \MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence($this->db))->loadMany($this->otherSupplierId, [$this->employmentId], '2026-06-01'));
+        $time->reopenMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $approved['row_version'], 'Syntetická oprava podkladu', $this->actors[0]);
+        $current = $builder->currentSources($this->supplierId, '2026-06-01', '2026-07-15', null, [$this->employmentId], [$this->employeeId]);
+        $drift = \MyInvoice\Service\Payroll\Run\PayrollRunSourceDrift::between($snapshot->data, $current);
+        self::assertSame(1, $drift->workedTimeChanged);
+        self::assertNotSame($frozen['source_sha256'], $current['worked_time_evidence'][$this->employmentId]['source_sha256']);
+        self::assertSame(53, $snapshot->data['people'][0]['employments'][0]['worked_time_evidence']['manual_summary']['segments'][0]['worked_duration_units']);
+    }
+
     public function testHourlyIntervalBeforeMonthlyTermsStillBlocksRunAndCannotBeOverridden(): void
     {
         $this->db->pdo()->prepare(

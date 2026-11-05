@@ -27926,7 +27926,7 @@ paths:
     get:
       tags: [Payroll]
       summary: Seznam mzdových běhů
-      description: Pouze čtení. Přes bearer token nelze běh vytvořit ani řídit jeho stav. Kontrola připravenosti zachovává konkrétní důvod a odkaz každé dotčené entity; u rozdílných cílů nepoužívejte společný odkaz skupiny. Pole source_drift zahrnuje změny hodinových podmínek účinných ve zpracovávaném měsíci; historické uzavřené snímky zůstávají beze změny.
+      description: Pouze čtení. Přes bearer token nelze běh vytvořit ani řídit jeho stav. Kontrola připravenosti zachovává konkrétní důvod a odkaz každé dotčené entity; u rozdílných cílů nepoužívejte společný odkaz skupiny. U rozpracovaných běhů source_drift rozlišuje také změnu hodinových podmínek a odpracované doby proti zmrazenému podkladu.
       parameters:
         - { name: period, in: query, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -43824,6 +43824,7 @@ components:
         employments_removed: { type: integer, minimum: 0 }
         statutory_evidence_changed: { type: integer, minimum: 0 }
         remuneration_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou hodinových podmínek účinných ve zpracovávaném měsíci. }
+        worked_time_changed: { type: integer, minimum: 0, description: Počet vztahů se změnou vybraného zdroje hodin nebo jeho obsahu či schválení. }
         snapshot_created_at: { type: string }
 
     PayrollRunValidation:

@@ -166,6 +166,7 @@ final class PayrollEmploymentDeletionRepository
             'payroll_time_entries',
             'payroll_time_months',
             'payroll_time_month_import_summaries',
+            'payroll_time_month_manual_summaries',
         ],
         'absences' => [
             'payroll_absences',

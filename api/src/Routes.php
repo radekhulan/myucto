@@ -2422,6 +2422,8 @@ final class Routes
             $g->post('/time/imports/preview', [PayrollTimeAction::class, 'previewImport']);
             $g->post('/time/imports', [PayrollTimeAction::class, 'import']);
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/approve', [PayrollTimeAction::class, 'approve']);
+            $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/manual-summary', [PayrollTimeAction::class, 'saveManualSummary']);
+            $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/work-source', [PayrollTimeAction::class, 'restoreEntries']);
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/reopen', [PayrollTimeAction::class, 'reopen']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);

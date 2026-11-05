@@ -9,6 +9,27 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollJmhzWorkMonthSummaryConfirmationTest extends TestCase
 {
+    public function testManualSummaryConfirmsProjectedHoursButDoesNotInventDaysOrOvertime(): void
+    {
+        $builder = (new \ReflectionClass(PayrollJmhzWorkMonthSummaryBuilder::class))->newInstanceWithoutConstructor();
+        $hash = str_repeat('a', 64);
+        $summary = $builder->confirm([
+            'derivation_version' => PayrollJmhzWorkMonthSummaryBuilder::MANUAL_SUMMARY_DERIVATION_VERSION,
+            'work_source' => 'manual_summary', 'source_snapshot_sha256' => $hash, 'source_snapshot_json' => '{}',
+            'suggestions' => ['evidence_days' => 31, 'worked_days' => null, 'overtime_hours' => null, 'worked_hours' => '0.018'],
+        ], [
+            'source_snapshot_sha256' => $hash, 'standard_fund_hours' => '168',
+            'agreed_fund_hours' => '168', 'weekly_work_hours' => '40', 'worked_hours' => '0.018',
+            'unworked_hours_occurred' => false, 'work_obstacles_occurred' => false,
+        ]);
+        self::assertSame(18, $summary['values']['worked_millihours']);
+        self::assertNull($summary['values']['worked_days']);
+        self::assertNull($summary['values']['overtime_millihours']);
+        self::assertSame('manual_summary', $summary['provenance']['work_source']);
+        self::assertSame('not_provided_by_manual_summary', $summary['provenance']['attributes']['10267']);
+        self::assertSame('manual_source_preserved_export_half_up_to_millihour', $summary['provenance']['decimal_policy']);
+    }
+
     public function testConditionalWorkBlocksRejectInvalidInputs(): void
     {
         $builder = (new \ReflectionClass(PayrollJmhzWorkMonthSummaryBuilder::class))->newInstanceWithoutConstructor();

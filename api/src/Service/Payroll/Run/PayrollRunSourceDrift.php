@@ -31,6 +31,7 @@ final readonly class PayrollRunSourceDrift
         public int $employmentsRemoved = 0,
         public int $statutoryEvidenceChanged = 0,
         public int $remunerationChanged = 0,
+        public int $workedTimeChanged = 0,
     ) {}
 
     /**
@@ -39,6 +40,7 @@ final readonly class PayrollRunSourceDrift
      *   eligible_employment_ids:list<int>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
+     *   worked_time_evidence?:array<int,array<string,mixed>>,
      *   hourly_remuneration_terms?:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * } $current
@@ -50,6 +52,7 @@ final readonly class PayrollRunSourceDrift
         $frozenEmployments = [];
         $frozenEvidence = [];
         $frozenHourlyTerms = [];
+        $frozenWorkedTime = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
@@ -65,6 +68,9 @@ final readonly class PayrollRunSourceDrift
                 $frozenEmployments[(int) ($employment['employment']['id'] ?? 0)] = true;
                 $frozenHourlyTerms[(int) ($employment['employment']['id'] ?? 0)] =
                     $employment['hourly_remuneration_terms'] ?? [];
+                if (array_key_exists('worked_time_evidence', $employment)) {
+                    $frozenWorkedTime[(int) ($employment['employment']['id'] ?? 0)] = $employment['worked_time_evidence'];
+                }
                 foreach (self::rows($employment['inputs'] ?? null) as $row) {
                     $frozenInputs[] = $row;
                 }
@@ -118,6 +124,22 @@ final readonly class PayrollRunSourceDrift
             }
         }
 
+        $workedTimeChanged = 0;
+        if (isset($current['worked_time_evidence'])) {
+            foreach ($frozenEmployments as $employmentId => $_) {
+                $now = $current['worked_time_evidence'][$employmentId] ?? null;
+                // Starší snímky dobu samostatně nezmrazovaly. Nový ruční zdroj
+                // přesto musí zastavit jejich schválení; běžné staré měsíce neměníme.
+                if (!array_key_exists($employmentId, $frozenWorkedTime)
+                    && ($now['work_source'] ?? null) !== 'manual_summary') {
+                    continue;
+                }
+                if (self::fingerprint($frozenWorkedTime[$employmentId] ?? null) !== self::fingerprint($now)) {
+                    ++$workedTimeChanged;
+                }
+            }
+        }
+
         return new self(
             inputsAdded: $inputsAdded,
             inputsChanged: $inputsChanged,
@@ -129,6 +151,7 @@ final readonly class PayrollRunSourceDrift
             employmentsRemoved: count(array_diff_key($frozenEmployments, $eligible)),
             statutoryEvidenceChanged: $statutoryChanged,
             remunerationChanged: $remunerationChanged,
+            workedTimeChanged: $workedTimeChanged,
         );
     }
 
@@ -143,7 +166,8 @@ final readonly class PayrollRunSourceDrift
             + $this->employmentsAdded
             + $this->employmentsRemoved
             + $this->statutoryEvidenceChanged
-            + $this->remunerationChanged;
+            + $this->remunerationChanged
+            + $this->workedTimeChanged;
     }
 
     public function hasChanges(): bool
@@ -166,6 +190,7 @@ final readonly class PayrollRunSourceDrift
             'employments_removed' => $this->employmentsRemoved,
             'statutory_evidence_changed' => $this->statutoryEvidenceChanged,
             'remuneration_changed' => $this->remunerationChanged,
+            'worked_time_changed' => $this->workedTimeChanged,
         ];
     }
 

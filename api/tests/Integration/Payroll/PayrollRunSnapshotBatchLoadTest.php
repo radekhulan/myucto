@@ -170,6 +170,9 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         );
         // Horní mez: dávka má 1 000 ID, takže ani 500 osob s více vztahy
         // nepřidá další dotaz.
+        // Samostatný podklad pracovní doby přidává dvě množinové dávky:
+        // stav zdroje měsíce a použité intervaly (4 round-tripy). Souhrny
+        // importu a ruční segmenty se čtou pouze při použití tohoto zdroje.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         // Doložené záměry OZUSPOJ mají vlastní množinovou dávku; risky savings
         // evidence se veze v kořenovém dotazu pracovních vztahů.
@@ -222,9 +225,9 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // Prepare + execute přidávají dva round-tripy bez ohledu na počet osob.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            90,
+            94,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 90 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 94 round-tripů.',
         );
     }
 

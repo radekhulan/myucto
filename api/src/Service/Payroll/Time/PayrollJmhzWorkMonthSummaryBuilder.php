@@ -16,6 +16,7 @@ use PDO;
 final class PayrollJmhzWorkMonthSummaryBuilder
 {
     public const DERIVATION_VERSION = 'jmhz-work-month.v9';
+    public const MANUAL_SUMMARY_DERIVATION_VERSION = 'jmhz-work-month.v10';
 
     /**
      * Souhrn měsíce, který bere odpracovanou dobu ze souhrnu importu docházky
@@ -52,7 +53,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     private const HOLIDAY_FIELDS = ['holiday_millihours'];
 
     /** Verze souhrnu, které nesou {@see HOLIDAY_FIELDS}. */
-    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8', 'jmhz-work-month.v9'];
+    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8', 'jmhz-work-month.v9', 'jmhz-work-month.v10'];
 
     /** @return list<string> */
     public static function holidayFields(): array
@@ -98,6 +99,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
+        'jmhz-work-month.v10',
     ];
 
     /** Provenience souhrnu potvrzeného hromadným schválením dávky importu. */
@@ -200,6 +202,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
+        'jmhz-work-month.v10',
     ];
 
     /**
@@ -221,6 +224,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
+        'jmhz-work-month.v10',
     ];
 
     /** @return list<string> */
@@ -262,6 +266,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v7',
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
+        'jmhz-work-month.v10',
     ];
 
     /** @return list<string> */
@@ -377,6 +382,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     {
         $period = self::period($periodStart);
         $importSource = $this->importSource($supplierId, $employmentId, $periodStart, $lockSources);
+        if ($importSource['work_source'] === 'manual_summary') {
+            $evidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, [$employmentId], $periodStart, $lockSources);
+            return $this->previewFromImportSummary(
+                $supplierId, $employmentId, $periodStart,
+                $evidence[$employmentId]['manual_summary'] ?? null, $lockSources, true,
+            );
+        }
         if ($importSource['work_source'] === 'import_summary') {
             return $this->previewFromImportSummary(
                 $supplierId,
@@ -385,6 +397,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 $importSource['summary'],
                 $lockSources,
             );
+        }
+        if ($importSource['work_source'] !== 'entries') {
+            throw new \InvalidArgumentException('Pracovní měsíc má nepodporovaný zdroj odpracované doby.');
         }
         $periodEnd = $period->modify('first day of next month');
         $employment = $this->employment(
@@ -526,6 +541,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         string $periodStart,
         ?array $summary,
         bool $lockSources,
+        bool $manual = false,
     ): array {
         $period = self::period($periodStart);
         $periodEnd = $period->modify('first day of next month');
@@ -537,7 +553,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $periodEnd->format('Y-m-d'),
             $lockSources,
         );
-        $entries = $this->entries($supplierId, $employmentId, $periodStart, $lockSources);
+        $entries = $manual ? [] : $this->entries($supplierId, $employmentId, $periodStart, $lockSources);
         $absences = $this->absences(
             $supplierId,
             $employmentId,
@@ -546,10 +562,18 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $lockSources,
         );
         [$evidenceFrom, $evidenceTo, $evidenceDays] = self::evidenceInterval($employment, $period, $periodEnd, $absences);
-        $worked = PayrollWorkedTimeSource::fromImportSummary($summary);
-        $workedSuggestion = $worked['worked_millihours'] === null
+        $worked = $manual
+            ? PayrollWorkedTimeSource::fromManualSummary($summary, $periodStart)
+            : PayrollWorkedTimeSource::fromImportSummary($summary);
+        $sourceKind = $manual ? PayrollWorkedTimeSource::KIND_MANUAL_SUMMARY : PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY;
+        $version = $manual ? self::MANUAL_SUMMARY_DERIVATION_VERSION : self::IMPORT_SUMMARY_DERIVATION_VERSION;
+        $projectedWorked = $manual && $worked['worked_duration_units'] !== null
+            ? PayrollDuration::roundedMillihours($worked['worked_duration_units']) : $worked['worked_millihours'];
+        $projectedOvertime = $manual && $worked['overtime_duration_units'] !== null
+            ? PayrollDuration::roundedMillihours($worked['overtime_duration_units']) : $worked['overtime_millihours'];
+        $workedSuggestion = $projectedWorked === null
             ? null
-            : self::millihoursSuggestion($worked['worked_millihours']);
+            : self::millihoursSuggestion($projectedWorked);
         [$agreedSuggestion, $calendarIssues] = match (true) {
             !self::requiresShiftCalendar($employment['relation_type']) => ['0', []],
             self::isAgreement($employment['relation_type']) => self::importAgreementFund(
@@ -578,22 +602,37 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $values,
             $this->datedAbsenceMinutes($supplierId, $employmentId, $periodStart, $periodEnd->format('Y-m-d'), $absences, $calendars),
         );
+        if ($manual) {
+            // Ruční podklad nese jen odpracovanou dobu. Chybějící druhy
+            // nepřítomnosti neznamenají výslovné potvrzení, že nenastaly.
+            if ($conditional['unworked_hours_occurred'] === false) {
+                $conditional['unworked_hours_occurred'] = null;
+            }
+            if ($conditional['work_obstacles_occurred'] === false) {
+                $conditional['work_obstacles_occurred'] = null;
+            }
+        }
         $source = [
-            'schema_version' => self::IMPORT_SUMMARY_DERIVATION_VERSION,
+            'schema_version' => $version,
             'specification' => self::specification(),
             'supplier_id' => $supplierId,
             'employment' => $employment,
             'period_start' => $periodStart,
             'calendars' => $calendars,
-            PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY => $summary,
+            $sourceKind => $summary,
             'absences' => $absences,
         ];
+        if ($manual) {
+            $source['work_source'] = $sourceKind;
+            $source['duration_units_per_hour'] = PayrollDuration::UNITS_PER_HOUR;
+            $source['export_projection'] = ['unit' => 'millihour', 'rounding' => 'half_up', 'worked_millihours' => $projectedWorked, 'overtime_millihours' => $projectedOvertime];
+        }
         $sourceJson = CanonicalJson::encode($source);
         [$durationFrom, $durationTo] = self::employmentInterval($employment, $period, $periodEnd);
 
         return [
-            'derivation_version' => self::IMPORT_SUMMARY_DERIVATION_VERSION,
-            'work_source' => 'import_summary',
+            'derivation_version' => $version,
+            'work_source' => $sourceKind,
             'relation_type' => $employment['relation_type'],
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
@@ -606,9 +645,9 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'evidence_days' => $evidenceDays,
                 'worked_hours' => $workedSuggestion,
                 'worked_days' => $worked['worked_days'],
-                'overtime_hours' => $worked['overtime_millihours'] === null
+                'overtime_hours' => $projectedOvertime === null
                     ? null
-                    : self::millihoursSuggestion($worked['overtime_millihours']),
+                    : self::millihoursSuggestion($projectedOvertime),
             ] + $conditional,
             'issues' => array_merge(
                 self::employmentIssues($employment),
@@ -1098,10 +1137,12 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     public function confirm(array $preview, array $input, ?string $confirmationKind = null): array
     {
         $version = $preview['derivation_version'] ?? self::DERIVATION_VERSION;
-        if (!in_array($version, [self::DERIVATION_VERSION, self::IMPORT_SUMMARY_DERIVATION_VERSION], true)) {
+        if (!in_array($version, [self::DERIVATION_VERSION, self::IMPORT_SUMMARY_DERIVATION_VERSION, self::MANUAL_SUMMARY_DERIVATION_VERSION], true)) {
             throw new \InvalidArgumentException('Náhled pracovního souhrnu má nepodporovanou verzi.');
         }
+        $manualSource = $version === self::MANUAL_SUMMARY_DERIVATION_VERSION;
         $importSource = $version === self::IMPORT_SUMMARY_DERIVATION_VERSION;
+        $summarySource = $importSource || $manualSource;
         if ($confirmationKind !== null
             && ($confirmationKind !== self::IMPORT_BULK_CONFIRMATION || !$importSource)
         ) {
@@ -1158,7 +1199,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
              * a jiným přesčasem, než z jakých vznikly hodiny 10268.
              */
             // U souhrnu z importu smí dny zůstat NEUVEDENÉ: podklady je nenesou.
-            'worked_days' => $importSource
+            'worked_days' => $summarySource
                 ? self::nullableNonNegativeInt($preview['suggestions']['worked_days'] ?? null, 'worked_days')
                 : self::nonNegativeInt($preview['suggestions']['worked_days'] ?? null, 'worked_days'),
             /*
@@ -1419,6 +1460,15 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             }
             $provenance['confirmation_kind'] = $confirmationKind ?? 'explicit_confirmation';
             $provenance['work_source'] = 'import_summary';
+        }
+        if ($manualSource) {
+            $provenance['work_source'] = 'manual_summary';
+            $provenance['confirmation_kind'] = 'explicit_confirmation';
+            $provenance['attributes']['10267'] = $values['worked_days'] === null ? 'not_provided_by_manual_summary' : 'manual_summary';
+            $provenance['attributes']['10268'] = 'explicit_confirmation_with_manual_summary_suggestion';
+            $provenance['attributes']['10269'] = $values['overtime_millihours'] === null ? 'not_provided_or_not_expressible_in_millihours' : 'manual_summary';
+            $provenance['duration_units_per_hour'] = PayrollDuration::UNITS_PER_HOUR;
+            $provenance['decimal_policy'] = 'manual_source_preserved_export_half_up_to_millihour';
         }
         $summaryPayload = [
             'derivation_version' => $version,

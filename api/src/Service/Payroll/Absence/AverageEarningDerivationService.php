@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Absence;
 
+use MyInvoice\Service\Payroll\Time\PayrollDuration;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyMath;
@@ -726,6 +727,7 @@ final class AverageEarningDerivationService
                     'revision_no' => $month['revision_no'] ?? null,
                     'gross_earnings_minor' => $month['gross_earnings_minor'] ?? null,
                     'worked_minutes' => $month['worked_minutes'] ?? null,
+                    'worked_duration_units' => $month['worked_duration_units'] ?? null,
                     'worked_days' => $month['worked_days'] ?? null,
                     'work_summary_id' => $month['work_summary_id'] ?? null,
                     'takeover' => ($month['takeover'] ?? false) === true,
@@ -819,6 +821,7 @@ final class AverageEarningDerivationService
             'revision_no' => null,
             'gross_earnings_minor' => null,
             'worked_minutes' => null,
+            'worked_duration_units' => null,
             'worked_days' => null,
             'work_summary_id' => null,
             'work_summary_sha256' => null,
@@ -875,6 +878,39 @@ final class AverageEarningDerivationService
             return ['blockers' => ['time_month_not_approved']] + $context;
         }
 
+        $evidence = $input['worked_time_evidence'] ?? null;
+        if (is_array($evidence) && ($evidence['work_source'] ?? null) === PayrollWorkedTimeSource::KIND_MANUAL_SUMMARY) {
+            $hash = $evidence['source_sha256'] ?? null;
+            $hashInput = $evidence;
+            unset($hashInput['source_sha256']);
+            if (!is_string($hash) || !hash_equals($hash, hash('sha256', CanonicalJson::encode($hashInput)))
+                || ($evidence['schema_version'] ?? null) !== 'payroll-worked-time.v1'
+                || ($evidence['status'] ?? null) !== 'approved'
+                || ($evidence['period_start'] ?? null) !== $periodStart
+                || ($evidence['revision_no'] ?? null) !== ($timeMonth['revision_no'] ?? null)
+            ) {
+                return ['blockers' => ['work_summary_source_corrupt']] + $context;
+            }
+            $worked = PayrollWorkedTimeSource::fromSnapshot($evidence, $periodStart);
+            if ($worked['issues'] !== [] || $worked['worked_duration_units'] === null) {
+                return ['blockers' => ['worked_time_not_derivable']] + $context;
+            }
+            $context['work_summary_sha256'] = $hash;
+            $context['worked_duration_units'] = $worked['worked_duration_units'];
+            $context['worked_minutes'] = $worked['worked_minutes'];
+            $context['worked_days'] = $worked['worked_days'];
+            $confirmed = $timeMonth['jmhz_work_summary']['values']['worked_millihours'] ?? null;
+            if ($confirmed !== null && $confirmed !== PayrollDuration::roundedMillihours($worked['worked_duration_units'])) {
+                return ['blockers' => ['work_summary_hours_mismatch']] + $context;
+            }
+            // Úložiště průměrů zatím vyžaduje celé minuty. Přesný podklad
+            // zachováváme, ale nenabízíme zápis se zaokrouhlenou jinou dobou.
+            if ($worked['worked_minutes'] === null) {
+                return ['blockers' => ['worked_time_not_whole_minutes']] + $context;
+            }
+            return $context;
+        }
+
         $summary = $timeMonth['jmhz_work_summary'] ?? null;
         if (!is_array($summary)) {
             return ['blockers' => ['work_summary_missing']] + $context;
@@ -903,7 +939,8 @@ final class AverageEarningDerivationService
         if ($source === null
             || !in_array($source['schema_version'] ?? null, self::SUPPORTED_WORK_SUMMARY_VERSIONS, true)
             || (!is_array($source[PayrollWorkedTimeSource::KIND_TIME_ENTRIES] ?? null)
-                && !is_array($source[PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY] ?? null))
+                && !is_array($source[PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY] ?? null)
+                && !is_array($source[PayrollWorkedTimeSource::KIND_MANUAL_SUMMARY] ?? null))
         ) {
             return ['blockers' => ['work_summary_source_corrupt']] + $context;
         }
@@ -911,6 +948,19 @@ final class AverageEarningDerivationService
         $worked = PayrollWorkedTimeSource::fromSnapshot($source, $periodStart);
         if ($worked['issues'] !== []) {
             return ['blockers' => ['worked_time_not_derivable']] + $context;
+        }
+
+        $context['worked_duration_units'] = $worked['worked_duration_units'];
+        if ($worked['kind'] === PayrollWorkedTimeSource::KIND_MANUAL_SUMMARY) {
+            if ($worked['worked_duration_units'] === null
+                || PayrollDuration::roundedMillihours($worked['worked_duration_units']) !== $confirmedMillihours) {
+                return ['blockers' => ['work_summary_hours_mismatch']] + $context;
+            }
+            $context['worked_minutes'] = $worked['worked_minutes'];
+            $context['worked_days'] = $worked['worked_days'];
+            return $worked['worked_minutes'] === null
+                ? ['blockers' => ['worked_time_not_whole_minutes']] + $context
+                : $context;
         }
 
         if ($worked['kind'] === PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeConflictException;
 use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
@@ -16,6 +17,72 @@ use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
 {
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function saveManualSummary(int $supplierId, string $period, array $input, ?int $userId): array
+    {
+        [$periodStart, $periodEnd] = $this->periodBounds($period);
+        $reason = $input['reason'] ?? null;
+        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > 500) {
+            throw new \InvalidArgumentException('Uveďte důvod zadání hodin (nejvýše 500 znaků).');
+        }
+        $replace = $input['replace_source'] ?? false;
+        if (!is_bool($replace)) {
+            throw new \InvalidArgumentException('Potvrzení nahrazení zdroje musí být boolean.');
+        }
+        $segments = $input['segments'] ?? null;
+        if (!is_array($segments) || !array_is_list($segments) || $segments === [] || count($segments) > 31) {
+            throw new \InvalidArgumentException('Zadejte jeden až 31 úseků odpracované doby.');
+        }
+        $normalized = [];
+        foreach ($segments as $segment) {
+            if (!is_array($segment)) {
+                throw new \InvalidArgumentException('Úsek odpracované doby není platný.');
+            }
+            $from = $segment['date_from'] ?? null;
+            $to = $segment['date_to'] ?? null;
+            if (!is_string($from) || !IsoDate::isValid($from) || !is_string($to) || !IsoDate::isValid($to)
+                || $from < $periodStart || $to >= $periodEnd || $to < $from) {
+                throw new \InvalidArgumentException('Úsek musí být platný a celý ležet ve zvoleném měsíci.');
+            }
+            $worked = $segment['worked_duration_units'] ?? null;
+            $overtime = $segment['overtime_duration_units'] ?? null;
+            $days = $segment['worked_days'] ?? null;
+            $span = (int) (new \DateTimeImmutable($from))->diff(new \DateTimeImmutable($to))->days + 1;
+            if (!is_int($worked) || $worked < 0 || $worked > $span * 24 * 3000
+                || ($overtime !== null && (!is_int($overtime) || $overtime < 0 || $overtime > $worked))
+                || ($days !== null && (!is_int($days) || $days < 0 || $days > $span
+                    || (($worked === 0) !== ($days === 0))))) {
+                throw new \InvalidArgumentException('Odpracovaná doba, přesčas nebo počet dnů nejsou platné.');
+            }
+            $normalized[] = ['date_from' => $from, 'date_to' => $to, 'worked_duration_units' => $worked,
+                'overtime_duration_units' => $overtime, 'worked_days' => $days];
+        }
+        usort($normalized, static fn (array $a, array $b): int => $a['date_from'] <=> $b['date_from']);
+        foreach ($normalized as $i => $segment) {
+            if ($i > 0 && $normalized[$i - 1]['date_to'] >= $segment['date_from']) {
+                throw new \InvalidArgumentException('Úseky odpracované doby se nesmí překrývat.');
+            }
+        }
+        return $this->repository->saveManualSummary(
+            $supplierId, $this->positiveInt($input, 'employment_id'), $periodStart,
+            $this->nonNegativeInt($input, 'row_version'), trim($reason), $replace, $normalized, $userId,
+        );
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function restoreEntries(int $supplierId, string $period, array $input, ?int $userId): array
+    {
+        [$periodStart] = $this->periodBounds($period);
+        $reason = $input['reason'] ?? null;
+        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > 500 || ($input['replace_source'] ?? null) !== true) {
+            throw new \InvalidArgumentException('Změna zdroje vyžaduje potvrzení a důvod (nejvýše 500 znaků).');
+        }
+        $source = $input['source'] ?? 'entries';
+        if (!in_array($source, ['entries', 'import_summary'], true)) {
+            throw new \InvalidArgumentException('Vyberte předchozí zdroj docházky nebo importu.');
+        }
+        return $this->repository->restoreEntries($supplierId, $this->positiveInt($input, 'employment_id'), $periodStart, $this->nonNegativeInt($input, 'row_version'), trim($reason), $source, $userId);
+    }
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
 
@@ -436,6 +503,7 @@ final class PayrollTimeService
         ?string $to,
         int $limit = self::HISTORY_DEFAULT_LIMIT,
         int $offset = 0,
+        int $manualSummaryOffset = 0,
     ): array {
         if ($employmentId <= 0) {
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
@@ -463,9 +531,17 @@ final class PayrollTimeService
             }
         }
 
+        $page = array_slice($periods, $offset, $limit);
+        $manualSummaryOffset = max(0, $manualSummaryOffset);
+        $manualHistory = $this->repository->manualSummaryHistory($supplierId, $employmentId, array_map(static fn (string $period): string => $period . '-01', $page), $manualSummaryOffset);
         $items = [];
-        foreach (array_slice($periods, $offset, $limit) as $period) {
-            $items[] = $this->historyMonth($supplierId, $employmentId, $period);
+        foreach ($page as $period) {
+            $item = $this->historyMonth($supplierId, $employmentId, $period);
+            $history = $manualHistory[$period . '-01'] ?? [];
+            $item['manual_summary_history_truncated'] = count($history) > 20;
+            $item['manual_summary_history_offset'] = $manualSummaryOffset;
+            $item['manual_summary_history'] = array_slice($history, 0, 20);
+            $items[] = $item;
         }
 
         return [

@@ -119,6 +119,7 @@ final class PayrollTimeAction
                         (int) ($query['limit'] ?? PayrollTimeService::HISTORY_DEFAULT_LIMIT),
                     )),
                     max(0, (int) ($query['offset'] ?? 0)),
+                    max(0, min(1_000_000, (int) ($query['manual_summary_offset'] ?? 0))),
                 ),
                 // Historie jde přes víc měsíců naráz, takže se posílá jen
                 // hranice a označení si dělá výpis řádek po řádku sám.
@@ -703,6 +704,38 @@ final class PayrollTimeAction
     }
 
     /** @param array<string,string> $args */
+    public function saveManualSummary(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
+        try {
+            $result = $this->time->saveManualSummary($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
+            $this->auditMonth($request, 'payroll.time.manual_summary_saved', $result['month']);
+            return Json::ok($response, $result);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    public function restoreEntries(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
+        try {
+            $result = $this->time->restoreEntries($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
+            $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
+            return Json::ok($response, $result);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
     public function approve(Request $request, Response $response, array $args): Response
     {
         if (($error = $this->authorize(
@@ -740,7 +773,7 @@ final class PayrollTimeAction
                 // měsíc s prací ve svátek bez sjednané zásady nebo s prací ve
                 // ztíženém prostředí bez počtu vlivů NENÍ schválitelná evidence,
                 // protože se z ní nedá spočítat mzda.
-                $surcharges = $this->surchargeInputs->materialize(
+                $surcharges = ($month['work_source'] ?? 'entries') === 'manual_summary' ? ['skipped_reason' => 'manual_summary'] : $this->surchargeInputs->materialize(
                     $supplierId,
                     PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
                     PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
@@ -748,7 +781,7 @@ final class PayrollTimeAction
                 );
                 // Odměna za pracovní pohotovost (§ 140 ZP) ze stejného důvodu
                 // a ve stejné transakci jako příplatky.
-                $standby = $this->standbyInputs->materialize(
+                $standby = ($month['work_source'] ?? 'entries') === 'manual_summary' ? ['skipped_reason' => 'manual_summary'] : $this->standbyInputs->materialize(
                     $supplierId,
                     PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
                     PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
@@ -920,7 +953,9 @@ final class PayrollTimeAction
                     $month['row_version'] ?? null,
                     'row_version',
                 ),
-                'reason_recorded' => $action === 'payroll.time.month_reopened',
+                'reason_recorded' => in_array($action, [
+                    'payroll.time.month_reopened', 'payroll.time.manual_summary_saved', 'payroll.time.source_changed',
+                ], true),
             ],
         );
     }

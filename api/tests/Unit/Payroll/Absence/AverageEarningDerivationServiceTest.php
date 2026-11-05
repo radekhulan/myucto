@@ -547,6 +547,50 @@ final class AverageEarningDerivationServiceTest extends TestCase
         self::assertNull($combined['source_kind']);
     }
 
+    public function testManualEvidenceDoesNotRequireOptionalJmhzAndNeverLosesSubminuteTime(): void
+    {
+        foreach ([480000 => [], 480053 => ['worked_time_not_whole_minutes']] as $units => $blockers) {
+            $evidence = self::manualEvidence($units, 21);
+            $input = json_decode(self::inputJson(['jmhz_work_summary' => null]), true);
+            $input['worked_time_evidence'] = $evidence;
+            $month = Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01');
+            self::assertSame($blockers, $month['blockers']);
+            self::assertSame($units, $month['worked_duration_units']);
+            self::assertSame(21, $month['worked_days']);
+            self::assertSame($units === 480000 ? 9600 : null, $month['worked_minutes']);
+        }
+    }
+
+    public function testManualEvidenceRequiresUnchangedHashAndAgreedExportProjection(): void
+    {
+        $evidence = self::manualEvidence(480050, null);
+        $input = json_decode(self::inputJson(['jmhz_work_summary' => ['values' => ['worked_millihours' => 160017]]]), true);
+        $input['worked_time_evidence'] = $evidence;
+        $month = Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01');
+        self::assertSame([], $month['blockers']);
+        self::assertNull($month['worked_days']);
+        $input['time_month']['jmhz_work_summary']['values']['worked_millihours'] = 160016;
+        self::assertSame(['work_summary_hours_mismatch'], Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01')['blockers']);
+        $input['worked_time_evidence']['manual_summary']['segments'][0]['worked_duration_units'] = 480000;
+        self::assertSame(['work_summary_source_corrupt'], Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01')['blockers']);
+    }
+
+    /** @return array<string,mixed> */
+    private static function manualEvidence(int $units, ?int $days): array
+    {
+        $evidence = [
+            'schema_version' => 'payroll-worked-time.v1', 'duration_units_per_hour' => 3000,
+            'work_source' => 'manual_summary', 'status' => 'approved', 'revision_no' => 1,
+            'period_start' => '2026-01-01',
+            'manual_summary' => ['segments' => [[
+                'date_from' => '2026-01-01', 'date_to' => '2026-01-31',
+                'worked_duration_units' => $units, 'overtime_duration_units' => null, 'worked_days' => $days,
+            ]]],
+        ];
+        $evidence['source_sha256'] = hash('sha256', CanonicalJson::encode($evidence));
+        return $evidence;
+    }
+
     /** @return array<string,mixed> */
     private static function importSummary(int $importedMillihours = 160_500, ?int $confirmedMillihours = null): array
     {

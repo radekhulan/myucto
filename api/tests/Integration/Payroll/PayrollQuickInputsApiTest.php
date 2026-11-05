@@ -9,7 +9,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Repository\Payroll\PayrollInputRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringMaterializer;
+use MyInvoice\Service\Payroll\Time\PayrollTimeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -69,6 +72,63 @@ final class PayrollQuickInputsApiTest extends TestCase
         if (isset($this->db)) {
             $this->db->close();
         }
+    }
+
+    public function testWorkedTimeIsBatchedAndKeepsExactManualSegments(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, effective_to, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-06-15", "2026-01-01"), (?, ?, "2026-06-16", NULL, "2026-01-01")')
+            ->execute([$this->supplierId, $this->employmentId, $this->supplierId, $this->employmentId]);
+        $time = $this->container->get(PayrollTimeService::class);
+        $saved = $time->saveManualSummary($this->supplierId, '2026-06', [
+            'employment_id' => $this->employmentId, 'row_version' => 0,
+            'reason' => 'Syntetický podklad', 'replace_source' => false,
+            'segments' => [
+                ['date_from' => '2026-06-01', 'date_to' => '2026-06-15', 'worked_duration_units' => 150, 'overtime_duration_units' => null, 'worked_days' => null],
+                ['date_from' => '2026-06-16', 'date_to' => '2026-06-30', 'worked_duration_units' => 3, 'overtime_duration_units' => 0, 'worked_days' => 1],
+            ],
+        ], $this->userId);
+        $time->approve($this->supplierId, '2026-06', [
+            'employment_id' => $this->employmentId, 'row_version' => (int) $saved['month']['row_version'],
+        ], $this->userId);
+        $response = $this->action->list($this->request('GET')->withQueryParams(['period' => '2026-06']), new Response());
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $worked = $this->json($response)['month']['items'][0]['worked_time'];
+        self::assertSame('approved', $worked['month']['status']);
+        self::assertSame('manual_summary', $worked['month']['work_source']);
+        self::assertSame(153, $worked['worked_duration_units']);
+        self::assertNull($worked['overtime_duration_units']);
+        self::assertNull($worked['worked_days']);
+        self::assertFalse($worked['jmhz_confirmed']);
+        self::assertSame([
+            ['date_from' => '2026-06-01', 'date_to' => '2026-06-15'],
+            ['date_from' => '2026-06-16', 'date_to' => '2026-06-30'],
+        ], $worked['suggested_segments']);
+        self::assertSame(3, $worked['manual_summary']['segments'][1]['worked_duration_units']);
+        self::assertSame(['entries'], $worked['available_sources']);
+    }
+
+    public function testManualHoursCannotSilentlyKeepMaterializedSurcharge(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->firstRow('2026-06');
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = "PRIPLATEK_NOCNI"');
+        $stmt->execute([$this->supplierId]);
+        $component = (int) $stmt->fetchColumn();
+        self::assertGreaterThan(0, $component);
+        $stmt = $this->db->pdo()->prepare('SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+        $this->container->get(PayrollInputRepository::class)->createApproved($this->supplierId, [
+            'employee_id' => (int) $stmt->fetchColumn(), 'employment_id' => $this->employmentId,
+            'component_id' => $component, 'period_start' => '2026-06-01', 'source_period_start' => null,
+            'amount_minor' => 5000, 'quantity_milliunits' => null, 'source_kind' => 'time',
+            'external_id' => 'surcharge:night:2026-06-01:1',
+        ], $this->userId);
+        $this->expectException(PayrollTimeLockedException::class);
+        $this->container->get(PayrollTimeService::class)->saveManualSummary($this->supplierId, '2026-06', [
+            'employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Oprava', 'replace_source' => true,
+            'segments' => [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null]],
+        ], $this->userId);
     }
 
     public function testHourlyMonthHasNoMonthlyProposalAndCannotMaterializeMonthlyRecurringBase(): void

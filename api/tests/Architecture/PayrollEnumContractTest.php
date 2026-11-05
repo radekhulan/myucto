@@ -368,6 +368,7 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRecurringCalculationKind' => 'db:payroll_recurring_components.calculation_kind',
         'payroll.ts::PayrollRecurringAllocationRule'  => 'db:payroll_recurring_components.allocation_rule',
         'payroll.ts::PayrollTimeCategory'          => 'db:payroll_time_entries.category',
+        'payroll.ts::PayrollTimeWorkSource'        => 'db:payroll_time_months.work_source',
         // Zákazy a vyrovnávací období u přesčasu (§ 93 odst. 4, § 240 odst. 3).
         // Sloupce jsou VARCHAR s CHECK, ne ENUM, protože doména je právní výčet
         // vázaný na ustanovení — páruje se proto konstanta domény, ne sloupec.
