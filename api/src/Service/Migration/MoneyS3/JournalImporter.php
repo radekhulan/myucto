@@ -451,10 +451,22 @@ final class JournalImporter
                 continue;
             }
             $untagged = array_values(array_filter($indexes, static fn (int $i): bool => !isset($lines[$i]['currency_code'])));
-            if ($untagged === [] || $fx['opening'] === null) {
+            if ($untagged === []) {
                 continue;
             }
             $czk = (float) $lines[$untagged[0]]['amount'];
+            // Money u bankovního účtu `PocStav` často nevede (nula, záporný součet let);
+            // spolehlivý je zůstatek převedeného výpisu k začátku roku, ověřený kurzem na Kč.
+            $statement = count($untagged) === 1 && ($fx['bank'] ?? false) && ($fx['rate'] ?? 0) > 0
+                ? $this->statementOpening($ctx->supplierId, $fx['currency'], $periodStart)
+                : null;
+            if ($statement !== null && abs(round($statement * $fx['rate'], 2) - $czk) <= 1.0
+                && ($fx['opening'] === null || abs(round($fx['opening']['foreign'] * $fx['opening']['rate'], 2) - $czk) > 1.0)) {
+                $fx['opening'] = ['foreign' => $statement, 'rate' => $fx['rate']];
+            }
+            if ($fx['opening'] === null) {
+                continue;
+            }
             $expected = round($fx['opening']['foreign'] * $fx['opening']['rate'], 2);
             if (count($untagged) === 1 && abs($expected - $czk) <= 1.0) {
                 $lines[$untagged[0]] += [
@@ -473,11 +485,33 @@ final class JournalImporter
     }
 
     /**
+     * Zůstatek převedeného výpisu jediného bankovního účtu firmy v dané měně na začátku
+     * dne `$periodStart` (počáteční zůstatek prvního výpisu od toho dne). Víc účtů v téže
+     * měně nejde od sebe rozeznat - null.
+     */
+    private function statementOpening(int $supplierId, string $currency, string $periodStart): ?float
+    {
+        $pdo = $this->db->pdo();
+        $accounts = $pdo->prepare('SELECT COUNT(DISTINCT account_number, bank_code) FROM bank_statements WHERE supplier_id = ? AND currency = ?');
+        $accounts->execute([$supplierId, $currency]);
+        if ((int) $accounts->fetchColumn() !== 1) {
+            return null;
+        }
+        $first = $pdo->prepare(
+            'SELECT prev_balance FROM bank_statements WHERE supplier_id = ? AND currency = ? AND statement_date >= ?
+              ORDER BY statement_date, id LIMIT 1'
+        );
+        $first->execute([$supplierId, $currency, $periodStart]);
+        $balance = $first->fetchColumn();
+        return $balance === false || $balance === null ? null : abs(round((float) $balance, 2));
+    }
+
+    /**
      * Účty valutových pokladen a valutových bankovních účtů Money (`SzUcPokl.Mena`,
      * primární účet `PrimUcet`) s počátečním stavem roku ve valutě. Měna z roku adresáře,
      * jinak z posledního roku, ve kterém pokladna/účet je.
      *
-     * @return array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float}}> chart_of_accounts.id => valuta
+     * @return array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float},rate:float,bank:bool}> chart_of_accounts.id => valuta
      */
     private function foreignAccounts(ImportContext $ctx, string $dir): array
     {
@@ -496,12 +530,14 @@ final class JournalImporter
                     }
                     continue;
                 }
+                $bank = strtoupper(trim((string) ($r['UcPokl'] ?? ''))) === 'U';
                 if ($ownYear) {
                     $rate = (float) ($r['PSKurz'] ?? 0) / max(1.0, (float) ($r['PSMnozstvi'] ?? 1));
                     $foreign = abs(round((float) ($r['PocStav'] ?? 0), 2));
-                    $byAccount[$accountId] = ['currency' => $mena, 'code' => $code, 'opening' => $rate > 0 && $foreign > 0 ? ['foreign' => $foreign, 'rate' => $rate] : null];
+                    $byAccount[$accountId] = ['currency' => $mena, 'code' => $code, 'opening' => $rate > 0 && $foreign > 0 ? ['foreign' => $foreign, 'rate' => $rate] : null,
+                        'rate' => $rate, 'bank' => $bank];
                 } elseif (!array_key_exists($accountId, $byAccount)) {
-                    $byAccount[$accountId] = ['currency' => $mena, 'code' => $code, 'opening' => null];
+                    $byAccount[$accountId] = ['currency' => $mena, 'code' => $code, 'opening' => null, 'rate' => 0.0, 'bank' => $bank];
                 }
             }
         };
