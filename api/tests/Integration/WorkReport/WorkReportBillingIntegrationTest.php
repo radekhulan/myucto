@@ -168,7 +168,13 @@ final class WorkReportBillingIntegrationTest extends TestCase
             self::assertSame($projectId, (int) $billing['project_id']);
             $reports->deleteByInvoice($this->invoice, $this->supplier);
             $pdo->prepare('UPDATE projects SET billing_template_id = ? WHERE id = ?')->execute([$templateId, $projectId]);
-            $default = $this->save(['title' => 'Výchozí účtování', 'billing_period' => '2026-11', 'items' => []]);
+            // Bez billing klíčů (MCP, API) se výchozí šablona zakázky nedědí.
+            $implicit = $this->save(['title' => 'Bez výslovné šablony', 'items' => []]);
+            self::assertNull($implicit['project_id']);
+            self::assertNull($implicit['billing_template_id']);
+            self::assertNull($implicit['billing_snapshot']);
+            $reports->deleteByInvoice($this->invoice, $this->supplier);
+            $default = $this->save(['title' => 'Výchozí účtování', 'billing_template_id' => $templateId, 'billing_period' => '2026-11', 'items' => []]);
             self::assertSame($projectId, (int) $default['project_id']);
             self::assertSame($templateId, $default['billing_template_id']);
             $reports->deleteByInvoice($this->invoice, $this->supplier);

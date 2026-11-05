@@ -3155,6 +3155,14 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
+        '400':
+          description: |
+            Neplatný vstup (`validation_failed`), nebo změna měny faktury, jejíž výkaz práce má
+            cenové ujednání v původní měně (`billing_currency_mismatch`). Ujednání výkazu je
+            nejprve potřeba zrušit.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '403':
           description: |
             Doklad je uzamčený pro roli (`document_locked`), nebo API token žádá vynucenou
@@ -48266,7 +48274,7 @@ components:
       type: object
       required: [title, items]
       properties:
-        billing_template_id: { type: [integer, "null"], description: "Firemní šablona; výkaz uchovává vlastní kopii nastavení." }
+        billing_template_id: { type: [integer, "null"], description: "Firemní šablona; výkaz uchovává vlastní kopii nastavení. Nový výkaz výchozí šablonu zakázky nepřebírá sám, je třeba ji poslat výslovně; vynechaný klíč založí výkaz bez pásmového účtování." }
         billing_snapshot:
           oneOf:
             - { $ref: '#/components/schemas/WorkReportBillingSettings' }

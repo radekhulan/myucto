@@ -79,10 +79,10 @@ final class SaveWorkReportAction
         // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (items = jeho řádky).
         $stored = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         // project_id je volitelné — faktura nemusí mít zakázku, výkaz pak také ne.
+        // Výchozí šablonu zakázky volí klient výslovně (billing_template_id); požadavek bez
+        // cenového ujednání (MCP, API) zůstává běžným výkazem bez pásmového účtování.
         $inheritsBillingProject = $stored === null && (($body['billing_snapshot'] ?? null) !== null
-            || ($body['billing_template_id'] ?? null) !== null
-            || (!array_key_exists('billing_snapshot', $body) && !array_key_exists('billing_template_id', $body)
-                && !empty($invoice['project_billing_template_id'])));
+            || ($body['billing_template_id'] ?? null) !== null);
         $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id']
             : ($stored['project_id'] ?? ($inheritsBillingProject ? ($invoice['project_id'] ?? null) : null));
         $projectId = ($projectIdRaw !== null && $projectIdRaw !== '' && (int) $projectIdRaw > 0)
@@ -123,10 +123,7 @@ final class SaveWorkReportAction
         try {
             $templateId = array_key_exists('billing_template_id', $body) ? $body['billing_template_id'] : ($stored['billing_template_id'] ?? null);
             $snapshot = $stored['billing_snapshot'] ?? null;
-            if ($stored === null && !array_key_exists('billing_template_id', $body) && !array_key_exists('billing_snapshot', $body)) {
-                $templateId = $project['billing_template_id'] ?? null;
-            }
-            if (array_key_exists('billing_template_id', $body) || ($stored === null && $templateId !== null)) {
+            if (array_key_exists('billing_template_id', $body)) {
                 if ($templateId === null) {
                     $snapshot = null;
                 } else {
