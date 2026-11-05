@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use PDO;
@@ -17,6 +18,7 @@ final class PayrollComponentRepository
         private readonly PayrollComponentDeletionRepository $deletion,
         private readonly PayrollComponentDefaults $defaults,
         private readonly PayrollComponentJmhzMappingDefaults $jmhzDefaults,
+        private readonly DemoMode $demo,
     ) {}
 
     /**
@@ -34,7 +36,7 @@ final class PayrollComponentRepository
     /** @return list<array<string,mixed>> */
     public function list(int $supplierId, ?string $effectiveOn = null): array
     {
-        $this->ensureDefaults($supplierId);
+        $this->ensureDefaultsOnRead($supplierId);
         $params = [$supplierId];
         $where = '';
         if ($effectiveOn !== null) {
@@ -66,7 +68,7 @@ final class PayrollComponentRepository
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $id): ?array
     {
-        $this->ensureDefaults($supplierId);
+        $this->ensureDefaultsOnRead($supplierId);
         $stmt = $this->db->pdo()->prepare(
             'SELECT *
                FROM payroll_component_definitions
@@ -343,6 +345,20 @@ final class PayrollComponentRepository
         // zařazení — jinak kontrola před během hlásila „nemá zařazení" u složek,
         // které aplikace založila sama.
         $this->seedDefaultJmhzMappings($supplierId);
+    }
+
+    /**
+     * Doplnění číselníku při čtení. Ukázka je veřejná a jen ke čtení, takže tam se
+     * výpis nesmí stát zápisem: nové výchozí složky dostane při přípravě dat, ne od
+     * návštěvníka, který otevře mzdy. Zápisové cesty (create, převzetí, materializace)
+     * volají {@see ensureDefaults()} přímo a dostanou ho dál.
+     */
+    private function ensureDefaultsOnRead(int $supplierId): void
+    {
+        if ($this->demo->enabled()) {
+            return;
+        }
+        $this->ensureDefaults($supplierId);
     }
 
     /**

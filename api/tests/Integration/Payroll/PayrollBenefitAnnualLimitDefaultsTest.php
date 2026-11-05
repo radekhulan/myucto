@@ -13,6 +13,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollComponentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
@@ -300,6 +301,7 @@ final class PayrollBenefitAnnualLimitDefaultsTest extends TestCase
             $deletion,
             new PayrollComponentDefaults(CzechPayrollRulesets2026::provider(), $catalog),
             $jmhzDefaults,
+            $container->get(DemoMode::class),
         );
     }
 
