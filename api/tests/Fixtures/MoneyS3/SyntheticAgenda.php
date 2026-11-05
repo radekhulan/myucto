@@ -634,6 +634,20 @@ final class SyntheticAgenda
             ['Doklad' => 'CVH250001', 'Pokl' => 'POH', 'Vydej' => 1, 'DatVyst' => '2025-04-12', 'DatUcPr' => '2025-04-12', 'Popis' => 'Nákup ve forintech', 'Celkem' => 619.0,
                 'Mena' => 'HUF', 'Kurs' => 6.121, 'PocetJedn' => 100, 'ValutyZak0' => 10120.0],
         ]);
+        // Každá pokladna má v Money vlastní řadu; HUF zatím jen výdeje, příjmová řada CPH
+        // se pozná podle CVH. `Cislo` = příští číslo (CPE250002–3 Money už vydalo a smazalo).
+        $files['ROK.002/CisRady.DAT'] = Ms3FixtureWriter::table(
+            [['Rada', 'C', 10], ['Cislo', 'L', 4], ['PocetMist', 'L', 4], ['PP', 'B', 1], ['VP', 'B', 1]],
+            [
+                ['Rada' => 'PPrr', 'Cislo' => 3, 'PocetMist' => 3, 'PP' => 1],
+                ['Rada' => 'PVrr', 'Cislo' => 3, 'PocetMist' => 3, 'VP' => 1],
+                ['Rada' => 'CPErr', 'Cislo' => 4, 'PocetMist' => 4, 'PP' => 1],
+                ['Rada' => 'CVErr', 'Cislo' => 1, 'PocetMist' => 4, 'VP' => 1],
+                ['Rada' => 'CPHrr', 'Cislo' => 1, 'PocetMist' => 4, 'PP' => 1],
+                ['Rada' => 'CVHrr', 'Cislo' => 2, 'PocetMist' => 4, 'VP' => 1],
+                ['Rada' => 'BPrr', 'Cislo' => 4, 'PocetMist' => 3],
+            ],
+        );
         return $files;
     }
 

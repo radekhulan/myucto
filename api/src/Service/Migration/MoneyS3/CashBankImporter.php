@@ -109,6 +109,7 @@ final class CashBankImporter
         // Každá pokladna má vlastní číselnou řadu — stejné číslo v další pokladně téhož
         // roku dostane klíč s kódem pokladny (první si ponechá „rok|číslo").
         $owner = [];
+        $seriesDocs = [];
         foreach ($ctx->backup->rowsAcrossYears('PoklKnih') as $r) {
             $year = $ctx->yearOf($r);
             $docNo = trim((string) ($r['Doklad'] ?? ''));
@@ -116,6 +117,7 @@ final class CashBankImporter
                 continue;
             }
             $registerCode = trim((string) ($r['Pokl'] ?? ''));
+            $seriesDocs[$registerCode][((int) ($r['Vydej'] ?? 0)) === 1 ? 'cash_out' : 'cash_in'][$year][] = $docNo;
             $plain = $year . '|' . $docNo;
             $owner[$plain] ??= $registerCode;
             $key = $owner[$plain] === $registerCode ? $plain : $plain . '|' . $registerCode;
@@ -213,7 +215,165 @@ final class CashBankImporter
             $ctx->cashDocuments[$key] = $id;
             $p->count(self::STEP_CASH, 'created');
         }
+        if (!$ctx->options->relinkOnly) {
+            $this->adoptRegisterSeries($ctx, $registers, $seriesDocs);
+        }
         $p->finish(self::STEP_CASH);
+    }
+
+    /**
+     * Číslovala-li Money každou pokladnu vlastní řadou (`CisRady`: CPrr/CVrr pro Kč,
+     * CPErr/CVErr pro EUR …), dostane pokladna v MyÚčtu vlastní číselnou řadu se stejným
+     * prefixem, tvarem a čítačem. Bez toho by valutová pokladna po převodu číslovala
+     * z firemní řady a po roce s převzatými doklady už ji uživatel přepnout nemůže.
+     *
+     * Řada se pokladně přiřadí podle čísel jejích dokladů; druh bez dokladu (pokladna jen
+     * s výdeji) dostane nevyužitou řadu téhož druhu lišící se jedním znakem (CVH → CPH).
+     * Sdílí-li dvě pokladny jednu řadu, Money číslovalo společně a nic se nemění; stejně tak
+     * u pokladny, která už vlastní řadu má nebo ji uživatel zapnul.
+     *
+     * @param array<string, array{id:int, currency:string}|null> $registers
+     * @param array<string, array<string, array<int, list<string>>>> $docs
+     */
+    private function adoptRegisterSeries(ImportContext $ctx, array $registers, array $docs): void
+    {
+        $registers = array_filter($registers, static fn ($r, $code) => $r !== null && isset($docs[$code]), ARRAY_FILTER_USE_BOTH);
+        if (count($registers) < 2 || $ctx->dirYears === []) {
+            return;
+        }
+        $year = max($ctx->dirYears);
+        // Řady z nejnovějšího roku, který CisRady má; čítač (`Cislo` = příští číslo) platí
+        // jen pro rok, do kterého se řada zakládá.
+        $byYear = [];
+        foreach ($ctx->backup->rowsAcrossYears('CisRady', ['Rada', 'Cislo', 'PocetMist', 'PP', 'VP']) as $r) {
+            $rowYear = $ctx->yearOf($r);
+            if ($rowYear === null || preg_match('/^([A-Z0-9]{1,10})rr$/', trim((string) ($r['Rada'] ?? '')), $m) !== 1) {
+                continue;
+            }
+            foreach (['cash_in' => 'PP', 'cash_out' => 'VP'] as $code => $flag) {
+                if ((int) ($r[$flag] ?? 0) === 1) {
+                    $byYear[$rowYear][$code][$m[1]] = [
+                        'digits' => max(1, min(9, (int) ($r['PocetMist'] ?? 4))),
+                        'next' => $rowYear === $year ? max(1, (int) ($r['Cislo'] ?? 1)) : 1,
+                    ];
+                }
+            }
+        }
+        if ($byYear === []) {
+            return;
+        }
+        $series = $byYear[max(array_keys($byYear))] + ['cash_in' => [], 'cash_out' => []];
+
+        $assigned = [];
+        $claimed = [];
+        foreach ($registers as $registerCode => $register) {
+            foreach (['cash_in', 'cash_out'] as $code) {
+                $found = null;
+                foreach ($docs[$registerCode][$code] ?? [] as $docYear => $numbers) {
+                    foreach ($series[$code] as $prefix => $s) {
+                        $pattern = '/^' . $prefix . sprintf('%02d', $docYear % 100) . '\d{' . $s['digits'] . '}$/';
+                        if (preg_grep($pattern, $numbers) !== []) {
+                            $found = $prefix;
+                        }
+                    }
+                }
+                if ($found !== null) {
+                    if (isset($claimed[$code][$found]) && $claimed[$code][$found] !== $registerCode) {
+                        return;
+                    }
+                    $claimed[$code][$found] = $registerCode;
+                    $assigned[$registerCode][$code] = $found;
+                }
+            }
+        }
+        foreach ($assigned as $registerCode => $pair) {
+            foreach (['cash_in' => 'cash_out', 'cash_out' => 'cash_in'] as $code => $other) {
+                if (isset($pair[$code]) || !isset($pair[$other])) {
+                    continue;
+                }
+                $candidates = array_filter(
+                    array_keys($series[$code]),
+                    static fn ($prefix) => !isset($claimed[$code][$prefix])
+                        && strlen((string) $prefix) === strlen($pair[$other])
+                        && levenshtein((string) $prefix, $pair[$other]) === 1,
+                );
+                if (count($candidates) === 1) {
+                    $prefix = (string) reset($candidates);
+                    $claimed[$code][$prefix] = $registerCode;
+                    $assigned[$registerCode][$code] = $prefix;
+                }
+            }
+        }
+
+        $pdo = $this->db->pdo();
+        $hasOwn = $pdo->prepare(
+            "SELECT (SELECT own_series FROM cash_registers WHERE id = ? AND supplier_id = ?)
+                 OR EXISTS (SELECT 1 FROM accounting_document_series WHERE supplier_id = ? AND register_id = ? AND series_code IN ('cash_in', 'cash_out'))"
+        );
+        $taken = $pdo->prepare(
+            "SELECT id, register_id, fiscal_year, series_code FROM accounting_document_series
+              WHERE supplier_id = ? AND prefix = ? AND series_code IN ('cash_in', 'cash_out')"
+        );
+        $maxUsed = $pdo->prepare('SELECT doc_number FROM cash_documents WHERE supplier_id = ? AND YEAR(issue_date) = ? AND doc_number LIKE ?');
+        $moveCompany = $pdo->prepare('UPDATE accounting_document_series SET register_id = ?, number_format = ?, next_number = GREATEST(next_number, ?) WHERE id = ?');
+        $insert = $pdo->prepare(
+            'INSERT INTO accounting_document_series (supplier_id, series_code, fiscal_year, register_id, prefix, number_format, next_number)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $enable = $pdo->prepare('UPDATE cash_registers SET own_series = 1 WHERE id = ? AND supplier_id = ?');
+
+        foreach ($assigned as $registerCode => $pair) {
+            $registerId = (int) $registers[$registerCode]['id'];
+            if (count($pair) < 2) {
+                $ctx->protocol->warn(self::STEP_CASH, 'register_series_incomplete', sprintf(
+                    'Pokladna %s: v Money má řadu jen pro %s, vlastní číselnou řadu nastavte ručně.',
+                    $registerCode, isset($pair['cash_in']) ? 'příjmy' : 'výdeje',
+                ), ['register' => $registerCode]);
+                continue;
+            }
+            $hasOwn->execute([$registerId, $ctx->supplierId, $ctx->supplierId, $registerId]);
+            if ((bool) $hasOwn->fetchColumn()) {
+                continue;
+            }
+            $rows = [];
+            foreach ($pair as $code => $prefix) {
+                $digits = $series[$code][$prefix]['digits'];
+                $next = $series[$code][$prefix]['next'];
+                $maxUsed->execute([$ctx->supplierId, $year, $prefix . sprintf('%02d', $year % 100) . '%']);
+                foreach ($maxUsed->fetchAll(PDO::FETCH_COLUMN) as $number) {
+                    if (preg_match('/^' . $prefix . '\d{2}(\d{' . $digits . '})$/', (string) $number, $m) === 1) {
+                        $next = max($next, (int) $m[1] + 1);
+                    }
+                }
+                $taken->execute([$ctx->supplierId, $prefix]);
+                $move = null;
+                foreach ($taken->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    // Firemní řadu téhož roku se stejným prefixem (uživatel ji v MyÚčtu nastavil
+                    // podle Money) pokladna převezme, jinak by dvě řady vydaly totéž číslo.
+                    if ((int) $row['register_id'] === 0 && (int) $row['fiscal_year'] === $year && $row['series_code'] === $code) {
+                        $move = (int) $row['id'];
+                        continue;
+                    }
+                    $ctx->protocol->warn(self::STEP_CASH, 'register_series_prefix_taken', sprintf(
+                        'Pokladna %s: prefix %s už používá jiná pokladní řada, vlastní číselnou řadu nastavte ručně.', $registerCode, $prefix,
+                    ), ['register' => $registerCode, 'prefix' => $prefix]);
+                    continue 3;
+                }
+                $rows[$code] = [$prefix, '{PREFIX}{YY}{' . str_repeat('C', $digits) . '}', $next, $move];
+            }
+            foreach ($rows as $code => [$prefix, $format, $next, $move]) {
+                if ($move !== null) {
+                    $moveCompany->execute([$registerId, $format, $next, $move]);
+                } else {
+                    $insert->execute([$ctx->supplierId, $code, $year, $registerId, $prefix, $format, $next]);
+                }
+            }
+            $enable->execute([$registerId, $ctx->supplierId]);
+            $ctx->protocol->info(self::STEP_CASH, 'register_series_adopted', sprintf(
+                'Pokladna %s čísluje vlastní řadou %s/%s jako v Money.', $registerCode, $pair['cash_in'], $pair['cash_out'],
+            ), ['register' => $registerCode]);
+            $ctx->protocol->count(self::STEP_CASH, 'registers_own_series');
+        }
     }
 
     public function importBank(ImportContext $ctx): void

@@ -256,9 +256,28 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
             "currency_code IS NOT NULL AND account_id NOT IN (SELECT id FROM chart_of_accounts WHERE supplier_id = journal_entry_lines.supplier_id AND account_code IN ('211.002', '211.003'))"));
         $this->assertRevaluationProposals($supplierId);
 
+        // Pokladny číslují vlastními řadami z Money a navazují na jeho čítač.
+        $series = $this->db->pdo()->prepare(
+            "SELECT CONCAT(r.account_code, ' ', s.series_code, ' ', s.fiscal_year, ' ', s.prefix, ' ', s.number_format, ' ', s.next_number)
+               FROM accounting_document_series s JOIN cash_registers r ON r.id = s.register_id AND r.supplier_id = s.supplier_id
+              WHERE s.supplier_id = ? AND r.own_series = 1 ORDER BY r.account_code, s.series_code"
+        );
+        $series->execute([$supplierId]);
+        self::assertSame([
+            '211.000 cash_in 2025 PP {PREFIX}{YY}{CCC} 3',
+            '211.000 cash_out 2025 PV {PREFIX}{YY}{CCC} 3',
+            '211.002 cash_in 2025 CPE {PREFIX}{YY}{CCCC} 4',
+            '211.002 cash_out 2025 CVE {PREFIX}{YY}{CCCC} 1',
+            '211.003 cash_in 2025 CPH {PREFIX}{YY}{CCCC} 1',
+            '211.003 cash_out 2025 CVH {PREFIX}{YY}{CCCC} 2',
+        ], $series->fetchAll(PDO::FETCH_COLUMN));
+        self::assertSame(0, $this->rowCount('accounting_document_series', $supplierId, "register_id = 0 AND series_code IN ('cash_in', 'cash_out')"));
+
         // Opakovaný převod nic nezdvojí ani nepřepíše.
         $again = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
         self::assertFalse($again->hasErrors(), $this->explain($again));
+        $series->execute([$supplierId]);
+        self::assertCount(6, $series->fetchAll(PDO::FETCH_COLUMN));
         $this->assertForeignCash($supplierId);
         self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
     }
