@@ -1419,10 +1419,15 @@ detailu. Upravovat lze jen koncept.
 V části **Účtování** zvolíte:
 
 - **Účet pohledávky nebo závazku**: u pohledávky se nabízejí aktivní účty,
-  u závazku pasivní. Nevyberete-li žádný, při zaúčtování se použije 315
-  (pohledávka) nebo 325 (závazek).
+  u závazku pasivní. Nevyberete-li žádný, při zaúčtování se použije účet
+  z účetního profilu druhu ([52.14.14.12](#52141412-ucetni-profily-druhu-a-vlastni-kontace)),
+  bez profilu 315 (pohledávka) nebo 325 (závazek).
 - **Protiúčet**: skutečný účetní případ. Účet 5xx znamená náklad, 6xx výnos;
   rozvahový protiúčet (například kauce nebo jistina půjčky) zisk nemění.
+  Prázdný protiúčet doplní profil druhu; bez profilu ho před zaúčtováním vyberte.
+
+Když druh profil má, pole ukazují zděděný účet šedě („Z druhu: 378“) a pod nimi
+je poznámka, že je zaúčtování doplní. Vyplněný účet má vždy přednost.
 
 Tlačítkem **Rozdělit kontaci** rozdělíte protiúčet až na 50 řádků, například
 nájemné na nájem a zálohy na služby. Součet řádků musí přesně odpovídat částce
@@ -1462,6 +1467,12 @@ V podvojném účetnictví musí být platba nejdřív zaúčtovaná proti stejn
 pohledávky nebo závazku (u pohledávky na straně D, u závazku MD); jinak ji
 aplikace odmítne s výzvou platbu nejdřív takto zaúčtovat. Přiřazení samo nic
 znovu nezaúčtuje.
+
+Nezaúčtovaný bankovní pohyb, který položce přiřadíte z dialogu **Spárovat** u pohybu,
+aplikace zaúčtuje sama: banka (221 s analytikou podle účtu výpisu) proti účtu položky.
+Peněžní účet a popis zápisu může určit kontace úhrady z banky v profilu druhu nebo
+vlastní kontace položky ([52.14.14.12](#52141412-ucetni-profily-druhu-a-vlastni-kontace)),
+strana položky je vždy účet položky.
 
 Nabídnutá částka je menší z volné části platby a zbývajícího dluhu. Jedna
 položka může mít více dílčích úhrad a jedna platba se může rozdělit mezi více
@@ -1554,7 +1565,9 @@ Přiřazení bankovní platby vyžaduje přístup k bance a párování, přiřa
 pokladního dokladu přístup k pokladně. Připojené dokumenty vidí uživatel
 s přístupem k dokumentům. Druhy zakládá, skrývá a přejmenovává uživatel se zápisem
 do agendy; zapnutí a vypnutí vlastní řady navíc potřebuje oprávnění upravovat
-účetnictví, stejně jako úprava číselných řad v Nástrojích.
+účetnictví, stejně jako úprava číselných řad v Nástrojích. Účetní profil druhu
+a vlastní kontaci úhrad položky mění uživatel se zápisem do agendy; profily vidí
+každý, kdo agendu čte.
 
 #### 52.14.14.11 Druhy a číselné řady
 
@@ -1607,6 +1620,82 @@ společnou řadou. Proto i položka založená ze zůstatku zápisu v saldokontu
 Přes API a MCP server se druhy jen čtou (`kind`, `kind_id`, `kind_name`, seznam
 druhů); nastavují se ve webovém rozhraní. Úprava konceptu, která pošle druh `other`
 bez `kind_id`, vlastní druh ponechá; zruší ho jiný vestavěný druh nebo `kind_id: null`.
+
+#### 52.14.14.12 Účetní profily druhů a vlastní kontace
+
+Firma v podvojném účetnictví může každému druhu nastavit **účetní profil**, tedy
+kontaci, kterou dostanou jeho položky, pokud nemají vlastní. Daňová evidence profily
+nemá: položku jen potvrzuje a úhradu zařazuje v peněžním deníku.
+
+V přehledu klikněte na **Druhy** a u druhu na **Účtování**. Profil má tři události:
+
+| Událost | Co se nastavuje | Zápis |
+|---|---|---|
+| **Vznik** | účet položky a protiúčet, popis zápisu, výchozí dimenze nového dokladu | pohledávka MD účet položky / D protiúčet, závazek MD protiúčet / D účet položky |
+| **Úhrada z banky** | peněžní účet (221 nebo jeho analytika) a popis zápisu | pohledávka MD banka / D účet položky, závazek MD účet položky / D banka |
+| **Úhrada z pokladny** | peněžní účet (211 nebo jeho analytika) a popis zápisu | pohledávka MD pokladna / D účet položky, závazek obráceně |
+
+U úhrad je strana položky vždy účet položky, jinak by úhrada minula saldokonto;
+aplikace jiný účet na této straně odmítne už při uložení profilu. Prázdný peněžní účet
+znamená účet banky podle výpisu (221 s analytikou banky) nebo účet pokladny.
+
+Účty musí být aktivní v účtové osnově a účtovatelné: syntetický účet s více
+analytikami profil odmítne, vyberte analytiku. Účet položky u vzniku musí odpovídat
+směru druhu (aktiva u pohledávky, pasiva u závazku) a protiúčet nesmí být saldokontní
+účet 315 nebo 325.
+
+Popis zápisu může obsahovat zástupné znaky `{title}` (popis položky), `{document_no}`
+(číslo dokladu), `{partner}` (protistrana) a `{variable_symbol}`. Bez šablony má zápis
+vzniku popis položky a zápis úhrady obvyklý popis bankovního pohybu.
+
+Profil jde vypnout volbou **Profil platí**; vypnutý profil se neuplatní a položky
+účtují jako bez profilu.
+
+**Návrhy.** U vestavěných druhů okno nabízí nezávazný návrh kontace vzniku, například
+nájemné závazek MD 518 / D 325, přijatá půjčka MD 261 / D 461, poskytnutá půjčka
+MD 378 / D 261, kauce MD 378 / D 261 nebo MD 261 / D 379. Peníze půjčky a kauce jdou
+přes 261 (peníze na cestě), bankovní pohyb pak zaúčtujete 261 proti 221. Návrh se
+uloží, jen když kliknete na **Použít návrh** a profil uložíte; účty a analytiky se
+mezi firmami liší, proto ho aplikace sama nikdy nepoužije. Chybí-li účty návrhu
+v osnově nebo mají více analytik, okno na to upozorní.
+
+**Odkud se kontace bere.** Pořadí je vlastní kontace položky, profil druhu, výchozí
+kontace aplikace:
+
+- **Vznik** se skládá po částech. Vyplněný účet položky a protiúčet na položce mají
+  přednost, prázdné doplní profil druhu, bez profilu platí 315 nebo 325 a protiúčet
+  je povinný. Položka bez profilu druhu proto účtuje stejně jako dřív.
+- **Úhrady** se přebírají celé: vlastní kontace úhrady položky, jinak profil druhu,
+  jinak 221 nebo 211.
+
+Detail položky ukazuje v bloku **Účtování** pro každou událost, co se zaúčtuje,
+s označením **Vlastní**, **Zděděno z druhu** (s odkazem na nastavení druhu) nebo
+**Výchozí**. U konceptu je tam i náhled zápisu vzniku. Tlačítkem **Vlastní kontace**
+nastavíte položce peněžní účet a popis úhrady z banky či z pokladny, **Vrátit na
+zděděnou** vlastní kontaci zruší. Vlastní kontaci úhrad jde nastavit konceptu
+i potvrzené nebo zaúčtované položce, platí pro další úhrady. Kontaci vzniku nese
+koncept v polích účtu a protiúčtu; zaúčtovanou položku mění **Přeúčtovat**, a to jen
+dokud nemá úhradu.
+
+Při zaúčtování z profilu si položka uloží účet a protiúčet, které se opravdu
+zaúčtovaly, takže přeúčtování i saldokonto pracují se zaúčtovaným stavem. Změna
+profilu nebo vlastní kontace platí jen pro další zaúčtování; existující zápisy se
+nepřeúčtovávají. Do historie změn se zapisuje uložení profilu, změna vlastní kontace
+a každé zaúčtování, které kontaci převzalo z profilu druhu nebo z vlastní kontace
+úhrady (akce `other_item.posting_profile_applied` s událostí, druhem a zápisem).
+
+Úhradu z pokladny zaúčtuje pokladní doklad s účelem Ostatní a protiúčtem na účet
+položky; kontace úhrady z pokladny ukazuje účty, které má doklad použít.
+
+Opakování přenáší vlastní kontaci úhrad zdrojové položky na každý vygenerovaný
+koncept. Výchozí dimenze z profilu dostane jen nově pořízený doklad a jen u typů,
+které ještě nemá vyplněné.
+
+Přes API a MCP server se profily druhů jen čtou (seznam druhů vrací `posting_profiles`
+a `posting_suggestion`, detail položky `posting_rules` a `posting_overrides`). MCP
+server smí nastavit vlastní kontaci úhrad jen konceptu (`posting_overrides`
+v založení nebo úpravě); profily druhů a kontace potvrzené položky se mění jen ve
+webovém rozhraní.
 
 ### 52.14.15 Interní doklady
 

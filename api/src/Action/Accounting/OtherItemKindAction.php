@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemKindService;
+use MyInvoice\Service\Accounting\OtherItemPostingProfileService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -21,6 +22,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/accounting/other-items/kinds/{id}                    — úprava vlastního druhu { name, is_active, own_series, prefix }
  *   PUT    /api/accounting/other-items/kinds/builtin/{side}/{code}   — úprava vestavěného druhu { is_active, own_series, prefix }
  *   DELETE /api/accounting/other-items/kinds/{id}                    — smazání nepoužitého vlastního druhu
+ *   GET    /api/accounting/other-items/kinds/{id}/posting-profiles   - účetní profily druhu (migrace 2238)
+ *   PUT    /api/accounting/other-items/kinds/{id}/posting-profiles   - uložení profilů { origin, payment_bank, payment_cash }
+ *   PUT    /api/accounting/other-items/kinds/builtin/{side}/{code}/posting-profiles - totéž pro vestavěný druh
  *
  * Zapnutí i vypnutí vlastní řady mění číselnou řadu, proto vyžaduje navíc stejné právo
  * jako úprava řad v Nástrojích (`accounting` zápis).
@@ -31,6 +35,7 @@ final class OtherItemKindAction
 
     public function __construct(
         private readonly OtherItemKindService $kinds,
+        private readonly OtherItemPostingProfileService $postingProfiles,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -38,7 +43,43 @@ final class OtherItemKindAction
     public function list(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
-        return Json::ok($response, ['items' => $this->kinds->list($this->currentSupplierId($request))]);
+        $supplierId = $this->currentSupplierId($request);
+        return Json::ok($response, ['items' => $this->postingProfiles->attachToKinds($supplierId, $this->kinds->list($supplierId))]);
+    }
+
+    /** Účetní profily druhu po událostech (null = událost bez profilu). */
+    public function postingProfiles(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
+        return $this->run($response, fn (): array => ['profiles' => $this->postingProfiles->profilesForKind(
+            $this->currentSupplierId($request), (int) $args['id'])]);
+    }
+
+    public function savePostingProfiles(Request $request, Response $response, array $args): Response
+    {
+        return $this->savePostingProfilesFor($request, $response, (int) $args['id'], null, null);
+    }
+
+    public function saveBuiltinPostingProfiles(Request $request, Response $response, array $args): Response
+    {
+        return $this->savePostingProfilesFor($request, $response, null, (string) $args['side'], (string) $args['code']);
+    }
+
+    /**
+     * Uložení profilů mění kontaci budoucích dokladů druhu, proto jde do auditu s tím,
+     * co se změnilo. Zaúčtované doklady se nepřeúčtovávají.
+     */
+    private function savePostingProfilesFor(Request $request, Response $response, ?int $kindId, ?string $side, ?string $code): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        $body = (array) ($request->getParsedBody() ?? []);
+        return $this->run($response, function () use ($request, $kindId, $side, $code, $body): array {
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->postingProfiles->saveForKind($supplierId, $kindId, $side, $code, $body, $this->userId($request));
+            $this->log($request, 'other_item_kind.posting_profiles_updated', $result['kind_id'],
+                ['before' => $result['before'], 'after' => $result['after']]);
+            return ['kind_id' => $result['kind_id'], 'profiles' => $result['after']];
+        });
     }
 
     public function create(Request $request, Response $response): Response

@@ -105,7 +105,7 @@ final class OtherItemAction
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
         return $this->run($response, function () use ($request) {
             $item = $this->service->create($this->currentSupplierId($request), (array) ($request->getParsedBody() ?? []), $this->userId($request));
-            $this->log($request, 'other_item.created', (int) $item['id']);
+            $this->log($request, 'other_item.created', (int) $item['id'], $this->overridesContext($request, $item));
             return $item;
         }, 201);
     }
@@ -117,9 +117,40 @@ final class OtherItemAction
             $id = (int) $args['id'];
             $this->assertSessionForAutoPostDraft($request, $id, 'Upravit');
             $item = $this->service->update($this->currentSupplierId($request), $id, (array) ($request->getParsedBody() ?? []), $this->userId($request));
-            $this->log($request, 'other_item.updated', $id);
+            $this->log($request, 'other_item.updated', $id, $this->overridesContext($request, $item));
             return $item;
         });
+    }
+
+    /**
+     * Vlastní kontace úhrad potvrzené nebo zaúčtované položky (koncept ji nese v úpravě).
+     * Platí pro budoucí úhrady; webové rozhraní, token ji nemění.
+     */
+    public function setPostingOverrides(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $body = (array) ($request->getParsedBody() ?? []);
+            $result = $this->service->setPostingOverrides($this->currentSupplierId($request), $id,
+                $body['posting_overrides'] ?? $body, $this->userId($request));
+            $this->log($request, 'other_item.posting_overrides_updated', $id,
+                ['before' => $result['before'], 'after' => $result['after']]);
+            return $result['item'];
+        });
+    }
+
+    /**
+     * Audit změny vlastní kontace úhrad v těle založení či úpravy konceptu.
+     *
+     * @param array<string,mixed> $item
+     * @return array<string,mixed>
+     */
+    private function overridesContext(Request $request, array $item): array
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        return array_key_exists('posting_overrides', $body)
+            ? ['posting_overrides' => $item['posting_overrides'] ?? null] : [];
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -343,9 +374,10 @@ final class OtherItemAction
         }
     }
 
-    private function log(Request $request, string $action, int $id): void
+    /** @param array<string,mixed> $context */
+    private function log(Request $request, string $action, int $id, array $context = []): void
     {
-        $this->logger->log($action, $this->userId($request), 'other_item', $id, [],
+        $this->logger->log($action, $this->userId($request), 'other_item', $id, $context,
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $this->currentSupplierId($request));
     }

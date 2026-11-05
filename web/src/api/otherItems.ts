@@ -9,6 +9,60 @@ export interface OtherItemPostingLine {
   amount: number
 }
 
+/** Účetní události s profilem druhu a vlastní kontací položky (migrace 2238). */
+export type OtherItemPostingEvent = 'origin' | 'payment_bank' | 'payment_cash'
+export type OtherItemPostingSource = 'item' | 'kind' | 'default'
+export type OtherItemPaymentEvent = 'payment_bank' | 'payment_cash'
+
+export interface OtherItemDimensionRef {
+  type_id: number
+  value_id: number
+}
+
+/** Kontace jedné události; null na straně položky = účet položky, u úhrady na peněžní straně banka/pokladna. */
+export interface OtherItemPostingRuleInput {
+  debit_account_code: string | null
+  credit_account_code: string | null
+  description_template: string | null
+  dimensions?: OtherItemDimensionRef[]
+  is_active?: boolean
+}
+
+export interface OtherItemPostingRule extends OtherItemPostingRuleInput {
+  id: number
+  event: OtherItemPostingEvent
+  kind_id?: number
+  updated_at?: string | null
+}
+
+export type OtherItemPostingProfiles = Record<OtherItemPostingEvent, OtherItemPostingRule | null>
+
+export interface OtherItemEffectiveLine {
+  account_code: string
+  side: 'debit' | 'credit'
+  amount: number
+}
+
+/** Účinná kontace události s původem (položka, druh, výchozí). */
+export interface OtherItemEffectivePosting {
+  event: OtherItemPostingEvent
+  source: OtherItemPostingSource
+  account_code?: string
+  account_source?: OtherItemPostingSource
+  counter_source?: 'item' | 'kind' | null
+  posting_lines?: OtherItemPostingLine[]
+  lines?: OtherItemEffectiveLine[]
+  debit_account_code?: string
+  credit_account_code?: string
+  money_account_code?: string
+  description: string | null
+  description_template: string | null
+  kind_id: number | null
+  profile_id: number | null
+}
+
+export type OtherItemPostingOverridesInput = Partial<Record<OtherItemPaymentEvent, OtherItemPostingRuleInput | null>>
+
 export interface OtherItem {
   id: string | number
   source_kind: string
@@ -47,6 +101,10 @@ export interface OtherItem {
   posting_lines?: OtherItemPostingLine[]
   note?: string | null
   journal_entry_id?: number | null
+  /** Vlastní kontace úhrad položky (podvojné účetnictví). */
+  posting_overrides?: Partial<Record<OtherItemPaymentEvent, OtherItemPostingRule>>
+  /** Účinná kontace vzniku a úhrad; prázdný objekt v daňové evidenci. */
+  posting_rules?: Partial<Record<OtherItemPostingEvent, OtherItemEffectivePosting>>
 }
 
 export interface OtherItemPayload {
@@ -71,6 +129,8 @@ export interface OtherItemPayload {
   counter_account_code: string | null
   posting_lines?: OtherItemPostingLine[]
   note: string | null
+  /** Vlastní kontace úhrad; vynechané = beze změny, null u události = zděděná kontace. */
+  posting_overrides?: OtherItemPostingOverridesInput
 }
 
 export interface OtherItemsResult {
@@ -144,6 +204,10 @@ export interface OtherItemKind {
   is_active: boolean
   /** Prefix vlastní řady (i vypnuté); null = druh vlastní řadu ještě neměl. */
   series_prefix?: string | null
+  /** Účetní profily druhu (jen podvojné účetnictví). */
+  posting_profiles?: OtherItemPostingProfiles
+  /** Nezávazný návrh kontace vzniku vestavěného druhu. */
+  posting_suggestion?: { debit_account_code: string; credit_account_code: string; available: boolean } | null
 }
 
 export interface OtherItemKindPayload {
@@ -161,6 +225,12 @@ export const otherItemKindsApi = {
   updateBuiltin: (side: OtherItemSide, code: string, payload: OtherItemKindPayload) =>
     api.put<OtherItemKind>(`/accounting/other-items/kinds/builtin/${side}/${code}`, payload).then(r => r.data),
   remove: (id: number) => api.delete(`/accounting/other-items/kinds/${id}`).then(r => r.data),
+  /** Uloží profily druhu po událostech; null u události profil smaže. */
+  savePostingProfiles: (kind: Pick<OtherItemKind, 'id' | 'builtin' | 'builtin_code' | 'side'>,
+    profiles: Partial<Record<OtherItemPostingEvent, OtherItemPostingRuleInput | null>>) =>
+    api.put<{ kind_id: number; profiles: OtherItemPostingProfiles }>(kind.builtin || kind.id === null
+      ? `/accounting/other-items/kinds/builtin/${kind.side}/${kind.builtin_code}/posting-profiles`
+      : `/accounting/other-items/kinds/${kind.id}/posting-profiles`, profiles).then(r => r.data),
 }
 
 export const otherItemsApi = {
@@ -185,6 +255,9 @@ export const otherItemsApi = {
   post: (id: number) => api.post<OtherItem>(`/accounting/other-items/${id}/post`).then(r => r.data),
   reverse: (id: number, payload: { reason: string; entry_date?: string }) =>
     api.post<OtherItem>(`/accounting/other-items/${id}/reverse`, payload).then(r => r.data),
+  /** Vlastní kontace úhrad potvrzené nebo zaúčtované položky (koncept ji nese v úpravě). */
+  setPostingOverrides: (id: number, overrides: OtherItemPostingOverridesInput) =>
+    api.put<OtherItem>(`/accounting/other-items/${id}/posting-overrides`, { posting_overrides: overrides }).then(r => r.data),
   repost: (id: number, payload: OtherItemRepostPayload) =>
     api.post<OtherItem>(`/accounting/other-items/${id}/repost`, payload).then(r => r.data),
   allocations: (id: number) => api.get<{ items: OtherItemAllocation[] }>(`/accounting/other-items/${id}/allocations`).then(r => r.data.items),

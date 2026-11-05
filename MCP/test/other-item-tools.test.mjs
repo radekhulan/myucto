@@ -338,3 +338,23 @@ test('obnovení opakování s automatikou odmítne, pozastavení projde', async 
   await tool('set_other_item_schedule_status').run(manual, { id: 4, status: 'active' }, 's');
   assert.deepEqual(writes(manual)[0].body, { status: 'active' });
 });
+
+test('vlastní kontace úhrad jde do konceptu jen výslovně a nezmění kontaci vzniku', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft() });
+  await tool('update_other_item').run(client, {
+    id: 12, posting_overrides: { payment_bank: { credit_account_code: '221', description_template: 'Splátka {title}' } },
+  }, 'update_other_item');
+  const [put] = writes(client);
+  assert.deepEqual(put.body.posting_overrides, {
+    payment_bank: { credit_account_code: '221', description_template: 'Splátka {title}' },
+  });
+  assert.deepEqual(put.body.posting_lines, [{ account_code: '221', amount: 12000 }]);
+
+  await tool('update_other_item').run(client, { id: 12, title: 'Jen popis' }, 'update_other_item');
+  assert.equal(Object.hasOwn(writes(client)[1].body, 'posting_overrides'), false, 'Bez pole se uložená kontace nemění.');
+
+  const posted = new FakeClient({ 'GET /accounting/other-items/12': draft({ status: 'posted' }) });
+  await assert.rejects(tool('update_other_item').run(posted, { id: 12, posting_overrides: { payment_bank: null } }, 'u'),
+    /upravit lze jen koncept/);
+  assert.equal(writes(posted).length, 0);
+});

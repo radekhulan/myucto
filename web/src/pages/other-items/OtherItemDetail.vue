@@ -17,6 +17,7 @@ import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
+import OtherItemPostingRules from '@/components/accounting/OtherItemPostingRules.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
@@ -45,6 +46,7 @@ const repostSplit = ref(false)
 const repostLines = ref<OtherItemPostingLine[]>([])
 const repostDate = ref(appIsoDate())
 const repostReason = ref('')
+const postingAccounts = ref<ChartAccount[]>([])
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
 const isTaxEvidence = computed(() => supplier.currentSupplier?.accounting_mode === 'tax_evidence')
 const canEdit = computed(() => item.value?.status === 'draft' && auth.canWrite('other_items'))
@@ -90,6 +92,9 @@ async function load() {
     const [detail, linked] = await Promise.all([otherItemsApi.get(id.value), otherItemsApi.allocations(id.value)])
     item.value = detail
     allocations.value = linked
+    if (isDoubleEntry.value && postingAccounts.value.length === 0) {
+      postingAccounts.value = await accountingApi.listAccounts().catch(() => [])
+    }
   } catch (error: any) {
     item.value = null
     allocations.value = []
@@ -374,6 +379,8 @@ onMounted(load)
           <ActionBar :actions="postingActions" />
         </div>
       </section>
+      <OtherItemPostingRules v-if="isDoubleEntry && item.posting_rules?.payment_bank" :item="item" :accounts="postingAccounts"
+                             :can-write="auth.canWrite('other_items')" @changed="item = $event" />
       <OtherItemJournalContext v-if="isDoubleEntry && item.journal_entry_id" :entry-id="Number(item.journal_entry_id)" />
       <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
       <OtherItemPlans :item="item" />

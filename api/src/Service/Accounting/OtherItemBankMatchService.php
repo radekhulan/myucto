@@ -28,6 +28,7 @@ final class OtherItemBankMatchService
         private readonly OtherItemService $items,
         private readonly BankPostingService $bankPosting,
         private readonly OtherItemRepository $repository,
+        private readonly OtherItemPostingResolver $postingResolver,
     ) {}
 
     /**
@@ -188,9 +189,18 @@ final class OtherItemBankMatchService
                     throw new OtherItemException('posting_forbidden',
                         'Platbu je potřeba zaúčtovat a k tomu chybí oprávnění k účetnictví.', 403);
                 }
-                $this->bankPosting->postManual($supplierId, $txId, $side === 'receivable'
-                    ? ['debit_account_code' => '221', 'credit_account_code' => $account]
-                    : ['debit_account_code' => $account, 'credit_account_code' => '221'], $meta);
+                // Kontace úhrady z vlastní kontace položky nebo profilu druhu, výchozí 221 / účet
+                // položky. Strana položky je vždy účet položky (saldokonto), 221 doplní
+                // analytiku podle účtu výpisu.
+                $rule = $this->postingResolver->payment($supplierId, $item, OtherItemPostingEvent::PaymentBank, $account);
+                $posted = $this->bankPosting->postManual($supplierId, $txId, [
+                    'debit_account_code' => $rule['debit_account_code'],
+                    'credit_account_code' => $rule['credit_account_code'],
+                    ...($rule['description'] !== null ? ['description' => $rule['description']] : []),
+                ], $meta);
+                if ($rule['source'] !== OtherItemPostingResolver::SOURCE_DEFAULT) {
+                    $this->items->logPostingProvenance($supplierId, $itemId, $rule, (int) $posted['entry_id'], $userId);
+                }
             }
             // Položka ze zůstatku nemá vlastní zápis a allocate() její zaúčtování nekontroluje.
             $this->items->assertBankPaymentPosted($supplierId, $txId, $item, $amount);

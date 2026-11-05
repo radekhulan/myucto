@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
@@ -69,6 +69,40 @@ const accountChoices = computed(() => accounts.value.filter(a => a.is_active).so
 const balanceAccountChoices = computed(() => accountChoices.value.filter(a =>
   a.account_type === (form.side === 'receivable' ? 'asset' : 'liability'),
 ))
+/** Druh vybraný ve formuláři (vestavěný má řádek až po první změně nastavení). */
+const selectedKind = computed(() => form.kind.startsWith(CUSTOM_PREFIX)
+  ? kinds.value.find(kind => !kind.builtin && `${CUSTOM_PREFIX}${kind.id}` === form.kind)
+  : kinds.value.find(kind => kind.builtin && kind.side === form.side && kind.builtin_code === form.kind))
+/** Aktivní profil vzniku druhu: prázdný účet položky a protiúčet doplní při zaúčtování. */
+const originProfile = computed(() => {
+  const profile = selectedKind.value?.posting_profiles?.origin ?? null
+  return profile && profile.is_active !== false ? profile : null
+})
+const inheritedAccount = computed(() =>
+  originProfile.value?.[form.side === 'receivable' ? 'debit_account_code' : 'credit_account_code'] ?? null)
+const inheritedCounter = computed(() =>
+  originProfile.value?.[form.side === 'receivable' ? 'credit_account_code' : 'debit_account_code'] ?? null)
+const accountPlaceholder = computed(() => inheritedAccount.value
+  ? t('other_items.posting.inherited_placeholder', { account: inheritedAccount.value })
+  : t('other_items.posting.default_placeholder', { account: form.side === 'receivable' ? '315' : '325' }))
+const counterPlaceholder = computed(() => inheritedCounter.value
+  ? t('other_items.posting.inherited_placeholder', { account: inheritedCounter.value })
+  : t('other_items.choose_account'))
+
+// Výchozí dimenze z profilu druhu doplní nový doklad tam, kde typ ještě nemá hodnotu.
+watch(() => [form.kind, dimsReady.value, originProfile.value] as const, () => {
+  if (isEdit.value || !dimsReady.value || !originProfile.value?.dimensions?.length) return
+  const header = { ...docDims.header.value }
+  let changed = false
+  for (const row of originProfile.value.dimensions) {
+    if (!header[row.type_id]) {
+      header[row.type_id] = row.value_id
+      changed = true
+    }
+  }
+  if (changed) docDims.header.value = header
+})
+
 function onSideChange() {
   form.kind = 'other'
   form.account_code = ''
@@ -270,12 +304,13 @@ onMounted(load)
           </label>
           <div></div>
           <label class="text-sm font-medium">{{ t('other_items.account_code') }}
-            <ChartAccountSelect v-model="form.account_code" :accounts="balanceAccountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
+            <ChartAccountSelect v-model="form.account_code" :accounts="balanceAccountChoices" :placeholder="accountPlaceholder" class="mt-1 block" />
           </label>
           <label v-if="!splitPosting" class="text-sm font-medium">{{ t('other_items.counter_account_code') }}
-            <ChartAccountSelect v-model="form.counter_account_code" :accounts="accountChoices" :placeholder="t('other_items.choose_account')" class="mt-1 block" />
+            <ChartAccountSelect v-model="form.counter_account_code" :accounts="accountChoices" :placeholder="counterPlaceholder" class="mt-1 block" />
           </label>
         </div>
+        <p v-if="originProfile" class="mt-2 text-xs text-neutral-500" data-test="origin-inherited">{{ t('other_items.posting.inherited_note') }}</p>
         <div v-if="splitPosting" class="mt-4">
           <OtherItemPostingLines v-model="postingLines" :accounts="accountChoices" :total="Number(form.amount || 0)" />
         </div>

@@ -7,7 +7,9 @@ namespace MyInvoice\Service\Accounting;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\OtherItemRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use PDO;
@@ -23,12 +25,26 @@ final class OtherItemService
         private readonly DocumentSeriesService $series,
         private readonly ChartOfAccountsRepository $accounts,
         private readonly OtherItemKindService $kinds,
+        private readonly OtherItemPostingResolver $postingResolver,
+        private readonly OtherItemPostingProfileService $postingProfiles,
+        private readonly ActivityLogger $activity,
     ) {}
 
+    /**
+     * Detail položky. Podvojné účetnictví k němu dostane vlastní kontaci úhrad
+     * (`posting_overrides`) a účinnou kontaci událostí s původem (`posting_rules`).
+     */
     public function get(int $supplierId, int $id): array
     {
-        return $this->items->find($supplierId, $id)
+        $item = $this->items->find($supplierId, $id)
             ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+        $item['posting_overrides'] = (object) [];
+        $item['posting_rules'] = (object) [];
+        if ($this->isDoubleEntry($supplierId)) {
+            $item['posting_overrides'] = (object) $this->postingProfiles->overridesForItem($supplierId, $id);
+            $item['posting_rules'] = (object) $this->postingResolver->forItem($supplierId, $item);
+        }
+        return $item;
     }
 
     public function list(int $supplierId, array $filters, int $page, int $perPage): array
@@ -51,6 +67,15 @@ final class OtherItemService
         try {
             $id = $this->items->insert($supplierId, $data, $userId);
             $this->items->replacePostingLines($supplierId, $id, $data['posting_lines']);
+            if (array_key_exists('posting_overrides', $input) && $input['posting_overrides'] !== null) {
+                $this->postingProfiles->saveItemOverrides($supplierId, ['id' => $id, 'side' => $data['side']],
+                    $input['posting_overrides'], $userId);
+            }
+            // Výskyt opakování dostane dimenze zdroje ({@see OtherItemScheduleService::generate}),
+            // výchozí dimenze druhu jen nově pořízený doklad.
+            if ($templateKind === null) {
+                $this->applyKindDimensions($supplierId, $id, $data);
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -118,6 +143,12 @@ final class OtherItemService
             }
             $this->items->updateDraft($supplierId, $id, $data, $userId);
             $this->items->replacePostingLines($supplierId, $id, $data['posting_lines']);
+            if (array_key_exists('posting_overrides', $input) && $input['posting_overrides'] !== null) {
+                $this->postingProfiles->saveItemOverrides($supplierId, ['id' => $id, 'side' => $data['side']],
+                    $input['posting_overrides'], $userId);
+            } elseif ($data['side'] !== $existing['side']) {
+                $this->postingProfiles->flipItemOverrides($supplierId, $id, $userId);
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -212,12 +243,16 @@ final class OtherItemService
             $doubleEntry = $this->isDoubleEntry($supplierId);
             $number = $this->nextNumber($supplierId, $item, (string) $item['issued_on']);
             $entryId = null;
+            $origin = null;
             if ($doubleEntry) {
-                $postingLines = $item['posting_lines'];
+                // Prázdný účet položky a protiúčet doplní účetní profil druhu, bez profilu
+                // platí dosavadní výchozí účet 315/325 ({@see OtherItemPostingResolver::origin}).
+                $origin = $this->postingResolver->origin($supplierId, ['document_no' => $number] + $item);
+                $postingLines = $origin['posting_lines'];
                 if ($postingLines === []) {
                     throw new OtherItemException('counter_account_required', 'Před zaúčtováním vyberte protiúčet.');
                 }
-                $account = (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'));
+                $account = $origin['account_code'];
                 $this->assertPostingAccounts($account, $postingLines);
                 $this->assertBalanceAccount($supplierId, $account, (string) $item['side']);
                 $amount = (float) $item['amount_czk'];
@@ -231,13 +266,23 @@ final class OtherItemService
                     'entry_date' => (string) ($item['accounting_on'] ?: $item['issued_on']),
                     'document_date' => (string) $item['issued_on'],
                     'document_no' => $number,
-                    'description' => (string) $item['title'],
+                    'description' => $origin['description'],
                     'posted' => true,
                     'user_id' => $userId,
                     'posted_by' => $userId,
                 ]);
             }
             $this->setPosted($supplierId, $id, $doubleEntry ? 'posted' : 'confirmed', $number, $entryId);
+            if ($origin !== null && $origin['source'] === OtherItemPostingResolver::SOURCE_KIND) {
+                // Položka si nese, co se zaúčtovalo: přeúčtování, saldokonto i opakování čtou
+                // účet a protiúčet z ní, ne z profilu, který se mezitím může změnit.
+                $this->items->storePostedAccounts($supplierId, $id, $origin['account_code'],
+                    count($origin['posting_lines']) === 1 ? $origin['posting_lines'][0]['account_code'] : null);
+                if ($origin['counter_source'] === OtherItemPostingResolver::SOURCE_KIND) {
+                    $this->items->replacePostingLines($supplierId, $id, $origin['posting_lines']);
+                }
+                $this->logPostingProvenance($supplierId, $id, $origin, (int) $entryId, $userId);
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -926,9 +971,73 @@ final class OtherItemService
 
     public function isDoubleEntry(int $supplierId): bool
     {
-        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        return $stmt->fetchColumn() !== 'tax_evidence';
+        return $this->postingResolver->isDoubleEntry($supplierId);
+    }
+
+    /**
+     * Vlastní kontace úhrad položky mimo koncept (potvrzená či zaúčtovaná položka).
+     * Platí pro budoucí úhrady, zaúčtované úhrady se nemění. Vznik se tu nemění: jeho
+     * kontaci nese koncept, zaúčtovanou položku mění přeúčtování.
+     *
+     * @return array{item:array<string,mixed>,before:array<string,mixed>,after:array<string,mixed>}
+     */
+    public function setPostingOverrides(int $supplierId, int $id, mixed $input, ?int $userId): array
+    {
+        if (!$this->isDoubleEntry($supplierId)) {
+            throw new OtherItemException('not_double_entry', 'Vlastní kontaci má jen podvojné účetnictví.', 409);
+        }
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $item = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if (!in_array($item['status'], ['draft', 'confirmed', 'posted'], true)) {
+                throw new OtherItemException('invalid_status', 'Kontaci úhrad lze nastavit jen aktivnímu dokladu.', 409);
+            }
+            $changes = $this->postingProfiles->saveItemOverrides($supplierId, $item, $input, $userId);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id)] + $changes;
+    }
+
+    /**
+     * Výchozí dimenze z profilu vzniku druhu doplní hlavičce nového dokladu typy, které
+     * ještě nemá (ruční volba má přednost).
+     *
+     * @param array<string,mixed> $data
+     */
+    private function applyKindDimensions(int $supplierId, int $id, array $data): void
+    {
+        if (!$this->isDoubleEntry($supplierId)) return;
+        $origin = $this->postingResolver->origin($supplierId, $data + ['amount_czk' => 0, 'posting_lines' => []]);
+        if ($origin['dimensions'] === []) return;
+        $assignments = new DimensionAssignmentRepository($this->db);
+        foreach ($origin['dimensions'] as $dimension) {
+            $assignments->addHeaderDimensionIfMissing($supplierId, 'other_item', $id,
+                $dimension['type_id'], $dimension['value_id'],
+                ['origin' => 'rule_default', 'ref' => 'other_item_posting_profile:' . $origin['profile_id']]);
+        }
+    }
+
+    /**
+     * Původ kontace v auditu: zápis vznikl z účetního profilu druhu nebo z vlastní kontace
+     * úhrad položky (výchozí kontace se nezapisuje, chová se jako dřív).
+     *
+     * @param array<string,mixed> $rule výsledek {@see OtherItemPostingResolver}
+     */
+    public function logPostingProvenance(int $supplierId, int $id, array $rule, int $entryId, ?int $userId): void
+    {
+        $this->activity->log('other_item.posting_profile_applied', $userId, 'other_item', $id, [
+            'event' => $rule['event'],
+            'source' => $rule['source'],
+            'kind_id' => $rule['kind_id'],
+            'profile_id' => $rule['profile_id'],
+            'journal_entry_id' => $entryId,
+        ], null, null, $supplierId);
     }
 
     private function assertBalanceAccount(int $supplierId, string $code, string $side): void

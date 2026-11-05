@@ -44,6 +44,32 @@ const POSTING_LINES = {
   }, ['account_code', 'amount']),
 };
 
+const PAYMENT_RULE = nullable({
+  type: 'object',
+  additionalProperties: false,
+  description: 'Vlastní kontace úhrady. Strana položky zůstává prázdná (úhrada jde vždy proti účtu položky), '
+    + 'peněžní účet je u pohledávky debit_account_code, u závazku credit_account_code. null vrátí kontaci zděděnou '
+    + 'z druhu.',
+  properties: {
+    debit_account_code: nullable(str('MD.', { maxLength: 20 })),
+    credit_account_code: nullable(str('D.', { maxLength: 20 })),
+    description_template: nullable(str('Popis zápisu se zástupnými znaky {title}, {document_no}, {partner}, '
+      + '{variable_symbol}.', { maxLength: 255 })),
+  },
+});
+
+const POSTING_OVERRIDES = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'Vlastní kontace úhrad konceptu (jen podvojné účetnictví). Vynechaná událost se nemění. Bez vlastní '
+    + 'kontace platí účetní profil druhu (list_other_item_kinds, posting_profiles), jinak výchozí 221 / 211. '
+    + 'Kontaci vzniku nesou account_code, counter_account_code a posting_lines; prázdné doplní profil druhu.',
+  properties: {
+    payment_bank: { ...PAYMENT_RULE, description: `Úhrada z banky (221 nebo analytika). ${PAYMENT_RULE.description}` },
+    payment_cash: { ...PAYMENT_RULE, description: `Úhrada z pokladny (211 nebo analytika). ${PAYMENT_RULE.description}` },
+  },
+};
+
 const ITEM_INPUT = {
   side: str('receivable = pohledávka (dluží firmě někdo jiný), payable = závazek (firma dluží).', {
     enum: ['receivable', 'payable'],
@@ -66,12 +92,14 @@ const ITEM_INPUT = {
   counterparty_bank_code: nullable(str('Kód banky českého účtu, když ho counterparty_account neobsahuje za lomítkem. '
     + 'U IBANu se nezadává.', { pattern: '^[0-9]{4}$' })),
   account_code: nullable(str('Rozvahový účet pohledávky nebo závazku (např. 378, 379, 461). '
-    + 'Musí být aktivní a odpovídat straně; ověří se při zaúčtování.', { maxLength: 20 })),
+    + 'Musí být aktivní a odpovídat straně; ověří se při zaúčtování. Prázdný doplní účetní profil druhu, '
+    + 'bez profilu 315 nebo 325.', { maxLength: 20 })),
   counter_account_code: nullable(str('Jediný protiúčet (jednořádková kontace). Nekombinuj s posting_lines.', {
     maxLength: 20,
   })),
   posting_lines: POSTING_LINES,
   note: nullable(str('Interní poznámka.', { maxLength: 10000 })),
+  posting_overrides: POSTING_OVERRIDES,
 };
 
 /** Pole hlavičky, která PUT přepisuje vždy celá. Kontace se skládá zvlášť. */
@@ -79,7 +107,7 @@ const HEAD_KEYS = [
   'side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
   'due_on', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
 ];
-const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines'];
+const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines', 'posting_overrides'];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -152,6 +180,9 @@ function updateBody(current, a) {
     && current?.accounting_on && current.accounting_on === current.issued_on) {
     body.accounting_on = a.issued_on;
   }
+
+  // Vlastní kontace úhrad: server vynechanou událost nemění, proto jde jen to, co model poslal.
+  if (a.posting_overrides !== undefined) body.posting_overrides = a.posting_overrides;
 
   if (a.posting_lines !== undefined) {
     assertPostingLines(a.posting_lines, body.amount);
@@ -259,7 +290,9 @@ export const OTHER_ITEM_TOOLS = [
       return q;
     }),
   read('get_other_item', 'Detail ostatní pohledávky nebo závazku',
-    'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky.',
+    'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky. `posting_rules` ukazuje '
+    + 'účinnou kontaci vzniku a úhrad s původem (item = vlastní, kind = účetní profil druhu, default = výchozí), '
+    + '`posting_overrides` vlastní kontaci úhrad.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
     'Spárované bankovní a pokladní úhrady dokladu. Párování se dělá ve webovém rozhraní.',
@@ -278,7 +311,9 @@ export const OTHER_ITEM_TOOLS = [
   read('list_other_item_kinds', 'Druhy ostatních položek',
     'Vestavěné druhy (builtin_code = hodnota `kind`) a vlastní druhy firmy po stranách, s příznakem vlastní číselné '
     + 'řady (own_series, series_prefix) a skrytí (is_active). `id` vlastního druhu se zadává jako `kind_id`, vestavěný '
-    + 'druh se volí přes `kind`. Nastavení druhů se mění ve webovém rozhraní.',
+    + 'druh se volí přes `kind`. V podvojném účetnictví nese druh účetní profil (`posting_profiles`: vznik, úhrada '
+    + 'z banky a z pokladny; null na straně položky = účet položky) a vestavěný druh nezávazný návrh '
+    + '(`posting_suggestion`). Nastavení druhů a profilů se mění ve webovém rozhraní.',
     {}, () => `${BASE}/kinds`),
   read('list_other_item_schedules', 'Opakování ostatních položek',
     'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování.',

@@ -489,7 +489,10 @@ který není vydanou ani přijatou fakturou. Zadejte titul, protistranu, částk
 v CZK, datum vzniku a splatnosti. Cizoměnové položky tato agenda zatím
 nepřijímá, protože by vyžadovaly kurzové přecenění při uzávěrce.
 V podvojném účetnictví vyberte účet
-pohledávky nebo závazku a protiúčet podle skutečného případu. Před potvrzením
+pohledávky nebo závazku a protiúčet podle skutečného případu, nebo je nechte
+prázdné a doplní je účetní profil druhu (nastavení v okně **Druhy** tlačítkem
+**Účtování**, viz [§ 52.14.14.12](52_Ucetni_denik.md#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+Profil určuje i kontaci úhrady z banky a z pokladny. Před potvrzením
 je položka konceptem. Tlačítko **Zaúčtovat** vytvoří jediný zápis v deníku a
 přidělí číslo řady OP nebo OZ. Storno vytvoří opravný zápis; položku s
 přiřazenou úhradou je třeba nejprve od úhrady odpojit.

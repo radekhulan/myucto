@@ -195,6 +195,14 @@ final class OtherItemRepository
         $stmt->execute([$status, $number, $entryId, $id, $supplierId]);
     }
 
+    /** Účet a protiúčet doplněné při zaúčtování z účetního profilu druhu. */
+    public function storePostedAccounts(int $supplierId, int $id, string $accountCode, ?string $counterCode): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE other_items SET account_code = ?, counter_account_code = ? WHERE id = ? AND supplier_id = ?'
+        )->execute([$accountCode, $counterCode, $id, $supplierId]);
+    }
+
     public function setUnposted(int $supplierId, int $id, ?int $userId): void
     {
         $this->db->pdo()->prepare(
