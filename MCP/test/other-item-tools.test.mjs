@@ -81,7 +81,7 @@ test('katalog registruje nástroje ostatních položek a nenabízí účtování
     assert.ok(Object.hasOwn(tool(name).inputSchema.properties, 'confirm'), name);
   }
   for (const forbidden of [
-    'post_other_item', 'reverse_other_item', 'repost_other_item', 'allocate_other_item_payment',
+    'post_other_item', 'reverse_other_item', 'repost_other_item',
     'unallocate_other_item_payment', 'generate_other_item_schedule',
   ]) {
     assert.equal(TOOLS_BY_NAME.has(forbidden), false, forbidden);
@@ -311,6 +311,23 @@ test('zrušení splátkového kalendáře vyžaduje potvrzení a pošle prázdn�
   assert.equal(writes(client).length, 0);
   await tool('clear_other_item_installments').run(client, { item_id: 12, confirm: true }, 'c');
   assert.deepEqual(writes(client), [{ method: 'PUT', path: '/accounting/other-items/12/installments', body: { items: [] }, tool: 'c' }]);
+});
+
+test('přiřazení úhrady je zápisový nástroj a posílá právě jednu platbu', async () => {
+  assert.equal(tool('allocate_other_item_payment').write, true);
+  const client = new FakeClient();
+  await tool('allocate_other_item_payment').run(client, { item_id: 12, bank_transaction_id: 90, amount: 1500.5 }, 'a');
+  await tool('allocate_other_item_payment').run(client, { item_id: 12, cash_document_id: 7, amount: 100 }, 'a');
+  assert.deepEqual(client.calls, [
+    { method: 'POST', path: '/accounting/other-items/12/allocations', body: { bank_transaction_id: 90, amount: 1500.5 }, tool: 'a' },
+    { method: 'POST', path: '/accounting/other-items/12/allocations', body: { cash_document_id: 7, amount: 100 }, tool: 'a' },
+  ]);
+  const bad = new FakeClient();
+  const run = (args) => tool('allocate_other_item_payment').run(bad, { item_id: 12, ...args }, 'a');
+  assert.throws(() => run({ amount: 10 }), /právě jedno/);
+  assert.throws(() => run({ bank_transaction_id: 1, cash_document_id: 2, amount: 10 }), /právě jedno/);
+  assert.throws(() => run({ bank_transaction_id: 1, amount: 10.005 }), /haléře/);
+  assert.equal(bad.calls.length, 0);
 });
 
 test('opakování se zakládá vždy bez automatického účtování', async () => {

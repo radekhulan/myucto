@@ -1019,7 +1019,7 @@ s oprávněním čtení a zápis.
 #### 105.8.8.5 Ostatní pohledávky a závazky
 
 Nájem, půjčka nebo úvěr, leasing, kauce, pojistné a poplatky se evidují jako
-ostatní pohledávky a závazky (viz [kapitola 52](52_Ucetni_denik.md)). Asistent
+ostatní pohledávky a závazky (viz [§ 52.14.14](52_Ucetni_denik.md) a [§ 50.10.4](50_Pruvodce_ucetniho.md)). Asistent
 je umí číst i připravit, ale **jen jako koncept**. Koncept nemá zápis v deníku;
 potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuje.
 
@@ -1028,6 +1028,7 @@ potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuj
 | Čtení | `list_other_items`, `get_other_item`, `list_other_item_kinds`, `list_other_item_allocations`, `other_item_payment_candidates`, `list_other_item_schedules`, `get_other_item_schedule`, `get_other_item_installments` |
 | Koncept | `create_other_item`, `update_other_item`, `delete_other_item` |
 | Splátkový kalendář | `set_other_item_installments`, `clear_other_item_installments` |
+| Úhrada | `allocate_other_item_payment` (po potvrzení uživatele) |
 | Opakování | `create_other_item_schedule`, `set_other_item_schedule_status` |
 | Analytické účty | `chart_of_accounts` (čtení), `create_analytic_account`, `update_analytic_account` |
 | Smlouva a další dokumenty | `upload_document` nebo `link_document` s typem `other_item`, `list_entity_documents`, `unlink_document` |
@@ -1091,8 +1092,10 @@ nebo znovu aktivuje. Číslo účtu se změnit nedá, syntetické účty asisten
 čte a nepoužitou analytiku smažete jen v aplikaci. Funguje to u firmy
 s podvojným účetnictvím a s oprávněním zápisu do účetnictví.
 
+**Úhrada.** Nástrojem `allocate_other_item_payment` asistent přiřadí bankovní transakci nebo pokladní doklad (právě jedno z toho) k potvrzené či zaúčtované položce na zadanou částku. Kandidáty vypíše `other_item_payment_candidates`. Je to zápis, takže vyžaduje potvrzení a asistent ho bez něj neprovede. Splátku určí server sám (přesná shoda zbytku, jinak první otevřená) a stejně jako v aplikaci odmítne přeplatek, cizí měnu, platbu opačného směru i konceptu. Do deníku nic nezapíše. Odpojení úhrady zůstává v aplikaci.
+
 Přes asistenta **nejde**: potvrdit nebo zaúčtovat doklad, stornovat ho,
-přeúčtovat, spárovat nebo odpojit úhradu ani ručně vygenerovat doklady
+přeúčtovat, odpojit úhradu ani ručně vygenerovat doklady
 z opakování. Tyto kroky dělá účetní v aplikaci.
 
 #### 105.8.8.6 Soubory a přílohy

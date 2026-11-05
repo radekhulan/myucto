@@ -20021,6 +20021,8 @@
         "dimension_account_map_invalid": "The account-driving dimension map points to an analytic account that no longer matches its synthetic account (parent, type or tax deductibility)",
         "cnb_rate_deviation": "Document exchange rate deviates from the daily CNB rate",
         "payment_match_audit": "Matched payments that don't add up (currency, amount, FX difference, counterparty)",
+        "other_item_installments_overdue": "Other receivable and payable installments past due without payment",
+        "other_item_account_balance": "Balance of other receivable and payable accounts does not match open items",
         "inventory_unresolved": "Balance-sheet account stocktaking (§29–30 of the Accounting Act) is not completed or has unresolved differences",
         "attachment_vat_period": "Document tax point does not match its attachment and falls into another month — the document may be in the wrong VAT period and control statement",
         "attachment_mismatch": "Documents that differ from their extracted attachment (amount, company ID, variable symbol or tax point day) — informative",
