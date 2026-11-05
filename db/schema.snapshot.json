@@ -1138,7 +1138,8 @@
         "2234_bank_posting_rule_dimensions.sql",
         "2235_cash_register_foreign_opening.sql",
         "2236_invoice_defaults_role_permission.sql",
-        "2237_other_item_payment_matching.sql"
+        "2237_other_item_payment_matching.sql",
+        "2240_payment_order_other_items.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10579,6 +10580,8 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "message": "varchar(140) NULL DEFAULT NULL",
+                "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "other_item_installment_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "payee_account_number": "varchar(34) NULL DEFAULT NULL",
                 "payee_bank_code": "varchar(10) NULL DEFAULT NULL",
                 "payee_bic": "varchar(11) NULL DEFAULT NULL",
@@ -10596,14 +10599,18 @@
                 "idx_poi_invoice": "BTREE (purchase_invoice_id)",
                 "idx_poi_issued_invoice": "BTREE (invoice_id)",
                 "idx_poi_order": "BTREE (payment_order_id)",
+                "idx_poi_other_installment": "BTREE (other_item_installment_id)",
+                "idx_poi_other_item": "BTREE (other_item_id, other_item_installment_id)",
                 "idx_poi_tax_advance": "BTREE (tax_advance_schedule_id)",
                 "idx_poi_tax_submission": "BTREE (tax_submission_id)"
             },
             "foreign_keys": {
+                "fk_poi_other_installment": "(other_item_installment_id) -> other_item_installments (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_poi_other_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_poi_tax_submission": "(tax_submission_id) -> tax_submissions (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_poi_single_target": "(`purchase_invoice_id` is not null) + (`invoice_id` is not null) + (`tax_submission_id` is not null) + (`tax_advance_schedule_id` is not null) = 1"
+                "chk_poi_single_target": "(`purchase_invoice_id` is not null) + (`invoice_id` is not null) + (`tax_submission_id` is not null) + (`tax_advance_schedule_id` is not null) + (`other_item_id` is not null) = 1"
             }
         },
         "payment_orders": {

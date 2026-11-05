@@ -21535,8 +21535,17 @@
       "no_account": "chybí platební účet",
       "refund_disabled": "vyplácení přeplatků není zapnuté",
       "cash": "vyplácí se hotově",
-      "invalid_account": "neplatný účet příjemce"
+      "invalid_account": "neplatný účet příjemce",
+      "already_ordered": "už je v platebním příkazu"
     },
+    "other_title": "Ostatní závazky",
+    "other_hint": "Potvrzené závazky v CZK, které mají zbytek k úhradě. U splátkového kalendáře se nabízí nejbližší splátka, která ještě v příkazu není, jinak celý zbytek. Účet je účet protistrany z položky, úhradu pak spáruje výpis.",
+    "other_col_item": "Závazek",
+    "other_col_amount": "K úhradě",
+    "other_installment": "Splátka {position}/{count}",
+    "other_whole_remainder": "Celý zbytek",
+    "other_no_account": "Chybí účet protistrany",
+    "other_mark_only_unsupported": "Ostatní závazek jde označit jen vytvořením příkazu.",
     "refund_title": "Vratky odběratelům",
     "tax_title": "Daně finančnímu úřadu",
     "tax_hint": "DPH z podaných přiznání a zálohy na daň z příjmů. Účet finančního úřadu, variabilní symbol i částku určuje aplikace podle přiznání a předpisu záloh, úhradu pak spáruje výpis.",

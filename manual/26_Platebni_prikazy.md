@@ -2,7 +2,8 @@
 
 > Návod, jak zaplatit více přijatých faktur najednou: vybrané faktury
 > vyexportujete do souboru pro internetové bankovnictví nebo je pošlete rovnou
-> do banky. Platí i pro vratky peněz odběratelům a daně finančnímu úřadu. Pro každého, kdo v bance
+> do banky. Platí i pro vratky peněz odběratelům, daně finančnímu úřadu a ostatní
+> závazky (úvěry, nájemné, leasing). Pro každého, kdo v bance
 > zadává hromadné platby.
 
 ## 26.1 Kdy to potřebujete
@@ -329,6 +330,36 @@ včetně ABO a odeslání do banky. Volba **Jen označit** se na daně nevztahuj
 zařadí jen skutečný příkaz. Zařazená daň nese štítek **Zařazeno k úhradě**, zaplacená
 je až po spárování odchozí platby z výpisu. Daň ze závislé činnosti, srážková daň
 a pojistné se platí mzdovými dávkami v **Mzdy → Platby**, ne tady.
+
+### 26.8.12 Ostatní závazky
+
+Tabulka **Ostatní závazky** nabízí závazky z [Ostatních pohledávek a závazků](50_Pruvodce_ucetniho.md#50104-ostatni-pohledavky-a-zavazky)
+(úvěry, nájemné, leasing, vlastní druhy), které jsou **potvrzené nebo zaúčtované**,
+vedené v **CZK** a mají zbytek k úhradě. Koncepty, pohledávky a závazky v cizí měně
+se nenabízejí.
+
+- Závazek se **splátkovým kalendářem** nabízí nejbližší otevřenou splátku, která ještě
+  není v žádném příkazu. Řádek nese štítek **Splátka 2/12**, splatnost splátky a částku
+  rovnou jejímu zbytku. Po zařazení splátky do příkazu se nabídne další splátka.
+- Závazek **bez kalendáře** nabízí celý zbytek (štítek **Celý zbytek**) se splatností
+  položky.
+- **Účet příjemce** je účet protistrany z položky, **variabilní symbol** číslice z jejího
+  VS a zpráva pro příjemce číslo dokladu, název a pořadí splátky. Ručně se nic nezadává,
+  účet nebo VS opravíte v detailu položky.
+- Závazek **bez účtu protistrany** je v tabulce, ale vybrat nejde (**Chybí účet
+  protistrany**). Účet doplníte v detailu položky a stránku obnovíte.
+
+Ostatní závazky se platí jen z účtu v **CZK** a jdou do stejné dávky jako faktury,
+vratky a daně, včetně ABO, CSV, PDF a odeslání do banky. Zařazená splátka nebo zbytek
+nese štítek **Zařazeno k úhradě** a podruhé vybrat nejde, filtr ho skryje (**Skrýt už zařazené k úhradě**). Smazáním příkazu nebo jeho archivací po zrušení v bance se splátka zase uvolní.
+
+Zařazení do příkazu závazek **neoznačí jako uhrazený**. Volba **Jen označit** ani
+**Označit při exportu faktury rovnou jako zaplacené** se na ostatní závazky
+nevztahuje. Úhradu zapíše až spárování odchozí platby z bankovního výpisu, ručně
+v dialogu **Spárovat** u pohybu nebo v detailu položky (VS a účet protistrany
+z příkazu párování usnadní). Do banky přes konektor jde příkaz jen tehdy, když
+splátka nebo zbytek pořád pokryje částku v příkazu. Jinak ho aplikace odmítne, aby
+splátka uhrazená mezitím jinou platbou neodešla podruhé.
 
 ## 26.9 Související kapitoly
 

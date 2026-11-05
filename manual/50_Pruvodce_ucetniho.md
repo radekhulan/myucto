@@ -539,6 +539,13 @@ pokladnu. Tabulka splátek ukazuje u každé splátky stav **Neuhrazeno**,
 **Částečně** (se zbývající částkou), **Uhrazeno** nebo **Po splatnosti**.
 Podle zbytků splátek počítá i předpověď cash-flow.
 
+Potvrzený nebo zaúčtovaný **závazek s účtem protistrany** zaplatíte i
+[platebním příkazem](26_Platebni_prikazy.md#26812-ostatni-zavazky) spolu s přijatými
+fakturami. Stránka **Nákup → Platební příkazy** nabízí nejbližší neuhrazenou splátku,
+bez kalendáře celý zbytek, s účtem protistrany a variabilním symbolem z položky.
+Zařazená splátka se podruhé nenabídne, dokud příkaz nesmažete. Zařazení závazek
+neuhradí: úhrada se zapíše až přiřazením odchozí platby z výpisu, jako u jiné platby.
+
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.
 Další položky se načítají při posunu dolů. Na počítači zůstávají filtry a názvy

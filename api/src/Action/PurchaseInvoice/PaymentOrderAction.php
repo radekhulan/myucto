@@ -111,6 +111,7 @@ final class PaymentOrderAction
             $envelope['refund_candidates'] = $result['refund_candidates'];
         }
         $envelope['tax_candidates'] = $result['tax_candidates'] ?? [];
+        $envelope['other_candidates'] = $result['other_candidates'] ?? [];
         return Json::ok($response, $envelope);
     }
 
@@ -130,6 +131,7 @@ final class PaymentOrderAction
                 'refund_invoice_ids' => (array) ($body['refund_invoice_ids'] ?? []),
                 'tax_submission_ids' => (array) ($body['tax_submission_ids'] ?? []),
                 'tax_advance_ids'    => (array) ($body['tax_advance_ids'] ?? []),
+                'other_items'        => (array) ($body['other_items'] ?? []),
                 'payer_currency_id'  => (int) ($body['payer_currency_id'] ?? 0),
                 'payment_date'       => (string) ($body['payment_date'] ?? ''),
                 'constant_symbol'    => $body['constant_symbol'] ?? null,

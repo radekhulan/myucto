@@ -8033,6 +8033,35 @@ paths:
                         account: { type: [string, "null"] }
                         variable_symbol: { type: [string, "null"] }
                         ordered_at: { type: [string, "null"], description: "Kdy byla daň naposledy zařazena do (nearchivovaného) příkazu." }
+                  other_candidates:
+                    type: array
+                    description: "Ostatní závazky k úhradě, jen CZK: potvrzené nebo zaúčtované položky strany `payable` se zbytkem k úhradě. Se splátkovým kalendářem nejbližší otevřená splátka, která ještě není v příkazu (částka = zbytek splátky), bez kalendáře celý zbytek. Splátky už zařazené do nearchivovaného příkazu jsou v seznamu s `ordered_at` a `payable: false`. Účet příjemce je účet protistrany položky, VS jen číslice z VS položky."
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string, example: 'other:12:34' }
+                        other_item_id: { type: integer }
+                        installment_id: { type: [integer, "null"] }
+                        installment_position: { type: [integer, "null"] }
+                        installment_count: { type: [integer, "null"] }
+                        side: { type: string, enum: [payable] }
+                        kind: { type: string }
+                        kind_name: { type: [string, "null"], description: "Název vlastního druhu položky." }
+                        title: { type: string }
+                        partner_name: { type: [string, "null"] }
+                        document_no: { type: [string, "null"] }
+                        due_date: { type: string, format: date }
+                        amount: { type: number }
+                        currency: { type: string, enum: [CZK] }
+                        account_number: { type: [string, "null"], example: '19-1000000005' }
+                        bank_code: { type: [string, "null"], example: '0100' }
+                        iban: { type: [string, "null"], description: "Zahraniční IBAN protistrany (bez kódu banky)." }
+                        variable_symbol: { type: [string, "null"] }
+                        has_account: { type: boolean }
+                        abo_eligible: { type: boolean }
+                        ordered_at: { type: [string, "null"], description: "Kdy byla splátka (zbytek) naposledy zařazena do nearchivovaného příkazu." }
+                        payable: { type: boolean, description: "Lze zařadit do příkazu (má účet a ještě v příkazu není)." }
+                        reason: { type: [string, "null"], enum: [no_account, already_ordered, null] }
 
   /api/v1/purchase-invoices/payment-orders/verify-account:
     parameters:
@@ -8100,6 +8129,17 @@ paths:
                   type: array
                   items: { type: integer }
                   description: "Předpisy záloh na daň z příjmů (id z `tax_candidates`). Bez kódu finančního úřadu u firmy se přeskočí s důvodem `no_account`."
+                other_items:
+                  type: array
+                  description: "Ostatní závazky (z `other_candidates`): ID položky, nebo objekt se splátkou, kterou seznam nabídl. Samotné ID zařadí nejbližší splátku, která ještě v příkazu není (bez kalendáře celý zbytek). Splátka, která už nabízená není, se přeskočí s důvodem `already_ordered`, položka cizí firmy nebo bez zbytku s `nothing_to_pay`, bez účtu protistrany s `no_account`. Částku, účet i VS odvozuje server. `mark_paid` se na ně nevztahuje, uhrazení zapisuje párování výpisu."
+                  items:
+                    oneOf:
+                      - { type: integer }
+                      - type: object
+                        required: [id]
+                        properties:
+                          id: { type: integer }
+                          installment_id: { type: [integer, "null"] }
                 payer_currency_id:
                   type: integer
                   format: int64
@@ -58670,6 +58710,12 @@ components:
         tax_advance_schedule_id:
           type: integer
           description: Položka platí zálohu na daň z příjmů.
+        other_item_id:
+          type: integer
+          description: Položka platí ostatní závazek.
+        other_item_installment_id:
+          type: integer
+          description: Splátka ostatního závazku, kterou položka platí; chybí, když položka hradí celý zbytek.
         payee_name:
           anyOf:
           - type: string

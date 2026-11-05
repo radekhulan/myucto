@@ -21535,8 +21535,17 @@
       "no_account": "missing payment account",
       "refund_disabled": "paying out overpayments is not enabled",
       "cash": "paid out in cash",
-      "invalid_account": "invalid payee account"
+      "invalid_account": "invalid payee account",
+      "already_ordered": "already in a payment order"
     },
+    "other_title": "Other payables",
+    "other_hint": "Confirmed payables in CZK with an amount left to pay. With an instalment plan the nearest instalment that is not in an order yet is offered, otherwise the whole remainder. The account is the counterparty account of the item; the bank statement then matches the payment.",
+    "other_col_item": "Payable",
+    "other_col_amount": "To pay",
+    "other_installment": "Instalment {position}/{count}",
+    "other_whole_remainder": "Whole remainder",
+    "other_no_account": "Counterparty account is missing",
+    "other_mark_only_unsupported": "An other payable can only be marked by creating an order.",
     "refund_title": "Refunds to customers",
     "tax_title": "Taxes to the tax office",
     "tax_hint": "VAT from filed returns and income tax advances. The app sets the tax office account, variable symbol and amount from the return and the advance schedule; the bank statement then matches the payment.",
