@@ -25,6 +25,8 @@ const loading = ref(false)
 const error = ref('')
 const notice = ref('')
 const issueOpen = ref(false)
+/** Formulář revize je u člena s historií sbalený za akcí „Změnit stav členství“. */
+const revisionOpen = ref(false)
 const reverseClaim = ref<ClaimRow | null>(null)
 const locks = ref({ revision: false, issue: false, reverse: false })
 let alive = true
@@ -76,6 +78,14 @@ async function finished(message: string) {
   emit('changed')
 }
 
+/** Formulář revize se po zápisu sbalí, proto hlášku o úspěchu drží detail stejně jako u předpisu a storna. */
+async function revisionFinished() {
+  revisionOpen.value = false
+  notice.value = t('nonprofitMembership.revisionDone')
+  await load()
+  emit('changed')
+}
+
 function startReverse(row: ClaimRow) {
   if (anyLocked.value) return
   issueOpen.value = false
@@ -94,6 +104,7 @@ onActivated(() => {
 
 const actions = computed<ActionItem[]>(() => [
   { key: 'new-charge', label: t('nonprofitMembership.newCharge'), icon: 'plus', tier: 'primary', variant: 'primary', show: props.canManage, disabled: anyLocked.value || loading.value || !history.value.length, disabledReason: t('nonprofitMembership.newChargeNeedsRevision'), run: () => { reverseClaim.value = null; issueOpen.value = true } },
+  { key: 'change-status', label: t('nonprofitMembership.changeStatus'), icon: 'edit', show: props.canManage && history.value.length > 0 && !revisionOpen.value, disabled: anyLocked.value || loading.value, run: () => { revisionOpen.value = true } },
   { key: 'reload', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || anyLocked.value, run: () => { void load() } },
   { key: 'close-detail', label: t('nonprofitMembership.close'), icon: 'x', disabled: anyLocked.value, run: () => emit('close') },
 ])
@@ -110,7 +121,7 @@ const actions = computed<ActionItem[]>(() => [
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="detail-notice">{{ notice }}</p>
 
     <div v-if="identity" class="space-y-2" data-section="member-status">
-      <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: label, id: identity.client_id }) }}</p>
+      <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: label }) }}</p>
       <p v-if="current" data-field="status-today">
         {{ t('nonprofitMembership.statusToday', { date: formatDate(today) }) }}:
         <span :class="memberStatusBadge(current.status)">{{ t(`nonprofitMembership.status_${current.status}`) }}</span>
@@ -139,9 +150,9 @@ const actions = computed<ActionItem[]>(() => [
     </div>
 
     <MembershipRevisionForm
-      v-if="canManage && identity"
+      v-if="canManage && identity && (!history.length || revisionOpen || locks.revision)"
       :supplier="supplier" :can-manage="canManage" :member="identity" :history="history"
-      @done="load().then(() => emit('changed'))" @lock="locks.revision = $event"
+      @done="revisionFinished()" @close="revisionOpen = false" @lock="locks.revision = $event"
     />
 
     <MembershipIssueFlow

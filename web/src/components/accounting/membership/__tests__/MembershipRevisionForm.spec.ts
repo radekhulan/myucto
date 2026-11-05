@@ -175,4 +175,16 @@ describe('Membership revision form', () => {
     expect(preview).not.toContain('2026-02-03')
     w.unmount()
   })
+
+  it('offers closing the form only for a member who already has a revision', async () => {
+    const first = mounted({ history: [] })
+    await flushPromises()
+    expect(first.find('[data-action="rev-close"]').exists()).toBe(false)
+    first.unmount()
+    const next = mounted({ history: [revision(1, '2026-01-01')] })
+    await flushPromises()
+    await next.get('[data-action="rev-close"]').trigger('click')
+    expect(next.emitted('close')).toHaveLength(1)
+    next.unmount()
+  })
 })

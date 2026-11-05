@@ -21,7 +21,7 @@ const ActionBar = defineComponent({
   setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
     .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
 })
-const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'lock'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
+const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
 const ReverseFlow = defineComponent({ name: 'MembershipReverseFlow', props: ['supplier', 'canManage', 'member', 'claim', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'reverse' }) })
 
@@ -256,5 +256,58 @@ describe('Membership member detail', () => {
     } finally {
       i18n.global.locale.value = previous
     }
+  })
+
+  it('keeps the revision form behind the change status action once the member has a history', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-stub="revision"]').exists()).toBe(false)
+    await w.get('[data-action="change-status"]').trigger('click')
+    expect(w.find('[data-stub="revision"]').exists()).toBe(true)
+    expect(w.find('[data-action="change-status"]').exists()).toBe(false)
+    w.findComponent(RevisionForm).vm.$emit('close')
+    await flushPromises()
+    expect(w.find('[data-stub="revision"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('opens the revision form right away for a member without any revision', async () => {
+    api.member.mockResolvedValue(detail([], []))
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-stub="revision"]').exists()).toBe(true)
+    expect(w.find('[data-action="change-status"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('names the contact without its internal id', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.get('[data-section="member-status"]').text()).toContain(cs.nonprofitMembership.clientRef.replace('{client}', 'Synthetic member'))
+    expect(w.get('[data-section="member-status"]').text()).not.toContain('č. 3')
+    w.unmount()
+  })
+
+  it('tells the user the revision was recorded although the form folds away', async () => {
+    const w = mounted()
+    await flushPromises()
+    await w.get('[data-action="change-status"]').trigger('click')
+    w.findComponent(RevisionForm).vm.$emit('done')
+    await flushPromises()
+    expect(w.find('[data-stub="revision"]').exists()).toBe(false)
+    expect(w.get('[data-section="detail-notice"]').text()).toBe(cs.nonprofitMembership.revisionDone)
+    expect(w.emitted('changed')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('keeps the revision form open while its write is pending or uncertain', async () => {
+    const w = mounted()
+    await flushPromises()
+    await w.get('[data-action="change-status"]').trigger('click')
+    w.findComponent(RevisionForm).vm.$emit('lock', true)
+    w.findComponent(RevisionForm).vm.$emit('close')
+    await flushPromises()
+    expect(w.find('[data-stub="revision"]').exists()).toBe(true)
+    w.unmount()
   })
 })

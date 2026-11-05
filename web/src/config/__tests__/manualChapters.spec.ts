@@ -34,6 +34,8 @@ describe('contextual manual for application menu', () => {
     ['/other-items/new', '52_Ucetni_denik'],
     ['/accounting/internal-documents', '52_Ucetni_denik'],
     ['/accounting/internal-documents/12/edit', '52_Ucetni_denik'],
+    ['/accounting/nonprofit-membership', '120_Clenove_a_clenske_prispevky'],
+    ['/accounting/nonprofit-membership/', '120_Clenove_a_clenske_prispevky'],
     ['/reports/cnb-rate-audit', '46_Ucetni_kontroly_a_inventarizace'],
     ['/reports/invoice-series-completeness', '46_Ucetni_kontroly_a_inventarizace'],
     ['/reports/vat-coefficient', '41_Vykazy_DPH'],

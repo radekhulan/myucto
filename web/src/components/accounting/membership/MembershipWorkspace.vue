@@ -15,7 +15,7 @@ import MembershipMemberDetail from './MembershipMemberDetail.vue'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean }>()
-const { t } = useI18n()
+const { t, tm, rt } = useI18n()
 
 
 const members = ref<MemberRow[]>([])
@@ -158,7 +158,6 @@ const createActions = computed<ActionItem[]>(() => [
       <ActionBar :actions="createActions" />
     </section>
 
-    <MembershipReconciliation v-if="periods.length" :supplier="supplier" :periods="periods" :data-version="dataVersion" />
 
     <div :class="selected ? 'grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : ''" data-section="members-layout">
     <div v-if="selected" ref="detailPane" class="min-w-0 scroll-mt-4 self-start lg:sticky lg:top-4 lg:order-last" data-section="member-detail-pane">
@@ -171,7 +170,12 @@ const createActions = computed<ActionItem[]>(() => [
     <section class="min-w-0 space-y-3" data-section="members">
       <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
       <p v-if="loading && !members.length" role="status" class="text-sm text-neutral-500" data-section="members-loading">{{ t('common.loading') }}</p>
-      <p v-else-if="!members.length && !loading" class="text-sm text-neutral-500" data-section="members-empty">{{ t('nonprofitMembership.membersEmpty') }}</p>
+      <div v-else-if="!members.length && !loading" class="space-y-2 text-sm text-neutral-500" data-section="members-empty">
+        <p>{{ t('nonprofitMembership.membersEmpty') }}</p>
+        <ol class="list-decimal space-y-1 pl-5" data-section="members-steps">
+          <li v-for="(step, index) in tm('nonprofitMembership.firstSteps')" :key="index">{{ rt(step) }}</li>
+        </ol>
+      </div>
       <div v-for="row in members" :key="row.id" :class="['flex flex-wrap items-center justify-between gap-3 rounded border bg-surface p-3', selected?.id === row.id ? 'border-primary-400 ring-1 ring-primary-300' : '']" data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined">
         <div class="min-w-0 space-y-1 text-sm">
           <p class="break-words font-medium">{{ row.member_number }} · {{ labelOf(row) }}</p>
@@ -188,5 +192,7 @@ const createActions = computed<ActionItem[]>(() => [
       </button>
     </section>
     </div>
+
+    <MembershipReconciliation v-if="periods.length" :supplier="supplier" :periods="periods" :data-version="dataVersion" />
   </div>
 </template>
