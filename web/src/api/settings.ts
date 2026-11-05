@@ -511,6 +511,12 @@ export interface OperationalBrandingSettings {
   email_accent_color: string
   pdf_logo_show_name: boolean
   invoice_pdf_monochrome?: boolean
+  invoice_pdf_show_issued_by?: boolean
+  invoice_pdf_show_line_discount?: boolean
+  invoice_pdf_compact_items?: boolean
+  invoice_pdf_bank_in_footer?: boolean
+  invoice_pdf_show_base_qty?: boolean
+  work_report_display_options?: Partial<import('./invoices').WorkReportDisplayOptions> | null
   branding_profiles_enabled: boolean
   logo_path: string | null
   has_email_logo?: boolean
@@ -1150,8 +1156,8 @@ export const settingsApi = {
       },
     }).then(r => r.data),
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
-  updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
-    api.put<OperationalBrandingSettings>('/settings/client/branding', payload).then(r => r.data),
+  updateClientBranding: (payload: Partial<OperationalBrandingSettings>, supplierId?: number) =>
+    api.put<OperationalBrandingSettings>('/settings/client/branding', payload, supplierId ? { headers: { 'X-Supplier-Id': String(supplierId) } } : undefined).then(r => r.data),
   getClientPaymentQrSettings: () =>
     api.get<PaymentQrSettings>('/settings/client/payment-qr').then(r => r.data),
   updateClientPaymentQrSettings: (payload: PaymentQrSettings) =>

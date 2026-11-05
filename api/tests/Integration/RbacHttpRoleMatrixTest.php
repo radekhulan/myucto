@@ -244,6 +244,156 @@ final class RbacHttpRoleMatrixTest extends TestCase
         self::assertSame($stored, $after);
     }
 
+    #[DataProvider('roleMatrix')]
+    public function testPdfAppearanceWriteUsesEffectiveBrandingPermission(
+        string $variant,
+        string $roleType,
+        int $level,
+        bool $hasSupplier,
+    ): void {
+        $this->supplierId = $this->createPdfAppearanceSupplier();
+        $session = $this->createSession($this->createUser($variant, $roleType, $level, $hasSupplier));
+        $before = $this->pdfAppearanceRow($this->supplierId);
+        $payload = [
+            'invoice_pdf_compact_items' => true,
+            'invoice_pdf_show_issued_by' => true,
+            'invoice_pdf_show_line_discount' => true,
+            'invoice_pdf_show_base_qty' => false,
+            'invoice_pdf_bank_in_footer' => true,
+            'work_report_display_options' => ['compact' => true, 'rate' => false],
+        ];
+        $response = $this->request('PUT', '/api/settings/client/branding', $session, $payload);
+        $allowed = ($hasSupplier && $level === 2) || $variant === 'superadmin';
+        self::assertSame($allowed ? 200 : 403, $response->getStatusCode(), (string) $response->getBody());
+        if (!$allowed) {
+            self::assertSame($before, $this->pdfAppearanceRow($this->supplierId));
+            return;
+        }
+
+        $returned = $this->json($response);
+        $stored = $this->pdfAppearanceRow($this->supplierId);
+        foreach ($payload as $field => $value) {
+            if ($field === 'work_report_display_options') continue;
+            self::assertSame($value, $returned[$field] ?? null, $field);
+            self::assertSame((int) $value, (int) $stored[$field], $field);
+        }
+        self::assertTrue($returned['work_report_display_options']['compact']);
+        self::assertFalse($returned['work_report_display_options']['rate']);
+        $options = json_decode($stored['work_report_display_options'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertTrue($options['compact']);
+        self::assertFalse($options['rate']);
+    }
+
+    public function testPdfAppearanceRejectsInvalidAndForbiddenFieldsAtomically(): void
+    {
+        $this->supplierId = $this->createPdfAppearanceSupplier();
+        $session = $this->createSession($this->createUser('pdf_validation', 'client', 2, true));
+        $before = $this->pdfAppearanceRow($this->supplierId);
+        foreach ([
+            [['supplier_id' => $this->supplierId], 403, 'field_not_delegable'],
+            [['accounting_mode' => 'double_entry'], 403, 'field_not_delegable'],
+            [['default_rounding_mode' => 'whole_czk'], 403, 'field_not_delegable'],
+            [['invoice_pdf_show_issued_by' => 'yes'], 400, 'validation_failed'],
+            [['work_report_display_options' => ['rate' => 'false']], 400, 'validation_failed'],
+            [['work_report_display_options' => ['unknown' => true]], 400, 'validation_failed'],
+        ] as [$invalid, $status, $code]) {
+            $response = $this->request('PUT', '/api/settings/client/branding', $session,
+                ['invoice_pdf_compact_items' => true] + $invalid);
+            self::assertSame($status, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame($code, $this->json($response)['error']['code'] ?? null);
+            self::assertSame($before, $this->pdfAppearanceRow($this->supplierId));
+        }
+    }
+
+    public function testPdfAppearanceIsIsolatedAndHonorsPerSupplierRoleAndRevocation(): void
+    {
+        $this->supplierId = $this->createPdfAppearanceSupplier();
+        $otherSupplier = $this->createPdfAppearanceSupplier();
+        $userId = $this->createUser('pdf_writer', 'client', 2, true);
+        $writerRole = (int) end($this->roleIds);
+        $session = $this->createSession($userId);
+        $beforeOther = $this->pdfAppearanceRow($otherSupplier);
+        $payload = ['invoice_pdf_compact_items' => true];
+        $path = '/api/settings/client/branding';
+
+        self::assertSame(403, $this->request('PUT', $path, $session, $payload, supplierId: $otherSupplier)->getStatusCode());
+        $saved = $this->request('PUT', $path, $session, $payload);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertSame(1, (int) $this->pdfAppearanceRow($this->supplierId)['invoice_pdf_compact_items']);
+        self::assertSame($beforeOther, $this->pdfAppearanceRow($otherSupplier));
+
+        $this->createUser('pdf_reader_role', 'client', 1, true);
+        $readerRole = (int) end($this->roleIds);
+        $this->db->pdo()->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')
+            ->execute([$userId, $otherSupplier, $readerRole]);
+        $this->app = null;
+        self::assertSame(403, $this->request('PUT', $path, $session, $payload, supplierId: $otherSupplier)->getStatusCode());
+        self::assertSame(200, $this->request('GET', $path, $session)->getStatusCode());
+        self::assertSame($beforeOther, $this->pdfAppearanceRow($otherSupplier));
+
+        $this->db->pdo()->prepare('DELETE FROM role_permissions WHERE role_id = ? AND permission_key = ?')
+            ->execute([$writerRole, 'settings.branding']);
+        $this->app = null;
+        self::assertSame(403, $this->request('PUT', $path, $session, ['invoice_pdf_compact_items' => false])->getStatusCode());
+        self::assertSame(403, $this->request('GET', $path, $session)->getStatusCode());
+        self::assertSame(1, (int) $this->pdfAppearanceRow($this->supplierId)['invoice_pdf_compact_items']);
+        self::assertSame($beforeOther, $this->pdfAppearanceRow($otherSupplier));
+    }
+
+    public function testCompanyAndStockWritesCannotBypassRevokedPdfAppearance(): void
+    {
+        $this->supplierId = $this->createPdfAppearanceSupplier();
+        $userId = $this->createUser('pdf_staff_revoked', 'staff', 2, true);
+        $roleId = (int) end($this->roleIds);
+        $this->db->pdo()->prepare('DELETE FROM role_permissions WHERE role_id = ? AND permission_key = ?')
+            ->execute([$roleId, 'settings.branding']);
+        $this->db->pdo()->prepare('INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, ?, 2)')
+            ->execute([$roleId, 'stock']);
+        $session = $this->createSession($userId);
+        $before = $this->pdfAppearanceRow($this->supplierId);
+        foreach ($before as $field => $value) {
+            $changed = $field === 'work_report_display_options' ? ['compact' => true] : !(bool) $value;
+            $response = $this->request('PUT', '/api/settings/supplier', $session, [$field => $changed]);
+            self::assertSame(403, $response->getStatusCode(), $field . ': ' . (string) $response->getBody());
+            self::assertSame($before, $this->pdfAppearanceRow($this->supplierId));
+        }
+
+        // Starý formulář smí vrátit nezměněné hodnoty; JSON se porovnává podle významu.
+        $unchanged = $this->request('PUT', '/api/settings/supplier', $session, [
+            'invoice_pdf_compact_items' => false,
+            'work_report_display_options' => ['compact' => false, 'date' => true, 'hours' => true, 'rate' => true, 'amount' => true],
+        ]);
+        self::assertSame(200, $unchanged->getStatusCode(), (string) $unchanged->getBody());
+        self::assertSame($before, $this->pdfAppearanceRow($this->supplierId));
+    }
+
+    private function createPdfAppearanceSupplier(): int
+    {
+        $insert = $this->db->pdo()->prepare("INSERT INTO supplier
+            (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id,
+             invoice_pdf_compact_items, invoice_pdf_show_issued_by, invoice_pdf_show_line_discount,
+             invoice_pdf_show_base_qty, invoice_pdf_bank_in_footer, work_report_display_options)
+            SELECT '__TEST PDF appearance', 'Testovací 1', 'Praha', '11000', country_id,
+                   'pdf-appearance@example.test', default_currency_id, default_vat_rate_id,
+                   0, 0, 0, 1, 0, NULL FROM supplier WHERE id = ?");
+        $insert->execute([$this->supplierId]);
+        self::assertSame(1, $insert->rowCount(), 'Test vyžaduje zdrojovou syntetickou firmu.');
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->supplierIds[] = $id;
+        return $id;
+    }
+
+    private function pdfAppearanceRow(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT invoice_pdf_compact_items, invoice_pdf_show_issued_by,
+            invoice_pdf_show_line_discount, invoice_pdf_show_base_qty, invoice_pdf_bank_in_footer,
+            work_report_display_options FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        return $row;
+    }
+
     public function testClientOperationalGrantsUseOnlyTheOperationalSettingsAllowlist(): void
     {
         $readerId = $this->createUser('client_operational_settings_read', 'client', 1, true);

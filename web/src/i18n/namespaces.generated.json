@@ -257,7 +257,9 @@
     "portal-company-settings": [
       "company_email_templates",
       "settings",
-      "users"
+      "stock",
+      "users",
+      "workReportDisplay"
     ],
     "clients": [
       "purchase_invoice"
@@ -1133,7 +1135,9 @@
       "activation"
     ],
     "admin-branding": [
-      "settings"
+      "settings",
+      "stock",
+      "workReportDisplay"
     ],
     "admin-suppliers": [
       "aiGateway",

@@ -704,6 +704,8 @@ Provozní nastavení firmy má pět samostatných oprávnění: **Odesílací pr
 samostatně zakázat nebo povolit pro zápis. V `Firma → Nastavení firmy` se zobrazí jen povolené záložky; totéž platí
 pro přímý odkaz a pro vlastní klientskou doménu. Samotné **Nastavení firmy** přístup do těchto editorů nezapíná.
 Právo **Měnit nastavení firmy** zůstává interní správě právních, daňových a účetních údajů.
+Oprávnění **Branding firmy** umožňuje upravit také vzhled PDF: kompaktní řádky položek, zobrazení autora dokladu, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce. Interní uživatelé nastavují vzhled v `Firma → Branding` nebo v `Firma → Nastavení`; klienti s tímto oprávněním v `Firma → Nastavení firmy` na záložce **Branding**. Kontaktní údaje brandingových profilů se spravují na stejné záložce. Volby vzhledu nemění účetní ani daňové údaje. Změna vzhledu se projeví u konceptů faktur. Již uložená PDF vystavených dokladů zůstávají zachována; výkazy u vystavených faktur zachovávají původní podobu i po přegenerování PDF.
+
 Interní role mají branding v položce `Firma → Branding`, platební QR a e-mailové šablony v `Firma → Nastavení`
 a superadmin odesílací profily v `Systém → E-maily a certifikáty`. Položka `Firma → Nastavení firmy` se jim proto
 v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR a e-mailovým šablonám

@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   replace: vi.fn(),
   getSupplier: vi.fn(),
   updateSupplier: vi.fn(),
+  brandingWrite: true,
 }))
 
 vi.mock('vue-router', () => ({
@@ -61,7 +62,7 @@ vi.mock('@/stores/auth', () => ({
     hasCommercialFeatures: true,
     license: null,
     canRead: () => true,
-    canWrite: () => true,
+    canWrite: (permission: string) => permission !== 'settings.branding' || m.brandingWrite,
   }),
 }))
 vi.mock('@/components/settings/AutomationPolicyBox.vue', () => ({ default: { template: '<div />' } }))
@@ -92,6 +93,7 @@ async function mountSettings(tab?: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  m.brandingWrite = true
   m.getSupplier.mockResolvedValue({ ...SUPPLIER })
   m.updateSupplier.mockImplementation(async payload => ({ ...SUPPLIER, ...payload }))
 })
@@ -387,5 +389,31 @@ describe('Nastavení — osobní údaje podnikatele', () => {
     } finally {
       wrapper.unmount()
     }
+  })
+})
+
+
+describe('Nastavení — sdílená podoba PDF', () => {
+  it('uloží kompaktní položky společně s formulářem', async () => {
+    const wrapper = await mountSettings('documents')
+    await wrapper.get('[data-test="invoice-pdf-compact-items"]').setValue(true)
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({ invoice_pdf_compact_items: true }))
+    wrapper.unmount()
+  })
+
+  it('po odebrání práva neodešle rozpracované volby PDF', async () => {
+    const wrapper = await mountSettings('documents')
+    await wrapper.get('[data-test="invoice-pdf-compact-items"]').setValue(true)
+    m.brandingWrite = false
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    const payload = m.updateSupplier.mock.calls[0]![0]
+    for (const key of ['invoice_pdf_compact_items', 'invoice_pdf_monochrome', 'invoice_pdf_show_issued_by',
+      'invoice_pdf_show_line_discount', 'invoice_pdf_show_base_qty', 'invoice_pdf_bank_in_footer', 'work_report_display_options']) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
   })
 })
