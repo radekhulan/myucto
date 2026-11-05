@@ -570,6 +570,14 @@ async function load() {
       void router.replace({ query })
       if (canApprove.value && selectableItems.value.length > 0) approveAllOpen()
     }
+    if (payrollQueryValue(route.query, 'confirm_jmhz') === '1' && focusEmploymentId.value !== null) {
+      const focusedMonth = overview.value.items.find(item => item.employment.id === focusEmploymentId.value)
+      if (canApprove.value && focusedMonth?.month.status === 'open') {
+        const { confirm_jmhz: _confirmation, ...query } = route.query
+        void router.replace({ query })
+        openApproval(focusedMonth)
+      }
+    }
     // Předvybraný vztah má přednost před prvním v seznamu — jinak by odkaz
     // z karty zúžil tabulku, ale editor otevřel někoho jiného.
     const focused = focusEmploymentId.value !== null

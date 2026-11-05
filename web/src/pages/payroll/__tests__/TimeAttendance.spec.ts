@@ -194,6 +194,19 @@ describe('TimeAttendance', () => {
     await flushPromises()
   }
 
+  it.each(['open', 'approved'] as const)('proklik na JMHZ otevře existující potvrzení jen u otevřeného měsíce (%s)', async status => {
+    m.routeQuery = { period: '2026-11', employment: '12', confirm_jmhz: '1' }
+    const item = row(12, 'Syntetická Osoba')
+    item.month.status = status
+    m.timeMonth.mockResolvedValue({ items: [item], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="jmhz-confirm"]').exists()).toBe(status === 'open')
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
   it('nabídne počet ztěžujících vlivů jen u ztíženého prostředí a pošle vyplněný počet nebo null', async () => {
     m.timeMonth.mockResolvedValue({
       items: [row(12, 'Syntetická osoba A')],

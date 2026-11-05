@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -25,6 +25,8 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
 import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
+import PayrollWorkedHoursSummary from '@/components/payroll/PayrollWorkedHoursSummary.vue'
+import PayrollWorkedHoursPanel from '@/components/payroll/PayrollWorkedHoursPanel.vue'
 import {
   payrollPeriodRange,
   payrollPeriodScopeFromQuery,
@@ -333,6 +335,17 @@ const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
  * `draft_inputs_present` a schvalovat na jiné obrazovce se nemusí nic.
  */
 const canApprove = computed(() => auth.canWrite('payroll.approve'))
+const canWriteTime = computed(() => auth.canWrite('payroll.time.write'))
+const canReopenTime = computed(() => auth.canWrite('payroll.reopen'))
+const workedEmploymentId = ref<number | null>(null)
+const workedPanel = ref<HTMLElement | null>(null)
+const activeWorkedRow = computed(() => rows.value.find(row => row.employment_id === workedEmploymentId.value) ?? null)
+async function openWorkedHours(row: PayrollQuickInputRow): Promise<void> {
+  workedEmploymentId.value = row.employment_id
+  await nextTick()
+  workedPanel.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+}
+watch(period, () => { workedEmploymentId.value = null })
 /*
  * Konflikt s jiným vstupem NEBLOKUJE uložení celé stránky.
  *
@@ -2026,6 +2039,21 @@ onMounted(() => {
           jménem (`sticky left-0`). Svislý strop tu být nesmí: stránka má jediný
           posuvník, ne tabulku skrolující uvnitř sebe pod vlastní patičkou.
         -->
+        <div v-if="activeWorkedRow?.worked_time" ref="workedPanel">
+          <PayrollWorkedHoursPanel
+            :key="`${period}:${activeWorkedRow.employment_id}`"
+            :employment-id="activeWorkedRow.employment_id"
+            :full-name="activeWorkedRow.full_name"
+            :period="period"
+            :value="activeWorkedRow.worked_time"
+            :closed="rowClosed(activeWorkedRow) || historicalMonth"
+            :can-write="canWriteTime"
+            :can-approve="canApprove"
+            :can-reopen="canReopenTime"
+            @updated="load"
+            @close="workedEmploymentId = null"
+          />
+        </div>
         <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
           <table v-column-labels="tbl" class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead class="sticky top-0 z-20 bg-surface">
@@ -2122,6 +2150,7 @@ onMounted(() => {
                     </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
+                  <PayrollWorkedHoursSummary v-if="row.hourly_remuneration_in_period && row.worked_time" :value="row.worked_time" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
@@ -2618,6 +2647,7 @@ onMounted(() => {
                 </p>
               </div>
             </div>
+            <PayrollWorkedHoursSummary v-if="row.hourly_remuneration_in_period && row.worked_time" :value="row.worked_time" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
             </p>

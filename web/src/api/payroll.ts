@@ -1378,7 +1378,10 @@ export type PayrollTimeCategory =
   | 'holiday'
   | 'difficult_environment'
 
+export type PayrollTimeWorkSource = 'entries' | 'import_summary' | 'manual_summary'
+
 export interface PayrollTimeMonthState {
+  work_source?: PayrollTimeWorkSource
   id: number | null
   employment_id: number
   period_start: string
@@ -1742,6 +1745,9 @@ export interface PayrollTimeOverview extends PayrollHistoricalPeriodInfo {
  * serveru jedna sada metod, takže se dvě obrazovky téže evidence nerozejdou.
  */
 export interface PayrollTimeHistoryItem {
+  manual_summary_history?: PayrollManualTimeSummaryRevision[]
+  manual_summary_history_truncated?: boolean
+  manual_summary_history_offset?: number
   period: string
   month: PayrollTimeMonthState
   summary: PayrollTimeOverviewItem['summary']
@@ -2529,7 +2535,49 @@ export interface PayrollQuickClosedRun {
   period: string
 }
 
+export interface PayrollManualTimeSegment {
+  date_from: string
+  date_to: string
+  worked_duration_units: number
+  overtime_duration_units: number | null
+  worked_days: number | null
+}
+
+export interface PayrollManualTimeSummary {
+  id: number
+  time_month_revision_no: number
+  content_sha256: string
+  reason: string
+  segments: PayrollManualTimeSegment[]
+}
+
+export interface PayrollWorkedTime {
+  available_sources?: Array<Exclude<PayrollTimeWorkSource, 'manual_summary'>>
+  month: (Pick<PayrollTimeMonthState, 'id' | 'status' | 'revision_no' | 'row_version'> & { work_source: PayrollTimeWorkSource }) | null
+  manual_summary: PayrollManualTimeSummary | null
+  suggested_segments: Array<{ date_from: string; date_to: string }>
+  worked_duration_units: number | null
+  overtime_duration_units: number | null
+  worked_days: number | null
+  jmhz_confirmed: boolean
+}
+
+export interface PayrollManualTimeSummaryRevision extends PayrollManualTimeSummary {
+  created_by: number | null
+  created_by_name: string | null
+  created_at: string
+}
+
+export interface PayrollManualTimeSummaryPayload {
+  employment_id: number
+  row_version: number
+  reason: string
+  replace_source: boolean
+  segments: PayrollManualTimeSegment[]
+}
+
 export interface PayrollQuickInputRow {
+  worked_time?: PayrollWorkedTime
   hourly_remuneration_in_period?: boolean
   employee_id: number
   employment_id: number
@@ -7258,6 +7306,7 @@ export interface PayrollRun {
  * že schválení server odmítne, dokud se podklady neobnoví a běh nepřepočítá.
  */
 export interface PayrollRunSourceDrift {
+  worked_time_changed?: number
   remuneration_changed: number
   total: number
   inputs_added: number
@@ -10283,7 +10332,7 @@ export const payrollApi = {
    */
   timeHistory: (
     employmentId: number,
-    params?: { from?: string, to?: string, limit?: number, offset?: number },
+    params?: { from?: string, to?: string, limit?: number, offset?: number, manual_summary_offset?: number },
   ) =>
     api.get<PayrollTimeHistory>('/payroll/time/history', {
       params: {
@@ -10292,6 +10341,7 @@ export const payrollApi = {
         ...(params?.to ? { to: params.to } : {}),
         ...(params?.limit ? { limit: params.limit } : {}),
         ...(params?.offset ? { offset: params.offset } : {}),
+        ...(params?.manual_summary_offset !== undefined ? { manual_summary_offset: params.manual_summary_offset } : {}),
       },
     }).then(response => response.data),
   saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
@@ -10388,6 +10438,13 @@ export const payrollApi = {
   importTime: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
     api.post<{ import: Record<string, unknown> }>('/payroll/time/imports', payload)
       .then(response => response.data.import),
+  restoreTimeWorkSource: (period: string, payload: {
+    employment_id: number; row_version: number; reason: string; replace_source: true; source: 'entries' | 'import_summary'
+  }) => api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/work-source`, payload).then(response => response.data),
+  saveManualTimeSummary: (period: string, payload: PayrollManualTimeSummaryPayload) =>
+    api.post<{ month: PayrollTimeMonthState; manual_summary: PayrollManualTimeSummary }>(
+      `/payroll/time/months/${period}/manual-summary`, payload,
+    ).then(response => response.data),
   approveTimeMonth: (period: string, payload: {
     employment_id: number
     row_version: number

@@ -760,6 +760,7 @@ function commandHint(run: PayrollRun): string {
 }
 
 const SOURCE_DRIFT_KEYS = [
+  'worked_time_changed',
   'remuneration_changed',
   'inputs_added',
   'inputs_changed',

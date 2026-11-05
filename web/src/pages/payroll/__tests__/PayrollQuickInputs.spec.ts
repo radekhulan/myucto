@@ -399,6 +399,26 @@ describe('PayrollQuickInputs', () => {
       .toContain('payroll.quick_inputs.continue_to_runs')
   })
 
+  it('hodinové podklady načte dávkově a panel nepovolí zápisem peněžních vstupů', async () => {
+    m.canWrite.mockImplementation(permission => permission === 'payroll.inputs.write')
+    m.load.mockImplementation(async period => ({ period, items: [fixture({ hourly_remuneration_in_period: true, worked_time: {
+      month: { id: 1, row_version: 2, revision_no: 1, status: 'approved', work_source: 'manual_summary' },
+      manual_summary: { id: 2, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Syntetický výkaz', segments: [] },
+      suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
+      worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+    } })], total: 1 }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-worked-hours-12"]').text()).toContain('7:30')
+    expect(wrapper.get('[data-testid="quick-worked-hours-mobile-12"]').text()).toContain('jmhz_pending')
+    await wrapper.get('[data-testid="quick-worked-hours-12"] [data-test="worked-hours-open"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="worked-hours-panel"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-reopen"]').exists()).toBe(false)
+    expect(m.load).toHaveBeenCalledTimes(1)
+  })
+
   it('v hodinovém měsíci pouze ukáže existující základ a zablokuje jeho změnu', async () => {
     m.load.mockImplementation(async period => ({ period, items: [fixture({
       hourly_remuneration_in_period: true,

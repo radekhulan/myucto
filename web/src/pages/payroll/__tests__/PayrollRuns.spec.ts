@@ -1660,7 +1660,7 @@ describe('PayrollRuns', () => {
       revision_no: 2,
       revision_kind: 'correction',
       available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
-      source_drift: { ...drift, total: 3, remuneration_changed: 1 },
+      source_drift: { ...drift, total: 4, remuneration_changed: 1, worked_time_changed: 1 },
     })])
 
     const wrapper = mount(PayrollRuns)
@@ -1671,6 +1671,7 @@ describe('PayrollRuns', () => {
     expect(box.find('[data-test="payroll-run-source-drift-inputs_added"]').exists()).toBe(true)
     expect(box.find('[data-test="payroll-run-source-drift-statutory_evidence_changed"]').exists()).toBe(true)
     expect(box.find('[data-test="payroll-run-source-drift-remuneration_changed"]').exists()).toBe(true)
+    expect(box.find('[data-test="payroll-run-source-drift-worked_time_changed"]').exists()).toBe(true)
     // Nulové druhy změn se nevypisují.
     expect(box.find('[data-test="payroll-run-source-drift-inputs_changed"]').exists()).toBe(false)
     expect(box.text()).toContain('payroll.runs.source_drift.action')
