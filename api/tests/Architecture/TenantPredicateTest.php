@@ -431,6 +431,7 @@ final class TenantPredicateTest extends TestCase
         // zápisu nad pěti firmami je jedno licenční místo. Zúžit počítání na
         // jednu firmu by limit rozbilo — každá firma by měla vlastní počet.
         'SeatPolicy.php::seatConditionSql' => 'licenční místa se počítají za celou instalaci',
+        'SeatPolicy.php::countActiveWriteTokens' => 'tokeny se zápisem se do licenčních míst počítají za celou instalaci',
 
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',

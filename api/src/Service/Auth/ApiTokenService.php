@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Auth;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
 use PDO;
 
 /**
@@ -31,6 +32,11 @@ final class ApiTokenService
     public function __construct(
         private readonly Connection $db,
         private readonly RedisFactory $redis,
+        /**
+         * Licenční brána pro tokeny se zápisem. Kontejner ji dosazuje vždy
+         * (Bootstrap); `null` mají jen přímo sestavené testy.
+         */
+        private readonly ?LicenseCapacityGate $capacity = null,
     ) {}
 
     /**
@@ -79,6 +85,7 @@ final class ApiTokenService
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
         bool $allowPayrollSubmissionDocs = false,
+        bool $seatGate = true,
     ): array {
         if (!$pdo->inTransaction() || $userId < 1) {
             throw new \LogicException('Vytvoření API tokenu vyžaduje aktivní transakci a uživatele.');
@@ -115,7 +122,14 @@ final class ApiTokenService
         if ($expiresAt !== null) {
             $params[] = $expiresAt->getTimestamp();
         }
-        $stmt->execute($params);
+        // ⚠️ Token se zápisem může podle parametru licence zabírat místo.
+        // `$seatGate = false` smí předat jen cesta, která počet přístupů
+        // nemění (obnova MCP oprávnění vytváří token jen dočasně).
+        if ($seatGate && $scope === 'read_write' && $this->capacity !== null) {
+            $this->capacity->mutateWriteTokens(static fn () => $stmt->execute($params));
+        } else {
+            $stmt->execute($params);
+        }
 
         return [
             'plaintext' => $plaintext,

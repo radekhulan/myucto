@@ -152,10 +152,12 @@ final class McpOAuth
             }
 
             $nextRefresh = self::randomToken('mi_mcp_rt_');
+            // Obnova počet oprávnění nemění: dočasný token se hned smaže.
             $access = $this->tokens->generateInTransaction(
                 $pdo, (int) $row['user_id'], $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null,
                 'MCP OAuth ' . substr($clientId, 0, 20), (string) $row['scope'],
                 new \DateTimeImmutable('+1 hour'),
+                seatGate: false,
             );
             $pdo->prepare('DELETE FROM api_tokens WHERE id = ?')->execute([$access['id']]);
             $rotate = $pdo->prepare(

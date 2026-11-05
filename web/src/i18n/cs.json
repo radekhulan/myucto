@@ -22610,6 +22610,7 @@
     "too_many_attempts": "Příliš mnoho pokusů. Zkuste to později.",
     "login_failed": "Přihlášení selhalo.",
     "redirect_loop_detected": "Aplikace se opakovaně přepínala mezi úvodní stránkou a přihlášením, proto jsme přesměrování zastavili. Server vrací nekonzistentní odpovědi - nejčastěji kvůli service workeru z jiné aplikace na stejné adrese. V prohlížeči otevřete Nástroje pro vývojáře → Application → Storage → Clear site data, pak se přihlaste znovu.",
+    "session_superseded": "Byli jste odhlášeni, protože se k vašemu účtu přihlásil někdo jiný. Účet patří jedné osobě a počet současně přihlášených zařízení je omezený. Pokud jste to nebyli vy, změňte si po přihlášení heslo.",
     "passwordless_passkey_login": "Přihlásit přístupovým klíčem",
     "passwordless_passkey_hint": "Bez zadání e-mailu a hesla. Účet vyberete v systémovém dialogu.",
     "passwordless_passkey_unsupported": "Tento prohlížeč přihlášení přístupovým klíčem nepodporuje. Použijte e-mail a heslo.",

@@ -1145,7 +1145,8 @@
         "2241_other_item_installment_components.sql",
         "2242_sessions_admin_last_seen.sql",
         "2243_work_report_billing.sql",
-        "2244_payroll_import_profile_pamica_sample.sql"
+        "2244_payroll_import_profile_pamica_sample.sql",
+        "2245_session_device_class.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -23768,6 +23769,7 @@
                 "auth_method": "varchar(32) NOT NULL DEFAULT 'legacy'",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "csrf_token": "char(64) NOT NULL",
+                "device_class": "enum('browser','mobile') NULL DEFAULT NULL",
                 "expires_at": "timestamp NOT NULL",
                 "generation": "int(10) unsigned NOT NULL DEFAULT 1",
                 "id": "char(64) NOT NULL",
@@ -23780,6 +23782,7 @@
                 "locked_at": "datetime(6) NULL DEFAULT NULL",
                 "mfa_verified_at": "datetime(6) NULL DEFAULT NULL",
                 "replaced_at": "datetime(6) NULL DEFAULT NULL",
+                "revoke_reason": "varchar(32) NULL DEFAULT NULL",
                 "revoked_at": "datetime(6) NULL DEFAULT NULL",
                 "session_family_id": "varbinary(32) NOT NULL",
                 "supplier_domain_id": "bigint(20) unsigned NULL DEFAULT NULL",

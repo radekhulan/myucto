@@ -13,6 +13,7 @@ import MaintenanceNoticeBanner from '@/components/layout/MaintenanceNoticeBanner
 import { useAuthStore } from '@/stores/auth'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { authApi, type DomainLoginConfirmation } from '@/api/auth'
+import { SESSION_SUPERSEDED_KEY } from '@/api/client'
 import {
   cancelActiveWebAuthnCeremony,
   getCredential,
@@ -120,7 +121,13 @@ onUnmounted(() => {
 const turnstile = useTurnstile()
 const turnstileEl = ref<HTMLElement | null>(null)
 
+const sessionSuperseded = ref(false)
+
 onMounted(async () => {
+  try {
+    sessionSuperseded.value = sessionStorage.getItem(SESSION_SUPERSEDED_KEY) === '1'
+    sessionStorage.removeItem(SESSION_SUPERSEDED_KEY)
+  } catch { /* soukromé okno */ }
   await auth.fetchSetupStatus()
   if (auth.needsSetup) {
     router.replace('/setup')
@@ -550,6 +557,10 @@ async function resendCode() {
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6">
         <h2 class="text-xl font-semibold mb-1">{{ t('auth.login_title') }}</h2>
         <p class="text-sm text-neutral-500 mb-6">{{ t('auth.login_subtitle') }}</p>
+
+        <div v-if="sessionSuperseded" role="status" class="mb-5 rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+          {{ t('auth.session_superseded') }}
+        </div>
 
         <div v-if="auth.isDemo" class="mb-5 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800">
           {{ t('auth.demo_login_hint') }}

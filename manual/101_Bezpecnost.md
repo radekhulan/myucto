@@ -184,6 +184,14 @@ přihlášení. Jednotlivé relace lze označit a hromadně ukončit; **Vybrat v
 API tokeny ani MCP připojení přehled nezobrazuje a tlačítko **Ukončit relaci** je neodvolává. Přihlášení technických
 účtů správce instance v přehledu nejsou a superadmin je odtud ukončit nemůže.
 
+**Počet současně přihlášených zařízení.** Licence může omezit, kolik relací smí mít jeden uživatel současně, zvlášť
+v prohlížeči počítače a zvlášť na mobilním zařízení (telefon, tablet, mobilní aplikace). Standardně je to jedna relace
+v prohlížeči a jedna na mobilu. Nové přihlášení nad tento počet ukončí nejstarší relaci stejného druhu a odhlášené
+zařízení při příštím požadavku zobrazí na přihlašovací stránce, že se k účtu přihlásil někdo jiný. Uložené přihlášení
+v témže prohlížeči je stále jedna relace, nová vzniká až přihlášením v jiném prohlížeči nebo na jiném zařízení.
+Přihlášení na vlastní doméně firmy se počítá zvlášť a hlavní aplikaci neodhlásí. Instalace bez platné licence relace
+neomezuje.
+
 ## 101.10 Když něco nejde
 
 <!-- cols: 30 34 36 -->

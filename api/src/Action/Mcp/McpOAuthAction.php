@@ -21,6 +21,7 @@ use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\HostedMcp;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Service\Mcp\McpOAuth;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -316,11 +317,16 @@ final class McpOAuthAction
             if (preg_match('/^[A-Za-z0-9._~-]{43,128}$/D', $verifier) !== 1) {
                 return $this->oauthError($response, 'invalid_grant', 400);
             }
-            $result = $this->oauth->exchange(
-                (string) ($params['code'] ?? ''), $clientId,
-                (string) ($params['redirect_uri'] ?? ''), $verifier,
-                (string) ($params['resource'] ?? $this->hosted->endpoint()),
-            );
+            try {
+                $result = $this->oauth->exchange(
+                    (string) ($params['code'] ?? ''), $clientId,
+                    (string) ($params['redirect_uri'] ?? ''), $verifier,
+                    (string) ($params['resource'] ?? $this->hosted->endpoint()),
+                );
+            } catch (LicenseSeatLimitExceeded) {
+                // Oprávnění se zápisem by podle parametru licence zabralo další místo.
+                return $this->oauthError($response, 'access_denied', 403);
+            }
         } elseif ($grant === 'refresh_token') {
             $result = $this->oauth->refresh((string) ($params['refresh_token'] ?? ''), $clientId, $params['resource'] ?? null);
         } else {

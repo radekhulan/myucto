@@ -22610,6 +22610,7 @@
     "too_many_attempts": "Too many attempts. Try again later.",
     "login_failed": "Login failed.",
     "redirect_loop_detected": "The app kept bouncing between the home page and sign-in, so we stopped the redirects. The server is returning inconsistent responses — most often because of a service worker left behind by another app on the same address. Open DevTools → Application → Storage → Clear site data, then sign in again.",
+    "session_superseded": "You were signed out because someone else signed in to your account. An account belongs to one person and the number of devices signed in at the same time is limited. If it was not you, change your password after signing in.",
     "passwordless_passkey_login": "Sign in with a passkey",
     "passwordless_passkey_hint": "No email or password needed. Choose your account in the system dialog.",
     "passwordless_passkey_unsupported": "This browser does not support passkey sign-in. Use your email and password.",

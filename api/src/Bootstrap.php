@@ -125,6 +125,20 @@ final class Bootstrap
             // bere SecurityClock z databáze a zbytek se normalizuje na UTC explicitně.
             ClockInterface::class => fn () => new \Symfony\Component\Clock\NativeClock(),
             SecurityClock::class => fn () => new DatabaseSecurityClock(),
+            // Limit souběžných relací a licenční brána tokenů jsou v konstruktoru
+            // volitelné (přímo sestavené testy je nepotřebují), a PHP-DI volitelný
+            // parametr nevyplní. Proto explicitní bindy, jinak by v provozu chyběly.
+            \MyInvoice\Service\Auth\SessionManager::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\SessionManager(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(SecurityClock::class),
+                $c->get(\MyInvoice\Service\License\SessionConcurrencyPolicy::class),
+            ),
+            \MyInvoice\Service\Auth\ApiTokenService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\ApiTokenService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\RedisFactory::class),
+                $c->get(\MyInvoice\Service\License\LicenseCapacityGate::class),
+            ),
 
             LoggerInterface::class => function (ContainerInterface $c) use ($config): LoggerInterface {
                 $logger = new Logger('myinvoice');

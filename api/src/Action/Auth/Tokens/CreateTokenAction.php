@@ -19,6 +19,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\StepUpOperationException;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -204,6 +205,8 @@ final class CreateTokenAction
                 );
             } catch (\DomainException) {
                 return Json::error($response, 'session_expired', 'Session vypršela.', 401);
+            } catch (LicenseSeatLimitExceeded) {
+                return self::seatLimitError($response);
             }
         } elseif ($totpAvailable) {
             if ($totpCode === '') {
@@ -260,14 +263,18 @@ final class CreateTokenAction
             }
         }
 
-        $out ??= $this->tokens->generate(
-            $userId,
-            $supplierId,
-            $name,
-            $scope,
-            $expiresAt,
-            $allowPayrollSubmissionDocs,
-        );
+        try {
+            $out ??= $this->tokens->generate(
+                $userId,
+                $supplierId,
+                $name,
+                $scope,
+                $expiresAt,
+                $allowPayrollSubmissionDocs,
+            );
+        } catch (LicenseSeatLimitExceeded) {
+            return self::seatLimitError($response);
+        }
 
         $this->activity->log(
             'api_token.created',
@@ -293,5 +300,21 @@ final class CreateTokenAction
             'prefix' => $out['prefix'],
             'warning' => 'Plain-text token se zobrazí pouze jednou. Ulož si ho — později už ho znovu neuvidíš.',
         ], 201);
+    }
+
+    /**
+     * Token se zápisem by podle parametru licence zabral další licenční místo.
+     * Token jen pro čtení jde vytvořit vždy.
+     */
+    private static function seatLimitError(Response $response): Response
+    {
+        return Json::error(
+            $response,
+            'license_user_limit',
+            'Token s právem zápisu se podle vaší licence započítává jako aktivní uživatel '
+                . 'a počet uživatelů podle licence je vyčerpaný. Vytvořte token jen pro čtení, '
+                . 'zrušte jiný token se zápisem, nebo rozšiřte předplatné.',
+            403,
+        );
     }
 }

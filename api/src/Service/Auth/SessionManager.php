@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\License\SessionConcurrencyPolicy;
 use PDO;
 
 /**
@@ -21,7 +22,14 @@ final class SessionManager
         private readonly Connection $db,
         private readonly Config $config,
         private readonly SecurityClock $securityClock,
+        /**
+         * Limit souběžných relací podle parametrů licence. Kontejner ho
+         * dosazuje vždy (Bootstrap); `null` mají jen přímo sestavené testy.
+         */
+        private readonly ?SessionConcurrencyPolicy $concurrency = null,
     ) {}
+
+    public const REVOKE_SUPERSEDED = 'superseded';
 
     /**
      * @return array{token:string,csrf_token:string,expires_at:int,issued_at:\DateTimeImmutable}
@@ -92,14 +100,15 @@ final class SessionManager
         $token = bin2hex(random_bytes(32));
         $csrf = bin2hex(random_bytes(32));
         $familyId = random_bytes(32);
+        $deviceClass = SessionDeviceClass::fromUserAgent($userAgent);
         $expiresAt = $cutoff->epochSeconds + ($lifetimeDays * 86400);
         $stmt = $pdo->prepare(
             'INSERT INTO sessions
-                (id, user_id, csrf_token, ip, user_agent, supplier_domain_id,
+                (id, user_id, csrf_token, ip, user_agent, device_class, supplier_domain_id,
                  created_at, last_seen, expires_at,
                  auth_method, assurance_level, mfa_verified_at, auth_credential_id,
                  last_user_activity_at, session_family_id, generation)
-             VALUES (?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
+             VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
                      ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
@@ -108,6 +117,7 @@ final class SessionManager
             $csrf,
             $packedIp,
             mb_substr($userAgent, 0, 255),
+            $deviceClass,
             $supplierDomainId,
             $cutoff->epochSeconds,
             $cutoff->epochSeconds,
@@ -120,6 +130,7 @@ final class SessionManager
             $familyId,
             1,
         ]);
+        $this->enforceConcurrencyLimit($pdo, $cutoff, $userId, $deviceClass, $supplierDomainId, $familyId);
 
         return [
             'token' => $token,
@@ -413,6 +424,7 @@ final class SessionManager
         $token = bin2hex(random_bytes(32));
         $csrf = bin2hex(random_bytes(32));
         $familyId = random_bytes(32);
+        $deviceClass = SessionDeviceClass::fromUserAgent($userAgent);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -449,10 +461,10 @@ final class SessionManager
 
             $insert = $pdo->prepare(
                 'INSERT INTO sessions
-                    (id, user_id, csrf_token, ip, user_agent, created_at, last_seen, expires_at,
+                    (id, user_id, csrf_token, ip, user_agent, device_class, created_at, last_seen, expires_at,
                      auth_method, assurance_level, mfa_verified_at, auth_credential_id,
                      last_user_activity_at, session_family_id, generation)
-                 VALUES (?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
+                 VALUES (?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
                          ?, ?, ?, ?, ?, ?, 1)'
             );
             $insert->execute([
@@ -461,6 +473,7 @@ final class SessionManager
                 $csrf,
                 $packedIp,
                 mb_substr($userAgent, 0, 255),
+                $deviceClass,
                 $cutoff->epochSeconds,
                 $cutoff->epochSeconds,
                 $expiresAt,
@@ -474,6 +487,7 @@ final class SessionManager
             if ($insert->rowCount() !== 1) {
                 throw new \RuntimeException('Strong session se nepodařilo vytvořit.');
             }
+            $this->enforceConcurrencyLimit($pdo, $cutoff, $userId, $deviceClass, null, $familyId);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -630,12 +644,12 @@ final class SessionManager
         $newCsrf = bin2hex(random_bytes(32));
         $insert = $pdo->prepare(
             'INSERT INTO sessions
-                (id, user_id, csrf_token, ip, user_agent, supplier_domain_id,
+                (id, user_id, csrf_token, ip, user_agent, device_class, supplier_domain_id,
                  created_at, last_seen, expires_at,
                  auth_method, assurance_level, mfa_verified_at, auth_credential_id,
                  last_user_activity_at, locked_at, lock_reason, last_unlock_at,
                  last_unlock_method, session_family_id, generation, replaced_at, revoked_at)
-             SELECT ?, user_id, ?, ip, user_agent, supplier_domain_id,
+             SELECT ?, user_id, ?, ip, user_agent, device_class, supplier_domain_id,
                     created_at, FROM_UNIXTIME(?), expires_at,
                     auth_method, assurance_level, mfa_verified_at, auth_credential_id,
                     ?, NULL, NULL, ?, ?, session_family_id, generation + 1, NULL, NULL
@@ -675,6 +689,77 @@ final class SessionManager
             'user_id' => $userId,
             'issued_at' => $cutoff->utc,
         ];
+    }
+
+    /**
+     * Byla předložená relace ukončena novějším přihlášením téhož uživatele
+     * nad limit souběžných relací? Slouží jen k vysvětlení odhlášení.
+     */
+    public function isSuperseded(string $token): bool
+    {
+        if (!self::isTokenShapeValid($token)) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM sessions
+              WHERE id = ? AND revoke_reason = ? AND expires_at > CURRENT_TIMESTAMP(6)
+              LIMIT 1'
+        );
+        $stmt->execute([$token, self::REVOKE_SUPERSEDED]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
+     * Ukončí nejstarší relace téhož uživatele a druhu zařízení nad limit
+     * z parametrů licence. Nová relace (`$keepFamilyId`) zůstává vždy.
+     *
+     * Relace na vlastní doméně firmy jsou samostatné přihlášení: limit se
+     * počítá zvlášť pro canonical adresu a zvlášť pro každou doménu, takže
+     * přihlášení do portálu na doméně neodhlásí hlavní aplikaci.
+     *
+     * Řádek uživatele se zamyká, aby dvě souběžná přihlášení nenechala
+     * aktivní obě relace nad limit.
+     */
+    private function enforceConcurrencyLimit(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        int $userId,
+        string $deviceClass,
+        ?int $supplierDomainId,
+        string $keepFamilyId,
+    ): void {
+        $limit = $this->concurrency?->limitFor($deviceClass) ?? 0;
+        if ($limit < 1) {
+            return;
+        }
+        $user = $pdo->prepare('SELECT id FROM users WHERE id = ? FOR UPDATE');
+        $user->execute([$userId]);
+
+        $select = $pdo->prepare(
+            "SELECT session_family_id
+               FROM sessions
+              WHERE user_id = ?
+                AND revoked_at IS NULL
+                AND replaced_at IS NULL
+                AND expires_at > FROM_UNIXTIME(?)
+                AND IFNULL(device_class, 'browser') = ?
+                AND supplier_domain_id <=> ?
+                AND session_family_id <> ?
+              ORDER BY created_at DESC, last_user_activity_at DESC, id DESC
+              FOR UPDATE"
+        );
+        $select->execute([$userId, $cutoff->epochSeconds, $deviceClass, $supplierDomainId, $keepFamilyId]);
+        $families = array_values(array_unique($select->fetchAll(PDO::FETCH_COLUMN)));
+        $excess = array_slice($families, $limit - 1);
+        if ($excess === []) {
+            return;
+        }
+        $placeholders = implode(',', array_fill(0, count($excess), '?'));
+        $pdo->prepare(
+            "UPDATE sessions
+                SET revoked_at = ?, revoke_reason = ?
+              WHERE user_id = ? AND session_family_id IN ({$placeholders}) AND revoked_at IS NULL"
+        )->execute([$cutoff->utcSql, self::REVOKE_SUPERSEDED, $userId, ...$excess]);
     }
 
     /**
