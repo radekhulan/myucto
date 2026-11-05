@@ -292,9 +292,65 @@ zůstává viditelný. Historie ukazuje autora, čas a důvod změny.
 
 Je-li některý nárok neúplný, náhled ho označí a jeho částku neodhadne.
 Již doložený základ může zůstat zobrazený, celková částka ale zůstane
-neznámá. Schválení hodin ani úspěšný náhled zatím nejsou úplnou
-kontrolou minima a zákonných výstupů; tato ochrana stále blokuje
-schválení běhu s hodinovým výpočtem.
+neznámá. Výpočet obsahuje také posouzení minima a případný doplatek
+podle následující části. Navazující zákonné výstupy zatím nejsou
+dokončené a tato ochrana stále blokuje schválení hodinového běhu.
+
+### 79.8.1.3 Minimální mzda a doplatek
+
+V rozbaleném náhledu sledujte **Posouzení minimální mzdy**. Ukazuje
+požadovaný příjem podle minima, započitatelnou mzdu či odměnu a
+**Doplatek do minimální mzdy**. Rozpis vyloučených položek vysvětluje,
+proč se určitý příjem do minima nepočítá. Podklady po účinných úsecích
+ukazují skutečně odpracovanou běžnou dobu, stanovenou týdenní dobu
+a účinné minimum. Částky určuje server, náhled není další ruční vstup.
+
+**Hodinové posouzení je výchozí.** Používá přesnou dobu běžné práce
+bez přesčasu. Kratší sjednaný úvazek nesnižuje hodinové minimum.
+Je-li doložená kratší zákonná stanovená týdenní doba, může být
+hodinové minimum vyšší; nezaměňujte ji se sjednaným částečným úvazkem.
+V **Zásadách příplatků** na kartě vztahu lze stanovenou týdenní dobu
+doložit v části minima. Zadejte ji v hodinách s přesností na celé
+minuty a uveďte podklad; prázdné pole použije zákonný výchozí režim
+serveru. Pole se samo nepředvyplňuje sjednaným kratším úvazkem.
+
+**Měsíční posouzení** lze zvolit jen u pracovního poměru, také u
+zaměstnání malého rozsahu. Potřebuje označení sjednání a doklad
+předchozího rozhodnutí: datum rozhodnutí a dobu platnosti. Rozhodnutí
+musí být předem doložené a platné pro posuzované úseky. Režim se
+nevybírá zpětně podle toho, který dá nižší doplatek. U DPP a DPČ tato
+volba není dostupná. Chybějící fond, rozvrh či rozporná týdenní doba
+se neřeší odhadem; náhled uvede, co doplnit.
+
+**Započitatelnost není daňové zařazení.** Do minima se nepočítají
+například dosažená mzda za přesčas a zákonné příplatky, náhrady mzdy,
+pohotovost, odstupné, benefity a nepeněžní plnění. Doložené příplatky
+zahrnuté v odměně dohody se odečtou ze započitatelné části; nepřičítají
+se podruhé. Vyloučená opravná položka může být záporná. Je to stopa
+opravovaného příjmu, nikoli nový započitatelný základ.
+
+U nejednoznačné vlastní prémie, příplatku nebo doplatku otevřete
+[editor mzdové složky](91_Mzdove_slozky_a_vstupy.md#9131-zapocteni-vlastni-slozky-do-minimalni-mzdy)
+a zkontrolujte **Započtení do minimální mzdy**. Zahrnutí nebo vyloučení
+vyžaduje konkrétní odůvodnění. Výchozí či ruční neurčené posouzení
+neznamená zahrnutí a může bránit dokončení kontroly. Jednoznačné
+zákonné zařazení určuje server a formulář je nedovolí přepsat.
+
+**Potvrzená nula není neznámá hodnota.** Doložený měsíc bez běžné práce
+může mít požadované minimum i doplatek nulový; chybějící hodiny se
+nulou nenahrazují. U neúplného posouzení náhled neukáže vypočtený
+doplatek jako ověřený. Částky vyloučených položek jsou jednotlivé
+serverové podklady, jejich prázdný neověřený seznam není potvrzená nula.
+
+Doplatek se počítá z přesného rozdílu a zaokrouhluje nahoru na celé
+koruny, aby příjem neklesl pod minimum ani při firemním matematickém
+zaokrouhlování ostatních nároků. Při přípravě běhu vzniká spravovaný
+vstup doplatku; nepřepisujte jej další ruční částkou. U vypořádání
+pouze historických hodinových nároků se minimum aktuální práce
+neposuzuje a nevytváří se fiktivní nulová docházka.
+
+Dokončené minimum nezaručuje dokončené zákonné výstupy. Schválení
+hodinového běhu stále čeká na jejich ověřené dokončení.
 
 ### 79.8.2 Krácení měsíční mzdy o absence
 

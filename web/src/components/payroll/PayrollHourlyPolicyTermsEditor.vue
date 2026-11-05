@@ -1,17 +1,30 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { PayrollHourlyPolicyTerms } from '@/api/payroll'
+import type { PayrollHourlyPolicyTerms, PayrollMinimumWagePolicy } from '@/api/payroll'
 import { formatPayrollDuration, parsePayrollDurationDraft } from '@/pages/payroll/payrollDuration'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 
-const props = withDefaults(defineProps<{ modelValue: PayrollHourlyPolicyTerms | null; disabled: boolean; allowOvertime?: boolean; allowPremiums?: boolean }>(), { allowOvertime: true, allowPremiums: true })
+const props = withDefaults(defineProps<{ modelValue: PayrollHourlyPolicyTerms | null; disabled: boolean; allowOvertime?: boolean; allowPremiums?: boolean; allowMonthlyAssessment?: boolean }>(), { allowOvertime: true, allowPremiums: true, allowMonthlyAssessment: true })
 const emit = defineEmits<{ 'update:modelValue': [PayrollHourlyPolicyTerms | null]; valid: [boolean] }>()
 const { t } = useI18n()
 const initial = props.modelValue
 const overtime = initial?.included_overtime
+const initialMinimum = initial?.minimum_wage
+const minimumTouched = ref(false)
+const minimumError = ref('')
 const draft = reactive({
+  minimum: {
+    assessment: initialMinimum?.assessment ?? 'hourly',
+    reference: initialMinimum?.agreement_reference ?? '',
+    weekly: initialMinimum?.statutory_weekly_minutes == null ? '' : formatPayrollDuration(initialMinimum.statutory_weekly_minutes * 50),
+    weeklyReference: initialMinimum?.statutory_weekly_reference ?? '',
+    proofReference: initialMinimum?.advance_proof?.reference ?? '',
+    decidedOn: initialMinimum?.advance_proof?.decided_on ?? '',
+    validFrom: initialMinimum?.advance_proof?.valid_from ?? '',
+    validTo: initialMinimum?.advance_proof?.valid_to ?? '',
+  },
   enabled: overtime != null,
   scope: overtime?.scope_kind ?? 'annual_hours',
   reference: overtime?.agreement_reference ?? '',
@@ -34,6 +47,7 @@ function addPremium() {
   draft.premiums.push({ kind: 'night', from: '', to: '', hours: '', rate: '', reference: '', opening: '', openingReference: '', asOf: '', original: null })
 }
 function publish() {
+  minimumError.value = ''
   const included: PayrollHourlyPolicyTerms['included_agreement_premiums'] = []
   for (const item of draft.premiums) {
     const hours = parsePayrollDurationDraft(item.hours, item.original?.scope_duration_units)
@@ -55,9 +69,21 @@ function publish() {
     }
     ot = { agreement_kind: 'contract', agreement_reference: draft.reference.trim(), scope_kind: draft.scope, calendar_year: year, annual_limit_duration_units: limit, manager_proof_reference: draft.manager.trim() || null, opening_used_duration_units: opening, opening_as_of: draft.asOf, opening_reference: draft.openingReference.trim() }
   }
+  let minimum: PayrollMinimumWagePolicy | null = null
+  if (minimumTouched.value || initialMinimum != null) {
+    const value = draft.minimum
+    const weeklyUnits = value.weekly.trim() === '' ? null : parsePayrollDurationDraft(value.weekly, initialMinimum?.statutory_weekly_minutes == null ? null : initialMinimum.statutory_weekly_minutes * 50)
+    if (value.weekly.trim() !== '' && (weeklyUnits == null || weeklyUnits <= 0 || weeklyUnits % 50 !== 0 || !value.weeklyReference.trim())) { minimumError.value = t('payroll.minimum.weekly_invalid'); emit('valid', false); return }
+    if (value.assessment === 'monthly' && (!props.allowMonthlyAssessment || !value.reference.trim() || !value.proofReference.trim() || !value.decidedOn || !value.validFrom || value.decidedOn > value.validFrom || (value.validTo !== '' && value.validTo < value.validFrom))) { minimumError.value = t('payroll.minimum.monthly_invalid'); emit('valid', false); return }
+    minimum = { assessment: value.assessment, agreement_reference: value.reference.trim() || null,
+      statutory_weekly_minutes: weeklyUnits == null ? null : weeklyUnits / 50, statutory_weekly_reference: weeklyUnits == null ? null : value.weeklyReference.trim(),
+      advance_proof: value.assessment === 'monthly' ? { reference: value.proofReference.trim(), decided_on: value.decidedOn, valid_from: value.validFrom, valid_to: value.validTo || null } : null }
+  }
+  const value: PayrollHourlyPolicyTerms = { ...initial, included_overtime: ot, included_agreement_premiums: included, ...(minimumTouched.value ? { minimum_wage: minimum } : {}) }
   emit('valid', true)
-  emit('update:modelValue', ot == null && included.length === 0 ? null : { included_overtime: ot, included_agreement_premiums: included })
+  emit('update:modelValue', initial == null && ot == null && included.length === 0 && value.minimum_wage == null ? null : value)
 }
+watch(() => JSON.stringify(draft.minimum), () => { minimumTouched.value = true }, { flush: 'sync' })
 watch(draft, publish, { deep: true })
 </script>
 
@@ -65,6 +91,24 @@ watch(draft, publish, { deep: true })
   <fieldset class="mt-3 space-y-3 rounded-md border border-neutral-200 p-3 text-xs" :disabled="disabled" data-test="hourly-policy-editor">
     <legend class="px-1 font-semibold">{{ t('payroll.hourly_policy.title') }}</legend>
     <p class="text-neutral-500">{{ t('payroll.hourly_policy.hint') }}</p>
+    <div class="space-y-3 rounded-md border border-neutral-200 p-3" data-test="hourly-policy-minimum">
+      <p class="font-medium">{{ t('payroll.minimum.policy_title') }}</p>
+      <p class="text-neutral-500">{{ t('payroll.minimum.policy_hint') }}</p>
+      <p v-if="minimumError" class="text-danger-700" role="alert" data-test="minimum-policy-error">{{ minimumError }}</p>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label>{{ t('payroll.minimum.assessment') }}<select v-model="draft.minimum.assessment" :class="inputClass" data-test="minimum-assessment"><option value="hourly">{{ t('payroll.minimum.hourly') }}</option><option v-if="allowMonthlyAssessment" value="monthly">{{ t('payroll.minimum.monthly') }}</option></select></label>
+        <label>{{ t('payroll.minimum.statutory_weekly') }}<input v-model="draft.minimum.weekly" :class="inputClass" data-test="minimum-weekly"><span class="mt-1 block text-neutral-500">{{ t('payroll.minimum.weekly_hint') }}</span></label>
+        <label v-if="draft.minimum.weekly.trim() !== ''">{{ t('payroll.minimum.weekly_reference') }}<input v-model="draft.minimum.weeklyReference" :class="inputClass" data-test="minimum-weekly-reference" maxlength="255"></label>
+      </div>
+      <div v-if="draft.minimum.assessment === 'monthly'" class="grid gap-3 sm:grid-cols-2">
+        <p class="text-warning-800 sm:col-span-2">{{ t('payroll.minimum.monthly_hint') }}</p>
+        <label>{{ t('payroll.minimum.agreement_reference') }}<input v-model="draft.minimum.reference" :class="inputClass" data-test="minimum-reference" maxlength="255"></label>
+        <label>{{ t('payroll.minimum.advance_reference') }}<input v-model="draft.minimum.proofReference" :class="inputClass" data-test="minimum-proof-reference" maxlength="255"></label>
+        <label>{{ t('payroll.minimum.decided_on') }}<DateInput v-model="draft.minimum.decidedOn" :class="inputClass" data-test="minimum-decided-on" /></label>
+        <label>{{ t('payroll.minimum.valid_from') }}<DateInput v-model="draft.minimum.validFrom" :class="inputClass" data-test="minimum-valid-from" /></label>
+        <label>{{ t('payroll.minimum.valid_to') }}<DateInput v-model="draft.minimum.validTo" :class="inputClass" data-test="minimum-valid-to" /></label>
+      </div>
+    </div>
     <label v-if="allowOvertime" class="flex items-center gap-2"><input v-model="draft.enabled" type="checkbox" data-test="hourly-policy-enabled">{{ t('payroll.hourly_policy.included_overtime') }}</label>
     <div v-if="draft.enabled" class="grid gap-3 sm:grid-cols-2">
       <label>{{ t('payroll.hourly_policy.contract_reference') }}<input v-model="draft.reference" :class="inputClass" data-test="hourly-policy-reference" maxlength="255"></label>

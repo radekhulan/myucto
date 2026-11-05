@@ -253,8 +253,12 @@ Upozornění samo mzdu ani doplatek nevytváří.
 Hodinovou mzdu a její jednotlivé nároky zkontrolujete v
 [rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
 Výpočet používá přesné schválené hodiny a účinné sazby; příplatkové
-vrstvy se dokládají samostatně. Kontrola minima a navazujících výstupů
-není dokončená, takže schválení takového běhu zůstává blokované.
+vrstvy se dokládají samostatně. V zásadách lze doložit také režim
+[posouzení minimální mzdy](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek):
+hodinový je výchozí, měsíční pouze pro pracovní poměr s předchozím
+rozhodnutím a platností. Jiná stanovená týdenní doba vyžaduje vlastní
+podklad a není totožná s kratším sjednaným úvazkem. Výpočet obsahuje
+minimum i doplatek; dokončení výkaznictví stále blokuje schválení běhu.
 Rychlý vstup ani pravidelné složky místo sazby nepoužijí dřívější měsíční mzdu.
 Dosavadní ruční a importované hotové částky bez přepnutí vztahu na nový
 hodinový způsob odměňování zůstávají podporované.

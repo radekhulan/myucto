@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import type { PayrollHourlyWagePreview } from '@/api/payroll'
+import type { PayrollHourlyWagePreview, PayrollMinimumWagePreview } from '@/api/payroll'
 import PayrollHourlyWagePreviewView from '../PayrollHourlyWagePreview.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => `${key}${params ? JSON.stringify(params) : ''}` }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (value: string) => value, formatMoneyMinor: (value: number) => `money:${value}` }))
 function preview(overrides: Partial<PayrollHourlyWagePreview> = {}): PayrollHourlyWagePreview {
   return { complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: 123400, entitlements: [], included_allocations: [], claims: [{ ready: true, worked_duration_units: 53, purpose: 'ordinary_base', component_code: 'BASE', duration_units: 53, raw_numerator_minor: 1, raw_denominator: 3, analytical_minor: 123367, payable_minor: 123400, rounding: 'ceil', segments: [{ term_id: 1, term_row_version: 2, date_from: '2026-11-01', date_to: '2026-11-30', duration_units: 53, hourly_rate_minor: 19000, monthly_gross_minor: null, raw_numerator_minor: 1, raw_denominator: 3 }] }], ...overrides }
+}
+function minimum(complete = true): PayrollMinimumWagePreview {
+  return { complete, claim: { ready: complete, duration_units: complete ? 0 : null, payable_minor: complete ? 99900 : null }, blockers: [], evidence_hash: 'b'.repeat(64), assessment_evidence: { assessment: 'hourly', threshold: null, eligible: null, ordinary_payable_minor: 0, company_rounding: 'ceil', statutory_floor_rounding: 'ceil', policy_payable_minor: null, excluded: [], parts: [] } }
 }
 describe('PayrollHourlyWagePreview', () => {
   it('shows server amounts and exact segments without recomputing money', () => {
@@ -47,6 +50,20 @@ describe('PayrollHourlyWagePreview', () => {
     expect(compact.text()).toContain('more_blockers')
     const expanded = mount(PayrollHourlyWagePreviewView, { props: { value } })
     expect(expanded.text()).toContain('Druhý syntetický podklad')
+  })
+  it('does not assess current minimum for settlement-only historical claims', () => {
+    const wrapper = mount(PayrollHourlyWagePreviewView, { props: { value: preview({ settlement_only: true, minimum_wage: minimum() }) } })
+    expect(wrapper.find('[data-test="minimum-wage-preview"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="minimum-settlement-only"]').text()).toContain('settlement_only')
+  })
+  it('preserves the known base while suppressing an unconfirmed minimum claim', () => {
+    const value = preview({ complete: false, payable_total_minor: null, minimum_wage: minimum(false) })
+    value.claims.push({ ...value.claims[0]!, purpose: 'minimum_wage_top_up' })
+    const wrapper = mount(PayrollHourlyWagePreviewView, { props: { value } })
+    const claims = wrapper.findAll('[data-test="hourly-preview-claim"]')
+    expect(claims[0]!.text()).toContain('money:123400')
+    expect(claims[1]!.text()).toContain('claim_incomplete')
+    expect(claims[1]!.text()).not.toContain('money:123400')
   })
   it('keeps compact rows small while the shared panel provides detailed rates', () => {
     const wrapper = mount(PayrollHourlyWagePreviewView, { props: { value: preview(), compact: true } })

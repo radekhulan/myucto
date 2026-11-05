@@ -33,10 +33,13 @@ do vstupů před jejich uzamčením; opakování nevytváří druhou platbu
 za tentýž nárok. Náhled a konkrétní chybějící podklady zkontrolujte
 v [rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
 
-Úspěšný náhled neznamená úplně podporovaný běh. Neověřená ochrana
-minimální mzdy a navazujících zákonných výstupů stále brání schválení
-běhu s hodinovým výpočtem. Samotným zadáním hotové částky tuto
-kontrolu nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
+Výpočet obsahuje posouzení minimální mzdy a případný doplatek.
+Neurčené započtení vlastní složky, chybějící rozhodnutí pro měsíční
+posouzení nebo rozporná stanovená doba mají konkrétní blokaci v
+[náhledu minima](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Úspěšný náhled ještě neznamená úplně podporovaný běh: dokončení
+navazujících zákonných výstupů stále brání jeho schválení. Samotným
+zadáním hotové částky tuto kontrolu nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
 a další podklady nároků; pozdější změnu ohlásí jako změnu podkladů
 a již uzavřenou revizi nepřepíše.
 

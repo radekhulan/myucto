@@ -355,18 +355,30 @@ z převzatých mezd předchozího programu se hromadně neschvaluje; založte ho
 jednotlivě a převzatou hrubou mzdu upravte na započitatelnou (náhrady za
 dovolenou nebo svátek do průměru nepatří).
 
-**Spodní hranice.** Je-li vypočtený průměr nižší než minimální mzda, použije
-se podle § 357 odst. 1 zákoníku práce minimální mzda. Hranice platí pro
-skutečný i pravděpodobný výdělek a její výše se bere z legislativní sady
-účinné pro rozhodné období. Ve stopě výpočtu je vidět, že se uplatnila
-a z jaké hodnoty.
+**Spodní hranice.** Je-li průměr nižší než příslušná minimální mzda,
+použije se podle § 357 odst. 1 zákoníku práce minimální mzda. Hranice
+platí pro skutečný i pravděpodobný výdělek; ve stopě je vidět její
+uplatnění a výchozí hodnota.
+
+U výslovně hodinově odměňovaného vztahu používají náhrady schválený
+průměr povýšený alespoň na aktuální minimum příslušného účinného úseku.
+Schválený průměr zůstává čtvrtletní; při výpočtu náhrady se hranice
+znovu ověří podle skutečného dne náhrady.
+Platí to i při čerpání dovolené, překážkách, náhradě při DPN,
+pohotovosti nebo nárocích při skončení vztahu. Rozhoduje doložená
+**stanovená** týdenní doba, nikoli pouze kratší sjednaný úvazek.
+Neurčený či rozporný režim výpočet zablokuje konkrétní příčinou;
+mezery v údajích se nesmějí doplňovat odhadem nebo nulou. Podklady
+stanovené doby a minima doplňte v
+[zásadách vztahu](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
 
 > [!WARNING]
-> Aplikace nerozlišuje **stanovenou** kratší týdenní pracovní dobu (§ 79
-> odst. 2 a 3 zákoníku práce), která hodinové minimum zvyšuje, od
-> **sjednané** kratší doby podle § 80, která ho nezvyšuje. U provozu s kratší
-> stanovenou týdenní dobou hodinovou hranici ověřte a případný rozdíl
-> vypořádejte mimo automatický výpočet.
+> Dosavadní výpočty mimo výslovný hodinový režim automaticky nerozlišují
+> **stanovenou** kratší týdenní pracovní dobu (§ 79 odst. 2 a 3 zákoníku
+> práce) od **sjednané** kratší doby podle § 80. U takového provozu ověřte
+> dosavadní hodinovou hranici a případný rozdíl vypořádejte podle
+> doložených podkladů. Nové hodinové posouzení neznamená zpětnou změnu
+> uzavřených průměrů a mezd.
 
 ### 76.11.2 Dovolená: nárok, čerpání a náhrada
 

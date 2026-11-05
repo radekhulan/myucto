@@ -16,8 +16,10 @@ Hodinový výpočet používá přesně doložené a schválené hodiny, účinn
 a samostatné podklady příplatků. V rychlém měsíčním vstupu ukazuje rozpad
 nároků, zaokrouhlené částky a konkrétní chybějící podklady. Podporuje více
 sazeb i změnu způsobu odměňování během měsíce, pokud lze dobu jednoznačně
-rozdělit. Náhled nezaručuje úplnou ochranu minimální mzdy ani návazné
-výkaznictví; jejich neověřený stav stále brání schválení běhu.
+rozdělit. Součástí je posouzení minima a případný doplatek podle
+[doloženého režimu a započitatelných složek](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Neúplné podklady minima mají konkrétní důvod blokace. Návazné
+výkaznictví zatím není dokončené a stále brání schválení běhu.
 Původní vztahy zůstávají v neurčeném režimu a jejich zpracování se nemění.
 Hodinový režim se volí výslovně pro konkrétní vztah; hotová importovaná
 částka sama tento režim nezapíná.

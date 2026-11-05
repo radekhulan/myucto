@@ -2372,6 +2372,45 @@
     "refresh_failed": "Could not refresh the limits. Please try again shortly."
   },
   "payroll": {
+    "minimum": {
+      "weekly_invalid": "Enter a positive statutory weekly duration in whole minutes and supply its evidence.",
+      "monthly_invalid": "Monthly assessment is available only for employment relationships. Complete the agreement, prior decision evidence and its valid dates.",
+      "settlement_only": "This preview settles previous entitlements. It does not assess the minimum for current worked time.",
+      "top_up": "Minimum wage top-up",
+      "required": "Required minimum income",
+      "eligible": "Eligible wage / remuneration",
+      "excluded": "Excluded income and embedded premiums",
+      "rounding_hint": "The server determines the top-up from exact evidence and rounds it up to whole crowns, so resulting income cannot fall below the statutory minimum even with a different company rounding policy.",
+      "incomplete": "The minimum assessment is incomplete. An unknown amount is not a zero top-up; complete the listed evidence.",
+      "excluded_embedded": "A premium already embedded in remuneration is excluded from minimum wage eligibility.",
+      "excluded_component": "This income is excluded from minimum wage eligibility.",
+      "embedded_amount": "Agreed embedded remuneration amount",
+      "none_excluded": "The verified evidence contains no excluded items in this breakdown.",
+      "excluded_unknown": "The excluded-item breakdown is unconfirmed; an empty list is not a verified zero.",
+      "parts": "Minimum evidence by effective segment",
+      "hourly_rate": "Hourly minimum {amount}/h",
+      "confirmed_zero": "An explicitly documented zero duration of ordinary work is known evidence; it does not mean hours are missing.",
+      "component_treatment": "Minimum wage eligibility",
+      "default_classification": "Server default (unspecified does not mean included)",
+      "reason": "Assessment rationale",
+      "classification_hint": "Minimum wage eligibility is separate from tax and insurance treatment. Including or excluding an ambiguous component requires a specific rationale; an unresolved component prevents completing the minimum check.",
+      "immutable_classification": "The server determines statutory eligibility; this setting cannot override it.",
+      "classification_after_save": "Assessment will be available after server rules are loaded or the component is saved.",
+      "policy_title": "Minimum wage assessment",
+      "policy_hint": "Hourly assessment is the default. Contracted part-time hours do not lower the hourly minimum. Document any different statutory working week separately; it is not inferred from contracted hours.",
+      "assessment": "Assessment method",
+      "hourly": "Hourly assessment",
+      "monthly": "Monthly employment assessment documented in advance",
+      "statutory_weekly": "Statutory weekly hours",
+      "weekly_hint": "Leave empty to use the server statutory default. Enter a different duration as H:MM or decimal hours precise to whole minutes and document its basis.",
+      "weekly_reference": "Statutory working week evidence",
+      "monthly_hint": "Employment relationships only. The decision must be documented before the assessed period and cover the entire assessed segment; monthly assessment cannot be chosen afterwards to obtain a more favourable result.",
+      "agreement_reference": "Assessment agreement reference",
+      "advance_reference": "Prior decision evidence",
+      "decided_on": "Decision date",
+      "valid_from": "Decision valid from",
+      "valid_to": "Decision valid to (optional)"
+    },
     "hourly_evidence": {
       "boundaries_changed": "Rate or policy boundaries have changed. The previous evidence remains below; explicitly document the new breakdown for the next revision. Hours are not split automatically.",
       "readonly": "Evidence is read-only for this period according to permissions and payroll run status.",
@@ -2404,7 +2443,7 @@
       "exposure_invalid": "Enter a positive duration and positive whole number of exposure factors."
     },
     "hourly_policy": {
-      "title": "Work scope included in the agreed wage / remuneration",
+      "title": "Work included in wage / remuneration and minimum wage",
       "hint": "Explicitly agreed inclusion only. Document its scope and opening consumption, including confirmed zero; the server determines subsequent consumption. Enter H:MM or decimal hours with up to 3 places.",
       "included_overtime": "Overtime included in the contracted wage",
       "contract_reference": "Overtime inclusion contract reference",
@@ -2421,7 +2460,7 @@
       "agreement_reference": "Agreement reference",
       "included_rate": "Included hourly amount (CZK)",
       "add_premium": "Add included agreement premium",
-      "invalid": "Complete the scope, opening consumption, date and evidence for inclusion in wage / remuneration."
+      "invalid": "Complete the required scope and evidence for wage / remuneration inclusion or minimum wage assessment."
     },
     "hourly_preview": {
       "claim_incomplete": "Entitlement evidence is incomplete",
@@ -2442,6 +2481,7 @@
       "more_blockers": "More blockers in the evidence panel: {count}",
       "settlement_title": "Historical hourly entitlement settlement preview",
       "open_settlement": "Historical hourly entitlements",
+      "minimum_wage_top_up": "Minimum wage top-up",
       "title": "Hourly wage / remuneration preview",
       "saved_evidence": "Based on the currently saved evidence. Unsaved changes to hours do not change this preview.",
       "total": "Rounded total",
@@ -2451,7 +2491,7 @@
       "monthly_part": "Part covered by monthly pay",
       "rate": "Rate {amount}/h",
       "rounding_ceil": "Claims are rounded up to whole crowns per month and component.",
-      "rounding_half_up": "Claims are rounded half up to whole crowns per month and component."
+      "rounding_half_up": "Ordinary claims are rounded half up to whole crowns per month and component. The minimum wage top-up is separately rounded up."
     },
     "worked_hours": {
       "selected_source_hint": "Current hours come from the selected monthly summary. Daily records are not added to it.",
@@ -4680,7 +4720,7 @@
       "search_empty": "No employment in this month matches “{q}”.",
       "search_clear": "Clear search",
       "blockers": {
-        "hourly_remuneration_calculation_unsupported": "The preview calculates pay from documented hours; approving the payroll run still requires completion of minimum wage and reporting checks.",
+        "hourly_remuneration_calculation_unsupported": "The preview calculates pay from documented hours, including the minimum wage check; approving the payroll run still requires completion of reporting.",
         "base_conflict": "Base pay is duplicated in the quick form and another input.",
         "base_managed_elsewhere": "Base pay is managed by another monthly or recurring input.",
         "base_recurring_manual_review": "The recurring base-pay assignment requires manual review.",
@@ -5076,6 +5116,7 @@
         "health_participation_treatment": "Health insurance — participation",
         "health_treatment": "Health insurance — assessment base",
         "average_earning_treatment": "Average earnings",
+        "minimum_wage_reason": "Minimum wage assessment rationale",
         "enforcement_treatment": "Enforcement deductions",
         "jmhz_treatment": "JMHZ",
         "statistics_treatment": "Statistics",
@@ -31548,6 +31589,7 @@
         "work_summary_source_corrupt": "The source records of the work summary are unreadable",
         "work_summary_hours_mismatch": "Hours from the shifts do not match the confirmed work summary hours",
         "worked_time_not_derivable": "Recorded shifts cannot be summed without review (overlap, interval crossing a month boundary or negative duration)",
+        "hourly_average_minimum_missing": "The hourly relationship lacks a verified minimum or unambiguous evidence of statutory weekly hours. Correct the effective terms and working-time regime evidence; do not estimate missing durations or the minimum.",
         "hourly_overtime_duration_mismatch": "Exact worked time after deferred overtime settlement could not be verified. Check the overtime evidence, its settlement quarter and consistency with worked hours; do not estimate the duration.",
         "worked_time_not_whole_minutes": "The worked time did not come out in whole minutes; manual review is required",
         "worked_time_missing": "The decisive period has no positive qualifying earnings and time worked",

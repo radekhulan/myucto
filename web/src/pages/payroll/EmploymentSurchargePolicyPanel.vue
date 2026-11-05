@@ -937,7 +937,7 @@ onMounted(load)
         </label>
       </div>
 
-      <PayrollHourlyPolicyTermsEditor v-if="hasHourlyTerms || form.hourly_terms" v-model="form.hourly_terms" :disabled="!canWrite || saving" :allow-overtime="relationType === 'employment' || relationType === 'small_scale_employment'" :allow-premiums="relationType === 'dpp' || relationType === 'dpc'" @valid="hourlyTermsValid = $event" />
+      <PayrollHourlyPolicyTermsEditor v-if="hasHourlyTerms || form.hourly_terms" v-model="form.hourly_terms" :disabled="!canWrite || saving" :allow-monthly-assessment="relationType === 'employment' || relationType === 'small_scale_employment'" :allow-overtime="relationType === 'employment' || relationType === 'small_scale_employment'" :allow-premiums="relationType === 'dpp' || relationType === 'dpc'" @valid="hourlyTermsValid = $event" />
 
       <!--
         Varování, ne blokace: podlahu vyhodnocuje server a jeho rozhodnutí se tu

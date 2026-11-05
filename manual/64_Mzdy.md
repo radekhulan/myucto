@@ -17,8 +17,10 @@ Sjednanou hodinovou sazbu s účinností a historií evidujete v plném modulu
 [Mzdy na kartě pracovního vztahu](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
 Tato rekapitulace z hodin a sazby mzdu nepočítá. Plný modul nabízí
 [náhled hodinového výpočtu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)
-z přesných schválených hodin a účinných sazeb. Náhled není potvrzením úplnosti
-kontroly minima ani zákonných výstupů; schválení takového běhu zůstává blokované.
+z přesných schválených hodin a účinných sazeb, včetně
+[kontroly minimální mzdy a doplatku](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Nevyřešené podklady výpočet označí. Dokončení zákonných výstupů stále
+brání schválení takového běhu.
 
 Použijte jej pro jednoduchou mzdu jednoho zaměstnance nebo odměnu jednatele-společníka, pokud všechny vstupy odpovídají podporovanému standardnímu modelu. U více zaměstnanců, nemocenské, exekucí, benefitů, souběhů, dohod a dalších výjimek použijte výpočet specializovaného mzdového systému a do MyÚčta přeneste pouze schválenou rekapitulaci. Seznam toho, co modul neumí, je v [§ 64.8.7](#6487-co-modul-neumi).
 

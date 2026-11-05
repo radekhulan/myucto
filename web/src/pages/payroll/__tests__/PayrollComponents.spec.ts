@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import { ref } from 'vue'
+import { ref, type ComponentPublicInstance } from 'vue'
+type SelectInstance = ComponentPublicInstance<{ modelValue: unknown }>
 
 const m = vi.hoisted(() => ({
   approveInputsBatch: vi.fn(),
@@ -8,6 +9,8 @@ const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   components: vi.fn(),
+  componentCatalog: vi.fn(),
+  minimumRules: { non_monetary: 'excluded', codes: {} as Record<string, string>, kinds: { bonus: 'included', base_wage: 'included' } as Record<string, string>, fallback: 'manual_review' },
   recurringComponents: vi.fn(),
   inputs: vi.fn(),
   people: vi.fn(),
@@ -21,6 +24,7 @@ const m = vi.hoisted(() => ({
   deleteComponent: vi.fn(),
   deleteRecurringComponent: vi.fn(),
   createComponent: vi.fn(),
+  updateComponent: vi.fn(),
   createRecurringComponent: vi.fn(),
   createInput: vi.fn(),
   previewInput: vi.fn(),
@@ -45,6 +49,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     components: m.components,
+    componentCatalog: m.componentCatalog,
     recurringComponents: m.recurringComponents,
     inputs: m.inputs,
     people: m.people,
@@ -58,7 +63,7 @@ vi.mock('@/api/payroll', () => ({
     previewInputImport: m.previewInputImport,
     applyInputImport: m.applyInputImport,
     createComponent: m.createComponent,
-    updateComponent: vi.fn(),
+    updateComponent: m.updateComponent,
     createRecurringComponent: m.createRecurringComponent,
     updateRecurringComponent: vi.fn(),
     deleteRecurringComponent: m.deleteRecurringComponent,
@@ -114,6 +119,16 @@ vi.mock('@/composables/useUserPrefs', async () => {
 
 import PayrollComponents from '@/pages/payroll/PayrollComponents.vue'
 
+async function openMinimumCatalogEditor(existing = false) {
+  const wrapper = mount(PayrollComponents)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'payroll.components.tabs.catalog')!.trigger('click')
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === (existing ? 'common.edit' : 'payroll.components.catalog.add'))!.trigger('click')
+  await flushPromises()
+  return wrapper
+}
+
 describe('PayrollComponents', () => {
   afterEach(() => {
     vi.useRealTimers()
@@ -136,6 +151,8 @@ describe('PayrollComponents', () => {
       rate_basis_points: 400,
     })
     m.institutionAccounts.mockResolvedValue([])
+    m.minimumRules = { non_monetary: 'excluded', codes: {}, kinds: { bonus: 'included', base_wage: 'included' }, fallback: 'manual_review' }
+    m.componentCatalog.mockImplementation(async () => ({ components: await m.components(), minimum_wage_classification: m.minimumRules }))
     m.components.mockResolvedValue([{
       id: 5,
       supplier_id: 1,
@@ -302,6 +319,7 @@ describe('PayrollComponents', () => {
     m.slugify.mockResolvedValue('ceska-odmena')
     m.createRecurringComponent.mockResolvedValue({})
     m.createComponent.mockResolvedValue({})
+    m.updateComponent.mockResolvedValue({})
     m.createInput.mockResolvedValue({})
     m.previewInput.mockResolvedValue({
       support_status: 'supported',
@@ -920,12 +938,78 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('requires a reason for explicit eligibility of an ambiguous component', async () => {
+    const wrapper = await openMinimumCatalogEditor()
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Syntetická vlastní prémie')
+    await wrapper.get('[data-testid="payroll-component-code"]').setValue('SYN_CUSTOM_MIN')
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-kind"]').vm.$emit('update:modelValue', 'premium')
+    await flushPromises()
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-minimum-treatment"]').vm.$emit('update:modelValue', 'included')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click')
+    expect(m.createComponent).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="payroll-component-minimum-reason"]').setValue('Syntetické posouzení odměny za běžnou práci')
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(m.createComponent).toHaveBeenCalledWith(expect.objectContaining({ minimum_wage_treatment: 'included', minimum_wage_reason: 'Syntetické posouzení odměny za běžnou práci' }))
+    expect(m.createComponent.mock.calls[0][0]).not.toHaveProperty('effective_minimum_wage_treatment')
+    expect(m.createComponent.mock.calls[0][0]).not.toHaveProperty('minimum_wage_treatment_editable')
+    wrapper.unmount()
+  })
+
+  it('keeps unspecified custom eligibility null instead of inferring it from tax treatment', async () => {
+    const wrapper = await openMinimumCatalogEditor()
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Syntetická neurčená prémie')
+    await wrapper.get('[data-testid="payroll-component-code"]').setValue('SYN_UNKNOWN_MIN')
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-kind"]').vm.$emit('update:modelValue', 'premium'); await flushPromises()
+    expect(wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-minimum-treatment"]').props('modelValue')).toBeNull()
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(m.createComponent).toHaveBeenCalledWith(expect.objectContaining({ tax_treatment: 'included', minimum_wage_treatment: null, minimum_wage_reason: null }))
+    wrapper.unmount()
+  })
+
+  it('uses server code and non-monetary precedence without permitting statutory overrides', async () => {
+    m.minimumRules.codes = { SYN_CODE_MIN: 'excluded' }
+    const wrapper = await openMinimumCatalogEditor()
+    await wrapper.get('[data-testid="payroll-component-name"]').setValue('Syntetická složka')
+    await wrapper.get('[data-testid="payroll-component-code"]').setValue('SYN_CODE_MIN')
+    expect(wrapper.find('[data-testid="payroll-component-minimum-treatment"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-component-minimum-effective"]').text()).toContain('inclusion.excluded')
+    await wrapper.get('[data-testid="payroll-component-code"]').setValue('SYN_UNRESOLVED')
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-kind"]').vm.$emit('update:modelValue', 'premium'); await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-component-minimum-treatment"]').exists()).toBe(true)
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-minimum-treatment"]').vm.$emit('update:modelValue', 'included'); await flushPromises()
+    await wrapper.get('[data-testid="payroll-component-minimum-reason"]').setValue('Syntetické původní posouzení')
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-value-kind"]').vm.$emit('update:modelValue', 'non_monetary'); await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-component-minimum-treatment"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-component-minimum-effective"]').text()).toContain('inclusion.excluded')
+    wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-value-kind"]').vm.$emit('update:modelValue', 'monetary'); await flushPromises()
+    expect(wrapper.getComponent<SelectInstance>('[data-testid="payroll-component-minimum-treatment"]').props('modelValue')).toBeNull()
+    expect((wrapper.get('[data-testid="payroll-component-minimum-reason"]').element as HTMLTextAreaElement).value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('honours an immutable server row and omits resolver fields from updates', async () => {
+    const rows = await m.components()
+    m.components.mockResolvedValue([{ ...rows[0], minimum_wage_treatment: null, effective_minimum_wage_treatment: 'excluded', minimum_wage_treatment_editable: false }])
+    const wrapper = await openMinimumCatalogEditor(true)
+    expect(wrapper.find('[data-testid="payroll-component-minimum-treatment"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payroll-component-minimum-effective"]').text()).toContain('inclusion.excluded')
+    await wrapper.findAll('button').find(button => button.text() === 'common.save')!.trigger('click'); await flushPromises()
+    expect(m.updateComponent).toHaveBeenCalled()
+    const payload = m.updateComponent.mock.calls[0][2]
+    expect(payload).not.toHaveProperty('minimum_wage_treatment')
+    expect(payload).not.toHaveProperty('minimum_wage_reason')
+    expect(payload).not.toHaveProperty('effective_minimum_wage_treatment')
+    wrapper.unmount()
+  })
+
   it('creates the code from the name until the user edits it manually', async () => {
     const wrapper = mount(PayrollComponents)
     await flushPromises()
     const catalogTab = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')
     await catalogTab!.trigger('click')
+    await flushPromises()
     const addButton = wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')
     await addButton!.trigger('click')
@@ -953,6 +1037,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')!
       .trigger('click')
@@ -975,6 +1060,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')!
@@ -1001,6 +1087,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.jmhz.configure')!
       .trigger('click')
@@ -1025,6 +1112,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
 
     await wrapper.findAll('[data-testid="payroll-component-delete"]')[0].trigger('click')
     await flushPromises()
@@ -1100,6 +1188,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
 
     expect(wrapper.text()).toContain('payroll.components.jmhz.status.outside_breakdown')
     expect(wrapper.text()).not.toContain('payroll.components.jmhz.status.missing')
@@ -1114,6 +1203,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
 
     expect(wrapper.text()).toContain('Syntetická odměna')
     expect(m.toastError).toHaveBeenCalledWith('synthetic JMHZ failure')
@@ -1128,6 +1218,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
 
     expect(wrapper.text()).toContain('Syntetická odměna')
     expect(wrapper.findAll('button')
@@ -1446,6 +1537,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')!
       .trigger('click')
@@ -1472,6 +1564,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')!
       .trigger('click')

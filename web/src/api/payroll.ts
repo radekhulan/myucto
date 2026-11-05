@@ -1950,6 +1950,13 @@ export interface PayrollBenefitBasketUsage {
   } | null
 }
 
+export interface PayrollMinimumWageClassificationRules {
+  non_monetary: PayrollComponentInclusion
+  codes: Record<string, PayrollComponentInclusion>
+  kinds: Partial<Record<PayrollComponentKind, PayrollComponentInclusion>>
+  fallback: PayrollComponentInclusion
+}
+
 export interface PayrollComponent {
   id: number
   supplier_id: number
@@ -1964,6 +1971,10 @@ export interface PayrollComponent {
   health_participation_treatment: PayrollComponentInclusion
   health_treatment: PayrollComponentInclusion
   average_earning_treatment: PayrollComponentInclusion
+  minimum_wage_treatment?: PayrollComponentInclusion | null
+  minimum_wage_reason?: string | null
+  effective_minimum_wage_treatment?: PayrollComponentInclusion
+  minimum_wage_treatment_editable?: boolean
   enforcement_treatment: PayrollComponentInclusion
   jmhz_treatment: PayrollComponentInclusion
   statistics_treatment: PayrollComponentInclusion
@@ -1983,6 +1994,7 @@ export interface PayrollComponent {
 export type PayrollComponentPayload = Omit<
   PayrollComponent,
   'id' | 'supplier_id' | 'row_version' | 'created_at' | 'updated_at'
+  | 'effective_minimum_wage_treatment' | 'minimum_wage_treatment_editable'
 >
 
 export interface PayrollRiskySavingsItem {
@@ -2305,7 +2317,21 @@ interface PayrollSurchargeFixedHourlyFields {
   difficult_environment_fixed_hourly_minor: number | null
 }
 
+export interface PayrollMinimumWagePolicy {
+  assessment: 'hourly' | 'monthly'
+  agreement_reference: string | null
+  statutory_weekly_minutes: number | null
+  statutory_weekly_reference: string | null
+  advance_proof: {
+    reference: string
+    decided_on: string
+    valid_from: string
+    valid_to: string | null
+  } | null
+}
+
 export interface PayrollHourlyPolicyTerms {
+  minimum_wage?: PayrollMinimumWagePolicy | null
   included_overtime: {
     agreement_kind: 'contract'
     agreement_reference: string
@@ -2656,7 +2682,51 @@ export interface PayrollHourlyEvidenceResponse {
   history_has_more: boolean
 }
 
+export interface PayrollMinimumWageFraction {
+  raw_numerator_minor: number
+  raw_denominator: number
+  analytical_minor: number
+}
+
+export interface PayrollMinimumWagePreview {
+  complete: boolean
+  claim: { ready: boolean; duration_units: number | null; payable_minor: number | null; [key: string]: unknown }
+  blockers: Array<{ code: string; message: string; context: unknown }>
+  evidence_hash: string
+  assessment_evidence: {
+    assessment: 'hourly' | 'monthly'
+    threshold: PayrollMinimumWageFraction | null
+    eligible: PayrollMinimumWageFraction | null
+    ordinary_payable_minor: number | null
+    company_rounding: PayrollWageRounding
+    statutory_floor_rounding: 'ceil'
+    policy_payable_minor: number | null
+    excluded: Array<{
+      component_id?: number
+      component_version?: number
+      component_code?: string
+      input_ids?: number[]
+      premium_kind?: string
+      reason: string
+      analytical_minor?: number | null
+      [key: string]: unknown
+    }>
+    parts: Array<{
+      term_id: number
+      date_from: string
+      date_to: string
+      regular_worked_duration_units: number
+      stated_weekly_minutes: number | null
+      minimum_base40_minor: number | null
+      minimum_hourly_minor: number | null
+      analytical_minor: number
+      [key: string]: unknown
+    }>
+  }
+}
+
 export interface PayrollHourlyWagePreview {
+  minimum_wage?: PayrollMinimumWagePreview | null
   settlement_only?: boolean
   complete: boolean
   blockers: Array<{ code: string; message: string; context: Record<string, unknown> }>
@@ -2689,7 +2759,7 @@ export interface PayrollHourlyWagePreview {
     worked_duration_units: number
     purpose: string
     component_code: string
-    duration_units: number
+    duration_units: number | null
     raw_numerator_minor: number | null
     raw_denominator: number | null
     analytical_minor: number | null
@@ -2704,7 +2774,9 @@ export interface PayrollHourlyWagePreview {
       date_to?: string
       date?: string
       granted_on?: string
-      duration_units: number
+      duration_units?: number
+      regular_worked_duration_units?: number
+      minimum_hourly_minor?: number | null
       hourly_rate_minor?: number | null
       monthly_gross_minor?: number | null
       raw_numerator_minor?: number
@@ -10604,6 +10676,10 @@ export const payrollApi = {
   reopenTimeMonth: (period: string, payload: { employment_id: number; row_version: number; reason: string }) =>
     api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/reopen`, payload)
       .then(response => response.data.month),
+  componentCatalog: (effectiveOn?: string) =>
+    api.get<{ components: PayrollComponent[]; minimum_wage_classification?: PayrollMinimumWageClassificationRules }>('/payroll/components', {
+      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
+    }).then(response => response.data),
   components: (effectiveOn?: string) =>
     api.get<{ components: PayrollComponent[] }>('/payroll/components', {
       params: effectiveOn ? { effective_on: effectiveOn } : undefined,

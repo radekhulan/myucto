@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PayrollMinimumWagePreviewView from './PayrollMinimumWagePreview.vue'
 import { useI18n } from 'vue-i18n'
 import type { PayrollHourlyWagePreview } from '@/api/payroll'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
@@ -7,6 +8,7 @@ import { formatPayrollDuration } from '@/pages/payroll/payrollDuration'
 defineProps<{ value: PayrollHourlyWagePreview; compact?: boolean }>()
 const { t } = useI18n()
 const purposes: Record<string, string> = {
+  minimum_wage_top_up: 'minimum_wage_top_up',
   ordinary_base: 'ordinary_base', achieved_overtime: 'achieved_overtime', premium_overtime: 'premium_overtime',
   premium_holiday: 'premium_holiday', premium_night: 'premium_night', premium_weekend: 'premium_weekend',
   premium_difficult_environment: 'premium_difficult_environment', holiday_nonworked_compensation: 'holiday_nonworked_compensation',
@@ -25,14 +27,18 @@ function purposeLabel(purpose: string): string {
       {{ t('payroll.hourly_preview.total') }}:
       {{ value.payable_total_minor === null ? t('payroll.worked_hours.unknown') : formatMoneyMinor(value.payable_total_minor) }}
     </p>
+    <p v-if="value.settlement_only" class="mt-2 text-neutral-500" data-test="minimum-settlement-only">{{ t('payroll.minimum.settlement_only') }}</p>
+    <PayrollMinimumWagePreviewView v-else-if="value.minimum_wage && !compact" :value="value.minimum_wage" />
+    <p v-else-if="value.minimum_wage && compact" class="mt-1 text-neutral-600">{{ t('payroll.minimum.top_up') }}: {{ value.minimum_wage.complete && value.minimum_wage.claim.ready && value.minimum_wage.claim.payable_minor !== null ? formatMoneyMinor(value.minimum_wage.claim.payable_minor) : t('payroll.worked_hours.unknown') }}</p>
     <template v-if="!compact">
       <div v-for="(claim, index) in value.claims" :key="`${claim.component_code}-${index}`" class="mt-3 border-t border-neutral-200 pt-2" data-test="hourly-preview-claim">
-        <p class="font-medium">{{ purposeLabel(claim.purpose) }} · <template v-if="claim.ready">{{ formatPayrollDuration(claim.duration_units) }} · {{ claim.payable_minor === null ? t('payroll.worked_hours.unknown') : formatMoneyMinor(claim.payable_minor) }}</template><template v-else>{{ t('payroll.hourly_preview.claim_incomplete') }}</template></p>
+        <p class="font-medium">{{ purposeLabel(claim.purpose) }} · <template v-if="claim.ready && (claim.purpose !== 'minimum_wage_top_up' || value.minimum_wage?.complete !== false)">{{ claim.duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(claim.duration_units) }} · {{ claim.payable_minor === null ? t('payroll.worked_hours.unknown') : formatMoneyMinor(claim.payable_minor) }}</template><template v-else>{{ t('payroll.hourly_preview.claim_incomplete') }}</template></p>
         <p v-for="(segment, segmentIndex) in claim.segments" :key="segmentIndex" class="mt-1 text-neutral-600" data-test="hourly-preview-segment">
           <template v-if="segment.date_from">{{ formatDate(segment.date_from) }}<template v-if="segment.date_to"> – {{ formatDate(segment.date_to) }}</template> · </template>
           <template v-else-if="segment.date || segment.granted_on">{{ formatDate((segment.date || segment.granted_on)!) }} · </template>
-          {{ formatPayrollDuration(segment.duration_units) }}
-          <template v-if="segment.hourly_rate_minor != null"> · {{ t('payroll.hourly_preview.rate', { amount: formatMoneyMinor(segment.hourly_rate_minor) }) }}</template>
+          <template v-if="segment.duration_units != null || segment.regular_worked_duration_units != null">{{ formatPayrollDuration(segment.duration_units ?? segment.regular_worked_duration_units ?? null) }}</template>
+          <template v-if="segment.minimum_hourly_minor != null"> · {{ t('payroll.minimum.hourly_rate', { amount: formatMoneyMinor(segment.minimum_hourly_minor) }) }}</template>
+          <template v-else-if="segment.hourly_rate_minor != null"> · {{ t('payroll.hourly_preview.rate', { amount: formatMoneyMinor(segment.hourly_rate_minor) }) }}</template>
           <template v-else-if="segment.monthly_gross_minor != null"> · {{ t('payroll.hourly_preview.monthly_part') }}</template>
         </p>
       </div>

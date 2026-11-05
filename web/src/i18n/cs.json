@@ -2372,6 +2372,45 @@
     "refresh_failed": "Rozsah se nepodařilo aktualizovat. Zkuste to prosím za chvíli."
   },
   "payroll": {
+    "minimum": {
+      "weekly_invalid": "Stanovenou týdenní dobu zadejte kladně v celých minutách a doplňte podklad.",
+      "monthly_invalid": "Měsíční posouzení je možné jen u pracovního poměru. Doplňte sjednání, doklad předchozího rozhodnutí a jeho platná data.",
+      "settlement_only": "Zde se vypořádávají dřívější nároky. Minimum za aktuálně odpracovanou dobu se v tomto náhledu neposuzuje.",
+      "top_up": "Doplatek do minimální mzdy",
+      "required": "Požadovaný příjem podle minima",
+      "eligible": "Započitatelná mzda / odměna",
+      "excluded": "Nezapočtené příjmy a zahrnuté příplatky",
+      "rounding_hint": "Doplatek určuje server z přesných podkladů. Zaokrouhlí jej nahoru na celé koruny, aby výsledný příjem neklesl pod zákonné minimum ani při jiném firemním zaokrouhlení.",
+      "incomplete": "Posouzení minima není úplné. Neznámá částka není nulový doplatek; doplňte uvedené podklady.",
+      "excluded_embedded": "Příplatek již zahrnutý v odměně se do minima nezapočítává.",
+      "excluded_component": "Tento příjem se do minimální mzdy nezapočítává.",
+      "embedded_amount": "Sjednaná zahrnutá část odměny",
+      "none_excluded": "Podle ověřených podkladů není v tomto rozpisu žádná vyloučená položka.",
+      "excluded_unknown": "Rozpis vyloučených položek není potvrzený; prázdný seznam není ověřená nula.",
+      "parts": "Podklady minima po účinných úsecích",
+      "hourly_rate": "Hodinové minimum {amount}/h",
+      "confirmed_zero": "Výslovně doložená nulová běžná doba je známý podklad; nejde o chybějící hodiny.",
+      "component_treatment": "Započtení do minimální mzdy",
+      "default_classification": "Výchozí posouzení serveru (neurčeno není zahrnuto)",
+      "reason": "Odůvodnění posouzení",
+      "classification_hint": "Posouzení minima je samostatné od daní a pojistného. Zahrnutí nebo vyloučení nejasné složky vyžaduje konkrétní odůvodnění; neurčená složka neumožní dokončit kontrolu minima.",
+      "immutable_classification": "Zákonné posouzení určuje server; touto volbou jej nelze přepsat.",
+      "classification_after_save": "Posouzení bude dostupné po načtení serverových pravidel nebo po uložení složky.",
+      "policy_title": "Posouzení minimální mzdy",
+      "policy_hint": "Hodinové posouzení je výchozí. Sjednaný kratší úvazek nesnižuje hodinové minimum. Jinou stanovenou týdenní dobu doložte samostatně; nepřebírá se ze sjednaného úvazku.",
+      "assessment": "Způsob posouzení minima",
+      "hourly": "Hodinové posouzení",
+      "monthly": "Předem doložené měsíční posouzení pracovního poměru",
+      "statutory_weekly": "Stanovená týdenní doba (hodiny)",
+      "weekly_hint": "Prázdné pole použije zákonný výchozí režim serveru. Jinou dobu zadejte jako H:MM nebo desetinné hodiny s přesností na celé minuty a doložte její podklad.",
+      "weekly_reference": "Podklad stanovené týdenní doby",
+      "monthly_hint": "Pouze pracovní poměr. Rozhodnutí musí být doložené před posuzovaným obdobím a platit pro celý posuzovaný úsek; měsíční posouzení se nevolí až podle výhodnějšího výsledku.",
+      "agreement_reference": "Označení sjednání způsobu posouzení",
+      "advance_reference": "Doklad předchozího rozhodnutí",
+      "decided_on": "Datum rozhodnutí",
+      "valid_from": "Platnost rozhodnutí od",
+      "valid_to": "Platnost rozhodnutí do (nepovinné)"
+    },
     "hourly_evidence": {
       "boundaries_changed": "Změnily se hranice sazeb nebo zásad. Původní podklad zůstává níže; pro novou revizi rozdělení výslovně doložte znovu. Hodiny se automaticky nerozdělují.",
       "readonly": "Podklady jsou v tomto období pouze ke čtení podle oprávnění a stavu mzdového běhu.",
@@ -2404,7 +2443,7 @@
       "exposure_invalid": "Doplňte kladnou dobu a kladný celý počet faktorů expozice."
     },
     "hourly_policy": {
-      "title": "Rozsah práce zahrnutý ve sjednané mzdě / odměně",
+      "title": "Zahrnutí práce ve mzdě / odměně a minimální mzda",
       "hint": "Pouze výslovně sjednané zahrnutí. Doložte rozsah a počáteční čerpání včetně potvrzené nuly; následné čerpání určuje server. Doby zadávejte jako H:MM nebo desetinné hodiny s nejvýše 3 místy.",
       "included_overtime": "Přesčas zahrnutý v dohodnuté mzdě podle smlouvy",
       "contract_reference": "Identifikace smlouvy o zahrnutí přesčasu",
@@ -2421,7 +2460,7 @@
       "agreement_reference": "Identifikace sjednání",
       "included_rate": "Zahrnutá částka za hodinu (Kč)",
       "add_premium": "Přidat zahrnutý příplatek dohody",
-      "invalid": "Doplňte rozsah, počáteční čerpání, datum a doklady zahrnutí ve mzdě / odměně."
+      "invalid": "Doplňte požadované rozsahy a podklady zahrnutí ve mzdě / odměně nebo posouzení minimální mzdy."
     },
     "hourly_preview": {
       "claim_incomplete": "Nárok není úplně doložen",
@@ -2442,6 +2481,7 @@
       "more_blockers": "Další důvody v panelu podkladů: {count}",
       "settlement_title": "Náhled historických hodinových nároků",
       "open_settlement": "Historické hodinové nároky",
+      "minimum_wage_top_up": "Doplatek do minimální mzdy",
       "title": "Náhled hodinové mzdy / odměny",
       "saved_evidence": "Ze současných uložených podkladů. Neuložené změny hodin tento náhled nemění.",
       "total": "Celkem po zaokrouhlení",
@@ -2451,7 +2491,7 @@
       "monthly_part": "Část krytá měsíční mzdou",
       "rate": "Sazba {amount}/h",
       "rounding_ceil": "Nároky se zaokrouhlují za měsíc a složku nahoru na celé koruny.",
-      "rounding_half_up": "Nároky se zaokrouhlují za měsíc a složku matematicky na celé koruny."
+      "rounding_half_up": "Běžné nároky se zaokrouhlují za měsíc a složku matematicky na celé koruny. Doplatek do minimální mzdy má samostatné zaokrouhlení nahoru."
     },
     "worked_hours": {
       "selected_source_hint": "Aktuální hodiny vycházejí z vybraného měsíčního souhrnu. Denní záznamy se k němu nepřičítají.",
@@ -4680,7 +4720,7 @@
       "search_empty": "V tomto měsíci žádný pracovní vztah neodpovídá hledání „{q}“.",
       "search_clear": "Zrušit hledání",
       "blockers": {
-        "hourly_remuneration_calculation_unsupported": "Náhled vypočítá mzdu z doložených hodin; schválení běhu zatím vyžaduje dokončení kontroly minimální mzdy a výkaznictví.",
+        "hourly_remuneration_calculation_unsupported": "Náhled vypočítá mzdu z doložených hodin včetně kontroly minimální mzdy; schválení běhu zatím vyžaduje dokončení výkaznictví.",
         "base_conflict": "Základní mzda je zadána duplicitně rychlým i jiným vstupem.",
         "base_managed_elsewhere": "Základní mzdu spravuje jiný měsíční nebo pravidelný vstup.",
         "base_recurring_manual_review": "Pravidelný předpis základní mzdy vyžaduje ruční kontrolu.",
@@ -5076,6 +5116,7 @@
         "health_participation_treatment": "ZP - účast",
         "health_treatment": "ZP - vyměřovací základ",
         "average_earning_treatment": "Průměrný výdělek",
+        "minimum_wage_reason": "Odůvodnění posouzení minima",
         "enforcement_treatment": "Exekuční srážky",
         "jmhz_treatment": "JMHZ",
         "statistics_treatment": "Statistika",
@@ -31548,6 +31589,7 @@
         "work_summary_source_corrupt": "Zdrojová evidence pracovního souhrnu není čitelná",
         "work_summary_hours_mismatch": "Hodiny ze směn neodpovídají potvrzeným hodinám pracovního souhrnu",
         "worked_time_not_derivable": "Evidované směny nelze sečíst bez posouzení (překryv, interval přes hranici měsíce nebo záporná doba)",
+        "hourly_average_minimum_missing": "Pro hodinový vztah chybí ověřené minimum nebo jednoznačně doložená stanovená týdenní doba. Opravte účinné podmínky a podklad režimu; chybějící dobu ani minimum nenahrazujte odhadem.",
         "hourly_overtime_duration_mismatch": "Přesnou odpracovanou dobu po zúčtování odloženého přesčasu nelze ověřit. Zkontrolujte podklad přesčasu, jeho zúčtované čtvrtletí a soulad s odpracovanými hodinami; dobu nedoplňujte odhadem.",
         "worked_time_not_whole_minutes": "Odpracovaná doba nevyšla v celých minutách; je nutné ruční posouzení",
         "worked_time_missing": "Rozhodné období nemá kladnou započitatelnou mzdu a odpracovanou dobu",
