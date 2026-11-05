@@ -18,6 +18,7 @@ final class WorkReportBillingService
     {
         $report = $this->reports->findByInvoice($invoiceId, $supplierId);
         if ($report === null || $report['billing_snapshot'] === null) return;
+        if ($report['billing_preview'] === null) throw new WorkReportBillingConflict('Cenové ujednání výkazu nelze vyhodnotit: ' . ($report['billing_error'] ?? 'neplatné nastavení') . ' Opravte výkaz a znovu přeneste rekapitulaci.');
         if ($report['billing_stale']) throw new WorkReportBillingConflict('Účtování výkazu se změnilo. Znovu přeneste rekapitulaci do faktury.');
         $actual = array_values(array_filter($this->invoices->itemsFor($invoiceId), static fn (array $item): bool => (int) ($item['linked_work_report_id'] ?? 0) === (int) $report['id'] && ($item['work_report_billing_key'] ?? null) !== null));
         $expected = $report['billing_preview']['items'];
@@ -40,6 +41,7 @@ final class WorkReportBillingService
         $report = $this->reports->findByInvoice($invoiceId, $supplierId);
         if ($report === null || $report['billing_snapshot'] === null) throw new \InvalidArgumentException('Výkaz nemá cenové ujednání.');
         $preview = $report['billing_preview'];
+        if ($preview === null) throw new \InvalidArgumentException((string) ($report['billing_error'] ?? 'Cenové ujednání výkazu je neplatné.'));
         if (!hash_equals($preview['fingerprint'], $fingerprint)) throw new \DomainException('Náhled je zastaralý. Obnovte jej před přenosem.');
         $storedItems = \MyInvoice\Service\Stock\InvoiceItemTracking::fromStored($this->invoices->itemsFor($invoiceId));
         if ($legacyItemId !== null) {

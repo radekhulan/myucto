@@ -220,13 +220,38 @@ final class WorkReportRepository
         return $items;
     }
 
+    /**
+     * Neplatné uložené ujednání (např. hodiny přidané mimo editor nad zahrnutý limit bez
+     * neomezeného pásma, změna měny faktury jinou cestou) nesmí shodit detail, PDF ani
+     * schvalování. Výkaz se pak vrací bez rekapitulace, jako zastaralý a s důvodem
+     * v `billing_error`; uložená data zůstávají beze změny a vystavení blokuje
+     * {@see \MyInvoice\Service\WorkReport\WorkReportBillingService::assertCurrent()}.
+     */
     private static function withBilling(array $report, array $storedItems = []): array
     {
         $snapshot = $report['billing_snapshot'] ?? null;
-        $report['billing_snapshot'] = is_string($snapshot) ? json_decode($snapshot, true, 512, JSON_THROW_ON_ERROR) : $snapshot;
         $report['billing_template_id'] = isset($report['billing_template_id']) ? (int) $report['billing_template_id'] : null;
         $report['billing_preview'] = null;
         $report['billing_stale'] = false;
+        $report['billing_error'] = null;
+        try {
+            $report['billing_snapshot'] = is_string($snapshot) ? json_decode($snapshot, true, 512, JSON_THROW_ON_ERROR) : $snapshot;
+            if ($report['billing_snapshot'] !== null && !is_array($report['billing_snapshot'])) throw new \InvalidArgumentException('Neplatné cenové ujednání.');
+            $report = self::billingPreview($report, $storedItems);
+        } catch (\InvalidArgumentException | \JsonException $e) {
+            // Prázdné pole drží výkaz v režimu ujednání, aby částečné uložení otisk nesmazalo.
+            if (!is_array($report['billing_snapshot'] ?? null)) $report['billing_snapshot'] = [];
+            $report['billing_preview'] = null;
+            $report['billing_stale'] = true;
+            $report['billing_error'] = $e instanceof \JsonException ? 'Uložené cenové ujednání výkazu je poškozené.' : $e->getMessage();
+            error_log(sprintf('Výkaz práce #%d: cenové ujednání nelze vyhodnotit (%s).', (int) ($report['id'] ?? 0), $report['billing_error']));
+        }
+        foreach (['billing_invoice_status', 'billing_currency', 'billing_gross', 'billing_reverse_charge', 'billing_project_name', 'billing_vat_rate_id', 'billing_vat_percent'] as $key) unset($report[$key]);
+        return $report;
+    }
+
+    private static function billingPreview(array $report, array $storedItems): array
+    {
         if ($report['billing_snapshot'] !== null && $report['billing_invoice_status'] !== 'draft') {
             $report['billing_preview'] = WorkReportBilling::fromInvoiceItems($report, $storedItems, (bool) $report['billing_gross']);
             $report['total_amount'] = $report['billing_preview']['total_amount'];
@@ -242,7 +267,6 @@ final class WorkReportRepository
             $report['total_hours'] = $report['billing_preview']['total_hours'];
             $report['billing_stale'] = $report['billing_preview']['fingerprint'] !== ($report['billing_transferred_fingerprint'] ?? null);
         }
-        foreach (['billing_invoice_status', 'billing_currency', 'billing_gross', 'billing_reverse_charge', 'billing_project_name', 'billing_vat_rate_id', 'billing_vat_percent'] as $key) unset($report[$key]);
         return $report;
     }
 
@@ -270,7 +294,7 @@ final class WorkReportRepository
             ]);
         if ($snapshot === null) return;
         $report = $this->findByInvoice($invoiceId, $supplierId);
-        if ($report !== null) {
+        if ($report !== null && $report['billing_preview'] !== null) {
             $amount = $report['billing_preview']['total_amount'];
             $this->db->pdo()->prepare('UPDATE work_reports SET total_amount = ? WHERE id = ?')->execute([$amount, $report['id']]);
         }

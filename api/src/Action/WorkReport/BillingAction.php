@@ -49,7 +49,8 @@ final class BillingAction
         $id = (int) $args['id'];
         if (!SupplierGuard::owns($request, $this->invoices->find($id))) return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
         $report = $this->reports->findByInvoice($id, SupplierGuard::currentId($request));
-        if (empty($report['billing_snapshot'])) return Json::error($response, 'validation_failed', 'Výkaz nemá cenové ujednání.', 400);
+        if ($report === null || $report['billing_snapshot'] === null) return Json::error($response, 'validation_failed', 'Výkaz nemá cenové ujednání.', 400);
+        if ($report['billing_preview'] === null) return Json::error($response, 'validation_failed', (string) $report['billing_error'], 400);
         return Json::ok($response, $report['billing_preview']);
     }
 

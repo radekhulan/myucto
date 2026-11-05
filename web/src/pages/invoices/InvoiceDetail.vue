@@ -3336,7 +3336,8 @@ useWindowRefresh(async () => {
         </header>
         <div v-if="workReport.billing_snapshot" class="px-5 py-3 space-y-3">
           <p v-if="workReport.billing_period" class="text-sm text-neutral-500">{{ t('work_report_billing.period') }}: {{ formatPeriod(workReport.billing_period) }}</p>
-          <p v-if="workReport.billing_stale" class="text-sm text-warning-600">{{ t('work_report_billing.stale') }}</p>
+          <p v-if="workReport.billing_error" class="text-sm text-warning-600" data-test="billing-error">{{ t('work_report_billing.invalid', { message: workReport.billing_error }) }}</p>
+          <p v-else-if="workReport.billing_stale" class="text-sm text-warning-600">{{ t('work_report_billing.stale') }}</p>
           <BillingRecap v-if="workReport.billing_preview" :preview="workReport.billing_preview" :currency="invoice.currency" :prices-include-vat="!!invoice.prices_include_vat" />
         </div>
         <!-- Desktop: tabulka -->

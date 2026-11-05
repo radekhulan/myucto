@@ -118,6 +118,19 @@ describe('InvoiceDetail: výkaz práce', () => {
     wrapper.unmount()
   })
 
+  it('neplatné ujednání ukáže důvod místo rekapitulace a výkaz zůstane čitelný', async () => {
+    m.workReport = { ...workReport(), billing_snapshot: { name: 'Servis', currency: 'EUR' }, billing_period: '2096-03', billing_stale: true,
+      billing_preview: null, billing_error: 'Měna cenového ujednání se liší od měny faktury.' }
+    const wrapper = await mountDetail()
+    const section = wrapper.find('#invoice-work-report')
+    expect(section.exists()).toBe(true)
+    expect(section.find('[data-test="billing-error"]').text()).toContain('work_report_billing.invalid')
+    expect(section.text()).not.toContain('work_report_billing.stale')
+    expect(wrapper.findComponent({ name: 'BillingRecap' }).exists()).toBe(false)
+    expect(section.text()).toContain('Analýza')
+    wrapper.unmount()
+  })
+
   it('oddělovač zůstane jen mezi zobrazenými údaji', async () => {
     m.workReport = workReport({ compact: false, date: true, hours: true, rate: false, amount: true })
     const wrapper = await mountDetail()

@@ -485,6 +485,34 @@ final class WorkReportBillingIntegrationTest extends TestCase
         $this->container->get(WorkReportBillingService::class)->assertCurrent($this->invoice, $this->supplier);
     }
 
+    public function testInvalidStoredBillingKeepsInvoiceReadableAndBlocksIssue(): void
+    {
+        $report = $this->setupReport();
+        $this->transfer($report);
+        $pdo = $this->db->pdo();
+        // Ujednání v jiné měně, než má faktura: vznikne jinou cestou než přes editor výkazu.
+        $pdo->prepare("UPDATE work_reports SET billing_snapshot = JSON_SET(billing_snapshot, '$.currency', 'EUR') WHERE id = ?")->execute([$report['id']]);
+        $stored = (string) $pdo->query('SELECT billing_snapshot FROM work_reports WHERE id = ' . (int) $report['id'])->fetchColumn();
+        $reports = $this->container->get(WorkReportRepository::class);
+        $loaded = $reports->findByInvoice($this->invoice, $this->supplier);
+        self::assertNotNull($loaded);
+        self::assertNull($loaded['billing_preview']);
+        self::assertTrue($loaded['billing_stale']);
+        self::assertStringContainsString('Měna', (string) $loaded['billing_error']);
+        self::assertSame('EUR', $loaded['billing_snapshot']['currency']);
+        self::assertArrayHasKey($this->invoice, $reports->findByInvoiceIds([$this->invoice], $this->supplier));
+        $public = \MyInvoice\Service\WorkReport\WorkReportDisplayOptions::forPublic($loaded);
+        self::assertTrue($public['billing_enabled']);
+        self::assertArrayNotHasKey('billing_error', $public);
+        try {
+            $this->container->get(WorkReportBillingService::class)->assertCurrent($this->invoice, $this->supplier);
+            self::fail('Neplatné ujednání musí vystavení zablokovat.');
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            self::assertStringContainsString('nelze vyhodnotit', $e->getMessage());
+        }
+        self::assertSame($stored, (string) $pdo->query('SELECT billing_snapshot FROM work_reports WHERE id = ' . (int) $report['id'])->fetchColumn());
+    }
+
     public function testReportChangedBetweenIssueChecksReturnsConflictWithoutNumberAllocation(): void
     {
         $report = $this->setupReport();

@@ -45,7 +45,7 @@ final class WorkReportDisplayOptions
         if (array_key_exists('billing_snapshot', $report)) {
             $report['billing_enabled'] = $report['billing_snapshot'] !== null;
             // Veřejnost potřebuje rekapitulaci, nikoli šablonu, sazby pásem a interní otisk.
-            unset($report['billing_snapshot'], $report['billing_template_id'], $report['billing_transferred_fingerprint'], $report['billing_stale']);
+            unset($report['billing_snapshot'], $report['billing_template_id'], $report['billing_transferred_fingerprint'], $report['billing_stale'], $report['billing_error']);
             if (is_array($report['billing_preview'] ?? null)) {
                 $preview = $report['billing_preview'];
                 $report['billing_preview'] = [
