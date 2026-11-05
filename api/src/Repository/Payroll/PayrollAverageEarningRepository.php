@@ -131,6 +131,7 @@ final class PayrollAverageEarningRepository
                 'worked_days' => $workedDays,
                 'worked_minutes' => $workedMinutes,
                 ...($workedDurationUnits === null ? [] : ['worked_duration_units' => $workedDurationUnits]),
+                ...(isset($result->trace['hourly_minimum_proof']) ? ['hourly_minimum_proof' => $result->trace['hourly_minimum_proof']] : []),
             ]), true);
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_average_earning_snapshots

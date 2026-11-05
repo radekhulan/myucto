@@ -54,7 +54,7 @@ final class PayrollHourlyWageCollisionGuard
         $stmt->execute([$supplierId, ...$ids, $periodStart]);
         $purposes = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $claim) $purposes[(int) $claim['employment_id']][(string) $claim['purpose']] = true;
-        $codes = ['ordinary_base' => 'MZDA_HODINOVA_ZAKLAD', 'achieved_overtime' => 'MZDA_DOSAZENA_PRESCAS',
+        $codes = ['ordinary_base' => 'MZDA_HODINOVA_ZAKLAD', 'achieved_overtime' => 'MZDA_DOSAZENA_PRESCAS', 'minimum_wage_top_up' => 'DOPLATEK_MINIMALNI_MZDA',
             'holiday_nonworked_compensation' => 'NAHRADA_MZDY_SVATEK', 'holiday_time_off_compensation' => 'NAHRADA_MZDY_VOLNO_ZA_SVATEK'];
         foreach (\MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind::all() as $kind) $codes['premium_' . $kind->value] = $kind->componentCode();
         foreach ($rows as $row) {

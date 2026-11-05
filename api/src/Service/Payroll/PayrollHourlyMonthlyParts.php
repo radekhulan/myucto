@@ -16,11 +16,13 @@ final class PayrollHourlyMonthlyParts
     public function __construct(private readonly Connection $db) {}
 
     /** @return array<int,array{parts:list<array<string,mixed>>,source:array<string,mixed>}> */
-    public function forMany(int $supplierId, string $periodStart, array $employments, array $termsByEmployment, bool $lock = false): array
+    public function forMany(int $supplierId, string $periodStart, array $employments, array $termsByEmployment, bool $lock = false, array $minimumFundIds = []): array
     {
         $end = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
         $mixed = [];
+        $minimumFunds = array_fill_keys($minimumFundIds, true);
         foreach ($termsByEmployment as $id => $terms) {
+            if (isset($minimumFunds[(int) $id])) $mixed[(int) $id] = $terms;
             foreach ($terms as $term) {
                 if (($term['remuneration_type'] ?? null) !== 'hourly') {
                     $mixed[(int) $id] = $terms;
@@ -83,7 +85,16 @@ final class PayrollHourlyMonthlyParts
                 $parts[] = ['term_id' => (int) $term['id'], 'date_from' => $from, 'date_to' => $to,
                     'fund_duration_units' => PayrollDuration::fromMinutes($full), 'retained_duration_units' => PayrollDuration::fromMinutes($retained)];
             }
-            $result[$id] = ['parts' => $parts, 'source' => ['status' => 'supported', 'calendar' => $calendar, 'parts' => $parts]];
+            $weeklyPatternMinutes = 0;
+            for ($weekday = 1; $weekday <= 7; ++$weekday) $weeklyPatternMinutes += (int) ($pattern[(string) $weekday] ?? $pattern[$weekday] ?? 0);
+            $minimumFundUsable = true;
+            foreach ($terms as $term) {
+                try {
+                    if (!isset($term['weekly_hours']) || PayrollDuration::parseHours((string) $term['weekly_hours']) !== PayrollDuration::fromMinutes($weeklyPatternMinutes)) $minimumFundUsable = false;
+                } catch (\InvalidArgumentException|\OverflowException) { $minimumFundUsable = false; }
+            }
+            $result[$id] = ['parts' => $parts, 'source' => ['status' => 'supported', 'calendar' => $calendar, 'parts' => $parts,
+                'full_fund_duration_units' => PayrollDuration::fromMinutes($full), 'minimum_fund_usable' => $minimumFundUsable]];
         }
         return $result;
     }

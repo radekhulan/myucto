@@ -198,6 +198,59 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertSame(20000, (int) $term->fetchColumn());
     }
 
+    public function testHourlyAverageCreationAndBulkProposalUseDocumentedStatutoryWeek(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis,
+             probable_hourly_earning_minor, probable_earning_rationale)
+            VALUES (?, ?, "2025-01-01", "2025-01-01", 37.5, 10000, "hourly", 13000, "contract", "Syntetická smlouva", 13000, "Individuální posouzení")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $suggestion = $this->suggest(2026, 2);
+        self::assertTrue($suggestion['ready'], json_encode($suggestion['blockers']));
+        self::assertSame(14340, $suggestion['probable_hourly_minor']);
+        self::assertSame(2250, $suggestion['hourly_minimum_proof']['stated_weekly_minutes']);
+        $created = $this->call('createAutomaticAverages', 'POST', ['year' => 2026, 'quarter' => 2,
+            'items' => [['employment_id' => $this->employmentId, 'input_version' => $suggestion['input_version']]]]);
+        self::assertSame(201, $created['status'], json_encode($created['body']));
+        self::assertSame(14340, $created['body']['averages'][0]['average_hourly_minor']);
+        self::assertSame(14340, $created['body']['averages'][0]['input_trace']['hourly_minimum_proof']['minimum_hourly_minor']);
+        $body = [...$this->averageBody(2026, 3), 'gross_earnings_minor' => 1000000];
+        $manual = $this->call('createAverage', 'POST', $body);
+        self::assertSame(201, $manual['status'], json_encode($manual['body']));
+        self::assertSame(14340, $manual['body']['snapshot']['average_hourly_minor']);
+        self::assertSame(14340, $manual['body']['snapshot']['input_trace']['minimum_wage_hourly_minor']);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET weekly_hours = NULL WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(422, $this->call('createAverage', 'POST', [...$this->averageBody(2026, 4), 'gross_earnings_minor' => 1000000])['status']);
+    }
+
+    public function testHourlyAverageFloorResolverUsesConstantQueriesAndTenantScope(): void
+    {
+        $ids = [$this->employmentId];
+        foreach (['SYN-FLOOR-B', 'SYN-FLOOR-C'] as $code) {
+            $this->db->pdo()->prepare('INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, start_date)
+                VALUES (?, ?, ?, "employment", "active", "2025-01-01")')->execute([$this->supplierId, $this->employeeId, $code]);
+            $ids[] = (int) $this->db->pdo()->lastInsertId();
+        }
+        foreach ($ids as $id) $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2025-01-01", "2025-01-01", 37.5, 10000, "hourly", 13000, "contract", "Syntetická smlouva")')->execute([$this->supplierId, $id]);
+        $resolver = new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db);
+        $questions = fn(): int => (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch()['Value'];
+        $before = $questions();
+        $one = $resolver->forMany($this->supplierId, [$ids[0]], '2026-07-01', '2026-07-31');
+        $single = $questions() - $before;
+        $before = $questions();
+        $many = $resolver->forMany($this->supplierId, $ids, '2026-07-01', '2026-07-31');
+        $batch = $questions() - $before;
+        self::assertSame($single, $batch);
+        self::assertLessThanOrEqual(12, $batch);
+        self::assertSame($one[$ids[0]], $many[$ids[0]]);
+        $other = $this->createIsolatedSupplier($this->db->pdo(), $this->supplierId);
+        self::assertSame(array_fill_keys($ids, []), $resolver->forMany($other, $ids, '2026-07-01', '2026-07-31'));
+    }
+
     public function testMissingMonthSuppressesTheWholeProposal(): void
     {
         $this->insertClosedRun('2026-01-01');

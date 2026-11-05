@@ -90,12 +90,64 @@ final class PayrollHourlyEntitlementContextLoaderTest extends TestCase
         $batchCount = $this->questions() - $before;
         self::assertCount(4, $batch);
         self::assertSame($singleCount, $batchCount);
-        self::assertLessThanOrEqual(14, $batchCount);
+        self::assertLessThanOrEqual(15, $batchCount);
         self::assertSame($single[$ids[0]], $batch[$ids[0]]);
         $other = $this->createIsolatedSupplier($this->db->pdo(), $this->supplier);
         $foreign = $loader->forMany($other, '2026-06-01', [], $terms, $sources);
         self::assertNull($foreign[$ids[0]]['evidence_source']);
         self::assertSame([], $foreign[$ids[0]]['policy_source']);
+    }
+
+    public function testAgreementHoursDoNotDefineStatutoryWeekAndConflictingEmploymentOverrideFailsClosed(): void
+    {
+        $dpp = $this->employment();
+        $dpc = $this->employment();
+        $hpp = $this->employment();
+        $pdo = $this->db->pdo();
+        $update = $pdo->prepare('UPDATE payroll_employment_terms SET weekly_hours = ?, workload_basis_points = ? WHERE supplier_id = ? AND employment_id = ?');
+        $update->execute([10, 10000, $this->supplier, $dpp]);
+        $update->execute([20, 5000, $this->supplier, $dpc]);
+        $update->execute([37.5, 10000, $this->supplier, $hpp]);
+        $policy = json_encode(['minimum_wage' => ['assessment' => 'hourly', 'statutory_weekly_minutes' => 2400,
+            'statutory_weekly_reference' => 'Syntetický rozvrh']], JSON_THROW_ON_ERROR);
+        $pdo->prepare('INSERT INTO payroll_employment_surcharge_policies (supplier_id, employment_id, valid_from, agreement_reference, hourly_terms_json) VALUES (?, ?, "2026-06-01", "Syntetické podmínky", ?)')->execute([$this->supplier, $hpp, $policy]);
+        $ids = [$dpp, $dpc, $hpp];
+        $terms = (new PayrollRunSnapshotBatchLoader($this->db))->hourlyRemunerationTerms($this->supplier, $ids, '2026-06-01', '2026-06-30');
+        $sources = (new PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplier, $ids, '2026-06-01');
+        $contexts = (new PayrollHourlyEntitlementContextLoader($this->db))->forMany($this->supplier, '2026-06-01', [
+            ['employment_id' => $dpp, 'relation_type' => 'dpp'], ['employment_id' => $dpc, 'relation_type' => 'dpc'],
+            ['employment_id' => $hpp, 'relation_type' => 'employment']], $terms, $sources);
+        foreach ([$dpp, $dpc] as $id) {
+            self::assertSame(2400, $contexts[$id]['minimum_floor_segments'][0]['stated_weekly_minutes']);
+            self::assertSame(13440, $contexts[$id]['minimum_floor_segments'][0]['minimum_hourly_minor']);
+        }
+        self::assertTrue($contexts[$hpp]['minimum_floor_segments'][0]['weekly_hours_conflict']);
+        self::assertNull($contexts[$hpp]['minimum_floor_segments'][0]['minimum_hourly_minor']);
+    }
+
+    public function testPreviewCalculatesMinimumTopUpFromConfirmed160Hours(): void
+    {
+        $id = $this->employment();
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET hourly_rate_minor = 13000, weekly_hours = 40, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplier, $id]);
+        $month = $this->time->monthState($this->supplier, $id, '2026-06-01');
+        $this->time->reopenMonth($this->supplier, $id, '2026-06-01', (int) $month['row_version'], 'Oprava syntetických hodin', $this->user);
+        $month = $this->time->monthState($this->supplier, $id, '2026-06-01');
+        $this->time->saveManualSummary($this->supplier, $id, '2026-06-01', (int) $month['row_version'], 'Doložených 160 hodin', false,
+            [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'worked_duration_units' => 480000, 'overtime_duration_units' => 0, 'worked_days' => 20]], $this->user);
+        $month = $this->time->monthState($this->supplier, $id, '2026-06-01');
+        $this->time->approveMonth($this->supplier, $id, '2026-06-01', (int) $month['row_version'], null, $this->user);
+        $source = (new PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplier, [$id], '2026-06-01')[$id];
+        $body = ['row_version' => 1, 'reason' => 'Výslovně bez dalších nároků', 'work_source_hash' => PayrollHourlyEvidenceRepository::bindingHash($source),
+            'premium_segments' => [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []]],
+            'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => []];
+        (new PayrollHourlyEvidenceRepository($this->db))->save($this->supplier, $id, '2026-06-01', $body, $this->user, static fn() => null);
+        $rows = [['employment_id' => $id, 'relation_type' => 'employment', 'start_date' => '2026-01-01', 'end_date' => null]];
+        $preview = (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->forMany($this->supplier, '2026-06-01', $rows)[$id];
+        self::assertTrue($preview['minimum_wage']['complete'], json_encode($preview['minimum_wage']['blockers']));
+        self::assertSame(70400, $preview['minimum_wage']['claim']['payable_minor']);
+        self::assertSame(70400, array_values(array_filter($preview['claims'], static fn(array $claim): bool => $claim['purpose'] === 'minimum_wage_top_up'))[0]['payable_minor']);
+        self::assertSame(2150400, $preview['payable_total_minor']);
     }
 
     private function context(int $id): array

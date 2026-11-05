@@ -78,7 +78,32 @@ final class PayrollHourlyAgreementTerms
                 'opening_used_duration_units' => self::integer($premium, 'opening_used_duration_units', 0, $scope),
                 'opening_as_of' => $openingDate, 'opening_reference' => self::text($premium['opening_reference'] ?? null)];
         }
-        return ['included_overtime' => $overtime, 'included_agreement_premiums' => $normalized];
+        $result = ['included_overtime' => $overtime, 'included_agreement_premiums' => $normalized];
+        if (array_key_exists('minimum_wage', $input) && $input['minimum_wage'] !== null) {
+            $minimum = $input['minimum_wage'];
+            if (!is_array($minimum) || !in_array($minimum['assessment'] ?? null, ['hourly', 'monthly'], true)) {
+                throw new \InvalidArgumentException('Zvolte hodinové nebo doložené měsíční posouzení minimální mzdy.');
+            }
+            $assessment = $minimum['assessment'];
+            $reference = self::text($minimum['agreement_reference'] ?? null, false);
+            $weekly = $minimum['statutory_weekly_minutes'] ?? null;
+            $weeklyReference = self::text($minimum['statutory_weekly_reference'] ?? null, $weekly !== null);
+            if ($weekly !== null) $weekly = self::integer($minimum, 'statutory_weekly_minutes', 1, 2400);
+            $proof = $minimum['advance_proof'] ?? null;
+            if ($assessment === 'monthly') {
+                if (!is_array($proof)) throw new \InvalidArgumentException('Měsíční posouzení minimální mzdy vyžaduje předem doložené rozhodnutí.');
+                $decidedOn = self::date($proof['decided_on'] ?? null);
+                $from = self::date($proof['valid_from'] ?? null);
+                $to = ($proof['valid_to'] ?? null) === null ? null : self::date($proof['valid_to']);
+                if ($decidedOn > $from || ($to !== null && $to < $from)) throw new \InvalidArgumentException('Rozhodnutí o posouzení musí předcházet platnosti a mít platné období.');
+                $proof = ['reference' => self::text($proof['reference'] ?? null), 'decided_on' => $decidedOn, 'valid_from' => $from, 'valid_to' => $to];
+            } elseif ($proof !== null) {
+                throw new \InvalidArgumentException('Rozhodnutí pro měsíční posouzení nelze uvést u hodinového posouzení.');
+            }
+            $result['minimum_wage'] = ['assessment' => $assessment, 'agreement_reference' => $reference,
+                'statutory_weekly_minutes' => $weekly, 'statutory_weekly_reference' => $weeklyReference, 'advance_proof' => $proof];
+        }
+        return $result;
     }
 
     /** @param array<string,mixed> $input */

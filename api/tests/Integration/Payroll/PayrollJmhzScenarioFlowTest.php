@@ -62,6 +62,22 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         $this->tearDownPayrollFullFlow();
     }
 
+    public function testHourlyVacationUsesCurrentStatutoryAverageFloor(): void
+    {
+        $person = $this->hire('Syntetická Dovolená', 'female', '1988-04-12');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $person['employment_id']]);
+        $pdo->prepare('UPDATE payroll_average_earning_snapshots SET average_hourly_minor = 13440 WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $person['average_id']]);
+        $this->createApprovedAbsence($person['employment_id'], 'vacation', '2026-07-20', '2026-07-21', $person['average_id']);
+        $stmt = $pdo->prepare('SELECT input.amount_minor, input.source_snapshot_json FROM payroll_inputs input JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id WHERE input.supplier_id = ? AND input.employment_id = ? AND component.code = "NAHRADA_MZDY_DOVOLENA"');
+        $stmt->execute([$this->supplierId, $person['employment_id']]);
+        $input = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(229500, (int) $input['amount_minor']);
+        $trace = json_decode((string) $input['source_snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(14340, $trace['hourly_average_floor'][0]['average_hourly_minor']);
+        self::assertCount(2, $trace['hourly_average_segments']);
+    }
+
     public function testFullTimeEmployeeWithVacation(): void
     {
         $person = $this->hire('Eva Dovolená', 'female', '1988-04-12');

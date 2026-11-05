@@ -86,6 +86,52 @@ final class PayrollSicknessCompensationChainTest extends TestCase
         }
     }
 
+    public function testHourlySicknessUsesCurrentMinimumPerDayWithoutChangingApprovedAverage(): void
+    {
+        $averageId = $this->createApprovedAverage(2026, 2, 1_600_000);
+        // Průměr vznikl před změnou podmínek; nesmí se přepsat v jeho revizi.
+        $stmt = $this->db->pdo()->prepare('SELECT average_hourly_minor FROM payroll_average_earning_snapshots WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $averageId]);
+        self::assertSame(13440, (int) $stmt->fetchColumn());
+        $term = $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, effective_to, planned_start_on,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis,
+             weekly_hours, workload_basis_points)
+            VALUES (?, ?, ?, ?, "2025-10-01", "hourly", 13000, "contract", "Syntetické hodinové podmínky", ?, 10000)');
+        $term->execute([$this->supplierId, $this->employmentId, '2026-04-01', '2026-06-08', '40.00']);
+        $term->execute([$this->supplierId, $this->employmentId, '2026-06-09', null, '37.50']);
+        $this->publishWeekdayShifts('2026-06-08', '2026-06-09');
+        $approved = $this->approve($this->createDpn('2026-06-08', '2026-06-09', $averageId));
+        self::assertSame([13440, 14340], array_column($approved['calculation']['segments'], 'hourly_average_minor'));
+        // 8 × (134,40 + 143,40) × 0,90 × 0,60 = 1 200,096 Kč → 1 201 Kč.
+        self::assertSame(120100, $approved['calculation']['compensation_minor']);
+        self::assertSame(120100, array_sum(array_column($approved['calculation']['segments'], 'compensation_minor')));
+        $first = $approved['calculation']['segments'][0];
+        $second = $approved['calculation']['segments'][1];
+        self::assertGreaterThan($first['compensation_minor'], $second['compensation_minor']);
+        self::assertSame(14340, $second['trace']['hourly_minimum_proof']['minimum_hourly_minor']);
+        $stmt->execute([$this->supplierId, $averageId]);
+        self::assertSame(13440, (int) $stmt->fetchColumn());
+    }
+
+    public function testUnknownHourlyMinimumRejectsSicknessApprovalWithoutPartialWrites(): void
+    {
+        $averageId = $this->createApprovedAverage(2026, 2, 1_600_000);
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type,
+             hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-04-01", "2025-10-01", "hourly", 13000, "contract", "Syntetické podmínky")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->publishWeekdayShifts('2026-06-08', '2026-06-08');
+        $absence = $this->createDpn('2026-06-08', '2026-06-08', $averageId);
+        $response = $this->decide($absence);
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('requested', $this->absences->find($this->supplierId, (int) $absence['id'])['status']);
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_sickness_events WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
     /**
      * DPN-01: neschopnost 8. až 26. 6. 2026 zapsaná po částech (8.–19., 20.–22., 23.–26.).
      * Okno § 192 ZP končí 21. 6. Druhá část z něj má jen víkend 20.–21. 6., třetí nic.

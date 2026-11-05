@@ -23,6 +23,8 @@ final class PayrollComponentValidator
      *   enforcement_treatment:string,
      *   jmhz_treatment:string,
      *   statistics_treatment:string,
+     *   minimum_wage_treatment?:?string,
+     *   minimum_wage_reason?:?string,
      *   accounting_debit_code:?string,
      *   accounting_credit_code:?string,
      *   annual_limit_minor:?int,
@@ -137,7 +139,7 @@ final class PayrollComponentValidator
             );
         }
 
-        return [
+        $data = [
             'code' => $definition->code,
             'name' => $definition->name,
             'component_kind' => $definition->kind->value,
@@ -163,6 +165,20 @@ final class PayrollComponentValidator
             'valid_to' => $validTo,
             'is_active' => $this->bool($input['is_active'] ?? true, 'is_active'),
         ];
+        // Vynechaná nová pole při úpravě zachovají dosavadní posouzení verze.
+        if (array_key_exists('minimum_wage_treatment', $input)) {
+            $data['minimum_wage_treatment'] = $this->optionalEnum(
+                PayrollComponentInclusion::class,
+                $input['minimum_wage_treatment'],
+                'minimum_wage_treatment',
+            )?->value;
+        }
+        if (array_key_exists('minimum_wage_reason', $input)) {
+            $reason = $input['minimum_wage_reason'];
+            $data['minimum_wage_reason'] = $reason === null || $reason === ''
+                ? null : $this->requiredString($reason, 'minimum_wage_reason', 500);
+        }
+        return $data;
     }
 
     private function code(mixed $value): string

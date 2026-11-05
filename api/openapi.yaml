@@ -27802,7 +27802,7 @@ paths:
     get:
       tags: [Payroll]
       summary: Mzdové složky
-      description: Vrací aktivní mzdové složky použitelné při zadávání měsíčních vstupů.
+      description: Vrací mzdové složky a pravidla jejich započítání do minimální mzdy. Daňové a pojistné zařazení není podkladem pro toto posouzení.
       parameters:
         - { name: effective_on, in: query, schema: { type: string, format: date } }
       responses:
@@ -27812,8 +27812,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [components]
+                required: [components, minimum_wage_classification]
                 properties:
+                  minimum_wage_classification:
+                    $ref: '#/components/schemas/PayrollComponentMinimumWageClassification'
                   components:
                     type: array
                     items: { $ref: '#/components/schemas/PayrollComponent' }
@@ -27831,6 +27833,9 @@ paths:
         skupinách. S `period_to` se místo jednoho měsíce vypíše rozsah měsíců
         `period`–`period_to` včetně; `group_by=period` ho svine na řádek na
         měsíc, od nejnovějšího.
+        Automatické hodinové vstupy a doložená hodinová pohotovost obsahují
+        neměnný JSON podkladu v `source_snapshot_json`, včetně použitého minima
+        a zaokrouhlení, pokud se na výpočet vztahují.
       parameters:
         - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: period_to, in: query, description: 'Poslední měsíc rozsahu YYYY-MM (včetně). Bez něj se vypisuje jen měsíc `period`.', schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
@@ -43723,6 +43728,38 @@ components:
         value_kind: { type: string }
         is_active: { type: boolean }
         row_version: { type: integer }
+        minimum_wage_treatment:
+          type: [string, "null"]
+          enum: [included, excluded, manual_review, null]
+          description: Výslovné posouzení této verze složky; null používá zákonné zařazení nebo vyžádá ruční posouzení nejednoznačného druhu.
+        minimum_wage_reason:
+          type: [string, "null"]
+          maxLength: 500
+          description: Odůvodnění vlastního započítání nebo vyloučení nejednoznačné složky.
+        effective_minimum_wage_treatment:
+          type: string
+          readOnly: true
+          enum: [included, excluded, manual_review]
+          description: Výsledné posouzení pro minimum. U nejednoznačné složky bez odůvodnění je manual_review.
+        minimum_wage_treatment_editable:
+          type: boolean
+          readOnly: true
+          description: Umožňuje vlastní posouzení právního titulu. Použitou verzi složky nelze měnit; změna vyžaduje novou účinnou verzi.
+
+    PayrollComponentMinimumWageClassification:
+      type: object
+      readOnly: true
+      required: [non_monetary, codes, kinds, fallback]
+      description: Pravidla pro nový záznam nebo změnu druhu. Přednost má nepeněžní plnění, poté přesný kód, druh a nakonec fallback. Vlastní posouzení je možné jen při výchozím manual_review.
+      properties:
+        non_monetary: { type: string, enum: [excluded] }
+        codes:
+          type: object
+          additionalProperties: { type: string, enum: [included, excluded, manual_review] }
+        kinds:
+          type: object
+          additionalProperties: { type: string, enum: [included, excluded, manual_review] }
+        fallback: { type: string, enum: [manual_review] }
 
     PayrollInputWrite:
       type: object
@@ -43733,7 +43770,7 @@ components:
         component_id:
           type: integer
           format: int64
-          description: Automatické složky MZDA_HODINOVA_ZAKLAD, MZDA_DOSAZENA_PRESCAS a NAHRADA_MZDY_VOLNO_ZA_SVATEK nelze zadat ručně. Hotová částka druhu hourly_wage nesmí souběžně hradit práci již pokrytou automatickým hodinovým výpočtem.
+          description: Automatické složky MZDA_HODINOVA_ZAKLAD, MZDA_DOSAZENA_PRESCAS, DOPLATEK_MINIMALNI_MZDA a NAHRADA_MZDY_VOLNO_ZA_SVATEK nelze zadat ručně. Hotová částka druhu hourly_wage nesmí souběžně hradit práci již pokrytou automatickým hodinovým výpočtem.
         period: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
         source_period: { type: [string, "null"], pattern: '^[0-9]{4}-[0-9]{2}$' }
         amount_minor: { type: integer }
@@ -43742,7 +43779,7 @@ components:
         external_id:
           type: [string, "null"]
           description: >-
-            Externí identifikátor vstupu. Prefix hourly-wage: je vyhrazený automatickému hodinovému výpočtu a běžný zápis jej odmítne.
+            Externí identifikátor vstupu. Prefixy hourly-wage:, standby: a termination: jsou vyhrazené automatickým výpočtům a běžný zápis je odmítne.
 
     PayrollInput:
       allOf:
@@ -43757,6 +43794,11 @@ components:
             component_name: { type: string }
             status: { type: string, enum: [draft, approved, locked, cancelled] }
             row_version: { type: integer, minimum: 1 }
+            source_snapshot_json:
+              type: [string, "null"]
+              readOnly: true
+              contentMediaType: application/json
+              description: Neměnný JSON podkladu automatického vstupu. Hodinové nároky obsahují přesné hodiny, sazby, zaokrouhlení a posouzení minima; náhrady a pohotovost dokládají případné zvýšení schváleného průměru podle účinného minima. Historické snímky se zpětně nedoplňují.
 
     PayrollInputsPage:
       type: object
@@ -44160,6 +44202,29 @@ components:
         rationale: { type: [string, "null"] }
         status: { type: string, enum: [manual_review, approved, superseded] }
         row_version: { type: integer, minimum: 1 }
+        input_trace:
+          type: object
+          additionalProperties: true
+          description: Neměnná stopa výpočtu; hodinové podmínky mohou přidat doložení minima použitého pro průměr. Historické měsíční stopy se nedoplňují.
+          properties:
+            hourly_minimum_proof:
+              $ref: '#/components/schemas/PayrollHourlyAverageMinimumProof'
+
+    PayrollHourlyAverageMinimumProof:
+      type: object
+      readOnly: true
+      additionalProperties: true
+      properties:
+        application_date: { type: string, format: date }
+        date_from: { type: string, format: date }
+        date_to: { type: string, format: date }
+        term_id: { type: integer, format: int64 }
+        term_row_version: { type: integer }
+        stated_weekly_minutes: { type: integer, minimum: 1, maximum: 2400 }
+        minimum_hourly_minor: { type: integer, minimum: 1 }
+        raw_average_hourly_minor: { type: integer, minimum: 1 }
+        average_hourly_minor: { type: integer, minimum: 1 }
+        ruleset_id: { type: string }
 
     PayrollAbsence:
       allOf:

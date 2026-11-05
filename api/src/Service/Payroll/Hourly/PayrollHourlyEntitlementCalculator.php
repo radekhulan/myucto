@@ -81,7 +81,7 @@ final class PayrollHourlyEntitlementCalculator
                         if ($mode === 'time_off') {
                             $this->overtimeTimeOff($segment, $policy, $extra);
                         } elseif ($extra > $covered) {
-                            $amount = $this->premiumAmount(PayrollSurchargeKind::Overtime, $policy, $extra - $covered);
+                            $amount = $this->premiumAmount(PayrollSurchargeKind::Overtime, $policy, $extra - $covered, segment: $segment);
                             $this->add('premium_overtime', $amount, $extra - $covered, $this->segmentTrace($segment, $policy));
                         }
                     });
@@ -111,7 +111,7 @@ final class PayrollHourlyEntitlementCalculator
                             $this->holidayWork($segment, $row, $policy, $units);
                             continue;
                         }
-                        $amount = $this->premiumAmount($kind, $policy, $units, $factors);
+                        $amount = $this->premiumAmount($kind, $policy, $units, $factors, $segment);
                         $deduction = $this->includedAgreementPremium($segment, $policy, $kind, $units);
                         $amount = $amount->compare($deduction) > 0 ? $amount->minus($deduction) : new PayrollExactFraction(0);
                         $this->add($purpose, $amount, $units, [...$this->segmentTrace($segment, $policy), 'factors' => $factors]);
@@ -192,7 +192,7 @@ final class PayrollHourlyEntitlementCalculator
         return $covered;
     }
 
-    private function premiumAmount(PayrollSurchargeKind $kind, array $policy, int $units, int $factors = 1): PayrollExactFraction
+    private function premiumAmount(PayrollSurchargeKind $kind, array $policy, int $units, int $factors = 1, ?array $segment = null): PayrollExactFraction
     {
         self::reference((string) ($this->evidence['ruleset']['id'] ?? ''));
         self::hash($this->evidence['ruleset']['content_sha256'] ?? null);
@@ -208,7 +208,7 @@ final class PayrollHourlyEntitlementCalculator
         if ($fixed !== null && $kind->allowsLowerAgreedRate()) {
             return PayrollExactFraction::product([self::units($fixed), $units, $factors], [PayrollDuration::UNITS_PER_HOUR]);
         }
-        $basisMinor = $basis === 'average' ? $this->average() : self::positive($this->evidence['minimum_hourly_minor'] ?? null);
+        $basisMinor = $basis === 'average' ? $this->average($segment) : $this->minimumFloor($segment);
         $statutoryHourly = PayrollExactFraction::product([$basisMinor, $statutory], [10000]);
         if ($fixed !== null) {
             $hourly = new PayrollExactFraction(self::units($fixed));
@@ -227,7 +227,7 @@ final class PayrollHourlyEntitlementCalculator
         $mode = $policy['holiday_mode'] ?? null;
         if ($mode === 'surcharge') {
             self::reference($policy['holiday_surcharge_agreement_reference'] ?? null);
-            $this->add('premium_holiday', $this->premiumAmount(PayrollSurchargeKind::Holiday, $policy, $units), $units, $this->segmentTrace($segment, $policy));
+            $this->add('premium_holiday', $this->premiumAmount(PayrollSurchargeKind::Holiday, $policy, $units, segment: $segment), $units, $this->segmentTrace($segment, $policy));
             return;
         }
         if ($mode !== 'time_off') throw new PayrollHourlyCalculationException('hourly_holiday_policy_missing', 'Doložte náhradní volno za svátek nebo dohodu o příplatku.');
@@ -259,7 +259,7 @@ final class PayrollHourlyEntitlementCalculator
             if ($allocated > $day['duration_units']) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_overdrawn', 'Čerpání přesčasového volna přesahuje doložený přesčas.');
             $remaining = $day['duration_units'] - $allocated;
             if ($due <= $this->evidence['as_of'] && $remaining > 0) {
-                $this->add('premium_overtime', $this->premiumAmount(PayrollSurchargeKind::Overtime, $policy, $remaining), $remaining, [...$this->segmentTrace($segment, $policy), 'work_date' => $day['date'], 'time_off_due_on' => $due]);
+                $this->add('premium_overtime', $this->premiumAmount(PayrollSurchargeKind::Overtime, $policy, $remaining, segment: $segment), $remaining, [...$this->segmentTrace($segment, $policy), 'work_date' => $day['date'], 'time_off_due_on' => $due]);
             } else {
                 $this->entitlements[] = ['kind' => 'overtime_time_off_accrual', 'purpose' => 'premium_overtime',
                     'work_date' => $day['date'], 'duration_units' => $day['duration_units'], 'allocated_duration_units' => $allocated,
@@ -335,7 +335,7 @@ final class PayrollHourlyEntitlementCalculator
             $term = $this->termOn($date);
             if (($term['remuneration_type'] ?? null) !== 'hourly') throw new PayrollHourlyCalculationException('hourly_holiday_already_in_monthly_wage', 'Svátek krytý měsíční mzdou nelze zaplatit ještě hodinovou náhradou.');
             $units = $this->scheduleCapacity($row, $date);
-            $this->add('holiday_nonworked_compensation', PayrollExactFraction::product([$this->average(), $units], [PayrollDuration::UNITS_PER_HOUR]), $units, $row);
+            $this->add('holiday_nonworked_compensation', PayrollExactFraction::product([$this->average(['date_from' => $date, 'date_to' => $date]), $units], [PayrollDuration::UNITS_PER_HOUR]), $units, $row);
         }
     }
 
@@ -360,7 +360,8 @@ final class PayrollHourlyEntitlementCalculator
             $used[$id] = PayrollDuration::add($used[$id] ?? 0, $units);
             if ($used[$id] > $available) throw new PayrollHourlyCalculationException('hourly_holiday_time_off_overdrawn', 'Čerpání placeného volna přesahuje zbývající nárok za svátek.');
             self::positive($row['average_snapshot_id'] ?? null);
-            $rate = self::positive($row['average_hourly_minor'] ?? null);
+            $rate = self::positive($row['raw_average_hourly_minor'] ?? $row['average_hourly_minor'] ?? null);
+            if (array_key_exists('minimum_floor_segments', $this->evidence)) $rate = max($rate, $this->minimumFloor(['date_from' => $date, 'date_to' => $date]));
             $this->add('holiday_time_off_compensation', PayrollExactFraction::product([$rate, $units], [PayrollDuration::UNITS_PER_HOUR]), $units, $row);
             $this->entitlements[] = ['kind' => 'holiday_time_off_allocation', 'purpose' => 'holiday_time_off_compensation',
                 'entitlement_id' => $id, 'entitlement_revision' => $row['entitlement_revision'], 'work_date' => $workDate,
@@ -423,11 +424,29 @@ final class PayrollHourlyEntitlementCalculator
         return $rows;
     }
 
-    private function average(): int
+    private function average(?array $segment = null): int
     {
         self::positive($this->evidence['average_earning']['id'] ?? null);
         self::positive($this->evidence['average_earning']['revision_no'] ?? null);
-        return self::positive($this->evidence['average_earning']['hourly_minor'] ?? null);
+        // Historický přesčas si níže vloží svůj průměr i minimum ke dni vypořádání.
+        if ($segment === null) return self::positive($this->evidence['average_earning']['hourly_minor'] ?? null);
+        $raw = self::positive($this->evidence['average_earning']['raw_hourly_minor'] ?? $this->evidence['average_earning']['hourly_minor'] ?? null);
+        return array_key_exists('minimum_floor_segments', $this->evidence) ? max($raw, $this->minimumFloor($segment)) : $raw;
+    }
+
+    private function minimumFloor(?array $segment): int
+    {
+        // Staré čisté kontexty zůstávají reprodukovatelné; nový loader vždy dodává účinné úseky.
+        if (!array_key_exists('minimum_floor_segments', $this->evidence)) return self::positive($this->evidence['minimum_hourly_minor'] ?? null);
+        $from = self::date($segment['date_from'] ?? null);
+        $to = self::date($segment['date_to'] ?? null);
+        $rows = $this->evidence['minimum_floor_segments'];
+        if (!is_array($rows) || $from > $to) throw new PayrollHourlyCalculationException('hourly_minimum_floor_partition_missing', 'Doložte účinné minimum a rozdělte podklady podle změny stanovené týdenní doby.');
+        $matches = array_values(array_filter($rows, static fn(array $row): bool => ($row['date_from'] ?? '9999') <= $to && ($row['date_to'] ?? '') >= $from));
+        if (count($matches) !== 1 || $matches[0]['date_from'] > $from || $matches[0]['date_to'] < $to) throw new PayrollHourlyCalculationException('hourly_minimum_floor_partition_missing', 'Doložte účinné minimum a rozdělte podklady podle změny stanovené týdenní doby.');
+        self::date($matches[0]['date_from']);
+        self::date($matches[0]['date_to']);
+        return self::positive($matches[0]['minimum_hourly_minor'] ?? null);
     }
 
     private function dueOn(string $date, string $kind): string

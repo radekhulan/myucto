@@ -914,9 +914,9 @@ final class PayrollInputRepository
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
-    public function createApproved(int $supplierId, array $data, ?int $userId, bool $sourceAlreadyGuarded = false): array
+    public function createApproved(int $supplierId, array $data, ?int $userId, bool $sourceAlreadyGuarded = false, bool $internalStandby = false, bool $internalTermination = false): array
     {
-        $this->assertValidReferences($supplierId, $data);
+        $this->assertValidReferences($supplierId, $data, $internalStandby, $internalTermination);
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -1026,7 +1026,7 @@ final class PayrollInputRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $code = (string) $row['code'];
             if (isset($components[$code])) throw new \InvalidArgumentException('Mzdová složka nemá jednoznačnou účinnou verzi.');
-            $expectedKind = in_array($code, ['MZDA_HODINOVA_ZAKLAD', 'MZDA_DOSAZENA_PRESCAS'], true) ? 'hourly_wage'
+            $expectedKind = in_array($code, ['MZDA_HODINOVA_ZAKLAD', 'MZDA_DOSAZENA_PRESCAS', 'DOPLATEK_MINIMALNI_MZDA'], true) ? 'hourly_wage'
                 : (str_starts_with($code, 'PRIPLATEK_') ? 'premium' : 'compensation');
             if ($row['component_kind'] !== $expectedKind || $row['annual_limit_minor'] !== null || $row['exemption_basket'] !== null) {
                 throw new \InvalidArgumentException('Chráněná složka hodinové mzdy nemá platnou klasifikaci.');
@@ -2637,8 +2637,14 @@ final class PayrollInputRepository
      *
      * @param array<string,mixed> $data
      */
-    public function assertValidReferences(int $supplierId, array $data): void
+    public function assertValidReferences(int $supplierId, array $data, bool $internalStandby = false, bool $internalTermination = false): void
     {
+        if (!$internalTermination && str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'termination:')) {
+            throw new \InvalidArgumentException('Identifikátor termination: je vyhrazen nároku při skončení pracovního vztahu.');
+        }
+        if (!$internalStandby && str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'standby:')) {
+            throw new \InvalidArgumentException('Identifikátor standby: je vyhrazen výpočtu pracovní pohotovosti.');
+        }
         if (str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'hourly-wage:')) {
             throw new \InvalidArgumentException('Identifikátor hourly-wage: je vyhrazen výpočtu hodinové mzdy.');
         }

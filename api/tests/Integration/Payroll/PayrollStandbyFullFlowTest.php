@@ -78,6 +78,40 @@ final class PayrollStandbyFullFlowTest extends TestCase
         }
     }
 
+    public function testHourlyStandbyUsesCurrentAverageFloorAndKeepsTrustedProof(): void
+    {
+        $person = $this->hire('Syntetická Pohotovost', 'female', '1988-03-14');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetická smlouva", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $person['employment_id']]);
+        $pdo->prepare('UPDATE payroll_average_earning_snapshots SET average_hourly_minor = 13440 WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $person['average_id']]);
+        $this->standby($person['employment_id'], ['2026-07-07', '2026-07-09'], 240);
+        $this->approveMonth($person['employment_id']);
+        self::assertSame(11500, $this->standbyTotal($person['employment_id']));
+        $stmt = $pdo->prepare('SELECT source_snapshot_json FROM payroll_standby_floor_proofs WHERE supplier_id = ? AND employment_id = ?');
+        $stmt->execute([$this->supplierId, $person['employment_id']]);
+        $proof = json_decode((string) $stmt->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(14340, $proof['hourly_average_floor'][0]['average_hourly_minor']);
+        self::assertSame(13440, $proof['hourly_average_floor'][0]['raw_average_hourly_minor']);
+        $snapshot = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-07-01', '2026-08-14');
+        self::assertNotContains('hourly_average_minimum_evidence_missing', array_map(static fn($validation): string => $validation->code, $snapshot->validations));
+    }
+
+    public function testCorrectedStandbyUsesLatestFullProofInsteadOfBlockingOldDelta(): void
+    {
+        $person = $this->hire('Syntetická Oprava', 'female', '1988-03-14');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_average_earning_snapshots SET average_hourly_minor = 13440 WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $person['average_id']]);
+        $this->standby($person['employment_id'], ['2026-07-07', '2026-07-09'], 240);
+        $this->approveMonth($person['employment_id']);
+        self::assertSame(10800, $this->standbyTotal($person['employment_id']));
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $person['employment_id']]);
+        $this->reopenMonth($person['employment_id']);
+        $this->approveMonth($person['employment_id'], []);
+        self::assertSame(11500, $this->standbyTotal($person['employment_id']));
+        $snapshot = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-07-01', '2026-08-14');
+        self::assertNotContains('hourly_average_minimum_evidence_missing', array_map(static fn($validation): string => $validation->code, $snapshot->validations));
+    }
+
     public function testStandbyMinutesReachPayAndJmhz10343(): void
     {
         $person = $this->hire('Pavla Pohotová', 'female', '1988-03-14');

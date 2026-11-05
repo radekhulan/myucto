@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
+use MyInvoice\Service\Payroll\Component\PayrollComponentMinimumWage;
 use PDO;
 use PDOException;
 
@@ -102,6 +103,7 @@ final class PayrollComponentRepository
      */
     public function create(int $supplierId, array $data): array
     {
+        PayrollComponentMinimumWage::assertValid($data);
         $this->ensureDefaults($supplierId);
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -120,8 +122,9 @@ final class PayrollComponentRepository
                      enforcement_treatment, jmhz_treatment,
                      statistics_treatment, accounting_debit_code,
                      accounting_credit_code, annual_limit_minor, exemption_basket,
-                     exemption_basis, valid_from, valid_to, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     exemption_basis, valid_from, valid_to, is_active,
+                     minimum_wage_treatment, minimum_wage_reason)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -147,6 +150,8 @@ final class PayrollComponentRepository
                 $data['valid_from'],
                 $data['valid_to'],
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
+                $data['minimum_wage_treatment'] ?? null,
+                $data['minimum_wage_reason'] ?? null,
             ]);
             $id = PayrollTimeValue::int($pdo->lastInsertId(), 'last_insert_id');
             $this->applyDefaultJmhzMappings($supplierId, [$id]);
@@ -186,6 +191,12 @@ final class PayrollComponentRepository
         if ($current === null) {
             return null;
         }
+        foreach (['minimum_wage_treatment', 'minimum_wage_reason'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                $data[$field] = $current[$field] ?? null;
+            }
+        }
+        PayrollComponentMinimumWage::assertValid($data);
         if (PayrollTimeValue::string($current['code'] ?? null, 'code')
                 !== PayrollTimeValue::string($data['code'] ?? null, 'code')
             || PayrollTimeValue::string(
@@ -225,6 +236,7 @@ final class PayrollComponentRepository
                     accounting_credit_code = ?, annual_limit_minor = ?,
                     exemption_basket = ?, exemption_basis = ?,
                     valid_from = ?, valid_to = ?, is_active = ?,
+                    minimum_wage_treatment = ?, minimum_wage_reason = ?,
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND row_version = ?'
         );
@@ -252,6 +264,8 @@ final class PayrollComponentRepository
                 $data['valid_from'],
                 $data['valid_to'],
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
+                $data['minimum_wage_treatment'],
+                $data['minimum_wage_reason'],
                 $supplierId,
                 $id,
                 $expectedVersion,
@@ -683,6 +697,9 @@ final class PayrollComponentRepository
             $row['is_active'] ?? null,
             'is_active',
         );
+        $minimum = PayrollComponentMinimumWage::resolve($row);
+        $row['effective_minimum_wage_treatment'] = $minimum['treatment'];
+        $row['minimum_wage_treatment_editable'] = $minimum['editable'];
         return $row;
     }
 }

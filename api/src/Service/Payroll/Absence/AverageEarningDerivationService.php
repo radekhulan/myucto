@@ -197,6 +197,7 @@ final class AverageEarningDerivationService
         int $employmentId,
         int $year,
         int $quarter,
+        ?array $hourlyFloorIntervals = null,
     ): array {
         if ($employmentId <= 0) {
             throw new \InvalidArgumentException('Pracovní vztah není platný.');
@@ -264,7 +265,7 @@ final class AverageEarningDerivationService
                 );
         }
 
-        return [
+        $suggestion = [
             'employment_id' => $employmentId,
             'applicable_year' => $year,
             'applicable_quarter' => $quarter,
@@ -276,6 +277,10 @@ final class AverageEarningDerivationService
             $this->existingSnapshot($supplierId, $employmentId, $year, $quarter) !== null,
             $probable,
         );
+        $date = $applicationStart->format('Y-m-d');
+        $hourlyFloorIntervals ??= (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+            ->forMany($supplierId, [$employmentId], $date, $date)[$employmentId] ?? [];
+        return \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::applyToSuggestion($suggestion, $hourlyFloorIntervals, $date);
     }
 
     /**

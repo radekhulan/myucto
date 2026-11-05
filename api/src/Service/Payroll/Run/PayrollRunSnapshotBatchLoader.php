@@ -286,7 +286,7 @@ final class PayrollRunSnapshotBatchLoader
         string $periodStart,
     ): array {
         return $this->grouped($this->fetch(
-            'SELECT id, amount_minor, quantity_milliunits, source_kind,
+            'SELECT id, amount_minor, quantity_milliunits, source_kind, external_id,
                     source_period_start, component_snapshot_json,
                     HEX(component_snapshot_hash) AS component_snapshot_hash,
                     benefit_basket, benefit_exempt_minor, benefit_taxable_minor,

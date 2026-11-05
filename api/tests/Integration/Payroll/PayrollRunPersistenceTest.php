@@ -168,6 +168,74 @@ final class PayrollRunPersistenceTest extends TestCase
         $this->inputId = $this->approvedInput(120_000, 'BASE', 'manual');
     }
 
+    public function testMinimumTopUpMaterializesOnceAndKeepsSourceExclusion(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_inputs SET status = "cancelled" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->inputId]);
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetická smlouva", weekly_hours = 40, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
+        $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0, 'Doložených 160 hodin', false,
+            [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'worked_duration_units' => 480000, 'overtime_duration_units' => 0, 'worked_days' => 20]], $this->actors[0]);
+        $month = $time->monthState($this->supplierId, $this->employmentId, '2026-06-01');
+        $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
+        $source = (new \MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
+        $body = ['row_version' => 0, 'reason' => 'Výslovně bez dalších nároků', 'work_source_hash' => \MyInvoice\Repository\Payroll\PayrollHourlyEvidenceRepository::bindingHash($source),
+            'premium_segments' => [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []]],
+            'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => []];
+        (new \MyInvoice\Repository\Payroll\PayrollHourlyEvidenceRepository($this->db))->save($this->supplierId, $this->employmentId, '2026-06-01', $body, $this->actors[0], static fn() => null);
+        $previewRows = $this->container->get(PayrollRunSnapshotBuilder::class)->employmentRows($this->supplierId, '2026-06-01', '2026-06-30', null);
+        $preview = (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->forMany($this->supplierId, '2026-06-01', $previewRows)[$this->employmentId];
+        self::assertTrue($preview['complete'], json_encode($preview['blockers'], JSON_THROW_ON_ERROR));
+        $run = $this->productionService->createRun($this->supplierId, '2026-06-01', '2026-07-15', null, $this->actors[0]);
+        $locked = $this->productionService->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'minimum-lock', $this->actors[0]);
+        $stmt = $pdo->prepare('SELECT input.id, input.amount_minor FROM payroll_inputs input JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id WHERE input.supplier_id = ? AND input.employment_id = ? AND component.code = "DOPLATEK_MINIMALNI_MZDA" AND input.status IN ("approved", "locked")');
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+        $topups = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(1, $topups);
+        self::assertSame(70400, (int) $topups[0]['amount_minor']);
+        $evidence = (new \MyInvoice\Service\Payroll\PayrollHourlyMinimumInputs($this->db))->forMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
+        foreach ($evidence as $entry) self::assertNotContains((int) $topups[0]['id'], $entry['input_ids']);
+        $again = $this->productionService->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'minimum-lock', $this->actors[0]);
+        self::assertTrue($again->idempotentReplay);
+        self::assertSame($locked->run['row_version'], $again->run['row_version']);
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+        self::assertCount(1, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function testMinimumEvidenceUsesApprovedSourceAndRequiresClassificationAndPeriod(): void
+    {
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $stmt->execute([$this->supplierId, 'PREMIE_PRIPLATKY']);
+        $premium = (int) $stmt->fetchColumn();
+        $inputs = $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class);
+        $row = $inputs->createApproved($this->supplierId, ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => $premium, 'period_start' => '2026-06-01', 'source_period_start' => null, 'amount_minor' => 30000,
+            'quantity_milliunits' => null, 'source_kind' => 'manual', 'external_id' => null], $this->actors[0]);
+        $adjustment = $inputs->createApproved($this->supplierId, ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => $premium, 'period_start' => '2026-06-01', 'source_period_start' => null, 'amount_minor' => -5000,
+            'quantity_milliunits' => null, 'source_kind' => 'correction', 'external_id' => null], $this->actors[0]);
+        $loader = new \MyInvoice\Service\Payroll\PayrollHourlyMinimumInputs($this->db);
+        $items = $loader->forMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
+        $byId = [];
+        foreach ($items as $item) $byId[$item['input_ids'][0]] = $item;
+        self::assertSame('included', $byId[$this->inputId]['minimum_wage_treatment']);
+        self::assertSame('manual_review', $byId[(int) $row['id']]['minimum_wage_treatment']);
+        self::assertSame(25000, $byId[(int) $row['id']]['amount_minor']);
+        self::assertContains((int) $adjustment['id'], $byId[(int) $row['id']]['input_ids']);
+        $pdo->prepare('UPDATE payroll_component_definitions SET minimum_wage_treatment = "included", minimum_wage_reason = "Syntetický podklad" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $premium]);
+        $pdo->prepare('UPDATE payroll_inputs SET source_period_start = "2026-05-01" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->inputId]);
+        $items = $loader->forMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
+        $byId = [];
+        foreach ($items as $item) $byId[$item['input_ids'][0]] = $item;
+        self::assertSame('manual_review', $byId[$this->inputId]['minimum_wage_treatment']);
+        self::assertSame('included', $byId[(int) $row['id']]['minimum_wage_treatment']);
+        self::assertSame('Syntetický podklad', $byId[(int) $row['id']]['classification_reason']);
+        self::assertSame([], $loader->forMany($this->otherSupplierId, [$this->employmentId], '2026-06-01')[$this->employmentId]);
+    }
+
     public function testHourlyBatchCreatesApprovedFrozenInputsAndReservesTheirCodes(): void
     {
         $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
@@ -203,6 +271,86 @@ final class PayrollRunPersistenceTest extends TestCase
         $data = ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
             'component_id' => (int) $query->fetchColumn(), 'period_start' => '2026-06-01', 'source_period_start' => null,
             'amount_minor' => 100, 'quantity_milliunits' => null, 'source_kind' => 'time', 'external_id' => 'hourly-wage:fake'];
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('vyhrazen');
+        $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class)->create($this->supplierId, $data, $this->actors[0]);
+    }
+
+    public function testHourlyRunBlocksUndocumentedOldAbsenceAverage(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $this->approvedInput(107600, 'NAHRADA_MZDY_DOVOLENA', 'absence');
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertContains('hourly_average_minimum_evidence_missing', array_map(static fn($validation): string => $validation->code, $snapshot->validations));
+    }
+
+    public function testHourlyGuardAcceptsOnlyFullReversalOfTheSameOldAbsence(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $original = $this->approvedInput(107600, 'NAHRADA_MZDY_DOVOLENA', 'absence');
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $blocked = static fn($snapshot): bool => in_array('hourly_average_minimum_evidence_missing', array_map(static fn($v): string => $v->code, $snapshot->validations), true);
+        $reverse = function (int $target, int $amount, string $suffix) use ($pdo, $original): int {
+            $trace = CanonicalJson::encode(['kind' => 'leave_compensation_reversal.v1', 'period_start' => '2026-06-01', 'reverses_input_id' => $target, 'amount_minor' => $amount]);
+            $stmt = $pdo->prepare('INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, source_period_start, amount_minor, source_kind, external_id, status, component_snapshot_json, component_snapshot_hash, source_snapshot_json, source_snapshot_hash, approved_by, approved_at) SELECT supplier_id, employee_id, employment_id, component_id, period_start, period_start, ?, "correction", ?, "approved", component_snapshot_json, component_snapshot_hash, ?, ?, approved_by, NOW() FROM payroll_inputs WHERE supplier_id = ? AND id = ?');
+            $stmt->execute([$amount, 'leave:reverse:' . $suffix, $trace, hash('sha256', $trace, true), $this->supplierId, $original]);
+            return (int) $pdo->lastInsertId();
+        };
+        self::assertTrue($blocked($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+        $partial = $reverse($original, -50000, 'partial');
+        self::assertTrue($blocked($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+        $pdo->prepare('UPDATE payroll_inputs SET status = "cancelled" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $partial]);
+        $other = $reverse($original + 100000, -107600, 'other');
+        self::assertTrue($blocked($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+        $pdo->prepare('UPDATE payroll_inputs SET status = "cancelled" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $other]);
+        $reverse($original, -107600, 'full');
+        self::assertFalse($blocked($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+    }
+
+    public function testOldAbsenceIsCheckedOnlyAgainstHourlyDatesItActuallyOverlaps(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET effective_to = "2026-06-15" WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, weekly_hours, workload_basis_points) VALUES (?, ?, "2026-06-16", "2026-01-01", "hourly", 13000, "contract", "Syntetické podmínky", 37.5, 10000)')->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_absences (supplier_id, employment_id, absence_type, date_from, date_to, status) VALUES (?, ?, "vacation", "2026-06-08", "2026-06-08", "approved")')->execute([$this->supplierId, $this->employmentId]);
+        $absenceId = (int) $pdo->lastInsertId();
+        $inputId = $this->approvedInput(107600, 'NAHRADA_MZDY_DOVOLENA', 'absence');
+        $trace = CanonicalJson::encode(['absence_id' => $absenceId, 'average_hourly_minor' => 13440]);
+        $pdo->prepare('UPDATE payroll_inputs SET external_id = "leave:old", source_snapshot_json = ?, source_snapshot_hash = ? WHERE supplier_id = ? AND id = ?')->execute([$trace, hash('sha256', $trace, true), $this->supplierId, $inputId]);
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertNotContains('hourly_average_minimum_evidence_missing', array_map(static fn($v): string => $v->code, $snapshot->validations));
+        $pdo->prepare('UPDATE payroll_absences SET date_from = "2026-06-22", date_to = "2026-06-22" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $absenceId]);
+        $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertContains('hourly_average_minimum_evidence_missing', array_map(static fn($v): string => $v->code, $snapshot->validations));
+    }
+
+    public function testOldAutomaticSeveranceNeedsTrustedHourlyFloorProof(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET status = "ended", end_date = "2026-06-30" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $inputId = $this->approvedInput(107600, 'ODSTUPNE', 'manual');
+        $pdo->prepare('UPDATE payroll_inputs SET external_id = ? WHERE supplier_id = ? AND id = ?')->execute(['termination:severance:' . $this->employmentId, $this->supplierId, $inputId]);
+        $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
+        $codes = static fn($snapshot): array => array_map(static fn($v): string => $v->code, $snapshot->validations);
+        self::assertContains('hourly_average_minimum_evidence_missing', $codes($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+        $proof = CanonicalJson::encode(['end_date' => '2026-06-30', 'amount_minor' => 107600, 'hourly_average_floor' => ['average_hourly_minor' => 14340]]);
+        $pdo->prepare('INSERT INTO payroll_termination_floor_proofs (supplier_id, employment_id, input_id, period_start, source_snapshot_json, source_snapshot_hash) VALUES (?, ?, ?, "2026-06-01", ?, ?)')->execute([$this->supplierId, $this->employmentId, $inputId, $proof, hash('sha256', $proof, true)]);
+        self::assertNotContains('hourly_average_minimum_evidence_missing', $codes($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+    }
+
+    public function testExternalStandbyPrefixCannotImpersonateFloorProof(): void
+    {
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $query = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $query->execute([$this->supplierId, 'ODMENA_POHOTOVOST']);
+        $data = ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => (int) $query->fetchColumn(), 'period_start' => '2026-06-01', 'source_period_start' => null,
+            'amount_minor' => 100, 'quantity_milliunits' => null, 'source_kind' => 'time', 'external_id' => 'standby:fake'];
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('vyhrazen');
         $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class)->create($this->supplierId, $data, $this->actors[0]);
@@ -412,6 +560,7 @@ final class PayrollRunPersistenceTest extends TestCase
             ->execute([$this->supplierId, $this->employmentId]);
         $pdo->prepare('INSERT INTO payroll_work_calendars (supplier_id, employment_id, name, schedule_type, week_pattern, weekly_minutes, valid_from) VALUES (?, ?, "Syntetický rozvrh", "regular", ?, 2400, "2026-01-01")')
             ->execute([$this->supplierId, $this->employmentId, '{"1":480,"2":480,"3":480,"4":480,"5":480,"6":0,"7":0}']);
+        $pdo->prepare('UPDATE payroll_employment_terms SET weekly_hours = 40, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
         $terms = (new \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBatchLoader($this->db))->hourlyRemunerationTerms($this->supplierId, [$this->employmentId], '2026-06-01', '2026-06-30');
         self::assertCount(2, $terms[$this->employmentId]);
         $employment = [['employment_id' => $this->employmentId, 'start_date' => '2026-01-01', 'end_date' => null]];
@@ -420,6 +569,10 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('supported', $parts[$this->employmentId]['source']['status']);
         self::assertSame(528000, $parts[$this->employmentId]['parts'][0]['fund_duration_units']);
         self::assertSame(264000, $parts[$this->employmentId]['parts'][0]['retained_duration_units']);
+        self::assertTrue($parts[$this->employmentId]['source']['minimum_fund_usable']);
+        $terms[$this->employmentId][0]['weekly_hours'] = '20';
+        $mismatch = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms, false, [$this->employmentId]);
+        self::assertFalse($mismatch[$this->employmentId]['source']['minimum_fund_usable']);
         $pdo->prepare('INSERT INTO payroll_absences (supplier_id, employment_id, absence_type, date_from, date_to, status) VALUES (?, ?, "unpaid_leave", "2026-06-18", "2026-06-18", "requested")')
             ->execute([$this->supplierId, $this->employmentId]);
         $blocked = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms);

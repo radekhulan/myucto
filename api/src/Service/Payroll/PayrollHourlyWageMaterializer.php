@@ -72,7 +72,7 @@ final class PayrollHourlyWageMaterializer
         $previousClaims = $pdo->prepare("SELECT employment_id, purpose FROM payroll_hourly_wage_claims
             WHERE supplier_id = ? AND employment_id IN ($readyIn) AND work_period_start = ? ORDER BY employment_id, purpose FOR UPDATE");
         $previousClaims->execute([$supplierId, ...$readyIds, $periodStart]);
-        $codes = ['ordinary_base' => 'MZDA_HODINOVA_ZAKLAD', 'achieved_overtime' => 'MZDA_DOSAZENA_PRESCAS',
+        $codes = ['ordinary_base' => 'MZDA_HODINOVA_ZAKLAD', 'achieved_overtime' => 'MZDA_DOSAZENA_PRESCAS', 'minimum_wage_top_up' => 'DOPLATEK_MINIMALNI_MZDA',
             'holiday_nonworked_compensation' => 'NAHRADA_MZDY_SVATEK', 'holiday_time_off_compensation' => 'NAHRADA_MZDY_VOLNO_ZA_SVATEK'];
         foreach (\MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind::all() as $kind) $codes['premium_' . $kind->value] = $kind->componentCode();
         foreach ($previousClaims->fetchAll(PDO::FETCH_ASSOC) as $previousClaim) {

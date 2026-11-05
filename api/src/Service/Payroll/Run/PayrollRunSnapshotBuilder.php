@@ -192,7 +192,7 @@ final class PayrollRunSnapshotBuilder
         $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
             $supplierId, $periodStart, $employments, $evidenceTerms, $workedTimeEvidence,
         );
-        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms);
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms, false, \MyInvoice\Service\Payroll\PayrollHourlyWagePreview::minimumFundIds($hourlyContexts));
         foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
@@ -211,6 +211,7 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
         $dimensionRows = $this->batch->employmentDimensions(
             $supplierId,
             $employmentIds,
@@ -447,6 +448,11 @@ final class PayrollRunSnapshotBuilder
                 );
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);
+            foreach ($hourlyAverageCheck['invalid'][$employmentId] ?? [] as $invalidInputId) {
+                $validations[] = new PayrollRunValidation('blocker', 'hourly_average_minimum_evidence_missing', 'employment', $employmentId,
+                    'Náhrada nebo pohotovost nemá doložený průměr alespoň v účinném hodinovém minimu. Opravte průměr a znovu vytvořte podklad.',
+                    "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms");
+            }
             $riskySavingsEvidence = $this->riskySavingsEvidence($row);
             if ($riskySavingsEvidence !== null) {
                 foreach ($this->riskySavingsPolicy->issues(
@@ -726,6 +732,7 @@ final class PayrollRunSnapshotBuilder
                         : (bool) $row['term_is_primary'],
                 ],
                 'term' => $termSnapshot,
+                ...(!isset($hourlyAverageCheck['source'][$employmentId]) ? [] : ['hourly_average_input_sources' => $hourlyAverageCheck['source'][$employmentId]]),
                 ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
                     'hourly_remuneration_terms' => $hourlyTerms[$employmentId],
                     'hourly_entitlement_context' => $hourlyContexts[$employmentId] ?? null,
@@ -949,12 +956,14 @@ final class PayrollRunSnapshotBuilder
         $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
             $supplierId, $periodStart, $eligibleRows, $evidenceTerms, $hourlySources,
         );
-        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $eligibleRows, $hourlyTerms);
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $eligibleRows, $hourlyTerms, false, \MyInvoice\Service\Payroll\PayrollHourlyWagePreview::minimumFundIds($hourlyContexts));
         foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
+        $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
         return [
             'eligible_employment_ids' => $eligible,
             'worked_time_evidence' => $hourlySources,
             'hourly_entitlement_context' => $hourlyContexts,
+            'hourly_average_input_sources' => $hourlyAverageCheck['source'],
             'manual_time_month_state' => $workedTime->manualHistoryStates(
                 $supplierId, array_values(array_diff($allEmployments, array_keys($hourlyTerms))), $periodStart,
             ),

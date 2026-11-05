@@ -55,6 +55,7 @@ final readonly class PayrollRunSourceDrift
         $frozenHourlyTerms = [];
         $frozenWorkedTime = [];
         $frozenHourlyContexts = [];
+        $frozenAverageSources = [];
         $frozenTimeMonths = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
@@ -74,6 +75,7 @@ final readonly class PayrollRunSourceDrift
                 if (array_key_exists('hourly_settlement_terms', $employment)) {
                     $frozenSettlementTerms[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_settlement_terms'];
                 }
+                if (array_key_exists('hourly_average_input_sources', $employment)) $frozenAverageSources[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_average_input_sources'];
                 if (array_key_exists('hourly_entitlement_context', $employment)) {
                     $frozenHourlyContexts[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_entitlement_context'];
                 }
@@ -138,6 +140,10 @@ final readonly class PayrollRunSourceDrift
         }
 
         $workedTimeChanged = 0;
+        if (isset($current['hourly_average_input_sources'])) {
+            $ids = array_unique([...array_keys($frozenAverageSources), ...array_keys($current['hourly_average_input_sources'])]);
+            foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint($frozenAverageSources[$id] ?? null) !== self::fingerprint($current['hourly_average_input_sources'][$id] ?? null)) ++$workedTimeChanged;
+        }
         foreach (($current['hourly_settlement_terms'] ?? []) as $employmentId => $terms) {
             if (isset($frozenEmployments[$employmentId]) && !array_key_exists($employmentId, $frozenHourlyContexts)) ++$workedTimeChanged;
         }

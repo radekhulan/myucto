@@ -83,6 +83,17 @@ final class PayrollRunSourceDriftTest extends TestCase
         self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->remunerationChanged);
     }
 
+    public function testChangedHourlyAverageInputProofInvalidatesFrozenRun(): void
+    {
+        $frozen = $this->frozen();
+        $frozen['people'][0]['employments'][0]['hourly_average_input_sources'] = [15 => 'original'];
+        $current = $this->current();
+        $current['hourly_average_input_sources'] = [7 => [15 => 'original']];
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        $current['hourly_average_input_sources'][7][15] = 'changed';
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged);
+    }
+
     public function testSettlementEntitlementAndTermsChangesInvalidateFrozenSources(): void
     {
         $current = $this->current();

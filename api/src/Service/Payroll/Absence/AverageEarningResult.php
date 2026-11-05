@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Payroll\Absence;
 final readonly class AverageEarningResult
 {
     /**
-     * @param array<string,int|string|bool|null> $trace
+     * @param array<string,mixed> $trace
      */
     public function __construct(
         public string $sourceKind,

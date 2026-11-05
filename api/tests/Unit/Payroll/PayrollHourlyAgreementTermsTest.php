@@ -53,6 +53,20 @@ final class PayrollHourlyAgreementTermsTest extends TestCase
         PayrollHourlyAgreementTerms::normalize(['included_agreement_premiums' => [$premium]], '2026-01-01', 'surcharge');
     }
 
+    public function testMinimumAssessmentKeepsDocumentedAdvanceAndStandardWeek(): void
+    {
+        $minimum = ['assessment' => 'monthly', 'agreement_reference' => null, 'statutory_weekly_minutes' => 2250,
+            'statutory_weekly_reference' => 'Syntetické sjednání směn', 'advance_proof' => [
+                'reference' => 'Syntetické rozhodnutí', 'decided_on' => '2026-01-01',
+                'valid_from' => '2026-01-01', 'valid_to' => '2026-12-31']];
+        $result = PayrollHourlyAgreementTerms::normalize(['minimum_wage' => $minimum], '2026-01-01', 'surcharge');
+        self::assertSame($minimum, $result['minimum_wage']);
+        self::assertArrayNotHasKey('minimum_wage', PayrollHourlyAgreementTerms::normalize([], '2026-01-01', 'surcharge'));
+        $minimum['advance_proof']['decided_on'] = '2026-02-01';
+        $this->expectException(\InvalidArgumentException::class);
+        PayrollHourlyAgreementTerms::normalize(['minimum_wage' => $minimum], '2026-01-01', 'surcharge');
+    }
+
     private static function terms(): array
     {
         return ['included_overtime' => ['agreement_kind' => 'contract', 'agreement_reference' => 'Syntetická smlouva',

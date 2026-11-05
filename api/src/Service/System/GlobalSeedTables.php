@@ -516,7 +516,7 @@ final class GlobalSeedTables
         'payroll_submission_receipts',
         'payroll_submission_transport_attempts', 'payroll_submissions',
         'payroll_surcharge_input_materializations', 'payroll_surcharge_period_claims',
-        'payroll_hourly_wage_claims', 'payroll_hourly_wage_materializations',
+        'payroll_termination_floor_proofs', 'payroll_standby_floor_proofs', 'payroll_hourly_wage_claims', 'payroll_hourly_wage_materializations',
         'payroll_hourly_evidence_revisions', 'payroll_hourly_time_entitlements',
         'payroll_hourly_time_entitlement_revisions', 'payroll_hourly_included_consumption',
         'payroll_takeover_payment_evidence', 'payroll_takeover_runs',

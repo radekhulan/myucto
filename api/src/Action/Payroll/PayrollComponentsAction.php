@@ -15,6 +15,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollComponentValidator;
+use MyInvoice\Service\Payroll\Component\PayrollComponentMinimumWage;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -47,6 +48,7 @@ final class PayrollComponentsAction
         }
 
         return Json::ok($response, [
+            'minimum_wage_classification' => PayrollComponentMinimumWage::catalog(),
             'components' => $this->components->list(
                 $this->currentSupplierId($request),
                 $effectiveOn,

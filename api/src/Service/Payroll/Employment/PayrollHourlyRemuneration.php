@@ -10,7 +10,7 @@ final class PayrollHourlyRemuneration
     public const BLOCKER = 'hourly_remuneration_calculation_unsupported';
 
     public const MESSAGE = 'Vztah má v tomto měsíci sjednané hodinové odměňování. '
-        . 'Náhled vypočítá mzdu z doložených hodin; schválení běhu zatím vyžaduje dokončení kontroly minimální mzdy a výkaznictví.';
+        . 'Náhled vypočítá mzdu z doložených hodin včetně kontroly minimální mzdy; schválení běhu zatím vyžaduje dokončení výkaznictví.';
 
     /**
      * Překryv kterékoliv hodinové revize s obdobím, nikoli jen stav na konci měsíce.

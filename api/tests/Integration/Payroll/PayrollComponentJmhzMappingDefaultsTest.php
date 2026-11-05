@@ -129,6 +129,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'MZDA_HODINOVA' => '10329',
             'MZDA_HODINOVA_ZAKLAD' => '10329',
             'MZDA_DOSAZENA_PRESCAS' => '10329',
+            'DOPLATEK_MINIMALNI_MZDA' => '10329',
             'MZDA_UKOLOVA' => '10329',
             'ODMENA' => '10331',
             'PREMIE_PRIPLATKY' => '10332',

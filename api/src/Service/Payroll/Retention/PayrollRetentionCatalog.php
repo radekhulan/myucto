@@ -243,7 +243,7 @@ final class PayrollRetentionCatalog
                 'payroll_net_results',
                 'payroll_annual_settlement_outcomes',
             ],
-            'employment_tables' => ['payroll_hourly_wage_claims', 'payroll_hourly_wage_materializations',
+            'employment_tables' => ['payroll_termination_floor_proofs', 'payroll_standby_floor_proofs', 'payroll_hourly_wage_claims', 'payroll_hourly_wage_materializations',
                 'payroll_hourly_time_entitlements', 'payroll_hourly_time_entitlement_revisions', 'payroll_hourly_included_consumption'],
             'note' => 'Povinnost VÉST mzdový list plyne z § 38j zákona č. 586/1992 Sb.; '
                 . 'lhůtu pro jeho uschování stanoví až předpis o sociálním zabezpečení, '

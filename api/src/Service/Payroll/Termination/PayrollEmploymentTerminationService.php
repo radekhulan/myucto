@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentTerminationRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Service\Payroll\Absence\LeaveCompensationCalculator;
+use MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyConverter;
 use MyInvoice\Service\Payroll\Document\EmploymentExitReadinessException;
@@ -340,6 +341,7 @@ final class PayrollEmploymentTerminationService
                 'amount_minor' => $plan['amount_minor'],
                 'rounding' => 'ceil-to-czk-on-total',
                 'entitlement_basis' => $kind === 'payout' ? 'zp-222-2+222-3' : 'zp-147-1-e',
+                ...(isset($average['hourly_average_floor']) ? ['hourly_average_floor' => [$average['hourly_average_floor']], 'hourly_average_segments' => [['local_date' => $employment['end_date'], 'eligible_minutes' => $minutes]]] : []),
             ]);
             $this->inputs->createApproved($supplierId, [
                 'employee_id' => $employment['employee_id'],
@@ -497,7 +499,7 @@ final class PayrollEmploymentTerminationService
             $period = substr((string) $employment['end_date'], 0, 7) . '-01';
             $componentId = $this->terminations->componentId($supplierId, self::SEVERANCE_COMPONENT, $period)
                 ?? throw new \DomainException('Chybí účinná mzdová složka ODSTUPNE.');
-            $this->inputs->createApproved($supplierId, [
+            $createdInput = $this->inputs->createApproved($supplierId, [
                 'employee_id' => $employment['employee_id'],
                 'employment_id' => $employmentId,
                 'component_id' => $componentId,
@@ -507,7 +509,8 @@ final class PayrollEmploymentTerminationService
                 'quantity_milliunits' => ($garnishmentMultiple ?? (int) $plan['multiple']) * 1000,
                 'source_kind' => 'manual',
                 'external_id' => self::severanceExternalId($employmentId),
-            ], $userId);
+            ], $userId, false, false, true);
+            $this->writeFloorProof($supplierId, $employment, $createdInput, $average, $plan);
 
             return $this->overview($supplierId, $employmentId);
         });
@@ -602,7 +605,7 @@ final class PayrollEmploymentTerminationService
                 $this->components->ensureDefaults($supplierId);
                 $componentId = $this->terminations->componentId($supplierId, self::WORK_INJURY_COMPONENT, $period)
                     ?? throw new \DomainException('Chybí účinná mzdová složka NAHRADA_271CA.');
-                $this->inputs->createApproved($supplierId, [
+                $createdInput = $this->inputs->createApproved($supplierId, [
                     'employee_id' => $employment['employee_id'],
                     'employment_id' => $employmentId,
                     'component_id' => $componentId,
@@ -612,7 +615,8 @@ final class PayrollEmploymentTerminationService
                     'quantity_milliunits' => (int) $plan['multiple'] * 1000,
                     'source_kind' => 'manual',
                     'external_id' => self::workInjuryExternalId($employmentId),
-                ], $userId);
+                ], $userId, false, false, true);
+                $this->writeFloorProof($supplierId, $employment, $createdInput, $average, $plan);
             }
             $this->terminations->saveWorkInjuryCompensation(
                 $supplierId,
@@ -1074,6 +1078,17 @@ final class PayrollEmploymentTerminationService
      * @param array<string,mixed> $employment
      * @return array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string}
      */
+    /** @param array<string,mixed> $employment @param array<string,mixed> $input @param array<string,mixed> $average @param array<string,mixed> $plan */
+    private function writeFloorProof(int $supplierId, array $employment, array $input, array $average, array $plan): void
+    {
+        if (!isset($average['hourly_average_floor'])) return;
+        $snapshot = CanonicalJson::encode(['kind' => 'termination_hourly_average.v1', 'end_date' => $employment['end_date'],
+            'hourly_average_floor' => $average['hourly_average_floor'], 'average_snapshot_id' => $average['snapshot']['id'],
+            'monthly_average_minor' => $average['monthly_gross'], 'amount_minor' => $plan['amount_minor'], 'multiple' => $plan['multiple']]);
+        $this->db->pdo()->prepare('INSERT INTO payroll_termination_floor_proofs (supplier_id, employment_id, input_id, period_start, source_snapshot_json, source_snapshot_hash) VALUES (?, ?, ?, ?, ?, ?)')
+            ->execute([$supplierId, $employment['id'], $input['id'], $input['period_start'], $snapshot, hash('sha256', $snapshot, true)]);
+    }
+
     private function average(int $supplierId, array $employment, bool $lockTerms = true): array
     {
         $end = (string) $employment['end_date'];
@@ -1089,6 +1104,22 @@ final class PayrollEmploymentTerminationService
             'error' => null,
         ];
         if ($snapshot === null) {
+            return $result;
+        }
+        try {
+            $raw = $snapshot['average_hourly_minor'] ?? null;
+            if (is_int($raw) && $raw > 0) {
+                $intervals = (new PayrollHourlyAverageFloorResolver($this->db))->forMany($supplierId, [(int) $employment['id']], $end, $end, $lockTerms)[(int) $employment['id']] ?? [];
+                $applied = PayrollHourlyAverageFloorResolver::apply($intervals, $end, $raw);
+                if ($applied['hourly_proof'] !== null) {
+                    $snapshot['average_hourly_minor'] = $applied['hourly_minor'];
+                    $result['snapshot'] = $snapshot;
+                    $result['hourly_average_floor'] = $applied['hourly_proof'];
+                }
+            }
+        } catch (\InvalidArgumentException $e) {
+            $result['snapshot']['support_status'] = 'unsupported';
+            $result['error'] = $e->getMessage();
             return $result;
         }
         try {

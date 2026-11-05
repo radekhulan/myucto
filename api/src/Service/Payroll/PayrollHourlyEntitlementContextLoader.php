@@ -38,6 +38,8 @@ final class PayrollHourlyEntitlementContextLoader
         $ledger = (new PayrollHourlyEntitlementLedger($this->db))->loadMany($supplierId, $ids, $from, $end, $periodStart, $lock);
         $data = $this->proofData($supplierId, $ids, $periodStart, $lock);
         $averages = $this->averages($supplierId, $ids, $periodStart, $lock);
+        $hourlyIds = array_keys(array_filter($termsByEmployment, static fn(array $terms): bool => array_any($terms, static fn(array $term): bool => ($term['remuneration_type'] ?? null) === 'hourly')));
+        $minimumInputs = (new PayrollHourlyMinimumInputs($this->db))->forMany($supplierId, $hourlyIds, $periodStart, $lock);
         $registry = new PayrollRulesetRegistry(new PayrollRulesetRepository($this->db));
         $provider = $registry->provider();
         try {
@@ -51,13 +53,14 @@ final class PayrollHourlyEntitlementContextLoader
         $calendar = self::calendar($periodStart, $ledger);
         $employerPolicies = $this->employerPolicies($supplierId, $periodStart, $end, $lock);
         $currentFloors = [];
+        $floorSegments = [];
+        $employmentTypes = [];
+        foreach ($employments as $employment) $employmentTypes[(int) $employment['employment_id']] = (string) $employment['relation_type'];
         foreach ($termsByEmployment as $id => $terms) {
-            $minutes = self::statedWeeklyMinutes($terms);
-            try {
-                $currentFloors[$id] = $minutes === null ? null : MinimumWageFloor::forDate($provider, $end, $minutes)->hourlyMinor;
-            } catch (\LogicException|\UnexpectedValueException) { $currentFloors[$id] = null; }
-            if (isset($averages[$id])) $averages[$id] = [...$averages[$id], 'raw_hourly_minor' => $averages[$id]['hourly_minor'],
-                'minimum_hourly_minor' => $currentFloors[$id], 'hourly_minor' => $currentFloors[$id] === null ? null : max($averages[$id]['hourly_minor'], $currentFloors[$id])];
+            $floorSegments[$id] = PayrollHourlyAverageFloorResolver::segments($terms, $policies[$id] ?? [], $periodStart, $end, $employmentTypes[$id] ?? '', $provider);
+            $current = array_values(array_filter($floorSegments[$id], static fn(array $part): bool => $part['date_from'] <= $end && $part['date_to'] >= $end));
+            $currentFloors[$id] = count($current) === 1 ? $current[0]['minimum_hourly_minor'] : null;
+            if (isset($averages[$id])) $averages[$id]['raw_hourly_minor'] = $averages[$id]['hourly_minor'];
         }
         $historical = $this->historicalOvertime($supplierId, $periodStart, $ledger, $provider, $currentFloors, $lock);
         $result = [];
@@ -81,6 +84,8 @@ final class PayrollHourlyEntitlementContextLoader
                 'holiday_calendar' => $calendar, 'average_earning' => $averages[$id] ?? null,
                 'minimum_hourly_minor' => $floor->baseHourlyMinor, 'minimum_ruleset_id' => $floor->rulesetId,
                 'historical_overtime' => $historical[$id] ?? [], 'current_minimum_hourly_minor' => $currentFloors[$id],
+                'minimum_floor_segments' => $floorSegments[$id],
+                ...(array_key_exists($id, $minimumInputs) ? ['minimum_input_evidence' => $minimumInputs[$id]] : []),
                 'policy_versions' => $policy, 'work_segments' => $segments,
                 'policy_source' => $policies[$id] ?? [], 'employer_policy_source' => $employerPolicies,
                 'evidence_source' => $saved, 'ledger_source' => $ledger[$id],
@@ -336,18 +341,10 @@ final class PayrollHourlyEntitlementContextLoader
         return $result;
     }
 
-    /** § 79 se nesmí zaměnit s kratším smluvním úvazkem podle § 80. */
+    /** Zpětně kompatibilní veřejný převod používaný staršími volajícími. */
     public static function statedWeeklyMinutes(array $terms): ?int
     {
-        if ($terms === []) return null;
-        usort($terms, static fn(array $a, array $b): int => $a['effective_from'] <=> $b['effective_from']);
-        $term = $terms[array_key_last($terms)];
-        if (!isset($term['weekly_hours'], $term['workload_basis_points']) || !is_int($term['workload_basis_points']) || $term['workload_basis_points'] <= 0) return null;
-        $hours = \MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder::statedWeeklyHours((string) $term['weekly_hours'], $term['workload_basis_points']);
-        try {
-            $minutes = $hours === null ? null : PayrollDuration::exactMinutes(PayrollDuration::parseHours($hours));
-        } catch (\InvalidArgumentException|\OverflowException) { return null; }
-        return $minutes !== null && $minutes > 0 && $minutes <= 2400 ? $minutes : null;
+        return PayrollHourlyAverageFloorResolver::statedWeeklyMinutes($terms);
     }
 
     private function proofData(int $supplierId, array $ids, string $periodStart, bool $lock = false): array

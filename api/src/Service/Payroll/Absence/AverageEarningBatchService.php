@@ -92,11 +92,14 @@ final class AverageEarningBatchService
             $year,
             $quarter,
         );
+        $floorDate = sprintf('%04d-%02d-01', $year, (($quarter - 1) * 3) + 1);
+        $hourlyFloors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+            ->forMany($supplierId, array_map(static fn(array $row): int => (int) $row['id'], $rows), $floorDate, $floorDate);
         $items = [];
         foreach ($rows as $row) {
             $employmentId = (int) $row['id'];
             $items[] = $this->candidate(
-                $this->derivation->suggest($supplierId, $employmentId, $year, $quarter),
+                $this->derivation->suggest($supplierId, $employmentId, $year, $quarter, $hourlyFloors[$employmentId] ?? []),
                 (string) $row['full_name'],
                 (string) $row['code'],
                 $existing[$employmentId] ?? null,
@@ -153,6 +156,8 @@ final class AverageEarningBatchService
             $pdo->beginTransaction();
         }
         try {
+            $hourlyFloors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+                ->forMany($supplierId, array_keys($versions), $applicationStart, $applicationStart, true);
             $approved = [];
             foreach ($versions as $employmentId => $expectedVersion) {
                 $this->lockEmployment($supplierId, $employmentId);
@@ -161,7 +166,7 @@ final class AverageEarningBatchService
                     // může být jen z ručně sestavené dávky. Přeskočí se, dávka ne.
                     continue;
                 }
-                $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter);
+                $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter, $hourlyFloors[$employmentId] ?? []);
                 if (!hash_equals($expectedVersion, (string) $suggestion['input_version'])) {
                     throw new AverageEarningBatchConflictException($employmentId);
                 }
@@ -191,6 +196,7 @@ final class AverageEarningBatchService
                     $suggestion,
                     $ruleset,
                     $userId,
+                    $hourlyFloors[$employmentId] ?? [],
                 );
             }
             if ($ownsTransaction) {
@@ -219,6 +225,7 @@ final class AverageEarningBatchService
         array $suggestion,
         \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion $ruleset,
         ?int $userId,
+        array $hourlyFloorIntervals,
     ): array {
         $probable = $suggestion['source_kind'] === 'probable';
         $gross = $probable ? 0 : (int) $suggestion['gross_earnings_minor'];
@@ -234,11 +241,11 @@ final class AverageEarningBatchService
             $days,
             $probable ? (int) $suggestion['probable_hourly_minor'] : null,
             $probable ? $rationale : null,
-            // Stejně jako ruční založení: stanovenou kratší týdenní dobu
-            // podmínky vztahu nerozlišují, minimum platí pro 40 hodin.
+            // Původní výpočet zachováváme; nové hodinové minimum se ověří níže.
             null,
             $units,
         );
+        $calculated = \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::applyToResult($calculated, $hourlyFloorIntervals, $applicationStart);
         $trace = $calculated->trace;
         $trace['automatic'] = 'bulk';
         $trace['input_version'] = (string) $suggestion['input_version'];

@@ -8,6 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Hourly\PayrollHourlyWageCalculator;
 use MyInvoice\Service\Payroll\Hourly\PayrollHourlyWageContext;
+use MyInvoice\Service\Payroll\Hourly\PayrollHourlyMinimumWageCalculator;
+use MyInvoice\Service\Payroll\Hourly\PayrollHourlyMinimumWageContext;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBatchLoader;
 use MyInvoice\Service\Payroll\Time\PayrollDuration;
 use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence;
@@ -33,7 +36,8 @@ final class PayrollHourlyWagePreview
         if ($terms === []) return [];
         $sources = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, array_keys($terms), $periodStart, $lock);
         $entitlementContexts = (new PayrollHourlyEntitlementContextLoader($this->db))->forMany($supplierId, $periodStart, $employments, $terms, $sources, $lock);
-        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms, $lock);
+        $minimumFundIds = self::minimumFundIds($entitlementContexts);
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms, $lock, $minimumFundIds);
         $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId);
         $calculator = new PayrollHourlyWageCalculator();
         $result = [];
@@ -58,10 +62,38 @@ final class PayrollHourlyWagePreview
                 settlementOnly: !isset($hourlyTerms[$id]),
             );
             $calculated = $calculator->calculate($context);
+            $minimum = null;
+            $claims = $calculated->claims;
+            $blockers = $calculated->blockers;
+            $complete = $calculated->complete;
+            $evidenceHash = $calculated->evidenceHash;
+            if (!$context->settlementOnly) {
+                $minimumContext = self::minimumContext($context, $calculated->claims, $calculated->includedAllocations);
+                $assessment = (new PayrollHourlyMinimumWageCalculator())->calculate($minimumContext);
+                $minimumBlockers = $assessment->blockers;
+                foreach ($entitlementContext['minimum_floor_segments'] ?? [] as $floor) {
+                    if (($floor['weekly_hours_conflict'] ?? false) === true) {
+                        $minimumBlockers[] = ['code' => 'hourly_minimum_weekly_hours_conflict',
+                            'message' => 'Stanovená týdenní doba ve sjednání odporuje podmínkám vztahu. Opravte doložené údaje.',
+                            'context' => ['term_id' => $floor['term_id'], 'date_from' => $floor['date_from'], 'date_to' => $floor['date_to']]];
+                    }
+                }
+                $minimumClaim = $assessment->claim;
+                if ($minimumBlockers !== $assessment->blockers) {
+                    $minimumClaim = [...$minimumClaim, 'ready' => false, 'raw_numerator_minor' => null, 'raw_denominator' => null, 'analytical_minor' => null, 'payable_minor' => null];
+                }
+                $minimum = ['complete' => $assessment->complete && count($minimumBlockers) === 0, 'claim' => $minimumClaim,
+                    'blockers' => $minimumBlockers, 'assessment_evidence' => $assessment->assessmentEvidence,
+                    'evidence_hash' => $assessment->evidenceHash];
+                $claims[] = $minimumClaim;
+                $blockers = [...$blockers, ...$minimumBlockers];
+                $complete = $complete && $minimum['complete'];
+                $evidenceHash = hash('sha256', CanonicalJson::encode(['hourly_wage' => $calculated->evidenceHash, 'minimum_wage' => $assessment->evidenceHash]));
+            }
             $total = null;
-            if ($calculated->complete) {
+            if ($complete) {
                 $total = 0;
-                foreach ($calculated->claims as $claim) {
+                foreach ($claims as $claim) {
                     $amount = (int) $claim['payable_minor'];
                     if ($amount > PHP_INT_MAX - $total) throw new \OverflowException('Součet hodinové mzdy překročil celočíselný rozsah.');
                     $total += $amount;
@@ -69,11 +101,12 @@ final class PayrollHourlyWagePreview
             }
             $result[$id] = [
                 'settlement_only' => $context->settlementOnly,
-                'complete' => $calculated->complete,
-                'blockers' => $calculated->blockers,
+                'complete' => $complete,
+                'blockers' => $blockers,
                 'rounding' => $rounding->value,
-                'evidence_hash' => $calculated->evidenceHash,
-                'claims' => $calculated->claims,
+                'evidence_hash' => $evidenceHash,
+                'claims' => $claims,
+                'minimum_wage' => $minimum,
                 'entitlements' => $calculated->entitlements,
                 'included_allocations' => $calculated->includedAllocations,
                 'payable_total_minor' => $total,
@@ -86,10 +119,57 @@ final class PayrollHourlyWagePreview
                     'rounding' => $rounding->value,
                     'monthly_parts' => $context->monthlyParts,
                     'entitlement_context' => $context->entitlementContext,
+                    ...($minimum === null ? [] : ['minimum_wage' => $minimum]),
                 ],
             ];
         }
         return $result;
+    }
+
+    /** @param list<array<string,mixed>> $claims @param list<array<string,mixed>> $included */
+    private static function minimumContext(PayrollHourlyWageContext $wage, array $claims, array $included): PayrollHourlyMinimumWageContext
+    {
+        $source = $wage->entitlementContext ?? [];
+        $parts = [];
+        $assessments = [];
+        $proofs = [];
+        foreach ($wage->segments as $segment) {
+            $matches = array_values(array_filter($source['minimum_floor_segments'] ?? [], static fn(array $floor): bool =>
+                $floor['date_from'] <= $segment['date_to'] && $floor['date_to'] >= $segment['date_from']));
+            $floor = count($matches) === 1 && $matches[0]['date_from'] <= $segment['date_from'] && $matches[0]['date_to'] >= $segment['date_to'] ? $matches[0] : [];
+            $term = null;
+            foreach ($wage->terms as $candidate) if ((int) $candidate['id'] === (int) ($floor['term_id'] ?? 0)) { $term = $candidate; break; }
+            $mode = $floor['assessment'] ?? 'hourly';
+            $assessments[$mode] = true;
+            if (($floor['advance_proof'] ?? null) !== null) $proofs[CanonicalJson::encode($floor['advance_proof'])] = $floor['advance_proof'];
+            $worked = $segment['worked_duration_units'] ?? null;
+            $overtime = $segment['overtime_duration_units'] ?? null;
+            $contractual = null;
+            try { if (isset($term['weekly_hours'])) $contractual = PayrollDuration::parseHours((string) $term['weekly_hours']); }
+            catch (\InvalidArgumentException|\OverflowException) {}
+            $parts[] = ['term_id' => $floor['term_id'] ?? null, 'date_from' => $segment['date_from'], 'date_to' => $segment['date_to'],
+                'regular_worked_duration_units' => is_int($worked) && is_int($overtime) && $worked >= $overtime ? $worked - $overtime : null,
+                'stated_weekly_minutes' => $floor['stated_weekly_minutes'] ?? null, 'minimum_base40_minor' => $floor['minimum_base40_minor'] ?? null,
+                'minimum_monthly_minor' => $floor['minimum_monthly_minor'] ?? null,
+                'full_month_fund_duration_units' => ($source['monthly_fund_source']['minimum_fund_usable'] ?? false) ? ($source['monthly_fund_source']['full_fund_duration_units'] ?? null) : null,
+                'contractual_weekly_duration_units' => $contractual];
+        }
+        $assessment = count($assessments) === 1 ? (string) array_key_first($assessments) : (count($assessments) === 0 ? 'hourly' : 'mixed');
+        $base = null;
+        foreach ($claims as $claim) if (($claim['purpose'] ?? null) === 'ordinary_base' && ($claim['ready'] ?? false) === true && is_int($claim['payable_minor'] ?? null)) $base = $claim['payable_minor'];
+        return new PayrollHourlyMinimumWageContext($wage->employmentId, $wage->periodStart, $wage->employmentType,
+            $assessment, $parts, $base, $source['minimum_input_evidence'] ?? [], $included, $wage->rounding,
+            count($proofs) === 1 ? array_values($proofs)[0] : null);
+    }
+
+    /** @param array<int,array<string,mixed>> $contexts @return list<int> */
+    public static function minimumFundIds(array $contexts): array
+    {
+        $ids = [];
+        foreach ($contexts as $id => $context) foreach ($context['minimum_floor_segments'] ?? [] as $segment) {
+            if (($segment['assessment'] ?? null) === 'monthly') { $ids[] = (int) $id; break; }
+        }
+        return $ids;
     }
 
     /** @param ?array<string,mixed> $source @param list<array<string,mixed>> $terms @param list<array<string,mixed>> $policyIntervals @return list<array<string,mixed>> */
