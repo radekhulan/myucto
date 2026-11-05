@@ -1007,7 +1007,7 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
         // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde.
         if (auth.isSuperadmin) return false
         return auth.canWrite('settings.email_profiles') || (!auth.canWrite('settings.company.write')
-          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.email_templates')))
+          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.invoice_defaults') || auth.canWrite('settings.email_templates')))
       }
       const permission = navPermission(item)
       if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.canWrite('settings.company.write')

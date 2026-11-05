@@ -699,8 +699,8 @@ rolí bez jiných rolí licenční místo nečerpá. Vlastní čtecí role, klie
 i technické účty se do limitu aktivních uživatelů počítají, a to i při přiřazení
 jiné role pouze pro jednu firmu. Podrobnosti jsou v [§ 104.10.3](104_Licence_a_aktivace.md#104103-zkusebni-obdobi-a-stavy-licence).
 
-Provozní nastavení firmy má pět samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
-**Branding firmy**, **Platební QR firmy** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
+Provozní nastavení firmy má šest samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
+**Branding firmy**, **Platební QR firmy**, **Výchozí hodnoty dokladů** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
 samostatně zakázat nebo povolit pro zápis. V `Firma → Nastavení firmy` se zobrazí jen povolené záložky; totéž platí
 pro přímý odkaz a pro vlastní klientskou doménu. Samotné **Nastavení firmy** přístup do těchto editorů nezapíná.
 Právo **Měnit nastavení firmy** zůstává interní správě právních, daňových a účetních údajů.
@@ -708,8 +708,10 @@ Oprávnění **Branding firmy** umožňuje upravit také vzhled PDF: kompaktní 
 
 Interní role mají branding v položce `Firma → Branding`, platební QR a e-mailové šablony v `Firma → Nastavení`
 a superadmin odesílací profily v `Systém → E-maily a certifikáty`. Položka `Firma → Nastavení firmy` se jim proto
-v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR a e-mailovým šablonám
+v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR, e-mailovým šablonám a výchozím hodnotám dokladů
 u role bez práva **Měnit nastavení firmy**.
+
+Oprávnění **Výchozí hodnoty dokladů** (`settings.invoice_defaults`) se zápisem dovolí měnit výchozí splatnost včetně jednotky, hodinovou sazbu a zapnutí a český i anglický text poznámky pod položkami. Interní správce je najde v `Firma → Nastavení`; klient a interní uživatel bez práva měnit celé nastavení firmy v `Firma → Nastavení firmy → Výchozí hodnoty dokladů`. Hodnoty se používají při zakládání nových dokladů; již uložené koncepty a vystavené doklady zůstávají beze změny. Měna, DPH a zaokrouhlování do tohoto oprávnění nepatří. Poznámka může mít nejvýše 5 000 znaků a hodinová sazba šest desetinných míst. Běžná klientská a účetní role toto právo ve výchozím stavu nemá. Odebrání práva platí i pro uživatele s právem **Měnit nastavení firmy**.
 
 Klient s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
 pro PDF výstupy. Pro propojení profilu s odesílacím profilem potřebuje také správu odesílacích profilů. Správa se týká

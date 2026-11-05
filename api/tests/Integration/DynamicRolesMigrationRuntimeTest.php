@@ -205,6 +205,38 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
         self::assertSame('1', $db->query("SELECT v FROM app_meta WHERE k='rbac_tax_submission_defaults_initialized'")->fetchColumn());
     }
 
+    public function testInvoiceDefaultsBackfillPreservesExplicitDenyAndLaterRevocation(): void
+    {
+        $db = $this->databasePdo();
+        $db->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES'");
+        $db->exec('CREATE TABLE roles (id INT UNSIGNED PRIMARY KEY, system_key VARCHAR(32) NULL, role_type VARCHAR(20) NOT NULL) ENGINE=InnoDB');
+        $db->exec('CREATE TABLE role_permissions (role_id INT UNSIGNED NOT NULL, permission_key VARCHAR(120) NOT NULL, access_level TINYINT UNSIGNED NOT NULL, PRIMARY KEY (role_id, permission_key)) ENGINE=InnoDB');
+        $db->exec('CREATE TABLE app_meta (k VARCHAR(64) PRIMARY KEY, v MEDIUMTEXT NOT NULL) ENGINE=InnoDB');
+        $db->exec("INSERT INTO roles VALUES (1, 'admin', 'staff'), (2, 'admin_plus', 'staff'), (3, 'accountant', 'staff'),
+            (4, 'readonly', 'staff'), (5, 'client', 'client'), (6, NULL, 'staff'), (7, NULL, 'staff'), (8, NULL, 'staff')");
+        $db->exec("INSERT INTO role_permissions VALUES
+            (1, 'settings.company.write', 2), (2, 'settings.company.write', 2),
+            (2, 'settings.invoice_defaults', 0), (3, 'settings.company', 1),
+            (4, 'settings.company.write', 1), (5, 'settings.company.write', 2), (5, 'settings.company', 2),
+            (6, 'settings.company.write', 2), (7, 'settings.company.write', 2), (7, 'settings.invoice_defaults', 1),
+            (8, 'settings.company.write', 0)");
+        $migration = ['2236_invoice_defaults_role_permission.sql'];
+        $this->runMigrator($migration);
+        $read = static fn (): array => array_map('intval', $db->query(
+            "SELECT role_id, access_level FROM role_permissions WHERE permission_key='settings.invoice_defaults' ORDER BY role_id"
+        )->fetchAll(PDO::FETCH_KEY_PAIR));
+        self::assertSame([1 => 2, 2 => 0, 6 => 2, 7 => 1], $read(), 'Nový grant dostanou jen interní role se zápisem firmy; výslovný zákaz i READ zůstanou.');
+
+        $db->exec("DELETE FROM role_permissions WHERE role_id=1 AND permission_key='settings.invoice_defaults'");
+        $db->exec("UPDATE role_permissions SET access_level=0 WHERE role_id=6 AND permission_key='settings.invoice_defaults'");
+        $db->exec("INSERT INTO roles VALUES (9, NULL, 'staff')");
+        $db->exec("INSERT INTO role_permissions VALUES (9, 'settings.company.write', 2)");
+        $db->exec("DELETE FROM migrations WHERE filename='2236_invoice_defaults_role_permission.sql'");
+        $this->runMigrator($migration);
+        self::assertSame([2 => 0, 6 => 0, 7 => 1], $read(), 'Marker chrání odebrané granty a nepřiděluje právo později založeným rolím.');
+        self::assertSame('1', $db->query("SELECT v FROM app_meta WHERE k='rbac_invoice_defaults_initialized'")->fetchColumn());
+    }
+
     private function createLegacyParentTables(PDO $db): void
     {
         $tables = [
@@ -381,6 +413,7 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
                 '2118_property_service_unwind_permission.sql',
                 '2183_eet_role_permissions.sql',
                 '2196_client_tax_submission_permissions.sql',
+                '2236_invoice_defaults_role_permission.sql',
             ]),
         ];
         $env = getenv();

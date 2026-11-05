@@ -256,6 +256,7 @@
     ],
     "portal-company-settings": [
       "company_email_templates",
+      "invoice_default_note",
       "settings",
       "stock",
       "users",
