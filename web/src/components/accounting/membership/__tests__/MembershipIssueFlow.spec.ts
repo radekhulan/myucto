@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatDate } from '@/composables/useFormat'
 import Flow from '../MembershipIssueFlow.vue'
 import type { MemberRevision, MembershipPreview } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
@@ -16,8 +17,8 @@ vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: dppo }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; variant?: string; loading?: boolean; disabled?: boolean; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-variant': a.variant, 'data-loading': a.loading ? 'true' : undefined, disabled: a.disabled, onClick: a.run }, a.label))),
 })
 const DateInput = defineComponent({
   props: ['modelValue'], emits: ['update:modelValue'],
@@ -193,7 +194,8 @@ describe('Membership issue flow', () => {
     await fill(w)
     await review(w)
     const deferral = w.get('[data-section="issue-deferral"]').text()
-    expect(deferral).toContain('2026-12-31')
+    expect(deferral).toContain(formatDate('2026-12-31'))
+    expect(deferral).not.toContain('2026-12-31')
     expect(deferral).toContain('600')
     w.unmount()
   })
@@ -210,6 +212,7 @@ describe('Membership issue flow', () => {
     const w = mounted()
     await fill(w)
     await review(w)
+    expect(w.get('[data-action="confirm"]').attributes('data-variant')).toBe('success')
     expect(w.get('[data-action="confirm"]').attributes('disabled')).toBeDefined()
     await w.get('[data-field="ack"]').setValue(true)
     await w.get('[data-action="confirm"]').trigger('click')
@@ -220,6 +223,26 @@ describe('Membership issue flow', () => {
       operation: 'issue', request: expectedRequest, expected_case_version: 0, preview_hash: hash, idempotency_key: expect.stringMatching(token),
     })
     expect(w.emitted('done')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('shows progress on the preview and on the confirmation while the server answers', async () => {
+    let answerPreview: (value: MembershipPreview) => void = () => {}
+    api.preview.mockImplementation(() => new Promise<MembershipPreview>(resolve => { answerPreview = resolve }))
+    const w = mounted()
+    await fill(w)
+    expect(w.get('[data-action="issue-preview"]').attributes('data-loading')).toBeUndefined()
+    await w.get('[data-action="issue-preview"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-action="issue-preview"]').attributes('data-loading')).toBe('true')
+    answerPreview(previewResult())
+    await flushPromises()
+    api.confirm.mockReturnValue(new Promise(() => {}))
+    await w.get('[data-field="ack"]').setValue(true)
+    expect(w.get('[data-action="confirm"]').attributes('data-loading')).toBeUndefined()
+    await w.get('[data-action="confirm"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-action="confirm"]').attributes('data-loading')).toBe('true')
     w.unmount()
   })
 
@@ -275,6 +298,7 @@ describe('Membership issue flow', () => {
     await flushPromises()
     expect(api.confirm).toHaveBeenCalledTimes(1)
     expect(w.get('[data-section="uncertain"]').text()).toContain(cs.nonprofitMembership.uncertain)
+    expect(w.get('[data-section="uncertain"]').classes()).toEqual(expect.arrayContaining(['rounded-lg', 'bg-warning-50']))
     expect(w.get('fieldset').attributes('disabled')).toBeDefined()
     expect(w.get('[data-field="ack"]').attributes('disabled')).toBeDefined()
     expect(w.find('[data-action="issue-preview"]').exists()).toBe(false)
@@ -636,6 +660,27 @@ describe('Membership issue flow: explicit accounting classification', () => {
     expect(w.text()).toContain(messages.classificationReviewTitle)
     expect(w.text()).toContain(messages.classificationTaxAdvisory)
     expect(w.text()).not.toContain('nonprofitMembership.')
+    w.unmount()
+  })
+
+  it('shows the proven member revision with its effective date', async () => {
+    const w = mounted()
+    await fill(w)
+    await review(w)
+    const proof = w.get('[data-field="proof-revision"]').text()
+    expect(proof).toContain(formatDate('2020-01-01'))
+    expect(w.get('[data-field="review-amount"]').classes()).toContain('tabular-nums')
+    expect(w.get('[data-section="issue-preview"]').text()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    w.unmount()
+  })
+
+  it('shows a failed legal profile lookup in the shared error box', async () => {
+    dppo.profile.mockRejectedValue({ response: { status: 500, data: {} } })
+    const w = mounted()
+    await flushPromises()
+    const box = w.get('[data-section="profile-error"]')
+    expect(box.text()).toBe(cs.nonprofitMembership.profileError)
+    expect(box.classes()).toEqual(expect.arrayContaining(['bg-danger-50', 'text-danger-700']))
     w.unmount()
   })
 })

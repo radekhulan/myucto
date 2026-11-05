@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatDate } from '@/composables/useFormat'
 import Form from '../MembershipRevisionForm.vue'
 import type { MemberRevision } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
@@ -97,7 +98,7 @@ describe('Membership revision form', () => {
     const w = mounted({ history: [revision(1, '2026-01-01')] })
     await fill(w, '2026-01-01')
     expect(w.get('[data-action="rev-review"]').attributes('disabled')).toBeDefined()
-    expect(w.get('[data-section="rev-invalid"]').text()).toContain('2026-01-01')
+    expect(w.get('[data-section="rev-invalid"]').text()).toContain(formatDate('2026-01-01'))
     await w.get('[data-field="rev-from"]').setValue('2026-01-02')
     expect(w.get('[data-action="rev-review"]').attributes('disabled')).toBeUndefined()
     w.unmount()
@@ -161,6 +162,17 @@ describe('Membership revision form', () => {
   it('renders no mutating action without write rights', () => {
     const w = mounted({ canManage: false })
     expect(w.find('[data-action="rev-review"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('shows the previewed effective date in the app date format', async () => {
+    const w = mounted({ history: [revision(1, '2026-01-01')] })
+    await fill(w, '2026-02-03')
+    await w.get('[data-action="rev-review"]').trigger('click')
+    await flushPromises()
+    const preview = w.get('[data-section="rev-preview"]').text()
+    expect(preview).toContain(formatDate('2026-02-03'))
+    expect(preview).not.toContain('2026-02-03')
     w.unmount()
   })
 })

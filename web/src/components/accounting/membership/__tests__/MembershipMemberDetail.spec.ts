@@ -3,7 +3,10 @@ import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Detail from '../MembershipMemberDetail.vue'
-import { formatCents } from '../membershipFormat'
+import { formatDateRange } from '../membershipFormat'
+import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
+import { appIsoDate } from '@/utils/date'
+import { i18n } from '@/i18n'
 import type { ClaimRow, MemberDetail, MemberRevision } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
@@ -74,14 +77,15 @@ describe('Membership member detail', () => {
     const w = mounted()
     await flushPromises()
     expect(w.get('[data-field="status-today"]').text()).toContain(cs.nonprofitMembership.status_active)
+    expect(w.get('[data-field="status-today"]').text()).toContain(formatDate(appIsoDate()))
     expect(w.get('[data-field="status-today"]').text()).not.toContain(cs.nonprofitMembership.status_ended)
-    expect(w.get('[data-field="status-upcoming"]').text()).toContain('2999-01-01')
+    expect(w.get('[data-field="status-upcoming"]').text()).toContain(formatDate('2999-01-01'))
     expect(w.get('[data-field="status-upcoming"]').text()).toContain(cs.nonprofitMembership.status_ended)
     const rows = w.findAll('[data-section="history-row"]')
     expect(rows).toHaveLength(2)
     expect(rows[0]!.text()).toContain(cs.nonprofitMembership.validToday)
     expect(rows[1]!.text()).toContain(cs.nonprofitMembership.notYetValid)
-    expect(rows[1]!.text()).toContain('2999-01-01')
+    expect(rows[1]!.text()).toContain(formatDate('2999-01-01'))
     w.unmount()
   })
 
@@ -104,11 +108,11 @@ describe('Membership member detail', () => {
     expect(rows[0]!.find('[data-field="settlement-unknown"]').exists()).toBe(true)
     expect(rows[1]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_ambiguous)
     expect(rows[1]!.find('[data-field="settlement-amounts"]').exists()).toBe(false)
-    expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatCents(50000, 'cs'))
-    expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatCents(30000, 'cs'))
+    expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(50000))
+    expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(30000))
     expect(rows[3]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_reversed)
-    expect(w.get('[data-field="sum-issued"]').text()).toBe(formatCents(100000 + 80000 + 120050, 'cs'))
-    expect(w.get('[data-field="sum-proven-open"]').text()).toBe(formatCents(30000, 'cs'))
+    expect(w.get('[data-field="sum-issued"]').text()).toBe(formatMoneyMinor(100000 + 80000 + 120050))
+    expect(w.get('[data-field="sum-proven-open"]').text()).toBe(formatMoneyMinor(30000))
     expect(w.get('[data-field="sum-unproven"]').text()).toBe('2')
     expect(w.get('[data-section="unproven-note"]').text()).toContain(cs.nonprofitMembership.unprovenNote)
     expect(w.get('[data-section="claims-summary"]').text()).not.toMatch(/neuhrazen|dluh:/i)
@@ -216,5 +220,41 @@ describe('Membership member detail', () => {
     expect(w.get('[data-section="detail-error"]').text()).toContain('Synthetic missing member')
     expect(w.findAll('[data-section="claim-row"]')).toHaveLength(0)
     w.unmount()
+  })
+
+  it('formats claim dates and amounts like the rest of the app and separates the open amount', async () => {
+    const w = mounted()
+    await flushPromises()
+    const row = w.findAll('[data-section="claim-row"]')[2]!
+    expect(row.get('[data-field="claim-period"]').text()).toBe(formatDateRange('2026-01-01', '2026-12-31'))
+    expect(row.get('[data-field="claim-amounts"]').text()).toContain(formatDate('2026-03-31'))
+    expect(row.text()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(row.get('[data-field="settlement-amounts"]').text()).toContain(`${cs.nonprofitMembership.openAmount}: ${formatMoneyMinor(30000)}`)
+    expect(row.get('[data-field="settlement-status"]').classes()).toContain('rounded-full')
+    w.unmount()
+  })
+
+  it('shows a loading state and no orphan separator in the heading before the member arrives', async () => {
+    api.member.mockReturnValue(new Promise(() => {}))
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-section="detail-loading"]').exists()).toBe(true)
+    expect(w.get('[data-focus="member-heading"]').text()).toBe('Synthetic member')
+    w.unmount()
+  })
+
+  it('formats amounts with the app currency suffix in English too', async () => {
+    const previous = i18n.global.locale.value
+    i18n.global.locale.value = 'en'
+    try {
+      const w = mounted({}, 'en')
+      await flushPromises()
+      const issued = w.get('[data-field="sum-issued"]').text()
+      expect(issued).toBe('3,000.50 Kč')
+      expect(w.get('[data-section="claims"]').text()).not.toMatch(/CZK\s*\d/)
+      w.unmount()
+    } finally {
+      i18n.global.locale.value = previous
+    }
   })
 })

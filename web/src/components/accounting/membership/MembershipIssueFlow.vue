@@ -11,9 +11,10 @@ import { nonprofitDppoApi } from '@/api/nonprofitDppo'
 import type { LegalOverview } from '@/api/nonprofitDppoTypes'
 import { membershipApi, type MemberRevision, type MembershipConfirmBody, type MembershipIssueRequest, type MembershipPreview } from '@/api/nonprofitMembership'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
+import { formatDate, formatMoney } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
 import { dimensionValueName } from '@/utils/dimensionValueLabel'
-import { amountDecimal, formatCents, isIsoDate, revisionAt, titleKeyPattern } from './membershipFormat'
+import { amountDecimal, errorBox, formatDateRange, isIsoDate, revisionAt, titleKeyPattern } from './membershipFormat'
 import MembershipConfirmBar from './MembershipConfirmBar.vue'
 import { useGuardedCommit } from './useGuardedCommit'
 
@@ -23,7 +24,7 @@ const props = defineProps<{
   history: MemberRevision[]; periods: AccountingPeriod[]
 }>()
 const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean] }>()
-const { t, te, locale } = useI18n()
+const { t, te } = useI18n()
 
 const inputForm = ref<HTMLFormElement | null>(null)
 
@@ -212,10 +213,6 @@ onMounted(() => {
   void loadClassification()
 })
 
-const money = (value: string) => {
-  const [whole = '0', fraction = ''] = value.split('.')
-  return formatCents(Number(`${whole}${fraction.padEnd(2, '0').slice(0, 2)}`), locale.value)
-}
 const frozenRequest = computed(() => {
   const payload = commit.frozen.value?.payload
   return payload && payload.operation === 'issue' ? payload.request : null
@@ -265,20 +262,20 @@ const retryActions = computed<ActionItem[]>(() => [
   { key: 'classification-retry', label: t('nonprofitMembership.classificationRetry'), icon: 'cycle', tier: 'primary', variant: 'warning', disabled: commit.locked.value, run: () => { void loadClassification() } },
 ])
 const actions = computed<ActionItem[]>(() => [
-  { key: 'issue-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
+  { key: 'issue-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
   { key: 'issue-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
 ])
 </script>
 
 <template>
   <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="issue-flow">
-    <h3 class="font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
+    <h3 class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.issueHelp') }}</p>
-    <p v-if="commit.error.value" role="alert" class="rounded border border-danger-300 p-3 text-sm" data-section="issue-error">{{ commit.error.value }}</p>
-    <p v-if="accountsError" role="alert" class="text-sm text-danger-700">{{ t('nonprofitMembership.accountsError') }}</p>
+    <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="issue-error">{{ commit.error.value }}</p>
+    <p v-if="accountsError" role="alert" :class="errorBox" data-section="accounts-error">{{ t('nonprofitMembership.accountsError') }}</p>
     <p v-if="classState === 'loading'" class="text-sm text-neutral-500" data-section="classification-loading">{{ t('nonprofitMembership.classificationLoading') }}</p>
     <div v-else-if="classState === 'error'" class="flex flex-wrap items-center gap-3" data-section="classification-error">
-      <p role="alert" class="text-sm text-danger-700">{{ t('nonprofitMembership.classificationError') }}</p>
+      <p role="alert" :class="[errorBox, 'min-w-0 flex-1']">{{ t('nonprofitMembership.classificationError') }}</p>
       <ActionBar v-if="canManage" :actions="retryActions" />
     </div>
     <p v-else-if="classState === 'ready' && !classificationAxesOk" role="alert" class="text-sm text-warning-700" data-section="classification-missing">{{ t('nonprofitMembership.classificationMissing') }}</p>
@@ -287,13 +284,13 @@ const actions = computed<ActionItem[]>(() => [
       <label :class="formLabel">{{ t('nonprofitMembership.accountingPeriod') }}
         <select v-model.number="form.periodId" :class="field" data-field="issue-period">
           <option :value="0">{{ t('nonprofitMembership.choose') }}</option>
-          <option v-for="p in openPeriods" :key="p.id" :value="p.id">{{ p.starts_on }} - {{ p.ends_on }}</option>
+          <option v-for="p in openPeriods" :key="p.id" :value="p.id">{{ formatDateRange(p.starts_on, p.ends_on) }}</option>
         </select>
       </label>
       <div class="text-sm" data-section="issue-profile">
         <p class="font-medium">{{ t('nonprofitMembership.legalProfile') }}</p>
         <p v-if="profileState === 'loading'">{{ t('nonprofitMembership.profileLoading') }}</p>
-        <p v-else-if="profileState === 'error'" class="text-danger-700">{{ t('nonprofitMembership.profileError') }}</p>
+        <p v-else-if="profileState === 'error'" role="alert" :class="errorBox" data-section="profile-error">{{ t('nonprofitMembership.profileError') }}</p>
         <p v-else-if="profileState === 'ready' && latestProfile" :class="legalOk ? '' : 'text-warning-700'">
           {{ t('nonprofitMembership.profileRevision', { no: latestProfile.revision_no, id: latestProfile.id, type: latestProfile.profile.entity_type }) }}
           · {{ t(legalOk ? 'nonprofitMembership.profileAssociation' : 'nonprofitMembership.profileNotAssociation') }}
@@ -336,23 +333,25 @@ const actions = computed<ActionItem[]>(() => [
       <h4 class="font-semibold">{{ t('nonprofitMembership.reviewTitle') }}</h4>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.advisory') }}</p>
       <dl class="grid gap-3 sm:grid-cols-3">
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.titleKey') }}</dt><dd>{{ frozenRequest.title_key }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.periodFrom') }} - {{ t('nonprofitMembership.periodTo') }}</dt><dd>{{ frozenRequest.period_from }} - {{ frozenRequest.period_to }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.amount') }}</dt><dd data-field="review-amount">{{ money(frozenRequest.amount) }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.accountingDate') }}</dt><dd>{{ frozenRequest.accounting_date }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.dueDate') }}</dt><dd>{{ frozenRequest.due_date }}</dd></div>
+        <div class="min-w-0"><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.titleKey') }}</dt><dd class="break-words">{{ frozenRequest.title_key }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.periodFrom') }} – {{ t('nonprofitMembership.periodTo') }}</dt><dd data-field="review-period">{{ formatDateRange(frozenRequest.period_from, frozenRequest.period_to) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.amount') }}</dt><dd class="whitespace-nowrap tabular-nums" data-field="review-amount">{{ formatMoney(frozenRequest.amount) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.accountingDate') }}</dt><dd>{{ formatDate(frozenRequest.accounting_date) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.dueDate') }}</dt><dd>{{ formatDate(frozenRequest.due_date) }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.caseVersion') }}</dt><dd>{{ commit.review.value.expected_case_version === 0 ? t('nonprofitMembership.caseNew') : t('nonprofitMembership.caseExisting', { version: commit.review.value.expected_case_version }) }}</dd></div>
       </dl>
+      <div class="overflow-x-auto">
       <table class="w-full text-sm" data-section="issue-plan">
-        <thead><tr class="text-left text-neutral-500"><th>{{ t('nonprofitMembership.side') }}</th><th>{{ t('nonprofitMembership.account') }}</th><th class="text-right">{{ t('nonprofitMembership.amount') }}</th></tr></thead>
-        <tbody>
+        <thead><tr class="text-left text-neutral-500"><th class="px-3 py-2">{{ t('nonprofitMembership.side') }}</th><th class="px-3 py-2">{{ t('nonprofitMembership.account') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitMembership.amount') }}</th></tr></thead>
+        <tbody class="divide-y">
           <tr v-for="(line, index) in commit.review.value.journal_plan || []" :key="index">
-            <td>{{ line.side === 'debit' ? t('nonprofitMembership.debit') : t('nonprofitMembership.credit') }}</td>
-            <td>{{ line.account_code }} {{ accountName(line.account_code) }}</td>
-            <td class="text-right">{{ money(line.amount) }}</td>
+            <td class="whitespace-nowrap px-3 py-2">{{ line.side === 'debit' ? t('nonprofitMembership.debit') : t('nonprofitMembership.credit') }}</td>
+            <td class="px-3 py-2">{{ line.account_code }} {{ accountName(line.account_code) }}</td>
+            <td class="whitespace-nowrap px-3 py-2 text-right tabular-nums">{{ formatMoney(line.amount) }}</td>
           </tr>
         </tbody>
       </table>
+      </div>
       <div data-section="issue-classification">
         <h5 class="text-sm font-medium">{{ t('nonprofitMembership.classificationReviewTitle') }}</h5>
         <dl v-if="classificationRows.length" class="grid gap-3 sm:grid-cols-3">
@@ -366,9 +365,9 @@ const actions = computed<ActionItem[]>(() => [
         <p class="text-sm text-neutral-500" data-section="classification-tax-advisory">{{ t('nonprofitMembership.classificationTaxAdvisory') }}</p>
       </div>
       <p v-if="commit.review.value.deferral" class="text-sm text-warning-700" data-section="issue-deferral">
-        {{ t('nonprofitMembership.deferralProposal', { amount: money(commit.review.value.deferral.deferred_amount), date: commit.review.value.deferral.balance_sheet_date }) }}
+        {{ t('nonprofitMembership.deferralProposal', { amount: formatMoney(commit.review.value.deferral.deferred_amount), date: formatDate(commit.review.value.deferral.balance_sheet_date) }) }}
       </p>
-      <p v-if="commit.review.value.proof?.member_revision" class="text-sm">{{ t('nonprofitMembership.proofRevision', { no: commit.review.value.proof.member_revision.revision_no, from: commit.review.value.proof.member_revision.effective_from }) }}</p>
+      <p v-if="commit.review.value.proof?.member_revision" class="text-sm" data-field="proof-revision">{{ t('nonprofitMembership.proofRevision', { no: commit.review.value.proof.member_revision.revision_no, date: formatDate(commit.review.value.proof.member_revision.effective_from) }) }}</p>
       <p v-if="commit.review.value.proof?.legal_profile" class="text-sm">{{ t('nonprofitMembership.proofProfile', { id: commit.review.value.proof.legal_profile.id }) }}</p>
       <p v-if="profileMismatch" class="text-sm text-warning-700" data-section="profile-mismatch">{{ t('nonprofitMembership.profileMismatch') }}</p>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.taxUnclassified') }}</p>

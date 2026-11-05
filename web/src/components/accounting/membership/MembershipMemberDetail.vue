@@ -5,8 +5,9 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnIconSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
+import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { errorMessage, formatCents, revisionAt } from './membershipFormat'
+import { badgeBase, errorBox, errorMessage, formatDateRange, memberStatusBadge, revisionAt } from './membershipFormat'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
 import MembershipRevisionForm from './MembershipRevisionForm.vue'
@@ -14,7 +15,7 @@ import MembershipSettlement from './MembershipSettlement.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[] }>()
 const emit = defineEmits<{ changed: []; close: [] }>()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const identity = ref<MemberIdentity | null>(null)
 const history = ref<MemberRevision[]>([])
@@ -101,22 +102,23 @@ const actions = computed<ActionItem[]>(() => [
 <template>
   <section class="space-y-5 rounded-lg border bg-surface p-4" data-section="member-detail">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <h2 class="text-lg font-semibold">{{ identity?.member_number }} · {{ label }}</h2>
+      <h2 tabindex="-1" class="min-w-0 break-words text-lg font-semibold focus:outline-none" data-focus="member-heading">{{ identity ? `${identity.member_number} · ${label}` : label }}</h2>
       <ActionBar :actions="actions" />
     </div>
-    <p v-if="error" role="alert" class="rounded border border-danger-300 p-3 text-sm" data-section="detail-error">{{ error }}</p>
-    <p v-if="notice" role="status" class="text-sm text-success-700" data-section="detail-notice">{{ notice }}</p>
+    <p v-if="error" role="alert" :class="errorBox" data-section="detail-error">{{ error }}</p>
+    <p v-if="loading && !identity" role="status" class="text-sm text-neutral-500" data-section="detail-loading">{{ t('common.loading') }}</p>
+    <p v-if="notice" role="status" class="text-sm text-success-600" data-section="detail-notice">{{ notice }}</p>
 
     <div v-if="identity" class="space-y-2" data-section="member-status">
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.clientRef', { client: label, id: identity.client_id }) }}</p>
       <p v-if="current" data-field="status-today">
-        {{ t('nonprofitMembership.statusToday', { date: today }) }}:
-        <strong>{{ t(`nonprofitMembership.status_${current.status}`) }}</strong>
-        ({{ t('nonprofitMembership.sinceDate', { date: current.effective_from }) }})
+        {{ t('nonprofitMembership.statusToday', { date: formatDate(today) }) }}:
+        <span :class="memberStatusBadge(current.status)">{{ t(`nonprofitMembership.status_${current.status}`) }}</span>
+        ({{ t('nonprofitMembership.sinceDate', { date: formatDate(current.effective_from) }) }})
       </p>
-      <p v-else class="text-warning-700" data-field="status-today">{{ t('nonprofitMembership.statusNoneToday', { date: today }) }}</p>
+      <p v-else class="text-warning-700" data-field="status-today">{{ t('nonprofitMembership.statusNoneToday', { date: formatDate(today) }) }}</p>
       <p v-for="revision in upcoming" :key="revision.id" class="text-sm text-warning-700" data-field="status-upcoming">
-        {{ t('nonprofitMembership.statusUpcoming', { status: t(`nonprofitMembership.status_${revision.status}`), date: revision.effective_from }) }}
+        {{ t('nonprofitMembership.statusUpcoming', { status: t(`nonprofitMembership.status_${revision.status}`), date: formatDate(revision.effective_from) }) }}
       </p>
     </div>
 
@@ -126,10 +128,10 @@ const actions = computed<ActionItem[]>(() => [
       <div v-for="revision in history" :key="revision.id" class="space-y-1 rounded border p-3 text-sm" data-section="history-row">
         <div class="flex flex-wrap items-center gap-2">
           <span class="font-medium">#{{ revision.revision_no }}</span>
-          <span>{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
-          <span>{{ t('nonprofitMembership.sinceDate', { date: revision.effective_from }) }}</span>
-          <span v-if="current?.id === revision.id" class="rounded bg-success-50 px-2 py-0.5 text-success-700">{{ t('nonprofitMembership.validToday') }}</span>
-          <span v-else-if="revision.effective_from > today" class="rounded bg-warning-50 px-2 py-0.5 text-warning-700">{{ t('nonprofitMembership.notYetValid') }}</span>
+          <span :class="memberStatusBadge(revision.status)">{{ t(`nonprofitMembership.status_${revision.status}`) }}</span>
+          <span>{{ t('nonprofitMembership.sinceDate', { date: formatDate(revision.effective_from) }) }}</span>
+          <span v-if="current?.id === revision.id" :class="[badgeBase, 'bg-success-50 text-success-600']">{{ t('nonprofitMembership.validToday') }}</span>
+          <span v-else-if="revision.effective_from > today" :class="[badgeBase, 'bg-warning-50 text-warning-700']">{{ t('nonprofitMembership.notYetValid') }}</span>
         </div>
         <p>{{ revision.legal_basis.reference }}</p>
         <p class="text-neutral-500">{{ revision.legal_basis.evidence }}</p>
@@ -158,20 +160,20 @@ const actions = computed<ActionItem[]>(() => [
       <h3 class="font-semibold">{{ t('nonprofitMembership.claims') }}</h3>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.claimsHelp') }}</p>
       <dl class="grid gap-3 sm:grid-cols-3" data-section="claims-summary">
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumIssued') }}</dt><dd data-field="sum-issued">{{ formatCents(issued, locale) }}</dd></div>
-        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumProvenOpen') }}</dt><dd data-field="sum-proven-open">{{ formatCents(provenOpen, locale) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumIssued') }}</dt><dd class="tabular-nums" data-field="sum-issued">{{ formatMoneyMinor(issued) }}</dd></div>
+        <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumProvenOpen') }}</dt><dd class="tabular-nums" data-field="sum-proven-open">{{ formatMoneyMinor(provenOpen) }}</dd></div>
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.sumUnproven') }}</dt><dd data-field="sum-unproven">{{ unproven }}</dd></div>
       </dl>
       <p v-if="unproven" class="text-sm text-warning-700" data-section="unproven-note">{{ t('nonprofitMembership.unprovenNote') }}</p>
       <p v-if="nextAfter !== null" class="text-sm text-neutral-500" data-section="partial-note">{{ t('nonprofitMembership.partialSummary') }}</p>
       <p v-if="identity && !claims.length && !loading" class="text-sm text-neutral-500">{{ t('nonprofitMembership.claimsEmpty') }}</p>
       <div v-for="claim in claims" :key="claim.claim_id" class="grid gap-3 rounded border p-3 sm:grid-cols-[1fr_1fr_auto]" data-section="claim-row" :data-claim="claim.claim_id">
-        <div class="space-y-1 text-sm">
-          <p class="font-medium">{{ claim.title_key }}</p>
-          <p class="text-neutral-500">{{ claim.period_from }} - {{ claim.period_to }}</p>
-          <p>{{ formatCents(claim.amount_cents, locale) }} · {{ t('nonprofitMembership.accountingDate') }} {{ claim.accounting_date }} · {{ t('nonprofitMembership.dueDate') }} {{ claim.due_date }}</p>
+        <div class="min-w-0 space-y-1 text-sm">
+          <p class="break-words font-medium">{{ claim.title_key }}</p>
+          <p class="text-neutral-500" data-field="claim-period">{{ formatDateRange(claim.period_from, claim.period_to) }}</p>
+          <p data-field="claim-amounts"><span class="whitespace-nowrap font-medium tabular-nums">{{ formatMoneyMinor(claim.amount_cents) }}</span> · {{ t('nonprofitMembership.accountingDate') }} {{ formatDate(claim.accounting_date) }} · {{ t('nonprofitMembership.dueDate') }} {{ formatDate(claim.due_date) }}</p>
         </div>
-        <MembershipSettlement :settlement="claim.settlement" :amount-cents="claim.amount_cents" />
+        <MembershipSettlement :settlement="claim.settlement" />
         <div class="flex flex-wrap items-start gap-2">
           <button type="button" :class="btnIconSm('neutral')" :title="t('nonprofitMembership.refreshClaim')" :aria-label="t('nonprofitMembership.refreshClaim')" data-action="refresh-claim" :disabled="loading || anyLocked" @click="refreshClaim(claim)">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
