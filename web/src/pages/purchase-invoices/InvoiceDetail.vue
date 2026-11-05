@@ -358,8 +358,8 @@ const stockReceiptOpen = ref(false)
 const stockReceivedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.already_received), 0))
 const stockRequestedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.quantity), 0))
 const stockFullyReceived = computed(() => !!stockProposal.value && stockRequestedTotal.value > 0 && stockReceivedTotal.value >= stockRequestedTotal.value)
-const hasStockReceiptLines = computed(() => (stockProposal.value?.lines ?? []).some(line =>
-  line.stock_item_id !== null && Number(line.remaining_qty) > 0))
+const hasStockReceiptLines = computed(() => (stockProposal.value?.unmatched_lines ?? []).length > 0
+  || (stockProposal.value?.lines ?? []).some(line => line.stock_item_id !== null && Number(line.remaining_qty) > 0))
 async function loadStockIntegration(purchaseInvoiceId = id.value, generation = loadGeneration) {
   stockLoading.value = true
   stockError.value = ''

@@ -500,6 +500,29 @@ final class StockDocumentRepository
     }
 
     /**
+     * Karty, na které se řádky přijaté faktury přijímají v konceptech i zaúčtovaných příjemkách.
+     *
+     * @return array<int,list<int>> klíč = purchase_invoice_item_id
+     */
+    public function receiptCardsByPurchaseInvoiceItem(int $supplierId, int $purchaseInvoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT l.purchase_invoice_item_id, l.stock_item_id
+               FROM stock_document_lines l
+               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND d.purchase_invoice_id = ?
+                AND d.doc_type = 'receipt' AND d.status IN ('draft', 'posted')
+                AND l.purchase_invoice_item_id IS NOT NULL"
+        );
+        $stmt->execute([$supplierId, $purchaseInvoiceId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['purchase_invoice_item_id']][] = (int) $r['stock_item_id'];
+        }
+        return $out;
+    }
+
+    /**
      * Datum posledního pohybu karty na skladu (detekce backdatingu, §3.2).
      * Stavy ('posted','reversed') — viz class docblock.
      */

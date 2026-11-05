@@ -926,7 +926,12 @@ interface StockReceiptProposalBase {
     already_received: string
     remaining_qty: string
     unit_cost: string
+    seller_item_code?: string | null
+    matched_stock_item_id?: number | null
+    match_source?: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
   }>
+  /** Řádky s kódem, ke kterým se nenašla karta: člověk ji vybere v okně příjemky. */
+  unmatched_lines?: StockReceiptProposalBase['lines']
   cost_candidates: Array<{
     purchase_invoice_item_id: number
     description: string
@@ -974,6 +979,7 @@ export interface StockReceiptPayload {
     stock_item_id?: number
     quantity: string | number
     unit_cost?: string | number
+    remember_seller_code?: boolean
   }>
   landed_costs?: StockReceiptLandedCost[]
 }
@@ -1264,8 +1270,11 @@ export const stockApi = {
   },
 
   // ── Příjem na sklad z přijaté faktury ───────────────────────────────────
-  receiptPropose: (purchaseInvoiceId: number) =>
-    api.get<StockReceiptProposal>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`).then(r => r.data),
+  /** `stockItemIds`: purchase_invoice_item_id → vybraná karta, řádek se přepočte podle jejího balení. */
+  receiptPropose: (purchaseInvoiceId: number, stockItemIds?: Record<number, number>) =>
+    api.get<StockReceiptProposal>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, {
+      params: stockItemIds ? { stock_item_ids: stockItemIds } : undefined,
+    }).then(r => r.data),
   receiptCreate: (purchaseInvoiceId: number, payload: StockReceiptPayload) =>
     api.post<StockDocument>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, payload).then(r => r.data),
   receiptList: (purchaseInvoiceId: number) =>
