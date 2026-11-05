@@ -9,7 +9,7 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatUnitPrice } from '@/composables/useFormat'
+import { formatUnitPrice, statusLabel } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -18,6 +18,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import { codebooksApi, type Unit } from '@/api/codebooks'
 import { useUnitDecimals } from '@/composables/useUnitDecimals'
 import InsufficientStockDialog from '@/components/stock/InsufficientStockDialog.vue'
+import ReceiptInvoiceModal from '@/components/stock/ReceiptInvoiceModal.vue'
 import { insufficientStockItems, type InsufficientStockItem } from '@/components/stock/insufficientStock'
 
 const { t } = useI18n()
@@ -121,6 +122,7 @@ const rowOptions = reactive<Record<number, { value: number; label: string; secon
 const rowLoading = reactive<Record<number, boolean>>({})
 const itemsCache = new Map<number, StockItemSearchResult>()
 
+const invoiceOpen = ref(false)
 const isPosted = computed(() => doc.value?.status === 'posted')
 const isReversed = computed(() => doc.value?.status === 'reversed')
 /** Převzatý doklad (import historie skladu): storno backend odmítne, opravuje se vrácením importu. */
@@ -408,6 +410,11 @@ const actions = computed<ActionItem[]>(() => [
     show: !!docId.value, run: () => window.open(stockApi.documentPdfUrl(docId.value!), '_blank', 'noopener'),
   },
   {
+    // Jen zaúčtovaná: u konceptu by okno ukázalo stav bez neuložených úprav. API bere i koncept.
+    key: 'invoice', label: t('stock.receipt_invoice.action'), icon: 'doc', tier: 'secondary', variant: 'neutral',
+    show: auth.canWrite('stock.documents.write') && auth.canWrite('invoices.create') && isPosted.value && isReceipt.value, run: () => { invoiceOpen.value = true },
+  },
+  {
     key: 'reverse', label: t('stock.documents.cancel'), icon: 'uturn', tier: 'overflow', variant: 'danger',
     show: auth.canWrite('stock.documents.write') && isPosted.value && !isImported.value, run: () => { reverseOpen.value = true },
   },
@@ -660,6 +667,26 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <!-- Vydané faktury vzniklé z řádků příjemky -->
+      <div v-if="auth.canRead('invoices') && doc?.sales_invoices?.length" data-test="receipt-sales-invoices" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+        <div class="px-5 py-3 border-b border-neutral-200">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.receipt_invoice.list_title') }}</h3>
+        </div>
+        <div class="divide-y divide-neutral-100">
+          <RouterLink v-for="i in doc.sales_invoices" :key="i.invoice_id" :to="`/invoices/${i.invoice_id}`"
+            class="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="font-mono text-xs text-neutral-500">{{ i.varsymbol || t('stock.receipt_invoice.draft') }}</span>
+              <span>{{ i.client_name }}</span>
+              <span class="text-xs text-neutral-500">{{ t('stock.receipt_invoice.lines', { lines: i.line_nos.join(', ') }) }}</span>
+            </span>
+            <span class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-600">{{ statusLabel(i.status ?? '') }}</span>
+          </RouterLink>
+        </div>
+      </div>
+
+      <ReceiptInvoiceModal v-if="invoiceOpen && doc" :document="doc" @close="invoiceOpen = false" />
 
       <div v-if="!readOnly" class="flex justify-end">
         <RouterLink to="/stock/documents" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.cancel') }}</RouterLink>

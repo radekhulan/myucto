@@ -376,7 +376,27 @@ výběr kusů, které jsou ve zvoleném skladu skladem:
 V editoru dokladu přepněte typ na **Převodka**, zvolte různý zdrojový a cílový
 sklad, přidejte řádky a zaúčtujte. Číslo má tvar `PRE-RRRR-NNNN`.
 
-### 37.5.4 Oprava chybného dokladu
+### 37.5.4 Faktura z příjemky
+
+Když nakupujete zboží na zakázku, připravíte fakturu odběrateli rovnou z příjemky.
+
+1. Otevřete zaúčtovanou příjemku a klikněte na **Vytvořit fakturu**.
+2. Vyberte **odběratele**, případně **cenovou hladinu dokladu**, a označte řádky.
+3. Klikněte na **Vytvořit koncept faktury**. Otevře se editor faktury.
+
+Ceny plynou z běžného nacenění odběratele. Sériová čísla a šarže z příjemky se přenesou
+na řádky faktury, výdejka při vystavení vydá právě tyto kusy. Karta bez ceny v měně dokladu
+dostane cenu 0 a v editoru upozornění **Zadejte cenu**.
+
+Příjemka ukazuje faktury, které z ní vznikly, a faktura v kartě **Sklad** svou příjemku.
+Když z řádku už faktura vznikla, okno na to upozorní a řádek nabídne nezaškrtnutý. Vytvořit
+druhou fakturu jde dál, stornovaná faktura se nepočítá. Dobropis k faktuře řádky
+neuvolní: když zboží fakturujete znovu, zaškrtněte řádek vědomě. Taková faktura se zapíše
+do historie činností.
+
+Fakturu s řádkem bez ceny nejde vystavit, dokud cenu nedoplníte.
+
+### 37.5.5 Oprava chybného dokladu
 
 Zaúčtovaný doklad nejde upravit. V editoru klikněte na **Stornovat**, vyplňte
 **Důvod storna** a potvrďte. Vznikne protidoklad se stejnými hodnotami.
