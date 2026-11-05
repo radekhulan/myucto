@@ -10,12 +10,12 @@ const { t } = useI18n()
 const options = [
   { key: 'invoice_pdf_monochrome', label: 'settings.branding_pdf_monochrome', hint: 'settings.branding_pdf_monochrome_hint', test: 'branding-invoice-pdf-monochrome', fallback: false },
   { key: 'invoice_pdf_show_issued_by', label: 'settings.invoice_pdf_show_issued_by', hint: 'settings.invoice_pdf_show_issued_by_hint', test: 'invoice-pdf-show-issued-by', fallback: false },
-  { key: 'invoice_pdf_show_line_discount', label: 'settings.invoice_pdf_line_discount', hint: 'settings.invoice_pdf_line_discount_hint', test: 'invoice-pdf-line-discount', fallback: false },
   { key: 'invoice_pdf_compact_items', label: 'settings.invoice_pdf_compact_items', hint: 'settings.invoice_pdf_compact_items_hint', test: 'invoice-pdf-compact-items', fallback: false },
   { key: 'invoice_pdf_show_base_qty', label: 'stock.settings.pdf_base_qty_label', hint: 'stock.settings.pdf_base_qty_hint', test: 'invoice-pdf-base-qty', fallback: true },
 ] as const
-// Nestandardní umístění bankovního spojení patří až na konec, za běžné volby vzhledu.
+// Nestandardní vzhled (rozpis slevy, bankovní spojení jen v patičce) patří až na konec, za běžné volby.
 const trailingOptions = [
+  { key: 'invoice_pdf_show_line_discount', label: 'settings.invoice_pdf_line_discount', hint: 'settings.invoice_pdf_line_discount_hint', test: 'invoice-pdf-line-discount', fallback: false },
   { key: 'invoice_pdf_bank_in_footer', label: 'settings.invoice_pdf_bank_in_footer', hint: 'settings.invoice_pdf_bank_in_footer_hint', test: 'invoice-pdf-bank-in-footer', fallback: false },
 ] as const
 </script>

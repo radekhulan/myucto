@@ -271,7 +271,7 @@ ceny. Při vystavení faktury tomuto odběrateli se použije jako základ
 
 **Jak poznáte, že je hotovo:** řádek faktury nacení cenou podle hladiny a pod cenou ukáže
 ceníkovou cenu a slevu („Ceník 1 000,00 · sleva 10 %“). Zákazníkovi ji na PDF rozepíšete
-volbou **Na PDF faktury rozepsat slevu z ceníkové ceny**, viz
+volbou **Na PDF faktury rozepsat slevu z ceníkové ceny (nestandardní vzhled)**, viz
 [§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura). Přirážka hladiny se na PDF nerozepisuje.
 
 Podrobnosti viz [§ 38.11.18](#381118-cenove-hladiny).

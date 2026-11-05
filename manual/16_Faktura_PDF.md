@@ -363,7 +363,7 @@ Vygenerované PDF obsahuje:
    nebo šarže s expirací a množstvím („Šarže: …“), viz [§ 37.5.1](37_Sklad.md#3751-vydej-fakturou).
    Textový řádek ([§ 15.9.3](15_Faktura_editor.md#1593-polozky)) se tiskne přes celou
    šířku tabulky, bez množství a cen.
-   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
+   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny (nestandardní vzhled)** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) má tabulka místo sloupce Cena/j sloupce **Cena/j před slevou**, **Sleva**
    a **Cena/j po slevě**, pokud má faktura aspoň jednu položku se slevou z ceníkové ceny.
    Položka bez ceníkové ceny nebo s přirážkou ukáže jen výslednou cenu. U faktury s cenami

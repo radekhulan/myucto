@@ -26177,7 +26177,7 @@
     "default_rounding_mode_hint": "Předvyplní u nových faktur a dobropisů v Kč volbu Zaokrouhlení. Platí i pro faktury z API, pravidelné fakturace a objednávek. Lze přepsat u každé faktury, vystavené doklady se nemění.",
     "invoice_pdf_show_issued_by": "Tisknout na faktuře, kdo ji vystavil",
     "invoice_pdf_show_issued_by_hint": "Na PDF přibude řádek „Vystavil“ se jménem uživatele, který doklad vystavil. Starší doklady bez tohoto údaje ukážou autora dokladu. U už vystavených dokladů se řádek objeví až po přegenerování PDF.",
-    "invoice_pdf_line_discount": "Na PDF faktury rozepsat slevu z ceníkové ceny",
+    "invoice_pdf_line_discount": "Na PDF faktury rozepsat slevu z ceníkové ceny (nestandardní vzhled)",
     "invoice_pdf_line_discount_hint": "U položky se slevou vytiskne sloupce Cena/j před slevou, Sleva a Cena/j po slevě. Jen když má faktura aspoň jednu takovou položku, přirážka se nerozepisuje. Ceníkovou cenu doplní nacenění skladové karty. Editor faktury pak u položky nabídne pole Sleva %.",
     "invoice_pdf_compact_items": "Kompaktní řádky položek na PDF faktury",
     "invoice_pdf_compact_items_hint": "Menší odsazení a písmo v tabulce položek, širší sloupec popisu, rozpis balení a sériová čísla na řádku popisu. Faktura s mnoha položkami má zhruba o polovinu méně stran, s rozpisem slevy u řádku o něco víc. U už vystavených dokladů se projeví až po přegenerování PDF.",

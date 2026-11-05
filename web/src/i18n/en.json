@@ -26177,7 +26177,7 @@
     "default_rounding_mode_hint": "Pre-fills the Rounding option on new invoices and credit notes in CZK, including invoices from the API, recurring billing and orders. Can be overridden per invoice; issued documents stay unchanged.",
     "invoice_pdf_show_issued_by": "Print who issued the invoice",
     "invoice_pdf_show_issued_by_hint": "The PDF gets an “Issued by” line with the name of the user who issued the document. Older documents without this record show the document's author. On already issued documents the line appears only after their PDF is regenerated.",
-    "invoice_pdf_line_discount": "Show the discount from the list price on the invoice PDF",
+    "invoice_pdf_line_discount": "Show the discount from the list price on the invoice PDF (non-standard layout)",
     "invoice_pdf_line_discount_hint": "Items with a discount get the columns Unit price before discount, Discount and Unit price after discount. Only when the invoice has at least one such item; a markup is not itemised. The list price comes from pricing the stock card. The invoice editor then offers a Discount % field on each item.",
     "invoice_pdf_compact_items": "Compact item rows on the invoice PDF",
     "invoice_pdf_compact_items_hint": "Smaller padding and font in the item table, a wider description column, package breakdown and serial numbers on the description line. An invoice with many items needs roughly half as many pages, slightly more with the per-line discount breakdown. On already issued documents it shows only after their PDF is regenerated.",
