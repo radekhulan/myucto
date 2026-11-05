@@ -1135,7 +1135,8 @@
         "2231_unit_prices_six_decimals.sql",
         "2232_currencies_foreign_bank_code.sql",
         "2233_dimension_defaults_bank_account.sql",
-        "2234_bank_posting_rule_dimensions.sql"
+        "2234_bank_posting_rule_dimensions.sql",
+        "2235_cash_register_foreign_opening.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3952,6 +3953,8 @@
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "is_default": "tinyint(1) NOT NULL DEFAULT 0",
                 "name": "varchar(100) NOT NULL",
+                "opening_foreign_amount": "decimal(15,2) NULL DEFAULT NULL",
+                "opening_foreign_date": "date NULL DEFAULT NULL",
                 "own_series": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
