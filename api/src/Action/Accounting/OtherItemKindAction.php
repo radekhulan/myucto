@@ -23,7 +23,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PUT    /api/accounting/other-items/kinds/builtin/{side}/{code}   — úprava vestavěného druhu { is_active, own_series, prefix }
  *   DELETE /api/accounting/other-items/kinds/{id}                    — smazání nepoužitého vlastního druhu
  *   GET    /api/accounting/other-items/kinds/{id}/posting-profiles   - účetní profily druhu (migrace 2238)
- *   PUT    /api/accounting/other-items/kinds/{id}/posting-profiles   - uložení profilů { origin, payment_bank, payment_cash }
+ *   PUT    /api/accounting/other-items/kinds/{id}/posting-profiles   - uložení profilů { origin, payment_bank, payment_cash, interest, fee }
  *   PUT    /api/accounting/other-items/kinds/builtin/{side}/{code}/posting-profiles - totéž pro vestavěný druh
  *
  * Zapnutí i vypnutí vlastní řady mění číselnou řadu, proto vyžaduje navíc stejné právo

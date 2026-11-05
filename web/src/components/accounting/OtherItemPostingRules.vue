@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChartAccount } from '@/api/accounting'
-import { otherItemsApi, type OtherItem, type OtherItemEffectivePosting, type OtherItemPaymentEvent, type OtherItemPostingEvent } from '@/api/otherItems'
+import { otherItemsApi, type OtherItem, type OtherItemEffectivePosting, type OtherItemOverrideEvent, type OtherItemPostingEvent } from '@/api/otherItems'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import { ICONS, btnOutlineSm, btnFilledSm } from '@/components/ui/buttonStyles'
@@ -11,7 +11,9 @@ import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 /**
  * Účinná kontace vzniku a úhrad položky s původem (vlastní, zděděná z druhu, výchozí)
  * a vlastní kontace úhrad. Vznik nese položka v účtu a protiúčtu (editor, přeúčtování),
- * tady se jen ukazuje. Změna platí jen pro další zaúčtování.
+ * tady se jen ukazuje. Úrok a poplatek rozdělené splátky (úvěr, leasing) mají jen účet
+ * nákladu nebo výnosu; ukazují se u půjčky a u položky s rozdělenými splátkami.
+ * Změna platí jen pro další zaúčtování.
  */
 const props = defineProps<{
   item: OtherItem
@@ -22,19 +24,27 @@ const emit = defineEmits<{ (e: 'changed', item: OtherItem): void }>()
 
 const { t } = useI18n()
 const toast = useToast()
-const editing = ref<OtherItemPaymentEvent | null>(null)
+const editing = ref<OtherItemOverrideEvent | null>(null)
 const saving = ref(false)
 const form = reactive({ money: '', template: '' })
-const MONEY_PREFIX: Record<OtherItemPaymentEvent, string> = { payment_bank: '221', payment_cash: '211' }
+const MONEY_PREFIX: Record<string, string> = { payment_bank: '221', payment_cash: '211' }
+const isComponent = (event: OtherItemPostingEvent) => event === 'interest' || event === 'fee'
 
-const events = computed<OtherItemPostingEvent[]>(() => props.item.status === 'draft'
-  ? ['origin', 'payment_bank', 'payment_cash'] : ['payment_bank', 'payment_cash'])
+const showComponents = computed(() => props.item.has_split_installments === true || props.item.kind === 'loan')
+const events = computed<OtherItemPostingEvent[]>(() => [
+  ...(props.item.status === 'draft' ? ['origin' as const] : []),
+  'payment_bank', 'payment_cash',
+  ...(showComponents.value ? ['interest' as const, 'fee' as const] : []),
+])
 const active = computed(() => ['draft', 'confirmed', 'posted'].includes(String(props.item.status)))
 const rule = (event: OtherItemPostingEvent): OtherItemEffectivePosting | undefined => props.item.posting_rules?.[event]
-const moneyColumn = (): 'debit_account_code' | 'credit_account_code' =>
-  props.item.side === 'receivable' ? 'debit_account_code' : 'credit_account_code'
-const moneyChoices = computed(() => editing.value === null ? [] : props.accounts.filter(account =>
-  account.is_active && account.account_code.startsWith(MONEY_PREFIX[editing.value!])))
+/** Upravovaný sloupec: peněžní účet úhrady, u úroku a poplatku účet nákladu (závazek) či výnosu (pohledávka). */
+const editColumn = (event: OtherItemPostingEvent): 'debit_account_code' | 'credit_account_code' =>
+  (props.item.side === 'receivable') !== isComponent(event) ? 'debit_account_code' : 'credit_account_code'
+const moneyChoices = computed(() => editing.value === null ? [] : props.accounts.filter(account => account.is_active
+  && (isComponent(editing.value!)
+    ? account.account_type === (props.item.side === 'receivable' ? 'revenue' : 'expense')
+    : account.account_code.startsWith(MONEY_PREFIX[editing.value!]))))
 
 function sourceClass(source: string): string {
   if (source === 'item') return 'bg-primary-50 text-primary-700'
@@ -42,18 +52,18 @@ function sourceClass(source: string): string {
   return 'bg-neutral-50 text-neutral-500'
 }
 
-function startEdit(event: OtherItemPaymentEvent) {
+function startEdit(event: OtherItemOverrideEvent) {
   const own = props.item.posting_overrides?.[event]
-  form.money = (own?.[moneyColumn()] ?? '') || ''
+  form.money = (own?.[editColumn(event)] ?? '') || ''
   form.template = own?.description_template ?? rule(event)?.description_template ?? ''
   editing.value = event
 }
 
-async function save(event: OtherItemPaymentEvent, reset = false) {
+async function save(event: OtherItemOverrideEvent, reset = false) {
   if (saving.value) return
   saving.value = true
   try {
-    const column = moneyColumn()
+    const column = editColumn(event)
     const updated = await otherItemsApi.setPostingOverrides(Number(props.item.source_id || props.item.id), {
       [event]: reset ? null : {
         debit_account_code: column === 'debit_account_code' ? form.money.trim() || null : null,
@@ -93,6 +103,10 @@ async function save(event: OtherItemPaymentEvent, reset = false) {
               </li>
               <li v-if="(rule(event)!.posting_lines || []).length === 0" class="text-warning-700">{{ t('other_items.posting.missing_counter') }}</li>
             </ul>
+            <p v-else-if="isComponent(event)" class="mt-1 tabular-nums">
+              <span class="text-neutral-500">{{ t(editColumn(event) === 'debit_account_code' ? 'other_items.posting.debit' : 'other_items.posting.credit') }}</span> <span class="font-mono">{{ rule(event)!.account_code }}</span>
+              <span class="ml-2 text-xs text-neutral-500">{{ t('other_items.posting.component_money') }}</span>
+            </p>
             <p v-else class="mt-1 tabular-nums">
               <span class="text-neutral-500">{{ t('other_items.posting.debit') }}</span> <span class="font-mono">{{ rule(event)!.debit_account_code }}</span>
               <span class="mx-2 text-neutral-300">/</span>
@@ -102,19 +116,19 @@ async function save(event: OtherItemPaymentEvent, reset = false) {
             <p v-if="event === 'payment_cash'" class="mt-0.5 text-xs text-neutral-500">{{ t('other_items.posting.cash_note') }}</p>
           </div>
           <div v-if="canWrite && active && event !== 'origin' && editing !== event" class="flex flex-wrap gap-1">
-            <button type="button" :disabled="saving" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-test="posting-own" @click="startEdit(event as OtherItemPaymentEvent)">
+            <button type="button" :disabled="saving" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-test="posting-own" @click="startEdit(event as OtherItemOverrideEvent)">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
               {{ t('other_items.posting.set_own') }}
             </button>
-            <button v-if="rule(event)!.source === 'item'" type="button" :disabled="saving" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="posting-reset" @click="save(event as OtherItemPaymentEvent, true)">
+            <button v-if="rule(event)!.source === 'item'" type="button" :disabled="saving" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="posting-reset" @click="save(event as OtherItemOverrideEvent, true)">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
               {{ t('other_items.posting.reset') }}
             </button>
           </div>
         </div>
-        <form v-if="editing === event" class="mt-3 grid gap-3 sm:grid-cols-2" data-test="posting-form" @submit.prevent="save(event as OtherItemPaymentEvent)">
-          <label class="text-sm font-medium">{{ t('other_items.posting.money_account') }}
-            <ChartAccountSelect v-model="form.money" :accounts="moneyChoices" :placeholder="MONEY_PREFIX[event as OtherItemPaymentEvent]" class="mt-1 block" />
+        <form v-if="editing === event" class="mt-3 grid gap-3 sm:grid-cols-2" data-test="posting-form" @submit.prevent="save(event as OtherItemOverrideEvent)">
+          <label class="text-sm font-medium">{{ isComponent(event) ? t(`other_items.posting.component_account.${event}`) : t('other_items.posting.money_account') }}
+            <ChartAccountSelect v-model="form.money" :accounts="moneyChoices" :placeholder="isComponent(event) ? rule(event)?.account_code ?? '' : MONEY_PREFIX[event]" class="mt-1 block" />
             <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t(`other_items.posting.money_hint.${event}`) }}</span>
           </label>
           <label class="text-sm font-medium">{{ t('other_items.posting.description_template') }}

@@ -299,6 +299,29 @@ test('splátkový kalendář odmítne špatný součet, pořadí, datum i počet
   assert.equal(writes(client).length + writes(paid).length, 0);
 });
 
+test('rozdělená splátka úvěru: jistina dává částku dokladu, složky částku splátky', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft() });
+  const run = (installments) => tool('set_other_item_installments').run(client, { item_id: 12, installments }, 's');
+  await assert.rejects(run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 90, fee_amount: 10 },
+    { due_on: '2094-03-15', amount: 6050, principal_amount: 6000, interest_amount: 40 },
+  ]), /splátka 2: jistina, úrok a poplatek dávají 6040\.00 Kč, ale částka splátky je 6050\.00 Kč/);
+  await assert.rejects(run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100 },
+    { due_on: '2094-03-15', amount: 5050, principal_amount: 5000, interest_amount: 50 },
+  ]), /součet jistiny splátek 11000\.00 Kč neodpovídá částce dokladu 12000\.00 Kč/);
+  assert.equal(writes(client).length, 0);
+
+  await run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100 },
+    { due_on: '2094-03-15', amount: 6060, principal_amount: 6000, interest_amount: 50, fee_amount: 10 },
+  ]);
+  assert.deepEqual(writes(client)[0].body.items, [
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100, fee_amount: 0 },
+    { due_on: '2094-03-15', amount: 6060, principal_amount: 6000, interest_amount: 50, fee_amount: 10 },
+  ]);
+});
+
 test('zrušení splátkového kalendáře vyžaduje potvrzení a pošle prázdný seznam', async () => {
   const client = new FakeClient({
     'GET /accounting/other-items/12': draft(),

@@ -3197,6 +3197,7 @@ final class Routes
             $g->post  ('/other-items/{item_id:[0-9]+}/schedule', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'create']);
             $g->get   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'installments']);
             $g->put   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'setInstallments']);
+            $g->post  ('/other-items/{item_id:[0-9]+}/installments/plan', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'planInstallments']);
             $g->get   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'get']);
             $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);

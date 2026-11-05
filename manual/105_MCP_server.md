@@ -1073,13 +1073,17 @@ zápisem zkontroluje, že:
 
 - splátek je 2 až 120 a termíny jdou vzestupně, nejdříve od data vzniku dokladu,
 - částky jsou kladné a na haléře,
-- součet splátek přesně odpovídá částce dokladu,
+- součet splátek (u rozdělených splátek součet jistiny) přesně odpovídá částce dokladu,
+- jistina, úrok a poplatek rozdělené splátky dávají dohromady její částku,
 - doklad zatím nemá spárovanou úhradu.
 
-U úvěru a leasingu patří do kalendáře jen jistina; úroky a poplatky nejsou
-součástí částky dokladu. Uložení **nahradí celý dosavadní kalendář**, proto
+U úvěru a leasingu je částkou dokladu jistina. Splátku lze rozdělit na jistinu,
+úrok a poplatek (`principal_amount`, `interest_amount`, `fee_amount`), například
+podle splátkového kalendáře banky. Uložení **nahradí celý dosavadní kalendář**, proto
 asistent posílá vždy všechny splátky. Zrušení celého kalendáře vyžaduje
-potvrzení. Splátky slouží k plánu cashflow a do deníku nic nezapisují.
+potvrzení. Kalendář slouží k plánu cashflow a do deníku nic nezapisuje; úrok
+a poplatek se zaúčtují až s úhradou splátky ve webovém rozhraní
+([§ 52.14.14.13](52_Ucetni_denik.md#52141413-uvery-a-leasing-jistina-urok-a-poplatek)).
 
 **Opakování** vytvoří z dokladu pravidelnou řadu (měsíčně, čtvrtletně, ročně).
 Aplikace další doklady zakládá dopředu jako koncepty. Automatické účtování

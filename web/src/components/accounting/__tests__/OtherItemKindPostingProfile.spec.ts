@@ -73,4 +73,21 @@ describe('OtherItemKindPostingProfile', () => {
     expect(wrapper.find('[data-test="kind-posting-suggestion"]').text()).toContain('suggestion_unavailable')
     expect(wrapper.find('button[type="submit"]').exists()).toBe(false)
   })
+
+  it('interest and fee carry only the expense account and show the default as placeholder', async () => {
+    m.savePostingProfiles.mockResolvedValue({ kind_id: 5, profiles: {} })
+    const wrapper = factory({ kind: kind({ builtin_code: 'loan', posting_suggestion: null,
+      posting_component_defaults: { interest: '562', fee: '568' } }) })
+    const interest = wrapper.find('[data-test="kind-posting-interest"]')
+    expect(interest.findAll('input.account')).toHaveLength(1)
+    expect(interest.text()).toContain('other_items.posting.component_money')
+    const selects = wrapper.findAllComponents(ChartAccountSelect)
+    expect(selects.map(select => select.props('placeholder'))).toContain('568')
+    await interest.find('input.account').setValue('562.100')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    const [, payload] = m.savePostingProfiles.mock.calls[0]
+    expect(payload.interest).toMatchObject({ debit_account_code: '562.100', credit_account_code: null })
+    expect(payload.fee).toBeNull()
+  })
 })

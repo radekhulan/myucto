@@ -10,9 +10,13 @@ export interface OtherItemPostingLine {
 }
 
 /** Účetní události s profilem druhu a vlastní kontací položky (migrace 2238). */
-export type OtherItemPostingEvent = 'origin' | 'payment_bank' | 'payment_cash'
+export type OtherItemPostingEvent = 'origin' | 'payment_bank' | 'payment_cash' | 'interest' | 'fee'
 export type OtherItemPostingSource = 'item' | 'kind' | 'default'
 export type OtherItemPaymentEvent = 'payment_bank' | 'payment_cash'
+/** Úrok a poplatek rozdělené splátky (migrace 2241); účtují se s úhradou do nákladů nebo výnosů. */
+export type OtherItemComponentEvent = 'interest' | 'fee'
+/** Události s vlastní kontací položky: úhrady a složky splátky. */
+export type OtherItemOverrideEvent = OtherItemPaymentEvent | OtherItemComponentEvent
 
 export interface OtherItemDimensionRef {
   type_id: number
@@ -61,7 +65,7 @@ export interface OtherItemEffectivePosting {
   profile_id: number | null
 }
 
-export type OtherItemPostingOverridesInput = Partial<Record<OtherItemPaymentEvent, OtherItemPostingRuleInput | null>>
+export type OtherItemPostingOverridesInput = Partial<Record<OtherItemOverrideEvent, OtherItemPostingRuleInput | null>>
 
 export interface OtherItem {
   id: string | number
@@ -87,6 +91,10 @@ export interface OtherItem {
   paid_amount: number
   settled_outside_amount?: number
   remaining_amount: number
+  /** Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek (jen detail). */
+  remaining_payment?: number
+  /** Kalendář má splátku rozdělenou na jistinu, úrok a poplatek (jen detail). */
+  has_split_installments?: boolean
   status: OtherItemStatus | string
   certainty: 'confirmed' | 'scheduled' | 'estimate'
   editable: boolean
@@ -102,7 +110,7 @@ export interface OtherItem {
   note?: string | null
   journal_entry_id?: number | null
   /** Vlastní kontace úhrad položky (podvojné účetnictví). */
-  posting_overrides?: Partial<Record<OtherItemPaymentEvent, OtherItemPostingRule>>
+  posting_overrides?: Partial<Record<OtherItemOverrideEvent, OtherItemPostingRule>>
   /** Účinná kontace vzniku a úhrad; prázdný objekt v daňové evidenci. */
   posting_rules?: Partial<Record<OtherItemPostingEvent, OtherItemEffectivePosting>>
 }
@@ -148,7 +156,12 @@ export interface OtherItemAllocation {
   installment_id?: number | null
   bank_transaction_id: number | null
   cash_document_id: number | null
+  /** Jistina, o kterou úhrada snižuje saldo (u nerozdělené splátky celá úhrada). */
   amount: number
+  interest_amount?: number
+  fee_amount?: number
+  /** Peněžní částka úhrady: jistina + úrok + poplatek. */
+  total_amount?: number
   payment_on: string
   reversed_on: string | null
 }
@@ -208,6 +221,8 @@ export interface OtherItemKind {
   posting_profiles?: OtherItemPostingProfiles
   /** Nezávazný návrh kontace vzniku vestavěného druhu. */
   posting_suggestion?: { debit_account_code: string; credit_account_code: string; available: boolean } | null
+  /** Výchozí účty úroku a poplatku rozdělené splátky, když je neurčí profil ani položka. */
+  posting_component_defaults?: Record<OtherItemComponentEvent, string>
 }
 
 export interface OtherItemKindPayload {

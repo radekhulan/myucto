@@ -21,10 +21,25 @@ export interface OtherItemInstallment {
   position?: number
   due_on: string
   amount: number
+  /** Rozdělená splátka úvěru: jistina, úrok a poplatek (součet = amount); null = nerozdělená. */
+  principal_amount?: number | null
+  interest_amount?: number | null
+  fee_amount?: number | null
   /** Jen uložené splátky: uhrazeno, zbývá a stav podle přiřazených úhrad. */
   paid_amount?: number
   remaining_amount?: number
+  remaining_principal?: number
   status?: OtherItemInstallmentStatus
+}
+
+export interface OtherItemLoanPlanInput {
+  principal?: number
+  annual_rate: number
+  count: number
+  first_due_on: string
+  frequency: 'monthly' | 'quarterly'
+  method: 'annuity' | 'linear'
+  fee?: number
 }
 
 export const otherItemPlansApi = {
@@ -40,4 +55,6 @@ export const otherItemPlansApi = {
   installments: (itemId: number) => api.get<{ items: OtherItemInstallment[] }>(`/accounting/other-items/${itemId}/installments`).then(r => r.data.items),
   setInstallments: (itemId: number, items: OtherItemInstallment[]) =>
     api.put<{ items: OtherItemInstallment[] }>(`/accounting/other-items/${itemId}/installments`, { items }).then(r => r.data.items),
+  planLoan: (itemId: number, payload: OtherItemLoanPlanInput) =>
+    api.post<{ items: OtherItemInstallment[] }>(`/accounting/other-items/${itemId}/installments/plan`, payload).then(r => r.data.items),
 }

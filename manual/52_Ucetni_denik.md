@@ -1515,8 +1515,10 @@ koncepty zůstávají samostatnými položkami k posouzení.
 **Splátkový kalendář** rozloží jednu pohledávku nebo závazek na 2 až 120 splátek
 s rostoucími daty (ne dřívějšími než datum vzniku). Součet splátek musí odpovídat
 částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží očekávané
-platby v cash-flow; úhrady se započítávají od nejstarší splátky. Po přiřazení
-první úhrady už kalendář měnit nejde. Koncept se splátkovým kalendářem lze dál
+platby v cash-flow; úhrady se započítávají od nejstarší splátky. Splátky úvěru
+nebo leasingu lze rozdělit na jistinu, úrok a poplatek a nechat si je spočítat
+(viz [§ 52.14.14.13](#52141413-uvery-a-leasing-jistina-urok-a-poplatek)). Po přiřazení
+první úhrady už kalendář měnit nejde, ani když úhrada pokryla jen úrok. Koncept se splátkovým kalendářem lze dál
 upravovat, dokud částka odpovídá součtu splátek a datum vzniku není pozdější než
 první splátka; před změnou částky kalendář zrušte tlačítkem **Zrušit kalendář**.
 
@@ -1627,13 +1629,21 @@ Firma v podvojném účetnictví může každému druhu nastavit **účetní pro
 kontaci, kterou dostanou jeho položky, pokud nemají vlastní. Daňová evidence profily
 nemá: položku jen potvrzuje a úhradu zařazuje v peněžním deníku.
 
-V přehledu klikněte na **Druhy** a u druhu na **Účtování**. Profil má tři události:
+V přehledu klikněte na **Druhy** a u druhu na **Účtování**. Profil má pět událostí:
 
 | Událost | Co se nastavuje | Zápis |
 |---|---|---|
 | **Vznik** | účet položky a protiúčet, popis zápisu, výchozí dimenze nového dokladu | pohledávka MD účet položky / D protiúčet, závazek MD protiúčet / D účet položky |
 | **Úhrada z banky** | peněžní účet (221 nebo jeho analytika) a popis zápisu | pohledávka MD banka / D účet položky, závazek MD účet položky / D banka |
 | **Úhrada z pokladny** | peněžní účet (211 nebo jeho analytika) a popis zápisu | pohledávka MD pokladna / D účet položky, závazek obráceně |
+| **Úrok splátky** | účet úroku (náklad u závazku, výnos u pohledávky) a popis | závazek MD úrok / D banka, pohledávka MD banka / D úrok; jen u rozdělené splátky |
+| **Poplatek splátky** | účet poplatku (náklad u závazku, výnos u pohledávky) a popis | jako úrok |
+
+Úrok a poplatek nemají peněžní stranu: peníze jdou podle kontace úhrady z banky.
+Prázdný účet úroku a poplatku znamená výchozí účty 562 a 568 u závazku a 662 a 668
+u pohledávky, v rámci pro nevýdělečné organizace 544 a 549, respektive 644 a 649.
+Profil s účtem jiného typu (například výnos u závazku) aplikace odmítne. Podrobnosti
+o rozdělených splátkách jsou v [§ 52.14.14.13](#52141413-uvery-a-leasing-jistina-urok-a-poplatek).
 
 U úhrad je strana položky vždy účet položky, jinak by úhrada minula saldokonto;
 aplikace jiný účet na této straně odmítne už při uložení profilu. Prázdný peněžní účet
@@ -1667,11 +1677,14 @@ kontace aplikace:
   je povinný. Položka bez profilu druhu proto účtuje stejně jako dřív.
 - **Úhrady** se přebírají celé: vlastní kontace úhrady položky, jinak profil druhu,
   jinak 221 nebo 211.
+- **Úrok a poplatek** stejně: vlastní účet položky, jinak profil druhu, jinak výchozí
+  účet podle strany a účetního rámce.
 
 Detail položky ukazuje v bloku **Účtování** pro každou událost, co se zaúčtuje,
 s označením **Vlastní**, **Zděděno z druhu** (s odkazem na nastavení druhu) nebo
 **Výchozí**. U konceptu je tam i náhled zápisu vzniku. Tlačítkem **Vlastní kontace**
-nastavíte položce peněžní účet a popis úhrady z banky či z pokladny, **Vrátit na
+nastavíte položce peněžní účet a popis úhrady z banky či z pokladny, u půjčky
+a u položky s rozdělenými splátkami také účet úroku a poplatku. **Vrátit na
 zděděnou** vlastní kontaci zruší. Vlastní kontaci úhrad jde nastavit konceptu
 i potvrzené nebo zaúčtované položce, platí pro další úhrady. Kontaci vzniku nese
 koncept v polích účtu a protiúčtu; zaúčtovanou položku mění **Přeúčtovat**, a to jen
@@ -1691,11 +1704,84 @@ Opakování přenáší vlastní kontaci úhrad zdrojové položky na každý vy
 koncept. Výchozí dimenze z profilu dostane jen nově pořízený doklad a jen u typů,
 které ještě nemá vyplněné.
 
-Přes API a MCP server se profily druhů jen čtou (seznam druhů vrací `posting_profiles`
-a `posting_suggestion`, detail položky `posting_rules` a `posting_overrides`). MCP
-server smí nastavit vlastní kontaci úhrad jen konceptu (`posting_overrides`
-v založení nebo úpravě); profily druhů a kontace potvrzené položky se mění jen ve
-webovém rozhraní.
+Přes API a MCP server se profily druhů jen čtou (seznam druhů vrací `posting_profiles`,
+`posting_suggestion` a `posting_component_defaults`, detail položky `posting_rules`
+a `posting_overrides`). MCP server smí nastavit vlastní kontaci úhrad jen konceptu
+(`posting_overrides` v založení nebo úpravě); profily druhů a kontace potvrzené
+položky se mění jen ve webovém rozhraní.
+
+#### 52.14.14.13 Úvěry a leasing: jistina, úrok a poplatek
+
+Splátka úvěru, půjčky nebo leasingu obvykle obsahuje jistinu, úrok a případně poplatek.
+Účetně jde o různé věci: jistina snižuje dluh, úrok a poplatek jsou náklad (u přijatého
+úvěru) nebo výnos (u poskytnuté půjčky) období, kdy se platí.
+
+**Částka položky je jistina.** Přijatý úvěr 100 000 Kč založte jako závazek druhu
+Půjčka s částkou 100 000 Kč, například s účtem položky 461 (dlouhodobý úvěr) nebo 231
+(krátkodobý) a protiúčtem 261 nebo 221. Vznik se zaúčtuje jen v jistině, úroky
+a poplatky do předpisu nepatří. Poskytnutou půjčku vedete stejně jako pohledávku
+(například MD 378 / D 261).
+
+**Rozdělení splátek.** V části **Splátkový kalendář** zaškrtněte **Rozdělit splátky
+na jistinu, úrok a poplatek**. Každá splátka pak má jistinu, úrok a poplatek a její
+částka je jejich součet. Součet jistiny všech splátek musí odpovídat částce položky.
+Rozdělit jde i jen některé splátky; nerozdělená splátka je celá jistinou.
+
+**Výpočet splátek.** Zadejte roční úrokovou sazbu, počet splátek, četnost (měsíčně
+nebo čtvrtletně), způsob splácení a první splatnost, případně poplatek ke každé
+splátce, a klikněte na **Spočítat splátky**:
+
+- **Anuitní** splácení má stejnou splátku jistiny a úroku, podíl úroku postupně klesá.
+- **Lineární** splácení má stejnou jistinu, úrok klesá se zůstatkem.
+
+Úrok období je zůstatek jistiny krát roční sazba děleno 12 (čtvrtletně 4), zaokrouhlený
+na haléře. Součet jistiny vychází vždy přesně na částku položky; zaokrouhlení vyrovná
+poslední splátka. Výpočet je jen návrh: řádky můžete upravit podle splátkového
+kalendáře banky a kalendář pak uložte.
+
+**Úhrada splátky.** Platba se rozdělí podle splátek: nejdřív úrok, potom poplatek
+a nakonec jistina. Platba vyšší než splátka pokryje stejným pořadím další splátky,
+platba nad zbytek všech splátek je přeplatek a aplikace ji odmítne. Párování z banky
+zaúčtuje pohyb jedním zápisem se dvojicí řádků za každou složku. Pro přijatý úvěr
+s výchozími účty:
+
+| Složka | MD | D |
+|---|---|---|
+| Jistina | 461 (účet položky) | 221 |
+| Úrok | 562 | 221 |
+| Poplatek | 568 | 221 |
+
+U poskytnuté půjčky je banka na straně MD a na straně D účet položky, 662 a 668.
+Účty úroku a poplatku určuje vlastní kontace položky, účetní profil druhu nebo výchozí
+účet ([§ 52.14.14.12](#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+
+Pohyb, který už je zaúčtovaný, musí odpovídat rozdělení: jistina na účtu položky
+a úrok a poplatek na jejich účtech aspoň ve výši úhrady. Jinak aplikace přiřazení
+odmítne a ve zprávě uvede, kolik patří na který účet. Pokladní doklad nese jediný
+protiúčet, proto úhradu rozdělené splátky přiřadíte z banky; hotovostní splátky veďte
+jako nerozdělené.
+
+**Saldo a stav splátek.** Saldo položky (Zbývá jistina) snižuje jen jistina, takže
+odpovídá zůstatku účtu položky v deníku a v saldokontu. Detail ukazuje navíc **Zbývá
+zaplatit vč. úroku a poplatku** a u každé úhrady její rozdělení. Stav splátky je
+Uhrazeno, až když je zaplacený i úrok a poplatek. Výhled cash-flow počítá s celou
+částkou splátky.
+
+**Co aplikace neúčtuje.** Úrok se účtuje dnem úhrady. Úrok za období do rozvahového
+dne, který se platí až po něm, zaúčtujte k uzávěrce ručně (například interním dokladem
+jako dohadnou položku). Přeúčtování části dlouhodobého úvěru splatné do roka na
+krátkodobý účet aplikace sama nedělá.
+
+**Daňová evidence.** Rozdělení splátek slouží jen k přehledu splátek a výhledu cash-flow,
+nic se neúčtuje. Úhrada přiřazená k položce snižuje zůstatek jen o jistinu; pohyb, který
+nese i úrok, zůstává v peněžním deníku k zařazení
+([§ 74](74_Danova_evidence.md)).
+
+**API a MCP.** Splátky v API nesou `principal_amount`, `interest_amount` a `fee_amount`
+a stav splátky zbytky po složkách. Úhrada nese jistinu v `amount`, úrok a poplatek
+v `interest_amount` a `fee_amount` a celou platbu v `total_amount`, detail položky
+`remaining_payment` a `has_split_installments`. MCP server zapíše rozdělený kalendář
+nástrojem `set_other_item_installments`; úhrady a účtování se dělají ve webovém rozhraní.
 
 ### 52.14.15 Interní doklady
 

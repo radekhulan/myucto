@@ -193,7 +193,7 @@ final class OtherItemPostingProfileTest extends TestCase
             'same_accounts' => ['origin' => ['debit_account_code' => '325']],
             'invalid_account' => ['origin' => ['debit_account_code' => '999999']],
             'invalid_description_template' => ['origin' => ['description_template' => '{neznamy}']],
-            'invalid_posting_event' => ['interest' => ['debit_account_code' => '562']],
+            'invalid_posting_event' => ['deferral' => ['debit_account_code' => '381']],
         ];
         foreach ($cases as $code => $input) {
             try {
@@ -203,7 +203,7 @@ final class OtherItemPostingProfileTest extends TestCase
                 self::assertSame(trim($code), $e->errorCode, json_encode($input));
             }
         }
-        self::assertSame(['origin' => null, 'payment_bank' => null, 'payment_cash' => null],
+        self::assertSame(['origin' => null, 'payment_bank' => null, 'payment_cash' => null, 'interest' => null, 'fee' => null],
             $this->profiles->profilesForKind($this->supplierId, $this->rentKindId()));
     }
 

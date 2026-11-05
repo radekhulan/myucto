@@ -24,6 +24,9 @@ use MyInvoice\Repository\OtherItemPostingProfileRepository;
  *     položky, jinak aktivní profil druhu, jinak výchozí 221 / 211. Strana položky je
  *     u úhrady vždy účet položky, jinak by úhrada minula saldokonto (hlídá to už
  *     uložení profilu, {@see OtherItemPostingProfileService}).
+ *   * Úrok a poplatek rozdělené splátky (`interest`, `fee`, migrace 2241) nesou jen účet
+ *     nákladu nebo výnosu; peněžní stranu dá kontace úhrady. Bez položky i profilu platí
+ *     {@see DEFAULT_COMPONENT_ACCOUNT} podle strany a účetního rámce.
  *
  * Daňová evidence nic z toho nepoužívá: položku jen potvrdí a úhradu neúčtuje.
  */
@@ -38,6 +41,20 @@ final class OtherItemPostingResolver
 
     /** Zástupné znaky v popisu zápisu. */
     public const PLACEHOLDERS = ['title', 'document_no', 'partner', 'variable_symbol'];
+
+    /**
+     * Výchozí účet úroku a poplatku rozdělené splátky podle strany: přijatý úvěr 562 / 568,
+     * poskytnutá půjčka 662 / 668. Rámec 504 má úroky na 544 / 644 a ostatní finanční
+     * náklady a výnosy na 549 / 649 (562 je tam změna stavu zásob).
+     */
+    public const DEFAULT_COMPONENT_ACCOUNT = [
+        'interest' => ['payable' => '562', 'receivable' => '662'],
+        'fee' => ['payable' => '568', 'receivable' => '668'],
+    ];
+    public const DEFAULT_COMPONENT_ACCOUNT_504 = [
+        'interest' => ['payable' => '544', 'receivable' => '644'],
+        'fee' => ['payable' => '549', 'receivable' => '649'],
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -71,6 +88,77 @@ final class OtherItemPostingResolver
     public static function otherColumn(OtherItemPostingEvent $event, string $side): string
     {
         return self::itemColumn($event, $side) === 'debit_account_code' ? 'credit_account_code' : 'debit_account_code';
+    }
+
+    /**
+     * Sloupec profilu s účtem úroku nebo poplatku: u závazku náklad na MD, u pohledávky
+     * výnos na D. Druhou stranu (peníze) určuje kontace úhrady, v profilu zůstává prázdná.
+     */
+    public static function componentColumn(string $side): string
+    {
+        return $side === 'receivable' ? 'credit_account_code' : 'debit_account_code';
+    }
+
+    /** Výchozí účet úroku nebo poplatku podle strany a účetního rámce. */
+    public static function defaultComponentAccount(OtherItemPostingEvent $event, string $side, bool $nonprofit): string
+    {
+        $map = $nonprofit ? self::DEFAULT_COMPONENT_ACCOUNT_504 : self::DEFAULT_COMPONENT_ACCOUNT;
+        return $map[$event->value][$side === 'receivable' ? 'receivable' : 'payable'];
+    }
+
+    /**
+     * Účet úroku nebo poplatku rozdělené splátky: vlastní kontace položky > profil druhu >
+     * výchozí účet ({@see defaultComponentAccount}).
+     *
+     * @param array<string,mixed> $item
+     * @return array{event:string,source:string,account_code:string,description:?string,
+     *   description_template:?string,kind_id:?int,profile_id:?int}
+     */
+    public function component(int $supplierId, array $item, OtherItemPostingEvent $event): array
+    {
+        if (!$event->isComponent()) {
+            throw new \LogicException('OtherItemPostingResolver::component čeká úrok nebo poplatek.');
+        }
+        $side = (string) $item['side'];
+        $column = self::componentColumn($side);
+        [$rule, $source, $kindId] = $this->rule($supplierId, $item, $event);
+        $account = $rule[$column] ?? null;
+        if ($account === null) {
+            $account = self::defaultComponentAccount($event, $side, $this->isNonprofit($supplierId));
+        }
+        $template = $rule['description_template'] ?? null;
+        return [
+            'event' => $event->value,
+            'source' => $source,
+            'account_code' => (string) $account,
+            'description' => self::render($template, $item),
+            'description_template' => $template,
+            'kind_id' => $source === self::SOURCE_KIND ? $kindId : null,
+            'profile_id' => $source === self::SOURCE_KIND ? ($rule['id'] ?? null) : null,
+        ];
+    }
+
+    /**
+     * Pravidlo události: vlastní kontace položky, jinak aktivní profil druhu.
+     *
+     * @param array<string,mixed> $item
+     * @return array{0:?array<string,mixed>,1:string,2:?int}
+     */
+    private function rule(int $supplierId, array $item, OtherItemPostingEvent $event): array
+    {
+        if (isset($item['id'])) {
+            $rule = $this->profiles->overridesForItem($supplierId, (int) $item['id'])[$event->value] ?? null;
+            if ($rule !== null) return [$rule, self::SOURCE_ITEM, null];
+        }
+        $kindId = $this->kindIdOf($supplierId, $item);
+        $rule = $kindId === null ? null : $this->profiles->activeProfile($supplierId, $kindId, $event->value);
+        return $rule !== null ? [$rule, self::SOURCE_KIND, $kindId] : [null, self::SOURCE_DEFAULT, $kindId];
+    }
+
+    private function isNonprofit(int $supplierId): bool
+    {
+        return (new AccountingFrameworkService($this->db, new \MyInvoice\Repository\AccountingFrameworkRepository($this->db)))
+            ->forDate($supplierId, date('Y-m-d')) === AccountingFrameworkService::CZ_504;
     }
 
     /**
@@ -164,18 +252,7 @@ final class OtherItemPostingResolver
         }
         $side = (string) $item['side'];
         $moneyColumn = self::otherColumn($event, $side);
-        $rule = null;
-        $source = self::SOURCE_DEFAULT;
-        $kindId = null;
-        if (isset($item['id'])) {
-            $rule = $this->profiles->overridesForItem($supplierId, (int) $item['id'])[$event->value] ?? null;
-            if ($rule !== null) $source = self::SOURCE_ITEM;
-        }
-        if ($rule === null) {
-            $kindId = $this->kindIdOf($supplierId, $item);
-            $rule = $kindId === null ? null : $this->profiles->activeProfile($supplierId, $kindId, $event->value);
-            if ($rule !== null) $source = self::SOURCE_KIND;
-        }
+        [$rule, $source, $kindId] = $this->rule($supplierId, $item, $event);
         $money = (string) ($rule[$moneyColumn] ?? self::DEFAULT_MONEY_ACCOUNT[$event->value]);
         $template = $rule['description_template'] ?? null;
         return [
@@ -213,6 +290,9 @@ final class OtherItemPostingResolver
         $out = [OtherItemPostingEvent::Origin->value => $origin];
         foreach ([OtherItemPostingEvent::PaymentBank, OtherItemPostingEvent::PaymentCash] as $event) {
             $out[$event->value] = $this->payment($supplierId, $item, $event, $origin['account_code']);
+        }
+        foreach ([OtherItemPostingEvent::Interest, OtherItemPostingEvent::Fee] as $event) {
+            $out[$event->value] = $this->component($supplierId, $item, $event);
         }
         return $out;
     }

@@ -54,7 +54,7 @@ const canPost = computed(() => auth.canWrite('other_items') && (!isDoubleEntry.v
 const canManageBankPayment = computed(() => auth.canRead('bank') && auth.canWrite('bank.match'))
 const canManageCashPayment = computed(() => auth.canRead('cash') && auth.canWrite('cash.document.write'))
 const canAllocate = computed(() => auth.canWrite('other_items') && (canManageBankPayment.value || canManageCashPayment.value) && item.value?.currency === 'CZK'
-  && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && Number(item.value?.remaining_amount || 0) > 0)
+  && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && payableAmount.value > 0)
 const canRepost = computed(() => isDoubleEntry.value && item.value?.status === 'posted' && !!item.value?.journal_entry_id
   && auth.canWrite('other_items') && auth.canWrite('accounting.journal.post'))
 const documentFolderPath = computed(() => {
@@ -71,6 +71,8 @@ const paymentQuery = ref('')
 const paymentCandidates = ref<OtherItemPaymentCandidate[]>([])
 const candidatesLoading = ref(false)
 const selectedPayment = ref<OtherItemPaymentCandidate | null>(null)
+/** Kolik zbývá zaplatit: u rozdělených splátek úvěru i úrok a poplatek, jinak saldo. */
+const payableAmount = computed(() => Number(item.value?.remaining_payment ?? item.value?.remaining_amount ?? 0))
 const allocationAmount = ref<number | null>(null)
 let paymentTimer: ReturnType<typeof setTimeout> | null = null
 let paymentRequest = 0
@@ -125,7 +127,7 @@ onBeforeUnmount(() => { if (paymentTimer) clearTimeout(paymentTimer) })
 
 function selectPayment(candidate: OtherItemPaymentCandidate) {
   selectedPayment.value = candidate
-  allocationAmount.value = Math.min(Math.abs(Number(candidate.amount)), Number(item.value?.remaining_amount || 0))
+  allocationAmount.value = Math.min(Math.abs(Number(candidate.amount)), payableAmount.value)
   paymentCandidates.value = []
 }
 
@@ -357,7 +359,8 @@ onMounted(load)
             <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.amount') }}</dt><dd class="tabular-nums">{{ formatMoney(item.amount, item.currency) }}</dd></div>
             <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.paid_amount') }}</dt><dd class="tabular-nums">{{ formatMoney(item.paid_amount, item.currency) }}</dd></div>
             <div v-if="Number(item.settled_outside_amount || 0) > 0" class="flex justify-between gap-3 pl-3" :title="t('other_items.settled_outside_hint')"><dt class="text-neutral-500">{{ t('other_items.settled_outside') }}</dt><dd class="tabular-nums text-neutral-500">{{ formatMoney(item.settled_outside_amount ?? 0, item.currency) }}</dd></div>
-            <div class="flex justify-between gap-3 border-t border-neutral-200 pt-3 font-semibold"><dt>{{ t('other_items.remaining') }}</dt><dd class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</dd></div>
+            <div class="flex justify-between gap-3 border-t border-neutral-200 pt-3 font-semibold"><dt>{{ t(item.has_split_installments ? 'other_items.remaining_principal' : 'other_items.remaining') }}</dt><dd class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</dd></div>
+            <div v-if="item.has_split_installments" class="flex justify-between gap-3" :title="t('other_items.remaining_payment_hint')" data-test="remaining-payment"><dt class="text-neutral-500">{{ t('other_items.remaining_payment') }}</dt><dd class="tabular-nums">{{ formatMoney(payableAmount, item.currency) }}</dd></div>
           </dl>
         </section>
       </div>
@@ -398,7 +401,10 @@ onMounted(load)
               <span v-if="allocation.reversed_on" class="ml-2 text-warning-700">{{ t('other_items.payment_reversed_on', { date: formatDate(allocation.reversed_on) }) }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <strong class="tabular-nums" :class="allocation.reversed_on ? 'line-through text-neutral-500' : ''">{{ formatMoney(allocation.amount, item.currency) }}</strong>
+              <span v-if="Number(allocation.interest_amount || 0) + Number(allocation.fee_amount || 0) > 0" class="text-xs text-neutral-500 tabular-nums" data-test="allocation-split">
+                {{ t('other_items.allocation_split', { principal: formatMoney(allocation.amount, item.currency), interest: formatMoney(allocation.interest_amount ?? 0, item.currency), fee: formatMoney(allocation.fee_amount ?? 0, item.currency) }) }}
+              </span>
+              <strong class="tabular-nums" :class="allocation.reversed_on ? 'line-through text-neutral-500' : ''">{{ formatMoney(allocation.total_amount ?? allocation.amount, item.currency) }}</strong>
               <button v-if="auth.canWrite('other_items') && (allocation.bank_transaction_id ? canManageBankPayment : canManageCashPayment)" type="button" :disabled="busy" class="text-warning-700 hover:underline disabled:opacity-50" @click="unallocate(allocation)">{{ t('other_items.unlink_payment') }}</button>
             </div>
           </div>
@@ -426,7 +432,7 @@ onMounted(load)
           <div v-else class="flex flex-wrap items-end gap-3">
             <div class="text-sm"><span class="font-medium">{{ t(selectedPayment.source === 'bank' ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ selectedPayment.id }}</span><div class="text-neutral-500">{{ formatDate(selectedPayment.payment_on) }} · {{ selectedPayment.description }}</div></div>
             <label class="text-sm font-medium">{{ t('other_items.allocation_amount') }}
-              <input v-model.number="allocationAmount" required type="number" min="0.01" step="0.01" :max="Math.min(Math.abs(selectedPayment.amount), Number(item.remaining_amount))" class="mt-1 block h-9 w-36 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
+              <input v-model.number="allocationAmount" required type="number" min="0.01" step="0.01" :max="Math.min(Math.abs(selectedPayment.amount), payableAmount)" class="mt-1 block h-9 w-36 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
             </label>
             <button type="submit" :disabled="busy" :class="btnFilled('success')">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
@@ -436,6 +442,7 @@ onMounted(load)
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
+            <p v-if="item.has_split_installments" class="w-full text-xs text-neutral-500">{{ t('other_items.allocation_split_hint') }}</p>
           </div>
         </form>
         <p v-else-if="item.currency !== 'CZK'" class="mt-3 text-sm text-neutral-500">{{ t('other_items.foreign_payment_hint') }}</p>

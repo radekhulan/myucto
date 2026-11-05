@@ -542,6 +542,15 @@ pokladnu. Tabulka splátek ukazuje u každé splátky stav **Neuhrazeno**,
 **Částečně** (se zbývající částkou), **Uhrazeno** nebo **Po splatnosti**.
 Podle zbytků splátek počítá i předpověď cash-flow.
 
+U úvěru, půjčky nebo leasingu je částkou položky jistina. Splátky lze rozdělit
+na jistinu, úrok a poplatek a nechat si je spočítat jako anuitní nebo lineární
+splácení. Platba splátky se pak rozdělí nejdřív na úrok, potom poplatek a nakonec
+jistinu. Saldo položky snižuje jen jistina, úrok a poplatek se v podvojném
+účetnictví zaúčtují s úhradou z banky do nákladů nebo výnosů (výchozí 562 a 568
+u přijatého úvěru, 662 a 668 u poskytnuté půjčky) a předpověď cash-flow počítá
+s celou splátkou. Podrobnosti v
+[§ 52.14.14.13](52_Ucetni_denik.md#52141413-uvery-a-leasing-jistina-urok-a-poplatek).
+
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.
 Další položky se načítají při posunu dolů. Na počítači zůstávají filtry a názvy

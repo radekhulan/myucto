@@ -18,6 +18,13 @@ final class OtherItemService
 {
     private const KINDS = ['other', 'rent', 'loan', 'deposit', 'insurance', 'fee', 'claim'];
 
+    /**
+     * Peněžní částka úhrady (jistina, úrok a poplatek, migrace 2241). Čerpání platby
+     * (kolik z pohybu či pokladního dokladu je už použito) se počítá z ní; saldo položky
+     * jen z jistiny (`amount`).
+     */
+    public const ALLOCATION_TOTAL_SQL = 'amount + interest_amount + fee_amount';
+
     public function __construct(
         private readonly Connection $db,
         private readonly OtherItemRepository $items,
@@ -40,6 +47,10 @@ final class OtherItemService
             ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
         $item['posting_overrides'] = (object) [];
         $item['posting_rules'] = (object) [];
+        // Rozdělené splátky (migrace 2241): saldo položky je jistina, platit se má i úrok a poplatek.
+        $coverage = $this->installmentCoverage($supplierId, $id);
+        $item['has_split_installments'] = OtherItemInstallmentCoverage::hasSplit($coverage);
+        $item['remaining_payment'] = self::payableOf($item, $coverage);
         if ($this->isDoubleEntry($supplierId)) {
             $item['posting_overrides'] = (object) $this->postingProfiles->overridesForItem($supplierId, $id);
             $item['posting_rules'] = (object) $this->postingResolver->forItem($supplierId, $item);
@@ -119,6 +130,18 @@ final class OtherItemService
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Má položka aktivní úhradu? Úhrada samotného úroku či poplatku rozdělené splátky
+     * (migrace 2241) má jistinu 0, takže ji `paid_amount` nevidí.
+     */
+    public function hasActivePayments(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM other_item_allocations
+            WHERE supplier_id = ? AND other_item_id = ? AND reversed_on IS NULL LIMIT 1');
+        $stmt->execute([$supplierId, $id]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function update(int $supplierId, int $id, array $input, ?int $userId): array
     {
         $pdo = $this->db->pdo();
@@ -131,7 +154,8 @@ final class OtherItemService
                 throw new OtherItemException('not_draft', 'Upravovat lze jen koncept.', 409);
             }
             $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input), $existing);
-            $planned = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) AS total, MIN(due_on) AS first_due
+            // Částka položky je jistina; rozdělená splátka nese úrok a poplatek navíc (migrace 2241).
+            $planned = $pdo->prepare('SELECT COALESCE(SUM(COALESCE(principal_amount, amount)), 0) AS total, MIN(due_on) AS first_due
                 FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?');
             $planned->execute([$supplierId, $id]);
             $plan = $planned->fetch(PDO::FETCH_ASSOC);
@@ -333,7 +357,7 @@ final class OtherItemService
             if (!in_array($item['status'], ['posted', 'confirmed'], true)) {
                 throw new OtherItemException('not_posted', 'Stornovat lze jen potvrzený doklad.', 409);
             }
-            if ((float) $item['paid_amount'] > 0) {
+            if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
                 throw new OtherItemException('has_payments', 'Doklad má spárované úhrady. Nejprve je odpojte.', 409);
             }
             // Položka ze zůstatku bez dokladu nemá vlastní zápis, předpis nese řádek převzatého
@@ -391,7 +415,7 @@ final class OtherItemService
             if ($item['status'] !== 'posted' || $item['journal_entry_id'] === null) {
                 throw new OtherItemException('not_posted', 'Přeúčtovat lze jen zaúčtovaný doklad.', 409);
             }
-            if ((float) $item['paid_amount'] > 0) {
+            if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
                 throw new OtherItemException('has_payments', 'Doklad má spárované úhrady. Nejprve je odpojte.', 409);
             }
             $account = $account ?: (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'));
@@ -440,7 +464,8 @@ final class OtherItemService
     {
         $this->get($supplierId, $id);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, installment_id, bank_transaction_id, cash_document_id, amount, payment_on, reversed_on, created_at
+            'SELECT id, installment_id, bank_transaction_id, cash_document_id, amount, interest_amount, fee_amount,
+                    amount + interest_amount + fee_amount AS total_amount, payment_on, reversed_on, created_at
                FROM other_item_allocations WHERE supplier_id = ? AND other_item_id = ? ORDER BY payment_on, id'
         );
         $stmt->execute([$supplierId, $id]);
@@ -463,7 +488,8 @@ final class OtherItemService
         $term = '%' . addcslashes(trim($search), '%_\\') . '%';
         $coverage = $this->installmentCoverage($supplierId, $id);
         // Hledané částky: zbývající dluh a zbytky otevřených splátek (nejvýš 12 nejbližších).
-        $amounts = [round((float) $item['remaining_amount'], 2)];
+        // U rozdělených splátek je zbývající dluh peněžní: jistina, úrok i poplatek.
+        $amounts = [round((float) $item['remaining_payment'], 2)];
         foreach (OtherItemInstallmentCoverage::open($coverage) as $row) {
             $amounts[] = round((float) $row['remaining_amount'], 2);
         }
@@ -488,7 +514,7 @@ final class OtherItemService
                         COALESCE(a.used_amount, 0) used_amount
                    FROM bank_transactions bt
                    JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
-              LEFT JOIN (SELECT bank_transaction_id, SUM(amount) used_amount FROM other_item_allocations
+              LEFT JOIN (SELECT bank_transaction_id, SUM(' . self::ALLOCATION_TOTAL_SQL . ') used_amount FROM other_item_allocations
                          WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL AND reversed_on IS NULL
                          GROUP BY bank_transaction_id) a
                      ON a.bank_transaction_id = bt.id
@@ -528,7 +554,7 @@ final class OtherItemService
                 'SELECT cd.id, cd.issue_date payment_on, cd.total_amount amount, cd.currency_code currency,
                         cd.description, COALESCE(a.used_amount, 0) used_amount
                    FROM cash_documents cd
-              LEFT JOIN (SELECT cash_document_id, SUM(amount) used_amount FROM other_item_allocations
+              LEFT JOIN (SELECT cash_document_id, SUM(' . self::ALLOCATION_TOTAL_SQL . ') used_amount FROM other_item_allocations
                          WHERE supplier_id = ? AND cash_document_id IS NOT NULL AND reversed_on IS NULL
                          GROUP BY cash_document_id) a
                      ON a.cash_document_id = cd.id
@@ -577,7 +603,7 @@ final class OtherItemService
             'variable_symbol' => $item['variable_symbol'] ?? null,
             'counterparty_account' => $item['counterparty_account'] ?? null,
             'counterparty_bank_code' => $item['counterparty_bank_code'] ?? null,
-            'remaining_amount' => (float) $item['remaining_amount'],
+            'remaining_amount' => (float) $item['remaining_payment'],
             'installments' => $coverage,
         ];
         $rows = array_map(static function (array $row) use ($matchItem): array {
@@ -655,30 +681,35 @@ final class OtherItemService
             if ((string) $payment['currency'] !== 'CZK') {
                 throw new OtherItemException('currency_mismatch', 'Měna úhrady se liší od měny dokladu.');
             }
-            if ($amount > round((float) $item['remaining_amount'], 2)) {
-                throw new OtherItemException('overpayment', 'Párovaná částka převyšuje zbývající dluh.', 409);
-            }
+            $sourceColumn = $bankId > 0 ? 'bank_transaction_id' : 'cash_document_id';
+            $sourceId = $bankId > 0 ? $bankId : $cashId;
+            $sourceType = $bankId > 0 ? 'bank' : 'cash';
+            // Opětovné přiřazení po stornu míří na původní splátku.
+            $priorInstallment = $pdo->prepare("SELECT installment_id FROM other_item_allocations
+                WHERE supplier_id = ? AND other_item_id = ? AND {$sourceColumn} = ? AND reversed_on IS NOT NULL");
+            $priorInstallment->execute([$supplierId, $id, $sourceId]);
+            $priorTarget = $priorInstallment->fetchColumn();
+            $split = $this->splitPayment($supplierId, $item, $amount,
+                $priorTarget !== false && $priorTarget !== null ? (int) $priorTarget : null);
             $stmt = $pdo->prepare(
-                'SELECT COALESCE(SUM(amount), 0) FROM other_item_allocations
-                  WHERE supplier_id = ? AND reversed_on IS NULL AND '
-                    . ($bankId > 0 ? 'bank_transaction_id' : 'cash_document_id') . ' = ?'
+                'SELECT COALESCE(SUM(' . self::ALLOCATION_TOTAL_SQL . '), 0) FROM other_item_allocations
+                  WHERE supplier_id = ? AND reversed_on IS NULL AND ' . $sourceColumn . ' = ?'
             );
-            $stmt->execute([$supplierId, $bankId > 0 ? $bankId : $cashId]);
+            $stmt->execute([$supplierId, $sourceId]);
             $used = (float) $stmt->fetchColumn();
             if ($amount + $used > abs((float) $payment['amount']) + 0.001) {
                 throw new OtherItemException('payment_overallocated', 'Platba nemá dostatek volné částky.', 409);
             }
             if ($item['journal_entry_id'] !== null) {
                 $accountId = $this->settlementAccountId($supplierId, $item);
-                $this->assertPaymentPosting($supplierId, $bankId > 0 ? 'bank' : 'cash',
-                    $bankId > 0 ? $bankId : $cashId, $accountId, (string) $item['side'],
-                    $amount + $this->allocatedOnAccount($supplierId, $bankId > 0 ? 'bank' : 'cash',
-                        $bankId > 0 ? $bankId : $cashId, $accountId));
+                $this->assertPaymentPosting($supplierId, $sourceType, $sourceId, $accountId, (string) $item['side'],
+                    $split['principal'] + $this->allocatedOnAccount($supplierId, $sourceType, $sourceId, $accountId));
             }
-            $sourceColumn = $bankId > 0 ? 'bank_transaction_id' : 'cash_document_id';
-            $sourceId = $bankId > 0 ? $bankId : $cashId;
+            if ($split['interest'] + $split['fee'] > 0 && $this->settlementAccountCode($supplierId, $item) !== null) {
+                $this->assertComponentPosting($supplierId, $sourceType, $sourceId, $item, $split);
+            }
             $previous = $pdo->prepare(
-                "SELECT id, other_item_id, amount, reversed_on FROM other_item_allocations
+                "SELECT id, other_item_id, amount + interest_amount + fee_amount AS amount, reversed_on FROM other_item_allocations
                   WHERE supplier_id = ? AND {$sourceColumn} = ? FOR UPDATE"
             );
             $previous->execute([$supplierId, $sourceId]);
@@ -701,22 +732,27 @@ final class OtherItemService
                         'Po stornu lze znovu přiřadit stejnou částku původní úhrady.', 409);
                 }
                 // Vazba na splátku zůstává; po novém splátkovém kalendáři (smazaná splátka) se dopočítá.
+                // Složky se rozdělí znovu podle současného stavu splátek (stejně je ověřilo zaúčtování).
                 $reactivate = $pdo->prepare(
-                    'UPDATE other_item_allocations SET reversed_on = NULL, installment_id = COALESCE(installment_id, ?)
+                    'UPDATE other_item_allocations SET reversed_on = NULL, installment_id = COALESCE(installment_id, ?),
+                            amount = ?, interest_amount = ?, fee_amount = ?
                       WHERE id = ? AND supplier_id = ? AND reversed_on IS NOT NULL'
                 );
-                $reactivate->execute([$this->installmentFor($supplierId, $id, $amount), (int) $prior['id'], $supplierId]);
-                $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
+                $reactivate->execute([$split['installment_id'], $split['principal'], $split['interest'], $split['fee'],
+                    (int) $prior['id'], $supplierId]);
+                $this->posting->restampDimensions($supplierId, $sourceType, $sourceId, true);
                 if ($ownTx) $pdo->commit();
                 return $this->get($supplierId, $id);
             }
             $stmt = $pdo->prepare(
                 'INSERT INTO other_item_allocations
-                   (supplier_id, other_item_id, installment_id, bank_transaction_id, cash_document_id, amount, payment_on, created_by)
-                 VALUES (?,?,?,?,?,?,?,?)'
+                   (supplier_id, other_item_id, installment_id, bank_transaction_id, cash_document_id, amount,
+                    interest_amount, fee_amount, payment_on, created_by)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)'
             );
-            $stmt->execute([$supplierId, $id, $this->installmentFor($supplierId, $id, $amount),
-                $bankId ?: null, $cashId ?: null, $amount, $payment['payment_on'], $userId]);
+            $stmt->execute([$supplierId, $id, $split['installment_id'],
+                $bankId ?: null, $cashId ?: null, $split['principal'], $split['interest'], $split['fee'],
+                $payment['payment_on'], $userId]);
             // Úhrada přebírá dimenze položky (DimensionDefaults::bankDocuments / forCash).
             $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
             if ($ownTx) $pdo->commit();
@@ -728,14 +764,90 @@ final class OtherItemService
     }
 
     /**
-     * Splátka, kterou úhrada hradí ({@see OtherItemInstallmentCoverage::target}): přesná shoda
-     * s otevřenou splátkou, jinak první otevřená. Volá se pod zámkem položky a jejích úhrad
-     * ({@see lockForAllocation}); null u položky bez splátkového kalendáře.
+     * Rozdělení peněžní částky úhrady na jistinu, úrok a poplatek a splátka, kterou hradí
+     * ({@see OtherItemInstallmentCoverage::target}: přesná shoda s otevřenou splátkou, jinak
+     * první otevřená). Volá se pod zámkem položky a jejích úhrad ({@see lockForAllocation}).
+     *
+     * Bez rozdělené splátky je celá částka jistina a přeplatek se měří zbývajícím dluhem,
+     * přesně jako dřív. S rozdělenými splátkami pokryje částka nejdřív úrok, pak poplatek
+     * a teprve potom jistinu splátky (obvyklé pořadí započtení u úvěrů), přebytek
+     * stejně další splátky; částka nad zbytek všech splátek je přeplatek.
+     *
+     * @param array<string,mixed> $item zamčená položka s remaining_amount
+     * @return array{installment_id:?int,principal:float,interest:float,fee:float}
      */
-    private function installmentFor(int $supplierId, int $id, float $amount): ?int
+    public function splitPayment(int $supplierId, array $item, float $amount, ?int $target = null): array
     {
-        $coverage = $this->items->installmentCoverage($supplierId, [$id])[$id] ?? [];
-        return OtherItemInstallmentCoverage::target($coverage, $amount);
+        $coverage = $this->items->installmentCoverage($supplierId, [(int) $item['id']])[(int) $item['id']] ?? [];
+        if ($target !== null && !in_array($target, array_map(static fn (array $row): int => (int) $row['id'], $coverage), true)) {
+            $target = null;
+        }
+        $target ??= OtherItemInstallmentCoverage::target($coverage, $amount);
+        if (!OtherItemInstallmentCoverage::hasSplit($coverage)) {
+            if ($amount > round((float) $item['remaining_amount'], 2)) {
+                throw new OtherItemException('overpayment', 'Párovaná částka převyšuje zbývající dluh.', 409);
+            }
+            return ['installment_id' => $target, 'principal' => $amount, 'interest' => 0.0, 'fee' => 0.0];
+        }
+        $split = OtherItemInstallmentCoverage::split($coverage, $amount, $target);
+        if ($split['unallocated'] > 0.001 || $split['principal'] > round((float) $item['remaining_amount'], 2) + 0.001) {
+            throw new OtherItemException('overpayment', 'Párovaná částka převyšuje zbývající splátky včetně úroku a poplatku.', 409);
+        }
+        return ['installment_id' => $target, 'principal' => $split['principal'],
+            'interest' => $split['interest'], 'fee' => $split['fee']];
+    }
+
+    /**
+     * Kolik má protistrana ještě zaplatit: u rozdělených splátek zbytek všech splátek
+     * (jistina, úrok i poplatek), jinak zbývající dluh (saldo).
+     *
+     * @param array<string,mixed> $item
+     * @param list<array<string,mixed>> $coverage
+     */
+    public static function payableOf(array $item, array $coverage): float
+    {
+        return OtherItemInstallmentCoverage::hasSplit($coverage)
+            ? OtherItemInstallmentCoverage::remainingTotal($coverage)
+            : round((float) $item['remaining_amount'], 2);
+    }
+
+    /**
+     * Zaúčtovaná platba nese úrok a poplatek rozdělené splátky na jejich účtech
+     * ({@see OtherItemPostingResolver::component}) aspoň v částce úhrady. Jinak by úhrada
+     * snížila saldo jistiny, ale úrok by v účetnictví chyběl nebo ležel jinde.
+     *
+     * @param array<string,mixed> $item
+     * @param array{principal:float,interest:float,fee:float} $split
+     */
+    private function assertComponentPosting(int $supplierId, string $sourceType, int $sourceId, array $item, array $split): void
+    {
+        $required = [];
+        foreach ([OtherItemPostingEvent::Interest, OtherItemPostingEvent::Fee] as $event) {
+            $amount = (int) round($split[$event->value] * 100);
+            if ($amount <= 0) continue;
+            $code = $this->postingResolver->component($supplierId, $item, $event)['account_code'];
+            $required[$code] = ($required[$code] ?? 0) + $amount;
+        }
+        $side = $item['side'] === 'receivable' ? 'credit' : 'debit';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = ? THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ?
+                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND (a.account_code = ? OR a.account_code LIKE ?)"
+        );
+        foreach ($required as $code => $cents) {
+            $code = (string) $code;
+            $stmt->execute([$side, $supplierId, $sourceType, $sourceId, $code, addcslashes($code, '%_\\') . '.%']);
+            if ((int) round((float) $stmt->fetchColumn() * 100) < $cents) {
+                throw new OtherItemException('payment_split_mismatch', sprintf(
+                    'Zaúčtování platby neodpovídá rozdělení splátky: úrok %s Kč a poplatek %s Kč patří na účet %s, jistina %s Kč na účet položky. Zaúčtování platby opravte nebo ji nechte zaúčtovat při párování.',
+                    number_format($split['interest'], 2, ',', ' '), number_format($split['fee'], 2, ',', ' '),
+                    $code, number_format($split['principal'], 2, ',', ' ')), 409);
+            }
+        }
     }
 
     /**

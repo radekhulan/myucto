@@ -19,7 +19,9 @@ use MyInvoice\Service\Accounting\Dimension\DimensionService;
  * smaže. Účty se ověřují proti osnově firmy při uložení, ne až při zaúčtování: aktivní
  * účet, u vzniku rozvahový účet položky podle strany druhu a protiúčet bez saldokonta,
  * u úhrady prázdná strana položky (úhrada vždy jde proti účtu položky, jinak by minula
- * saldokonto) a peněžní účet banky 221 nebo pokladny 211.
+ * saldokonto) a peněžní účet banky 221 nebo pokladny 211, u úroku a poplatku rozdělené
+ * splátky nákladový (závazek) nebo výnosový (pohledávka) účet bez peněžní strany, kterou
+ * určí kontace úhrady.
  *
  * Návrhy kontace pro vestavěné druhy jsou jen nabídka v nastavení druhu, aplikace je
  * sama nikdy neuloží: účty a analytiky se mezi firmami liší.
@@ -79,10 +81,16 @@ final class OtherItemPostingProfileService
         }
         unset($this->postable[$supplierId]);
         $bySupplier = $this->profiles->profilesBySupplier($supplierId);
+        $nonprofit = $this->framework($supplierId) === AccountingFrameworkService::CZ_504;
         foreach ($kinds as $i => $kind) {
             $kinds[$i]['posting_profiles'] = self::byEvent($kind['id'] !== null ? ($bySupplier[(int) $kind['id']] ?? []) : []);
             $kinds[$i]['posting_suggestion'] = $kind['builtin']
                 ? $this->suggestion($supplierId, (string) $kind['side'], (string) $kind['builtin_code']) : null;
+            // Výchozí účty úroku a poplatku rozdělené splátky, když je profil ani položka neurčí.
+            $kinds[$i]['posting_component_defaults'] = [
+                'interest' => OtherItemPostingResolver::defaultComponentAccount(OtherItemPostingEvent::Interest, (string) $kind['side'], $nonprofit),
+                'fee' => OtherItemPostingResolver::defaultComponentAccount(OtherItemPostingEvent::Fee, (string) $kind['side'], $nonprofit),
+            ];
         }
         return $kinds;
     }
@@ -172,7 +180,7 @@ final class OtherItemPostingProfileService
         $itemId = (int) $item['id'];
         $before = $this->profiles->overridesForItem($supplierId, $itemId);
         foreach ($this->eventsFromInput($input) as $event) {
-            if (!$event->isPayment()) {
+            if (!$event->isPayment() && !$event->isComponent()) {
                 throw new OtherItemException('invalid_posting_override',
                     'Vlastní kontaci vzniku nesou účet a protiúčet položky.');
             }
@@ -201,6 +209,12 @@ final class OtherItemPostingProfileService
     public function flipItemOverrides(int $supplierId, int $itemId, ?int $userId): void
     {
         foreach ($this->profiles->overridesForItem($supplierId, $itemId) as $event => $rule) {
+            // Nákladový účet úroku či poplatku závazku není výnosem pohledávky: vlastní účet
+            // složky po změně strany zanikne a platí profil druhu nebo výchozí účet.
+            if (OtherItemPostingEvent::tryFrom((string) $event)?->isComponent()) {
+                $this->profiles->deleteOverride($supplierId, $itemId, (string) $event);
+                continue;
+            }
             $this->profiles->upsertOverride($supplierId, $itemId, (string) $event, [
                 'debit_account_code' => $rule['credit_account_code'],
                 'credit_account_code' => $rule['debit_account_code'],
@@ -293,6 +307,17 @@ final class OtherItemPostingProfileService
                 }
                 $this->assertPostingAccount($supplierId, $counter);
             }
+        } elseif ($event->isComponent()) {
+            // Úrok a poplatek jdou s úhradou splátky: peněžní stranu určí kontace úhrady.
+            $column = OtherItemPostingResolver::componentColumn($side);
+            $moneyColumn = $column === 'debit_account_code' ? 'credit_account_code' : 'debit_account_code';
+            if ($codes[$moneyColumn] !== null) {
+                throw new OtherItemException('component_money_account',
+                    'Peněžní účet úroku a poplatku určuje kontace úhrady z banky. Druhou stranu nechte prázdnou.');
+            }
+            if ($codes[$column] !== null) {
+                $this->assertComponentAccount($supplierId, $codes[$column], $side);
+            }
         } else {
             if ($codes[$itemColumn] !== null) {
                 throw new OtherItemException('profile_breaks_saldo',
@@ -384,6 +409,19 @@ final class OtherItemPostingProfileService
             || $account['account_type'] !== ($side === 'receivable' ? 'asset' : 'liability')) {
             throw new OtherItemException('invalid_account_side',
                 'Účet položky musí být aktivní rozvahový účet ' . ($side === 'receivable' ? 'aktiv (pohledávka).' : 'pasiv (závazek).'));
+        }
+        $this->assertPostingLevel($supplierId, $account);
+    }
+
+    /** Účet úroku či poplatku: náklad u závazku, výnos u pohledávky, na úrovni účtování. */
+    private function assertComponentAccount(int $supplierId, string $code, string $side): void
+    {
+        $account = $this->accounts->findByCode($supplierId, $code);
+        if ($account === null || !$account['is_active']
+            || $account['account_type'] !== ($side === 'receivable' ? 'revenue' : 'expense')) {
+            throw new OtherItemException('invalid_component_account', $side === 'receivable'
+                ? 'Úrok a poplatek pohledávky jdou na aktivní výnosový účet.'
+                : 'Úrok a poplatek závazku jdou na aktivní nákladový účet.');
         }
         $this->assertPostingLevel($supplierId, $account);
     }

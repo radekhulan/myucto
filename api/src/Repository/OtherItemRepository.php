@@ -239,8 +239,7 @@ final class OtherItemRepository
      *
      * @param list<int> $itemIds
      * @param bool $lock zamknout aktivní úhrady (přiřazení úhrady pod zámkem položky)
-     * @return array<int, list<array{id:int,position:int,due_on:string,amount:float,paid_amount:float,
-     *     remaining_amount:float,status:string}>>
+     * @return array<int, list<array<string,mixed>>>
      */
     public function installmentCoverage(int $supplierId, array $itemIds, ?string $today = null, bool $lock = false): array
     {
@@ -248,7 +247,8 @@ final class OtherItemRepository
         if ($itemIds === []) return [];
         $in = implode(',', array_fill(0, count($itemIds), '?'));
         $pdo = $this->db->pdo();
-        $installments = $pdo->prepare("SELECT id, other_item_id, position, due_on, amount FROM other_item_installments
+        $installments = $pdo->prepare("SELECT id, other_item_id, position, due_on, amount,
+                principal_amount, interest_amount, fee_amount FROM other_item_installments
             WHERE supplier_id = ? AND other_item_id IN ({$in}) ORDER BY other_item_id, position");
         $installments->execute([$supplierId, ...$itemIds]);
         $plan = [];
@@ -258,7 +258,8 @@ final class OtherItemRepository
         if ($plan === []) return [];
         $planned = array_keys($plan);
         $in = implode(',', array_fill(0, count($planned), '?'));
-        $allocations = $pdo->prepare("SELECT other_item_id, installment_id, amount FROM other_item_allocations
+        $allocations = $pdo->prepare("SELECT other_item_id, installment_id, amount, interest_amount, fee_amount
+            FROM other_item_allocations
             WHERE supplier_id = ? AND other_item_id IN ({$in}) AND reversed_on IS NULL
             ORDER BY other_item_id, payment_on, id" . ($lock ? ' FOR UPDATE' : ''));
         $allocations->execute([$supplierId, ...$planned]);

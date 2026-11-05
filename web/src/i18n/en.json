@@ -132,7 +132,9 @@
       "event": {
         "origin": "Origin",
         "payment_bank": "Bank payment",
-        "payment_cash": "Cash payment"
+        "payment_cash": "Cash payment",
+        "interest": "Installment interest",
+        "fee": "Installment fee"
       },
       "source": {
         "item": "Custom",
@@ -145,7 +147,9 @@
       "money_account": "Money account",
       "money_hint": {
         "payment_bank": "221 or its analytic account; empty = bank account from the statement.",
-        "payment_cash": "211 or its analytic account; empty = cash register account."
+        "payment_cash": "211 or its analytic account; empty = cash register account.",
+        "interest": "Only for installments split into principal, interest and fee. Empty = default account.",
+        "fee": "Only for installments split into principal, interest and fee. Empty = default account."
       },
       "description_template": "Entry description",
       "description_template_hint": "Placeholders: {'{title}'}, {'{document_no}'}, {'{partner}'}, {'{variable_symbol}'}.",
@@ -170,7 +174,12 @@
         "use_suggestion": "Use suggestion",
         "dimensions": "Default dimensions of a new document",
         "saved": "Kind posting profile saved."
-      }
+      },
+      "component_account": {
+        "interest": "Interest account",
+        "fee": "Fee account"
+      },
+      "component_money": "Money side from the payment posting"
     },
     "title": "Other receivables and payables",
     "subtitle": "Manual items, taxes and payroll liabilities in one place.",
@@ -396,7 +405,7 @@
       "created_for": "Item for {date}",
       "no_generated": "No later items have been created yet.",
       "installments_title": "Payment installments",
-      "installments_hint": "Installments spread payment of one document across the cash flow forecast. They do not create journal entries.",
+      "installments_hint": "Installments spread the payment of one document across the cash flow. The schedule itself creates no journal entries.",
       "due_number": "Installment {number} due:",
       "total": "Installment total",
       "add_installment": "Add installment",
@@ -422,8 +431,27 @@
       "split_quarter": "quarter",
       "split_year": "year",
       "split": "Split",
-      "split_hint": "Splits the document amount evenly; the rounding remainder goes to the last installment. Save the schedule afterwards."
-    }
+      "split_hint": "Splits the document amount evenly; the rounding remainder goes to the last installment. Save the schedule afterwards.",
+      "components": "Split installments into principal, interest and fee (loan, leasing)",
+      "components_hint": "The document amount is the principal. In double-entry bookkeeping, interest and fee are posted with the installment payment to expenses or revenues per the kind posting profile.",
+      "loan_rate": "Interest % p.a.",
+      "loan_method": "Repayment",
+      "loan_annuity": "Annuity",
+      "loan_linear": "Linear",
+      "loan_fee": "Fee per installment",
+      "loan_plan": "Calculate installments",
+      "loan_hint": "Interest is calculated from the outstanding principal and rounded to cents; the last installment absorbs the rounding. You can edit the proposal, then save the schedule.",
+      "loan_planned": "Installments calculated. Review them and save the schedule.",
+      "principal_amount": "Principal",
+      "interest_amount": "Interest",
+      "fee_amount": "Fee",
+      "principal_total": "Principal total {amount} (document amount {item})"
+    },
+    "remaining_principal": "Principal remaining",
+    "remaining_payment": "Left to pay incl. interest and fee",
+    "remaining_payment_hint": "Sum of unpaid installments. Only the principal reduces the item balance; interest and fee are posted with the payment.",
+    "allocation_split": "principal {principal}, interest {interest}, fee {fee}",
+    "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal."
   },
   "internal_documents": {
     "title": "Internal documents",

@@ -234,6 +234,7 @@ function assertInstallments(item, rows) {
   }
   let previous = '';
   let sum = 0;
+  let split = false;
   for (const [i, row] of rows.entries()) {
     if (!isDate(row?.due_on)) {
       throw new Error(`NEPROVEDENO: splátka ${i + 1} má neplatné datum „${row?.due_on}" (čekám YYYY-MM-DD).`);
@@ -249,15 +250,39 @@ function assertInstallments(item, rows) {
     if (c === null) {
       throw new Error(`NEPROVEDENO: splátka ${i + 1} musí mít kladnou částku na haléře.`);
     }
-    sum += c;
+    const parts = componentCents(row, i);
+    if (parts !== null && parts.principal + parts.interest + parts.fee !== c) {
+      throw new Error(`NEPROVEDENO: splátka ${i + 1}: jistina, úrok a poplatek dávají `
+        + `${czk(parts.principal + parts.interest + parts.fee)}, ale částka splátky je ${czk(c)}.`);
+    }
+    sum += parts === null ? c : parts.principal;
+    if (parts !== null) split = true;
     previous = row.due_on;
   }
   const total = cents(item.amount);
   if (sum !== total) {
-    throw new Error(`NEPROVEDENO: součet splátek ${czk(sum)} neodpovídá částce dokladu `
+    throw new Error(`NEPROVEDENO: součet ${split ? 'jistiny ' : ''}splátek ${czk(sum)} neodpovídá částce dokladu `
       + `${total === null ? String(item.amount) : czk(total)} (rozdíl ${czk((total ?? 0) - sum)}). `
-      + 'U úvěru a leasingu patří do kalendáře jen jistina; úroky a poplatky nejsou součástí částky dokladu.');
+      + 'U úvěru a leasingu je částkou dokladu jistina; úrok a poplatek patří do interest_amount a fee_amount '
+      + 'splátky (s jistinou v principal_amount).');
   }
+}
+
+const COMPONENTS = ['principal_amount', 'interest_amount', 'fee_amount'];
+
+/** Složky splátky v haléřích; null, když splátka rozdělená není. */
+function componentCents(row, i) {
+  if (!COMPONENTS.some((key) => row?.[key] !== undefined && row?.[key] !== null)) return null;
+  const out = {};
+  for (const key of COMPONENTS) {
+    const value = row[key] ?? 0;
+    const c = value === 0 ? 0 : cents(value);
+    if (c === null) {
+      throw new Error(`NEPROVEDENO: splátka ${i + 1}: ${key} musí být nezáporná částka na haléře.`);
+    }
+    out[key.replace('_amount', '')] = c;
+  }
+  return out;
 }
 
 const read = (name, title, description, properties, path, query = () => null, required = []) => ({
@@ -445,9 +470,12 @@ export const OTHER_ITEM_TOOLS = [
       'Nastaví splátkový kalendář dokladu a NAHRADÍ JÍM CELÝ DOSAVADNÍ KALENDÁŘ; pošli vždy všechny splátky, '
       + 'ne jen změněné. Kalendář lze vyčíst z dokumentu (úvěrová nebo leasingová smlouva, splátkový '
       + 'kalendář banky): asistent ho z přiloženého dokumentu analyzuje a pošle jako data. Pravidla: 2 až 120 '
-      + 'splátek, vzestupné termíny ne dříve než datum vzniku dokladu, kladné částky na haléře a součet přesně '
-      + 'rovný částce dokladu (u úvěru jen jistina, úroky ne). Jen u neuhrazeného dokladu. Splátky slouží '
-      + `k plánu cashflow a do deníku nic nezapisují. ${NO_POSTING} Zrušení kalendáře: clear_other_item_installments.`,
+      + 'splátek, vzestupné termíny ne dříve než datum vzniku dokladu a kladné částky na haléře. Splátku úvěru '
+      + 'nebo leasingu lze rozdělit na jistinu, úrok a poplatek (principal_amount, interest_amount, fee_amount; '
+      + 'jejich součet je částka splátky). Částka dokladu je jistina: součet jistiny (u nerozdělené splátky celé '
+      + 'částky) musí být přesně částka dokladu. Jen u neuhrazeného dokladu. Kalendář slouží k plánu cashflow, '
+      + 'úrok a poplatek se zaúčtují až s úhradou splátky v aplikaci. '
+      + `${NO_POSTING} Zrušení kalendáře: clear_other_item_installments.`,
     inputSchema: schema({
       item_id: id('ID dokladu.'),
       installments: {
@@ -457,7 +485,10 @@ export const OTHER_ITEM_TOOLS = [
         maxItems: 120,
         items: schema({
           due_on: date('Termín splátky (YYYY-MM-DD).'),
-          amount: num('Částka splátky v Kč na haléře.', { exclusiveMinimum: 0 }),
+          amount: num('Částka splátky v Kč na haléře (u rozdělené splátky jistina + úrok + poplatek).', { exclusiveMinimum: 0 }),
+          principal_amount: nullable(num('Jistina splátky v Kč na haléře.', { minimum: 0 })),
+          interest_amount: nullable(num('Úrok splátky v Kč na haléře.', { minimum: 0 })),
+          fee_amount: nullable(num('Poplatek splátky v Kč na haléře.', { minimum: 0 })),
         }, ['due_on', 'amount']),
       },
     }, ['item_id', 'installments']),
@@ -467,7 +498,10 @@ export const OTHER_ITEM_TOOLS = [
       const item = await c.get(`${BASE}/${seg(a.item_id)}`, null, tool);
       assertInstallments(item, rows);
       return c.put(`${BASE}/${seg(a.item_id)}/installments`, {
-        items: rows.map((row) => ({ due_on: row.due_on, amount: row.amount })),
+        items: rows.map((row) => (COMPONENTS.some((key) => row[key] !== undefined && row[key] !== null)
+          ? { due_on: row.due_on, amount: row.amount, principal_amount: row.principal_amount ?? 0,
+            interest_amount: row.interest_amount ?? 0, fee_amount: row.fee_amount ?? 0 }
+          : { due_on: row.due_on, amount: row.amount })),
       }, tool);
     },
   },

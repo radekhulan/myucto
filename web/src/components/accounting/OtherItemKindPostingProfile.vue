@@ -20,14 +20,20 @@ const emit = defineEmits<{ (e: 'saved'): void }>()
 const { t } = useI18n()
 const toast = useToast()
 const saving = ref(false)
-const events: OtherItemPostingEvent[] = ['origin', 'payment_bank', 'payment_cash']
+const events: OtherItemPostingEvent[] = ['origin', 'payment_bank', 'payment_cash', 'interest', 'fee']
 const MONEY_PREFIX: Record<string, string> = { payment_bank: '221', payment_cash: '211' }
 const receivable = computed(() => props.kind.side === 'receivable')
 type Column = 'debit_account_code' | 'credit_account_code'
+/** Úrok a poplatek rozdělené splátky: jen účet nákladu či výnosu, peníze určí kontace úhrady. */
+const isComponent = (event: OtherItemPostingEvent) => event === 'interest' || event === 'fee'
 
-/** Sloupec účtu položky: vznik pohledávky jde na MD, úhrada pohledávky na D, závazek obráceně. */
+/**
+ * Sloupec, který se v profilu nevyplňuje: účet položky (vznik pohledávky jde na MD, úhrada
+ * pohledávky na D, závazek obráceně), u úroku a poplatku peněžní strana (náklad závazku na MD,
+ * výnos pohledávky na D).
+ */
 function itemColumn(event: OtherItemPostingEvent): Column {
-  const debit = event === 'origin' ? receivable.value : !receivable.value
+  const debit = isComponent(event) ? receivable.value : event === 'origin' ? receivable.value : !receivable.value
   return debit ? 'debit_account_code' : 'credit_account_code'
 }
 const otherColumn = (event: OtherItemPostingEvent): Column =>
@@ -53,6 +59,20 @@ const balanceAccounts = computed(() => activeAccounts.value.filter(account =>
   account.account_type === (receivable.value ? 'asset' : 'liability')))
 const moneyAccounts = (event: OtherItemPostingEvent) => activeAccounts.value.filter(account =>
   account.account_code.startsWith(MONEY_PREFIX[event]))
+const componentAccounts = computed(() => activeAccounts.value.filter(account =>
+  account.account_type === (receivable.value ? 'revenue' : 'expense')))
+const otherAccounts = (event: OtherItemPostingEvent) => event === 'origin' ? activeAccounts.value
+  : isComponent(event) ? componentAccounts.value : moneyAccounts(event)
+function otherPlaceholder(event: OtherItemPostingEvent): string {
+  if (event === 'origin') return t('other_items.choose_account')
+  if (isComponent(event)) return props.kind.posting_component_defaults?.[event as 'interest' | 'fee'] ?? ''
+  return MONEY_PREFIX[event]
+}
+function otherLabel(event: OtherItemPostingEvent): string {
+  if (event === 'origin') return t('other_items.posting.kinds.counter_account')
+  if (isComponent(event)) return t(`other_items.posting.component_account.${event}`)
+  return t('other_items.posting.money_account')
+}
 const suggestion = computed(() => props.kind.posting_suggestion ?? null)
 
 function useSuggestion() {
@@ -111,12 +131,12 @@ async function save() {
           <ChartAccountSelect v-model="form[event].item" :accounts="balanceAccounts" :placeholder="receivable ? '315' : '325'" class="mt-1 block" />
         </label>
         <div v-else class="text-sm">
-          <span class="font-medium">{{ t('other_items.posting.kinds.item_account') }} ({{ t(itemColumn(event) === 'debit_account_code' ? 'other_items.posting.debit' : 'other_items.posting.credit') }})</span>
-          <p class="mt-2 text-neutral-500">{{ t('other_items.posting.item_account') }}</p>
+          <span class="font-medium">{{ t(isComponent(event) ? 'other_items.posting.money_account' : 'other_items.posting.kinds.item_account') }} ({{ t(itemColumn(event) === 'debit_account_code' ? 'other_items.posting.debit' : 'other_items.posting.credit') }})</span>
+          <p class="mt-2 text-neutral-500">{{ t(isComponent(event) ? 'other_items.posting.component_money' : 'other_items.posting.item_account') }}</p>
         </div>
-        <label class="text-sm font-medium">{{ t(event === 'origin' ? 'other_items.posting.kinds.counter_account' : 'other_items.posting.money_account') }} ({{ t(otherColumn(event) === 'debit_account_code' ? 'other_items.posting.debit' : 'other_items.posting.credit') }})
-          <ChartAccountSelect v-model="form[event].other" :accounts="event === 'origin' ? activeAccounts : moneyAccounts(event)"
-            :placeholder="event === 'origin' ? t('other_items.choose_account') : MONEY_PREFIX[event]" class="mt-1 block" />
+        <label class="text-sm font-medium">{{ otherLabel(event) }} ({{ t(otherColumn(event) === 'debit_account_code' ? 'other_items.posting.debit' : 'other_items.posting.credit') }})
+          <ChartAccountSelect v-model="form[event].other" :accounts="otherAccounts(event)"
+            :placeholder="otherPlaceholder(event)" class="mt-1 block" />
           <span v-if="event !== 'origin'" class="mt-1 block text-xs font-normal text-neutral-500">{{ t(`other_items.posting.money_hint.${event}`) }}</span>
         </label>
         <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.posting.description_template') }}

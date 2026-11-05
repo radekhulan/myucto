@@ -255,11 +255,13 @@ final class OtherItemScheduleService
         try {
             $item = $this->items->find($supplierId, $itemId, true)
                 ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            // Zámek kalendáře po první úhradě: i úhrada jen úroku či poplatku (jistina 0) ho zamyká.
             if (!in_array($item['status'], ['draft', 'confirmed', 'posted'], true)
-                || (float) $item['paid_amount'] > 0) {
+                || (float) $item['paid_amount'] > 0 || $this->service->hasActivePayments($supplierId, $itemId)) {
                 throw new OtherItemException('invalid_status', 'Splátky lze nastavit jen na aktivním neuhrazeném dokladu.', 409);
             }
-            $total = 0;
+            $normalized = [];
+            $principalTotal = 0;
             $previous = '';
             foreach ($rows as $row) {
                 if (!is_array($row)) throw new OtherItemException('invalid_installments', 'Neplatná splátka.');
@@ -268,23 +270,24 @@ final class OtherItemScheduleService
                 if ($date <= $previous || $date < $item['issued_on']) {
                     throw new OtherItemException('invalid_installment_date', 'Termíny splátek musí být vzestupné a po vystavení.');
                 }
-                $amount = filter_var($row['amount'] ?? null, FILTER_VALIDATE_FLOAT);
-                if ($amount === false || !is_finite((float) $amount) || $amount <= 0
-                    || round((float) $amount, 2) !== (float) $amount) {
-                    throw new OtherItemException('invalid_installment_amount', 'Splátka musí mít kladnou částku na haléře.');
-                }
-                $total += (int) round((float) $amount * 100);
+                $installment = self::installmentRow($row);
+                $principalTotal += (int) round(($installment['principal_amount'] ?? $installment['amount']) * 100);
+                $normalized[] = ['due_on' => $date] + $installment;
                 $previous = $date;
             }
-            if ($rows !== [] && $total !== (int) round((float) $item['amount'] * 100)) {
-                throw new OtherItemException('installment_total', 'Součet splátek musí odpovídat částce dokladu.');
+            if ($rows !== [] && $principalTotal !== (int) round((float) $item['amount'] * 100)) {
+                throw new OtherItemException('installment_total', OtherItemInstallmentCoverage::hasSplit($normalized)
+                    ? 'Součet jistiny splátek musí odpovídat částce dokladu.'
+                    : 'Součet splátek musí odpovídat částce dokladu.');
             }
             $pdo->prepare('DELETE FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?')
                 ->execute([$supplierId, $itemId]);
             $stmt = $pdo->prepare('INSERT INTO other_item_installments
-                (supplier_id, other_item_id, position, due_on, amount) VALUES (?,?,?,?,?)');
-            foreach ($rows as $position => $row) {
-                $stmt->execute([$supplierId, $itemId, $position + 1, $row['due_on'], $row['amount']]);
+                (supplier_id, other_item_id, position, due_on, amount, principal_amount, interest_amount, fee_amount)
+                VALUES (?,?,?,?,?,?,?,?)');
+            foreach ($normalized as $position => $row) {
+                $stmt->execute([$supplierId, $itemId, $position + 1, $row['due_on'], $row['amount'],
+                    $row['principal_amount'], $row['interest_amount'], $row['fee_amount']]);
             }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
@@ -292,6 +295,64 @@ final class OtherItemScheduleService
             throw $e;
         }
         return $this->installments($supplierId, $itemId);
+    }
+
+    /**
+     * Návrh splátkového kalendáře úvěru ({@see OtherItemLoanSchedule}) pro editor splátek.
+     * Nic neukládá: uživatel řádky zkontroluje, případně upraví a uloží přes setInstallments.
+     *
+     * @return list<array{due_on:string,amount:float,principal_amount:float,interest_amount:float,fee_amount:float}>
+     */
+    public function planLoan(int $supplierId, int $itemId, array $input): array
+    {
+        $item = $this->service->get($supplierId, $itemId);
+        $principal = $input['principal'] ?? $item['amount'];
+        return OtherItemLoanSchedule::plan($input + ['principal' => $principal]);
+    }
+
+    /**
+     * Částka splátky a její složky. Bez složek je splátka nerozdělená (jen `amount`).
+     * Se složkou se chybějící složky berou jako 0 a jejich součet musí být `amount`;
+     * bez `amount` se částka splátky dopočítá ze složek.
+     *
+     * @param array<string,mixed> $row
+     * @return array{amount:float,principal_amount:?float,interest_amount:?float,fee_amount:?float}
+     */
+    private static function installmentRow(array $row): array
+    {
+        $parts = [];
+        foreach (['principal_amount', 'interest_amount', 'fee_amount'] as $key) {
+            $value = $row[$key] ?? null;
+            if ($value === null || $value === '') continue;
+            $number = filter_var($value, FILTER_VALIDATE_FLOAT);
+            if ($number === false || !is_finite((float) $number) || $number < 0
+                || round((float) $number, 2) !== (float) $number) {
+                throw new OtherItemException('invalid_installment_component', 'Jistina, úrok a poplatek musí být nezáporné částky na haléře.');
+            }
+            $parts[$key] = (int) round((float) $number * 100);
+        }
+        $amountRaw = $row['amount'] ?? null;
+        if (($amountRaw === null || $amountRaw === '') && $parts !== []) {
+            $amountRaw = array_sum($parts) / 100.0;
+        }
+        $amount = filter_var($amountRaw, FILTER_VALIDATE_FLOAT);
+        if ($amount === false || !is_finite((float) $amount) || $amount <= 0
+            || round((float) $amount, 2) !== (float) $amount) {
+            throw new OtherItemException('invalid_installment_amount', 'Splátka musí mít kladnou částku na haléře.');
+        }
+        if ($parts === []) {
+            return ['amount' => round((float) $amount, 2), 'principal_amount' => null, 'interest_amount' => null, 'fee_amount' => null];
+        }
+        $parts += ['principal_amount' => 0, 'interest_amount' => 0, 'fee_amount' => 0];
+        if (array_sum($parts) !== (int) round((float) $amount * 100)) {
+            throw new OtherItemException('installment_components_total', 'Jistina, úrok a poplatek musí dát dohromady částku splátky.');
+        }
+        return [
+            'amount' => round((float) $amount, 2),
+            'principal_amount' => $parts['principal_amount'] / 100.0,
+            'interest_amount' => $parts['interest_amount'] / 100.0,
+            'fee_amount' => $parts['fee_amount'] / 100.0,
+        ];
     }
 
     private function link(int $supplierId, int $scheduleId, int $index, int $itemId): void

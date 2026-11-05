@@ -132,7 +132,9 @@
       "event": {
         "origin": "Vznik",
         "payment_bank": "Úhrada z banky",
-        "payment_cash": "Úhrada z pokladny"
+        "payment_cash": "Úhrada z pokladny",
+        "interest": "Úrok splátky",
+        "fee": "Poplatek splátky"
       },
       "source": {
         "item": "Vlastní",
@@ -145,7 +147,9 @@
       "money_account": "Peněžní účet",
       "money_hint": {
         "payment_bank": "221 nebo jeho analytika; prázdné pole = účet banky podle výpisu.",
-        "payment_cash": "211 nebo jeho analytika; prázdné pole = účet pokladny."
+        "payment_cash": "211 nebo jeho analytika; prázdné pole = účet pokladny.",
+        "interest": "Jen u splátek rozdělených na jistinu, úrok a poplatek. Prázdné pole = výchozí účet.",
+        "fee": "Jen u splátek rozdělených na jistinu, úrok a poplatek. Prázdné pole = výchozí účet."
       },
       "description_template": "Popis zápisu",
       "description_template_hint": "Zástupné znaky: {'{title}'}, {'{document_no}'}, {'{partner}'}, {'{variable_symbol}'}.",
@@ -170,7 +174,12 @@
         "use_suggestion": "Použít návrh",
         "dimensions": "Výchozí dimenze nového dokladu",
         "saved": "Účetní profil druhu uložen."
-      }
+      },
+      "component_account": {
+        "interest": "Účet úroku",
+        "fee": "Účet poplatku"
+      },
+      "component_money": "Peníze podle kontace úhrady"
     },
     "title": "Ostatní pohledávky a závazky",
     "subtitle": "Ručně evidované položky, daně a mzdové závazky na jednom místě.",
@@ -396,7 +405,7 @@
       "created_for": "Položka k {date}",
       "no_generated": "Další položky zatím nevznikly.",
       "installments_title": "Splátkový kalendář",
-      "installments_hint": "Splátky rozkládají úhradu jednoho dokladu do cash-flow. Nevytvářejí další účetní zápisy.",
+      "installments_hint": "Splátky rozkládají úhradu jednoho dokladu do cash-flow. Samotný kalendář účetní zápisy nevytváří.",
       "due_number": "Splatnost splátky {number}:",
       "total": "Součet splátek",
       "add_installment": "Přidat splátku",
@@ -422,8 +431,27 @@
       "split_quarter": "čtvrtletí",
       "split_year": "rok",
       "split": "Rozpočítat",
-      "split_hint": "Rozdělí částku dokladu rovnoměrně, haléřový zbytek připadne na poslední splátku. Kalendář pak uložte."
-    }
+      "split_hint": "Rozdělí částku dokladu rovnoměrně, haléřový zbytek připadne na poslední splátku. Kalendář pak uložte.",
+      "components": "Rozdělit splátky na jistinu, úrok a poplatek (úvěr, leasing)",
+      "components_hint": "Částka dokladu je jistina. Úrok a poplatek se v podvojném účetnictví zaúčtují až s úhradou splátky do nákladů nebo výnosů podle účetního profilu druhu.",
+      "loan_rate": "Úrok % p. a.",
+      "loan_method": "Splácení",
+      "loan_annuity": "Anuitní",
+      "loan_linear": "Lineární",
+      "loan_fee": "Poplatek ke splátce",
+      "loan_plan": "Spočítat splátky",
+      "loan_hint": "Úrok se počítá ze zůstatku jistiny a zaokrouhluje na haléře, poslední splátka vyrovná zaokrouhlení. Návrh můžete upravit a pak kalendář uložte.",
+      "loan_planned": "Splátky jsou spočítané. Zkontrolujte je a kalendář uložte.",
+      "principal_amount": "Jistina",
+      "interest_amount": "Úrok",
+      "fee_amount": "Poplatek",
+      "principal_total": "Jistina celkem {amount} (částka dokladu {item})"
+    },
+    "remaining_principal": "Zbývá jistina",
+    "remaining_payment": "Zbývá zaplatit vč. úroku a poplatku",
+    "remaining_payment_hint": "Součet nezaplacených splátek. Saldo položky snižuje jen jistina, úrok a poplatek se zaúčtují s úhradou.",
+    "allocation_split": "jistina {principal}, úrok {interest}, poplatek {fee}",
+    "allocation_split_hint": "Platba se rozdělí podle splátek: nejdřív úrok, pak poplatek a nakonec jistina."
   },
   "internal_documents": {
     "title": "Interní doklady",

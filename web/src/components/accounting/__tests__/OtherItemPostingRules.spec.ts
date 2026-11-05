@@ -83,4 +83,31 @@ describe('OtherItemPostingRules', () => {
     const readonly = factory({ item: item('posted', 'item'), canWrite: false })
     expect(readonly.find('[data-test="posting-own"]').exists()).toBe(false)
   })
+
+  it('shows interest and fee for split installments and saves the revenue account of a receivable', async () => {
+    const split = {
+      ...item('posted'), has_split_installments: true,
+      posting_rules: {
+        ...item('posted').posting_rules,
+        interest: { event: 'interest', source: 'default', account_code: '662', description: null, description_template: null, kind_id: null, profile_id: null },
+        fee: { event: 'fee', source: 'default', account_code: '668', description: null, description_template: null, kind_id: null, profile_id: null },
+      },
+    }
+    m.setPostingOverrides.mockResolvedValue(split)
+    const wrapper = factory({ item: split, accounts: [...accounts, { account_code: '662.100', account_type: 'revenue', is_active: true }] })
+    expect(wrapper.find('[data-test="posting-rule-interest"]').text()).toContain('662')
+    expect(wrapper.find('[data-test="posting-rule-fee"]').text()).toContain('668')
+    await wrapper.find('[data-test="posting-rule-interest"] [data-test="posting-own"]').trigger('click')
+    const select = wrapper.find('[data-test="posting-form"] input.account')
+    expect(select.attributes('data-codes')).toBe('662.100')
+    await select.setValue('662.100')
+    await wrapper.find('[data-test="posting-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.setPostingOverrides).toHaveBeenCalledWith(7, {
+      interest: { debit_account_code: null, credit_account_code: '662.100', description_template: null },
+    })
+
+    const plain = factory({ item: item('posted') })
+    expect(plain.find('[data-test="posting-rule-interest"]').exists()).toBe(false)
+  })
 })
