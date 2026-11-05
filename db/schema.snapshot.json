@@ -1168,7 +1168,8 @@
         "2262_drop_supplier_login_policy.sql",
         "2263_payroll_employment_relation_type_changed_event.sql",
         "2264_payroll_employment_merged_event.sql",
-        "2266_purchase_invoice_item_codes.sql"
+        "2266_purchase_invoice_item_codes.sql",
+        "2267_stock_item_match_indexes.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -25051,6 +25052,7 @@
                 "purchase_invoice_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "purchase_order_line_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "qty": "decimal(14,3) NOT NULL",
+                "remember_seller_code": "tinyint(1) NOT NULL DEFAULT 0",
                 "source_description": "varchar(500) NULL DEFAULT NULL",
                 "source_qty": "decimal(14,3) NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NOT NULL",
@@ -25515,6 +25517,7 @@
                 "idx_siv_offer": "BTREE (supplier_id, is_active, availability_state)",
                 "idx_siv_staleness": "BTREE (supplier_id, stock_qty_updated_at)",
                 "idx_siv_supplier": "BTREE (supplier_id)",
+                "idx_siv_vendor_sku": "BTREE (supplier_id, client_id, vendor_sku)",
                 "uq_siv_item_client": "UNIQUE BTREE (stock_item_id, client_id)"
             },
             "foreign_keys": {
@@ -25570,6 +25573,7 @@
                 "idx_si_export": "BTREE (supplier_id, export_eshop, item_type)",
                 "idx_si_manufacturer": "BTREE (manufacturer_id)",
                 "idx_si_supplier_active": "BTREE (supplier_id, is_active, item_type)",
+                "idx_si_supplier_ean": "BTREE (supplier_id, ean)",
                 "idx_si_supplier_lifecycle": "BTREE (supplier_id, lifecycle_status, is_active)",
                 "idx_si_supplier_name": "BTREE (supplier_id, name)",
                 "uq_si_supplier_id": "UNIQUE BTREE (supplier_id, id)",

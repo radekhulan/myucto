@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { stockApi, type StockDocument, type StockReceiptProposal, type StockItemSearchResult, type Warehouse, type LandedCostAllocation } from '@/api/stock'
+import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -14,6 +15,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'created', document: StockDoc
 
 const { t } = useI18n()
 const toast = useToast()
+const canWriteCards = useAuthStore().canWrite('stock.items.write')
 
 const loading = ref(true)
 const saving = ref(false)
@@ -35,7 +37,14 @@ interface LineState {
   stock_item_id: number | null
   option: { value: number; label: string; secondary?: string } | null
   creatingNew: boolean
+  recalculating: boolean
+  recalcFailed: boolean
   newName: string
+  seller_item_code: string | null
+  matched_stock_item_id: number | null
+  match_source: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
+  remember: boolean
+  vendor_code_cards: { id: number; sku: string; name: string }[]
 }
 const lines = ref<LineState[]>([])
 const rowOptions = reactive<Record<number, { value: number; label: string; secondary?: string }[]>>({})
@@ -56,16 +65,27 @@ async function load() {
     proposal.value = prop
     warehouses.value = whs
     warehouseId.value = whs.find(w => w.is_default)?.id ?? whs[0]?.id ?? null
-    lines.value = prop.lines.map(l => ({
+    const proposedLines = [...prop.lines, ...(prop.unmatched_lines ?? [])]
+      .sort((a, b) => a.order_index - b.order_index || a.purchase_invoice_item_id - b.purchase_invoice_item_id)
+    lines.value = proposedLines.map(l => ({
       purchase_invoice_item_id: l.purchase_invoice_item_id,
       description: l.description,
       remaining: l.remaining_qty,
       quantity: l.remaining_qty,
       unit_cost: l.unit_cost,
-      stock_item_id: l.stock_item_id,
+      // Návrh podle kódu karty se předvyplní, odesláním příjemky ho člověk potvrdí.
+      stock_item_id: l.stock_item_id ?? l.matched_stock_item_id ?? null,
       option: null,
       creatingNew: false,
+      recalculating: false,
+      recalcFailed: false,
       newName: l.description,
+      seller_item_code: l.seller_item_code ?? null,
+      matched_stock_item_id: l.matched_stock_item_id ?? null,
+      match_source: l.match_source ?? null,
+      // Předvolené jen u karty vybrané v tomto okně (onSelect), návrh se sám nezapamatuje.
+      remember: false,
+      vendor_code_cards: l.vendor_code_cards ?? [],
     }))
     costs.value = prop.cost_candidates.map(c => ({
       purchase_invoice_item_id: c.purchase_invoice_item_id,
@@ -104,6 +124,35 @@ function onSelect(rowIndex: number, itemId: number | null) {
   row.stock_item_id = itemId
   const si = itemId != null ? itemsCache.get(itemId) : null
   row.option = si ? { value: si.id, label: `${si.sku} - ${si.name}`, secondary: si.unit } : null
+  row.remember = itemId != null && !isSuggestion(row)
+  void recalcForCard(row)
+}
+
+// Zbytek a cena závisí na balení karty: po změně karty je spočítá server pro tuto kartu.
+async function recalcForCard(row: LineState) {
+  const card = row.stock_item_id
+  row.recalcFailed = false
+  row.recalculating = card != null
+  if (card == null) return
+  try {
+    const p = await stockApi.receiptPropose(props.purchaseInvoiceId, { [row.purchase_invoice_item_id]: card })
+    if (row.stock_item_id !== card) return
+    const l = p.lines.find(x => x.purchase_invoice_item_id === row.purchase_invoice_item_id)
+    // Server kartu nepřijal (služba, cizí karta): řádek nemá pro tuto kartu hodnoty.
+    if (!l) throw new Error('card not accepted')
+    row.remaining = l.remaining_qty
+    row.quantity = l.remaining_qty
+    row.unit_cost = l.unit_cost
+  } catch {
+    // Stará cena a množství patří jiné kartě: vyprázdnit, řádek pak blokuje odeslání.
+    if (row.stock_item_id !== card) return
+    row.quantity = ''
+    row.remaining = ''
+    row.unit_cost = ''
+    row.recalcFailed = true
+  } finally {
+    if (row.stock_item_id === card) row.recalculating = false
+  }
 }
 
 const creatingItem = reactive<Record<number, boolean>>({})
@@ -117,6 +166,8 @@ async function createNewItem(rowIndex: number) {
     row.stock_item_id = created.id
     row.option = { value: created.id, label: `${created.sku} - ${created.name}`, secondary: created.unit }
     row.creatingNew = false
+    row.remember = true
+    void recalcForCard(row)
     toast.success(t('common.saved'))
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -128,13 +179,41 @@ async function createNewItem(rowIndex: number) {
 // M4: klientský guard proti přeplnění (qty > remaining), ať se to nezjistí až 409 po submitu.
 // Tolerance 0.0005 zrcadlí backend (StockReceiptService).
 function lineOver(l: LineState): boolean {
-  return l.stock_item_id != null && Number(l.quantity) > Number(l.remaining) + 0.0005
+  // Neznámý zbytek (přepočet selhal) ohlídá server.
+  return l.stock_item_id != null && l.remaining !== '' && Number(l.quantity) > Number(l.remaining) + 0.0005
 }
 const hasOver = computed(() => lines.value.some(lineOver))
+
+/** Po neúspěšném přepočtu řádek blokuje odeslání, dokud se znovu nevybere karta nebo se množství nevynuluje. */
+function recalcBlocks(l: LineState): boolean {
+  return l.recalcFailed && l.stock_item_id != null && (l.quantity === '' || Number(l.quantity) !== 0)
+}
+
+/** Karta se liší od té, kterou by řádek dostal sám: nabídne se zapamatování kódu. */
+function canRemember(l: LineState): boolean {
+  return !!l.seller_item_code && l.stock_item_id != null
+    && !(l.stock_item_id === l.matched_stock_item_id && l.match_source === 'vendor_sku')
+}
+/** Karty, kterým se kód zapamatováním odebere. */
+function codeMovesFrom(l: LineState): string {
+  return l.vendor_code_cards.filter(c => c.id !== l.stock_item_id).map(c => `${c.sku} - ${c.name}`).join(', ')
+}
+function isSuggestion(l: LineState): boolean {
+  return l.stock_item_id === l.matched_stock_item_id && (l.match_source === 'sku' || l.match_source === 'code_ean')
+}
+function matchLabel(l: LineState): string {
+  if (l.stock_item_id == null) return l.seller_item_code ? t('stock.receipt.match_none') : ''
+  if (l.stock_item_id !== l.matched_stock_item_id || !l.match_source) return ''
+  return t(`stock.receipt.match_${l.match_source}`)
+}
+// Řádek naskladňovaný na kartu nemůže být zároveň vedlejším nákladem.
+const visibleCosts = computed(() => costs.value.filter(c =>
+  !lines.value.some(l => l.purchase_invoice_item_id === c.purchase_invoice_item_id && l.stock_item_id != null)))
 
 const canSubmit = computed(() =>
   !!warehouseId.value
   && !hasOver.value
+  && !lines.value.some(l => l.recalculating || recalcBlocks(l))
   && lines.value.some(l => l.stock_item_id != null && Number(l.quantity) > 0),
 )
 
@@ -153,9 +232,10 @@ async function submit() {
           stock_item_id: l.stock_item_id!,
           quantity: l.quantity,
           unit_cost: l.unit_cost || undefined,
+          remember_seller_code: canWriteCards && canRemember(l) && l.remember ? true : undefined,
         })),
       landed_costs: includeLandedCosts.value
-        ? costs.value.filter(c => c.include && Number(c.amount) > 0).map(c => ({
+        ? visibleCosts.value.filter(c => c.include && Number(c.amount) > 0).map(c => ({
             purchase_invoice_item_id: c.purchase_invoice_item_id,
             description: c.description,
             amount: Number(c.amount),
@@ -213,6 +293,11 @@ async function submit() {
           <div class="border border-neutral-200 rounded-lg overflow-hidden">
             <div v-for="(l, i) in lines" :key="l.purchase_invoice_item_id" class="p-3 border-b border-neutral-100 last:border-b-0 space-y-2">
               <div class="text-sm font-medium">{{ l.description }}</div>
+              <div v-if="l.seller_item_code || matchLabel(l)" class="flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                <span v-if="l.seller_item_code">{{ t('stock.receipt.seller_code', { code: l.seller_item_code }) }}</span>
+                <span v-if="matchLabel(l)" class="px-1.5 py-0.5 rounded"
+                  :class="l.stock_item_id == null || isSuggestion(l) ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-600'">{{ matchLabel(l) }}</span>
+              </div>
               <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-start">
                 <div class="sm:col-span-6">
                   <SearchableSelect
@@ -251,16 +336,25 @@ async function submit() {
                     class="w-full h-9 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
                 </div>
               </div>
+              <p v-if="recalcBlocks(l)" data-test="recalc-failed" class="text-xs text-danger-500">{{ t('stock.receipt.recalc_failed') }}</p>
+              <label v-if="canWriteCards && canRemember(l)" class="inline-flex items-center gap-2 text-xs cursor-pointer">
+                <input v-model="l.remember" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+                {{ t('stock.receipt.remember_code', { code: l.seller_item_code }) }}
+              </label>
+              <p v-else-if="canRemember(l)" class="text-xs text-neutral-500">{{ t('stock.receipt.remember_no_right') }}</p>
+              <p v-if="canWriteCards && canRemember(l) && l.remember && codeMovesFrom(l)" class="text-xs text-warning-700">
+                {{ t('stock.receipt.remember_moves_from', { cards: codeMovesFrom(l) }) }}
+              </p>
             </div>
           </div>
 
-          <div v-if="proposal.cost_candidates.length > 0" class="border-t border-neutral-100 pt-3">
+          <div v-if="visibleCosts.length > 0" class="border-t border-neutral-100 pt-3">
             <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
               <input v-model="includeLandedCosts" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
               {{ t('stock.receipt.landed_costs_checkbox') }}
             </label>
             <div v-if="includeLandedCosts" class="mt-2 space-y-2">
-              <div v-for="(c, i) in costs" :key="i" class="flex items-center gap-2 text-sm">
+              <div v-for="c in visibleCosts" :key="c.purchase_invoice_item_id" class="flex items-center gap-2 text-sm">
                 <input v-model="c.include" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
                 <span class="flex-1 truncate">{{ c.description }}</span>
                 <span class="font-mono text-neutral-500">{{ formatMoney(Number(c.amount) || 0) }}</span>

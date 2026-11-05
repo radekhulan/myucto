@@ -555,6 +555,11 @@ const STOCK_DOC_LINES = arrayOf(
     unit_cost: num('Pořizovací cena za MJ bez DPH. Jen u příjemky (`receipt`) — u výdeje a převodky si ji doplní zaúčtování.'),
     extra_cost: num('Vedlejší pořizovací náklady rozpočítané na řádek (doprava, clo). Jen u příjemky.'),
     note: str('Poznámka k řádku.'),
+    purchase_invoice_item_id: int('Řádek přijaté faktury, ze kterého příjemka vznikla. Při úpravě příjemky z faktury ho pošli zpět, jinak se vazba ztratí.'),
+    remember_seller_code: {
+      type: 'boolean',
+      description: 'Jen `true`: po zaúčtování uloží kód z řádku faktury (`purchase_invoice_item_id` té faktury, ze které příjemka vznikla) ke kartě pro tohoto dodavatele a odebere ho z jeho ostatních karet. Nastavit vyžaduje právo upravovat skladové karty. Při úpravě konceptu pošli zpět, jinak se volba zruší.',
+    },
   },
   ['stock_item_id', 'qty'],
   { minItems: 1 },

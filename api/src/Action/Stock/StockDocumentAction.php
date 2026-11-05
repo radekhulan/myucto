@@ -9,11 +9,14 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
 use MyInvoice\Repository\WarehouseRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockDocumentPdfRenderer;
 use MyInvoice\Service\Stock\StockDocumentService;
 use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockReceiptService;
 use MyInvoice\Service\Stock\StockValuation;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -102,6 +105,7 @@ final class StockDocumentAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            $this->guardCardWriteOptions($request, $supplierId, $body);
             // Ruční zadání: hlídá desetinná místa množství podle jednotky karty (2036).
             $result = $this->service->create($supplierId, $body, $this->userId($request), checkUnitDecimals: true);
             $this->log($request, 'stock.document_created', (int) $result['id'], ['doc_type' => $result['doc_type'] ?? null]);
@@ -123,6 +127,7 @@ final class StockDocumentAction
         $id = (int) $args['id'];
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            $this->guardCardWriteOptions($request, $supplierId, $body, $id);
             $result = $this->service->updateDraft($supplierId, $id, $body, $this->userId($request), checkUnitDecimals: true);
             $this->log($request, 'stock.document_updated', $id, []);
             return Json::ok($response, $result);
@@ -161,11 +166,47 @@ final class StockDocumentAction
         }
         $id = (int) $args['id'];
         try {
-            $result = $this->service->post($supplierId, $id, $this->userId($request));
+            $result = $this->service->post(
+                $supplierId,
+                $id,
+                $this->userId($request),
+                RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE),
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
             $this->log($request, 'stock.document_posted', $id, ['doc_number' => $result['doc_number'] ?? null]);
             return Json::ok($response, $result);
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
+        }
+    }
+
+    /**
+     * Volby zapisující na kartu smí nastavit jen ten, kdo smí upravovat karty. Bez práva lze u konceptu
+     * jen ponechat tu, kterou řádek už má se stejným řádkem faktury a stejnou kartou, nebo ji zrušit.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function guardCardWriteOptions(Request $request, int $supplierId, array $body, ?int $draftId = null): void
+    {
+        if (RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE)) {
+            return;
+        }
+        $lines = is_array($body['lines'] ?? null) ? $body['lines'] : [];
+        $key = static fn (array $l): string => (int) ($l['purchase_invoice_item_id'] ?? 0) . '/' . (int) ($l['stock_item_id'] ?? 0);
+        $current = null;
+        foreach (StockDocumentService::CARD_WRITE_OPTIONS as $option) {
+            $chosen = array_filter($lines, static fn (mixed $l): bool => is_array($l) && ($l[$option] ?? false) === true);
+            if ($chosen === []) {
+                continue;
+            }
+            $current ??= $draftId === null ? [] : ($this->docs->findWithLines($supplierId, $draftId)['lines'] ?? []);
+            $kept = array_map($key, array_filter($current, static fn (array $l): bool => $l[$option] === true));
+            foreach ($chosen as $line) {
+                if (!in_array($key($line), $kept, true)) {
+                    throw new StockException('card_write_forbidden', StockReceiptService::CARD_WRITE_FORBIDDEN, 403);
+                }
+            }
         }
     }
 

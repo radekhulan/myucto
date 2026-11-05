@@ -35,6 +35,9 @@ use PDO;
  */
 final class StockDocumentService
 {
+    /** Volby řádku příjemky, které po zaúčtování zapisují na kartu; nastavit je smí jen `stock.items.write`. */
+    public const CARD_WRITE_OPTIONS = ['remember_seller_code'];
+
     private const DOC_TYPES = ['receipt', 'issue', 'transfer'];
     private const ORIGINS   = ['manual', 'invoice', 'credit_note', 'purchase_invoice', 'inventory', 'purchase_order'];
 
@@ -71,6 +74,7 @@ final class StockDocumentService
         private readonly TrackingAllocationService $tracking,
         private readonly StockCommitmentService $commitments,
         private readonly UnitPrecision $unitPrecision,
+        private readonly ReceiptCardUpdater $cardUpdates,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -211,11 +215,42 @@ final class StockDocumentService
      * → kontrola dostupnosti → aplikace pohybů → číslo řady → posted. Idempotence
      * dvojkliku (B2): už posted doklad se vrátí beze změny.
      *
+     * Zápisy na kartu vyžádané volbami na řádcích příjemky běží až po potvrzení zaúčtování
+     * a na všech cestách. `$canWriteCards` = false předává jen HTTP vrstva, když volající
+     * nemá `stock.items.write`: doklad se zaúčtuje, karta se nezmění a vrátí se varování.
+     *
      * @return array<string,mixed> doklad vč. řádků + warnings
      */
-    public function post(int $supplierId, int $id, ?int $userId): array
+    public function post(int $supplierId, int $id, ?int $userId, bool $canWriteCards = true, ?string $ip = null, ?string $userAgent = null): array
     {
-        return $this->runInTransaction(fn (): array => $this->doPost($supplierId, $id, $userId));
+        $justPosted = false;
+        $posted = $this->runInTransaction(function () use ($supplierId, $id, $userId, &$justPosted): array {
+            return $this->doPost($supplierId, $id, $userId, justPosted: $justPosted);
+        });
+        if ($justPosted) {
+            $posted['warnings'] = [...$posted['warnings'], ...$this->applyCardUpdates($supplierId, $posted, $canWriteCards, $userId, $ip, $userAgent)];
+        }
+        return $posted;
+    }
+
+    /**
+     * Příjemka je už zaúčtovaná a potvrzená, chyba zápisu na kartu ji nesmí vrátit.
+     *
+     * @param array<string,mixed> $posted
+     * @return list<string> varování
+     */
+    private function applyCardUpdates(int $supplierId, array $posted, bool $canWriteCards, ?int $userId, ?string $ip, ?string $userAgent): array
+    {
+        $id = (int) $posted['id'];
+        if (array_filter($posted['lines'] ?? [], static fn (array $l): bool => $l['remember_seller_code'] === true) === []) {
+            return [];
+        }
+        try {
+            return $this->runInTransaction(fn (): array => $this->cardUpdates->rememberSellerCodes($supplierId, $id, $canWriteCards, $userId, $ip, $userAgent));
+        } catch (\Throwable $e) {
+            error_log('Uložení kódu dodavatele po zaúčtování příjemky #' . $id . ': ' . $e->getMessage());
+            return ['Kód dodavatele se ke kartě nepodařilo uložit, příjemka je zaúčtovaná.'];
+        }
     }
 
     public function postFulfillmentShipment(int $supplierId, int $id, int $shipmentId, ?int $userId): array
@@ -227,7 +262,7 @@ final class StockDocumentService
     }
 
     /** @return array<string,mixed> */
-    private function doPost(int $supplierId, int $id, ?int $userId, array $shipmentAllowance = []): array
+    private function doPost(int $supplierId, int $id, ?int $userId, array $shipmentAllowance = [], bool &$justPosted = false): array
     {
         $doc = $this->docs->lockForPost($supplierId, $id);
         if ($doc === null) {
@@ -340,6 +375,7 @@ final class StockDocumentService
             throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
         }
         $posted['warnings'] = $this->collectPostWarnings($supplierId, $lines);
+        $justPosted = true;
         return $posted;
     }
 
@@ -757,6 +793,42 @@ final class StockDocumentService
     // ── interní: validace + normalizace vstupu ──────────────────────────────────
 
     /**
+     * Volby na řádku berou hodnotu z řádku přijaté faktury: smí to být jen řádek faktury,
+     * ze které příjemka vznikla, jinak by šlo připojit cizí řádek a jeho údaj zapsat na kartu.
+     *
+     * @param array<string,mixed> $header
+     * @param list<array<string,mixed>> $lines
+     */
+    private function assertCardSourceIsOwnInvoice(int $supplierId, array $header, array $lines): void
+    {
+        $itemIds = [];
+        foreach ($lines as $line) {
+            foreach (self::CARD_WRITE_OPTIONS as $option) {
+                if ($line[$option] === true) {
+                    $itemIds[] = (int) ($line['purchase_invoice_item_id'] ?? 0);
+                }
+            }
+        }
+        if ($itemIds === []) {
+            return;
+        }
+        $message = 'Údaje na kartu lze vzít jen z řádku přijaté faktury, ze které příjemka vznikla.';
+        if ($header['doc_type'] !== 'receipt' || $header['purchase_invoice_id'] === null || in_array(0, $itemIds, true)) {
+            throw new StockException('invalid_document', $message, 422);
+        }
+        $itemIds = array_values(array_unique($itemIds));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pi.supplier_id = ? AND pi.id = ? AND pii.id IN (' . implode(',', array_fill(0, count($itemIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, $header['purchase_invoice_id'], ...$itemIds]);
+        if ((int) $stmt->fetchColumn() !== count($itemIds)) {
+            throw new StockException('invalid_document', $message, 422, ['purchase_invoice_item_ids' => $itemIds]);
+        }
+    }
+
+    /**
      * @param array<string,mixed> $body
      * @return array{0:array<string,mixed>, 1:list<array<string,mixed>>} [hlavička, řádky]
      */
@@ -889,6 +961,7 @@ final class StockDocumentService
                 'invoice_item_id'          => isset($rl['invoice_item_id']) && (int) $rl['invoice_item_id'] > 0 ? (int) $rl['invoice_item_id'] : null,
                 'purchase_invoice_item_id' => isset($rl['purchase_invoice_item_id']) && (int) $rl['purchase_invoice_item_id'] > 0 ? (int) $rl['purchase_invoice_item_id'] : null,
                 'purchase_order_line_id'   => isset($rl['purchase_order_line_id']) && (int) $rl['purchase_order_line_id'] > 0 ? (int) $rl['purchase_order_line_id'] : null,
+                'remember_seller_code'     => ($rl['remember_seller_code'] ?? false) === true,
                 'source_description'       => self::nullableString($rl['source_description'] ?? null),
                 'source_qty'               => isset($rl['source_qty']) && $rl['source_qty'] !== null && $rl['source_qty'] !== ''
                     ? StockValuation::tToDecimal(StockValuation::qtyToT((string) $rl['source_qty'])) : null,
@@ -929,6 +1002,7 @@ final class StockDocumentService
         ];
 
         $this->assertReferencesOwned($supplierId, $header, $lines);
+        $this->assertCardSourceIsOwnInvoice($supplierId, $header, $lines);
 
         return [$header, $lines];
     }

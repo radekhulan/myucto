@@ -669,6 +669,8 @@ export interface StockDocumentLine {
   invoice_item_id?: number | null
   purchase_invoice_item_id?: number | null
   purchase_order_line_id?: number | null
+  /** Po zaúčtování uloží kód z řádku faktury ke kartě. */
+  remember_seller_code?: boolean
   source_description?: string | null
   source_qty?: string | null
   line_no?: number
@@ -918,6 +920,7 @@ export interface StockValuationReport {
 
 interface StockReceiptProposalBase {
   lines: Array<{
+    order_index: number
     purchase_invoice_item_id: number
     purchase_order_line_id: number | null
     stock_item_id: number | null
@@ -926,7 +929,14 @@ interface StockReceiptProposalBase {
     already_received: string
     remaining_qty: string
     unit_cost: string
+    seller_item_code?: string | null
+    /** Karty, u kterých má dodavatel tento kód uložený. */
+    vendor_code_cards?: Array<{ id: number; sku: string; name: string }>
+    matched_stock_item_id?: number | null
+    match_source?: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
   }>
+  /** Řádky s kódem, ke kterým se nenašla karta: člověk ji vybere v okně příjemky. */
+  unmatched_lines?: StockReceiptProposalBase['lines']
   cost_candidates: Array<{
     purchase_invoice_item_id: number
     description: string
@@ -974,6 +984,7 @@ export interface StockReceiptPayload {
     stock_item_id?: number
     quantity: string | number
     unit_cost?: string | number
+    remember_seller_code?: boolean
   }>
   landed_costs?: StockReceiptLandedCost[]
 }
@@ -1264,8 +1275,11 @@ export const stockApi = {
   },
 
   // ── Příjem na sklad z přijaté faktury ───────────────────────────────────
-  receiptPropose: (purchaseInvoiceId: number) =>
-    api.get<StockReceiptProposal>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`).then(r => r.data),
+  /** `stockItemIds`: purchase_invoice_item_id → vybraná karta, řádek se přepočte podle jejího balení. */
+  receiptPropose: (purchaseInvoiceId: number, stockItemIds?: Record<number, number>) =>
+    api.get<StockReceiptProposal>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, {
+      params: stockItemIds ? { stock_item_ids: stockItemIds } : undefined,
+    }).then(r => r.data),
   receiptCreate: (purchaseInvoiceId: number, payload: StockReceiptPayload) =>
     api.post<StockDocument>(`/purchase-invoices/${purchaseInvoiceId}/stock-receipt`, payload).then(r => r.data),
   receiptList: (purchaseInvoiceId: number) =>

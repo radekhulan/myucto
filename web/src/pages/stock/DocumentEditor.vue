@@ -51,6 +51,7 @@ interface LineRow {
   // H2: vazba na PF řádek (načtená příjemka) — MUSÍ se přenášet zpět, jinak update
   // vynuluje remaining-qty / over-receipt / „Přijato X/Y" / PF-changed warning.
   purchase_invoice_item_id: number | null
+  remember_seller_code: boolean
   source_description: string | null
   source_qty: string | null
   tracking_mode: StockTrackingMode
@@ -60,7 +61,7 @@ interface LineRow {
 function blankLine(): LineRow {
   return {
     stock_item_id: null, qty: '1', unit_cost: '', extra_cost: '', note: '', unit: '', option: null,
-    purchase_invoice_item_id: null, source_description: null, source_qty: null,
+    purchase_invoice_item_id: null, remember_seller_code: false, source_description: null, source_qty: null,
     tracking_mode: 'none', tracking_allocations: [], tracking_units: [],
   }
 }
@@ -217,6 +218,7 @@ async function loadDocument() {
         unit: l.unit ?? '',
         option: l.sku ? { value: l.stock_item_id, label: `${l.sku} - ${l.name}`, secondary: l.unit } : null,
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? null,
+        remember_seller_code: l.remember_seller_code === true,
         source_description: l.source_description ?? null,
         source_qty: l.source_qty != null ? String(l.source_qty) : null,
         tracking_mode: l.tracking_mode ?? 'none',
@@ -289,6 +291,7 @@ function buildPayload(): StockDocumentPayload {
         extra_cost: isReceipt.value && totalExtraH > 0 ? (totalExtraH / 100).toFixed(2) : undefined,
         // H2: per-řádek vazba na PF řádek — backend validateBody je čte, replaceLines uloží.
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? undefined,
+        remember_seller_code: l.remember_seller_code || undefined,
         source_description: l.source_description ?? undefined,
         source_qty: l.source_qty ?? undefined,
         note: l.note.trim() || undefined,
@@ -548,6 +551,10 @@ onMounted(async () => {
               />
               <p v-if="!isReceipt && row.stock_item_id" class="text-xs mt-0.5 text-neutral-400">
                 {{ t('stock.documents.col_available') }}: {{ rowAvailability(row) }}
+              </p>
+              <p v-if="row.remember_seller_code && !readOnly" class="text-xs mt-0.5 text-neutral-500">
+                {{ t('stock.receipt.remember_line_note') }}
+                <button type="button" class="underline cursor-pointer hover:text-neutral-700" @click="row.remember_seller_code = false">{{ t('stock.receipt.remember_line_cancel') }}</button>
               </p>
             </div>
             <div class="sm:col-span-2">
