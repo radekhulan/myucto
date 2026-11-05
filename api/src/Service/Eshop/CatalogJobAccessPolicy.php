@@ -11,7 +11,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class CatalogJobAccessPolicy
 {
     private const KINDS = [
-        'price_recompute', 'stock_valuation', 'stock_cycle_prepare', 'sales_order_expiry', 'catalog_export',
+        'price_recompute', 'stock_valuation', 'stock_value_trend', 'stock_cycle_prepare', 'sales_order_expiry', 'catalog_export',
         'catalog_bulk_preview', 'catalog_bulk_apply', 'catalog_bulk_restore',
         'catalog_import_stage', 'catalog_import_apply', 'catalog_import_media',
         'price_matrix_preview', 'price_matrix_apply',
@@ -29,7 +29,7 @@ final class CatalogJobAccessPolicy
         if ($kind === 'stock_cycle_prepare' || $kind === 'sales_order_expiry') {
             return !$write && RequestAuthorization::allows($request, 'stock', AccessLevel::READ);
         }
-        if ($kind === 'stock_valuation') {
+        if ($kind === 'stock_valuation' || $kind === 'stock_value_trend') {
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
         if (str_starts_with($kind, 'stock_opening_import_') || str_starts_with($kind, 'stock_history_import_')) {
