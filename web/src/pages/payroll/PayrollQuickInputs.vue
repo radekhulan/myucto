@@ -36,7 +36,7 @@ import {
 import PayrollQuickFieldState from '@/components/payroll/PayrollQuickFieldState.vue'
 import PayrollQuickColumnMenu from '@/components/payroll/PayrollQuickColumnMenu.vue'
 import type { PayrollQuickColumnGroup } from '@/components/payroll/payrollQuickColumns'
-import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -1305,6 +1305,14 @@ async function load(): Promise<void> {
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     rows.value = month.items.map(applyPending)
+    if (payrollQueryValue(route.query, 'hours') === '1' && focusEmploymentId.value !== null) {
+      const focused = rows.value.find(row => row.employment_id === focusEmploymentId.value && row.worked_time)
+      if (focused) {
+        workedEmploymentId.value = focused.employment_id
+        const { hours: _hours, ...query } = route.query
+        void router.replace({ query })
+      }
+    }
     // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
     total.value = month.total
     componentColumns.value = month.columns ?? []
@@ -2150,7 +2158,7 @@ onMounted(() => {
                     </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
-                  <PayrollWorkedHoursSummary v-if="row.hourly_remuneration_in_period && row.worked_time" :value="row.worked_time" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
+                  <PayrollWorkedHoursSummary v-if="row.worked_time && (row.hourly_remuneration_in_period || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
@@ -2647,7 +2655,7 @@ onMounted(() => {
                 </p>
               </div>
             </div>
-            <PayrollWorkedHoursSummary v-if="row.hourly_remuneration_in_period && row.worked_time" :value="row.worked_time" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
+            <PayrollWorkedHoursSummary v-if="row.worked_time && (row.hourly_remuneration_in_period || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
             </p>

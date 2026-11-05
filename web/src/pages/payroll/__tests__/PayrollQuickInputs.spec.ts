@@ -399,6 +399,21 @@ describe('PayrollQuickInputs', () => {
       .toContain('payroll.quick_inputs.continue_to_runs')
   })
 
+  it('proklik otevře podklady již vybraného importu i u nehodinového vztahu', async () => {
+    m.routeQuery = { period: '2026-11', employment: '12', hours: '1' }
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({ hourly_remuneration_in_period: false, worked_time: {
+      month: { id: 1, row_version: 2, revision_no: 1, status: 'approved', work_source: 'import_summary' },
+      manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
+      worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+    } })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="quick-worked-hours-12"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-test="worked-hours-panel"]')).toHaveLength(1)
+    expect(wrapper.get('[data-test="worked-hours-current"]').text()).toContain('source_import')
+    expect(m.load).toHaveBeenCalledTimes(1)
+  })
+
   it('hodinové podklady načte dávkově a panel nepovolí zápisem peněžních vstupů', async () => {
     m.canWrite.mockImplementation(permission => permission === 'payroll.inputs.write')
     m.load.mockImplementation(async period => ({ period, items: [fixture({ hourly_remuneration_in_period: true, worked_time: {

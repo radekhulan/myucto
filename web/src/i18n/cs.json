@@ -2373,6 +2373,11 @@
   },
   "payroll": {
       "worked_hours": {
+      "selected_source_hint": "Aktuální hodiny vycházejí z vybraného měsíčního souhrnu. Denní záznamy se k němu nepřičítají.",
+      "daily_source_locked": "Je vybrán měsíční souhrn. Pro denní zápisy nejdřív výslovně obnovte zdroj denních záznamů v Podkladech hodin.",
+      "inactive_entries_hint": "Rozvrh směn zůstává plánem. Denní záznamy níže nejsou vybraným zdrojem odpracovaných hodin a nejsou započítané do aktuálního souhrnu.",
+      "inactive_entry": "Nepoužitý denní záznam",
+      "inactive_record_counts": "Plánované směny: {shifts}, nepoužité denní záznamy: {entries}",
       "segmentation_changed": "Změnily se hranice podmínek vztahu. Původní hodiny zůstávají uložené níže; rozdělení do nových úseků zadejte podle podkladu. Aplikace hodiny sama nerozděluje.",
       "history_newer": "Novější revize",
       "history_older": "Starší revize",
@@ -2381,9 +2386,9 @@
       "history_empty": "Pro tento měsíc nejsou uložené ruční revize.",
       "history_truncated": "Existují další starší ruční revize tohoto měsíce.",
       "history_retry": "Načíst znovu",
-      "restore_title": "Nahradit ruční souhrn původní evidencí",
+      "restore_title": "Změnit vybraný zdroj hodin",
       "restore_source": "Obnovený zdroj",
-      "restore_hint": "Potvrzuji nahrazení ručního souhrnu vybraným zdrojem. Hodiny se nesčítají; ruční revize zůstane v historii.",
+      "restore_hint": "Potvrzuji nahrazení měsíčního souhrnu vybraným zdrojem. Hodiny se nesčítají; předchozí podklad zůstane v historii.",
       "restore": "Obnovit vybraný zdroj",
         "title": "Odpracované hodiny — {name}",
         "worked": "Skutečně odpracováno (včetně přesčasu)",
@@ -4875,6 +4880,7 @@
         "meal_evidence_complete": "Docházkový podklad je úplný a uzavřený.",
         "meal_evidence_incomplete": "Podklad není úplný; vstup zatím nelze schválit jako osvobozený.",
         "meal_missing": {
+          "manual_work_source_requires_review": "Ruční měsíční souhrn sám nedokládá denní rozpad a délku směn pro stravování. Počet nároků není ověřený; podklady posuďte samostatně.",
           "employment_missing": "Osoba nemá pro období pracovní vztah.",
           "attendance_missing": "Za období chybí docházka, směny i odpracovaný čas.",
           "attendance_month_open": "Docházkový měsíc není uzavřený.",
@@ -5971,6 +5977,9 @@
       },
       "load_failed_hint": "Docházka za toto období se nenačetla. Než se to povede, neberte prázdný přehled jako doklad, že nikdo nic nevykázal.",
       "overtime": {
+        "manual_review": "Ruční měsíční souhrn nedokládá rozpad přesčasů po týdnech. Dodržení limitů je nutné samostatně ověřit.",
+        "year_unknown": "Nařízené a dohodnuté přesčasy v roce: nezjištěno.",
+        "averaging_unknown": "Průměr přesčasů a hodiny náhradního volna ve vyrovnávacím období: nezjištěno.",
         "title": "Přesčas - limity § 93 zákoníku práce",
         "year_summary": "Nařízený přesčas letos: {used} z {limit}.",
         "consent_missing": "Souhlas s prací přesčas nad nařízený rozsah není evidován.",
@@ -6107,6 +6116,8 @@
         "dpp_hours_limit": "DPP u limitu 300 h"
       },
       "dpp_hours": {
+        "label_manual_review_required": "DPP — součet neověřen",
+        "title_manual_review_required": "Roční součet DPP za {year} vyžaduje samostatné posouzení ručního podkladu. Automatický součet a zbývající hodiny nejsou ověřené.",
         "label": "DPP {hours} / {limit} h",
         "title_ok": "Na DPP odpracováno v roce {year} celkem {hours} h z {limit} h. Zbývá {remaining} h.",
         "title_approaching": "Blíží se limitu: na DPP odpracováno v roce {year} celkem {hours} h z {limit} h. Zbývá {remaining} h.",
@@ -31189,6 +31200,7 @@
     }
   },
   "payroll_absence": {
+    "manual_work_time_unverifiable": "Ruční měsíční souhrn nedokládá konkrétní odpracované dny. Souběh nepřítomnosti a práce ověřte podle podkladů.",
     "title": "Absence a dovolená",
     "shifts_missing": {
       "open": "Rozvrhnout směny v docházce"
@@ -31501,6 +31513,7 @@
       "manual_tools": "Ruční výpočet a opravy",
       "manual_tools_hint": "Použijte jen pro výjimky, které nelze bezpečně odvodit z uložených podkladů.",
       "blockers": {
+        "manual_work_source_requires_review": "Ruční měsíční souhrn nepostačuje k automatickému posouzení odpracované doby pro dovolenou. Doplňte nebo samostatně ověřte podklady.",
         "employment_terms_missing": "Chybí účinné smluvní podmínky",
         "employer_leave_policy_missing": "Chybí účinná firemní politika",
         "weekly_working_time_missing": "Chybí sjednaná týdenní pracovní doba",

@@ -2196,9 +2196,9 @@ onMounted(load)
             >
               <p class="font-medium">
                 {{ t('payroll.components.inputs.meal_entitlement_summary', {
-                  count: mealEntitlement.count,
-                  qualifying: mealEntitlement.qualifying_count,
-                  second: mealEntitlement.second_contribution_count,
+                  count: mealEntitlement.count ?? t('payroll.worked_hours.unknown'),
+                  qualifying: mealEntitlement.qualifying_count ?? t('payroll.worked_hours.unknown'),
+                  second: mealEntitlement.second_contribution_count ?? t('payroll.worked_hours.unknown'),
                 }) }}
               </p>
               <p class="mt-1">

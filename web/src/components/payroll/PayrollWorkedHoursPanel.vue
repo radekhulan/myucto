@@ -151,7 +151,7 @@ async function approve(): Promise<void> {
 }
 
 async function restore(): Promise<void> {
-  if (!editable.value || busy.value || current.value.month?.work_source !== 'manual_summary') return
+  if (!editable.value || busy.value || !current.value.month || current.value.month.work_source === 'entries') return
   if (!restoreReason.value.trim()) { error.value = t('payroll.worked_hours.reason_required'); return }
   if (!restoreConfirmed.value) { error.value = t('payroll.worked_hours.replace_required'); return }
   busy.value = true
@@ -236,12 +236,12 @@ async function reopen(): Promise<void> {
       </label>
       <button type="button" :class="[btnFilledSm('primary'), 'whitespace-nowrap']" :disabled="busy" data-test="worked-hours-save" @click="save"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('payroll.worked_hours.save') }}</button>
     </div>
-    <details v-if="editable && current.month?.work_source === 'manual_summary'" class="mt-3 rounded-lg border border-warning-200 p-3" data-test="worked-hours-restore-panel">
+    <details v-if="editable && current.month && current.month.work_source !== 'entries'" class="mt-3 rounded-lg border border-warning-200 p-3" data-test="worked-hours-restore-panel">
       <summary class="cursor-pointer text-xs font-medium text-warning-800">{{ t('payroll.worked_hours.restore_title') }}</summary>
       <div class="mt-2 grid gap-3 sm:grid-cols-2">
         <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.restore_source') }}
           <select v-model="restoreSource" :class="inputClass" :disabled="busy" data-test="worked-hours-restore-source">
-            <option v-for="source in current.available_sources ?? ['entries']" :key="source" :value="source">{{ t(source === 'import_summary' ? 'payroll.worked_hours.source_import' : 'payroll.worked_hours.source_attendance') }}</option>
+            <option v-for="source in (current.available_sources ?? ['entries']).filter(source => source !== current.month?.work_source)" :key="source" :value="source">{{ t(source === 'import_summary' ? 'payroll.worked_hours.source_import' : 'payroll.worked_hours.source_attendance') }}</option>
           </select>
         </label>
         <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.reason') }}<input v-model="restoreReason" maxlength="500" :class="inputClass" :disabled="busy" data-test="worked-hours-restore-reason"></label>

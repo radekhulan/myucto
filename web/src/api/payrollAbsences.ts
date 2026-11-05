@@ -272,7 +272,7 @@ export interface LeaveEntitlementCandidate {
   entitlement_weeks: number | null
   allowance_source: 'company_policy' | 'employment_override' | 'mixed_same_value' | null
   continuous_calendar_days: number
-  worked_equivalent_minutes: number
+  worked_equivalent_minutes: number | null
   ready: boolean
   blockers: string[]
   input_version: string

@@ -439,6 +439,7 @@ describe('AbsenceManagement', () => {
       warnings: [
         { code: 'absence_overlaps_worked_time', message: 'Na 8. 9. je zapsaná odpracovaná doba.', path: '/payroll/time?employment=48&period=2026-09' },
         { code: 'absence_in_approved_run', message: 'Mzdový běh za 9/2026 je už schválený.', path: '/payroll/runs?period=2026-09' },
+        { code: 'absence_manual_work_time_unverifiable', message: 'Neověřený souhrn', path: '/payroll/time?employment=48&period=2026-09' },
       ],
     })
     const wrapper = mount(AbsenceManagement, { global: { stubs: { RouterLink: true } } })
@@ -453,6 +454,7 @@ describe('AbsenceManagement', () => {
 
     expect(wrapper.get('[data-test="absence-approval-warning-absence_overlaps_worked_time"]').text()).toContain('8. 9.')
     expect(wrapper.find('[data-test="absence-approval-warning-absence_in_approved_run"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="absence-approval-warning-absence_manual_work_time_unverifiable"]').text()).toContain('payroll_absence.manual_work_time_unverifiable')
     wrapper.unmount()
   })
 
@@ -1107,6 +1109,19 @@ describe('AbsenceManagement', () => {
     expect(wrapper.find('[data-test="average-probable-czk"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="average-probable-field"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="average-suggestion-probable"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('dovolenou z ručního měsíčního zdroje označí k posouzení a nenabídne automatické vytvoření', async () => {
+    m.leaveEntitlementCandidates.mockResolvedValue({ items: [{ employment_id: 12, employee_id: 5, employee_name: 'Syntetická Osoba', employment_code: 'SYNTH-HPP', relation_type: 'employment', period_from: '2026-01-01', period_to: '2026-09-30', weekly_minutes: 2400, entitlement_weeks: 4, allowance_source: 'company_policy', continuous_calendar_days: 273, worked_equivalent_minutes: null, input_version: 'b'.repeat(64), ready: false, blockers: ['manual_work_source_requires_review'], assessment_absences: [], predecessor_absences: 0, takeover: null }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-leave"]').trigger('click')
+    await flushPromises()
+    const row = wrapper.get('[data-test="leave-candidate-12"]')
+    expect(row.text()).toContain('payroll_absence.leave.blockers.manual_work_source_requires_review')
+    expect(row.find('input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(row.text()).not.toContain('payroll_absence.leave.automatic_summary')
     wrapper.unmount()
   })
 

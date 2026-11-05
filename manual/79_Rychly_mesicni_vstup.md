@@ -179,8 +179,8 @@ pracovní vztah a schválené ani uzamčené vstupy nikdy nepřepisuje.
 
 ### 79.8.1.1 Doložené odpracované hodiny
 
-U hodinově odměňovaného vztahu otevřete podklad odpracované doby přímo
-z jeho řádku. Panel ukazuje vybraný zdroj a stav měsíce. Můžete použít
+U hodinově odměňovaného vztahu nebo vztahu s již vybraným souhrnem otevřete
+podklad odpracované doby přímo z jeho řádku. Panel ukazuje vybraný zdroj a stav měsíce. Můžete použít
 docházku, souhrn importu nebo doložený ruční souhrn; vždy platí jediný zdroj
 pro celý pracovní vztah a měsíc.
 
@@ -207,6 +207,13 @@ ani nevytváří příplatky. Výkazové údaje doplňte v **Docházce a směná
 již schválený měsíc nejprve znovu otevřete a pak schvalte s úplným souhrnem.
 Pokud existují vypočtené příplatky nebo pohotovost z původního zdroje,
 změnu zdroje nejprve vyřešte opravou těchto vstupů.
+
+Měsíční souhrn nedokládá rozložení práce do konkrétních směn a týdnů.
+Kontroly, kterým takový rozpad chybí, si vyžádají ruční posouzení;
+původní nahrazené zápisy nepoužijí. Roční limit DPP, automatický nárok
+na dovolenou a počet směn pro stravenkový příspěvek se bez potřebného
+podkladu nezobrazí jako ověřená nula. Před schválením navazujícího
+nároku doplňte požadovanou evidenci nebo doložené ruční posouzení.
 
 Podklad hodin sám není mzdovou částkou. Automatický výpočet hodinové mzdy
 zatím není dostupný a běh s hodinovými podmínkami nelze schválit.

@@ -194,6 +194,72 @@ describe('TimeAttendance', () => {
     await flushPromises()
   }
 
+  it.each([[3, '0,001'], [50, '0:01'], [53, '0:01:03.6'], [0, '0:00'], [null, 'payroll.worked_hours.unknown']] as const)('ruční souhrn %s ukáže přesně a staré denní hodiny pouze jako nepoužité', async (units, text) => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original,
+      month: { ...original.month, work_source: 'manual_summary' },
+      summary: { ...original.summary, work_source: 'manual_summary', worked_duration_units: units, actual_minutes: null, difference_minutes: null, category_minutes: null },
+      manual_summary: { id: 5, time_month_revision_no: 2, content_sha256: 'a'.repeat(64), reason: 'Syntetický ruční podklad', segments: [] },
+      shifts: [], entries: [{ id: 101, row_version: 1, category: 'regular', starts_at: '2026-09-01T08:00:00+02:00', ends_at: '2026-09-01T16:00:00+02:00', timezone_name: 'Europe/Prague', net_minutes: 480, break_minutes: 0, status: 'approved' }],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="time-actual-12"]').text()).toBe(text)
+    expect(wrapper.get('[data-test="grid-worked-total-12"]').text()).toBe(text)
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="time-selected-source"]').text()).toContain('source_manual')
+    await openRowEditor(wrapper)
+    expect(wrapper.get('[data-test="time-inactive-records-hint"]').text()).toContain('inactive_entries_hint')
+    const old = wrapper.get('[data-test="time-record-entry-101"]')
+    expect(old.get('[data-test="time-inactive-entry"]').text()).toContain('inactive_entry')
+    expect(old.find('[data-test="time-record-edit"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="time-record-save-blocked"]').text()).toContain('daily_source_locked')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('historie měsíce použije přesný vybraný souhrn a ne archivní denní záznamy', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'), entries: [] }], total: 1, limit: 25, offset: 0 })
+    const old = historyMonth('2026-09')
+    m.timeHistory.mockResolvedValue({ employment: { id: 12, full_name: 'Syntetická Osoba', code: 'SYN-12' }, items: [{ ...old, month: { ...old.month, work_source: 'manual_summary' }, summary: { ...old.summary, work_source: 'manual_summary', worked_duration_units: 3, actual_minutes: null, difference_minutes: null, category_minutes: null } }], total: 1, limit: 12, offset: 0, range: { from: '2026-01', to: '2026-12' } })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await wrapper.get('[data-test="payroll-scope-year"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="history-actual-2026-09"]').text()).toBe('0,001')
+    expect(wrapper.get('[data-test="history-row-2026-09"]').text()).toContain('inactive_record_counts')
+    expect(wrapper.get('[data-test="history-row-2026-09"]').text()).toContain('payroll.worked_hours.unknown')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('neověřitelné přesčasy ukáže jako neznámé, nikoli nulu nebo prokázaný porušený zákaz', async () => {
+    m.routeQuery = { period: '2026-09' }
+    const item = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...item, entries: [], shifts: [], overtime_consents: [], overtime_protections: [], overtime_compensations: [],
+      overtime_limits: { employment_id: 12, evidence_status: 'manual_review_required', manual_summary_periods: ['2026-08'],
+        findings: [{ code: 'overtime_manual_summary_review_required', severity: 'warning', message: 'Neověřený podklad', actual_minutes: null, limit_minutes: 9000, scope_from: '2026-01-01', scope_to: '2026-09-30', consent_evidenced: false, provision: '§ 93', requires_override: true }],
+        weeks: [], ordered_year_minutes: null, agreed_year_minutes: null, ordered_year_limit_minutes: 9000,
+        averaging_from: '2026-01-01', averaging_to: '2026-09-30', averaging_weeks: 26, averaging_minutes: null,
+        averaging_limit_minutes: 12480, averaging_compensated_minutes: null, averaging_basis: 'statutory', averaging_reference: null,
+        prohibited_minutes: {}, requires_override: true, consent_evidenced: false, limits_from_ruleset: true,
+      },
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const limits = wrapper.get('[data-test="overtime-limits-12"]')
+    expect(limits.text()).toContain('payroll.time.overtime.manual_review')
+    expect(limits.text()).toContain('payroll.time.overtime.year_unknown')
+    expect(limits.text()).toContain('payroll.time.overtime.averaging_unknown')
+    expect(limits.find('[data-test="overtime-prohibition-banner"]').exists()).toBe(false)
+    expect(limits.text()).not.toContain('payroll.time.overtime.year_summary')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
   it.each(['open', 'approved'] as const)('proklik na JMHZ otevře existující potvrzení jen u otevřeného měsíce (%s)', async status => {
     m.routeQuery = { period: '2026-11', employment: '12', confirm_jmhz: '1' }
     const item = row(12, 'Syntetická Osoba')

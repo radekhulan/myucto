@@ -1376,7 +1376,8 @@ async function createEntry() {
   }
 }
 
-function minutes(value: number) {
+function minutes(value: number | null) {
+  if (value === null) return t('payroll.worked_hours.unknown')
   const sign = value < 0 ? '−' : ''
   const absolute = Math.abs(value)
   return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`
@@ -1513,7 +1514,7 @@ onMounted(async () => {
       :data-test="`absence-approval-warning-${warning.code}`"
     >
       <span class="min-w-0 flex-1">
-        <strong>{{ warning.name }}:</strong> {{ warning.message }}
+        <strong>{{ warning.name }}:</strong> {{ warning.code === 'absence_manual_work_time_unverifiable' ? t('payroll_absence.manual_work_time_unverifiable') : warning.message }}
       </span>
       <RouterLink :to="warning.path" :class="[btnOutline('warning'), 'whitespace-nowrap']">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>

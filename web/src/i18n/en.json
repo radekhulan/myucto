@@ -2373,6 +2373,11 @@
   },
   "payroll": {
       "worked_hours": {
+      "selected_source_hint": "Current hours come from the selected monthly summary. Daily records are not added to it.",
+      "daily_source_locked": "A monthly summary is selected. Explicitly restore the daily-record source in Hours evidence before editing daily records.",
+      "inactive_entries_hint": "The shift schedule remains a plan. Daily records below are not the selected worked-hours source and are excluded from the current summary.",
+      "inactive_entry": "Unused daily record",
+      "inactive_record_counts": "Planned shifts: {shifts}, unused daily records: {entries}",
       "segmentation_changed": "Contractual term boundaries have changed. Previously recorded hours remain listed below; enter the new segment breakdown from evidence. Hours are not redistributed automatically.",
       "history_newer": "Newer revisions",
       "history_older": "Older revisions",
@@ -2381,9 +2386,9 @@
       "history_empty": "No manual revisions are recorded for this month.",
       "history_truncated": "More older manual revisions are available for this month.",
       "history_retry": "Retry",
-      "restore_title": "Replace the manual summary with previous evidence",
+      "restore_title": "Change the selected hours source",
       "restore_source": "Restored source",
-      "restore_hint": "I confirm replacing the manual summary with the selected source. Hours are not added together; the manual revision remains in history.",
+      "restore_hint": "I confirm replacing the monthly summary with the selected source. Hours are not added together; previous evidence remains in history.",
       "restore": "Restore selected source",
         "title": "Worked hours — {name}",
         "worked": "Actually worked (including overtime)",
@@ -4875,6 +4880,7 @@
         "meal_evidence_complete": "The attendance evidence is complete and closed.",
         "meal_evidence_incomplete": "The evidence is incomplete; the input cannot yet be approved as exempt.",
         "meal_missing": {
+          "manual_work_source_requires_review": "A manual monthly summary alone does not establish the daily breakdown and shift lengths for meals. The entitlement count has not been verified; review the supporting evidence separately.",
           "employment_missing": "The person has no employment for the period.",
           "attendance_missing": "Attendance, shifts and worked time are missing for the period.",
           "attendance_month_open": "The attendance month is not closed.",
@@ -5971,6 +5977,9 @@
       },
       "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\".",
       "overtime": {
+        "manual_review": "A manual monthly summary does not establish the weekly overtime breakdown. Compliance with overtime limits requires a separate review.",
+        "year_unknown": "Ordered and agreed overtime for the year: unknown.",
+        "averaging_unknown": "Average overtime and compensatory-time hours in the averaging period: unknown.",
         "title": "Overtime — Section 93 Labour Code limits",
         "year_summary": "Ordered overtime this year: {used} of {limit}.",
         "consent_missing": "No consent to overtime beyond the ordered limit is on record.",
@@ -6107,6 +6116,8 @@
         "dpp_hours_limit": "DPP near the 300 h limit"
       },
       "dpp_hours": {
+        "label_manual_review_required": "DPP — total unverified",
+        "title_manual_review_required": "The DPP annual total for {year} requires a separate review of manual evidence. The automatic total and remaining hours have not been verified.",
         "label": "DPP {hours} / {limit} h",
         "title_ok": "Worked on DPP agreements in {year}: {hours} h of {limit} h. {remaining} h remaining.",
         "title_approaching": "Approaching the limit: worked on DPP agreements in {year}: {hours} h of {limit} h. {remaining} h remaining.",
@@ -31189,6 +31200,7 @@
     }
   },
   "payroll_absence": {
+    "manual_work_time_unverifiable": "A manual monthly summary does not establish the specific dates worked. Review the evidence for any overlap between absence and work.",
     "title": "Absence and leave",
     "shifts_missing": {
       "open": "Schedule shifts in attendance"
@@ -31501,6 +31513,7 @@
       "manual_tools": "Manual calculation and adjustments",
       "manual_tools_hint": "Use only for exceptions that cannot be derived safely from stored evidence.",
       "blockers": {
+        "manual_work_source_requires_review": "A manual monthly summary is insufficient for automatic assessment of worked time for leave. Provide additional evidence or review it separately.",
         "employment_terms_missing": "Effective contractual terms are missing",
         "employer_leave_policy_missing": "An effective company policy is missing",
         "weekly_working_time_missing": "Agreed weekly working time is missing",

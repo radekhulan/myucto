@@ -194,16 +194,16 @@ export interface PayrollPersonEmploymentRef {
   is_primary: boolean
 }
 
-export type PayrollAgreementAnnualHoursStatus = 'ok' | 'approaching' | 'exceeded'
+export type PayrollAgreementAnnualHoursStatus = 'ok' | 'approaching' | 'exceeded' | 'manual_review_required'
 
 /** Roční součet hodin na DPP (SSOT na serveru: PayrollAgreementAnnualHours). */
 export interface PayrollAgreementAnnualHours {
   year: number
-  total_minutes: number
+  total_minutes: number | null
   takeover_minutes: number
   limit_minutes: number
   warning_minutes: number
-  remaining_minutes: number
+  remaining_minutes: number | null
   status: PayrollAgreementAnnualHoursStatus
 }
 
@@ -1570,7 +1570,7 @@ export interface PayrollOvertimeLimitFinding {
   code: string
   severity: 'warning' | 'info'
   message: string
-  actual_minutes: number
+  actual_minutes: number | null
   limit_minutes: number
   scope_from: string
   scope_to: string
@@ -1584,18 +1584,20 @@ export interface PayrollOvertimeLimitFinding {
 export type PayrollOvertimeAveragingBasis = 'statutory' | 'collective_agreement'
 
 export interface PayrollOvertimeLimits {
+  evidence_status?: 'manual_review_required'
+  manual_summary_periods?: string[]
   employment_id: number
   findings: PayrollOvertimeLimitFinding[]
   weeks: Array<{ week_start: string; week_end: string; minutes: number }>
-  ordered_year_minutes: number
+  ordered_year_minutes: number | null
   ordered_year_limit_minutes: number
-  agreed_year_minutes: number
+  agreed_year_minutes: number | null
   averaging_from: string | null
   averaging_to: string | null
   averaging_weeks: number
-  averaging_minutes: number
+  averaging_minutes: number | null
   averaging_limit_minutes: number
-  averaging_compensated_minutes: number
+  averaging_compensated_minutes: number | null
   averaging_basis: PayrollOvertimeAveragingBasis
   averaging_reference: string | null
   prohibited_minutes: Partial<Record<'juvenile' | 'pregnancy' | 'child_under_one' | 'part_time', number>>
@@ -1668,14 +1670,17 @@ export interface PayrollTimeOverviewItem {
     end_date: string | null
     full_name: string
   }
+  manual_summary?: PayrollManualTimeSummary | null
   calendar: PayrollWorkCalendar | null
   month: PayrollTimeMonthState
   summary: {
     fund_minutes: number
     planned_minutes: number
-    actual_minutes: number
-    difference_minutes: number
-    category_minutes: Record<PayrollTimeCategory, number>
+    work_source?: PayrollTimeWorkSource
+    worked_duration_units?: number | null
+    actual_minutes: number | null
+    difference_minutes: number | null
+    category_minutes: Record<PayrollTimeCategory, number> | null
     incomplete: boolean
   }
   jmhz_work_summary: {
@@ -1745,6 +1750,7 @@ export interface PayrollTimeOverview extends PayrollHistoricalPeriodInfo {
  * serveru jedna sada metod, takže se dvě obrazovky téže evidence nerozejdou.
  */
 export interface PayrollTimeHistoryItem {
+  manual_summary?: PayrollManualTimeSummary | null
   manual_summary_history?: PayrollManualTimeSummaryRevision[]
   manual_summary_history_truncated?: boolean
   manual_summary_history_offset?: number
@@ -1907,9 +1913,9 @@ export type PayrollExemptionBasis =
 export interface PayrollMealShiftEntitlement {
   period_start: string
   basis: 'shift' | 'calendar_day' | 'mixed'
-  qualifying_count: number
-  second_contribution_count: number
-  count: number
+  qualifying_count: number | null
+  second_contribution_count: number | null
+  count: number | null
   complete: boolean
   missing: string[]
 }

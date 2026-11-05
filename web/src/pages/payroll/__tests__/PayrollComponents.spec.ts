@@ -97,7 +97,7 @@ vi.mock('@/api/slug', () => ({
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) => key === 'payroll.components.inputs.meal_entitlement_summary' ? `${key}:${JSON.stringify(params)}` : key,
     locale: ref('cs-CZ'),
   }),
 }))
@@ -1357,6 +1357,24 @@ describe('PayrollComponents', () => {
     expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_complete')
     expect(wrapper.get('[data-testid="payroll-input-meal-allocation"]').text())
       .toContain('payroll.components.inputs.meal_allocation_uniform')
+    wrapper.unmount()
+  })
+
+  it('u ručního zdroje stravenek zobrazí neznámé počty a neposkládá limit z falešných nul', async () => {
+    m.previewInput.mockResolvedValue({ support_status: 'manual_review', blocker: 'manual_work_source_requires_review', annual_limit_exceeded: false, annual_limit_minor: null, annual_used_minor: 0, annual_after_minor: 10000, exemption_basket: null, meal_entitlement: { period_start: '2026-06-01', basis: 'shift', qualifying_count: null, second_contribution_count: null, count: null, complete: false, missing: ['manual_work_source_requires_review'] } })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'payroll.components.tabs.inputs')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'payroll.components.inputs.add')!.trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('100')
+    await wrapper.findAll('button').find(button => button.text() === 'payroll.components.inputs.preview')!.trigger('click')
+    await flushPromises()
+    const entitlement = wrapper.get('[data-testid="payroll-input-meal-entitlement"]')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_missing.manual_work_source_requires_review')
+    expect(entitlement.text()).toContain('"count":"payroll.worked_hours.unknown"')
+    expect(entitlement.text()).toContain('"qualifying":"payroll.worked_hours.unknown"')
+    expect(entitlement.text()).toContain('"second":"payroll.worked_hours.unknown"')
+    expect(wrapper.find('[data-testid="payroll-input-meal-allocation"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

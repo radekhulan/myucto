@@ -98,6 +98,16 @@ describe('PayrollWorkedHoursPanel', () => {
     if (props.canReopen === false || props.closed) expect(wrapper.find('[data-test="worked-hours-reopen"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="worked-hours-approve"]').exists()).toBe(false)
   })
+  it('z importovaného souhrnu lze přímo obnovit denní záznamy bez mezikroku s ručními hodinami', async () => {
+    const wrapper = panel(evidence({ month: { id: 10, status: 'open', revision_no: 1, row_version: 7, work_source: 'import_summary' }, available_sources: ['entries', 'import_summary'] }))
+    expect(wrapper.get('[data-test="worked-hours-restore-source"]').findAll('option')).toHaveLength(1)
+    await wrapper.get('[data-test="worked-hours-restore-reason"]').setValue('Návrat k denní evidenci')
+    await wrapper.get('[data-test="worked-hours-restore-confirm"]').setValue(true)
+    await wrapper.get('[data-test="worked-hours-restore"]').trigger('click')
+    await flushPromises()
+    expect(mocks.restore).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 7, reason: 'Návrat k denní evidenci', replace_source: true, source: 'entries' })
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
   it('obnoví původní zdroj jen s výslovným souhlasem a důvodem', async () => {
     const wrapper = panel()
     await fill(wrapper)
