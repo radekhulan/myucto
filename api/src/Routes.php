@@ -3654,6 +3654,9 @@ final class Routes
         $app->get    ('/api/admin/imports/{id:[0-9]+}/report',  \MyInvoice\Action\Admin\Import\ImportJobReportAction::class);
         $app->post   ('/api/admin/imports/{id:[0-9]+}/cancel',  CancelImportJobAction::class);
         $app->delete ('/api/admin/imports/{id:[0-9]+}',         \MyInvoice\Action\Admin\Import\DeleteImportJobAction::class);
+        $app->get('/api/admin/user-sessions', [\MyInvoice\Action\Admin\UserSessionAction::class, 'list']);
+        $app->post('/api/admin/user-sessions/terminate', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminateSelected']);
+        $app->delete('/api/admin/user-sessions/{id}', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminate']);
         $app->get    ('/api/admin/users',           [UserAdminAction::class, 'list']);
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);

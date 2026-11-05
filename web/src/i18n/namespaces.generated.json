@@ -169,6 +169,7 @@
     "tax_evidence",
     "template_tools",
     "time_billing",
+    "user_sessions",
     "users",
     "validation",
     "vat_classifications",
@@ -1115,6 +1116,7 @@
       "instance_admin",
       "roles",
       "settings",
+      "user_sessions",
       "users"
     ],
     "admin-roles": [

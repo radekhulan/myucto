@@ -1137,7 +1137,8 @@
         "2233_dimension_defaults_bank_account.sql",
         "2234_bank_posting_rule_dimensions.sql",
         "2235_cash_register_foreign_opening.sql",
-        "2236_invoice_defaults_role_permission.sql"
+        "2236_invoice_defaults_role_permission.sql",
+        "2237_sessions_admin_last_seen.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -23665,6 +23666,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_sess_user": "BTREE (user_id, expires_at)",
+                "idx_sessions_admin_last_seen": "BTREE (revoked_at, replaced_at, last_seen, session_family_id, expires_at)",
                 "idx_sessions_family_revocation": "BTREE (session_family_id, revoked_at)",
                 "idx_sessions_user_revocation": "BTREE (user_id, revoked_at, expires_at)",
                 "uq_sessions_family_generation": "UNIQUE BTREE (session_family_id, generation)"
