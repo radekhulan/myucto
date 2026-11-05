@@ -950,9 +950,9 @@ dimenze. Podrobnosti v kapitole [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 ### 114.11.17 Systémové dimenze a původ přiřazení
 
 Systémový typ má vlastní identitu nezávislou na názvu a kódu vlastního typu.
-Vlastní typ se stejným kódem se automaticky nepřevádí. Příprava rámce 504
+Vlastní typ se stejným kódem se automaticky nepřevádí. Rámec 504
 rozlišuje činnost (hlavní nebo hospodářskou), druh činnosti a předběžné daňové
-zařazení. Rámec 504 zatím nelze v nastavení firmy aktivovat. Předběžné daňové
+zařazení. Rámec 504 se zapíná v nastavení firmy. Předběžné daňové
 zařazení samo nepotvrzuje daňové posouzení ani nárok na osvobození a systém
 automaticky nevybírá hlavní činnost ani předmět daně.
 

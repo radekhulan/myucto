@@ -42,12 +42,12 @@ Správa opakovaně používaných fakturačních položek je kvůli návaznosti 
 
 Nastavení globálních položek smí měnit jen superadministrátor nebo administrátor; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
 
-V **Nastavení / Účetní rámec** lze pro testování zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
+V **Nastavení / Účetní rámec** lze zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
 
 U rozpoznané právní formy spolku, nadace, ústavu nebo SVJ se zobrazí doporučení rámce 504. Tlačítko **Zvolit doporučený rámec** pouze připraví výběr. Nic neukládá a nenahrazuje datum účinnosti ani samostatné potvrzení změny. Právní forma sama nepotvrzuje veřejnou prospěšnost ani osvobození příjmů. Existující účetnictví se převádí řízeně na hranici období přes **Převod účetního rámce**. Pro SVJ tato stránka místo formuláře vysvětlí, že se převádějí doložené počáteční stavy jednotek, a nabídne odkaz na Počáteční stavy SVJ. Nová firma, u které rejstřík uvede právní formu spolku, nadace, ústavu nebo SVJ, dostane rámec 504 i osnovu podle vyhlášky 504 rovnou při založení.
 
-> [!WARNING]
-> Účetní rámec 504 je v testování a zatím není vhodný pro produkční účetnictví. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md). V této sekci se při výběru nebo používání rámce 504 zobrazuje žluté upozornění.
+> [!NOTE]
+> Účetní rámec 504 je určen pro produkční účetnictví nevýdělečných organizací. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md).
 
 
 Přepnutí rámce nepřevádí upravený ani používaný účtový rozvrh podle vyhlášky 500. Rozvrh podle vyhlášky 504 vznikne, když je rozvrh prázdný nebo je to nedotčená výchozí šablona.

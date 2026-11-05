@@ -540,8 +540,8 @@ zápis v deníku, uzávěrka nebo ho založil převod, uložit pole nejde, proto
 úkon s přechodným obdobím. Fyzická osoba vede vždy kalendářní rok.
 
 U podvojného účetnictví je na stejné záložce samostatná karta **Účetní rámec**. Ukazuje rámec platný
-k dnešku a jeho historii. Výchozí je **Podnikatelé (vyhláška 500)**. Rámec podle vyhlášky 504 zatím nelze
-aktivovat. Změna rámce se ukládá samostatným tlačítkem s datem prvního dne existujícího účetního období.
+k dnešku a jeho historii. Výchozí je **Podnikatelé (vyhláška 500)**. Nevýdělečné organizace zvolí rámec
+podle vyhlášky 504, viz kapitola [Nastavení](96_Nastaveni.md). Změna rámce se ukládá samostatným tlačítkem s datem prvního dne existujícího účetního období.
 Pokud jsou v dotčeném intervalu zaúčtované zápisy, aplikace změnu odmítne. Ostatní rozpracované údaje
 ve formuláři toto tlačítko neukládá.
 

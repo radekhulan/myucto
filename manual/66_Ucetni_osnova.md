@@ -149,8 +149,8 @@ a nedaňové nákladové analytiky **501.990 / 511.990 / 518.990 / 548.990**) a 
 Stejné založení lze bezpečně spustit znovu: existující firemní účty ani jejich názvy se neduplikují.
 Aktivační průvodce je popsán v kapitole [Aktivace účetnictví](68_Aktivace_ucetnictvi.md).
 
-Aktivace rámce **504/2002 Sb.** zůstává nedostupná. Jeho samostatná šablona zakládá pouze prázdný
-rozvrh a existující osnovu nepřevádí ani nedoplňuje účty jiného rámce. Používá třídy 0 až 3, 5, 6
+Rámec **504/2002 Sb.** má samostatnou šablonu osnovy, která existující osnovu jiného rámce nepřevádí
+ani nedoplňuje. Zapíná se v [Nastavení](96_Nastaveni.md) nebo řízeným převodem z rámce 500. Používá třídy 0 až 3, 5, 6
 a 9, včetně vlastního jmění a fondů 901/911, výsledku hospodaření 931/932/933 a závěrkových účtů
 961/962. Náklady této šablony nemají potvrzenou daňovou uznatelnost; výchozí nedaňový příznak
 nenahrazuje posouzení konkrétní činnosti a účetního případu.
