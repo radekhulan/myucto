@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Migration\Pohoda\PohodaStock;
+use MyInvoice\Service\Stock\StockItemIntrastatValidator;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -540,6 +541,7 @@ final class PurchaseInvoiceRepository
                     pii.accrual_from, pii.accrual_to,
                     pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
                     pii.seller_item_code, pii.item_ean,
+                    pii.intrastat_cn8_code, pii.intrastat_country_of_origin,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en,
                     sa.id AS small_asset_id, sa.name AS small_asset_name, sa.status AS small_asset_status
                FROM purchase_invoice_items pii
@@ -2174,8 +2176,9 @@ final class PurchaseInvoiceRepository
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index,
                  vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
-                 accrual_from, accrual_to, stock_item_id, seller_item_code, item_ean)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 accrual_from, accrual_to, stock_item_id, seller_item_code, item_ean,
+                 intrastat_cn8_code, intrastat_country_of_origin)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -2250,6 +2253,8 @@ final class PurchaseInvoiceRepository
             $tenantIsVatPayer = VatStatusService::flagsAt($pdo, $supplierId, $docDate)['is_vat_payer'];
         }
 
+        $originCountries = $this->knownOriginCountries($items);
+
         foreach (array_values($items) as $i => $item) {
             $vatRateId = (int) ($item['vat_rate_id'] ?? 0);
             $rate = $vatRates[$vatRateId] ?? 0.0;
@@ -2315,6 +2320,8 @@ final class PurchaseInvoiceRepository
                 $stockItemId,
                 self::itemCode($item['seller_item_code'] ?? null),
                 self::itemEan($item['item_ean'] ?? null),
+                self::cn8Code($item['intrastat_cn8_code'] ?? null),
+                self::originCountry($item['intrastat_country_of_origin'] ?? null, $originCountries),
             ]);
 
             if ($keepDomesticItemCodes && in_array((string) $code, self::MIXED_DOCUMENT_DOMESTIC_CODES, true)) {
@@ -2621,6 +2628,36 @@ final class PurchaseInvoiceRepository
             ExpenseKind::Service, ExpenseKind::SmallIntangible => false,
             default => null,
         };
+    }
+
+    /** KN8 z dokladu („7318.16.39“, „73181639“): po odstranění teček přesně 8 číslic, jiný tvar se zahodí. */
+    private static function cn8Code(mixed $value): ?string
+    {
+        $code = is_scalar($value) ? str_replace('.', '', trim((string) $value)) : '';
+        return preg_match('/^\d{8}$/D', $code) === 1 ? $code : null;
+    }
+
+    /** @param array<string,true> $known kódy, které zná číselník zemí */
+    private static function originCountry(mixed $value, array $known): ?string
+    {
+        $code = is_scalar($value) ? strtoupper(trim((string) $value)) : '';
+        return isset($known[$code]) || in_array($code, StockItemIntrastatValidator::NON_ISO_ORIGIN_CODES, true) ? $code : null;
+    }
+
+    /** Dvoupísmenné kódy z řádků, které zná číselník zemí. @return array<string,true> */
+    private function knownOriginCountries(array $items): array
+    {
+        $codes = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $it): string => is_array($it) && is_scalar($it['intrastat_country_of_origin'] ?? null)
+                ? strtoupper(trim((string) $it['intrastat_country_of_origin'])) : '',
+            $items,
+        ), static fn (string $c): bool => preg_match('/^[A-Z]{2}$/D', $c) === 1)));
+        if ($codes === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT iso2 FROM countries WHERE iso2 IN (' . implode(',', array_fill(0, count($codes), '?')) . ')');
+        $stmt->execute($codes);
+        return array_fill_keys(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []), true);
     }
 
     /** Kód zboží z řádku: oříznutý, prázdný nebo delší než sloupec je NULL (zkrácený by se mohl shodovat s jinou kartou). */

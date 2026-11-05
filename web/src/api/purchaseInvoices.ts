@@ -165,6 +165,9 @@ export interface PurchaseInvoiceItem {
   /** Kód položky dodavatele a EAN z dokladu: párují řádek s kartou. FE je MUSÍ posílat zpět (DELETE+INSERT). */
   seller_item_code?: string | null
   item_ean?: string | null
+  /** Intrastat z dokladu: při příjmu se doplní na kartu, pokud tam chybí. FE je MUSÍ posílat zpět. */
+  intrastat_cn8_code?: string | null
+  intrastat_country_of_origin?: string | null
   /** Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — read-only join. */
   small_asset?: { id: number; name: string; status: 'in_use' | 'disposed' | 'sold' } | null
 }

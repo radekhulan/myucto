@@ -671,6 +671,7 @@ export interface StockDocumentLine {
   purchase_order_line_id?: number | null
   /** Po zaúčtování uloží kód z řádku faktury ke kartě. */
   remember_seller_code?: boolean
+  fill_intrastat?: boolean
   source_description?: string | null
   source_qty?: string | null
   line_no?: number
@@ -735,6 +736,7 @@ export interface StockDocumentPayload {
     extra_cost?: string | number
     invoice_item_id?: number
     purchase_invoice_item_id?: number
+    fill_intrastat?: boolean
     source_description?: string
     source_qty?: string | number
     note?: string | null
@@ -932,6 +934,8 @@ interface StockReceiptProposalBase {
     seller_item_code?: string | null
     /** Karty, u kterých má dodavatel tento kód uložený. */
     vendor_code_cards?: Array<{ id: number; sku: string; name: string }>
+    intrastat_cn8_code?: string | null
+    intrastat_country_of_origin?: string | null
     matched_stock_item_id?: number | null
     match_source?: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
   }>
@@ -985,6 +989,7 @@ export interface StockReceiptPayload {
     quantity: string | number
     unit_cost?: string | number
     remember_seller_code?: boolean
+    fill_intrastat?: boolean
   }>
   landed_costs?: StockReceiptLandedCost[]
 }

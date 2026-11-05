@@ -447,6 +447,258 @@ final class PurchaseLineStockMatchTest extends StockTestCase
         return [$card, (int) $doc['id']];
     }
 
+    public function testIntrastatIsWrittenOnlyAfterPostingWithExplicitChoice(): void
+    {
+        $empty = $this->item($this->sid, 'PRAZDNA');
+        $filled = $this->item($this->sid, 'VYPLNENA');
+        $noChoice = $this->item($this->sid, 'BEZ-VOLBY');
+        $this->db->pdo()->prepare("UPDATE stock_items SET intrastat_cn8_code = '11111111' WHERE id = ?")->execute([$filled]);
+
+        [$docId, $byCode] = $this->receiptWith(['PRAZDNA' => true, 'VYPLNENA' => true, 'BEZ-VOLBY' => 1]);
+        $proposalLine = $byCode['PRAZDNA'];
+        self::assertSame(['73181639', 'IT'], [$proposalLine['intrastat_cn8_code'], $proposalLine['intrastat_country_of_origin']], 'Návrh hodnoty ukazuje.');
+        $before = $this->card($empty);
+        self::assertNull($before['intrastat_cn8_code'], 'Koncept příjemky kartu nemění.');
+
+        // Volání služby bez HTTP vrstvy: doplnění je ve službě, platí na všech cestách zaúčtování.
+        self::assertSame([], $this->documents->post($this->sid, $docId, $this->userId)['warnings']);
+
+        $card = $this->card($empty);
+        self::assertSame(['73181639', 'IT'], [$card['intrastat_cn8_code'], $card['intrastat_country_of_origin']]);
+        self::assertSame((int) $before['row_version'] + 1, (int) $card['row_version']);
+        $kept = $this->card($filled);
+        self::assertSame(['11111111', 'IT'], [$kept['intrastat_cn8_code'], $kept['intrastat_country_of_origin']], 'Existující hodnota se nepřepíše.');
+        self::assertNull($this->card($noChoice)['intrastat_cn8_code'], 'Bez výslovné volby true se nic nezapíše.');
+
+        $logged = $this->activity('stock.item_intrastat_filled', $empty);
+        self::assertCount(1, $logged);
+        self::assertSame(['old' => null, 'new' => '73181639'], $logged[0]['changes']['intrastat_cn8_code']);
+        self::assertSame(['old' => null, 'new' => 'IT'], $logged[0]['changes']['intrastat_country_of_origin']);
+        self::assertSame($docId, $logged[0]['stock_document_id']);
+        self::assertSame($byCode['PRAZDNA']['purchase_invoice_item_id'], $logged[0]['purchase_invoice_item_id']);
+        self::assertArrayNotHasKey('intrastat_cn8_code', $this->activity('stock.item_intrastat_filled', $filled)[0]['changes']);
+        self::assertSame([], $this->activity('stock.item_intrastat_filled', $noChoice));
+    }
+
+    public function testPostingActionNeedsCardPermissionAndTellsTheUser(): void
+    {
+        $denied = $this->item($this->sid, 'AKCE-BEZ');
+        $allowed = $this->item($this->sid, 'AKCE-S');
+        [$deniedDoc] = $this->receiptWith(['AKCE-BEZ' => true]);
+        [$allowedDoc] = $this->receiptWith(['AKCE-S' => true]);
+
+        $post = function (int $docId, array $permissions): array {
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/stock/documents/' . $docId . '/post')
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->sid)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+                ->withAttribute('auth.effective_role', new \MyInvoice\Security\EffectiveRole(0, 'Skladník', 'staff', true, $permissions));
+            $response = $this->container->get(\MyInvoice\Action\Stock\StockDocumentAction::class)
+                ->post($request, new \Slim\Psr7\Response(), ['id' => (string) $docId]);
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            return (array) json_decode((string) $response->getBody(), true);
+        };
+
+        $body = $post($deniedDoc, ['stock' => 2, 'accounting' => 2]);
+        self::assertSame('posted', $body['status'], 'Bez práva na karty se příjemka zaúčtuje, přeskočí se jen doplnění.');
+        self::assertContains('Údaje pro Intrastat se na kartu nedoplnily: nemáte právo upravovat skladové karty.', $body['warnings']);
+        self::assertNull($this->card($denied)['intrastat_cn8_code']);
+        self::assertSame([], $this->activity('stock.item_intrastat_filled', $denied));
+
+        $body = $post($allowedDoc, ['stock' => 2, 'accounting' => 2, 'stock.items.write' => 2]);
+        self::assertNotContains('Údaje pro Intrastat se na kartu nedoplnily: nemáte právo upravovat skladové karty.', $body['warnings']);
+        self::assertSame('73181639', $this->card($allowed)['intrastat_cn8_code']);
+        self::assertCount(1, $this->activity('stock.item_intrastat_filled', $allowed));
+    }
+
+    public function testIntrastatCanComeOnlyFromTheReceiptsOwnInvoice(): void
+    {
+        $card = $this->item($this->sid, 'VLASTNI');
+        $foreignCard = $this->item($this->sid, 'CIZI-RADEK');
+        [$docId] = $this->receiptWith(['VLASTNI' => true]);
+        $foreignLine = $this->receiptWith(['CIZI-RADEK' => false])[1]['CIZI-RADEK']['purchase_invoice_item_id'];
+        $doc = $this->docsRepo->findWithLines($this->sid, $docId);
+        $header = ['doc_type' => 'receipt', 'warehouse_id' => $doc['warehouse_id'], 'doc_date' => $doc['doc_date'], 'description' => 'Příjem'];
+        $line = ['stock_item_id' => $card, 'qty' => '1.000', 'unit_cost' => '10', 'purchase_invoice_item_id' => $foreignLine, 'fill_intrastat' => true];
+
+        foreach ([
+            'cizí řádek ke konceptu z faktury' => fn () => $this->documents->updateDraft($this->sid, $docId, $header + ['lines' => [$line]], $this->userId),
+            'ruční příjemka bez faktury'      => fn () => $this->documents->create($this->sid, $header + ['lines' => [$line]], $this->userId),
+            'řádek bez vazby na fakturu'      => fn () => $this->documents->create($this->sid, $header + ['purchase_invoice_id' => $doc['purchase_invoice_id'], 'lines' => [['purchase_invoice_item_id' => null] + $line]], $this->userId),
+        ] as $case => $call) {
+            try {
+                $call();
+                self::fail($case . ': musí se odmítnout.');
+            } catch (\MyInvoice\Service\Stock\StockException $e) {
+                self::assertSame(['invalid_document', 422], [$e->errorCode, $e->httpStatus], $case);
+            }
+        }
+        self::assertSame($doc['lines'][0]['purchase_invoice_item_id'], $this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['purchase_invoice_item_id']);
+
+        // Obrana i při zaúčtování: řádek přepojený mimo API na cizí fakturu se nedoplní.
+        $this->db->pdo()->prepare('UPDATE stock_document_lines SET purchase_invoice_item_id = ? WHERE document_id = ?')->execute([$foreignLine, $docId]);
+        $this->documents->post($this->sid, $docId, $this->userId);
+        self::assertNull($this->card($card)['intrastat_cn8_code']);
+        self::assertNull($this->card($foreignCard)['intrastat_cn8_code']);
+    }
+
+    public function testDeletedDraftLeavesCardUntouched(): void
+    {
+        $card = $this->item($this->sid, 'SMAZANY');
+        $before = $this->card($card);
+        [$docId] = $this->receiptWith(['SMAZANY' => true]);
+        self::assertSame($before, $this->card($card));
+
+        $this->documents->deleteDraft($this->sid, $docId, $this->userId);
+        self::assertSame($before, $this->card($card));
+        self::assertSame([], $this->activity('stock.item_intrastat_filled', $card));
+    }
+
+    public function testChoiceWithoutCardPermissionIsRejected(): void
+    {
+        $card = $this->item($this->sid, 'ODMITNUTI');
+        $byCode = $this->receiptWith(['ODMITNUTI' => false])[1];
+        $piLine = $byCode['ODMITNUTI']['purchase_invoice_item_id'];
+        $piId = (int) $this->db->pdo()->query('SELECT purchase_invoice_id FROM purchase_invoice_items WHERE id = ' . (int) $piLine)->fetchColumn();
+        $receiptsBefore = count($this->docsRepo->listByPurchaseInvoice($this->sid, $piId));
+
+        try {
+            $this->receipts->createReceipt($this->sid, $piId, [
+                'warehouse_id' => $this->warehouse($this->sid, 'W' . uniqid()),
+                'doc_date'     => '2099-01-10',
+                'lines'        => [['purchase_invoice_item_id' => $piLine, 'quantity' => '1.000', 'fill_intrastat' => true]],
+            ], $this->userId);
+            self::fail('Bez práva upravovat karty se volba musí odmítnout.');
+        } catch (\MyInvoice\Service\Stock\StockException $e) {
+            self::assertSame(['card_write_forbidden', 403], [$e->errorCode, $e->httpStatus]);
+        }
+        self::assertCount($receiptsBefore, $this->docsRepo->listByPurchaseInvoice($this->sid, $piId), 'Odmítnutí nesmí nechat koncept.');
+        self::assertNull($this->card($card)['intrastat_cn8_code']);
+    }
+
+    public function testDocumentApiRejectsNewChoiceWithoutCardPermissionButKeepsExisting(): void
+    {
+        $card = $this->item($this->sid, 'EDITOR');
+        $other = $this->item($this->sid, 'EDITOR-JINA');
+        [$docId] = $this->receiptWith(['EDITOR' => true]);
+        $doc = $this->docsRepo->findWithLines($this->sid, $docId);
+        $line = $doc['lines'][0];
+        self::assertSame($card, (int) $line['stock_item_id']);
+
+        $call = function (?int $id, array $lineBody, array $permissions) use ($doc): array {
+            $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/stock/documents')
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->sid)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+                ->withAttribute('auth.effective_role', new \MyInvoice\Security\EffectiveRole(0, 'Skladník', 'staff', true, $permissions))
+                ->withParsedBody([
+                    'doc_type' => 'receipt', 'warehouse_id' => $doc['warehouse_id'], 'doc_date' => $doc['doc_date'],
+                    'description' => 'Příjem', 'lines' => [$lineBody],
+                ]);
+            $action = $this->container->get(\MyInvoice\Action\Stock\StockDocumentAction::class);
+            $response = $id === null
+                ? $action->create($request, new \Slim\Psr7\Response())
+                : $action->update($request, new \Slim\Psr7\Response(), ['id' => (string) $id]);
+            return [$response->getStatusCode(), (array) json_decode((string) $response->getBody(), true)];
+        };
+        $body = static fn (int $stockItem, bool $choice): array => [
+            'stock_item_id' => $stockItem, 'qty' => $line['qty'], 'unit_cost' => $line['unit_cost'],
+            'purchase_invoice_item_id' => $line['purchase_invoice_item_id'], 'fill_intrastat' => $choice,
+        ];
+        $noRight = ['stock' => 2, 'accounting' => 2];
+        $right = $noRight + ['stock.items.write' => 2];
+
+        [$status, $denied] = $call(null, $body($card, true), $noRight);
+        self::assertSame(403, $status);
+        self::assertSame('stock.error.card_write_forbidden', $denied['error']['code']);
+
+        [$status] = $call($docId, $body($other, true), $noRight);
+        self::assertSame(403, $status, 'Bez práva nejde volbu přesunout na jinou kartu.');
+        self::assertSame($card, (int) $this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['stock_item_id']);
+
+        [$status] = $call($docId, $body($card, true), $noRight);
+        self::assertSame(200, $status, 'Existující volbu lze bez práva ponechat.');
+        self::assertTrue($this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['fill_intrastat']);
+
+        [$status] = $call($docId, $body($card, false), $noRight);
+        self::assertSame(200, $status, 'Volbu lze bez práva zrušit.');
+        self::assertFalse($this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['fill_intrastat']);
+
+        [$status] = $call($docId, $body($card, true), $noRight);
+        self::assertSame(403, $status, 'Zrušenou volbu už bez práva znovu nastavit nejde.');
+
+        [$status] = $call($docId, $body($card, true), $right);
+        self::assertSame(200, $status);
+        self::assertTrue($this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['fill_intrastat']);
+    }
+
+    public function testChoiceSurvivesDraftEditOnlyWhenSentAgain(): void
+    {
+        $this->item($this->sid, 'UPRAVA');
+        [$docId] = $this->receiptWith(['UPRAVA' => true]);
+        $doc = $this->docsRepo->findWithLines($this->sid, $docId);
+        self::assertTrue($doc['lines'][0]['fill_intrastat']);
+
+        $line = static fn (array $l, array $extra): array => $extra + [
+            'stock_item_id' => $l['stock_item_id'], 'qty' => $l['qty'], 'unit_cost' => $l['unit_cost'], 'purchase_invoice_item_id' => $l['purchase_invoice_item_id'],
+        ];
+        $header = ['doc_type' => 'receipt', 'warehouse_id' => $doc['warehouse_id'], 'doc_date' => $doc['doc_date']];
+        $this->documents->updateDraft($this->sid, $docId, $header + ['lines' => [$line($doc['lines'][0], ['fill_intrastat' => true])]], $this->userId);
+        self::assertTrue($this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['fill_intrastat']);
+
+        $this->documents->updateDraft($this->sid, $docId, $header + ['lines' => [$line($doc['lines'][0], [])]], $this->userId);
+        self::assertFalse($this->docsRepo->findWithLines($this->sid, $docId)['lines'][0]['fill_intrastat']);
+    }
+
+    public function testUnknownOriginCountryDoesNotReachTheCard(): void
+    {
+        $card = $this->item($this->sid, 'ZEME');
+        $changes = $this->container->get(\MyInvoice\Repository\StockItemRepository::class)->fillMissingIntrastat($this->sid, $card, '73181639', 'XX');
+        self::assertSame(['intrastat_cn8_code'], array_keys($changes));
+        self::assertSame(['73181639', null], [$this->card($card)['intrastat_cn8_code'], $this->card($card)['intrastat_country_of_origin']]);
+
+        $changes = $this->container->get(\MyInvoice\Repository\StockItemRepository::class)->fillMissingIntrastat($this->sid, $card, null, 'QU');
+        self::assertSame('QU', $changes['intrastat_country_of_origin']['new'], 'Stejný číselník jako validátor karty.');
+    }
+
+    public function testRepeatedPostDoesNotFillIntrastatAgain(): void
+    {
+        $card = $this->item($this->sid, 'DVA-POSTY');
+        [$docId] = $this->receiptWith(['DVA-POSTY' => true]);
+        $this->documents->post($this->sid, $docId, $this->userId);
+        self::assertSame('73181639', $this->card($card)['intrastat_cn8_code']);
+
+        $this->db->pdo()->prepare('UPDATE stock_items SET intrastat_cn8_code = NULL WHERE id = ?')->execute([$card]);
+        $this->documents->post($this->sid, $docId, $this->userId);
+        self::assertNull($this->card($card)['intrastat_cn8_code'], 'Opakované zaúčtování kartu nedoplňuje.');
+        self::assertCount(1, $this->activity('stock.item_intrastat_filled', $card));
+    }
+
+    public function testInvoiceLineKeepsOnlyValidIntrastatValues(): void
+    {
+        $cases = [
+            ['7318.16.39', 'it', '73181639', 'IT'],
+            [' 73181639 ', ' CZ ', '73181639', 'CZ'],
+            ['7318 16 39', 'IT', null, 'IT'],
+            ['NOIN.TR.A', 'IT', null, 'IT'],
+            ['7318.16.3X', 'IT', null, 'IT'],
+            ['73181639', 'XX', '73181639', null],
+            ['73181639', 'QU', '73181639', 'QU'],
+            ['7318', 'Italy', null, null],
+            ['HS 73181639', 'I', null, null],
+            ['1234-56-78', null, null, null],
+            ['73181639 kg', 'IT', null, 'IT'],
+            ['123456789', 'IT', null, 'IT'],
+        ];
+        $repo = $this->container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class);
+        $piId = $this->purchaseInvoice($this->sid, $this->vendorId);
+        $repo->replaceItems($piId, array_map(fn (array $c): array => [
+            'description' => 'A', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 10, 'vat_rate_id' => $this->vatRateId,
+            'intrastat_cn8_code' => $c[0], 'intrastat_country_of_origin' => $c[1],
+        ], $cases));
+        foreach ($repo->itemsFor($piId) as $i => $row) {
+            self::assertSame([$cases[$i][2], $cases[$i][3]], [$row['intrastat_cn8_code'], $row['intrastat_country_of_origin']], (string) $cases[$i][0]);
+        }
+    }
+
     public function testPackagingRatioAppliesToMatchedLine(): void
     {
         $wh = $this->warehouse($this->sid);
@@ -572,6 +824,40 @@ final class PurchaseLineStockMatchTest extends StockTestCase
         }
         $doc = $receive($byFour, '8.000');
         self::assertSame('8.000', number_format((float) $doc['lines'][0]['qty'], 3, '.', ''));
+    }
+
+    /**
+     * Koncept příjemky z faktury, jejíž řádky mají KN8 a zemi. Klíč = kód karty, hodnota = volba `fill_intrastat`.
+     *
+     * @param array<string,mixed> $choices
+     * @return array{0:int,1:array<string,array<string,mixed>>} id dokladu a řádky návrhu podle kódu
+     */
+    private function receiptWith(array $choices): array
+    {
+        $piId = $this->purchaseInvoice($this->sid, $this->vendorId);
+        $this->container->get(\MyInvoice\Repository\PurchaseInvoiceRepository::class)->replaceItems($piId, array_map(fn (string $code): array => [
+            'description' => $code, 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 10, 'vat_rate_id' => $this->vatRateId,
+            'seller_item_code' => $code, 'intrastat_cn8_code' => '7318.16.39', 'intrastat_country_of_origin' => 'it',
+        ], array_keys($choices)));
+        $proposal = $this->receipts->proposeForPurchaseInvoice($this->sid, $piId);
+        $byCode = array_column([...$proposal['lines'], ...$proposal['unmatched_lines']], null, 'seller_item_code');
+        $doc = $this->receipts->createReceipt($this->sid, $piId, [
+            'warehouse_id' => $this->warehouse($this->sid, 'W' . uniqid()),
+            'doc_date'     => '2099-01-10',
+            'lines'        => array_map(static fn (string $code, mixed $choice): array => [
+                'purchase_invoice_item_id' => $byCode[$code]['purchase_invoice_item_id'], 'quantity' => '1.000', 'fill_intrastat' => $choice,
+                'stock_item_id' => $byCode[$code]['matched_stock_item_id'],
+            ], array_keys($choices), $choices),
+        ], $this->userId, true);
+        return [(int) $doc['id'], $byCode];
+    }
+
+    /** @return array<string,mixed> */
+    private function card(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT intrastat_cn8_code, intrastat_country_of_origin, row_version FROM stock_items WHERE id = ?');
+        $stmt->execute([$id]);
+        return $stmt->fetch(\PDO::FETCH_ASSOC);
     }
 
     /** @return list<array<string,mixed>> payloady záznamů logu aktivit */

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Service\ActivityLogger;
 use PDO;
 
@@ -18,6 +19,7 @@ final class ReceiptCardUpdater
         private readonly Connection $db,
         private readonly PurchaseLineStockMatcher $matcher,
         private readonly ActivityLogger $logger,
+        private readonly StockItemRepository $items,
     ) {}
 
     /**
@@ -72,6 +74,52 @@ final class ReceiptCardUpdater
             $this->rememberOne($supplierId, $documentId, $row, $code, $userId, $ip, $userAgent);
         }
         return $warnings;
+    }
+
+    /**
+     * Doplní na karty Intrastat ze zdrojových řádků přijaté faktury, jen u řádků s volbou
+     * `fill_intrastat` a jen do prázdných polí.
+     *
+     * @return list<string> varování pro uživatele
+     */
+    public function fillIntrastat(int $supplierId, int $documentId, bool $canWriteCards, ?int $userId, ?string $ip = null, ?string $userAgent = null): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.stock_item_id, l.purchase_invoice_item_id, pii.intrastat_cn8_code, pii.intrastat_country_of_origin
+               FROM stock_document_lines l
+               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+               JOIN purchase_invoice_items pii ON pii.id = l.purchase_invoice_item_id
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id AND pi.supplier_id = l.supplier_id
+                AND pi.id = d.purchase_invoice_id
+              WHERE l.supplier_id = ? AND l.document_id = ? AND l.fill_intrastat = 1
+                AND d.doc_type = 'receipt' AND d.status = 'posted'
+                AND (pii.intrastat_cn8_code IS NOT NULL OR pii.intrastat_country_of_origin IS NOT NULL)
+              ORDER BY l.line_no"
+        );
+        $stmt->execute([$supplierId, $documentId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($rows === []) {
+            return [];
+        }
+        if (!$canWriteCards) {
+            return ['Údaje pro Intrastat se na kartu nedoplnily: nemáte právo upravovat skladové karty.'];
+        }
+        foreach ($rows as $row) {
+            $changes = $this->items->fillMissingIntrastat(
+                $supplierId,
+                (int) $row['stock_item_id'],
+                $row['intrastat_cn8_code'],
+                $row['intrastat_country_of_origin'],
+            );
+            if ($changes !== []) {
+                $this->logger->log('stock.item_intrastat_filled', $userId, 'stock_item', (int) $row['stock_item_id'], [
+                    'changes'                  => $changes,
+                    'purchase_invoice_item_id' => (int) $row['purchase_invoice_item_id'],
+                    'stock_document_id'        => $documentId,
+                ], $ip, $userAgent, $supplierId);
+            }
+        }
+        return [];
     }
 
     /** @param array<string,mixed> $row */

@@ -279,6 +279,8 @@ JSON schema:
       "description": string,
       "seller_item_code": string|null,
       "item_ean": string|null,
+      "intrastat_cn8_code": string|null,
+      "intrastat_country_of_origin": string|null,
       "quantity": number,
       "unit": string,
       "unit_price_without_vat": number,

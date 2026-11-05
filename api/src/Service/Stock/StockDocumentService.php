@@ -36,7 +36,7 @@ use PDO;
 final class StockDocumentService
 {
     /** Volby řádku příjemky, které po zaúčtování zapisují na kartu; nastavit je smí jen `stock.items.write`. */
-    public const CARD_WRITE_OPTIONS = ['remember_seller_code'];
+    public const CARD_WRITE_OPTIONS = ['remember_seller_code', 'fill_intrastat'];
 
     private const DOC_TYPES = ['receipt', 'issue', 'transfer'];
     private const ORIGINS   = ['manual', 'invoice', 'credit_note', 'purchase_invoice', 'inventory', 'purchase_order'];
@@ -242,15 +242,24 @@ final class StockDocumentService
     private function applyCardUpdates(int $supplierId, array $posted, bool $canWriteCards, ?int $userId, ?string $ip, ?string $userAgent): array
     {
         $id = (int) $posted['id'];
-        if (array_filter($posted['lines'] ?? [], static fn (array $l): bool => $l['remember_seller_code'] === true) === []) {
-            return [];
+        $wants = static fn (string $option): bool => array_filter($posted['lines'] ?? [], static fn (array $l): bool => $l[$option] === true) !== [];
+        $steps = [
+            ['remember_seller_code', 'rememberSellerCodes', 'Kód dodavatele se ke kartě nepodařilo uložit, příjemka je zaúčtovaná.'],
+            ['fill_intrastat', 'fillIntrastat', 'Údaje pro Intrastat se na kartu nepodařilo doplnit, příjemka je zaúčtovaná.'],
+        ];
+        $warnings = [];
+        foreach ($steps as [$option, $method, $failure]) {
+            if (!$wants($option)) {
+                continue;
+            }
+            try {
+                $warnings = [...$warnings, ...$this->runInTransaction(fn (): array => $this->cardUpdates->{$method}($supplierId, $id, $canWriteCards, $userId, $ip, $userAgent))];
+            } catch (\Throwable $e) {
+                error_log($failure . ' Příjemka #' . $id . ': ' . $e->getMessage());
+                $warnings[] = $failure;
+            }
         }
-        try {
-            return $this->runInTransaction(fn (): array => $this->cardUpdates->rememberSellerCodes($supplierId, $id, $canWriteCards, $userId, $ip, $userAgent));
-        } catch (\Throwable $e) {
-            error_log('Uložení kódu dodavatele po zaúčtování příjemky #' . $id . ': ' . $e->getMessage());
-            return ['Kód dodavatele se ke kartě nepodařilo uložit, příjemka je zaúčtovaná.'];
-        }
+        return $warnings;
     }
 
     public function postFulfillmentShipment(int $supplierId, int $id, int $shipmentId, ?int $userId): array
@@ -962,6 +971,7 @@ final class StockDocumentService
                 'purchase_invoice_item_id' => isset($rl['purchase_invoice_item_id']) && (int) $rl['purchase_invoice_item_id'] > 0 ? (int) $rl['purchase_invoice_item_id'] : null,
                 'purchase_order_line_id'   => isset($rl['purchase_order_line_id']) && (int) $rl['purchase_order_line_id'] > 0 ? (int) $rl['purchase_order_line_id'] : null,
                 'remember_seller_code'     => ($rl['remember_seller_code'] ?? false) === true,
+                'fill_intrastat'           => ($rl['fill_intrastat'] ?? false) === true,
                 'source_description'       => self::nullableString($rl['source_description'] ?? null),
                 'source_qty'               => isset($rl['source_qty']) && $rl['source_qty'] !== null && $rl['source_qty'] !== ''
                     ? StockValuation::tToDecimal(StockValuation::qtyToT((string) $rl['source_qty'])) : null,

@@ -42,7 +42,7 @@ final class StockReceiptService
         'credit_note'  => 'Dobropis je vratka dodavateli — použij výdejku, ne příjemku.',
     ];
 
-    public const CARD_WRITE_FORBIDDEN = 'Kód dodavatele nelze uložit ke kartě: nemáte právo upravovat skladové karty.';
+    public const CARD_WRITE_FORBIDDEN = 'Kód dodavatele ani údaje pro Intrastat nelze na kartu zapsat: nemáte právo upravovat skladové karty.';
 
     public function __construct(
         private readonly Connection $db,
@@ -110,6 +110,8 @@ final class StockReceiptService
                     'order_index'              => (int) $it['order_index'],
                     'seller_item_code'         => $it['seller_item_code'],
                     'vendor_code_cards'        => $holders,
+                    'intrastat_cn8_code'       => $it['intrastat_cn8_code'],
+                    'intrastat_country_of_origin' => $it['intrastat_country_of_origin'],
                     'matched_stock_item_id'    => $it['matched_stock_item_id'],
                     'match_source'             => $it['match_source'],
                     'purchase_invoice_item_id' => (int) $it['id'],
@@ -136,6 +138,8 @@ final class StockReceiptService
                         'purchase_order_line_id'   => $it['purchase_order_line_id'],
                         'stock_item_id'            => null,
                         'seller_item_code'         => $it['seller_item_code'],
+                        'intrastat_cn8_code'       => $it['intrastat_cn8_code'],
+                        'intrastat_country_of_origin' => $it['intrastat_country_of_origin'],
                         'matched_stock_item_id'    => $it['matched_stock_item_id'],
                         'match_source'             => $it['match_source'],
                         'description'              => (string) $it['description'],
@@ -178,9 +182,9 @@ final class StockReceiptService
      * rozpuštění vedlejších nákladů (A8, jen draft). Post provádí uživatel ručně
      * z editoru dokladu ({@see StockDocumentService::post()}).
      *
-     * Volba `lines[].remember_seller_code` = true chystá zápis do karty, ten proběhne až při
-     * zaúčtování ({@see ReceiptCardUpdater}). Bez práva `stock.items.write` ($canWriteCards)
-     * se celý požadavek odmítne a nic nevznikne.
+     * Volby `lines[].remember_seller_code` a `lines[].fill_intrastat` = true chystají zápis do karty,
+     * ten proběhne až při zaúčtování ({@see ReceiptCardUpdater}). Bez práva `stock.items.write`
+     * ($canWriteCards) se celý požadavek odmítne a nic nevznikne.
      *
      * @param array<string,mixed> $body {warehouse_id, doc_date, description?, lines:list, landed_costs?:list}
      * @return array<string,mixed>
@@ -220,7 +224,7 @@ final class StockReceiptService
 
             if (!$canWriteCards) {
                 foreach ($rawLines as $rl) {
-                    if (is_array($rl) && ($rl['remember_seller_code'] ?? false) === true) {
+                    if (is_array($rl) && (($rl['remember_seller_code'] ?? false) === true || ($rl['fill_intrastat'] ?? false) === true)) {
                         throw new StockException('card_write_forbidden', self::CARD_WRITE_FORBIDDEN, 403);
                     }
                 }
@@ -296,6 +300,7 @@ final class StockReceiptService
                     'purchase_invoice_item_id' => $piItemId,
                     'purchase_order_line_id'   => $piItem['purchase_order_line_id'] ?? null,
                     'remember_seller_code'     => $remember,
+                    'fill_intrastat'           => ($rl['fill_intrastat'] ?? false) === true,
                     'source_description'       => (string) $piItem['description'],
                     'source_qty'               => (string) $piItem['base_quantity'],
                 ];
@@ -390,7 +395,8 @@ final class StockReceiptService
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.order_index, pii.stock_item_id, pii.purchase_order_line_id, pii.description,
                     pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat, si.item_type,
-                    pii.seller_item_code, pii.item_ean, pii.expense_kind, pi.vendor_id
+                    pii.seller_item_code, pii.item_ean, pii.expense_kind, pi.vendor_id,
+                    pii.intrastat_cn8_code, pii.intrastat_country_of_origin
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
           LEFT JOIN stock_items si ON si.id = pii.stock_item_id AND si.supplier_id = pi.supplier_id

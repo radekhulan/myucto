@@ -26,6 +26,9 @@ final class PurchaseItemCodeExtractionTest extends TestCase
         self::assertSame(['string', 'null'], $item['properties']['seller_item_code']['type']);
         self::assertSame(['string', 'null'], $item['properties']['item_ean']['type']);
         self::assertContains('seller_item_code', $item['required'], 'Striktní schema chce všechna pole v required.');
+        self::assertContains('intrastat_cn8_code', $item['required']);
+        self::assertContains('intrastat_country_of_origin', $item['required']);
+        self::assertStringContainsString('"intrastat_cn8_code": string|null', $anthropic);
     }
 
     public function testIsdocReadsSellerCodeAndEan(): void

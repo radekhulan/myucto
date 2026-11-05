@@ -77,6 +77,8 @@ JSON schema:
       "description": string,
       "seller_item_code": string|null,
       "item_ean": string|null,
+      "intrastat_cn8_code": string|null,
+      "intrastat_country_of_origin": string|null,
       "quantity": number,
       "unit": string,
       "unit_price_without_vat": number,
@@ -372,6 +374,9 @@ DŮLEŽITÉ k polím `seller_item_code` a `item_ean` (KÓD ZBOŽÍ NA ŘÁDKU):
 - Pořadové číslo řádku, číslo dodacího listu ani objednávky kódem NEJSOU. Celní kód (Commodity
   code, HS, KN, CN) a země původu kódem zboží také NEJSOU.
 - Když řádek kód neuvádí (typicky služby, doprava, balné), vrať null. NEVYMÝŠLEJ ho.
+- `intrastat_cn8_code` = celní kód zboží z řádku (Commodity code, HS, KN, CN), 8 číslic bez teček.
+- `intrastat_country_of_origin` = země původu zboží z řádku (Country of Origin, Made in) jako
+  dvoupísmenný ISO kód. Země dodavatele to není. Když je řádek neuvádí, vrať u obou polí null.
 EOT;
     }
 
@@ -538,6 +543,8 @@ EOT;
                             // Kód zboží pro párování se skladovou kartou (viz itemCodeFieldRules).
                             'seller_item_code'       => ['type' => ['string', 'null']],
                             'item_ean'               => ['type' => ['string', 'null']],
+                            'intrastat_cn8_code'          => ['type' => ['string', 'null']],
+                            'intrastat_country_of_origin' => ['type' => ['string', 'null']],
                             'quantity'               => ['type' => 'number'],
                             'unit'                   => ['type' => ['string', 'null']],
                             'unit_price_without_vat' => ['type' => 'number'],
