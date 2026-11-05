@@ -49,8 +49,9 @@ jednorázové faktury (poradenství, licence).
 5. Zvolte **Měnu** a **Splatnost** (**7 dnů**, **14 dnů**, **Měsíc**
    nebo **Vlastní…**).
 6. Volitelně zadejte **Celkový**, **Roční** a **Měsíční rozpočet**.
-7. Přidejte **Fakturační e-maily** (viz [§ 19.9.3](#1993-fakturacni-e-maily)).
-8. Klikněte na **Vytvořit**.
+7. Volitelně vyberte **Výchozí ceník práce**; ten se předvyplní do nových výkazů této zakázky.
+8. Přidejte **Fakturační e-maily** (viz [§ 19.9.3](#1993-fakturacni-e-maily)).
+9. Klikněte na **Vytvořit**.
 
 ![Nová zakázka](img/07_zakazka_novy.webp)
 
@@ -201,6 +202,7 @@ kalendářní měsíc. Zakázka přebíjí klienta i dodavatele.
 | Celkový rozpočet | Volitelný horní limit za celou zakázku (varování v editoru při překročení) |
 | Roční rozpočet | Volitelný roční limit |
 | Měsíční rozpočet | Volitelný měsíční limit |
+| Výchozí ceník práce | Ceník předvyplněný do nového výkazu práce; výkaz si uloží vlastní kopii nastavení |
 | Výchozí kategorie tržby | Předvyplní se u nových vydaných faktur zakázky a má přednost před kategorií zákazníka. Po uložení se doplní do faktur zakázky, které kategorii nemají |
 | Stav | **Aktivní** (výchozí) / **Pozastavené** / **Uzavřené** |
 | Poznámka | Interní text |

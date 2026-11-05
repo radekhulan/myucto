@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\WorkReport\WorkReportDisplayOptions;
+use MyInvoice\Service\WorkReport\WorkReportBilling;
 use PDO;
 
 final class WorkReportRepository
@@ -16,10 +17,17 @@ final class WorkReportRepository
     public function findByInvoice(int $invoiceId, int $supplierId): ?array
     {
         $pdo = $this->db->pdo();
-        $stmt = $pdo->prepare('SELECT wr.*, s.work_report_display_options AS display_defaults
+        $stmt = $pdo->prepare('SELECT wr.*, s.work_report_display_options AS display_defaults,
+                    cur.code AS billing_currency, i.prices_include_vat AS billing_gross,
+                    i.reverse_charge AS billing_reverse_charge, p.name AS billing_project_name,
+                    COALESCE(wr.vat_rate_id, s.default_vat_rate_id) AS billing_vat_rate_id,
+                    vr.rate_percent AS billing_vat_percent
                FROM invoices i
                JOIN work_reports wr ON wr.invoice_id = i.id
                JOIN supplier s ON s.id = i.supplier_id
+               JOIN currencies cur ON cur.id = i.currency_id
+               LEFT JOIN projects p ON p.id = wr.project_id
+               LEFT JOIN vat_rates vr ON vr.id = COALESCE(wr.vat_rate_id, s.default_vat_rate_id)
               WHERE i.supplier_id = ? AND i.id = ?');
         $stmt->execute([$supplierId, $invoiceId]);
         $wr = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -51,7 +59,7 @@ final class WorkReportRepository
         $wr = self::withDisplayOptions($wr);
         $wr['items']                = $this->itemsFor((int) $wr['id']);
         $wr['materials']            = $this->materialsFor((int) $wr['id']);
-        return $wr;
+        return self::withBilling($wr);
     }
 
     /**
@@ -72,10 +80,17 @@ final class WorkReportRepository
         $pdo = $this->db->pdo();
         $place = implode(',', array_fill(0, count($invoiceIds), '?'));
 
-        $stmt = $pdo->prepare("SELECT wr.*, s.work_report_display_options AS display_defaults
+        $stmt = $pdo->prepare("SELECT wr.*, s.work_report_display_options AS display_defaults,
+                    cur.code AS billing_currency, i.prices_include_vat AS billing_gross,
+                    i.reverse_charge AS billing_reverse_charge, p.name AS billing_project_name,
+                    COALESCE(wr.vat_rate_id, s.default_vat_rate_id) AS billing_vat_rate_id,
+                    vr.rate_percent AS billing_vat_percent
                FROM invoices i
                JOIN work_reports wr ON wr.invoice_id = i.id
                JOIN supplier s ON s.id = i.supplier_id
+               JOIN currencies cur ON cur.id = i.currency_id
+               LEFT JOIN projects p ON p.id = wr.project_id
+               LEFT JOIN vat_rates vr ON vr.id = COALESCE(wr.vat_rate_id, s.default_vat_rate_id)
               WHERE i.supplier_id = ? AND i.id IN ($place)");
         $stmt->execute([$supplierId, ...$invoiceIds]);
         $reports = [];        // invoice_id → wr
@@ -173,10 +188,68 @@ final class WorkReportRepository
             }
             $wr['items']     = $itemsBy[$wrid] ?? [];
             $wr['materials'] = $matsBy[$wrid] ?? [];
-            $reports[$invoiceId] = self::withDisplayOptions($wr);
+            $reports[$invoiceId] = self::withBilling(self::withDisplayOptions($wr));
         }
 
         return $reports;
+    }
+
+    private static function withBilling(array $report): array
+    {
+        $snapshot = $report['billing_snapshot'] ?? null;
+        $report['billing_snapshot'] = is_string($snapshot) ? json_decode($snapshot, true, 512, JSON_THROW_ON_ERROR) : $snapshot;
+        $report['billing_template_id'] = isset($report['billing_template_id']) ? (int) $report['billing_template_id'] : null;
+        $report['billing_preview'] = null;
+        $report['billing_stale'] = false;
+        if ($report['billing_snapshot'] !== null) {
+            $input = $report;
+            $input['project_name'] = $report['billing_project_name'] ?? '';
+            $input['vat_rate_id'] = (int) $report['billing_vat_rate_id'];
+            $report['billing_preview'] = WorkReportBilling::calculate($input, [
+                'currency' => $report['billing_currency'], 'prices_include_vat' => $report['billing_gross'],
+                'reverse_charge' => $report['billing_reverse_charge'],
+            ], (float) $report['billing_vat_percent']);
+            $report['total_amount'] = $report['billing_preview']['total_amount'];
+            $report['total_hours'] = $report['billing_preview']['total_hours'];
+            $report['billing_stale'] = $report['billing_preview']['fingerprint'] !== ($report['billing_transferred_fingerprint'] ?? null);
+        }
+        foreach (['billing_currency', 'billing_gross', 'billing_reverse_charge', 'billing_project_name', 'billing_vat_rate_id', 'billing_vat_percent'] as $key) unset($report[$key]);
+        return $report;
+    }
+
+    /** Kopie nese uložené ujednání a nové vlastní vazby; přenos cen musí uživatel potvrdit. */
+    public function cloneForInvoice(int $sourceInvoiceId, int $targetInvoiceId, int $supplierId): ?int
+    {
+        $source = $this->findByInvoice($sourceInvoiceId, $supplierId);
+        if ($source === null) return null;
+        $pdo = $this->db->pdo();
+        $columns = 'project_id, title, total_hours, total_amount, vat_rate_id, material_title, material_total, material_vat_rate_id, display_options, billing_template_id, billing_snapshot, billing_period';
+        $pdo->prepare('INSERT INTO work_reports (invoice_id, ' . $columns . ') SELECT ?, ' . $columns . ' FROM work_reports WHERE id = ?')
+            ->execute([$targetInvoiceId, $source['id']]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO work_report_items (work_report_id, description, work_date, hours, duration_minutes, rate, total_amount, order_index)
+            SELECT ?, description, work_date, hours, duration_minutes, rate, total_amount, order_index FROM work_report_items WHERE work_report_id = ?')
+            ->execute([$id, $source['id']]);
+        $pdo->prepare('INSERT INTO work_report_materials (work_report_id, description, quantity, unit, unit_price, total_amount, order_index)
+            SELECT ?, description, quantity, unit, unit_price, total_amount, order_index FROM work_report_materials WHERE work_report_id = ?')
+            ->execute([$id, $source['id']]);
+        return $id;
+    }
+
+    public function saveBilling(int $invoiceId, int $supplierId, ?int $templateId, ?array $snapshot, ?string $period): void
+    {
+        $this->db->pdo()->prepare('UPDATE work_reports wr JOIN invoices i ON i.id = wr.invoice_id
+            SET wr.billing_template_id = ?, wr.billing_snapshot = ?, wr.billing_period = ?
+            WHERE i.supplier_id = ? AND i.id = ?')->execute([
+                $templateId, $snapshot === null ? null : json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                $period, $supplierId, $invoiceId,
+            ]);
+        if ($snapshot === null) return;
+        $report = $this->findByInvoice($invoiceId, $supplierId);
+        if ($report !== null) {
+            $amount = $report['billing_preview']['total_amount'];
+            $this->db->pdo()->prepare('UPDATE work_reports SET total_amount = ? WHERE id = ?')->execute([$amount, $report['id']]);
+        }
     }
 
     /** Procentní sazba DPH z číselníku (rate_percent), nebo null když ID neexistuje. */
@@ -428,6 +501,15 @@ final class WorkReportRepository
             $supplierId,
         ]);
         return $stmt->rowCount();
+    }
+
+    public function hasBillingItems(int $invoiceId, int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM invoices i
+            JOIN invoice_items ii ON ii.invoice_id = i.id
+            WHERE i.supplier_id = ? AND i.id = ? AND ii.work_report_billing_key IS NOT NULL LIMIT 1');
+        $stmt->execute([$supplierId, $invoiceId]);
+        return $stmt->fetchColumn() !== false;
     }
 
     public function deleteByInvoice(int $invoiceId, int $supplierId): bool

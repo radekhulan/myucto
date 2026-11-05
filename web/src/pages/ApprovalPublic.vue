@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureLocaleLoaded } from '@/i18n'
@@ -33,7 +34,7 @@ const turnstileEl = ref<HTMLElement | null>(null)
 const TURNSTILE_SCRIPT = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
 
 const WR_DEFAULTS: WorkReportDisplayOptions = { compact: false, date: true, hours: true, rate: true, amount: true }
-const wrOptions = computed<WorkReportDisplayOptions>(() => ({ ...WR_DEFAULTS, ...data.value?.work_report.effective_display_options }))
+const wrOptions = computed<WorkReportDisplayOptions>(() => ({ ...WR_DEFAULTS, ...data.value?.work_report.effective_display_options, ...(data.value?.work_report.billing_enabled ? { rate: false, amount: false } : {}) }))
 /** Bez změněných voleb zůstává tabulka v původní podobě: částka jen v součtu, ne u řádků. */
 const wrCustomized = computed(() => (Object.keys(WR_DEFAULTS) as Array<keyof WorkReportDisplayOptions>)
   .some(key => wrOptions.value[key] !== WR_DEFAULTS[key]))
@@ -303,6 +304,10 @@ async function submit(decision: 'approve' | 'reject') {
                   </tr>
                 </tbody>
               </table>
+            </div>
+
+            <div v-if="data.work_report.billing_enabled && data.work_report.billing_preview" class="p-4 border-t border-neutral-200">
+              <BillingRecap :preview="data.work_report.billing_preview" :currency="data.invoice.currency" :display-options="data.work_report.effective_display_options" :language="lang" :prices-include-vat="data.invoice.prices_include_vat" />
             </div>
 
             <!-- Materiál -->

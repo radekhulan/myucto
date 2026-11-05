@@ -39,6 +39,25 @@ describe('Veřejné schvalování výkazu', () => {
     wrapper.unmount()
   })
 
+  it('zobrazí oddělenou cenovou rekapitulaci místo starých řádkových sazeb', async () => {
+    const data = payload('en')
+    mocks.get.mockResolvedValue({ ...data, work_report: { ...data.work_report,
+      billing_enabled: true,
+      billing_preview: { items: [{ billing_key: 'fixed', description: 'Syntetický paušál', quantity: 1, unit: 'ks', unit_price_without_vat: 5000, total_amount: 5000 }], total_hours: 1, included_hours: 1, extra_hours: 0, total_amount: 5000 },
+    } })
+    const wrapper = mount(ApprovalPublic, {
+      global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: {
+        cs: { work_report_billing: { recap: 'Rekapitulace', hours_recap: '{included} zahrnuté / {extra} navíc' } },
+        en: { work_report_billing: { recap: 'Billing summary', hours_recap: '{included} included / {extra} extra' } },
+      } })] },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="billing-recap"]').text()).toContain('Billing summary')
+    expect(wrapper.text()).toContain('Syntetický paušál')
+    expect(wrapper.findAll('thead th').map(cell => cell.text())).toEqual(['Description', 'Hours'])
+    wrapper.unmount()
+  })
+
   it('skryje sloupec částky i součet podle nastavení výkazu', async () => {
     mocks.get.mockResolvedValue(payload('cs', false))
     const wrapper = mount(ApprovalPublic, {

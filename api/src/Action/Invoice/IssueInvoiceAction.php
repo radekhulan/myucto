@@ -108,6 +108,14 @@ final class IssueInvoiceAction
             return Json::error($response, 'not_draft', 'Lze vystavit jen draft fakturu.', 409);
         }
 
+        try {
+            (new \MyInvoice\Service\WorkReport\WorkReportBillingService($this->db,
+                new \MyInvoice\Repository\WorkReportRepository($this->db), $this->repo,
+                new \MyInvoice\Service\Invoice\InvoiceCalculator($this->db)))->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
+        }
+
         // Zámek dokladu (Epic F6, H1): issue přiděluje varsymbol/číslo řady k issue/tax
         // date — datum v uzavřeném období nesmí projít (client 403, účetní 409, admin force).
         if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $id)) {
@@ -238,7 +246,11 @@ final class IssueInvoiceAction
         if ($this->stockIssue->isStockEnabled($supplierId)) {
             try {
                 $this->stockIssue->assertAvailableForInvoice($supplierId, $invoice);
-            } catch (StockException $e) {
+            } catch (\DomainException $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $releaseAllocated();
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
+        } catch (StockException $e) {
                 return Json::error(
                     $response,
                     'stock.error.' . $e->errorCode,
@@ -352,6 +364,11 @@ final class IssueInvoiceAction
             }
         };
         try {
+            $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $billingLock->execute([$supplierId, $id]);
+            (new \MyInvoice\Service\WorkReport\WorkReportBillingService($this->db,
+                new \MyInvoice\Repository\WorkReportRepository($this->db), $this->repo,
+                new \MyInvoice\Service\Invoice\InvoiceCalculator($this->db)))->assertCurrent($id, $supplierId);
             if ($varsymbol === null) {
                 try {
                     // Zjednodušený doklad má vlastní řadu, je-li ve firmě nastavená.

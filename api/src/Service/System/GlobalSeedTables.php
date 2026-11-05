@@ -189,6 +189,7 @@ final class GlobalSeedTables
      * @var list<string>
      */
     public const RESET_KEEP_USERS_SUPPLIER = [
+        'work_report_billing_templates',
         // Účet, přihlášení a jeho druhé faktory. Bez passkeys a záchranných kódů by
         // se uživatel s vynuceným MFA po resetu nepřihlásil.
         'users', 'sessions', 'trusted_devices', 'login_otps',

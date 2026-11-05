@@ -388,7 +388,9 @@ Vygenerované PDF obsahuje:
 10. **Patičku** - text z Nastavení dodavatele (volitelný).
 11. **Druhou stranu s výkazem víceprací** (volitelně). Má-li faktura výkaz, je
     položka „Výkaz víceprací“ v tabulce položek podtržený odkaz, který přeskočí
-    přímo na stránku s výkazem.
+    přímo na stránku s výkazem. Při ceníku práce se na této straně zobrazí detailní
+    časový rozpis a cenová rekapitulace; viditelnost hodin, sazby a částek respektuje
+    nastavení zobrazení výkazu.
 
 > [!TIP]
 > **Branding hlavičky.** Má-li dodavatel v Nastavení zapnutý branding, PDF přebere jeho

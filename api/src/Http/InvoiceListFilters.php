@@ -45,6 +45,7 @@ final class InvoiceListFilters
             'currency'      => $filter['currency']    ?? null,
             'unpaid_only'   => !empty($filter['unpaid_only']),
             'overdue'       => !empty($filter['overdue']),
+            'cashflow_draft_unscheduled' => !empty($filter['cashflow_draft_unscheduled']),
             'unpaid_as_of'  => $unpaidAsOf,
             'booked'        => $filter['booked']      ?? null,
             // Kategorie tržby, čárkou oddělené seznamy: `revenue_category_id` = ponechat jen

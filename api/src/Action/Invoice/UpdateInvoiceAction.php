@@ -125,6 +125,14 @@ final class UpdateInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        if ((isset($body['currency_id']) && (int) $body['currency_id'] !== (int) $existing['currency_id'])
+            || (isset($body['currency']) && (string) $body['currency'] !== (string) $existing['currency'])) {
+            $billingReport = (new \MyInvoice\Repository\WorkReportRepository($this->db))->findByInvoice($id, (int) $existing['supplier_id']);
+            if (($billingReport['billing_snapshot'] ?? null) !== null) {
+                return Json::error($response, 'billing_currency_mismatch', 'Nejprve zrušte cenové ujednání výkazu; jeho měna musí odpovídat faktuře.', 400);
+            }
+        }
+
         // effective_tax_date je generovaný sloupec (COALESCE(tax_date, issue_date)) a z těla se
         // neukládá. invoiceRefDate() ho bere přednostně, takže podvržená hodnota by zámek
         // období i kontrolu podaného DPH období vyhodnotila nad jiným datem, než se uloží.

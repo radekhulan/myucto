@@ -174,7 +174,8 @@
     "vat_classifications",
     "vendor",
     "workReportDisplay",
-    "workReportTracking"
+    "workReportTracking",
+    "work_report_billing"
   ],
   "routes": {
     "instance-admin": [
@@ -214,10 +215,12 @@
       "errors"
     ],
     "approval": [
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "work-report-tracking": [
-      "workReportTracking"
+      "workReportTracking",
+      "work_report_billing"
     ],
     "payroll-document-access": [
       "payrollDocumentAccess"
@@ -236,7 +239,8 @@
       "errors",
       "taxReturn",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "portal-mcp": [
       "client_mcp",
@@ -291,7 +295,8 @@
     "project-new": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "project-detail": [
       "dimensions",
@@ -303,7 +308,8 @@
     "project-edit": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "invoices": [
       "dimensions",
@@ -315,7 +321,8 @@
       "payment_method",
       "project",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-ai-import": [
       "aiGateway",
@@ -337,7 +344,8 @@
       "settings",
       "stock",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-detail": [
       "accrual_period",
@@ -363,7 +371,8 @@
       "smtp_logs",
       "stock",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-edit": [
       "accrual_period",
@@ -381,7 +390,8 @@
       "settings",
       "stock",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoices-export": [
       "aiGateway",
@@ -1127,7 +1137,8 @@
       "settings",
       "stock",
       "users",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "accounting-activation": [
       "activation"
@@ -1330,7 +1341,8 @@
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "recurring-detail": [
       "payment_method",
@@ -1344,7 +1356,8 @@
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "admin-diagnostics": [
       "diagnostics",

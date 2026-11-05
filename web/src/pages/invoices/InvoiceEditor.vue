@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
+import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
 import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
 import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
@@ -2210,6 +2212,7 @@ const isRefundInvoice = computed(() =>
 
 const hasNonPositiveAmountToPay = computed(() =>
   requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
+    && !(!isEdit.value && form.value.items.length === 0 && wrBillingPending.value && wrBillingPendingAmount.value > 0)
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
@@ -2279,6 +2282,18 @@ const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat && sup
   : t('invoice.items_table.unit_price'))
 
 // ─── WORK REPORT ────────────────────────────────────────────────
+const wrBillingSnapshot = ref<WorkReportBillingSnapshot | null>(null)
+const wrBillingTemplateId = ref<number | null>(null)
+const wrBillingPeriod = ref('')
+const wrBillingStale = ref(false)
+const wrBillingPending = ref(false)
+const wrBillingPendingAmount = ref(0)
+const billingDraftId = ref<number | null>(null)
+const wrBillingLegacyItemId = ref<number | null>(null)
+function queueWrBilling(preview: WorkReportBillingPreview) {
+  wrBillingPendingAmount.value = preview.total_amount
+  wrBillingPending.value = true
+}
 const wrOpen = ref(false)
 const wrTitle = ref('')
 const wrDisplayOptions = ref<Partial<WorkReportDisplayOptions> | null>(null)
@@ -2300,6 +2315,10 @@ async function loadWorkReport() {
   if (!invoiceId.value) return
   const wr = await invoicesApi.getWorkReport(invoiceId.value)
   if (wr) {
+    wrBillingSnapshot.value = wr.billing_snapshot ?? null
+    wrBillingTemplateId.value = wr.billing_template_id ?? null
+    wrBillingPeriod.value = wr.billing_period ?? (form.value.tax_date || form.value.issue_date || '').slice(0, 7)
+    wrBillingStale.value = !!wr.billing_stale
     wrDisplayOptions.value = wr.display_options ?? null
     wrTitle.value = wr.title
     wrItems.value = wr.items.map(i => ({ ...i }))
@@ -2308,7 +2327,7 @@ async function loadWorkReport() {
     wrVatRateId.value = supplierIsVatPayer.value
       ? (wr.vat_rate_id ?? vatRateIdByPercent(21) ?? defaultVatRateId())
       : defaultVatRateId()
-    if (wr.items.length > 0) wrOpen.value = true
+    if (wr.items.length > 0 || wr.billing_snapshot) wrOpen.value = true
     // Materiál
     if (wr.material_title) matTitle.value = wr.material_title
     matItems.value = (wr.materials ?? []).map(m => ({ ...m }))
@@ -2350,7 +2369,15 @@ function moveWrItem(idx: number, dir: -1 | 1) {
   const [item] = wrItems.value.splice(idx, 1)
   wrItems.value.splice(newIdx, 0, item)
 }
-function openWorkReport() {
+async function openWorkReport() {
+  wrBillingPeriod.value ||= (form.value.tax_date || form.value.issue_date || '').slice(0, 7)
+  const defaultTemplate = projects.value.find(p => p.id === form.value.project_id)?.billing_template_id
+  if (!wrBillingSnapshot.value && defaultTemplate) {
+    try {
+      const template = (await workReportBillingApi.list()).find(item => item.id === defaultTemplate)
+      if (template && template.currency === form.value.currency) { wrBillingTemplateId.value = template.id; wrBillingSnapshot.value = JSON.parse(JSON.stringify(template)) }
+    } catch (e) { error.value = apiErrorMessage(e, t('common.error')) }
+  }
   if (wrVatRateId.value == null) wrVatRateId.value = supplierIsVatPayer.value ? (vatRateIdByPercent(21) ?? defaultVatRateId()) : defaultVatRateId()
   if (wrItems.value.length === 0) {
     const date = (form.value.tax_date || form.value.issue_date || '').slice(0, 7) // YYYY-MM
@@ -2422,6 +2449,9 @@ async function deleteWorkReport() {
   }
   wrItems.value = []
   wrTitle.value = ''
+  wrBillingSnapshot.value = null
+  wrBillingTemplateId.value = null
+  wrBillingPending.value = false
   wrOpen.value = false
 }
 
@@ -2430,6 +2460,7 @@ async function deleteWorkReport() {
  * Vrací null = OK, jinak warning string pro confirm().
  */
 function checkWorkReportSync(): string | null {
+  if (wrBillingSnapshot.value) return null
   if (!wrOpen.value || wrItemsValid.value.length === 0) return null
   const totalHours = Math.round(wrTotalHours.value * 100) / 100
   const totalAmount = Math.round(wrTotalAmount.value * 100) / 100
@@ -2675,6 +2706,8 @@ async function submit() {
   if (!validateDurationInputs(paneDom.root())) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
+  if (wrBillingPending.value && !isEdit.value && form.value.items.length === 1 && !form.value.items[0]?.description.trim()
+    && !form.value.items[0]?.stock_item_id && !form.value.items[0]?.small_asset_id && !form.value.items[0]?.asset_id) form.value.items = []
   form.value.items = form.value.items.filter(it =>
     (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0
   )
@@ -2763,6 +2796,8 @@ async function submit() {
         vat_rate_id: it.vat_rate_id,
         ...itemVatPayload(it),
         order_index: i,
+        linked_work_report_id: it.linked_work_report_id ?? null,
+        work_report_billing_key: it.work_report_billing_key ?? null,
         // B5: MUSÍ se posílat zpět, jinak je InvoiceRepository::replaceItems (DELETE+INSERT) tiše smaže.
         stock_item_id: it.stock_item_id ?? null,
         warehouse_id: it.warehouse_id ?? null,
@@ -2801,12 +2836,14 @@ async function submit() {
       })),
     }
 
+    const legacyItemIndex = wrBillingLegacyItemId.value == null ? -1 : form.value.items.findIndex(item => item.id === wrBillingLegacyItemId.value)
     const itemDimsSnapshot = docDims.snapshot(form.value.items)
     let saved: Invoice
-    if (isEdit.value && invoiceId.value) {
-      saved = await invoicesApi.update(invoiceId.value, payload, isForce.value)
+    if ((isEdit.value && invoiceId.value) || billingDraftId.value) {
+      saved = await invoicesApi.update(billingDraftId.value ?? invoiceId.value!, payload, isForce.value)
     } else {
       saved = await invoicesApi.create(payload)
+      if (wrBillingSnapshot.value) billingDraftId.value = saved.id
     }
     await docDims.save(saved.id, itemDimsSnapshot)
 
@@ -2849,11 +2886,14 @@ async function submit() {
     notifyCashSettlement(saved._cash_settlement)
     // Po uložení faktury — pokud uživatel otevřel work report, ulož ho
     // (jen řádky s vyplněným popisem; prázdné řádky tiše ignorujeme — viz wrItemsValid)
-    if (wrOpen.value && wrItemsValid.value.length > 0) {
+    if (wrOpen.value && (wrItemsValid.value.length > 0 || wrBillingSnapshot.value)) {
       try {
         await invoicesApi.saveWorkReport(saved.id, {
           project_id: saved.project_id,
           title: wrTitle.value,
+          billing_template_id: wrBillingTemplateId.value,
+          billing_snapshot: wrBillingSnapshot.value,
+          billing_period: wrBillingPeriod.value || null,
           display_options: wrDisplayOptions.value,
           vat_rate_id: wrVatRateId.value,
           items: wrItemsValid.value.map((it, i) => ({
@@ -2865,6 +2905,11 @@ async function submit() {
             order_index: i,
           })),
         }, isForce.value)
+        if (wrBillingSnapshot.value && wrBillingPending.value) {
+          const preview = await workReportBillingApi.preview(saved.id)
+          await workReportBillingApi.transfer(saved.id, preview.fingerprint, isForce.value, legacyItemIndex < 0 ? undefined : saved.items[legacyItemIndex]?.id)
+          wrBillingPending.value = false
+        }
       } catch (e: any) {
         // Faktura je uložená, výkaz ne — nepokračuj v redirectu, ať uživatel nepřijde o data ve formuláři
         error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
@@ -4080,15 +4125,15 @@ useWindowTitle(
 
       <!-- Výkaz víceprací -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report') }}</h3>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <button v-if="!wrOpen" type="button" @click="openWorkReport"
               class="cursor-pointer px-4 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 font-medium rounded-md inline-flex items-center gap-1.5">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
               {{ t('invoice.wr_add') }}
             </button>
-            <button v-if="wrOpen && wrItems.length > 0" type="button" @click="pushWrToInvoiceItem"
+            <button v-if="wrOpen && wrItems.length > 0 && !wrBillingSnapshot" type="button" @click="pushWrToInvoiceItem"
               class="cursor-pointer px-4 h-9 text-sm bg-success-600 hover:bg-success-600 text-white font-semibold rounded-md inline-flex items-center gap-1.5 shadow-sm">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
               {{ t('invoice.wr_push_to_item') }}
@@ -4111,6 +4156,10 @@ useWindowTitle(
               <option v-for="r in domesticVatRates" :key="r.id" :value="r.id">{{ vatRateLabel(r) }}</option>
             </select>
           </div>
+          <ReportBillingEditor v-model:snapshot="wrBillingSnapshot" v-model:template-id="wrBillingTemplateId" v-model:period="wrBillingPeriod" v-model:legacy-item-id="wrBillingLegacyItemId" :invoice-items="form.items"
+            :currency="form.currency" :title="wrTitle" :items="wrItems" :project-name="projects.find(p => p.id === form.project_id)?.name"
+            :vat-rate-id="wrVatRateId" :prices-include-vat="form.prices_include_vat" :reverse-charge="form.reverse_charge"
+            :stale="wrBillingStale" :pending="wrBillingPending" @transfer="queueWrBilling" @changed="wrBillingPending = false; wrBillingStale = true" />
           <!-- Desktop: tabulka -->
           <div class="hidden md:block overflow-x-auto">
           <table class="w-full text-sm table-sticky-first">
@@ -4120,8 +4169,8 @@ useWindowTitle(
                 <th class="px-3 py-2 text-left font-medium">{{ t('invoice.wr_description') }}</th>
                 <th class="px-3 py-2 text-left font-medium w-36">{{ t('invoice.wr_date') }}</th>
                 <th class="px-3 py-2 text-right font-medium w-24">{{ t('invoice.wr_hours') }}</th>
-                <th class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.wr_rate') }}</th>
-                <th class="px-3 py-2 text-right font-medium w-32">{{ t('invoice.wr_total') }}</th>
+                <th v-if="!wrBillingSnapshot" class="px-3 py-2 text-right font-medium w-28">{{ t('invoice.wr_rate') }}</th>
+                <th v-if="!wrBillingSnapshot" class="px-3 py-2 text-right font-medium w-32">{{ t('invoice.wr_total') }}</th>
                 <th class="px-2 py-2 w-10"></th>
               </tr>
             </thead>
@@ -4144,10 +4193,10 @@ useWindowTitle(
                 <td class="px-2 py-1.5">
                   <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes" />
                 </td>
-                <td class="px-2 py-1.5">
+                <td v-if="!wrBillingSnapshot" class="px-2 py-1.5">
                   <input v-model.number="it.rate" v-math="6" type="text" inputmode="decimal" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm text-right font-mono" />
                 </td>
-                <td class="px-3 py-1.5 text-right font-mono text-neutral-700">
+                <td v-if="!wrBillingSnapshot" class="px-3 py-1.5 text-right font-mono text-neutral-700">
                   {{ formatMoney(workRowTotal(it), form.currency) }}
                 </td>
                 <td class="px-2 py-1.5 text-center">
@@ -4169,11 +4218,11 @@ useWindowTitle(
                   <span class="text-neutral-400 font-normal mr-2">Σ</span>{{ wrDurationTotal ?? `${wrTotalHours.toFixed(2)} h` }}
                 </td>
                 <td v-else></td>
-                <td></td>
-                <td v-if="wrItems.length > 0" class="px-3 py-2 text-right font-mono whitespace-nowrap" colspan="2">
+                <td v-if="!wrBillingSnapshot"></td>
+                <td v-if="!wrBillingSnapshot && wrItems.length > 0" class="px-3 py-2 text-right font-mono whitespace-nowrap" colspan="2">
                   {{ formatMoney(wrTotalAmount, form.currency) }}
                 </td>
-                <td v-else colspan="2"></td>
+                <td v-else-if="!wrBillingSnapshot" colspan="2"></td>
               </tr>
             </tfoot>
           </table>
@@ -4213,7 +4262,7 @@ useWindowTitle(
                   <DurationInput :legacy-decimals="2" v-model="it.hours" v-model:duration-minutes="it.duration_minutes" />
                 </div>
               </div>
-              <div class="grid grid-cols-2 gap-2 items-end">
+              <div v-if="!wrBillingSnapshot" class="grid grid-cols-2 gap-2 items-end">
                 <div>
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_rate') }}</label>
                   <input v-model.number="it.rate" v-math="6" type="text" inputmode="decimal" class="w-full h-10 px-3 border border-neutral-300 rounded text-right font-mono text-sm bg-surface" />
@@ -4233,11 +4282,11 @@ useWindowTitle(
             </button>
             <div v-if="wrItems.length > 0" class="bg-neutral-50 rounded-md px-3 py-2 flex items-center justify-between font-semibold text-sm">
               <span class="font-mono">Σ {{ wrDurationTotal ?? `${wrTotalHours.toFixed(2)} h` }}</span>
-              <span class="font-mono">{{ formatMoney(wrTotalAmount, form.currency) }}</span>
+              <span v-if="!wrBillingSnapshot" class="font-mono">{{ formatMoney(wrTotalAmount, form.currency) }}</span>
             </div>
           </div>
 
-          <p class="text-xs text-neutral-500">
+          <p v-if="!wrBillingSnapshot" class="text-xs text-neutral-500">
             {{ t('invoice.wr_hint', { title: wrTitle, hours: wrTotalHours.toFixed(2), rate: wrItems[0]?.rate || 0, currency: form.currency }) }}
           </p>
         </div>

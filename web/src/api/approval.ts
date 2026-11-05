@@ -1,3 +1,4 @@
+import type { PublicWorkReportBillingPreview } from './workReportBilling'
 import type { WorkReportDisplayOptions } from './invoices'
 import axios from 'axios'
 
@@ -39,6 +40,9 @@ export interface PublicApprovalWorkReportMaterial {
 }
 
 export interface PublicApprovalWorkReport {
+  billing_enabled?: boolean
+  billing_preview?: PublicWorkReportBillingPreview | null
+  billing_period?: string | null
   id: number
   invoice_id: number
   project_id: number
@@ -54,6 +58,7 @@ export interface PublicApprovalWorkReport {
 }
 
 export interface PublicApprovalInvoice {
+  prices_include_vat?: boolean
   id: number
   varsymbol: string | null
   invoice_type: 'invoice' | 'proforma' | 'credit_note'

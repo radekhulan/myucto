@@ -1014,6 +1014,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
         ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
+        ['GET', '#^/api/work-report-billing-templates(/|$)#', 'projects', AccessLevel::READ],
+        ['*', '#^/api/work-report-billing-templates(/|$)#', 'settings.company.write', AccessLevel::WRITE],
+        ['POST', '#^/api/work-report-billing-preview$#', 'invoices', AccessLevel::READ],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];
@@ -1154,6 +1157,9 @@ final class RoutePermissionMap
             $picker = $read && preg_match('#^/api/price-list-items(?:/[0-9]+(?:/(?:prices|resolve))?)?$#D', $path) === 1;
             return new RoutePermission(self::PERMISSION, 'price_list', $read ? AccessLevel::READ : AccessLevel::WRITE,
                 $picker ? ['invoices', 'recurring'] : []);
+        }
+        if ($method === 'GET' && $path === '/api/work-report-billing-templates') {
+            return new RoutePermission(self::PERMISSION, 'projects', AccessLevel::READ, ['invoices', 'settings.company']);
         }
         if ($method === 'GET' && preg_match('#^/api/codebooks/(currencies|units|vat-rates)$#D', $path) === 1) {
             return new RoutePermission(self::PERMISSION, 'settings.company', AccessLevel::READ,

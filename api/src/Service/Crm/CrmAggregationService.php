@@ -3272,7 +3272,7 @@ final class CrmAggregationService
      *   total_in: float, total_out: float, total_net: float
      * }
      */
-    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK'): array
+    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK', bool $includeDrafts = false): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
@@ -3344,6 +3344,35 @@ final class CrmAggregationService
             $inByBucket[(int) $r['bucket']] = (float) $r['amt'];
         }
 
+        $draftByBucket = [];
+        $unscheduledDraftCount = 0;
+        if ($includeDrafts) {
+            // Pouze uložené částky konceptů; ruční přenos z výkazů se zde neopakuje.
+            $draftStmt = $pdo->prepare(
+                "SELECT CASE{$buildCase('i')} END AS bucket,
+                        SUM(i.amount_to_pay - i.paid_total) AS amt
+                   FROM invoices i
+              LEFT JOIN currencies c ON c.id = i.currency_id
+                  WHERE i.supplier_id = ? AND " . DraftCashFlow::eligibleSql() . "
+                    AND i.due_date BETWEEN ? AND ?
+                    AND COALESCE(c.code, 'CZK') = ?
+               GROUP BY bucket"
+            );
+            $draftStmt->execute([...$caseParams, $supplierId, $globalStart, $globalEnd, $currency]);
+            foreach ($draftStmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                if ($row['bucket'] !== null) $draftByBucket[(int) $row['bucket']] = (float) $row['amt'];
+            }
+            $unscheduled = $pdo->prepare(
+                "SELECT COUNT(*) FROM invoices i
+              LEFT JOIN currencies c ON c.id = i.currency_id
+                  WHERE i.supplier_id = ? AND " . DraftCashFlow::eligibleSql() . "
+                    AND (i.due_date IS NULL OR i.due_date < ?)
+                    AND COALESCE(c.code, 'CZK') = ?"
+            );
+            $unscheduled->execute([$supplierId, $globalStart, $currency]);
+            $unscheduledDraftCount = (int) $unscheduled->fetchColumn();
+        }
+
         // Out: nezaplacené přijaté faktury s due_date v okně.
         $outStmt = $pdo->prepare(
             "SELECT CASE{$buildCase('pi')} END AS bucket,
@@ -3395,13 +3424,22 @@ final class CrmAggregationService
             ];
         }
 
-        return [
+        $forecast = [
             'currency'  => $currency,
             'weeks'     => $weeks,
             'total_in'  => round($totalIn, 2),
             'total_out' => round($totalOut, 2),
             'total_net' => round($totalIn - $totalOut, 2),
         ];
+        if ($includeDrafts) {
+            foreach ($forecast['weeks'] as $idx => &$week) {
+                $week['draft_in'] = round($draftByBucket[$idx] ?? 0.0, 2);
+            }
+            unset($week);
+            $forecast['total_draft_in'] = round(array_sum($draftByBucket), 2);
+            $forecast['unscheduled_draft_count'] = $unscheduledDraftCount;
+        }
+        return DraftCashFlow::withOutlook($forecast);
     }
 
     /**

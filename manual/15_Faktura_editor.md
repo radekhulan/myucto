@@ -834,6 +834,20 @@ V editoru klikněte na ikonu **Přidat výkaz práce** v řádku položky. Zobra
 Přidejte řádky a výkaz uložte. Součet práce se přenáší jako jedna položka `1 ks × celková
 cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 
+Výkaz může používat **ceník práce** s paušálem a pásmy hodin. Po výběru ceníku se
+v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
+`RRRR-MM`. Tlačítko **Přenést do faktury** připraví položky, ale přenos se provede až
+po uložení faktury. Při nahrazení starší souhrnné položky ji vyberte v nabídce, jinak
+by se mohla částka účtovat dvakrát. Propojené položky mají stabilní vazbu na výkaz a
+na PDF odkazují na jeho podrobný rozpis. Pokud se výkaz od posledního přenosu změnil,
+aplikace přenos zablokuje; nejprve zkontrolujte výkaz a připravte nový přenos.
+
+Jednotlivý výkaz si uchovává vlastní kopii ceníku. Změna firemního ceníku tedy nemění
+již uložený výkaz. Paušál se účtuje i při nulovém počtu hodin, nevyčerpané hodiny se
+nepřevádějí do dalšího období a limit hodin platí samostatně pro každý výkaz/fakturu.
+Popis položky může obsahovat `{nazev}` (název výkazu), `{zakazka}`, `{obdobi}`, `{limit}`,
+`{od}`, `{do}` a `{hodiny}`.
+
 Čas lze zadat také přímo do množství fakturační položky s hodinovou jednotkou (`h`, `hod`,
 `hod.`). Například `0:01` při sazbě 1 000 Kč/h znamená 16,67 Kč. Sazba `333,33333 Kč/h` při
 60 hodinách dává 20 000 Kč. Stejný způsob zadávání podporují přijaté faktury a šablony
@@ -1074,8 +1088,8 @@ materiálu**.
 | Cena/MJ | Jednotková cena až na šest desetinných míst - **bez DPH, nebo s DPH podle režimu faktury** (viz níže). PDF ukazuje víc než dvě místa jen u ceny, která je skutečně má |
 | Celkem | Automaticky: množství × cena/MJ |
 
-**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH** (sumarizuje se do jedné položky
-faktury). U výkazu práce je volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
+**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH**. U účtování podle ceníku práce
+ji přebírají všechny položky paušálu a pásem, u původního přenosu jedna souhrnná položka. U výkazu práce je volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
 výchozí **12 %**. Sazbu vyberete v záhlaví příslušné sekce. Materiál a práce tak mohou mít
 **různou sazbu DPH** na jednom dokladu, DPH se na faktuře rekapituluje správně po sazbách.
 

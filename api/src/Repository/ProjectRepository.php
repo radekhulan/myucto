@@ -11,6 +11,24 @@ final class ProjectRepository
 {
     public function __construct(private readonly Connection $db) {}
 
+    private function saveBillingTemplate(int $id, int $supplierId, array $data): void
+    {
+        $current = $this->db->pdo()->prepare('SELECT p.billing_template_id, cur.code FROM projects p JOIN currencies cur ON cur.id = p.currency_id WHERE p.id = ?');
+        $current->execute([$id]);
+        $project = $current->fetch(PDO::FETCH_ASSOC);
+        $templateId = array_key_exists('billing_template_id', $data) ? $data['billing_template_id'] : ($project['billing_template_id'] ?? null);
+        if ($templateId !== null) {
+            if (!filter_var($templateId, FILTER_VALIDATE_INT) || (int) $templateId <= 0
+                || (new WorkReportBillingTemplateRepository($this->db))->find((int) $templateId, $supplierId) === null) {
+                throw new \InvalidArgumentException('Cenové ujednání nepatří aktuální firmě.');
+            }
+            $templateId = (int) $templateId;
+            $template = (new WorkReportBillingTemplateRepository($this->db))->find($templateId, $supplierId);
+            if ($template['currency'] !== $project['code']) throw new \InvalidArgumentException('Měna cenového ujednání se liší od měny zakázky.');
+        }
+        $this->db->pdo()->prepare('UPDATE projects SET billing_template_id = ? WHERE id = ?')->execute([$templateId, $id]);
+    }
+
     public function find(int $id): ?array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -38,7 +56,7 @@ final class ProjectRepository
             'SELECT p.id, p.name, p.status, p.currency_id, cur.code AS currency,
                     p.hourly_rate, p.payment_due_days, p.payment_due_unit, p.project_number,
                     p.contract_number, p.budget_total, p.budget_yearly, p.budget_monthly,
-                    p.default_revenue_category_id, p.billing_emails_mode, p.archived_at
+                    p.default_revenue_category_id, p.billing_template_id, p.billing_emails_mode, p.archived_at
                FROM projects p
                JOIN currencies cur ON cur.id = p.currency_id
               WHERE p.client_id = ?
@@ -165,6 +183,7 @@ final class ProjectRepository
             ]);
             $id = (int) $pdo->lastInsertId();
 
+            $this->saveBillingTemplate($id, $supplierId, $data);
             $this->saveBillingEmails($id, $data['billing_emails'] ?? []);
 
             $pdo->commit();
@@ -251,6 +270,7 @@ final class ProjectRepository
                 $id,
             ]);
 
+            $this->saveBillingTemplate($id, $supplierId, $data);
             if ($writeBillingEmails) {
                 $this->saveBillingEmails($id, is_array($data['billing_emails']) ? $data['billing_emails'] : []);
             }

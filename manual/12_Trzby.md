@@ -172,6 +172,18 @@ firem a chybějících příspěvků. Záložky načítají data až při otevř
 
 ## 12.8 Související kapitoly
 
+### Cashflow na CRM přehledu
+
+Na `CRM` je dostupná čtyřtýdenní prognóza cashflow. Základní sloupce ukazují
+plánované příjmy a výdaje podle uložených částek dokladů a jejich splatností, týdenní
+saldo a jeho kumulaci; nejde o předpověď zůstatku bankovního účtu. Neplatné datum
+splatnosti se do týdnů nezařadí a počet těchto dokladů lze otevřít v seznamu faktur.
+
+Volba **Zahrnout koncepty** je ve výchozím stavu vypnutá. Po zapnutí zobrazí oddělený
+výhled příjmů z konceptů podle uložené částky a splatnosti. Výkazy práce se k částkám
+faktur nepřičítají znovu. Koncepty bez budoucí splatnosti se nabízejí k otevření
+v seznamu faktur.
+
 - [Zisk](11_Zisk.md) - tržby a náklady vedle sebe
 - [Náklady](13_Naklady.md) - zrcadlová stránka pro přijaté faktury
 - [Průvodce účetního](50_Pruvodce_ucetniho.md#50104-ostatni-pohledavky-a-zavazky) - ostatní pohledávky a závazky

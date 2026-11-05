@@ -252,6 +252,8 @@ final class BulkReissueAction
             $params[] = $userId;
             $stmt->execute($params);
             $newId = (int) $pdo->lastInsertId();
+            $newWorkReportId = (new \MyInvoice\Repository\WorkReportRepository($this->db))
+                ->cloneForInvoice($sourceId, $newId, (int) $source['supplier_id']);
 
             // Zkopíruj položky s případným inkrementem měsíce
             // Zachovává vat_classification_code ze source položky pokud existuje,
@@ -271,6 +273,7 @@ final class BulkReissueAction
                 $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::LIST_COLUMN;
                 $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::PERCENT_COLUMN;
             }
+            array_push($ossColumns, 'linked_work_report_id', 'work_report_billing_key');
             $itemStmt = $pdo->prepare(
                 'INSERT INTO invoice_items
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
@@ -347,6 +350,7 @@ final class BulkReissueAction
                 if ($supportsLineDiscount) {
                     array_push($params, ...\MyInvoice\Service\Invoice\LineDiscount::columns($item));
                 }
+                array_push($params, empty($item['linked_work_report_id']) ? null : $newWorkReportId, $item['work_report_billing_key'] ?? null);
                 $itemStmt->execute($params);
             }
             // Dimenze dokladu i položek jdou s kopií — položky leží ve stejném pořadí.

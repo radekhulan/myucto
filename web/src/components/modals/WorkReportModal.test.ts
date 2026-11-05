@@ -1,8 +1,10 @@
 import { shallowMount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkReportModal from './WorkReportModal.vue'
+import { invoicesApi } from '@/api/invoices'
+import { workReportBillingApi, newBillingSnapshot } from '@/api/workReportBilling'
 
 type InvoiceRow = {
   description: string
@@ -30,6 +32,9 @@ function modalVm() {
   })
   return wrapper.vm as unknown as {
     wrItems: Array<{ description: string; hours: number; duration_minutes: number | null; rate: number }>
+    billingSnapshot: ReturnType<typeof newBillingSnapshot> | null
+    billingPending: boolean
+    save: () => Promise<void>
     totalAmount: number
     syncRow: (
       items: InvoiceRow[],
@@ -88,5 +93,29 @@ describe('WorkReportModal invoice row sync', () => {
 
     vm.syncRow(rows, 'Práce', 'Práce', 0, 1, false, true)
     expect(rows).toEqual([original])
+  })
+})
+
+
+describe('WorkReportModal účtování výkazu', () => {
+  it.each([false, true])('nulové hodiny drží celý paušál; přenos pouze na výslovný pokyn (%s)', async pending => {
+    const vm = modalVm()
+    const snapshot = { ...newBillingSnapshot(), name: 'Servis', fixed_fee: 5000, included_hours: 5 }
+    vm.billingSnapshot = snapshot
+    vm.billingPending = pending
+    const invoice = { id: 42, invoice_type: 'invoice', client_id: 1, currency_id: 1, currency: 'CZK', items: [], prices_include_vat: true }
+    const get = vi.spyOn(invoicesApi, 'get').mockResolvedValue(invoice as any)
+    const saveReport = vi.spyOn(invoicesApi, 'saveWorkReport').mockResolvedValue({} as any)
+    const materials = vi.spyOn(invoicesApi, 'saveWorkReportMaterials').mockResolvedValue({} as any)
+    const update = vi.spyOn(invoicesApi, 'update').mockResolvedValue(invoice as any)
+    const preview = vi.spyOn(workReportBillingApi, 'preview').mockResolvedValue({ fingerprint: 'current' } as any)
+    const transfer = vi.spyOn(workReportBillingApi, 'transfer').mockResolvedValue({} as any)
+    try {
+      await vm.save()
+      expect(saveReport).toHaveBeenCalledWith(42, expect.objectContaining({ billing_snapshot: snapshot, items: [] }))
+      expect(update).toHaveBeenCalledWith(42, expect.objectContaining({ prices_include_vat: true, items: [] }))
+      expect(transfer).toHaveBeenCalledTimes(pending ? 1 : 0)
+      if (pending) expect(transfer).toHaveBeenCalledWith(42, 'current', false, undefined)
+    } finally { [get, saveReport, materials, update, preview, transfer].forEach(mock => mock.mockRestore()) }
   })
 })

@@ -43,6 +43,19 @@ describe('CRM dashboard loading', () => {
     wrapper.unmount()
   })
 
+  it('keeps drafts disabled initially and reloads only cashflow when toggled', async () => {
+    mocks.api.overview.mockResolvedValue({ currencies: ['EUR'] })
+    const wrapper = mount({ ...CrmDashboard, render: () => null })
+    await flushPromises()
+    expect(mocks.api.cashFlowForecast).toHaveBeenCalledWith(4, 'EUR', false)
+    const vm = wrapper.vm as unknown as { includeDrafts: boolean; reloadCashFlow: () => Promise<void> }
+    vm.includeDrafts = true
+    await vm.reloadCashFlow()
+    expect(mocks.api.cashFlowForecast).toHaveBeenLastCalledWith(4, 'EUR', true)
+    expect(mocks.api.overview).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('preserves the period and currency supplied by a risk drilldown', async () => {
     mocks.route.query = { months: '6', currency: 'EUR' }
     mocks.route.hash = '#client_concentration'
