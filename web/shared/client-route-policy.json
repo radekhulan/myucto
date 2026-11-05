@@ -55,6 +55,7 @@
     { "name": "admin-price-list-view", "path_pattern": "^/admin/price-list/[0-9]+/?$", "kind": "permission", "permission": "price_list", "access": "read" },
     { "name": "admin-price-list-new", "path_pattern": "^/admin/price-list/new/?$", "kind": "permission", "permission": "price_list", "access": "write" },
     { "name": "admin-price-list-edit", "path_pattern": "^/admin/price-list/[0-9]+/edit/?$", "kind": "permission", "permission": "price_list", "access": "write" },
+    { "name": "admin-work-report-billing-templates", "path_pattern": "^/admin/work-report-billing-templates/?$", "kind": "permission", "permission": "price_list", "access": "read" },
 
     { "name": "recurring", "path_pattern": "^/recurring/?$", "kind": "permission", "permission": "recurring", "access": "read" },
     { "name": "recurring-new", "path_pattern": "^/recurring/new/?$", "kind": "permission", "permission": "recurring.create", "access": "write" },

@@ -146,6 +146,10 @@ describe('workspace route factory', () => {
     expect(byName.get('admin-bank-rule-templates')?.meta?.superadminOnly).not.toBe(true)
     expect(byName.get('admin-suppliers')?.meta).toMatchObject({ adminPlusOnly: true })
     expect(byName.get('admin-suppliers')?.meta?.superadminOnly).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta).toMatchObject({ permission: 'price_list', access: 'read', requiresSupplier: true })
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.requiresNoStock).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.companyAdminOnly).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.superadminOnly).not.toBe(true)
     for (const name of ['admin-price-list', 'admin-price-list-view', 'admin-price-list-new', 'admin-price-list-edit']) {
       expect(byName.get(name)?.meta).toMatchObject({
         permission: 'price_list',

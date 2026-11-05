@@ -104,6 +104,20 @@ describe('InvoiceDetail: výkaz práce', () => {
     wrapper.unmount()
   })
 
+  it('cenové ujednání skryje sazby jednotlivých záznamů a ukáže rekapitulaci', async () => {
+    m.workReport = { ...workReport(), billing_snapshot: { name: 'Servis', currency: 'CZK' }, billing_period: '2096-03', billing_stale: true,
+      billing_preview: { items: [], total_hours: 1.5, included_hours: 1.5, extra_hours: 0, total_amount: 5000 } }
+    const wrapper = await mountDetail()
+    expect(wrapper.find('#invoice-work-report').exists()).toBe(true)
+    expect(wrapper.find('#invoice-work-report').text()).not.toContain('invoice.wr_rate')
+    expect(wrapper.find('#invoice-work-report').text()).toContain('work_report_billing.stale')
+    expect(wrapper.findComponent({ name: 'BillingRecap' }).exists()).toBe(true)
+    const parts = mobileRowParts(wrapper)
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toContain('h')
+    wrapper.unmount()
+  })
+
   it('oddělovač zůstane jen mezi zobrazenými údaji', async () => {
     m.workReport = workReport({ compact: false, date: true, hours: true, rate: false, amount: true })
     const wrapper = await mountDetail()

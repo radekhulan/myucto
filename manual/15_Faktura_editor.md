@@ -836,6 +836,31 @@ V editoru klikněte na ikonu **Přidat výkaz práce** v řádku položky. Zobra
 Přidejte řádky a výkaz uložte. Součet práce se přenáší jako jedna položka `1 ks × celková
 cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 
+Výkaz může používat **šablonu účtování výkazů** s paušálem a pásmy hodin. Šablony
+spravujete na stránce `Prodej → Šablony účtování výkazů` pod **Ceníkem**. Zobrazení
+vyžaduje právo **Ceník** ke čtení; úprava a archivace vyžadují právo zápisu. Po výběru šablony se
+v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
+`RRRR-MM`. Tlačítkem **Připravit přenos** zařadíte účtovací položky k uložení;
+po akci se zobrazí **Připraveno k uložení**, počet čekajících položek a jejich náhled
+u položek faktury. Samotný přenos se provede až po uložení faktury. Při nahrazení
+starší souhrnné položky ji vyberte v nabídce, jinak
+by se mohla částka účtovat dvakrát. Propojené položky mají stabilní vazbu na výkaz a
+na PDF odkazují na jeho podrobný rozpis. Při ukládání nepřeneseného nebo změněného
+účtování se aplikace zeptá, zda chcete pokračovat bez aktualizace položek faktury.
+Pokud už jste přenos připravili tlačítkem, další potvrzení se nezobrazuje. Nesoulad
+výkazu a položek blokuje vystavení faktury; nejprve zkontrolujte výkaz a přeneste jej znovu.
+Bez šablony zadejte sazbu pro každý řádek výkazu zvlášť.
+
+Jednotlivý výkaz si uchovává vlastní kopii šablony. Změna firemní šablony tedy nemění
+již uložený výkaz. Paušál se účtuje i při nulovém počtu hodin, nevyčerpané hodiny se
+nepřevádějí do dalšího období a limit hodin platí samostatně pro každý výkaz/fakturu.
+Popis položky může obsahovat `{nazev}` (název výkazu), `{zakazka}`, `{obdobi}`, `{limit}`,
+`{od}`, `{do}` a `{hodiny}`.
+
+Volby zobrazení výkazu určují také, zda zákazník v PDF, e-mailu ke schválení a na veřejném
+odkazu uvidí hodiny, sazby a částky. Úprava šablony nebo její archivace neovlivní již
+uložené výkazy; archivace zároveň zruší její předvolbu na zakázkách.
+
 Čas lze zadat také přímo do množství fakturační položky s hodinovou jednotkou (`h`, `hod`,
 `hod.`). Například `0:01` při sazbě 1 000 Kč/h znamená 16,67 Kč. Sazba `333,33333 Kč/h` při
 60 hodinách dává 20 000 Kč. Stejný způsob zadávání podporují přijaté faktury a šablony
@@ -1076,8 +1101,9 @@ materiálu**.
 | Cena/MJ | Jednotková cena až na šest desetinných míst - **bez DPH, nebo s DPH podle režimu faktury** (viz níže). PDF ukazuje víc než dvě místa jen u ceny, která je skutečně má |
 | Celkem | Automaticky: množství × cena/MJ |
 
-**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH** (sumarizuje se do jedné položky
-faktury). U výkazu práce je volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
+**Sazba DPH výkazu.** Každý výkaz nese **jednu sazbu DPH**. U účtování podle šablony
+účtování výkazů ji přebírají všechny položky paušálu a pásem; bez šablony se přenese
+jedna souhrnná položka. U výkazu práce je sazba volitelná, výchozí **21 %**. U výkazu materiálu je volitelná,
 výchozí **12 %**. Sazbu vyberete v záhlaví příslušné sekce. Materiál a práce tak mohou mít
 **různou sazbu DPH** na jednom dokladu, DPH se na faktuře rekapituluje správně po sazbách.
 

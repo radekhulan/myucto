@@ -88,6 +88,8 @@ final class MeAction
                 : '0 AS invoice_pdf_show_line_discount';
             $workReportSelect = $this->db->hasColumn('supplier', 'work_report_display_options')
                 ? 'work_report_display_options' : 'NULL AS work_report_display_options';
+            $hourlyRateSelect = $this->db->hasColumn('supplier', 'default_hourly_rate')
+                ? 'default_hourly_rate' : '0 AS default_hourly_rate';
             $where  = '';
             $params = [];
             if ($allowed !== []) {
@@ -103,11 +105,12 @@ final class MeAction
                 . ':' . ($ossSelect === 'oss_enabled' ? '1' : '0') . ':client-ai'
                 . ':' . ($simplifiedSelect === 'simplified_hide_customer_default' ? '1' : '0')
                 . ':legal-form:work-report-display:' . $workReportSelect
+                . ':hourly-rate:' . $hourlyRateSelect
                 . ':' . ($lineDiscountSelect === 'invoice_pdf_show_line_discount' ? '1' : '0');
             $suppliers = (array) $this->cache->remember(
                 EntityCache::GROUP_SUPPLIER,
                 $cacheKey,
-                function () use ($where, $params, $ossSelect, $simplifiedSelect, $lineDiscountSelect, $workReportSelect): array {
+                function () use ($where, $params, $ossSelect, $simplifiedSelect, $lineDiscountSelect, $workReportSelect, $hourlyRateSelect): array {
                     $stmt = $this->db->pdo()->prepare(
                         // dic + adresa: dashboard pod názvem firmy vypisuje identifikaci
                         // (IČ · DIČ · adresa) na jeden řádek — bez nich by musel dělat
@@ -116,7 +119,7 @@ final class MeAction
                                 is_vat_payer, is_identified, taxpayer_type,
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat, default_rounding_mode,
                                 allow_refund_invoices, auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
-                                ' . $lineDiscountSelect . ', ' . $workReportSelect . ',
+                                ' . $lineDiscountSelect . ', ' . $workReportSelect . ', ' . $hourlyRateSelect . ',
                                 ' . $simplifiedSelect . ',
                                 accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, dimensions_enabled, fiscal_year_start_month, ' . $ossSelect . ',
                                 ai_provider, ai_data_region, ai_eu_residency_required, client_ai_extraction_enabled, '
@@ -182,6 +185,7 @@ final class MeAction
             $s['is_identified']            = (bool) ($s['is_identified'] ?? false);
             // 'fo' = OSVČ (fyzická osoba), 'po' = s.r.o. (právnická osoba), null = nenastaveno.
             $s['taxpayer_type']            = $s['taxpayer_type'] !== null ? (string) $s['taxpayer_type'] : null;
+            $s['default_hourly_rate']      = (float) ($s['default_hourly_rate'] ?? 0);
             $s['default_payment_due_days'] = (int) $s['default_payment_due_days'];
             $s['default_payment_due_unit'] = (string) ($s['default_payment_due_unit'] ?? 'days');
             // Výchozí režim cen u nových faktur (0 = bez DPH, 1 = ceny s DPH) — předvyplní editor.

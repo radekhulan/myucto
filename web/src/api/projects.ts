@@ -25,6 +25,7 @@ export interface Project {
   budget_total?: number | null
   budget_yearly?: number | null
   budget_monthly?: number | null
+  billing_template_id?: number | null
   hourly_rate: number
   currency_id: number
   currency: string
@@ -62,6 +63,7 @@ export interface ProjectPayload {
   budget_total?: number | null
   budget_yearly?: number | null
   budget_monthly?: number | null
+  billing_template_id?: number | null
   hourly_rate: number
   currency_id: number
   status: 'active' | 'paused' | 'closed'

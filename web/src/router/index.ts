@@ -104,6 +104,7 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[], AccessLevel?]> = {
+  'admin-work-report-billing-templates': ['price_list'],
   'admin-price-list': ['price_list'], 'admin-price-list-view': ['price_list'],
   'admin-price-list-new': ['price_list', 'write'], 'admin-price-list-edit': ['price_list', 'write'],
   home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],

@@ -545,6 +545,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/emails',           name: 'admin-emails',    component: () => import('@/pages/admin/Emails.vue'), meta: {  } },
       { path: 'admin/approvals',        name: 'admin-approvals', component: () => import('@/pages/admin/Approvals.vue'), meta: {  } },
       { path: 'admin/price-list',       name: 'admin-price-list', component: () => import('@/pages/admin/PriceList.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
+      { path: 'admin/work-report-billing-templates', name: 'admin-work-report-billing-templates', component: () => import('@/pages/admin/WorkReportBillingTemplates.vue'), meta: { requiresSupplier: true } },
       { path: 'admin/price-list/new',   name: 'admin-price-list-new', component: () => import('@/pages/admin/PriceListForm.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
       { path: 'admin/price-list/:id(\\d+)/edit', name: 'admin-price-list-edit', component: () => import('@/pages/admin/PriceListForm.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
       { path: 'admin/price-list/:id(\\d+)', name: 'admin-price-list-view', component: () => import('@/pages/admin/PriceListForm.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
