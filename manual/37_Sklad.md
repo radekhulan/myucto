@@ -502,9 +502,14 @@ a doplnění zásob ho začne navrhovat znovu. Zavřenou objednávku vrátíte t
 3. Záložka **Ocenění k datu** spočítá stav k historickému datu. Výpočet běží na
    pozadí, průběh je vidět na stránce. V poli **Seskupit podle kategorií** zvolte
    kategorii a nad tabulkou se objeví hodnota zásob po jejích podkategoriích.
-4. Záložka **Prodeje** ukáže, kolik kusů, komu a za kolik jste prodali (filtry
+4. Záložka **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích ke koncům měsíců
+   vedle sebe. Zadejte **Od** (první sloupec je první konec měsíce od tohoto data)
+   a **Do** (poslední sloupec je přesně toto datum, třeba dnešek), případně sklad
+   a kategorii, jejíž podkategorie tvoří řádky. Výpočet běží na pozadí, průběh je
+   vidět na stránce a jde ho zrušit.
+5. Záložka **Prodeje** ukáže, kolik kusů, komu a za kolik jste prodali (filtry
    období, sklad, odběratel, kategorie; **Po odběratelích** a po kartách sečte).
-5. Pro export použijte **Export PDF** nebo **Export XLSX**.
+6. Pro export použijte **Export PDF** nebo **Export XLSX**.
 
 **Jak poznáte, že je hotovo:** sestava má součtový řádek (počet položek a celková
 hodnota) a export se stáhl.
@@ -1262,6 +1267,24 @@ omezit nedá a vždy zahrne celý sklad.
     Kdo kartu mezitím přeřadil, uvidí ji v nové kategorii i ve starším ocenění.
   - Změna seskupení výpočet neopakuje, jen znovu načte hotové ocenění. Export XLSX
     přidá list **Podle kategorií**, export PDF souhrnnou tabulku nad seznam.
+- **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích **k více datům vedle sebe**:
+  ke koncům měsíců od data **Od** a k datu **Do** (nejvýše 36 sloupců, jinak
+  aplikace vyzve zkrátit období). Řádky jsou přímé podkategorie zvolené kategorie
+  (výchozí je kategorie nejvyšší úrovně), pod nimi je řádek **Celkem**.
+  - Hodnota za každé datum je stejná, jako vyjde v sestavě **Ocenění k datu** pro
+    tentýž den. Výpočet běží jako úloha na pozadí s průběhem a možností zrušení.
+    Hotová tabulka je **snímek** s uvedeným časem výpočtu: zůstane čitelná i
+    exportovatelná, i když se sklad dál mění. Změní-li se sklad během výpočtu, aplikace
+    výpočet sama dvakrát zopakuje od začátku, teprve potom ho ukončí s výzvou ke
+    spuštění znovu. Totéž zadání nad stejným stavem skladu se nepočítá znovu a
+    rozpracovaný výpočet se zruší, když zadání změníte nebo stránku opustíte.
+  - Karty se zařazují podle **dnešních** kategorií, ne podle kategorií k danému
+    datu, a karta ve více kategoriích se počítá jen jednou (stejně jako u ocenění
+    k datu). Součet řádků se rovná řádku Celkem.
+  - Bez práva číst katalog se zobrazí jen řádek Celkem.
+  - Export XLSX má přesné částky s haléři. Export PDF je na šířku, částky jsou
+    v celých korunách a víc než 12 dat se rozdělí do více tabulek, každá na vlastní
+    stránce. Exportuje se hotový výpočet.
 - **Prodeje** viz [§ 37.12.8.1](#371281-prodeje-skladovych-karet).
 
 Stav zásob a ocenění mají **součtový řádek** (počet položek a celková hodnota) a jdou
