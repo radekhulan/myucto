@@ -71,7 +71,7 @@ async function remove(template: WorkReportBillingTemplate) {
     </header>
     <p class="text-xs text-neutral-500">{{ t('work_report_billing.snapshot_hint') }}</p>
     <p v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
-    <p v-else-if="!error && list.length === 0" class="rounded-md border border-dashed border-neutral-300 p-4 text-center text-sm text-neutral-500">{{ t('work_report_billing.empty') }}</p>
+    <p v-else-if="!error && list.length === 0 && !editing" class="rounded-md border border-dashed border-neutral-300 p-4 text-center text-sm text-neutral-500">{{ t('work_report_billing.empty') }}</p>
     <div v-for="template in list" :key="template.id" class="flex flex-wrap gap-2 items-center justify-between rounded-md border border-neutral-200 p-3">
       <span class="text-sm">{{ template.name }} <span class="text-neutral-500">({{ template.currency }})</span></span>
       <div class="flex flex-wrap gap-2">
