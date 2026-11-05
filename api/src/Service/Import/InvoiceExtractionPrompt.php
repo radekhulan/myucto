@@ -75,6 +75,8 @@ JSON schema:
   "items": [
     {
       "description": string,
+      "seller_item_code": string|null,
+      "item_ean": string|null,
       "quantity": number,
       "unit": string,
       "unit_price_without_vat": number,
@@ -332,7 +334,7 @@ DŮLEŽITÉ k poli `total_with_vat`:
 - NIKDY ze subtotalu sekce/skupiny. Pokud si nejsi jistý → NULL.
 - Když doklad finální "K úhradě" NEUVÁDÍ VŮBEC (typicky souhrnný doklad hrazený
   inkasem nebo kartou), ale MÁ daňovou rekapitulaci → vezmi celkem s DPH z rekapitulace.
-EOT . "\n\n" . self::accrualFieldRules() . "\n\n" . self::scanFieldRules();
+EOT . "\n\n" . self::accrualFieldRules() . "\n\n" . self::itemCodeFieldRules() . "\n\n" . self::scanFieldRules();
     }
 
     /**
@@ -351,6 +353,25 @@ DŮLEŽITÉ k polím `accrual_from` a `accrual_to` (OBDOBÍ PLNĚNÍ POLOŽKY):
   Měsíc znamená od prvního do posledního dne měsíce, rok od 1. 1. do 31. 12.
 - Datum vystavení, DUZP, splatnost ani datum dodání období NEJSOU. Když položka období
   neuvádí, vrať u obou polí null. NEODHADUJ délku předplatného.
+EOT;
+    }
+
+    /**
+     * Pravidla pro kód zboží na řádku — podle něj se řádek páruje se skladovou kartou.
+     * Sdílí je všichni provideři včetně inline promptu {@see AnthropicClient}.
+     */
+    public static function itemCodeFieldRules(): string
+    {
+        return <<<'EOT'
+DŮLEŽITÉ k polím `seller_item_code` a `item_ean` (KÓD ZBOŽÍ NA ŘÁDKU):
+- `seller_item_code` = kód položky, pod kterým ji vede dodavatel: sloupec „Kód", „Kód zboží",
+  „Katalogové číslo", „Obj. číslo", „Part Number", „Article", „Art. No.", „Item", „SKU".
+  Opiš ho ZNAK PO ZNAKU včetně úvodních nul a písmen. NESPOJUJ ho do `description`
+  a `description` o něj nezkracuj, když je i v textu popisu.
+- `item_ean` = čárový kód zboží (EAN/GTIN, jen číslice v délce 8, 12, 13 nebo 14), když ho řádek uvádí. Jiný údaj sem nepatří, pak null.
+- Pořadové číslo řádku, číslo dodacího listu ani objednávky kódem NEJSOU. Celní kód (Commodity
+  code, HS, KN, CN) a země původu kódem zboží také NEJSOU.
+- Když řádek kód neuvádí (typicky služby, doprava, balné), vrať null. NEVYMÝŠLEJ ho.
 EOT;
     }
 
@@ -514,6 +535,9 @@ EOT;
                         'type'       => 'object',
                         'properties' => [
                             'description'            => ['type' => 'string'],
+                            // Kód zboží pro párování se skladovou kartou (viz itemCodeFieldRules).
+                            'seller_item_code'       => ['type' => ['string', 'null']],
+                            'item_ean'               => ['type' => ['string', 'null']],
                             'quantity'               => ['type' => 'number'],
                             'unit'                   => ['type' => ['string', 'null']],
                             'unit_price_without_vat' => ['type' => 'number'],

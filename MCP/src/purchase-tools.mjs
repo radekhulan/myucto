@@ -69,6 +69,7 @@ const PURCHASE_ITEM_FIELDS = [
   'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat',
   'vat_rate_id', 'order_index', 'vat_classification_code', 'is_fixed_asset',
   'expense_kind', 'expense_account_code', 'accrual_from', 'accrual_to', 'stock_item_id',
+  'seller_item_code', 'item_ean',
 ];
 
 /**
