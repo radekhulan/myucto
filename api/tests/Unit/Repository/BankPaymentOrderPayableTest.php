@@ -19,8 +19,8 @@ final class BankPaymentOrderPayableTest extends TestCase
         $pdo->exec('CREATE TABLE purchase_invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, status TEXT, document_kind TEXT, payment_method TEXT, amount_to_pay NUMERIC, rounding NUMERIC, exchange_rate NUMERIC, settled_outside_amount NUMERIC DEFAULT 0)');
         $pdo->exec('CREATE TABLE payment_order_items (payment_order_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, invoice_id INTEGER, tax_submission_id INTEGER, tax_advance_schedule_id INTEGER, other_item_id INTEGER, other_item_installment_id INTEGER)');
         $pdo->exec('CREATE TABLE other_items (id INTEGER, supplier_id INTEGER, side TEXT, status TEXT, currency TEXT, amount NUMERIC, settled_outside_amount NUMERIC DEFAULT 0, deleted_at TEXT)');
-        $pdo->exec('CREATE TABLE other_item_allocations (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, installment_id INTEGER, amount NUMERIC, payment_on TEXT, reversed_on TEXT)');
-        $pdo->exec('CREATE TABLE other_item_installments (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, position INTEGER, due_on TEXT, amount NUMERIC)');
+        $pdo->exec('CREATE TABLE other_item_allocations (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, installment_id INTEGER, amount NUMERIC, payment_on TEXT, reversed_on TEXT, interest_amount NUMERIC NOT NULL DEFAULT 0, fee_amount NUMERIC NOT NULL DEFAULT 0)');
+        $pdo->exec('CREATE TABLE other_item_installments (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, position INTEGER, due_on TEXT, amount NUMERIC, principal_amount NUMERIC NULL, interest_amount NUMERIC NULL, fee_amount NUMERIC NULL)');
         $pdo->exec('CREATE TABLE invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, invoice_type TEXT, status TEXT, payment_method TEXT, amount_to_pay NUMERIC, parent_invoice_id INTEGER)');
         $pdo->exec('CREATE TABLE payment_matches (supplier_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, bank_transaction_id INTEGER)');
         $pdo->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, currency TEXT, amount NUMERIC, card_last4 TEXT)');
@@ -65,8 +65,8 @@ final class BankPaymentOrderPayableTest extends TestCase
         $pdo->exec('CREATE TABLE purchase_invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, status TEXT, document_kind TEXT, payment_method TEXT, amount_to_pay NUMERIC, rounding NUMERIC, exchange_rate NUMERIC, settled_outside_amount NUMERIC DEFAULT 0)');
         $pdo->exec('CREATE TABLE payment_order_items (payment_order_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, invoice_id INTEGER, tax_submission_id INTEGER, tax_advance_schedule_id INTEGER, other_item_id INTEGER, other_item_installment_id INTEGER)');
         $pdo->exec('CREATE TABLE other_items (id INTEGER, supplier_id INTEGER, side TEXT, status TEXT, currency TEXT, amount NUMERIC, settled_outside_amount NUMERIC DEFAULT 0, deleted_at TEXT)');
-        $pdo->exec('CREATE TABLE other_item_allocations (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, installment_id INTEGER, amount NUMERIC, payment_on TEXT, reversed_on TEXT)');
-        $pdo->exec('CREATE TABLE other_item_installments (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, position INTEGER, due_on TEXT, amount NUMERIC)');
+        $pdo->exec('CREATE TABLE other_item_allocations (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, installment_id INTEGER, amount NUMERIC, payment_on TEXT, reversed_on TEXT, interest_amount NUMERIC NOT NULL DEFAULT 0, fee_amount NUMERIC NOT NULL DEFAULT 0)');
+        $pdo->exec('CREATE TABLE other_item_installments (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, position INTEGER, due_on TEXT, amount NUMERIC, principal_amount NUMERIC NULL, interest_amount NUMERIC NULL, fee_amount NUMERIC NULL)');
         $pdo->exec('CREATE TABLE invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, invoice_type TEXT, status TEXT, payment_method TEXT, amount_to_pay NUMERIC, parent_invoice_id INTEGER)');
         $pdo->exec('CREATE TABLE payment_matches (supplier_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, bank_transaction_id INTEGER)');
         $pdo->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, currency TEXT, amount NUMERIC, card_last4 TEXT)');
@@ -110,8 +110,8 @@ final class BankPaymentOrderPayableTest extends TestCase
             'purchase_invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, status TEXT, document_kind TEXT, payment_method TEXT, amount_to_pay NUMERIC, rounding NUMERIC, exchange_rate NUMERIC, settled_outside_amount NUMERIC DEFAULT 0)',
             'payment_order_items (payment_order_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, invoice_id INTEGER, tax_submission_id INTEGER, tax_advance_schedule_id INTEGER, other_item_id INTEGER, other_item_installment_id INTEGER)',
             'other_items (id INTEGER, supplier_id INTEGER, side TEXT, status TEXT, currency TEXT, amount NUMERIC, settled_outside_amount NUMERIC DEFAULT 0, deleted_at TEXT)',
-            'other_item_allocations (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, installment_id INTEGER, amount NUMERIC, payment_on TEXT, reversed_on TEXT)',
-            'other_item_installments (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, position INTEGER, due_on TEXT, amount NUMERIC)',
+            'other_item_allocations (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, installment_id INTEGER, amount NUMERIC, payment_on TEXT, reversed_on TEXT, interest_amount NUMERIC NOT NULL DEFAULT 0, fee_amount NUMERIC NOT NULL DEFAULT 0)',
+            'other_item_installments (id INTEGER, supplier_id INTEGER, other_item_id INTEGER, position INTEGER, due_on TEXT, amount NUMERIC, principal_amount NUMERIC NULL, interest_amount NUMERIC NULL, fee_amount NUMERIC NULL)',
             'invoices (id INTEGER, supplier_id INTEGER, currency_id INTEGER, invoice_type TEXT, status TEXT, payment_method TEXT, amount_to_pay NUMERIC, parent_invoice_id INTEGER)',
             'payment_matches (supplier_id INTEGER, purchase_invoice_id INTEGER, amount NUMERIC, bank_transaction_id INTEGER)',
             'bank_transactions (id INTEGER, statement_id INTEGER, currency TEXT, amount NUMERIC, card_last4 TEXT)',
@@ -125,7 +125,7 @@ final class BankPaymentOrderPayableTest extends TestCase
             $pdo->exec('CREATE TABLE ' . $table);
         }
         $pdo->exec("INSERT INTO other_items VALUES (701, 1, 'payable', 'posted', 'CZK', 3000, 0, NULL)");
-        $pdo->exec("INSERT INTO other_item_installments VALUES (81, 1, 701, 1, '2099-01-31', 1000), (82, 1, 701, 2, '2099-02-28', 1000), (83, 1, 701, 3, '2099-03-31', 1000)");
+        $pdo->exec("INSERT INTO other_item_installments (id, supplier_id, other_item_id, position, due_on, amount) VALUES (81, 1, 701, 1, '2099-01-31', 1000), (82, 1, 701, 2, '2099-02-28', 1000), (83, 1, 701, 3, '2099-03-31', 1000)");
         $pdo->exec('INSERT INTO payment_order_items (payment_order_id, amount, other_item_id, other_item_installment_id) VALUES (801, 1000, 701, 81)');
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
@@ -136,10 +136,20 @@ final class BankPaymentOrderPayableTest extends TestCase
         self::assertFalse($repository->allItemsStillPayable(801, 1, 'EUR'));
 
         // Splátku 1 uhradila jiná platba: zbytek položky (2000) by platbu pokryl, splátka už ne.
-        $pdo->exec("INSERT INTO other_item_allocations VALUES (1, 1, 701, 81, 1000, '2099-01-30', NULL)");
+        $pdo->exec("INSERT INTO other_item_allocations (id, supplier_id, other_item_id, installment_id, amount, payment_on, reversed_on) VALUES (1, 1, 701, 81, 1000, '2099-01-30', NULL)");
         self::assertFalse($repository->allItemsStillPayable(801, 1, 'CZK'), 'Uhrazená splátka se podruhé neplatí.');
         $pdo->exec("UPDATE other_item_allocations SET reversed_on = '2099-01-31'");
         self::assertTrue($repository->allItemsStillPayable(801, 1, 'CZK'), 'Stornovaná úhrada splátku zase otevře.');
+
+        // Poslední splátka úvěru nese nad zbývající jistinou i úrok: splátka 1 100 (jistina
+        // 1 000 + úrok 100) při zbývající jistině položky 1 000 musí do banky projít.
+        $pdo->exec("UPDATE other_item_allocations SET reversed_on = NULL, installment_id = 82, amount = 2000");
+        $pdo->exec("UPDATE other_item_installments SET amount = 1100, principal_amount = 1000, interest_amount = 100, fee_amount = 0 WHERE id = 83");
+        $pdo->exec('UPDATE payment_order_items SET amount = 1100, other_item_installment_id = 83');
+        self::assertTrue($repository->allItemsStillPayable(801, 1, 'CZK'), 'Úrok nad jistinou splátku z banky nezablokuje.');
+        $pdo->exec("DELETE FROM other_item_allocations");
+        $pdo->exec("UPDATE other_item_installments SET amount = 1000, principal_amount = NULL, interest_amount = NULL, fee_amount = NULL WHERE id = 83");
+        $pdo->exec('UPDATE payment_order_items SET amount = 1000, other_item_installment_id = 81');
 
         $pdo->exec("UPDATE other_items SET status = 'draft'");
         self::assertFalse($repository->allItemsStillPayable(801, 1, 'CZK'), 'Koncept se neplatí.');
