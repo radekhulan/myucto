@@ -233,6 +233,142 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Valutové pokladny z Money vzniknou ve své měně, doklady nesou kurz a částku ve valutě
+     * (korunová částka z Money) a řádky deníku na účtu pokladny měnu - jinak uzávěrka
+     * pokladnu kurzově nepřecení. Počáteční stav nese měnu jen v prvním roce účtu.
+     */
+    public function testForeignCashRegistersCarryCurrency(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->foreignCashBackup();
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $this->assertForeignCash($supplierId);
+        // Rok 2024 i 2025: měnu nese otevírací zápis 2024 (z PocStav), 2025 už ne.
+        self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
+        // Bez měny: otevírací zápis 2025 a uzávěrkový zápis 2024 (uzávěrka MyÚčta, v Kč).
+        self::assertSame(2, $this->rowCount('journal_entry_lines', $supplierId,
+            "currency_code IS NULL AND account_id = (SELECT id FROM chart_of_accounts WHERE supplier_id = journal_entry_lines.supplier_id AND account_code = '211.002')"));
+        self::assertSame([['2024-01-01', 'HUF', 0.062, 50000.0], ['2025-04-12', 'HUF', 0.06121, 10120.0]], $this->foreignLines($supplierId, '211.003'));
+        self::assertSame(0, $this->rowCount('journal_entry_lines', $supplierId,
+            "currency_code IS NOT NULL AND account_id NOT IN (SELECT id FROM chart_of_accounts WHERE supplier_id = journal_entry_lines.supplier_id AND account_code IN ('211.002', '211.003'))"));
+        $this->assertRevaluationProposals($supplierId);
+
+        // Opakovaný převod nic nezdvojí ani nepřepíše.
+        $again = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $this->assertForeignCash($supplierId);
+        self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
+    }
+
+    /**
+     * Firma převedená dřív bez valut (pokladny, doklady i deník v Kč) se opraví opravným
+     * převodem vazeb: pokladny se přepnou na měnu z Money, doklady a řádky deníku otevřeného
+     * roku dostanou valutu. Uzavřený rok 2024 zůstává, jak je - proto měnu nese počáteční
+     * stav roku 2025.
+     */
+    public function testRelinkRepairsForeignCashOfEarlierConversion(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->foreignCashBackup();
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->forgetForeignCurrency($supplierId);
+        $before = $this->snapshotCounts($supplierId);
+
+        $repair = $this->relink($supplierId, $backup);
+        self::assertFalse($repair->hasErrors(), $this->explain($repair));
+        self::assertSame($before, $this->snapshotCounts($supplierId));
+        $this->assertForeignCash($supplierId);
+        self::assertSame([['2025-01-01', 'EUR', 25.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
+        self::assertSame([['2025-01-01', 'HUF', 0.062, 50000.0], ['2025-04-12', 'HUF', 0.06121, 10120.0]], $this->foreignLines($supplierId, '211.003'));
+        $this->assertRevaluationProposals($supplierId);
+    }
+
+    /** Pokladna s doklady zadanými v MyÚčtu mimo převod měnu nemění, protokol to ohlásí. */
+    public function testRelinkKeepsCzkRegisterWithOwnDocuments(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->foreignCashBackup();
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->forgetForeignCurrency($supplierId);
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date, description, vat_mode, total_amount, currency_code, status)
+             SELECT supplier_id, register_id, 'in', 'sale', 'VLASTNI1', '2025-05-01', '2025-05-01', 'Doklad zadaný v MyÚčtu', 'none', 100, 'CZK', 'posted'
+               FROM cash_documents WHERE supplier_id = ? AND doc_number = 'CPE250001'"
+        )->execute([$supplierId]);
+
+        $repair = $this->relink($supplierId, $backup);
+        self::assertFalse($repair->hasErrors(), $this->explain($repair));
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.002' AND currency_code = 'CZK'"));
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.003' AND currency_code = 'HUF'"));
+        self::assertSame(1, $this->rowCount('cash_documents', $supplierId, "doc_number = 'CPE250001' AND currency_code = 'CZK' AND amount_foreign IS NULL"));
+        self::assertStringContainsString('register_currency_kept', $this->explain($repair));
+    }
+
+    private function foreignCashBackup(): Ms3Backup
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/cash-fx.lz', SyntheticAgenda::filesWithForeignCash());
+        return Ms3Backup::extract($this->tmp . '/cash-fx.lz', $this->tmp . '/cash-fx');
+    }
+
+    private function relink(int $supplierId, Ms3Backup $backup): ImportProtocol
+    {
+        return $this->importer->run($supplierId, $this->userId, $backup,
+            new ImportOptions(ImportOptions::MODE_IMPORT, true, null, [], [], false, null, ImportOptions::DISPOSAL_YEAR_TAX_HALF, false, true));
+    }
+
+    /** Stav firmy převedené před převzetím valut: vše v Kč. */
+    private function forgetForeignCurrency(int $supplierId): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE cash_registers SET currency_code = 'CZK' WHERE supplier_id = ?")->execute([$supplierId]);
+        $pdo->prepare("UPDATE cash_documents SET currency_code = 'CZK', fx_rate = 1, amount_foreign = NULL WHERE supplier_id = ?")->execute([$supplierId]);
+        $pdo->prepare('UPDATE journal_entry_lines SET currency_code = NULL, fx_rate = NULL, amount_foreign = NULL WHERE supplier_id = ?')->execute([$supplierId]);
+    }
+
+    private function assertForeignCash(int $supplierId): void
+    {
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.002' AND currency_code = 'EUR'"));
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.003' AND currency_code = 'HUF'"));
+        self::assertSame(1, $this->rowCount('cash_registers', $supplierId, "account_code = '211.000' AND currency_code = 'CZK'"));
+        self::assertSame(1, $this->rowCount('cash_documents', $supplierId,
+            "doc_number = 'CPE250001' AND doc_type = 'in' AND currency_code = 'EUR' AND fx_rate = 24.35 AND amount_foreign = 289.20 AND total_amount = 7042"));
+        self::assertSame(1, $this->rowCount('cash_documents', $supplierId,
+            "doc_number = 'CVH250001' AND doc_type = 'out' AND currency_code = 'HUF' AND fx_rate = 0.06121 AND amount_foreign = 10120 AND total_amount = 619"));
+        self::assertSame(0, $this->rowCount('cash_documents', $supplierId, "doc_number NOT IN ('CPE250001', 'CVH250001') AND currency_code <> 'CZK'"));
+    }
+
+    /** @return list<array{0:string,1:string,2:float,3:float}> datum, měna, kurz, částka ve valutě */
+    private function foreignLines(int $supplierId, string $account): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT e.entry_date, l.currency_code, l.fx_rate, l.amount_foreign FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND a.account_code = ? AND l.currency_code IS NOT NULL ORDER BY e.entry_date, l.id'
+        );
+        $stmt->execute([$supplierId, $account]);
+        return array_map(static fn (array $r): array => [(string) $r['entry_date'], (string) $r['currency_code'], (float) $r['fx_rate'], (float) $r['amount_foreign']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Uzávěrka 2025 nabídne kurzové přecenění obou valutových pokladen. */
+    private function assertRevaluationProposals(int $supplierId): void
+    {
+        $proposals = array_column($this->container(\MyInvoice\Repository\ClosingRepository::class)->bankProposals($supplierId, '2025-12-31'), null, 'account_code');
+        self::assertSame('EUR', $proposals['211.002']['currency_code'] ?? null, json_encode($proposals) ?: '');
+        self::assertEqualsWithDelta(389.2, $proposals['211.002']['foreign_balance'], 0.001);
+        self::assertEqualsWithDelta(9542.0, $proposals['211.002']['czk_balance'], 0.001);
+        self::assertSame('HUF', $proposals['211.003']['currency_code'] ?? null);
+        self::assertEqualsWithDelta(39880.0, $proposals['211.003']['foreign_balance'], 0.001);
+        self::assertEqualsWithDelta(2481.0, $proposals['211.003']['czk_balance'], 0.001);
+    }
+
+    /**
      * Storno výdeje v bance (vrácený poplatek) má v Money `Vydej` = 1 a zápornou částku —
      * peníze na účet přišly, pohyb je kladný. Rozdíl dokladu proti deníku, který je už
      * v samotném Money (kurzový rozdíl zaúčtovaný mimo účet banky, dobropis s jinou částkou

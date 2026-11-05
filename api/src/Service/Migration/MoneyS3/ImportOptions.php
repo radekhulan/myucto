@@ -26,7 +26,9 @@ final class ImportOptions
      * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
      * @param bool $relinkOnly opravný převod vazeb už převedené firmy: projde zálohu, ale nic
      *                         nového nezaloží (zápis, doklad, pohyb, výpis, partnera, kartu, období) -
-     *                         jen u převzatých záznamů znovu dopočítá úhrady, zápočty a zálohy.
+     *                         jen u převzatých záznamů znovu dopočítá úhrady, zápočty a zálohy
+     *                         a doplní valuty valutových pokladen, jejich dokladů a řádků deníku
+     *                         otevřených let.
      *                         Firma se po převodu účtuje v MyÚčtu a novější doklady z Money by se
      *                         zdvojily s tím, co uživatel zadal.
      */
