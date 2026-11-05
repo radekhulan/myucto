@@ -3,6 +3,7 @@ import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Flow from '../MembershipReverseFlow.vue'
+import { formatDateRange } from '../membershipFormat'
 import type { ClaimRow, MembershipPreview } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
@@ -12,8 +13,8 @@ vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; variant?: string; disabled?: boolean; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-variant': a.variant, disabled: a.disabled, onClick: a.run }, a.label))),
 })
 const DateInput = defineComponent({
   props: ['modelValue'], emits: ['update:modelValue'],
@@ -167,6 +168,24 @@ describe('Membership reverse flow', () => {
     await flushPromises()
     expect(w.find('[data-action="reverse-preview"]').exists()).toBe(false)
     expect(api.preview).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('previews as a neutral step and colours only the confirmation of the reversal as destructive', async () => {
+    const w = mounted()
+    await fill(w)
+    expect(w.get('[data-action="reverse-preview"]').attributes('data-variant')).toBe('primary')
+    await review(w)
+    expect(w.get('[data-action="confirm"]').attributes('data-variant')).toBe('danger')
+    w.unmount()
+  })
+
+  it('shows the claim and the period choice in the app date format', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.get('[data-field="reverse-claim-period"]').text()).toBe(formatDateRange('2026-01-01', '2026-12-31'))
+    expect(w.get('[data-section="reverse-claim"]').text()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    expect(w.get('[data-field="reverse-period"]').text()).toContain(formatDateRange('2000-01-01', '2099-12-31'))
     w.unmount()
   })
 })
