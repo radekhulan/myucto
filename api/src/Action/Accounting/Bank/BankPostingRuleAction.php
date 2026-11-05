@@ -410,9 +410,14 @@ final class BankPostingRuleAction
         }
         $debit = trim((string) ($body['debit_account_code'] ?? $existing['debit_account_code']));
         $credit = trim((string) ($body['credit_account_code'] ?? $existing['credit_account_code']));
-        if (array_key_exists('direction', $body)
+        // Pravidlo s cílovou ostatní položkou ověří účty spolu s položkou níže.
+        $keepsOtherItem = array_key_exists('other_item_id', $body)
+            ? !in_array($body['other_item_id'], [null, '', 0, '0'], true)
+            : ($existing['other_item_id'] ?? null) !== null;
+        if (!$keepsOtherItem && (array_key_exists('direction', $body)
             || array_key_exists('debit_account_code', $body)
-            || array_key_exists('credit_account_code', $body)) {
+            || array_key_exists('credit_account_code', $body)
+            || ($existing['other_item_id'] ?? null) !== null)) {
             $this->assertAccounts($supplierId, $direction, $debit, $credit);
         }
         if (array_key_exists('debit_account_code', $body) || array_key_exists('credit_account_code', $body)) {
@@ -442,6 +447,21 @@ final class BankPostingRuleAction
             (string) ($fields['credit_account_code'] ?? $existing['credit_account_code']),
             (string) ($fields['applies_currency'] ?? $existing['applies_currency'] ?? 'CZK'),
         );
+
+        // Cílová ostatní položka: nová, nebo stávající po změně směru či kontace.
+        if (array_key_exists('other_item_id', $body)
+            || (($existing['other_item_id'] ?? null) !== null
+                && (array_key_exists('direction', $body) || array_key_exists('debit_account_code', $body)
+                    || array_key_exists('credit_account_code', $body) || array_key_exists('applies_currency', $body)))) {
+            $fields['other_item_id'] = $this->validator->otherItemTarget(
+                $supplierId,
+                $direction,
+                array_key_exists('other_item_id', $body) ? $body['other_item_id'] : $existing['other_item_id'],
+                (string) ($fields['debit_account_code'] ?? $existing['debit_account_code']),
+                (string) ($fields['credit_account_code'] ?? $existing['credit_account_code']),
+                (string) ($fields['applies_currency'] ?? $existing['applies_currency'] ?? 'CZK'),
+            );
+        }
 
         // Režim se mění výhradně auditovatelnými promote/demote endpointy.
         if (array_key_exists('mode', $body) && in_array($body['mode'], ['suggest', 'auto'], true)) {

@@ -728,6 +728,9 @@ final class SettingsAction
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
             // přijetí; admin-only (jako ostatní účetní nastavení firmy), účinek jen v double_entry.
             'auto_post_invoices', 'auto_post_purchases',
+            // Automatické párování banky s ostatními pohledávkami a závazky (migrace 2239),
+            // výchozí vypnuto; účinek i v daňové evidenci (přiřazení bez zaúčtování).
+            'auto_match_other_items',
             // Účet závazku pro účtenky / paragony (migrace 2204), viz PurchasePayableAccount.
             'receipt_payable_account_code',
             // F7 — AI provider selection (NON-secret; secrety `*_enc` jdou VÝHRADNĚ přes
@@ -1185,7 +1188,7 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'simplified_hide_customer_default', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled', 'email_attach_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', DefaultInvoiceNote::ENABLED_COLUMN], true)
+                $params[] = in_array($f, ['is_vat_payer', 'simplified_hide_customer_default', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled', 'email_attach_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'auto_match_other_items', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', DefaultInvoiceNote::ENABLED_COLUMN], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
@@ -1643,6 +1646,7 @@ final class SettingsAction
         // Auto-post hook (A2, migrace 1035) — opt-in auto-zaúčtování; FE gatuje na double_entry.
         $row['auto_post_invoices']       = (bool) ($row['auto_post_invoices'] ?? false);
         $row['auto_post_purchases']      = (bool) ($row['auto_post_purchases'] ?? false);
+        $row['auto_match_other_items']   = (bool) ($row['auto_match_other_items'] ?? false);
         // Datum přijetí u importu (migrace 1848). Chybějící hodnota = nedoběhlá migrace;
         // fallback drží VÝCHOZÍ režim a hlavně nenechá FE select bez vybrané položky.
         $row['purchase_import_received_at'] = in_array(

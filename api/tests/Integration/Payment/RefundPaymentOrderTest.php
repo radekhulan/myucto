@@ -169,7 +169,7 @@ final class RefundPaymentOrderTest extends TestCase
         $this->seedAccounts();
 
         $result = $this->service->candidates($this->supplierId, 'CZK');
-        self::assertSame(['payer_accounts', 'candidates', 'total', 'tax_candidates'], array_keys($result));
+        self::assertSame(['payer_accounts', 'candidates', 'total', 'tax_candidates', 'other_candidates'], array_keys($result));
 
         try {
             $this->service->create($this->supplierId, [

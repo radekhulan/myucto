@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Obligations;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\OtherItemRepository;
 use PDO;
 
 final class OtherItemForecastService
@@ -43,37 +44,36 @@ final class OtherItemForecastService
             'due_on' => (string) $r['due_on'], 'remaining' => (float) $r['remaining'],
             'status' => (string) $r['status'],
         ] + self::identity($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
-        $planned = 'WITH planned AS (
-            SELECT oi.id, oi.document_no, oi.title, oi.partner_name, oi.issued_on,
-                   oi.side, oi.currency, oi.status, i.due_on, i.amount,
-                   SUM(i.amount) OVER (PARTITION BY oi.id ORDER BY i.position) cumulative,
-                   COALESCE(a.paid_amount, 0) + oi.settled_outside_amount paid_amount
-              FROM other_item_installments i
-              JOIN other_items oi ON oi.id = i.other_item_id AND oi.supplier_id = i.supplier_id
-              LEFT JOIN (SELECT supplier_id, other_item_id, SUM(amount) paid_amount
-                           FROM other_item_allocations WHERE reversed_on IS NULL
-                           GROUP BY supplier_id, other_item_id) a
-                ON a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id
-             WHERE oi.supplier_id = ? AND oi.deleted_at IS NULL
-               AND oi.status IN (\'draft\',\'confirmed\',\'posted\')';
-        $planParams = [$supplierId];
+        // Splátky: zbytek každé splátky podle OtherItemInstallmentCoverage (stejné pravidlo jako
+        // detail splátek a přiřazení úhrady). Načtou se jen položky se splátkou v rozsahu.
+        $planned = 'SELECT oi.id, oi.document_no, oi.title, oi.partner_name, oi.issued_on,
+                           oi.side, oi.currency, oi.status
+                      FROM other_items oi
+                     WHERE oi.supplier_id = ? AND oi.deleted_at IS NULL
+                       AND oi.status IN (\'draft\',\'confirmed\',\'posted\')
+                       AND EXISTS (SELECT 1 FROM other_item_installments i
+                                    WHERE i.supplier_id = oi.supplier_id AND i.other_item_id = oi.id
+                                      AND i.due_on BETWEEN ? AND ?)';
+        $planParams = [$supplierId, $from, $to];
         if ($currency !== null) {
             $planned .= ' AND oi.currency = ?';
             $planParams[] = $currency;
         }
-        $planned .= ') SELECT id, document_no, title, partner_name, issued_on, side, currency, status, due_on,
-                   GREATEST(LEAST(amount, cumulative - paid_amount), 0) remaining
-              FROM planned WHERE due_on BETWEEN ? AND ? ORDER BY due_on, id';
-        array_push($planParams, $from, $to);
-        $stmt = $this->db->pdo()->prepare($planned);
+        $stmt = $this->db->pdo()->prepare($planned . ' ORDER BY oi.id');
         $stmt->execute($planParams);
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if ((float) $row['remaining'] <= 0) continue;
-            $rows[] = [
-                'side' => (string) $row['side'], 'currency' => (string) $row['currency'],
-                'due_on' => (string) $row['due_on'], 'remaining' => (float) $row['remaining'],
-                'status' => (string) $row['status'],
-            ] + self::identity($row);
+        $items = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $items[(int) $row['id']] = $row;
+        $coverage = (new OtherItemRepository($this->db))->installmentCoverage($supplierId, array_keys($items));
+        foreach ($items as $itemId => $item) {
+            foreach ($coverage[$itemId] ?? [] as $installment) {
+                if ($installment['due_on'] < $from || $installment['due_on'] > $to
+                    || $installment['remaining_amount'] <= 0) continue;
+                $rows[] = [
+                    'side' => (string) $item['side'], 'currency' => (string) $item['currency'],
+                    'due_on' => $installment['due_on'], 'remaining' => (float) $installment['remaining_amount'],
+                    'status' => (string) $item['status'],
+                ] + self::identity($item);
+            }
         }
         usort($rows, static fn (array $a, array $b): int => $a['due_on'] <=> $b['due_on']);
         return $rows;

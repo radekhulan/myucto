@@ -389,6 +389,14 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'count'   => static fn (): int => (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($connection))->pending(),
             'script'  => 'backfill-linked-advance-amount.php',
         ],
+        [
+            // Úhrady ostatních položek se splátkami přiřazené před migrací 2237 bez vazby
+            // na splátku, viz OtherItemInstallmentBackfill.
+            'name'    => 'other-item-installments',
+            'reason'  => 'úhrad ostatních položek bez splátky',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\OtherItemInstallmentBackfill($db))->pending(),
+            'script'  => 'backfill-other-item-installments.php',
+        ],
     ];
 
     echo "\n=== Auto-backfill check ===\n";

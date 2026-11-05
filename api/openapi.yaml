@@ -8033,6 +8033,35 @@ paths:
                         account: { type: [string, "null"] }
                         variable_symbol: { type: [string, "null"] }
                         ordered_at: { type: [string, "null"], description: "Kdy byla daň naposledy zařazena do (nearchivovaného) příkazu." }
+                  other_candidates:
+                    type: array
+                    description: "Ostatní závazky k úhradě, jen CZK: potvrzené nebo zaúčtované položky strany `payable` se zbytkem k úhradě. Se splátkovým kalendářem nejbližší otevřená splátka, která ještě není v příkazu (částka = zbytek splátky), bez kalendáře celý zbytek. Splátky už zařazené do nearchivovaného příkazu jsou v seznamu s `ordered_at` a `payable: false`. Účet příjemce je účet protistrany položky, VS jen číslice z VS položky."
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string, example: 'other:12:34' }
+                        other_item_id: { type: integer }
+                        installment_id: { type: [integer, "null"] }
+                        installment_position: { type: [integer, "null"] }
+                        installment_count: { type: [integer, "null"] }
+                        side: { type: string, enum: [payable] }
+                        kind: { type: string }
+                        kind_name: { type: [string, "null"], description: "Název vlastního druhu položky." }
+                        title: { type: string }
+                        partner_name: { type: [string, "null"] }
+                        document_no: { type: [string, "null"] }
+                        due_date: { type: string, format: date }
+                        amount: { type: number }
+                        currency: { type: string, enum: [CZK] }
+                        account_number: { type: [string, "null"], example: '19-1000000005' }
+                        bank_code: { type: [string, "null"], example: '0100' }
+                        iban: { type: [string, "null"], description: "Zahraniční IBAN protistrany (bez kódu banky)." }
+                        variable_symbol: { type: [string, "null"] }
+                        has_account: { type: boolean }
+                        abo_eligible: { type: boolean }
+                        ordered_at: { type: [string, "null"], description: "Kdy byla splátka (zbytek) naposledy zařazena do nearchivovaného příkazu." }
+                        payable: { type: boolean, description: "Lze zařadit do příkazu (má účet a ještě v příkazu není)." }
+                        reason: { type: [string, "null"], enum: [no_account, already_ordered, null] }
 
   /api/v1/purchase-invoices/payment-orders/verify-account:
     parameters:
@@ -8100,6 +8129,17 @@ paths:
                   type: array
                   items: { type: integer }
                   description: "Předpisy záloh na daň z příjmů (id z `tax_candidates`). Bez kódu finančního úřadu u firmy se přeskočí s důvodem `no_account`."
+                other_items:
+                  type: array
+                  description: "Ostatní závazky (z `other_candidates`): ID položky, nebo objekt se splátkou, kterou seznam nabídl. Samotné ID zařadí nejbližší splátku, která ještě v příkazu není (bez kalendáře celý zbytek). Splátka, která už nabízená není, se přeskočí s důvodem `already_ordered`, položka cizí firmy nebo bez zbytku s `nothing_to_pay`, bez účtu protistrany s `no_account`. Částku, účet i VS odvozuje server. `mark_paid` se na ně nevztahuje, uhrazení zapisuje párování výpisu."
+                  items:
+                    oneOf:
+                      - { type: integer }
+                      - type: object
+                        required: [id]
+                        properties:
+                          id: { type: integer }
+                          installment_id: { type: [integer, "null"] }
                 payer_currency_id:
                   type: integer
                   format: int64
@@ -18327,6 +18367,43 @@ paths:
         '200': { description: Druhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemKind' } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/other-items/kinds/{id}/posting-profiles:
+    get:
+      tags: [Accounting]
+      summary: Účetní profily druhu
+      description: |
+        Kontace vzniku a úhrad, kterou druh předává svým položkám, pokud položka nemá vlastní.
+        Profily vestavěného druhu bez řádku nastavení vrací přehled druhů (posting_profiles).
+        Jen podvojné účetnictví (409 other_items.error.not_double_entry). Profily se mění jen ve
+        webovém rozhraní.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Profily, content: { application/json: { schema: { type: object, properties: { profiles: { $ref: '#/components/schemas/OtherItemPostingProfiles' } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Firma vede daňovou evidenci (other_items.error.not_double_entry), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/posting-overrides:
+    put:
+      tags: [Accounting]
+      summary: Vlastní kontace úhrad potvrzené nebo zaúčtované položky
+      description: |
+        Platí pro budoucí úhrady, zaúčtované úhrady se nemění. Koncept nese vlastní kontaci
+        úhrad v těle úpravy (posting_overrides). Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { posting_overrides: { $ref: '#/components/schemas/OtherItemPostingOverridesInput' } } } } }
+      responses:
+        '200': { description: Položka s novou kontací, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Položka není aktivní nebo firma vede daňovou evidenci (other_items.error.invalid_status|not_double_entry)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/other-items/{id}:
     parameters:
       - { $ref: '#/components/parameters/SupplierIdHeader' }
@@ -18425,6 +18502,37 @@ paths:
       responses:
         '200': { description: Přeúčtovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{id}/counterparty-account:
+    put:
+      tags: [Accounting]
+      summary: Změní účet protistrany potvrzeného nebo zaúčtovaného dokladu
+      description: |
+        Účet protistrany slouží jen k párování úhrad (automatické párování, kandidáti v dialogu
+        Spárovat), zaúčtování ani saldo nemění. Koncept se upravuje přes `PUT /accounting/other-items/{id}`,
+        stornovaný a zrušený doklad vrací `409 other_items.error.counterparty_not_editable`.
+        Změna se zapíše do aktivity dokladu (`other_item.counterparty_account_changed`).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                counterparty_account:
+                  type: [string, 'null']
+                  maxLength: 60
+                  description: Český účet `předčíslí-číslo/kód banky` (modulo 11) nebo IBAN; prázdná hodnota účet smaže.
+                counterparty_bank_code: { type: [string, 'null'], pattern: '^[0-9]{4}$' }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Doklad není potvrzený ani zaúčtovaný (`other_items.error.counterparty_not_editable`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Neplatný účet protistrany (`other_items.error.invalid_counterparty_account`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/allocations:
     get:
@@ -18585,7 +18693,7 @@ paths:
     put:
       tags: [Accounting]
       summary: Nastaví termíny splátek; prázdné pole kalendář zruší
-      description: Nahrazuje celý kalendář. Jinak 2 až 120 splátek se vzestupnými termíny ne dříve než datum vzniku, kladnými částkami na haléře a součtem přesně rovným částce dokladu. Jen na konceptu, potvrzeném nebo zaúčtovaném dokladu bez úhrady. Splátky slouží k plánu cashflow a do deníku nic nezapisují. Dostupné i API tokenu se scope read_write.
+      description: Nahrazuje celý kalendář. Jinak 2 až 120 splátek se vzestupnými termíny ne dříve než datum vzniku a kladnými částkami na haléře. Splátku lze rozdělit na jistinu, úrok a poplatek; součet jistiny (u nerozdělené splátky celé částky) musí přesně odpovídat částce dokladu. Jen na konceptu, potvrzeném nebo zaúčtovaném dokladu bez úhrady (ani úhrady samotného úroku). Kalendář sám do deníku nic nezapisuje; úrok a poplatek se zaúčtují s úhradou splátky. Dostupné i API tokenu se scope read_write.
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: path, name: item_id, required: true, schema: { type: integer } }
@@ -18595,6 +18703,22 @@ paths:
       responses:
         '200': { description: Splátky, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallment' } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/other-items/{item_id}/installments/plan:
+    post:
+      tags: [Accounting]
+      summary: Návrh splátkového kalendáře úvěru
+      description: Spočítá anuitní nebo lineární splátky s jistinou, úrokem (zůstatek × roční sazba / 12 nebo 4, na haléře) a poplatkem; součet jistiny je přesně zadaná jistina, poslední splátka vyrovná zaokrouhlení. Nic neukládá, kalendář se uloží přes PUT installments. Vyžaduje přihlášení v aplikaci.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemLoanPlanInput' } } }
+      responses:
+        '200': { description: Návrh splátek, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemInstallmentInput' } } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/internal-documents:
     get:
@@ -40853,6 +40977,8 @@ components:
             amount: { type: number }
             exchange_rate: { type: [number, 'null'] }
             variable_symbol: { type: [string, 'null'] }
+            counterparty_account: { type: [string, 'null'] }
+            counterparty_bank_code: { type: [string, 'null'] }
             account_code: { type: [string, 'null'] }
             counter_account_code: { type: [string, 'null'] }
             posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
@@ -40860,10 +40986,30 @@ components:
         occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string } } } }
     OtherItemInstallmentInput:
       type: object
-      required: [due_on, amount]
+      required: [due_on]
+      description: |
+        Splátka. Bez složek je nerozdělená a `amount` je povinné. Rozdělená splátka úvěru nebo
+        leasingu nese jistinu, úrok a poplatek (chybějící složka = 0); jejich součet musí být
+        `amount` (422 other_items.error.installment_components_total), bez `amount` se dopočítá.
+        Částka dokladu je jistina: součet principal_amount (u nerozdělené splátky amount) musí
+        přesně odpovídat částce dokladu (422 other_items.error.installment_total).
       properties:
         due_on: { type: string, format: date }
         amount: { type: number, exclusiveMinimum: 0 }
+        principal_amount: { type: [number, 'null'], minimum: 0, description: Jistina splátky; snižuje saldo položky. }
+        interest_amount: { type: [number, 'null'], minimum: 0, description: Úrok splátky; účtuje se s úhradou do nákladů (závazek) nebo výnosů (pohledávka). }
+        fee_amount: { type: [number, 'null'], minimum: 0, description: Poplatek splátky; účtuje se s úhradou jako úrok. }
+    OtherItemLoanPlanInput:
+      type: object
+      required: [annual_rate, count, first_due_on]
+      properties:
+        principal: { type: number, exclusiveMinimum: 0, description: Jistina; bez zadání částka dokladu. }
+        annual_rate: { type: number, minimum: 0, maximum: 100, description: Roční úroková sazba v procentech (nejvýš 4 desetinná místa). }
+        count: { type: integer, minimum: 2, maximum: 120 }
+        first_due_on: { type: string, format: date }
+        frequency: { type: string, enum: [monthly, quarterly], default: monthly }
+        method: { type: string, enum: [annuity, linear], default: annuity }
+        fee: { type: number, minimum: 0, default: 0, description: Poplatek přičtený ke každé splátce. }
     OtherItemInstallment:
       allOf:
         - { $ref: '#/components/schemas/OtherItemInstallmentInput' }
@@ -40871,6 +41017,12 @@ components:
           properties:
             id: { type: integer, format: int64 }
             position: { type: integer }
+            paid_amount: { type: number, description: Uhrazeno ze splátky (peněžně, i úrok a poplatek). Úhrada s installment_id pokryje nejdřív svou splátku, přebytek a ostatní úhrady (včetně settled_outside_amount, která je jistinou) pokrývají otevřené splátky podle pořadí; u rozdělené splátky každá složka zvlášť. }
+            remaining_amount: { type: number, description: Zbývá zaplatit ze splátky včetně úroku a poplatku. }
+            remaining_principal: { type: number, description: Zbývající jistina splátky (u nerozdělené celý zbytek). }
+            remaining_interest: { type: number }
+            remaining_fee: { type: number }
+            status: { type: string, enum: [unpaid, partial, paid, overdue], description: overdue = po splatnosti s neuhrazeným zbytkem (i částečně uhrazená). }
     OtherItemPostingLine:
       type: object
       required: [account_code, amount]
@@ -40896,6 +41048,11 @@ components:
         amount: { type: number, exclusiveMinimum: 0 }
         exchange_rate: { type: [number, 'null'], description: Ignorováno, pro tuto agendu je podporována pouze CZK }
         variable_symbol: { type: [string, 'null'] }
+        counterparty_account:
+          type: [string, 'null']
+          maxLength: 60
+          description: Účet protistrany pro párování úhrad. Český účet `předčíslí-číslo/kód banky` (ověří se modulo 11; kód banky lze poslat i zvlášť v counterparty_bank_code) nebo IBAN. Uloží se kanonicky - český účet i český IBAN jako `předčíslí-číslo` bez vodicích nul s kódem banky, zahraniční IBAN beze změny a bez kódu banky. Prázdná hodnota účet smaže. Při úpravě nový účet bez counterparty_bank_code smaže uložený kód banky.
+        counterparty_bank_code: { type: [string, 'null'], pattern: '^[0-9]{4}$', description: Kód banky českého účtu protistrany; u IBANu se nezadává. }
         account_code: { type: [string, 'null'], description: Rozvahový účet pohledávky nebo závazku }
         counter_account_code: { type: [string, 'null'], description: Původní jednořádková kontace; při více protiřádcích je null }
         posting_lines:
@@ -40905,6 +41062,89 @@ components:
           description: Protiřádky kontace v CZK; součet musí přesně odpovídat amount_czk. U starých dokladů se jednořádková kontace vrací synteticky.
           items: { $ref: '#/components/schemas/OtherItemPostingLine' }
         note: { type: [string, 'null'] }
+        posting_overrides:
+          $ref: '#/components/schemas/OtherItemPostingOverridesInput'
+    OtherItemPostingRuleInput:
+      type: object
+      description: |
+        Kontace jedné účetní události. NULL na straně položky znamená účet položky (u vzniku účet
+        z položky, jinak výchozí 315/325); NULL na peněžní straně úhrady znamená účet banky podle
+        výpisu (221) nebo pokladny (211). U úhrady musí strana položky zůstat prázdná
+        (422 other_items.error.profile_breaks_saldo), peněžní účet je 221 nebo 211 a jejich
+        analytiky (422 invalid_payment_account). Úrok (`interest`) a poplatek (`fee`) rozdělené
+        splátky nesou jen účet nákladu (závazek, debit_account_code) nebo výnosu (pohledávka,
+        credit_account_code); peněžní stranu určí kontace úhrady a musí zůstat prázdná
+        (422 component_money_account), účet jiného typu se odmítne (422 invalid_component_account).
+        NULL znamená výchozí 562 / 568 u závazku a 662 / 668 u pohledávky (rámec 504: 544 / 549
+        a 644 / 649). Účty musí být aktivní v osnově, syntetika s víc analytikami se odmítne
+        (422 account_not_posting_level).
+      properties:
+        debit_account_code: { type: [string, 'null'], maxLength: 20 }
+        credit_account_code: { type: [string, 'null'], maxLength: 20 }
+        description_template: { type: [string, 'null'], maxLength: 255, description: 'Popis zápisu se zástupnými znaky {title}, {document_no}, {partner}, {variable_symbol}.' }
+        dimensions:
+          type: array
+          maxItems: 20
+          description: Výchozí dimenze hlavičky nového dokladu druhu; jen profil vzniku druhu.
+          items: { type: object, required: [type_id, value_id], properties: { type_id: { type: integer }, value_id: { type: integer } } }
+        is_active: { type: boolean, description: Jen profil druhu; vypnutý profil se neuplatní. }
+    OtherItemPostingRule:
+      allOf:
+        - { $ref: '#/components/schemas/OtherItemPostingRuleInput' }
+        - type: object
+          properties:
+            id: { type: integer }
+            event: { type: string, enum: [origin, payment_bank, payment_cash, interest, fee] }
+            kind_id: { type: integer }
+            updated_at: { type: [string, 'null'], format: date-time }
+    OtherItemPostingOverridesInput:
+      type: object
+      additionalProperties: false
+      description: |
+        Vlastní kontace úhrad položky podle události; vynechaná událost se nemění, null vrátí
+        kontaci zděděnou z druhu. Vlastní kontaci vzniku nesou account_code, counter_account_code
+        a posting_lines (422 invalid_posting_override pro origin). Jen podvojné účetnictví.
+      properties:
+        payment_bank: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRuleInput' }, { type: 'null' }] }
+        payment_cash: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRuleInput' }, { type: 'null' }] }
+        interest: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRuleInput' }, { type: 'null' }] }
+        fee: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRuleInput' }, { type: 'null' }] }
+    OtherItemPostingProfiles:
+      type: object
+      description: Účetní profily druhu podle události; null = událost bez profilu.
+      properties:
+        origin: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+        payment_bank: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+        payment_cash: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+        interest: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+        fee: { oneOf: [{ $ref: '#/components/schemas/OtherItemPostingRule' }, { type: 'null' }] }
+    OtherItemEffectivePosting:
+      type: object
+      description: |
+        Účinná kontace události a její původ: item = vlastní kontace položky, kind = účetní profil
+        druhu, default = výchozí kontace aplikace. Vznik se skládá po částech (account_source,
+        counter_source) a nese náhled řádků (lines); úhrada nese debit_account_code
+        a credit_account_code, úrok a poplatek rozdělené splátky account_code. U zaúčtované položky
+        jde o kontaci dalšího zaúčtování, zaúčtované zápisy se nemění.
+      required: [event, source]
+      properties:
+        event: { type: string, enum: [origin, payment_bank, payment_cash, interest, fee] }
+        source: { type: string, enum: [item, kind, default] }
+        account_code: { type: string }
+        account_source: { type: string, enum: [item, kind, default] }
+        counter_source: { type: [string, 'null'], enum: [item, kind, null] }
+        posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
+        lines:
+          type: array
+          items: { type: object, properties: { account_code: { type: string }, side: { type: string, enum: [debit, credit] }, amount: { type: number } } }
+        debit_account_code: { type: string }
+        credit_account_code: { type: string }
+        money_account_code: { type: string }
+        description: { type: [string, 'null'] }
+        description_template: { type: [string, 'null'] }
+        dimensions: { type: array, items: { type: object, properties: { type_id: { type: integer }, value_id: { type: integer } } } }
+        kind_id: { type: [integer, 'null'] }
+        profile_id: { type: [integer, 'null'] }
     OtherItemKind:
       type: object
       required: [id, side, builtin, builtin_code, name, own_series, is_active]
@@ -40919,6 +41159,19 @@ components:
         is_active: { type: boolean, description: Skrytý druh nejde zvolit pro nový koncept; koncept a opakování, které ho nesou, ho ponechají. }
         created_at: { type: [string, 'null'], format: date-time }
         updated_at: { type: [string, 'null'], format: date-time }
+        posting_profiles: { $ref: '#/components/schemas/OtherItemPostingProfiles' }
+        posting_suggestion:
+          type: [object, 'null']
+          description: Nezávazný návrh kontace vzniku vestavěného druhu; aplikace ho sama neuloží. Jen podvojné účetnictví.
+          properties:
+            debit_account_code: { type: string }
+            credit_account_code: { type: string }
+        posting_component_defaults:
+          type: object
+          description: Výchozí účty úroku a poplatku rozdělené splátky podle strany druhu a účetního rámce, když je neurčí profil ani položka. Jen podvojné účetnictví.
+          properties:
+            interest: { type: string }
+            fee: { type: string }
     OtherItem:
       allOf:
         - { $ref: '#/components/schemas/OtherItemInput' }
@@ -40932,10 +41185,21 @@ components:
             amount_czk: { type: number }
             settled_outside_amount: { type: number, description: Část uhrazená mimo banku a pokladnu (zápočet, interní doklad, stav úhrady převzatý z jiného programu). Je součástí paid_amount. }
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }
-            remaining_amount: { type: number }
+            remaining_amount: { type: number, description: Saldo položky. U úvěru s rozdělenými splátkami jen jistina. }
+            remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Jen detail. }
+            has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. Jen detail. }
             journal_entry_id: { type: [integer, 'null'], format: int64 }
             reversal_entry_id: { type: [integer, 'null'], format: int64 }
             posted_at: { type: [string, 'null'], format: date-time }
+            posting_rules:
+              type: object
+              description: Účinná kontace vzniku a úhrad (prázdný objekt v daňové evidenci).
+              properties:
+                origin: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
+                payment_bank: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
+                payment_cash: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
+                interest: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
+                fee: { $ref: '#/components/schemas/OtherItemEffectivePosting' }
     OtherItemList:
       type: object
       required: [items, total, page, per_page, sources]
@@ -41047,10 +41311,18 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64 }
+        installment_id: { type: [integer, 'null'], format: int64, description: Splátka, kterou úhrada hradí (přesná shoda částky s otevřenou splátkou, jinak první otevřená). Přebytek pokrývá další otevřené splátky podle pořadí. Null u položky bez splátek. }
         bank_transaction_id: { type: [integer, 'null'], format: int64 }
         cash_document_id: { type: [integer, 'null'], format: int64 }
-        amount: { type: number }
+        amount: { type: number, description: Jistina, o kterou úhrada snižuje saldo položky (u nerozdělené splátky celá úhrada). }
+        interest_amount: { type: number, description: Úrok rozdělené splátky uhrazený touto platbou. }
+        fee_amount: { type: number, description: Poplatek rozdělené splátky uhrazený touto platbou. }
+        total_amount: { type: number, description: Peněžní částka úhrady (amount + interest_amount + fee_amount). Platba se pokryje nejdřív na úrok, pak poplatek, pak jistinu splátky. }
         payment_on: { type: string, format: date }
+        auto_match_reason:
+          type: [string, 'null']
+          enum: [other_item_vs_account, other_item_vs_installment, other_item_vs_remaining, other_item_account_installment, bank_rule, null]
+          description: Kód automatického přiřazení (shoda VS s účtem protistrany, příští splátkou nebo celým zbytkem, účet protistrany s příští splátkou, nebo pravidlo účtování banky). Null u ručního přiřazení.
         reversed_on: { type: [string, 'null'], format: date }
     OtherItemBankCandidate:
       type: object
@@ -41070,8 +41342,13 @@ components:
         paid: { type: boolean }
         currency_mismatch: { type: boolean }
         side: { type: string, enum: [receivable, payable] }
+        match_score: { $ref: '#/components/schemas/OtherItemMatchScore' }
+        match_confidence: { type: number, minimum: 0, maximum: 1, description: match_score / 100. }
+        match_reasons: { $ref: '#/components/schemas/OtherItemMatchReasons' }
+        installment: { $ref: '#/components/schemas/OtherItemMatchInstallment' }
     OtherItemPaymentCandidate:
       type: object
+      description: Volná bankovní nebo pokladní platba k přiřazení položce, seřazená podle match_score a pak od nejnovější.
       properties:
         source: { type: string, enum: [bank, cash] }
         id: { type: integer, format: int64 }
@@ -41079,6 +41356,26 @@ components:
         amount: { type: number }
         currency: { type: string }
         description: { type: string }
+        match_score: { $ref: '#/components/schemas/OtherItemMatchScore' }
+        match_confidence: { type: number, minimum: 0, maximum: 1, description: match_score / 100. }
+        match_reasons: { $ref: '#/components/schemas/OtherItemMatchReasons' }
+        installment: { $ref: '#/components/schemas/OtherItemMatchInstallment' }
+    OtherItemMatchScore:
+      type: integer
+      minimum: 0
+      maximum: 100
+      description: 'Síla shody platby s položkou - 100 VS + účet protistrany + částka splátky, 80 až 88 VS, 70 až 75 účet + částka splátky, 60 částka splátky do 15 dnů od její splatnosti, 50 až 55 celý zbývající dluh, 40 částka splátky mimo okno splatnosti, 30 jen účet protistrany, 0 jen výsledek hledání.'
+    OtherItemMatchReasons:
+      type: array
+      items: { type: string, enum: [variable_symbol, counterparty_account, installment_amount, installment_due, remaining_amount] }
+    OtherItemMatchInstallment:
+      type: [object, 'null']
+      description: Otevřená splátka, jejíž zbytek odpovídá částce platby (±0,01 Kč); null bez shody se splátkou.
+      properties:
+        id: { type: integer, format: int64 }
+        position: { type: integer }
+        due_on: { type: string, format: date }
+        remaining_amount: { type: number }
     ShoptetFeed:
       type: object
       description: Kořen `SHOP` feedu pro automatický import produktů Shoptetu.
@@ -44347,6 +44644,17 @@ components:
         operation_type: { type: [string, "null"] }
         auto_amount_cap: { type: [number, "null"], minimum: 0 }
         applies_currency: { type: string, pattern: '^[A-Z]{3}$' }
+        other_item_id:
+          type: [integer, "null"]
+          format: int64
+          description: |
+            Ostatní pohledávka nebo závazek (`/accounting/other-items`), kterým pravidlo pohyb po
+            zaúčtování rovnou uhradí. Položka musí být potvrzená nebo zaúčtovaná, v CZK, pohledávka
+            u příchozího a závazek u odchozího pravidla a ne-bankovní strana kontace musí být její
+            účet. Jinak `422 rule_other_item_invalid|rule_other_item_currency|rule_other_item_direction|rule_other_item_account`.
+            Automatické pravidlo pohyb zaúčtuje a přiřadí jedním krokem; když položku uhradit nejde
+            (uhrazená, stornovaná, přeplatek), vznikne návrh s poznámkou `other_item_unavailable`.
+            Schválení návrhu takového pravidla úhradu přiřadí také. NULL = pravidlo jen zaúčtuje.
         backfill_suggestions: { type: boolean }
 
     BankPostingRule:
@@ -49114,6 +49422,7 @@ components:
           readOnly: true
           description: "Měsíční limit klientských pokusů o vytěžení přijatých dokladů. Počítá se každý platný upload předaný ke zpracování včetně neúspěchu, duplicity a strukturovaného dokladu. Nula jejich vytěžování blokuje."
         dimensions_enabled: { type: boolean, description: "Uložený příznak dimenzí. Dostupnost funkce navíc závisí na platné licenci účetnictví." }
+        auto_match_other_items: { type: boolean, default: false, description: "Automatické párování bankovních pohybů s ostatními pohledávkami a závazky. Pohyb, který nespárovala žádná faktura, se přiřadí položce jen při jisté shodě (VS s účtem protistrany, příští splátkou nebo celým zbytkem; nebo účet protistrany s příští splátkou v okně splatnosti). V daňové evidenci se úhrada jen přiřadí, v podvojném účetnictví se nezaúčtovaný pohyb zaúčtuje na účet položky." }
         receipt_payable_account_code: { type: [string, "null"], description: "Účet závazku pro účtenky a paragony (document_kind=receipt); null = závazek z předkontace (321). Úhrady odúčtují účet, na kterém závazek dokladu vznikl." }
         vat_status_history:
           type: array
@@ -58634,6 +58943,12 @@ components:
         tax_advance_schedule_id:
           type: integer
           description: Položka platí zálohu na daň z příjmů.
+        other_item_id:
+          type: integer
+          description: Položka platí ostatní závazek.
+        other_item_installment_id:
+          type: integer
+          description: Splátka ostatního závazku, kterou položka platí; chybí, když položka hradí celý zbytek.
         payee_name:
           anyOf:
           - type: string
