@@ -106,6 +106,7 @@ final class RoutePermissionMap
 
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
+        ['GET', '#^/api/invoices/[0-9]+/source-receipts$#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/issue(-final)?$#', 'invoices.issue', AccessLevel::WRITE],
         // Import už vystaveného dokladu zakládá rovnou vystavenou fakturu: vystavení
