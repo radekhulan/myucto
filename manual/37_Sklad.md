@@ -1107,6 +1107,16 @@ dodavatele a z jiných jeho karet se odebere. Volba je jen pro uživatele, kter�
 skladové karty, ostatním se nenabídne a při přímém volání rozhraní se požadavek odmítne.
 Zápis je v logu aktivit.
 
+**Intrastat z faktury.** Uvádí-li řádek kód zboží a zemi původu, průvodce je ukáže s volbou
+**Po zaúčtování doplnit na kartu**. Volba je nezaškrtnutá. Se zaškrtnutím se hodnoty doplní
+až po zaúčtování příjemky a jen tam, kde na kartě chybí; vyplněné hodnoty se nepřepisují.
+Volbu vidí a smí nastavit jen uživatel, který smí upravovat skladové karty, a v editoru
+příjemky ji lze před zaúčtováním zrušit. Zaúčtuje-li koncept s touto volbou někdo bez tohoto
+práva, příjemka se zaúčtuje, karta se nezmění a aplikace to oznámí. Zápis je v logu aktivit.
+Hodnotu lze vzít jen z řádku faktury, ze které příjemka vznikla. Storno příjemky doplněné
+údaje z karty neodebere: hodnota zůstane a opravíte ji ručně na kartě, záznam o doplnění
+najdete v logu aktivit.
+
 Volitelně lze zahrnout i **vedlejší pořizovací náklady**. Kandidáti se nabídnou
 automaticky: jsou to řádky **téže** přijaté faktury, které nemají napojenou žádnou
 skladovou kartu (typicky položka za dopravu vedle položek zboží na jedné faktuře).

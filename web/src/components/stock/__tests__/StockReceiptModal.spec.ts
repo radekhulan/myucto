@@ -55,7 +55,7 @@ describe('StockReceiptModal: párování podle kódu', () => {
     mocks.receiptPropose.mockResolvedValue({
       purchase_invoice: { id: 7, varsymbol: null, vendor_invoice_number: 'X', vendor_name: 'D', currency_code: 'EUR', exchange_rate: null },
       pf_changed_after_receipt: false,
-      lines: [{ ...baseLine, purchase_invoice_item_id: 1, stock_item_id: 50, description: 'Matice', seller_item_code: 'KOD-1', matched_stock_item_id: 50, match_source: 'vendor_sku' }],
+      lines: [{ ...baseLine, purchase_invoice_item_id: 1, stock_item_id: 50, description: 'Matice', seller_item_code: 'KOD-1', matched_stock_item_id: 50, match_source: 'vendor_sku', intrastat_cn8_code: '73181639', intrastat_country_of_origin: 'IT' }],
       unmatched_lines: [{ ...baseLine, purchase_invoice_item_id: 2, stock_item_id: null, description: 'Hrnek', seller_item_code: 'KOD-2', matched_stock_item_id: null, match_source: null }],
       cost_candidates: [{ purchase_invoice_item_id: 2, description: 'Hrnek', amount: '10.00' }, { purchase_invoice_item_id: 3, description: 'Doprava', amount: '5.00' }],
     })
@@ -91,7 +91,8 @@ describe('StockReceiptModal: párování podle kódu', () => {
   it('řádek přiřazený na kartu zmizí z vedlejších nákladů, odškrtnutý kód se neuloží', async () => {
     const wrapper = mountModal()
     await flushPromises()
-    await wrapper.find('input[type="checkbox"]').setValue(true) // vedlejší náklady
+    const landedCosts = wrapper.findAll('label').find(l => l.text().includes(cs.stock.receipt.landed_costs_checkbox))!
+    await landedCosts.find('input').setValue(true)
     expect(wrapper.text()).toContain('Doprava')
     expect(wrapper.findAll('.space-y-2 span.flex-1').map(s => s.text())).toEqual(['Hrnek', 'Doprava'])
 
@@ -203,5 +204,28 @@ describe('StockReceiptModal: párování podle kódu', () => {
     expect(mocks.receiptCreate.mock.calls[0]![1].lines[1]).toEqual(expect.objectContaining({
       purchase_invoice_item_id: 2, stock_item_id: 60, quantity: 3, unit_cost: undefined,
     }))
+  })
+
+  it('Intrastat z dokladu ukáže a pošle jen po výslovném zaškrtnutí', async () => {
+    const wrapper = mountModal()
+    await flushPromises()
+    const fill = wrapper.findAll('label').find(l => l.text().includes('kód zboží 73181639, země původu IT'))!
+    expect(fill.find('input').element.checked).toBe(false)
+
+    await wrapper.findAll('footer button')[1]!.trigger('click')
+    await flushPromises()
+    expect(mocks.receiptCreate.mock.calls[0]![1].lines[0].fill_intrastat).toBeUndefined()
+
+    await fill.find('input').setValue(true)
+    await wrapper.findAll('footer button')[1]!.trigger('click')
+    await flushPromises()
+    expect(mocks.receiptCreate.mock.calls[1]![1].lines[0].fill_intrastat).toBe(true)
+  })
+
+  it('bez práva upravovat karty volbu Intrastatu nenabídne', async () => {
+    mocks.canWrite.mockReturnValue(false)
+    const wrapper = mountModal()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('kód zboží 73181639')
   })
 })

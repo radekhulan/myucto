@@ -62,7 +62,7 @@ final class StockDocumentRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT l.id, l.document_id, l.supplier_id, l.stock_item_id, l.doc_date, l.qty,
                     l.unit_cost, l.value_total, l.extra_cost, l.invoice_item_id,
-                    l.purchase_invoice_item_id, l.purchase_order_line_id,
+                    l.purchase_invoice_item_id, l.purchase_order_line_id, l.fill_intrastat,
                     l.source_description, l.source_qty,
                     l.line_no, l.note, l.tracking_input_json,
                     si.sku, si.name, si.unit, si.tracking_mode
@@ -219,9 +219,9 @@ final class StockDocumentRepository
         $pdo->prepare(
             'INSERT INTO stock_document_lines
                 (document_id, supplier_id, stock_item_id, doc_date, qty, unit_cost, value_total,
-                 extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id,
+                 extra_cost, invoice_item_id, purchase_invoice_item_id, purchase_order_line_id, fill_intrastat,
                  source_description, source_qty, line_no, note, tracking_input_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             (int) $data['document_id'],
             $supplierId,
@@ -234,6 +234,7 @@ final class StockDocumentRepository
             isset($data['invoice_item_id']) && (int) $data['invoice_item_id'] > 0 ? (int) $data['invoice_item_id'] : null,
             isset($data['purchase_invoice_item_id']) && (int) $data['purchase_invoice_item_id'] > 0 ? (int) $data['purchase_invoice_item_id'] : null,
             isset($data['purchase_order_line_id']) && (int) $data['purchase_order_line_id'] > 0 ? (int) $data['purchase_order_line_id'] : null,
+            (int) (($data['fill_intrastat'] ?? false) === true),
             $data['source_description'] ?? null,
             $data['source_qty'] ?? null,
             (int) ($data['line_no'] ?? 0),
@@ -652,6 +653,7 @@ final class StockDocumentRepository
         $r['invoice_item_id'] = $r['invoice_item_id'] !== null ? (int) $r['invoice_item_id'] : null;
         $r['purchase_invoice_item_id'] = $r['purchase_invoice_item_id'] !== null ? (int) $r['purchase_invoice_item_id'] : null;
         $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
+        $r['fill_intrastat'] = (bool) ($r['fill_intrastat'] ?? false);
         $r['line_no'] = (int) $r['line_no'];
         $r['tracking_allocations'] = $r['tracking_input_json'] === null
             ? []

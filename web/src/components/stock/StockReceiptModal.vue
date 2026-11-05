@@ -42,6 +42,9 @@ interface LineState {
   matched_stock_item_id: number | null
   match_source: 'vendor_sku' | 'ean' | 'sku' | 'code_ean' | null
   remember: boolean
+  intrastat_cn8_code: string | null
+  intrastat_country_of_origin: string | null
+  fill_intrastat: boolean
 }
 const lines = ref<LineState[]>([])
 const rowOptions = reactive<Record<number, { value: number; label: string; secondary?: string }[]>>({})
@@ -79,6 +82,10 @@ async function load() {
       matched_stock_item_id: l.matched_stock_item_id ?? null,
       match_source: l.match_source ?? null,
       remember: true,
+      intrastat_cn8_code: l.intrastat_cn8_code ?? null,
+      intrastat_country_of_origin: l.intrastat_country_of_origin ?? null,
+      // Údaj z dokladu na kartu jde jen po výslovném zaškrtnutí.
+      fill_intrastat: false,
     }))
     costs.value = prop.cost_candidates.map(c => ({
       purchase_invoice_item_id: c.purchase_invoice_item_id,
@@ -177,6 +184,12 @@ function canRemember(l: LineState): boolean {
 function isSuggestion(l: LineState): boolean {
   return l.stock_item_id === l.matched_stock_item_id && (l.match_source === 'sku' || l.match_source === 'code_ean')
 }
+function intrastatValues(l: LineState): string {
+  return [
+    l.intrastat_cn8_code ? t('stock.receipt.intrastat_code', { code: l.intrastat_cn8_code }) : '',
+    l.intrastat_country_of_origin ? t('stock.receipt.intrastat_country', { code: l.intrastat_country_of_origin }) : '',
+  ].filter(Boolean).join(', ')
+}
 function matchLabel(l: LineState): string {
   if (l.stock_item_id == null) return l.seller_item_code ? t('stock.receipt.match_none') : ''
   if (l.stock_item_id !== l.matched_stock_item_id || !l.match_source) return ''
@@ -208,6 +221,7 @@ async function submit() {
           quantity: l.quantity,
           unit_cost: l.unit_cost || undefined,
           remember_seller_code: canWriteCards && canRemember(l) && l.remember ? true : undefined,
+          fill_intrastat: canWriteCards && l.fill_intrastat && intrastatValues(l) !== '' ? true : undefined,
         })),
       landed_costs: includeLandedCosts.value
         ? visibleCosts.value.filter(c => c.include && Number(c.amount) > 0).map(c => ({
@@ -316,6 +330,10 @@ async function submit() {
                 {{ t('stock.receipt.remember_code', { code: l.seller_item_code }) }}
               </label>
               <p v-else-if="canRemember(l)" class="text-xs text-neutral-500">{{ t('stock.receipt.remember_no_right') }}</p>
+              <label v-if="canWriteCards && l.stock_item_id != null && intrastatValues(l)" class="flex items-center gap-2 text-xs cursor-pointer">
+                <input v-model="l.fill_intrastat" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
+                {{ t('stock.receipt.intrastat_fill', { values: intrastatValues(l) }) }}
+              </label>
             </div>
           </div>
 

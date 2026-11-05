@@ -715,6 +715,8 @@ final class AiPdfExtractor
                 'accrual_to'             => $accrual['to'] ?? null,
                 'seller_item_code'       => $line['seller_item_code'] ?? null,
                 'item_ean'               => $line['item_ean'] ?? null,
+                'intrastat_cn8_code'     => $line['intrastat_cn8_code'] ?? null,
+                'intrastat_country_of_origin' => $line['intrastat_country_of_origin'] ?? null,
                 // vat_classification_code tady nesetujeme — PurchaseInvoiceRepository::replaceItems()
                 // auto-derive based on rate + RC + vendor country (lookup z DB). Výjimka:
                 // reverse charge doklady dostanou explicitní kód níže (issue #116).
