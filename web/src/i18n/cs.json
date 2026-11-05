@@ -24904,6 +24904,7 @@
         "payroll_payment": "pohyb účtují mzdy",
         "email_notice_provisional": "jde o předběžné avízo, zaúčtuje se pohyb z výpisu",
         "policy_off": "automatika pro tento typ operace je vypnutá",
+        "dimension_required": "zápisu chybí povinná dimenze, doplňte ji u pohybu nebo v pravidle",
         "other": "návrh čeká ke schválení v Automatice"
       },
       "saldo_hint": "Platby faktur se párují, ne účtují pravidlem.",
@@ -24980,7 +24981,13 @@
       "err_error": "Zaúčtování se nezdařilo.",
       "err_generic": "Zaúčtování se nezdařilo.",
       "dashboard_card": "Banka: {count} plateb čeká na zaúčtování",
-      "err_rule_bank_side": "Bankovní strana pravidla musí být účet 221 - u příchozí platby na MD, u odchozí na D."
+      "err_rule_bank_side": "Bankovní strana pravidla musí být účet 221 - u příchozí platby na MD, u odchozí na D.",
+      "err_rule_own_account": "Vybraný vlastní bankovní účet ve firmě není.",
+      "rule_own_account": "Vlastní bankovní účet",
+      "rule_own_account_any": "Všechny účty",
+      "rule_own_account_hint": "Pravidlo platí jen pro pohyby na výpisu tohoto účtu. Při shodě s obecným pravidlem stejné priority má přednost.",
+      "rule_dimensions": "Dimenze pravidla",
+      "rule_dimensions_hint": "Zapíší se k pohybu při schválení návrhu nebo automatickém zaúčtování. Ruční dimenze pohybu a dimenze hrazených dokladů mají přednost."
     },
     "idoklad_source_badge": "iDoklad",
     "idoklad_source_hint": "Měsíční souhrn bankovních pohybů importovaných z iDokladu (ne nahraný výpis). GPC/PDF výpis z banky má přednost.",
@@ -30449,6 +30456,7 @@
       "policy_suggest": "Nastavení automatiky vyžaduje před zaúčtováním potvrzení.",
       "already_paid_verify": "Bankovní transakce je spárovaná s fakturou, která už byla označena jako zaplacená, ale její dřívější úhradu nelze bezpečně propojit s výpisem - ověřte, zda nejde o duplicitu.",
       "overpaid_verify": "Evidované platby faktury přesahují částku k úhradě, proto se úhrada nezaúčtovala automaticky - ověřte, zda nejde o dvojí úhradu.",
+      "dimension_required": "Zápisu chybí povinná dimenze. Doplňte ji u pohybu (akce Dimenze) nebo v pravidle a návrh schvalte.",
       "unknown": "Položka vyžaduje ruční kontrolu."
     }
   },

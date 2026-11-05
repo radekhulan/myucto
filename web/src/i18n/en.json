@@ -24904,6 +24904,7 @@
         "payroll_payment": "the transaction is posted by payroll",
         "email_notice_provisional": "this is a provisional notice, the statement transaction will be posted",
         "policy_off": "automation for this operation type is turned off",
+        "dimension_required": "the entry lacks a required dimension, add it on the movement or in the rule",
         "other": "the suggestion waits for approval in Automation"
       },
       "saldo_hint": "Invoice payments are matched, not posted by rules.",
@@ -24980,7 +24981,13 @@
       "err_error": "Posting failed.",
       "err_generic": "Posting failed.",
       "dashboard_card": "Bank: {count} payments awaiting posting",
-      "err_rule_bank_side": "The bank side of the rule must be account 221 — debit for incoming, credit for outgoing payments."
+      "err_rule_bank_side": "The bank side of the rule must be account 221 — debit for incoming, credit for outgoing payments.",
+      "err_rule_own_account": "The selected own bank account does not belong to the company.",
+      "rule_own_account": "Own bank account",
+      "rule_own_account_any": "All accounts",
+      "rule_own_account_hint": "The rule applies only to movements on this account's statement. It takes precedence over a general rule with the same priority.",
+      "rule_dimensions": "Rule dimensions",
+      "rule_dimensions_hint": "Written to the movement when the suggestion is approved or posted automatically. Manual movement dimensions and dimensions of paid documents take precedence."
     },
     "idoklad_source_badge": "iDoklad",
     "idoklad_source_hint": "Monthly summary of bank movements imported from iDoklad (not an uploaded statement). A GPC/PDF bank statement takes precedence.",
@@ -30449,6 +30456,7 @@
       "policy_suggest": "The automation policy requires confirmation before posting.",
       "already_paid_verify": "The bank transaction is matched to an invoice that was already marked as paid, but its earlier payment cannot be linked safely to the statement — check whether it is a duplicate.",
       "overpaid_verify": "The recorded invoice payments exceed the amount due, so the payment was not posted automatically — check whether it is a double payment.",
+      "dimension_required": "The entry lacks a required dimension. Add it on the movement (Dimensions action) or in the rule and approve the suggestion.",
       "unknown": "This item requires manual review."
     }
   },

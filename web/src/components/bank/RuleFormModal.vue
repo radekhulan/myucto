@@ -50,6 +50,7 @@ function emptyPayload(): BankPostingRulePayload {
     applies_currency: 'CZK', counterparty_prefix: null,
     debit_account_code: '', credit_account_code: '',
     description: null, mode: 'suggest',
+    bank_account_id: null, dimensions: {},
   }
 }
 
@@ -69,6 +70,7 @@ function toPayload(r: BankPostingRule): BankPostingRulePayload {
     applies_currency: r.applies_currency, counterparty_prefix: r.counterparty_prefix,
     debit_account_code: r.debit_account_code, credit_account_code: r.credit_account_code,
     description: r.description, mode: r.mode,
+    bank_account_id: r.bank_account_id ?? null, dimensions: { ...(r.dimensions ?? {}) },
   }
 }
 
@@ -190,7 +192,7 @@ async function save() {
       <RuleForm ref="formRef" :model-value="payload" @update:model-value="Object.assign(payload, $event)" :accounts="accounts"
         :mode="isEdit ? 'edit' : 'create'" :base-amount="baseAmount" :show-dry-run="true"
         :from-transaction="fromTransaction" :initial-mode="rule?.mode"
-        :promotion-candidate="rule?.promotion_candidate ?? false" />
+        :promotion-candidate="rule?.promotion_candidate ?? false" :show-scope="true" />
 
       <label v-if="fromTransaction && applicableCount > 0" data-test="apply-matching"
         class="flex items-center gap-2 mt-3 text-sm text-neutral-700 cursor-pointer">

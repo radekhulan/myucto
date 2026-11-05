@@ -426,6 +426,9 @@ final class DimensionDefaults
      * Výchozí dimenze vlastního bankovního účtu do hlavičky nepatří: platí jen pro řádek
      * banky a protiúčet pohybu bez dokladu. S originy proto vrací i `bank_account`
      * ({@see bankAccountLayer()}), které po řádcích doplní {@see DimensionStamper::fillBankAccount()}.
+     * Stejně omezenou vrstvu tvoří dimenze pravidla účtování zapsané k pohybu (`bank_rule`,
+     * {@see bankRuleLayer()}): doplní se na stejné řádky, ale ještě před výchozími
+     * hodnotami pravidel dimenzí podle účtu.
      *
      * @return array<int,int>
      */
@@ -443,6 +446,7 @@ final class DimensionDefaults
             'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId),
             'split_origins' => [],
             'bank_account' => $this->bankAccountLayer($supplierId, $bank, $includeInactiveAccount),
+            'bank_rule' => $this->bankRuleLayer($supplierId, $transactionId, $bank, $includeInactiveAccount),
         ];
     }
 
@@ -471,6 +475,63 @@ final class DimensionDefaults
      */
     private function bankAccountLayer(int $supplierId, array $bank, bool $includeInactive): ?array
     {
+        $account = $this->statementAccount($supplierId, $bank, $includeInactive);
+        if ($account === null || $account['layer'] === []) {
+            return null;
+        }
+        // merge() ověří, že hodnota je pořád aktivní a typ firma vidí.
+        $merged = $this->merge($supplierId, ['bank_account:' . $account['id'] => $account['layer']]);
+        if ($merged['header'] === []) {
+            return null;
+        }
+        return ['header' => $merged['header'], 'origins' => $merged['origins']] + self::bankLines($account, $bank);
+    }
+
+    /**
+     * Dimenze pravidla účtování, které pohyb zaúčtovalo ({@see BankRuleDimensions}), s týmiž
+     * řádky jako výchozí dimenze účtu ({@see bankAccountLayer()}): řádek banky a u pohybu,
+     * který nehradí doklad, protiúčet. Pravidlo popisuje druh pohybu, ne saldokonto
+     * hrazeného dokladu ani druhou nohu převodu, které se po dimenzi musí vyrovnat.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankRuleLayer(int $supplierId, int $transactionId, array $bank, bool $includeInactive): ?array
+    {
+        $rule = (new BankRuleDimensions($this->db))->onTransaction($supplierId, $transactionId);
+        if ($rule['header'] === []) {
+            return null;
+        }
+        return $rule + self::bankLines($this->statementAccount($supplierId, $bank, $includeInactive), $bank);
+    }
+
+    /**
+     * Řádky pohybu, na které patří výchozí hodnoty pohybu ({@see DimensionStamper::fillBankAccount()}).
+     *
+     * @param array{kind:string}|null $account účet výpisu z {@see statementAccount()}
+     * @param array{incoming:bool, documents:list<array<string,mixed>>} $bank
+     * @return array{synthetics:list<string>, side:string, pays_documents:bool}
+     */
+    private static function bankLines(?array $account, array $bank): array
+    {
+        return [
+            // Kreditní karta má vlastní nohu na úvěru 231.x; pravidla a ruční zápisy píšou 221.
+            'synthetics' => ($account['kind'] ?? '') === BankAnalyticAssigner::CREDIT_CARD_KIND
+                ? [CreditCardAccounts::SYNTHETIC, BankAnalyticAssigner::BANK_SYNTHETIC]
+                : [BankAnalyticAssigner::BANK_SYNTHETIC],
+            'side' => $bank['incoming'] ? 'debit' : 'credit',
+            'pays_documents' => $bank['documents'] !== [],
+        ];
+    }
+
+    /**
+     * Vlastní účet výpisu pohybu s jeho výchozími dimenzemi (cache viz {@see bankAccountLayer()}).
+     *
+     * @param array{statement_account?:array{number:string, bank:string}} $bank
+     * @return array{id:int, kind:string, layer:array<int,int>}|null
+     */
+    private function statementAccount(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
         if (!isset($bank['statement_account'])) {
             return null;
         }
@@ -491,25 +552,7 @@ final class DimensionDefaults
                 'layer' => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', (int) $account['id']),
             ];
         }
-        $account = $this->bankAccountCache[$key];
-        if ($account === null || $account['layer'] === []) {
-            return null;
-        }
-        // merge() ověří, že hodnota je pořád aktivní a typ firma vidí.
-        $merged = $this->merge($supplierId, ['bank_account:' . $account['id'] => $account['layer']]);
-        if ($merged['header'] === []) {
-            return null;
-        }
-        return [
-            'header' => $merged['header'],
-            'origins' => $merged['origins'],
-            // Kreditní karta má vlastní nohu na úvěru 231.x; pravidla a ruční zápisy píšou 221.
-            'synthetics' => $account['kind'] === BankAnalyticAssigner::CREDIT_CARD_KIND
-                ? [CreditCardAccounts::SYNTHETIC, BankAnalyticAssigner::BANK_SYNTHETIC]
-                : [BankAnalyticAssigner::BANK_SYNTHETIC],
-            'side' => $bank['incoming'] ? 'debit' : 'credit',
-            'pays_documents' => $bank['documents'] !== [],
-        ];
+        return $this->bankAccountCache[$key];
     }
 
     /**

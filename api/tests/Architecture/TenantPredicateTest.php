@@ -135,6 +135,7 @@ final class TenantPredicateTest extends TestCase
         'cash_registers',
         'cash_documents',
         'bank_posting_rules',
+        'bank_posting_rule_dimensions',
         'bank_posting_suggestions',
         'supplier_bank_accounts',
         'bank_transfer_matches',

@@ -144,6 +144,8 @@ export interface BankTransaction {
   period_closed?: boolean
   /** Dimenze pohybu (typ → hodnota); jen u firmy se zapnutými dimenzemi. */
   dimensions?: import('./dimensions').DimensionMap
+  /** Typy z `dimensions`, které pohybu zapsalo pravidlo účtování (ostatní jsou zadané ručně). */
+  rule_dimension_types?: number[]
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null

@@ -143,7 +143,7 @@ final class ClientBankAccess
         foreach (['posting', 'card'] as $key) if (array_key_exists($key, $row)) $row[$key] = null;
         // Ostatní pohledávky a závazky klientská role nevidí (agenda účetní).
         if (array_key_exists('matched_other_items', $row)) $row['matched_other_items'] = [];
-        unset($row['dimensions'], $row['match_reason'], $row['matched_by']);
+        unset($row['dimensions'], $row['rule_dimension_types'], $row['match_reason'], $row['matched_by']);
         return $row;
     }
 }

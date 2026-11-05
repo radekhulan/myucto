@@ -126,15 +126,19 @@ final class DimensionStamper
         if (!$hasExplicit && !$enabled) {
             return $resolved;
         }
-        [$header, $items, $splits, , $headerOrigins, $splitOrigins, , $bankAccount] = $sourceId !== null && isset(self::SOURCES[$sourceType]) && $enabled
+        [$header, $items, $splits, , $headerOrigins, $splitOrigins, , $bankAccount, $bankRule] = $sourceId !== null && isset(self::SOURCES[$sourceType]) && $enabled
             ? $this->documentContext($supplierId, $sourceType, $sourceId, $itemAccounts)
-            : [[], [], [], [], [], [], [], null];
+            : [[], [], [], [], [], [], [], null, null];
         if ($header !== [] || $items !== [] || $hasExplicit) {
             $resolved = self::expandSplits(
                 self::assign($resolved, $header, $items, $this->accountTypes($supplierId), true, $headerOrigins,$this->serviceCostAccounts($supplierId, $sourceType, $entryDate, $resolved))['lines'],
                 $splits,
                 $splitOrigins,
             );
+        }
+        if ($bankRule !== null) {
+            // Pravidlo účtování popisuje tento druh pohybu, proto před pravidly dimenzí podle účtu.
+            $resolved = self::fillBankAccount($resolved, $bankRule, $this->lineAccountCodes($supplierId, $resolved), $this->transferCodes($supplierId));
         }
         if ($enabled && $entryDate !== null) {
             // Výchozí hodnoty pravidel dimenzí až po dokladu — doklad má vždy přednost.
@@ -272,7 +276,7 @@ final class DimensionStamper
             return ['lines' => 0, 'needs_repost' => false, 'account_change' => false];
         }
         // Přerazítkování bere i deaktivovaný bankovní účet: pohyb na něm už je zaúčtovaný.
-        [$header, $items, $splits, , $headerOrigins, $splitOrigins, , $bankAccount] = $this->documentContext($supplierId, $sourceType, $sourceId, null, true, true);
+        [$header, $items, $splits, , $headerOrigins, $splitOrigins, , $bankAccount, $bankRule] = $this->documentContext($supplierId, $sourceType, $sourceId, null, true, true);
         $types = $this->accountTypes($supplierId);
         $assignments = new DimensionAssignmentRepository($this->db);
         $router = new DimensionAccountRouter($this->db);
@@ -330,13 +334,11 @@ final class DimensionStamper
             }
             $result = self::assign($lines, $header, $items, $types, false, $headerOrigins,$this->serviceCostAccounts($supplierId, $sourceType, $entryDate, $lines));
             $needsRepost = $needsRepost || $result['needs_split'];
-            $restamped = $this->rules()->applyDefaults(
-                $supplierId,
-                $sourceType,
-                $sourceId,
-                self::expandSplits($result['lines'], $splits, $splitOrigins),
-                $entryDate,
-            );
+            $restamped = self::expandSplits($result['lines'], $splits, $splitOrigins);
+            if ($bankRule !== null) {
+                $restamped = self::fillBankAccount($restamped, $bankRule, $this->lineAccountCodes($supplierId, $restamped), $this->transferCodes($supplierId));
+            }
+            $restamped = $this->rules()->applyDefaults($supplierId, $sourceType, $sourceId, $restamped, $entryDate);
             if ($bankAccount !== null) {
                 $restamped = self::fillBankAccount($restamped, $bankAccount, $this->lineAccountCodes($supplierId, $restamped), $this->transferCodes($supplierId));
             }
@@ -565,7 +567,10 @@ final class DimensionStamper
             return $lines;
         }
         $assignments = new DimensionAssignmentRepository($this->db);
-        $ownTypes = $assignments->documentDimensions($supplierId, 'bank_transaction', $txId)['header'];
+        $ownTypes = BankRuleDimensions::ownOnly(
+            $assignments->documentDimensions($supplierId, 'bank_transaction', $txId)['header'],
+            $assignments->documentOrigins($supplierId, 'bank_transaction', $txId)['header'],
+        );
         foreach ($assignments->documentSplits($supplierId, 'bank_transaction', $txId)[0] ?? [] as $typeId => $_) {
             $ownTypes[$typeId] = 0;
         }
@@ -787,7 +792,8 @@ final class DimensionStamper
     }
 
     /**
-     * Výchozí dimenze vlastního bankovního účtu po řádcích zápisu pohybu. Doplní jen typ,
+     * Výchozí dimenze vlastního bankovního účtu po řádcích zápisu pohybu; stejně se doplňují
+     * i dimenze pravidla účtování pohybů (volá se před pravidly dimenzí). Doplní jen typ,
      * který řádek nemá hodnotou ani rozpadem — dimenze pohybu, hrazeného dokladu
      * i výchozí hodnota pravidla dimenzí podle účtu ({@see DimensionRuleService::applyDefaults()},
      * běží dřív) mají přednost.
@@ -944,7 +950,8 @@ final class DimensionStamper
      * @param array<int,int>|null $itemAccounts
      * Čtvrtý prvek = id položky => její vlastní dimenze (položka > produkt), bez hlavičky.
      *
-     * Osmý prvek = výchozí dimenze vlastního bankovního účtu pohybu ({@see fillBankAccount()}).
+     * Osmý prvek = výchozí dimenze vlastního bankovního účtu pohybu, devátý = dimenze pravidla
+     * účtování zapsané k pohybu (obojí {@see fillBankAccount()}).
      *
      * @return array{0:array<int,int>, 1:list<array{dims:array<int,int>, weight:float, account_id:?int}>, 2:list<array<int,float>>, 3:array<int,array<int,int>>}
      */
@@ -958,6 +965,12 @@ final class DimensionStamper
             ? $assignments->documentDimensions($supplierId, $docType, $docId, $forUpdate)
             : ['header' => [], 'items' => []];
         $docOrigins = $docType !== null && $docId !== null ? $assignments->documentOrigins($supplierId, $docType, $docId, $forUpdate) : ['header' => [], 'items' => []];
+        if ($docType === 'bank_transaction') {
+            // Hodnoty z pravidla účtování nejsou vlastní dimenze pohybu (ty jdou na všechny
+            // řádky): vrací je DimensionDefaults jako vrstvu `bank_rule` pro fillBankAccount().
+            $dims['header'] = BankRuleDimensions::ownOnly($dims['header'], $docOrigins['header']);
+            $docOrigins['header'] = array_intersect_key($docOrigins['header'], $dims['header']);
+        }
         $docSplitOrigins = $docType !== null && $docId !== null ? $assignments->documentSplitOrigins($supplierId, $docType, $docId, $forUpdate) : [];
         $splits = [];
         $splitOrigins = [];
@@ -1037,7 +1050,7 @@ final class DimensionStamper
         }
         $header = DimensionDefaults::fill($dims['header'], $inherited['header']);
         $headerOrigins = ($docOrigins['header'] ?? []) + ($inherited['origins'] ?? []);
-        return [$header, $items, $splits, $byItem, $headerOrigins, $splitOrigins, $byItemOrigins, $inherited['bank_account'] ?? null];
+        return [$header, $items, $splits, $byItem, $headerOrigins, $splitOrigins, $byItemOrigins, $inherited['bank_account'] ?? null, $inherited['bank_rule'] ?? null];
     }
 
     /**

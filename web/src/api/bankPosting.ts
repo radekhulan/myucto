@@ -1,6 +1,7 @@
 import { api } from './client'
 import { apiErrorMessage } from './errors'
 import type { BankTransaction, BankAccountOption, BankTransactionSortKey } from './bank'
+import type { DimensionMap } from './dimensions'
 
 export type RuleDirection = 'incoming' | 'outgoing'
 export type RuleMode = 'suggest' | 'auto'
@@ -13,6 +14,10 @@ export interface BankPostingRule {
   name: string
   is_active: boolean
   direction: RuleDirection
+  /** Vlastní bankovní účet, na jehož výpisu musí pohyb ležet; null = všechny účty. */
+  bank_account_id?: number | null
+  /** Dimenze, které pravidlo zapíše k pohybu při schválení nebo automatickém zaúčtování. */
+  dimensions?: DimensionMap
   counterparty_account: string | null
   counterparty_bank: string | null
   variable_symbol: string | null
@@ -297,6 +302,7 @@ const ERROR_KEYS: Record<string, string> = {
   // Dva různé důvody, dva různé kódy: dokud sdílely jeden, hlásila se u
   // špatné bankovní strany hláška o saldokontu a uživatel neměl co opravit.
   rule_bank_side_required: 'bank.posting.err_rule_bank_side',
+  invalid_bank_account:   'bank.posting.err_rule_own_account',
   rule_saldo_forbidden:   'bank.posting.err_rule_account_forbidden',
   rule_account_forbidden: 'bank.posting.err_rule_account_forbidden',
   fx_rule_account_forbidden: 'bank.posting.err_fx_rule_account_forbidden',

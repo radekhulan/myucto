@@ -13,7 +13,7 @@ use PDO;
  */
 final class BankPostingRuleRepository
 {
-    private const COLS = 'id, supplier_id, name, direction, counterparty_account, counterparty_bank,
+    private const COLS = 'id, supplier_id, name, direction, bank_account_id, counterparty_account, counterparty_bank,
         variable_symbol, message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
         description, mode, mode_set_manually_at, is_active, hit_count, last_hit_at, rejected_streak, last_rejected_tx_id,
         priority, operation_type, system_template_key, auto_amount_cap, applies_currency,
@@ -22,7 +22,9 @@ final class BankPostingRuleRepository
     public function __construct(private readonly Connection $db) {}
 
     /**
-     * Aktivní pravidla pro směr (řazená dle hit_count DESC — konflikt bere vítěze).
+     * Aktivní pravidla pro směr v pořadí {@see \MyInvoice\Service\Accounting\Bank\BankRuleMatcher::rank()}
+     * (priorita, pravidlo omezené na vlastní účet před obecným), mezi rovnocennými
+     * podle hit_count DESC — konflikt bere vítěze.
      *
      * @return list<array<string,mixed>>
      */
@@ -31,7 +33,7 @@ final class BankPostingRuleRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLS . ' FROM bank_posting_rules
               WHERE supplier_id = ? AND is_active = 1 AND direction = ?
-              ORDER BY priority ASC, hit_count DESC, id ASC'
+              ORDER BY priority ASC, bank_account_id IS NULL, hit_count DESC, id ASC'
         );
         $stmt->execute([$supplierId, $direction]);
         return array_map(fn (array $r): array => $this->cast($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -140,15 +142,16 @@ final class BankPostingRuleRepository
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO bank_posting_rules
-                (supplier_id, name, direction, counterparty_account, counterparty_bank, variable_symbol,
+                (supplier_id, name, direction, bank_account_id, counterparty_account, counterparty_bank, variable_symbol,
                  message_contains, amount_min, amount_max, debit_account_code, credit_account_code,
                  description, mode, mode_set_manually_at, is_active, priority, operation_type, system_template_key,
                  auto_amount_cap, applies_currency, counterparty_prefix, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['name'],
             $data['direction'],
+            $data['bank_account_id'] ?? null,
             $data['counterparty_account'] ?? null,
             $data['counterparty_bank'] ?? null,
             $data['variable_symbol'] ?? null,
@@ -180,7 +183,7 @@ final class BankPostingRuleRepository
     public function update(int $supplierId, int $id, array $fields): bool
     {
         $allowed = [
-            'name', 'direction', 'counterparty_account', 'counterparty_bank', 'variable_symbol',
+            'name', 'direction', 'bank_account_id', 'counterparty_account', 'counterparty_bank', 'variable_symbol',
             'message_contains', 'amount_min', 'amount_max', 'debit_account_code', 'credit_account_code',
             'description', 'mode', 'mode_set_manually_at', 'is_active',
             'priority', 'operation_type', 'auto_amount_cap', 'applies_currency', 'counterparty_prefix',
@@ -272,10 +275,69 @@ final class BankPostingRuleRepository
         return ['streak' => $streak, 'disabled' => $disabled];
     }
 
+    /**
+     * Dimenze pravidel (typ => hodnota) pro více pravidel jedním dotazem.
+     *
+     * @param list<int> $ruleIds
+     * @return array<int,array<int,int>> id pravidla => typ => hodnota
+     */
+    public function dimensionsFor(int $supplierId, array $ruleIds): array
+    {
+        $ruleIds = array_values(array_unique(array_filter(array_map('intval', $ruleIds), static fn (int $id): bool => $id > 0)));
+        if ($ruleIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT rule_id, dimension_type_id, dimension_value_id
+               FROM bank_posting_rule_dimensions
+              WHERE supplier_id = ? AND rule_id IN (' . implode(',', array_fill(0, count($ruleIds), '?')) . ')
+           ORDER BY rule_id, dimension_type_id'
+        );
+        $stmt->execute([$supplierId, ...$ruleIds]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['rule_id']][(int) $row['dimension_type_id']] = (int) $row['dimension_value_id'];
+        }
+        return $out;
+    }
+
+    /** @return array<int,int> typ => hodnota */
+    public function dimensions(int $supplierId, int $ruleId): array
+    {
+        return $this->dimensionsFor($supplierId, [$ruleId])[$ruleId] ?? [];
+    }
+
+    /**
+     * Nahradí dimenze pravidla. Hodnoty musí být ověřené volajícím
+     * ({@see \MyInvoice\Service\Accounting\Dimension\DimensionService::normalize()}).
+     *
+     * @param array<int,int> $dimensions typ => hodnota
+     */
+    public function replaceDimensions(int $supplierId, int $ruleId, array $dimensions): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM bank_posting_rule_dimensions WHERE supplier_id = ? AND rule_id = ?')
+            ->execute([$supplierId, $ruleId]);
+        if ($dimensions === []) {
+            return;
+        }
+        $rows = [];
+        $params = [];
+        foreach ($dimensions as $typeId => $valueId) {
+            $rows[] = '(?, ?, ?, ?)';
+            array_push($params, $ruleId, $supplierId, (int) $typeId, (int) $valueId);
+        }
+        $pdo->prepare(
+            'INSERT INTO bank_posting_rule_dimensions (rule_id, supplier_id, dimension_type_id, dimension_value_id)
+             VALUES ' . implode(',', $rows)
+        )->execute($params);
+    }
+
     private function cast(array $r): array
     {
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
+        $r['bank_account_id'] = $r['bank_account_id'] === null ? null : (int) $r['bank_account_id'];
         $r['amount_min'] = $r['amount_min'] === null ? null : (float) $r['amount_min'];
         $r['amount_max'] = $r['amount_max'] === null ? null : (float) $r['amount_max'];
         $r['auto_amount_cap'] = $r['auto_amount_cap'] === null ? null : (float) $r['auto_amount_cap'];

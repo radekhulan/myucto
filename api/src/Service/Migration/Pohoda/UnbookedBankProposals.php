@@ -107,7 +107,8 @@ final class UnbookedBankProposals
         $out = [];
         foreach (array_chunk($ids, 500) as $chunk) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT t.id, t.amount, t.variable_symbol, t.counterparty_account, t.counterparty_bank, t.counterparty_name, t.description
+                "SELECT t.id, t.amount, t.variable_symbol, t.counterparty_account, t.counterparty_bank, t.counterparty_name, t.description,
+                        s.account_number AS recipient_account, s.bank_code AS recipient_bank
                    FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
                   WHERE s.supplier_id = ? AND t.source = 'statement' AND t.match_status = 'unmatched' AND t.amount <> 0
                     AND t.id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
@@ -181,6 +182,7 @@ final class UnbookedBankProposals
      */
     private function clusters(PohodaContext $ctx, array $candidates, array $history, array $ourRules): array
     {
+        $ownAccounts = new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db);
         $activeRules = [];
         $clusters = [];
         foreach ($candidates as $tx) {
@@ -209,7 +211,8 @@ final class UnbookedBankProposals
             $direction = $incoming ? 'incoming' : 'outgoing';
             $activeRules[$direction] ??= $this->rules->findActive($ctx->supplierId, $direction);
             foreach ($activeRules[$direction] as $rule) {
-                if (!isset($ourRules[$rule['id']]) && strtoupper((string) $rule['applies_currency']) === 'CZK' && $this->matcher->matching($rule, $tx)) {
+                if (!isset($ourRules[$rule['id']]) && strtoupper((string) $rule['applies_currency']) === 'CZK'
+                    && $this->matcher->matching($rule, $ownAccounts->withOwnAccount($ctx->supplierId, $tx, $tx))) {
                     $ctx->protocol->count(self::STEP, 'unbooked_proposal_covered_by_rule');
                     continue 2;
                 }

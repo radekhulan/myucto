@@ -407,13 +407,43 @@ Na každém řádku se typ po typu bere první hodnota z tohoto pořadí:
 1. dimenze zadaná u pohybu (panel **Dimenze**),
 2. dimenze hrazených dokladů (faktury, ostatní pohledávky a závazky) včetně
    jejich výchozích hodnot,
-3. výchozí hodnota z pravidla dimenzí podle účtu řádku (pravidlo pro 568
+3. dimenze pravidla účtování bankovních pohybů, podle kterého se pohyb zaúčtoval
+   (viz níže),
+4. výchozí hodnota z pravidla dimenzí podle účtu řádku (pravidlo pro 568
    je na řádku 568 konkrétnější než bankovní účet),
-4. výchozí dimenze bankovního účtu, na kterém pohyb je.
+5. výchozí dimenze bankovního účtu, na kterém pohyb je.
 
 Typ, který mají všechny hrazené doklady, ale s různými hodnotami, rozdělí
-zaúčtování po řádcích a na řádku banky jako rozpad. Výchozí dimenze účtu ho
-nepřepíše.
+zaúčtování po řádcích a na řádku banky jako rozpad. Dimenze pravidla ani výchozí
+dimenze účtu ho nepřepíšou.
+
+**Dimenze v pravidle účtování bankovních pohybů.** Pravidlo účtování
+([§ 29.13.14](29_Banka.md#291314-pravidla-uctovani-opakovanych-plateb)) může nést
+hodnoty dimenzí, například zakázku pro platby jedné protistrany. Nastavují se
+v editoru pravidla v části **Dimenze pravidla**. K pohybu se zapíšou až při
+schválení návrhu nebo při automatickém zaúčtování podle pravidla, a to jen typům,
+které pohyb nemá zadané ručně. Návrh sám k pohybu nic nezapíše, takže zamítnutý
+návrh na pohybu žádnou dimenzi z pravidla nenechá. Zapsané hodnoty vidíte v panelu
+**Dimenze** u pohybu. Jsou záznamem stavu v okamžiku zaúčtování: pozdější změna
+pravidla je nezmění, odúčtování pohybu je odebere. Když hodnotu v panelu změníte,
+platí jako ruční dimenze pohybu.
+
+Dimenze pravidla se doplní na stejné řádky jako výchozí dimenze bankovního účtu:
+na řádek banky a u pohybu, který nehradí žádný doklad, na protiúčet. Saldokonto
+hrazených dokladů ani peníze na cestě je nedostanou. Zapíšou se i tehdy, když
+při schválení návrhu změníte účty. Uzavřenou hodnotu dimenze pravidlo k pohybu
+nezapíše.
+
+Pravidlo lze omezit na **vlastní bankovní účet**. Hodí se, když se stejný druh
+pohybu (úrok, poplatek) objevuje na více účtech a každý účet patří jinému
+středisku. Stačí-li jedna hodnota pro všechny pohyby účtu bez ohledu na druh,
+použijte raději výchozí dimenze bankovního účtu. Pravidlo omezené na účet, který
+vypnete v poli **Aktivní**, přestane platit; výjimkou je úvěrový účet kreditní karty,
+jehož pohyby se účtují i po archivaci.
+
+Pravidlo v režimu **Automaticky**, kterému chybí povinná dimenze a nedoplní ji
+ani jedna vrstva, pohyb nezaúčtuje a vytvoří návrh v **Automatice** se stavem
+**Vyžaduje zásah**. Doplňte dimenzi u pohybu nebo v pravidle a návrh schvalte.
 
 Účet vypnutý v poli **Aktivní** své výchozí dimenze u nově účtovaných pohybů
 nepoužije, stejně jako se na jeho analytiku pohyby nepřesměrují. Pohyby, které
@@ -945,8 +975,8 @@ převezme z původního zápisu. Pevné systémové hodnoty nelze
 přejmenovat ani ukončit. Tato přísnější pravidla nemění správu vlastních dimenzí.
 
 Přiřazení uchovává známý původ hodnoty, například přímý výběr, výchozí hodnotu
-klienta, zakázky, produktu nebo bankovního účtu, konkrétní účetní pravidlo či
-účetní modul. Kopie a
+klienta, zakázky, produktu nebo bankovního účtu, konkrétní účetní pravidlo,
+pravidlo účtování bankovních pohybů či účetní modul. Kopie a
 storno zachovají původ převzatého přiřazení. U starších přiřazení bez doloženého
 původu zůstává původ neznámý; opětovné uložení stejné hodnoty jej nedoplňuje
 odhadem.
