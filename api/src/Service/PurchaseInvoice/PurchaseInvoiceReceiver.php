@@ -14,7 +14,7 @@ use MyInvoice\Service\ActivityLogger;
 /**
  * Přijetí přijatého dokladu (stav `received`) — jediné místo, kde žijí kroky, které
  * přijetí spouští: automatické zaúčtování, kartové vypořádání, evidence drobného
- * majetku a hotovostní úhrada z pokladny.
+ * majetku, hotovostní úhrada z pokladny a dohledání dřívější bankovní platby.
  *
  * Volá ho ruční přechod ({@see \MyInvoice\Action\PurchaseInvoice\TransitionPurchaseInvoiceStatusAction})
  * i dokončené schvalování manažerem střediska
@@ -32,6 +32,7 @@ final class PurchaseInvoiceReceiver
         private readonly CardPaymentAutomation $cardAutomation,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\TaxEvidence\TaxEvidenceExpenseRules $taxEvidenceRules,
+        private readonly \MyInvoice\Service\Bank\PurchaseBankRematch $bankRematch,
     ) {}
 
     /**
@@ -116,6 +117,12 @@ final class PurchaseInvoiceReceiver
         } catch (\Throwable $e) {
             $this->logger->log('purchase_invoice.credit_note_offset_failed', $userId,
                 'purchase_invoice', $id, ['error' => $e->getMessage()], $ip, $userAgent);
+        }
+
+        // Platba odešla dřív, než byl doklad přijatý: přepáruj nespárované odchozí pohyby
+        // se shodným symbolem nebo částkou. Doklad uhrazený hotově z pokladny už nehledá.
+        if (!in_array($settlement['status'] ?? null, [CashSettlementService::CREATED, CashSettlementService::UNCHANGED], true)) {
+            $this->bankRematch->afterReceived($supplierId, $id, $userId);
         }
 
         return $settlement;

@@ -238,6 +238,7 @@ Pro vybrané banky umí MyÚčto stahovat pohyby přes bankovní API, aniž byst
 | PDF výpis se nenaimportuje | Součet pohybů nesedí na rozdíl zůstatků, nebo banka není podporovaná | Použijte GPC/ABO, nebo PDF jiného formátu výpisu. |
 | Platba zůstala **Nespárováno**, důvod „Chybí variabilní symbol“ | Platba nemá VS | Spárujte ručně ([§ 29.4](#294-krok-za-krokem-parovani-plateb-s-fakturami)). |
 | Důvod „Žádná vydaná faktura s tímto VS“ | Platba přišla dřív, než faktura vznikla | Počkejte na fakturu a použijte **Přepárovat výpis**, nebo spárujte ručně. |
+| Odchozí platba zůstala nespárovaná, přijatá faktura přišla až po ní | Při importu výpisu doklad ještě nebyl přijatý | Přijetím dokladu se nespárované odchozí platby se shodným variabilním symbolem nebo částkou samy znovu spárují stejnými pravidly jako při importu. Nespárovanou platbu spárujte ručně tlačítkem **Spárovat s bankou** v detailu dokladu. |
 | Důvod „Částka nesedí s fakturou“ | Rozdílná částka, kurz nebo bankovní poplatek | Spárujte ručně, případně jako částečnou platbu ([§ 29.13.7](#29137-castecne-platby-a-cizi-mena)). |
 | Platba v EUR a faktura v CZK se nespárovaly | Jiná měna | Spárujte ručně. |
 | Platba kartou bez VS zůstala nespárovaná | Nejde o jediný volný doklad a jediný volný pohyb téže částky | Spárujte ručně nebo vytvořte doklad z výpisu ([§ 29.6](#296-krok-za-krokem-platba-ktera-neni-platbou-faktury)). |
