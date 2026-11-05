@@ -209,11 +209,18 @@ final class SaveWorkReportAction
             throw $e;
         }
         $wr = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
-        $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
-
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $action = ($invoice['status'] !== 'draft') ? 'work_report.force_saved' : 'work_report.saved';
-        $this->logger->log($action, $user['id'] ?? null, 'work_report', $id, null, $ip, $request->getHeaderLine('User-Agent'));
+        try {
+            $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
+        } catch (\Throwable $e) {
+            error_log('work_report.save_pdf_failed: ' . $e->getMessage());
+        }
+        try {
+            $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+            $action = ($invoice['status'] !== 'draft') ? 'work_report.force_saved' : 'work_report.saved';
+            $this->logger->log($action, $user['id'] ?? null, 'work_report', $id, null, $ip, $request->getHeaderLine('User-Agent'));
+        } catch (\Throwable $e) {
+            error_log('work_report.save_log_failed: ' . $e->getMessage());
+        }
 
         return Json::ok($response, $wr);
     }

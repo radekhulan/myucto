@@ -386,6 +386,7 @@ export interface Invoice {
   /** Odběratelem je systémový koncový zákazník (zjednodušený doklad bez odběratele, § 30). */
   client_is_walk_in?: boolean
   project_name?: string | null
+  project_billing_template_id?: number | null
   project_hourly_rate?: number | null
   project_payment_due_days?: number | null
   currency_symbol?: string

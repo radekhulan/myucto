@@ -1622,6 +1622,7 @@ onMounted(async () => {
       router.replace(`/invoices/${inv.id}`)
       return
     }
+    setLoadedProjectBillingContext(inv)
     editedStatus.value = inv.status
     editedVarsymbol.value = inv.varsymbol
     storedItemQuantities.value = inv.items.filter(i => i.item_kind !== 'discount').map(i => ({ quantity: i.quantity, unit: i.unit }))
@@ -2305,6 +2306,13 @@ const unitPriceHeaderLabel = computed(() => form.value.prices_include_vat && sup
 // ─── WORK REPORT ────────────────────────────────────────────────
 const wrBillingSnapshot = ref<WorkReportBillingSnapshot | null>(null)
 const wrBillingTemplateId = ref<number | null>(null)
+const wrBillingModeChosen = ref(false)
+const loadedProjectBillingContext = ref<Pick<Invoice, 'project_id' | 'project_name' | 'project_billing_template_id'> | null>(null)
+function setLoadedProjectBillingContext(invoice: Pick<Invoice, 'project_id' | 'project_name' | 'project_billing_template_id'>): void {
+  loadedProjectBillingContext.value = { project_id: invoice.project_id, project_name: invoice.project_name, project_billing_template_id: invoice.project_billing_template_id }
+}
+const wrBillingProjectName = computed(() => projects.value.find(project => project.id === form.value.project_id)?.name
+  ?? (loadedProjectBillingContext.value?.project_id === form.value.project_id ? loadedProjectBillingContext.value?.project_name ?? '' : ''))
 const wrBillingPeriod = ref('')
 const wrBillingStale = ref(false)
 const wrBillingReportId = ref<number | null>(null)
@@ -2316,6 +2324,21 @@ const wrBillingLegacyItemId = ref<number | null>(null)
 function queueWrBilling(preview: WorkReportBillingPreview) {
   wrBillingPendingPreview.value = preview
   wrBillingPending.value = true
+}
+// Po částečném uložení držíme serverové ID i nové řádky. Ruční řádky si ponechají
+// identitu objektu kvůli lokálním dimenzím a skladovým volbám pro případ opakování.
+function syncBillingInvoiceItems(items: InvoiceItem[], transferred = false, removedLegacyId?: number): void {
+  const rows = items.filter(item => item.item_kind !== 'discount')
+  const oldBilling = new Map(form.value.items.filter(item => item.work_report_billing_key != null).map(item => [item.work_report_billing_key, item]))
+  const oldManual = form.value.items.filter(item => item.work_report_billing_key == null && (removedLegacyId == null || item.id !== removedLegacyId))
+  form.value.items = rows.map((row, index) => {
+    const previous = transferred
+      ? (row.work_report_billing_key != null ? oldBilling.get(row.work_report_billing_key) : oldManual.shift())
+      : form.value.items[index]
+    return previous ? Object.assign(previous, row) : { ...row }
+  })
+  storedItemQuantities.value = form.value.items.map(item => ({ quantity: item.quantity, unit: item.unit }))
+  rememberLoadedStockPrices()
 }
 const wrOpen = ref(false)
 const wrTitle = ref('')
@@ -2338,6 +2361,7 @@ async function loadWorkReport() {
   if (!invoiceId.value) return
   const wr = await invoicesApi.getWorkReport(invoiceId.value)
   if (wr) {
+    wrBillingModeChosen.value = true
     wrBillingReportId.value = wr.id
     wrBillingCurrentPreview.value = wr.billing_preview ?? null
     wrBillingSnapshot.value = wr.billing_snapshot ?? null
@@ -2396,12 +2420,17 @@ function moveWrItem(idx: number, dir: -1 | 1) {
 }
 async function openWorkReport() {
   wrBillingPeriod.value ||= (form.value.tax_date || form.value.issue_date || '').slice(0, 7)
-  const defaultTemplate = projects.value.find(p => p.id === form.value.project_id)?.billing_template_id
-  if (!wrBillingSnapshot.value && defaultTemplate) {
+  const project = projects.value.find(p => p.id === form.value.project_id)
+  const defaultTemplate = project ? project.billing_template_id
+    : (loadedProjectBillingContext.value?.project_id === form.value.project_id ? loadedProjectBillingContext.value?.project_billing_template_id : null)
+  if (!wrBillingModeChosen.value && wrBillingReportId.value == null && !wrBillingSnapshot.value && defaultTemplate) {
     try {
       const template = (await workReportBillingApi.list()).find(item => item.id === defaultTemplate)
       if (template && template.currency === form.value.currency) { wrBillingTemplateId.value = template.id; wrBillingSnapshot.value = JSON.parse(JSON.stringify(template)) }
-    } catch (e) { error.value = apiErrorMessage(e, t('common.error')) }
+    } catch (e) {
+      error.value = apiErrorMessage(e, t('common.error'))
+      return
+    }
   }
   if (wrVatRateId.value == null) wrVatRateId.value = supplierIsVatPayer.value ? (vatRateIdByPercent(21) ?? defaultVatRateId()) : defaultVatRateId()
   if (wrItems.value.length === 0) {
@@ -2875,6 +2904,10 @@ async function submit() {
       saved = await invoicesApi.create(payload)
       if (wrBillingSnapshot.value) billingDraftId.value = saved.id
     }
+    if (wrBillingSnapshot.value) {
+      if (legacyItemIndex >= 0) wrBillingLegacyItemId.value = saved.items[legacyItemIndex]?.id ?? null
+      syncBillingInvoiceItems(saved.items)
+    }
     await docDims.save(saved.id, itemDimsSnapshot)
 
     // EUR / cizí měna: backend stáhl kurz ČNB. Pokud byl použit fallback
@@ -2916,7 +2949,7 @@ async function submit() {
     notifyCashSettlement(saved._cash_settlement)
     // Po uložení faktury — pokud uživatel otevřel work report, ulož ho
     // (jen řádky s vyplněným popisem; prázdné řádky tiše ignorujeme — viz wrItemsValid)
-    if (wrOpen.value && (wrItemsValid.value.length > 0 || wrBillingSnapshot.value)) {
+    if (wrOpen.value && (wrItemsValid.value.length > 0 || wrBillingSnapshot.value || wrBillingReportId.value != null)) {
       try {
         await invoicesApi.saveWorkReport(saved.id, {
           project_id: saved.project_id,
@@ -2935,11 +2968,6 @@ async function submit() {
             order_index: i,
           })),
         }, isForce.value)
-        if (wrBillingSnapshot.value && wrBillingPending.value) {
-          const preview = await workReportBillingApi.preview(saved.id)
-          await workReportBillingApi.transfer(saved.id, preview.fingerprint, isForce.value, legacyItemIndex < 0 ? undefined : saved.items[legacyItemIndex]?.id)
-          wrBillingPending.value = false
-        }
       } catch (e: any) {
         // Faktura je uložená, výkaz ne — nepokračuj v redirectu, ať uživatel nepřijde o data ve formuláři
         error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
@@ -2961,6 +2989,24 @@ async function submit() {
             order_index: i,
           })),
         }, isForce.value)
+      } catch (e: any) {
+        error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
+        return
+      }
+    }
+    // Přenos až po obou částech výkazu: chyba materiálu nesmí při dalším Save
+    // přepsat už přenesené řádky starým obsahem formuláře.
+    if (wrBillingSnapshot.value && wrBillingPending.value) {
+      try {
+        const preview = await workReportBillingApi.preview(saved.id)
+        const legacyItemId = legacyItemIndex < 0 ? undefined : saved.items[legacyItemIndex]?.id
+        const result = await workReportBillingApi.transfer(saved.id, preview.fingerprint, isForce.value, legacyItemId)
+        syncBillingInvoiceItems(result.items, true, legacyItemId)
+        wrBillingReportId.value = result.work_report.id
+        wrBillingCurrentPreview.value = result.preview
+        wrBillingStale.value = false
+        wrBillingPending.value = false
+        wrBillingLegacyItemId.value = null
       } catch (e: any) {
         error.value = apiErrorMessage(e, t('invoice.wr_save_failed'))
         return
@@ -4191,9 +4237,9 @@ useWindowTitle(
             </select>
           </div>
           <ReportBillingEditor v-model:snapshot="wrBillingSnapshot" v-model:template-id="wrBillingTemplateId" v-model:period="wrBillingPeriod" v-model:legacy-item-id="wrBillingLegacyItemId" :invoice-items="form.items"
-            :currency="form.currency" :title="wrTitle" :items="wrItems" :project-name="projects.find(p => p.id === form.project_id)?.name"
+            :currency="form.currency" :title="wrTitle" :items="wrItems" :project-name="wrBillingProjectName"
             :vat-rate-id="wrVatRateId" :prices-include-vat="form.prices_include_vat" :reverse-charge="form.reverse_charge"
-            :stale="wrBillingStale" :pending="wrBillingPending" @transfer="queueWrBilling" @changed="wrBillingPending = false; wrBillingStale = true" />
+            :stale="wrBillingStale" :pending="wrBillingPending" @transfer="queueWrBilling" @mode-selected="wrBillingModeChosen = true" @changed="wrBillingPending = false; wrBillingStale = true" />
           <!-- Desktop: tabulka -->
           <div class="hidden md:block overflow-x-auto">
           <table class="w-full text-sm table-sticky-first">

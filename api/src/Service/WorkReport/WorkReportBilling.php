@@ -13,8 +13,11 @@ final class WorkReportBilling
     public static function validate(mixed $value): array
     {
         if (!is_array($value)) throw new \InvalidArgumentException('Chybí cenové ujednání.');
-        $name = trim((string) ($value['name'] ?? ''));
-        $currency = strtoupper(trim((string) ($value['currency'] ?? '')));
+        if (!is_string($value['name'] ?? null) || !is_string($value['currency'] ?? null)) {
+            throw new \InvalidArgumentException('Název a měna cenového ujednání musí být text.');
+        }
+        $name = trim($value['name']);
+        $currency = strtoupper(trim($value['currency']));
         if ($name === '' || mb_strlen($name) > 200 || !preg_match('/^[A-Z]{3}$/D', $currency)) {
             throw new \InvalidArgumentException('Vyplňte název a měnu cenového ujednání.');
         }
@@ -56,7 +59,8 @@ final class WorkReportBilling
 
     private static function description(mixed $value): string
     {
-        $value = trim((string) $value);
+        if (!is_string($value)) throw new \InvalidArgumentException('Popis musí být text.');
+        $value = trim($value);
         if ($value === '' || mb_strlen($value) > 1000) throw new \InvalidArgumentException('Popis musí mít 1 až 1000 znaků.');
         preg_match_all('/\{([^{}]+)\}/u', $value, $matches);
         foreach ($matches[1] as $token) {
@@ -78,6 +82,9 @@ final class WorkReportBilling
 
     public static function calculate(array $report, array $invoice = [], float $vatRate = 0): array
     {
+        foreach (['title', 'project_name'] as $field) {
+            if (isset($report[$field]) && !is_string($report[$field])) throw new \InvalidArgumentException('Název výkazu a zakázky musí být text.');
+        }
         $settings = self::validate($report['billing_snapshot'] ?? null);
         $period = self::period($report['billing_period'] ?? null);
         if (($invoice['currency'] ?? $settings['currency']) !== $settings['currency']) {
@@ -89,6 +96,7 @@ final class WorkReportBilling
         if (!is_array($timeEntries) || !array_is_list($timeEntries)) throw new \InvalidArgumentException('Řádky práce musí být seznam.');
         foreach ($timeEntries as $entry) {
             if (!is_array($entry)) throw new \InvalidArgumentException('Neplatný řádek práce.');
+            if (isset($entry['description']) && !is_string($entry['description'])) throw new \InvalidArgumentException('Popis práce musí být text.');
             $entry = TimeBilling::normalizeWorkReportItem($entry);
             self::number($entry['hours'] ?? 0);
             $entries[] = ['description' => (string) ($entry['description'] ?? ''), 'work_date' => $entry['work_date'] ?? null, 'hours' => (float) ($entry['hours'] ?? 0), 'duration_minutes' => $entry['duration_minutes']];

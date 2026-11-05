@@ -32,6 +32,7 @@ final class BillingAction
     {
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            if (isset($body['vat_rate_id']) && (!filter_var($body['vat_rate_id'], FILTER_VALIDATE_INT) || (int) $body['vat_rate_id'] <= 0)) throw new \InvalidArgumentException('Neplatná sazba DPH.');
             $stmt = $this->db->pdo()->prepare('SELECT vr.id, vr.rate_percent FROM supplier s JOIN vat_rates vr ON vr.id = COALESCE(?, s.default_vat_rate_id) WHERE s.id = ?');
             $stmt->execute([$body['vat_rate_id'] ?? null, SupplierGuard::currentId($request)]);
             $rate = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -73,7 +74,8 @@ final class BillingAction
             if ($invoice['status'] !== 'draft') throw new \DomainException('Účtování lze přenést pouze do konceptu faktury.');
             $body = (array) ($request->getParsedBody() ?? []);
             if (isset($body['legacy_item_id']) && (!filter_var($body['legacy_item_id'], FILTER_VALIDATE_INT) || (int) $body['legacy_item_id'] <= 0)) throw new \InvalidArgumentException('Neplatná nahrazovaná položka.');
-            $result = $this->billing->transfer($id, $supplierId, (string) ($body['fingerprint'] ?? ''), $this->ossPlanner, isset($body['legacy_item_id']) ? (int) $body['legacy_item_id'] : null);
+            if (!is_string($body['fingerprint'] ?? null) || !preg_match('/^[a-f0-9]{64}$/D', $body['fingerprint'])) throw new \InvalidArgumentException('Neplatný otisk náhledu účtování.');
+            $result = $this->billing->transfer($id, $supplierId, $body['fingerprint'], $this->ossPlanner, isset($body['legacy_item_id']) ? (int) $body['legacy_item_id'] : null);
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();

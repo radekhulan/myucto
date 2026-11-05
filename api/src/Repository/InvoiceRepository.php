@@ -230,6 +230,7 @@ final class InvoiceRepository
                     c.reverse_charge AS client_reverse_charge, c.is_walk_in AS client_is_walk_in,
                     u.name AS created_by_name,
                     p.name AS project_name, p.hourly_rate AS project_hourly_rate,
+                    p.billing_template_id AS project_billing_template_id,
                     p.payment_due_days AS project_payment_due_days,
                     p.project_number AS project_number, p.contract_number AS contract_number,
                     p.requires_work_report_approval AS project_requires_approval,
@@ -2617,6 +2618,9 @@ final class InvoiceRepository
         $row['id']                  = (int) $row['id'];
         $row['client_id']           = (int) $row['client_id'];
         $row['project_id']          = $row['project_id'] !== null ? (int) $row['project_id'] : null;
+        if (array_key_exists('project_billing_template_id', $row)) {
+            $row['project_billing_template_id'] = $row['project_billing_template_id'] !== null ? (int) $row['project_billing_template_id'] : null;
+        }
         $row['parent_invoice_id']   = isset($row['parent_invoice_id']) && $row['parent_invoice_id'] !== null ? (int) $row['parent_invoice_id'] : null;
         if (array_key_exists('recurring_template_id', $row)) {
             $row['recurring_template_id'] = $row['recurring_template_id'] !== null ? (int) $row['recurring_template_id'] : null;

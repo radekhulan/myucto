@@ -47185,6 +47185,7 @@ components:
         client_is_walk_in: { type: boolean, description: "Odběratelem je systémový koncový zákazník (zjednodušený doklad bez údajů o odběrateli, § 30 ZDPH)." }
         project_id: { type: [integer, "null"] }
         project_name: { type: [string, "null"] }
+        project_billing_template_id: { type: [integer, "null"], readOnly: true, description: "Výchozí šablona účtování zakázky, pouze v detailu faktury. Uložený výkaz má přednost před tímto výchozím nastavením." }
         parent_invoice_id: { type: [integer, "null"], description: "Pro credit_note / cancellation / final-z-proformy odkaz na původní fakturu" }
         calendar_id: { type: [integer, "null"], description: "Kalendář, ke kterému patří interní doklad splátky (`invoice`, `proforma`) nebo daňový doklad k její úhradě (`tax_document`, číslo `KP-<id platby>`)." }
         calendar_contract_ref: { type: [string, "null"], maxLength: 190, description: "Nájemní smlouva splátkového kalendáře (§ 31 ZDPH)." }
@@ -47661,6 +47662,7 @@ components:
         budget_yearly:  { type: [number, "null"] }
         budget_monthly: { type: [number, "null"] }
         default_revenue_category_id: { type: [integer, "null"], description: "Default kategorie tržby pro faktury zakázky" }
+        billing_template_id: { type: [integer, "null"], description: "Výchozí firemní šablona účtování nových výkazů." }
         archived_at: { type: [string, "null"], format: date-time }
 
     Project:

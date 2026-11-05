@@ -34,7 +34,6 @@ import { useSupplierStore } from '@/stores/supplier'
 import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
 import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
 import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
-import { projectsApi } from '@/api/projects'
 import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
 import type { WorkReportDisplayOptions } from '@/api/invoices'
 import Modal from '@/components/ui/Modal.vue'
@@ -57,6 +56,7 @@ const emit = defineEmits<{
 }>()
 
 const loading = ref(false)
+const loadFailed = ref(false)
 const saving = ref(false)
 const error = ref('')
 const modalContent = ref<HTMLElement | null>(null)
@@ -138,16 +138,17 @@ const matTotal = computed(() =>
 
 const canSave = computed(() =>
   // Lze uložit i prázdný stav, pokud výkaz existoval — tím se smaže (vč. položek faktury).
-  (workItemsValid.value.length > 0 || !!billingSnapshot.value || matItemsValid.value.length > 0 || wrExistedOnLoad.value) && !saving.value
+  (workItemsValid.value.length > 0 || !!billingSnapshot.value || matItemsValid.value.length > 0 || wrExistedOnLoad.value) && !saving.value && !loading.value && !loadFailed.value
 )
 
 async function load() {
   loading.value = true
+  loadFailed.value = false
   error.value = ''
   try {
     const [inv, wr, unitsList, vatList] = await Promise.all([
       invoicesApi.get(props.invoiceId),
-      invoicesApi.getWorkReport(props.invoiceId).catch(() => null),
+      invoicesApi.getWorkReport(props.invoiceId),
       codebooksApi.units().catch(() => [] as Unit[]),
       codebooksApi.vatRates('CZ').catch(() => [] as VatRate[]),
     ])
@@ -161,14 +162,10 @@ async function load() {
     billingStale.value = !!wr?.billing_stale
     billingPending.value = false
     reverseCharge.value = !!inv.reverse_charge
-    projectName.value = ''
-    if (inv.project_id) {
-      const project = await projectsApi.get(inv.project_id).catch(() => null)
-      projectName.value = project?.name ?? ''
-      if (!wr && project?.billing_template_id) {
-        const template = (await workReportBillingApi.list()).find(item => item.id === project.billing_template_id)
-        if (template && template.currency === inv.currency) { billingTemplateId.value = template.id; billingSnapshot.value = JSON.parse(JSON.stringify(template)) }
-      }
+    projectName.value = inv.project_name ?? ''
+    if (!wr && inv.project_billing_template_id) {
+      const template = (await workReportBillingApi.list()).find(item => item.id === inv.project_billing_template_id)
+      if (template && template.currency === inv.currency) { billingTemplateId.value = template.id; billingSnapshot.value = JSON.parse(JSON.stringify(template)) }
     }
     displayOptions.value = wr?.display_options ?? null
     wrExistedOnLoad.value = !!wr
@@ -203,6 +200,7 @@ async function load() {
       : (zeroVatRateId() ?? defaultVatRateId.value)
     matOpen.value = matItems.value.length > 0
   } catch (e: any) {
+    loadFailed.value = true
     error.value = apiErrorMessage(e, t('common.error'))
   } finally {
     loading.value = false
@@ -430,6 +428,7 @@ onMounted(() => {
   <Modal v-if="modelValue" :title="t('invoice.wr_btn')" width-class="max-w-4xl" @close="close">
       <div v-if="loading" class="p-8 text-center text-neutral-500">{{ t('common.loading') }}</div>
 
+      <div v-else-if="loadFailed" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
       <div v-else ref="modalContent" class="space-y-6">
         <WorkReportDisplaySettings v-model="displayOptions" inheritable
           :defaults="supplierStore.currentSupplier?.work_report_display_options" />

@@ -320,6 +320,229 @@ final class WorkReportBillingIntegrationTest extends TestCase
         $this->container->get(WorkReportBillingService::class)->assertCurrent($this->invoice, $this->supplier);
     }
 
+    public function testReportChangedBetweenIssueChecksReturnsConflictWithoutNumberAllocation(): void
+    {
+        $report = $this->setupReport();
+        $this->transfer($report);
+        $actual = $this->db->pdo();
+        $otherDb = Connection::withoutSharedTestConnection(fn () => new Connection(
+            $this->container->get(\MyInvoice\Infrastructure\Config\Config::class)));
+        $other = $otherDb->pdo();
+        self::assertSame($actual->query('SELECT DATABASE()')->fetchColumn(), $other->query('SELECT DATABASE()')->fetchColumn());
+        $interleaved = false;
+        $proxy = new BillingIssueObservedPdo($actual, function (string $sql) use ($other, &$interleaved): void {
+            if (!$interleaved && str_contains($sql, 'SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE')) {
+                $interleaved = true;
+                // Druhý request commituje po první kontrole, ještě před získáním zámku vystavení.
+                $other->prepare('UPDATE work_reports SET billing_period = ? WHERE invoice_id = ?')
+                    ->execute(['2026-12', $this->invoice]);
+            }
+        });
+        $property = new \ReflectionProperty(Connection::class, 'pdo');
+        $property->setValue($this->db, $proxy);
+        try {
+            $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/invoices/' . $this->invoice . '/issue')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withParsedBody([]);
+            $response = ($this->container->get(\MyInvoice\Action\Invoice\IssueInvoiceAction::class))($request, new Response(), ['id' => $this->invoice]);
+            self::assertTrue($interleaved, 'Test musí projít oběma kontrolami vystavení.');
+            self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame('billing_stale', json_decode((string) $response->getBody(), true)['error']['code']);
+            self::assertFalse($actual->inTransaction());
+            $invoice = $this->container->get(InvoiceRepository::class)->find($this->invoice);
+            self::assertSame('draft', $invoice['status']);
+            self::assertEmpty($invoice['varsymbol']);
+            self::assertCount(3, $invoice['items']);
+        } finally {
+            $property->setValue($this->db, $actual);
+            if ($actual->inTransaction()) $actual->rollBack();
+            $otherDb->close();
+        }
+    }
+
+    public function testAutoIssueRejectsReportChangedAfterInitialCheck(): void
+    {
+        $report = $this->setupReport();
+        $this->transfer($report);
+        $actual = $this->db->pdo();
+        // Schvalovací tok již číslo přidělil; automatické vystavení je musí zachovat na konceptu.
+        $actual->prepare('UPDATE invoices SET varsymbol = ? WHERE id = ?')->execute(['TEST-BILLING-AUTO', $this->invoice]);
+        $otherDb = Connection::withoutSharedTestConnection(fn () => new Connection(
+            $this->container->get(\MyInvoice\Infrastructure\Config\Config::class)));
+        $other = $otherDb->pdo();
+        $interleaved = false;
+        $proxy = new BillingIssueObservedPdo($actual, function (string $sql) use ($other, &$interleaved): void {
+            if (str_contains($sql, 'UPDATE invoices SET status = "issued"')) self::fail('Zastaralý výkaz se dostal až k vydání dokladu.');
+            if (!$interleaved && str_contains($sql, 'SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE')) {
+                $interleaved = true;
+                $other->prepare('UPDATE work_reports SET billing_period = ? WHERE invoice_id = ?')->execute(['2026-12', $this->invoice]);
+            }
+        });
+        $property = new \ReflectionProperty(Connection::class, 'pdo');
+        $property->setValue($this->db, $proxy);
+        try {
+            try {
+                $this->container->get(\MyInvoice\Service\Invoice\AutoIssueAndSendService::class)
+                    ->run($this->invoice, $this->user, '127.0.0.1', 'synthetic-test');
+                self::fail('Automatické vystavení nesmí potvrdit zastaralé účtování.');
+            } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict) {
+                self::assertTrue($interleaved);
+                self::assertFalse($actual->inTransaction());
+                $invoice = $this->container->get(InvoiceRepository::class)->find($this->invoice);
+                self::assertSame('draft', $invoice['status']);
+                self::assertSame('TEST-BILLING-AUTO', $invoice['varsymbol']);
+            }
+        } finally {
+            $property->setValue($this->db, $actual);
+            if ($actual->inTransaction()) $actual->rollBack();
+            $otherDb->close();
+        }
+    }
+
+    public function testDeleteSeesTransferCommittedBeforeItsInvoiceLock(): void
+    {
+        $report = $this->setupReport();
+        $actual = $this->db->pdo();
+        $otherDb = Connection::withoutSharedTestConnection(fn () => new Connection(
+            $this->container->get(\MyInvoice\Infrastructure\Config\Config::class)));
+        $other = $otherDb->pdo();
+        $interleaved = false;
+        $proxy = new BillingIssueObservedPdo($actual, function (string $sql) use ($other, $report, &$interleaved): void {
+            if (!$interleaved && (str_contains($sql, 'SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE')
+                || str_starts_with($sql, 'DELETE wr FROM work_reports'))) {
+                $interleaved = true;
+                $other->beginTransaction();
+                $other->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE')->execute([$this->supplier, $this->invoice]);
+                $other->prepare('INSERT INTO invoice_items (invoice_id, description, quantity, unit, unit_price_without_vat,
+                    vat_rate_id, vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
+                    linked_work_report_id, work_report_billing_key) VALUES (?, ?, 1, ?, 1000, ?, 21, 1000, 210, 1210, 0, ?, ?)')
+                    ->execute([$this->invoice, 'Souběžně přenesený paušál', 'ks', $this->vat, $report['id'], 'fixed']);
+                $other->commit();
+            }
+        });
+        $property = new \ReflectionProperty(Connection::class, 'pdo');
+        $property->setValue($this->db, $proxy);
+        try {
+            $request = (new ServerRequestFactory())->createServerRequest('DELETE', '/api/invoices/' . $this->invoice . '/work-report')
+                ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+            $response = ($this->container->get(\MyInvoice\Action\WorkReport\DeleteWorkReportAction::class))($request, new Response(), ['id' => $this->invoice]);
+            self::assertTrue($interleaved);
+            self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame('billing_conflict', json_decode((string) $response->getBody(), true)['error']['code']);
+            self::assertNotNull($this->container->get(WorkReportRepository::class)->findByInvoice($this->invoice, $this->supplier));
+            self::assertSame((int) $report['id'], $this->container->get(InvoiceRepository::class)->itemsFor($this->invoice)[0]['linked_work_report_id']);
+            self::assertFalse($actual->inTransaction());
+        } finally {
+            $property->setValue($this->db, $actual);
+            if ($actual->inTransaction()) $actual->rollBack();
+            if ($other->inTransaction()) $other->rollBack();
+            $otherDb->close();
+        }
+    }
+
+    public function testCommittedReportSaveSucceedsEvenWhenAuditLoggerFails(): void
+    {
+        $logger = $this->createMock(\MyInvoice\Service\ActivityLogger::class);
+        $logger->expects(self::once())->method('log')->willThrowException(new \RuntimeException('Syntetická chyba logu po commitu'));
+        $this->container->set(\MyInvoice\Service\ActivityLogger::class, $logger);
+        $report = $this->setupReport();
+        self::assertNotNull($this->container->get(WorkReportRepository::class)->findByInvoice($this->invoice, $this->supplier));
+        self::assertSame('2026-11', $report['billing_period']);
+        self::assertFalse($this->db->pdo()->inTransaction());
+    }
+
+    public function testInvoiceIncludesProjectBillingDefaultWithoutProjectRead(): void
+    {
+        $repo = $this->container->get(InvoiceRepository::class);
+        $invoice = $repo->find($this->invoice);
+        $templateId = $this->container->get(WorkReportBillingTemplateRepository::class)
+            ->save($this->supplier, null, WorkReportBillingTest::settings());
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO projects (client_id, name, currency_id, billing_template_id) VALUES (?, ?, ?, ?)')
+            ->execute([$invoice['client_id'], 'Syntetická podpora', $invoice['currency_id'], $templateId]);
+        $projectId = (int) $pdo->lastInsertId();
+        try {
+            $pdo->prepare('UPDATE invoices SET project_id = ? WHERE id = ?')->execute([$projectId, $this->invoice]);
+            $withProject = $repo->find($this->invoice);
+            self::assertArrayHasKey('project_billing_template_id', $withProject);
+            self::assertSame($templateId, $withProject['project_billing_template_id']);
+            $pdo->prepare('UPDATE invoices SET project_id = NULL WHERE id = ?')->execute([$this->invoice]);
+            $withoutProject = $repo->find($this->invoice);
+            self::assertArrayHasKey('project_billing_template_id', $withoutProject);
+            self::assertNull($withoutProject['project_billing_template_id']);
+        } finally {
+            $pdo->prepare('UPDATE invoices SET project_id = NULL WHERE id = ?')->execute([$this->invoice]);
+            $pdo->prepare('DELETE FROM projects WHERE id = ?')->execute([$projectId]);
+        }
+    }
+
+    public static function malformedPreviewInputs(): array
+    {
+        return [
+            [['vat_rate_id' => ['invalid']]],
+            [['title' => ['invalid']]],
+            [['project_name' => ['invalid']]],
+            [['items' => [['hours' => 1, 'description' => ['invalid']]]]],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('malformedPreviewInputs')]
+    public function testMalformedPreviewReturnsValidationError(array $override): void
+    {
+        $body = array_replace(['title' => 'Práce', 'billing_snapshot' => WorkReportBillingTest::settings(),
+            'billing_period' => '2026-11', 'vat_rate_id' => $this->vat, 'items' => []], $override);
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/work-report-billing-preview')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)->withParsedBody($body);
+        $response = $this->container->get(\MyInvoice\Action\WorkReport\BillingAction::class)->previewUnsaved($request, new Response());
+        self::assertSame(400, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('validation_failed', json_decode((string) $response->getBody(), true)['error']['code']);
+    }
+
+    public function testStructuredTransferFingerprintReturnsValidationError(): void
+    {
+        $this->setupReport();
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/invoices/' . $this->invoice . '/work-report/billing-transfer')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->user, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withParsedBody(['fingerprint' => ['invalid']]);
+        $response = $this->container->get(\MyInvoice\Action\WorkReport\BillingAction::class)->transfer($request, new Response(), ['id' => $this->invoice]);
+        self::assertSame(400, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('validation_failed', json_decode((string) $response->getBody(), true)['error']['code']);
+        self::assertFalse($this->db->pdo()->inTransaction());
+    }
+
+    public static function assetLinks(): array
+    {
+        return [['asset_id'], ['small_asset_id']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('assetLinks')]
+    public function testLegacyReplacementCannotRemoveAssetSale(string $column): void
+    {
+        $report = $this->setupReport();
+        $pdo = $this->db->pdo();
+        $sql = $column === 'asset_id'
+            ? "INSERT INTO assets (supplier_id, name, inventory_number, input_price, acquisition_date, status) VALUES (?, 'Syntetický majetek', 'TEST-ASSET', 1000, '2026-01-01', 'in_use')"
+            : "INSERT INTO small_assets (supplier_id, name, price, acquisition_date) VALUES (?, 'Syntetický drobný majetek', 1000, '2026-01-01')";
+        $pdo->prepare($sql)->execute([$this->supplier]);
+        $assetId = (int) $pdo->lastInsertId();
+        $repo = $this->container->get(InvoiceRepository::class);
+        $repo->replaceItems($this->invoice, [['description' => 'Prodej majetku', 'quantity' => 1,
+            'unit' => 'ks', 'unit_price_without_vat' => 1000, 'vat_rate_id' => $this->vat, $column => $assetId]]);
+        $before = $repo->itemsFor($this->invoice);
+        self::assertSame($assetId, $before[0][$column]);
+        try {
+            $this->container->get(WorkReportBillingService::class)->transfer($this->invoice, $this->supplier,
+                $report['billing_preview']['fingerprint'], $this->container->get(\MyInvoice\Service\Oss\OssItemPlanner::class), (int) $before[0]['id']);
+            self::fail('Přenos výkazu nesmí nahradit řádek prodeje majetku.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame($before, $repo->itemsFor($this->invoice));
+        }
+    }
+
     public function testIssueGuardRejectsChangedLinkedLine(): void
     {
         $report = $this->setupReport();
@@ -329,4 +552,21 @@ final class WorkReportBillingIntegrationTest extends TestCase
         $this->expectException(\DomainException::class);
         $this->container->get(WorkReportBillingService::class)->assertCurrent($this->invoice, $this->supplier);
     }
+}
+
+/** Průhledný pozorovatel SQL; výpočty, zápisy a transakce běží na skutečné MariaDB. */
+final class BillingIssueObservedPdo extends \PDO
+{
+    public function __construct(private \PDO $actual, private \Closure $observe) {}
+    public function prepare(string $query, array $options = []): \PDOStatement|false { ($this->observe)($query); return $this->actual->prepare($query, $options); }
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): \PDOStatement|false { return $fetchMode === null ? $this->actual->query($query) : $this->actual->query($query, $fetchMode, ...$fetchModeArgs); }
+    public function exec(string $statement): int|false { return $this->actual->exec($statement); }
+    public function beginTransaction(): bool { return $this->actual->beginTransaction(); }
+    public function commit(): bool { return $this->actual->commit(); }
+    public function rollBack(): bool { return $this->actual->rollBack(); }
+    public function inTransaction(): bool { return $this->actual->inTransaction(); }
+    public function lastInsertId(?string $name = null): string|false { return $this->actual->lastInsertId($name); }
+    public function getAttribute(int $attribute): mixed { return $this->actual->getAttribute($attribute); }
+    public function setAttribute(int $attribute, mixed $value): bool { return $this->actual->setAttribute($attribute, $value); }
+    public function quote(string $string, int $type = \PDO::PARAM_STR): string|false { return $this->actual->quote($string, $type); }
 }

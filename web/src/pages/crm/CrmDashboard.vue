@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -44,17 +44,32 @@ const churn = ref<ChurnRiskClient[]>([])
 const cashFlow = ref<CashFlowResult | null>(null)
 const includeDrafts = ref(false)
 const cashFlowLoading = ref(false)
+let cashFlowGeneration = 0
+let confirmedIncludeDrafts = false
+function applyCashFlow(result: CashFlowResult, drafts: boolean, generation: number): void {
+  if (generation !== cashFlowGeneration) return
+  cashFlow.value = result
+  confirmedIncludeDrafts = drafts
+  includeDrafts.value = drafts
+}
 async function reloadCashFlow() {
+  const generation = ++cashFlowGeneration
+  const drafts = includeDrafts.value
   cashFlowLoading.value = true
   try {
     const cur = currencyFilter.value && currencyFilter.value !== ALL_CURRENCIES ? currencyFilter.value : 'CZK'
-    cashFlow.value = await crmApi.cashFlowForecast(4, cur, includeDrafts.value)
+    const result = await crmApi.cashFlowForecast(4, cur, drafts)
+    applyCashFlow(result, drafts, generation)
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    if (generation === cashFlowGeneration) {
+      includeDrafts.value = confirmedIncludeDrafts
+      toast.error(apiErrorMessage(e))
+    }
   } finally {
-    cashFlowLoading.value = false
+    if (generation === cashFlowGeneration) cashFlowLoading.value = false
   }
 }
+onBeforeUnmount(() => { cashFlowGeneration++ })
 const lateRisk = ref<LateRiskClient[]>([])
 const reminderEff = ref<ReminderEffectiveness | null>(null)
 const paymentHist = ref<PaymentTimeHistogram | null>(null)
@@ -74,6 +89,9 @@ const displayCurrency = computed(() => currencyFilter.value === ALL_CURRENCIES ?
 const availableCurrencies = computed(() => overview.value?.currencies || [])
 
 async function loadAll() {
+  const cashFlowRequest = ++cashFlowGeneration
+  const drafts = includeDrafts.value
+  cashFlowLoading.value = true
   loading.value = true
   try {
     const ov = await crmApi.overview()
@@ -98,7 +116,7 @@ async function loadAll() {
       crmApi.expenseBreakdown(periodMonths.value, cur),
       crmApi.revenueBreakdown(periodMonths.value, cur),
       crmApi.churnRisk(60, 10),
-      crmApi.cashFlowForecast(4, cur || 'CZK', includeDrafts.value),
+      crmApi.cashFlowForecast(4, cur || 'CZK', drafts),
       crmApi.lateRisk(10),
       crmApi.reminderEffectiveness(periodMonths.value),
       crmApi.paymentTimeHistogram(periodMonths.value),
@@ -119,14 +137,18 @@ async function loadAll() {
     expenses.value = exp
     revenues.value = rev
     churn.value = ch
-    cashFlow.value = cf
+    applyCashFlow(cf, drafts, cashFlowRequest)
     lateRisk.value = lr
     reminderEff.value = re
     paymentHist.value = ph
     monthly24.value = m24
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    if (cashFlowRequest === cashFlowGeneration) {
+      includeDrafts.value = confirmedIncludeDrafts
+      toast.error(apiErrorMessage(e))
+    }
   } finally {
+    if (cashFlowRequest === cashFlowGeneration) cashFlowLoading.value = false
     loading.value = false
   }
 }

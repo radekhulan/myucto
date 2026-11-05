@@ -13,7 +13,7 @@ const templateId = defineModel<number | null>('templateId', { required: true })
 const period = defineModel<string>('period', { required: true })
 const legacyItemId = defineModel<number | null>('legacyItemId', { default: null })
 const props = defineProps<{ currency: string; title: string; items: WorkReportItem[]; projectName?: string; vatRateId: number | null; pricesIncludeVat?: boolean; reverseCharge?: boolean; stale?: boolean; pending?: boolean; invoiceItems?: InvoiceItem[] }>()
-const emit = defineEmits<{ transfer: [preview: WorkReportBillingPreview]; changed: [] }>()
+const emit = defineEmits<{ transfer: [preview: WorkReportBillingPreview]; changed: []; modeSelected: [] }>()
 const { t } = useI18n()
 const preview = ref<WorkReportBillingPreview | null>(null)
 const busy = ref(false)
@@ -22,6 +22,7 @@ const expanded = ref(false)
 let generation = 0
 function selected(template: WorkReportBillingTemplate | null) {
   snapshot.value = template ? JSON.parse(JSON.stringify(template)) : null
+  emit('modeSelected')
 }
 watch(() => [snapshot.value, period.value, props.items, props.title, props.currency, props.vatRateId, props.pricesIncludeVat, props.reverseCharge, props.projectName], () => {
   generation++

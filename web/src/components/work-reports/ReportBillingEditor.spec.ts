@@ -41,6 +41,7 @@ describe('ReportBillingEditor', () => {
     expect(copy).toEqual(template)
     expect(copy).not.toBe(template)
     expect(copy.bands).not.toBe(template.bands)
+    expect(wrapper.emitted('modeSelected')).toHaveLength(1)
   })
   it('změna hodin zneplatní rozpracovaný náhled i čekající přenos', async () => {
     const wrapper = mountEditor()

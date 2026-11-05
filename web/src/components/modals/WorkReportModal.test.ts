@@ -3,6 +3,8 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkReportModal from './WorkReportModal.vue'
+import { projectsApi } from '@/api/projects'
+import { codebooksApi } from '@/api/codebooks'
 import { invoicesApi } from '@/api/invoices'
 import { workReportBillingApi, newBillingSnapshot } from '@/api/workReportBilling'
 
@@ -33,11 +35,15 @@ function modalVm() {
   return wrapper.vm as unknown as {
     wrItems: Array<{ description: string; hours: number; duration_minutes: number | null; rate: number }>
     billingSnapshot: ReturnType<typeof newBillingSnapshot> | null
+    projectName: string
     billingPending: boolean
     billingStale: boolean
     billingReportId: number | null
     billingCurrentPreview: import('@/api/workReportBilling').WorkReportBillingPreview | null
     invoiceItems: import('@/api/invoices').InvoiceItem[]
+    load: () => Promise<void>
+    canSave: boolean
+    error: string
     save: () => Promise<void>
     totalAmount: number
     syncRow: (
@@ -164,5 +170,56 @@ describe('WorkReportModal potvrzení uložení bez přenosu', () => {
       expect(update).toHaveBeenCalledTimes(saves)
       expect(transfer).toHaveBeenCalledTimes(state === 'pending' ? 1 : 0)
     } finally { [get, saveReport, materials, update, preview, transfer, confirm].forEach(mock => mock.mockRestore()) }
+  })
+})
+
+
+describe('WorkReportModal neúspěšné načtení existujícího výkazu', () => {
+  it('chyba GET se nesmí změnit na prázdný výkaz a povolit přepsání snapshotu', async () => {
+    const vm = modalVm()
+    vm.billingSnapshot = { ...newBillingSnapshot(), name: 'Uložený paušál', fixed_fee: 5000 }
+    const get = vi.spyOn(invoicesApi, 'get').mockResolvedValue({ id: 42, items: [] } as any)
+    const reportGet = vi.spyOn(invoicesApi, 'getWorkReport').mockRejectedValue(new Error('Načtení výkazu selhalo'))
+    const units = vi.spyOn(codebooksApi, 'units').mockResolvedValue([])
+    const vat = vi.spyOn(codebooksApi, 'vatRates').mockResolvedValue([])
+    const reportSave = vi.spyOn(invoicesApi, 'saveWorkReport').mockResolvedValue({} as any)
+    const update = vi.spyOn(invoicesApi, 'update').mockResolvedValue({} as any)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await vm.load()
+      expect(vm.error).toBeTruthy()
+      vm.wrItems = [{ description: 'Dopsaná práce po chybě', hours: 1, duration_minutes: 60, rate: 1500 }]
+      expect(vm.canSave).toBe(false)
+      await vm.save()
+      expect(reportSave).not.toHaveBeenCalled()
+      expect(update).not.toHaveBeenCalled()
+    } finally { [get, reportGet, units, vat, reportSave, update, confirm].forEach(mock => mock.mockRestore()) }
+  })
+})
+
+
+describe('WorkReportModal výchozí účtování bez práva číst zakázky', () => {
+  it.each(['inherit', 'legacy', 'snapshot', 'currency'] as const)('použije kontext faktury a zachová přednost režimu %s', async mode => {
+    const vm = modalVm()
+    const template = { ...newBillingSnapshot(), id: 9, name: 'Výchozí účtování', fixed_fee: 5000 }
+    const custom = { ...newBillingSnapshot(), name: 'Uložený snapshot', fixed_fee: 7000 }
+    const stored = mode === 'legacy' || mode === 'snapshot' ? { id: 7, title: 'Výkaz', items: [], materials: [], billing_snapshot: mode === 'snapshot' ? custom : null } : null
+    const get = vi.spyOn(invoicesApi, 'get').mockResolvedValue({ id: 42, project_id: 17, project_name: 'Syntetická zakázka', project_billing_template_id: 9, currency: mode === 'currency' ? 'EUR' : 'CZK', items: [], issue_date: '2096-03-10' } as any)
+    const report = vi.spyOn(invoicesApi, 'getWorkReport').mockResolvedValue(stored as any)
+    const list = vi.spyOn(workReportBillingApi, 'list').mockResolvedValue([template])
+    const projectGet = vi.spyOn(projectsApi, 'get').mockRejectedValue(new Error('projects.read zakázáno'))
+    const projectList = vi.spyOn(projectsApi, 'listForClient').mockRejectedValue(new Error('projects.read zakázáno'))
+    const units = vi.spyOn(codebooksApi, 'units').mockResolvedValue([])
+    const vat = vi.spyOn(codebooksApi, 'vatRates').mockResolvedValue([])
+    try {
+      await vm.load()
+      expect(vm.error).toBe('')
+      expect(vm.projectName).toBe('Syntetická zakázka')
+      expect(projectGet).not.toHaveBeenCalled()
+      expect(projectList).not.toHaveBeenCalled()
+      if (mode === 'inherit') expect(vm.billingSnapshot).toEqual(template)
+      else if (mode === 'snapshot') expect(vm.billingSnapshot).toEqual(custom)
+      else expect(vm.billingSnapshot).toBeNull()
+    } finally { [get, report, list, projectGet, projectList, units, vat].forEach(mock => mock.mockRestore()) }
   })
 })

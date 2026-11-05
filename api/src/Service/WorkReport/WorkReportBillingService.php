@@ -18,17 +18,17 @@ final class WorkReportBillingService
     {
         $report = $this->reports->findByInvoice($invoiceId, $supplierId);
         if ($report === null || $report['billing_snapshot'] === null) return;
-        if ($report['billing_stale']) throw new \DomainException('Účtování výkazu se změnilo. Znovu přeneste rekapitulaci do faktury.');
+        if ($report['billing_stale']) throw new WorkReportBillingConflict('Účtování výkazu se změnilo. Znovu přeneste rekapitulaci do faktury.');
         $actual = array_values(array_filter($this->invoices->itemsFor($invoiceId), static fn (array $item): bool => (int) ($item['linked_work_report_id'] ?? 0) === (int) $report['id'] && ($item['work_report_billing_key'] ?? null) !== null));
         $expected = $report['billing_preview']['items'];
-        if (count($actual) !== count($expected)) throw new \DomainException('Položky účtování výkazu byly změněny. Znovu přeneste rekapitulaci.');
+        if (count($actual) !== count($expected)) throw new WorkReportBillingConflict('Položky účtování výkazu byly změněny. Znovu přeneste rekapitulaci.');
         $byKey = array_column($actual, null, 'work_report_billing_key');
         foreach ($expected as $row) {
             $stored = $byKey[$row['work_report_billing_key']] ?? null;
             if ($stored !== null) $stored = \MyInvoice\Service\Invoice\TimeBilling::normalizeInvoiceItem($stored);
             foreach (['description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat', 'vat_rate_snapshot'] as $key) {
                 if ($stored === null || (is_numeric($row[$key]) ? abs((float) ($stored[$key] ?? 0) - (float) $row[$key]) > 0.000001 : ($stored[$key] ?? null) !== $row[$key])) {
-                    throw new \DomainException('Položky účtování výkazu byly změněny. Znovu přeneste rekapitulaci.');
+                    throw new WorkReportBillingConflict('Položky účtování výkazu byly změněny. Znovu přeneste rekapitulaci.');
                 }
             }
         }
@@ -44,8 +44,9 @@ final class WorkReportBillingService
         $storedItems = $this->invoices->itemsFor($invoiceId);
         if ($legacyItemId !== null) {
             $legacy = array_column($storedItems, null, 'id')[$legacyItemId] ?? null;
-            if ($legacy === null || ($legacy['item_kind'] ?? 'standard') !== 'standard' || !empty($legacy['stock_item_id']) || !empty($legacy['work_report_billing_key'])) {
-                throw new \InvalidArgumentException('Nahrazovaný souhrnný řádek musí být běžná neskladová položka této faktury.');
+            if ($legacy === null || ($legacy['item_kind'] ?? 'standard') !== 'standard' || !empty($legacy['stock_item_id'])
+                || !empty($legacy['asset_id']) || !empty($legacy['small_asset_id']) || !empty($legacy['work_report_billing_key'])) {
+                throw new \InvalidArgumentException('Nahrazovaný souhrnný řádek musí být běžná položka této faktury bez vazby na sklad či majetek.');
             }
         }
         $items = array_values(array_filter($storedItems, static fn (array $item): bool => (int) $item['id'] !== $legacyItemId && !((int) ($item['linked_work_report_id'] ?? 0) === (int) $report['id'] && ($item['work_report_billing_key'] ?? null) !== null)));

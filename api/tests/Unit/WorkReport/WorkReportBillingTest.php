@@ -67,6 +67,22 @@ final class WorkReportBillingTest extends TestCase
         WorkReportBilling::calculate(['billing_period' => '2026-11', 'billing_snapshot' => $settings, 'items' => [['hours' => 1]]]);
     }
 
+    public function testStructuredTemplateNameIsRejectedWithoutPhpWarning(): void
+    {
+        $settings = self::settings();
+        $settings['name'] = ['neplatný objekt'];
+        $this->expectException(\InvalidArgumentException::class);
+        WorkReportBilling::validate($settings);
+    }
+
+    public function testStructuredBandDescriptionIsRejectedWithoutPhpWarning(): void
+    {
+        $settings = self::settings();
+        $settings['bands'][0]['description'] = ['neplatný objekt'];
+        $this->expectException(\InvalidArgumentException::class);
+        WorkReportBilling::validate($settings);
+    }
+
     public function testInvalidBandsAreRejected(): void
     {
         $settings = self::settings();

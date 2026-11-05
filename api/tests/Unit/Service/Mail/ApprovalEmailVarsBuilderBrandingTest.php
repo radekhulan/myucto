@@ -32,6 +32,7 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
                 email_branding_enabled INTEGER NOT NULL,
                 email_accent_color TEXT NULL,
                 work_report_display_options TEXT NULL,
+                default_vat_rate_id INTEGER NULL,
                 logo_path TEXT NULL
             )'
         );
@@ -43,8 +44,11 @@ final class ApprovalEmailVarsBuilderBrandingTest extends TestCase
         );
         // Prázdná tabulka místo mocku — WorkReportRepository je final, a k výkazu
         // se tenhle test stejně nevyjadřuje; stačí, že dotaz projde a vrátí null.
-        $pdo->exec('CREATE TABLE work_reports (id INTEGER PRIMARY KEY, invoice_id INTEGER)');
-        $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE work_reports (id INTEGER PRIMARY KEY, invoice_id INTEGER, project_id INTEGER, vat_rate_id INTEGER)');
+        $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, currency_id INTEGER, prices_include_vat INTEGER, reverse_charge INTEGER)');
+        $pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, code TEXT)');
+        $pdo->exec('CREATE TABLE projects (id INTEGER PRIMARY KEY, name TEXT)');
+        $pdo->exec('CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, rate_percent REAL)');
         if ($extraSupplierSql !== '') {
             $pdo->exec($extraSupplierSql);
         }

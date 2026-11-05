@@ -112,7 +112,7 @@ final class IssueInvoiceAction
             (new \MyInvoice\Service\WorkReport\WorkReportBillingService($this->db,
                 new \MyInvoice\Repository\WorkReportRepository($this->db), $this->repo,
                 new \MyInvoice\Service\Invoice\InvoiceCalculator($this->db)))->assertCurrent($id, (int) $invoice['supplier_id']);
-        } catch (\DomainException $e) {
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
             return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         }
 
@@ -246,11 +246,7 @@ final class IssueInvoiceAction
         if ($this->stockIssue->isStockEnabled($supplierId)) {
             try {
                 $this->stockIssue->assertAvailableForInvoice($supplierId, $invoice);
-            } catch (\DomainException $e) {
-            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
-            $releaseAllocated();
-            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
-        } catch (StockException $e) {
+            } catch (StockException $e) {
                 return Json::error(
                     $response,
                     'stock.error.' . $e->errorCode,
@@ -407,6 +403,10 @@ final class IssueInvoiceAction
             );
             $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $releaseAllocated();
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         } catch (StockException $e) {
             // Typicky insufficient_stock (409 + výčet chybějících položek) —
             // rollback vrátí fakturu do draftu, nic se nevystavilo.
