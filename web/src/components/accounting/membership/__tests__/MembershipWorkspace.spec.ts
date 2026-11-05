@@ -32,6 +32,7 @@ const ClientSearchSelect = defineComponent({
   }, [h('option', { value: '' }), h('option', { value: '3' }, 'Synthetic client 3')]),
 })
 const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
+const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
 const row = (id: number, revision: Partial<MemberRow> = {}): MemberRow => ({
@@ -46,7 +47,7 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, ClientSearchSelect, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+      stubs: { ActionBar, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
     },
   })
 }
@@ -178,6 +179,23 @@ describe('Membership workspace', () => {
     expect(w.findComponent(Detail).props()).toMatchObject({ memberId: 9, label: 'Synthetic client 3' })
     expect(w.get('[data-section="workspace-notice"]').text()).toBe(cs.nonprofitMembership.memberCreated)
     expect(api.members).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+
+  it('creates a new contact in the shared client dialog and selects it for the member', async () => {
+    api.createMember.mockResolvedValue({ id: 9, client_id: 44 })
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-stub="client-modal"]').exists()).toBe(false)
+    await w.get('[data-action="member-new-client"]').trigger('click')
+    w.findComponent(ClientFormModal).vm.$emit('created', { id: 44, company_name: 'Synthetic new contact' })
+    await flushPromises()
+    expect(w.find('[data-stub="client-modal"]').exists()).toBe(false)
+    expect(w.findComponent(ClientSearchSelect).props()).toMatchObject({ modelValue: 44, selectedLabel: 'Synthetic new contact' })
+    await w.get('[data-field="member-number"]').setValue('M-44')
+    await w.get('[data-action="create-member"]').trigger('click')
+    await flushPromises()
+    expect(api.createMember).toHaveBeenCalledWith(5, { client_id: 44, member_number: 'M-44' })
     w.unmount()
   })
 

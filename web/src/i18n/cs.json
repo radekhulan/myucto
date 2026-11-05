@@ -26728,10 +26728,7 @@
       "save": "Uložit účetní rámec samostatně",
       "save_error": "Účetní rámec se nepodařilo uložit.",
       "saved": "Účetní rámec byl uložen.",
-      "title": "Účetní rámec",
-      "testing_warning_title": "Účetní rámec 504 je v testování",
-      "testing_warning": "Rámec 504 povolujte pouze pro testování. Zatím není vhodný pro produkční účetnictví.",
-      "testing_warning_link": "Testování rámce 504, licence a připravenost pro ostré účetnictví"
+      "title": "Účetní rámec"
     }
   },
   "oss_rates": {

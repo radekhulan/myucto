@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { formInput as field, formLabel } from '@/components/ui/formStyles'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
+import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type MemberRow } from '@/api/nonprofitMembership'
@@ -95,6 +96,14 @@ function chooseClient(client: Client | null) {
   clientLabel.value = client?.company_name ?? ''
 }
 
+const clientModalOpen = ref(false)
+
+function onClientCreated(client: Client) {
+  clientId.value = client.id
+  chooseClient(client)
+  clientModalOpen.value = false
+}
+
 async function create() {
   if (!props.canManage || creating.value || !clientId.value || !numberValid.value) return
   const ticket = ++createTicket, supplier = props.supplier, body = { client_id: clientId.value, member_number: memberNumber.value.trim() }, label = clientLabel.value
@@ -149,12 +158,22 @@ const createActions = computed<ActionItem[]>(() => [
       <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
       <fieldset :disabled="creating" class="grid gap-3 sm:grid-cols-2">
-        <label :class="formLabel">{{ t('nonprofitMembership.client') }}
-          <ClientSearchSelect v-model="clientId" :selected-label="clientLabel || null" data-field="member-client" @selected="chooseClient" />
-        </label>
+        <div :class="formLabel">
+          <span id="membership-client-label">{{ t('nonprofitMembership.client') }}</span>
+          <div class="mt-1 flex items-start gap-2">
+            <div class="min-w-0 flex-1" role="group" aria-labelledby="membership-client-label">
+              <ClientSearchSelect v-model="clientId" :selected-label="clientLabel || null" data-field="member-client" @selected="chooseClient" />
+            </div>
+            <button type="button" class="cursor-pointer shrink-0 h-9 px-3 inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium" :title="t('client.new_title')" :aria-label="t('client.new_title')" data-action="member-new-client" @click="clientModalOpen = true">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+              <span class="hidden sm:inline">{{ t('client.new_title') }}</span>
+            </button>
+          </div>
+        </div>
         <label :class="formLabel">{{ t('nonprofitMembership.memberNumber') }}<input v-model="memberNumber" :class="field" maxlength="80" data-field="member-number" /></label>
       </fieldset>
       <ActionBar :actions="createActions" />
+      <ClientFormModal v-if="clientModalOpen" @created="onClientCreated" @close="clientModalOpen = false" />
     </section>
 
     <div :class="selected ? 'grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : ''" data-section="members-layout">

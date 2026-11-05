@@ -169,15 +169,35 @@ input[type="file"].form-input::file-selector-button {
 
   /* ─── Semantic (pastel) ─── */
   --color-success-50:  #ECF6F0;
+  --color-success-100: #D6EDDF;
+  --color-success-200: #B3DCC3;
+  --color-success-300: #8BC9A3;
+  --color-success-400: #6BBB8D;
   --color-success-500: #4CAF7A;   /* soft sage */
   --color-success-600: #3B9665;   /* primary „go/potvrdit" button (Vystavit, Zaplaceno…) */
   --color-success-700: #2E7B53;   /* hover plného success tlačítka */
+  --color-success-800: #245F41;
+  --color-success-900: #1A4530;
   --color-warning-50:  #FDF6E9;
+  --color-warning-100: #FAEACB;
+  --color-warning-200: #F4D79E;
+  --color-warning-300: #EEC077;
+  --color-warning-400: #EBB15E;
   --color-warning-500: #E8A547;   /* soft amber */
   --color-warning-600: #C68A30;
+  --color-warning-700: #95661E;   /* text varování */
+  --color-warning-800: #765017;
+  --color-warning-900: #573B11;
   --color-danger-50:   #FBEDED;
+  --color-danger-100:  #F7DADA;
+  --color-danger-200:  #EFBDBD;
+  --color-danger-300:  #E39595;
+  --color-danger-400:  #DA7676;
   --color-danger-500:  #D45B5B;   /* soft coral */
   --color-danger-600:  #B84545;
+  --color-danger-700:  #9C3535;   /* text chyby */
+  --color-danger-800:  #7E2A2A;
+  --color-danger-900:  #5E2020;
 
   /* ─── Status badges (faktury) ─── */
   --color-status-draft-bg:     #F4F2F8;
@@ -271,6 +291,28 @@ input[type="file"].form-input::file-selector-button {
   --color-success-500: #56A98A;   /* border Upravit */
   --color-success-600: #46A074;   /* text + ikona Upravit (a ostatní success text) */
   --color-success-700: #2A6446;   /* hover bg tint */
+  /* Škály stavů v dark: tinty (100-200) tmavé, okraje (300-400) tlumené,
+     text (700-900, u success 800-900) zesvětlený, jinak by byl na tmavém nečitelný. */
+  --color-success-100: #1C3426;
+  --color-success-200: #244531;
+  --color-success-300: #336B4C;
+  --color-success-400: #3F8A62;
+  --color-success-800: #8FD1AE;
+  --color-success-900: #B8E3CA;
+  --color-warning-100: #3A2D15;
+  --color-warning-200: #4D3B18;
+  --color-warning-300: #7A5D22;
+  --color-warning-400: #B88A3A;
+  --color-warning-700: #E2AE5C;
+  --color-warning-800: #EBC27F;
+  --color-warning-900: #F3D8A8;
+  --color-danger-100:  #3A1D1D;
+  --color-danger-200:  #4E2525;
+  --color-danger-300:  #7A3838;
+  --color-danger-400:  #B05050;
+  --color-danger-700:  #E58A8A;
+  --color-danger-800:  #F0A8A8;
+  --color-danger-900:  #F7CACA;
   --color-accent-50:  #122231;
   /* accent-100 (soft pill bg — badge Proforma) — bez tohoto override by zůstal
      světlý #D7E8F6 a v dark módu zářil. Laděno k ostatním -50 stavům. */
@@ -349,6 +391,7 @@ input[type="file"].form-input::file-selector-button {
   --color-warning-100: #3D3013;
   --color-warning-700: #E7B968;
   --color-danger-50:  #34191C;
+  --color-danger-700: #EE9A9A;
   --color-accent-50:  #172B3D;
   --color-accent-100: #1C3A52;
   --color-teal-50:    #12313A;

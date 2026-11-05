@@ -26728,10 +26728,7 @@
       "save": "Save accounting framework separately",
       "save_error": "Could not save the accounting framework.",
       "saved": "Accounting framework saved.",
-      "title": "Accounting framework",
-      "testing_warning_title": "Accounting framework 504 is in testing",
-      "testing_warning": "Enable framework 504 for testing only. It is not yet suitable for production accounting.",
-      "testing_warning_link": "Testing framework 504, licensing and readiness for production accounting"
+      "title": "Accounting framework"
     }
   },
   "oss_rates": {

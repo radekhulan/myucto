@@ -749,7 +749,11 @@
       "dimensions"
     ],
     "accounting-nonprofit-membership": [
-      "dimensions"
+      "dimensions",
+      "errors",
+      "payment_method",
+      "purchase_invoice",
+      "settings"
     ],
     "accounting-nonprofit-tax": [
       "nonprofitTaxJ6"
