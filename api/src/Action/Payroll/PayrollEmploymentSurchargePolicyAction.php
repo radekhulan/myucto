@@ -87,6 +87,8 @@ final class PayrollEmploymentSurchargePolicyAction
                 is_array($body) ? PayrollTimeValue::row($body, 'request_body') : [],
                 $this->userId($request),
             );
+        } catch (\MyInvoice\Repository\Payroll\PayrollTermsSettledException $e) {
+            return $this->domainError($response, $e);
         } catch (DomainException $e) {
             // Zásada od téhož nebo pozdějšího dne už existuje. Není to vada
             // vstupu, ale stav — proto 409, ne 422.
@@ -206,6 +208,10 @@ final class PayrollEmploymentSurchargePolicyAction
     private function domainError(Response $response, \Throwable $e): Response
     {
         return match (true) {
+            $e instanceof \MyInvoice\Repository\Payroll\PayrollTermsSettledException => Json::error(
+                $response, 'payroll_terms_settled', $e->getMessage(), 409,
+                ['settled_period' => $e->settledPeriod],
+            ),
             $e instanceof PayrollSurchargePolicyNotFoundException => Json::error(
                 $response,
                 'not_found',

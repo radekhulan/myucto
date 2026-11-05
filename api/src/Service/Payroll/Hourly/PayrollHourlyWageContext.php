@@ -26,5 +26,6 @@ final readonly class PayrollHourlyWageContext
         public PayrollWageRounding $rounding = PayrollWageRounding::Ceil,
         public array $monthlyParts = [],
         public ?array $entitlementContext = null,
+        public bool $settlementOnly = false,
     ) {}
 }

@@ -32,10 +32,11 @@ final class PayrollHourlyEntitlementCalculator
         $this->claims = $this->amounts = $this->blocked = $this->blockers = $this->entitlements = $this->included = $this->consumed = $this->history = $this->scheduleUsed = [];
         foreach ($baseClaims as $claim) $this->claims[$claim['purpose']] = $claim;
         foreach (PayrollSurchargeKind::all() as $kind) {
+            if ($context->settlementOnly && $kind !== PayrollSurchargeKind::Overtime) continue;
             if ($kind === PayrollSurchargeKind::Overtime && $this->isAgreement()) continue;
             $this->initialize('premium_' . $kind->value, $kind->componentCode());
         }
-        $this->initialize('holiday_nonworked_compensation', 'NAHRADA_MZDY_SVATEK');
+        if (!$context->settlementOnly) $this->initialize('holiday_nonworked_compensation', 'NAHRADA_MZDY_SVATEK');
         $this->initialize('holiday_time_off_compensation', 'NAHRADA_MZDY_VOLNO_ZA_SVATEK');
         if ($context->entitlementContext === null || ($context->entitlementContext['schema_version'] ?? null) !== 'hourly-entitlements.v1') {
             $this->fail('entitlements', 'hourly_premium_evidence_missing', 'Doložte příplatkové hodiny a způsob vypořádání dalších nároků, včetně výslovných nul.');
@@ -118,7 +119,8 @@ final class PayrollHourlyEntitlementCalculator
                 });
             }
         }
-        $this->guard('holiday_nonworked_compensation', fn() => $this->nonworkedHolidays());
+        if (!$context->settlementOnly) $this->guard('holiday_nonworked_compensation', fn() => $this->nonworkedHolidays());
+        $this->guard('premium_overtime', fn() => $this->historicalOvertime());
         $this->guard('holiday_time_off_compensation', fn() => $this->holidayGrants());
         return $this->finish($hash);
     }
@@ -128,6 +130,9 @@ final class PayrollHourlyEntitlementCalculator
         $agreement = $policy['included_overtime'] ?? null;
         if (!is_array($agreement) || ($agreement['agreement_kind'] ?? null) !== 'contract' || $this->isAgreement()) {
             throw new PayrollHourlyCalculationException('hourly_included_overtime_evidence_missing', 'Zahrnutí přesčasu vyžaduje smluvně sjednanou mzdu a konkrétní doložený rozsah.');
+        }
+        if (!in_array($segment['term']['remuneration_basis_kind'] ?? null, ['contract', 'collective_agreement', 'agreement'], true)) {
+            throw new PayrollHourlyCalculationException('hourly_included_overtime_salary_not_agreed', 'Zahrnutí přesčasu vyžaduje smluvně sjednanou mzdu; mzdový výměr ani vnitřní předpis nestačí.');
         }
         self::reference($agreement['agreement_reference'] ?? null);
         $year = (int) substr($segment['date_from'], 0, 4);
@@ -156,11 +161,19 @@ final class PayrollHourlyEntitlementCalculator
         $openingDate = self::date($included['opening_as_of'] ?? null);
         if ($openingDate < $from || $openingDate > $segment['date_from']) throw new PayrollHourlyCalculationException('hourly_included_premium_history_incomplete', 'Počáteční čerpání příplatku neodpovídá období doložené práce.');
         $reference = self::reference($included['agreement_reference'] ?? null);
-        $scopeKey = 'agreement-premium:' . $kind->value . ':' . hash('sha256', CanonicalJson::encode(['reference' => $reference, 'from' => $from, 'to' => $to]));
+        $scopeKey = self::agreementScope($included);
         $covered = $this->consume($scopeKey, $included, self::positive($included['scope_duration_units'] ?? null), $units);
         $amount = PayrollExactFraction::product([self::positive($included['included_hourly_minor'] ?? null), $covered], [PayrollDuration::UNITS_PER_HOUR]);
         if ($covered > 0) $this->included[] = [...$this->allocation('included_agreement_premium', 'premium_' . $kind->value, $segment, $covered, $amount), 'premium_kind' => $kind->value, 'scope_key' => $scopeKey, 'exclude_from_minimum_wage' => true];
         return $amount;
+    }
+
+    /** Stejný neměnný klíč používá dávkový loader i ledger čerpání. */
+    public static function agreementScope(array $row): string
+    {
+        return 'agreement-premium:' . $row['kind'] . ':' . hash('sha256', CanonicalJson::encode([
+            'reference' => $row['agreement_reference'], 'from' => $row['date_from'], 'to' => $row['date_to'],
+        ]));
     }
 
     /** Čerpání používá jednou historický stav a potom všechny úseky aktuálního výpočtu. */
@@ -231,23 +244,82 @@ final class PayrollHourlyEntitlementCalculator
         self::reference($policy['document_reference'] ?? null);
         $row = $this->premiumSegment($segment);
         $days = $this->workDays($segment, $row['overtime_work_days'] ?? null, $units, false);
+        if (!is_array($this->evidence['overtime_time_off_allocations'] ?? null)) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_evidence_missing', 'Doložte čerpání přesčasového volna nebo potvrďte výslovnou nulu.');
         foreach ($days as $day) {
             $due = $this->dueOn($day['date'], 'overtime');
             $allocated = 0;
             foreach ($this->evidence['overtime_time_off_allocations'] ?? [] as $allocation) {
                 if (($allocation['work_date'] ?? null) !== $day['date']) continue;
                 self::reference($allocation['reference'] ?? null);
-                if (self::date($allocation['granted_on'] ?? null) > $this->evidence['as_of']) continue;
-                $allocated = PayrollDuration::add($allocated, self::positive($allocation['duration_units'] ?? null));
+                $granted = self::date($allocation['granted_on'] ?? null);
+                if ($granted < $day['date'] || $granted > $due || $granted > $this->evidence['as_of']) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_date_invalid', 'Čerpání přesčasového volna musí spadat mezi vznik nároku a doloženou lhůtu.');
+                self::positive($allocation['absence_id'] ?? null);
+                $allocated = PayrollDuration::add($allocated, $this->scheduleCapacity($allocation, $granted));
             }
             if ($allocated > $day['duration_units']) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_overdrawn', 'Čerpání přesčasového volna přesahuje doložený přesčas.');
             $remaining = $day['duration_units'] - $allocated;
-            if ($due < $this->evidence['as_of'] && $remaining > 0) {
+            if ($due <= $this->evidence['as_of'] && $remaining > 0) {
                 $this->add('premium_overtime', $this->premiumAmount(PayrollSurchargeKind::Overtime, $policy, $remaining), $remaining, [...$this->segmentTrace($segment, $policy), 'work_date' => $day['date'], 'time_off_due_on' => $due]);
             } else {
                 $this->entitlements[] = ['kind' => 'overtime_time_off_accrual', 'purpose' => 'premium_overtime',
                     'work_date' => $day['date'], 'duration_units' => $day['duration_units'], 'allocated_duration_units' => $allocated,
                     'due_on' => $due, 'entitlement_key' => 'overtime:' . $this->context->employmentId . ':' . $day['date']];
+            }
+        }
+    }
+
+    /** Historické volno může být vypořádáno i v měsíci bez nové přesčasové práce. */
+    private function historicalOvertime(): void
+    {
+        foreach ($this->evidence['historical_overtime'] ?? [] as $row) {
+            if ($this->isAgreement()) throw new PayrollHourlyCalculationException('hourly_agreement_overtime_invalid', 'Dohoda nemůže čerpat přesčasový nárok podle § 114.');
+            $id = self::positive($row['id'] ?? null);
+            $revision = self::positive($row['revision'] ?? null);
+            $workDate = self::date($row['work_date'] ?? null);
+            $due = self::date($row['due_on'] ?? null);
+            if ($workDate >= $this->context->periodStart) throw new PayrollHourlyCalculationException('hourly_historical_overtime_invalid', 'Historický nárok musí pocházet z předchozího období.');
+            $available = self::units($row['available_duration_units'] ?? null);
+            $allocations = $this->evidence['overtime_time_off_allocations'] ?? null;
+            if (!is_array($allocations)) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_evidence_missing', 'Doložte čerpání staršího přesčasového volna nebo potvrďte nulové čerpání.');
+            $allocated = 0;
+            foreach ($allocations as $allocation) {
+                if (($allocation['work_date'] ?? null) !== $workDate) continue;
+                $date = $this->periodDate($allocation['granted_on'] ?? null);
+                if ($date < $workDate || $date > $due) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_date_invalid', 'Čerpání přesčasového volna přesahuje doloženou lhůtu.');
+                self::reference($allocation['reference'] ?? null);
+                self::positive($allocation['absence_id'] ?? null);
+                $units = $this->scheduleCapacity($allocation, $date);
+                $allocated = PayrollDuration::add($allocated, $units);
+                $this->entitlements[] = ['kind' => 'overtime_time_off_allocation', 'purpose' => 'premium_overtime',
+                    'entitlement_id' => $id, 'entitlement_revision' => $revision, 'work_date' => $workDate,
+                    'granted_on' => $date, 'duration_units' => $units, 'absence_id' => $allocation['absence_id']];
+            }
+            if ($allocated > $available) throw new PayrollHourlyCalculationException('hourly_overtime_time_off_overdrawn', 'Čerpání přesahuje zbývající přesčasový nárok.');
+            $remaining = $available - $allocated;
+            if ($remaining === 0 || $due > $this->evidence['as_of']) continue;
+            $policy = $row['policy'] ?? null;
+            if (!is_array($policy) || ($policy['overtime_mode'] ?? null) !== 'time_off') throw new PayrollHourlyCalculationException('hourly_historical_overtime_policy_missing', 'Pro starší přesčas chybí doložené původní sjednání náhradního volna.');
+            self::hash($policy['content_sha256'] ?? null);
+            if (($row['average_basis'] ?? null) !== 'work_quarter') throw new PayrollHourlyCalculationException('hourly_historical_average_missing', 'Doplňte průměr platný ve čtvrtletí původní práce.');
+            $originalAverage = $this->evidence['average_earning'] ?? null;
+            $originalRules = $this->evidence['ruleset'] ?? null;
+            try {
+                $this->evidence['average_earning'] = $row['average_earning'] ?? null;
+                $rawAverage = $this->average();
+                $floor = self::positive($row['current_minimum_hourly_minor'] ?? null);
+                $this->evidence['average_earning']['hourly_minor'] = max($rawAverage, $floor);
+                $this->evidence['ruleset'] = $row['ruleset'] ?? null;
+                $amount = $this->premiumAmount(PayrollSurchargeKind::Overtime, $policy, $remaining);
+                $this->add('premium_overtime', $amount, $remaining, ['date_from' => $workDate, 'date_to' => $workDate,
+                    'policy_version_id' => $policy['id'], 'entitlement_id' => $id, 'entitlement_revision' => $revision,
+                    'average_basis' => 'work_quarter', 'average_snapshot_id' => $this->evidence['average_earning']['id'],
+                    'raw_average_hourly_minor' => $rawAverage, 'average_hourly_minor' => max($rawAverage, $floor),
+                    'minimum_hourly_minor' => $floor, 'time_off_due_on' => $due]);
+                $this->entitlements[] = ['kind' => 'overtime_premium_settlement', 'purpose' => 'premium_overtime',
+                    'entitlement_id' => $id, 'entitlement_revision' => $revision, 'work_date' => $workDate, 'duration_units' => $remaining];
+            } finally {
+                $this->evidence['average_earning'] = $originalAverage;
+                $this->evidence['ruleset'] = $originalRules;
             }
         }
     }

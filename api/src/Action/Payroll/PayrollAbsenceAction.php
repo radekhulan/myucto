@@ -802,6 +802,7 @@ final class PayrollAbsenceAction
                 // u dvacetihodinového úvazku by přepočet zdvojnásobil minimum.
                 // Dokud vztah stanovenou dobu neeviduje, platí sazba pro 40 hodin.
                 null,
+                $data['worked_duration_units'] ?? null,
             );
             $ruleset = $this->rulesets->forDate(
                 PayrollRulesetDomain::CompensationAverages,
@@ -822,6 +823,7 @@ final class PayrollAbsenceAction
                 $result,
                 $ruleset,
                 $this->userId($request),
+                $data['worked_duration_units'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

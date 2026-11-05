@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger;
+use MyInvoice\Service\Payroll\PayrollHourlyMonthlyParts;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
@@ -180,8 +183,17 @@ final class PayrollRunSnapshotBuilder
             $supplierId, $employmentIds, $periodStart, $periodEnd,
         );
 
-        // Nový přesný podklad patří pouze hodinovým vztahům; měsíční otisk zůstává beze změny.
-        $workedTimeEvidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, array_keys($hourlyTerms), $periodStart);
+        // Běžný měsíční otisk zůstává beze změny; starší nároky potřebují vlastní podklad.
+        $settlementIds = array_values(array_diff((new PayrollHourlyEntitlementLedger($this->db))->employmentIdsWithOutstanding($supplierId, $employmentIds, $periodStart, includeCurrentClaims: true), array_keys($hourlyTerms)));
+        $settlementTerms = $this->batch->remunerationTerms($supplierId, $settlementIds, $periodStart, $periodEnd);
+        foreach ($settlementIds as $id) $settlementTerms[$id] ??= [];
+        $evidenceTerms = $hourlyTerms + $settlementTerms;
+        $workedTimeEvidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, array_keys($evidenceTerms), $periodStart);
+        $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
+            $supplierId, $periodStart, $employments, $evidenceTerms, $workedTimeEvidence,
+        );
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms);
+        foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -265,7 +277,7 @@ final class PayrollRunSnapshotBuilder
         foreach ($employments as $row) {
             $employmentId = (int) $row['employment_id'];
             $employeeId = (int) $row['employee_id'];
-            if (($hourlyTerms[$employmentId] ?? []) !== []) {
+            if (($hourlyTerms[$employmentId] ?? []) !== [] || array_key_exists($employmentId, $settlementTerms)) {
                 $validations[] = new PayrollRunValidation(
                     'blocker',
                     PayrollHourlyRemuneration::BLOCKER,
@@ -716,6 +728,12 @@ final class PayrollRunSnapshotBuilder
                 'term' => $termSnapshot,
                 ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
                     'hourly_remuneration_terms' => $hourlyTerms[$employmentId],
+                    'hourly_entitlement_context' => $hourlyContexts[$employmentId] ?? null,
+                ]),
+                ...(!array_key_exists($employmentId, $settlementTerms) ? [] : [
+                    'hourly_settlement_only' => true,
+                    'hourly_settlement_terms' => $settlementTerms[$employmentId],
+                    'hourly_entitlement_context' => $hourlyContexts[$employmentId] ?? null,
                 ]),
                 'ordinary_evidence_profile' => $row['term_id'] === null
                     ? null
@@ -733,7 +751,7 @@ final class PayrollRunSnapshotBuilder
                     ],
                 'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
-                ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
+                ...(!array_key_exists($employmentId, $evidenceTerms) ? [] : [
                     'worked_time_evidence' => $workedTimeEvidence[$employmentId] ?? null,
                 ]),
                 'absences' => $absences,
@@ -890,7 +908,8 @@ final class PayrollRunSnapshotBuilder
 
         $eligible = [];
         $eligibleEmployees = [];
-        foreach ($this->employmentRows($supplierId, $periodStart, $periodEnd, $officeId) as $row) {
+        $eligibleRows = $this->employmentRows($supplierId, $periodStart, $periodEnd, $officeId);
+        foreach ($eligibleRows as $row) {
             $eligible[] = (int) $row['employment_id'];
             $eligibleEmployees[] = (int) $row['employee_id'];
         }
@@ -921,14 +940,26 @@ final class PayrollRunSnapshotBuilder
         }
 
         $hourlyTerms = $this->batch->hourlyRemunerationTerms($supplierId, $allEmployments, $periodStart, $periodEnd);
+        $settlementIds = array_values(array_diff((new PayrollHourlyEntitlementLedger($this->db))->employmentIdsWithOutstanding($supplierId, $allEmployments, $periodStart, includeCurrentClaims: true), array_keys($hourlyTerms)));
+        $settlementTerms = $this->batch->remunerationTerms($supplierId, $settlementIds, $periodStart, $periodEnd);
+        foreach ($settlementIds as $id) $settlementTerms[$id] ??= [];
+        $evidenceTerms = $hourlyTerms + $settlementTerms;
         $workedTime = new PayrollWorkedTimeEvidence($this->db);
+        $hourlySources = $workedTime->loadMany($supplierId, array_keys($evidenceTerms), $periodStart);
+        $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
+            $supplierId, $periodStart, $eligibleRows, $evidenceTerms, $hourlySources,
+        );
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $eligibleRows, $hourlyTerms);
+        foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
         return [
             'eligible_employment_ids' => $eligible,
-            'worked_time_evidence' => $workedTime->loadMany($supplierId, array_keys($hourlyTerms), $periodStart),
+            'worked_time_evidence' => $hourlySources,
+            'hourly_entitlement_context' => $hourlyContexts,
             'manual_time_month_state' => $workedTime->manualHistoryStates(
                 $supplierId, array_values(array_diff($allEmployments, array_keys($hourlyTerms))), $periodStart,
             ),
             'hourly_remuneration_terms' => $hourlyTerms,
+            'hourly_settlement_terms' => $settlementTerms,
             'inputs' => $inputs,
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,
@@ -1303,7 +1334,7 @@ final class PayrollRunSnapshotBuilder
     }
 
     /** @return list<array<string,mixed>> */
-    private function employmentRows(
+    public function employmentRows(
         int $supplierId,
         string $periodStart,
         string $periodEnd,

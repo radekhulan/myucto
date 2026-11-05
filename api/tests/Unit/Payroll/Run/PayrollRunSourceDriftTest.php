@@ -9,6 +9,22 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRunSourceDriftTest extends TestCase
 {
+    public function testHourlyEntitlementPolicyAndLedgerChangesBlockStaleSnapshot(): void
+    {
+        $frozen = $this->frozen();
+        $frozen['people'][0]['employments'][0]['hourly_entitlement_context'] = [
+            'ledger_source_sha256' => 'before', 'policy_source' => [['id' => 1]],
+        ];
+        $current = $this->current();
+        $current['hourly_entitlement_context'][7] = $frozen['people'][0]['employments'][0]['hourly_entitlement_context'];
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        $current['hourly_entitlement_context'][7]['ledger_source_sha256'] = 'after';
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged);
+        $current['hourly_entitlement_context'][7] = $frozen['people'][0]['employments'][0]['hourly_entitlement_context'];
+        $current['hourly_entitlement_context'][7]['policy_source'][0]['id'] = 2;
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged);
+    }
+
     public function testManualTimeRevisionChangesAreDetectedWithoutJmhz(): void
     {
         $frozen = ['people' => [['employee' => ['id' => 1], 'employments' => [[
@@ -65,6 +81,23 @@ final class PayrollRunSourceDriftTest extends TestCase
         self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
         $current['hourly_remuneration_terms'][7][0]['hourly_rate_minor'] = 21_000;
         self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->remunerationChanged);
+    }
+
+    public function testSettlementEntitlementAndTermsChangesInvalidateFrozenSources(): void
+    {
+        $current = $this->current();
+        $current['hourly_settlement_terms'] = [7 => [['id' => 5, 'monthly_gross_minor' => 4000000]]];
+        $current['hourly_entitlement_context'] = [7 => ['ledger_source_sha256' => 'first']];
+        self::assertSame(1, PayrollRunSourceDrift::between($this->frozen(), $current)->workedTimeChanged);
+
+        $frozen = $this->frozen();
+        $frozen['people'][0]['employments'][0]['hourly_settlement_terms'] = $current['hourly_settlement_terms'][7];
+        $frozen['people'][0]['employments'][0]['hourly_entitlement_context'] = $current['hourly_entitlement_context'][7];
+        self::assertFalse(PayrollRunSourceDrift::between($frozen, $current)->hasChanges());
+        $current['hourly_settlement_terms'][7][0]['monthly_gross_minor']++;
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->remunerationChanged);
+        $current['hourly_entitlement_context'][7]['ledger_source_sha256'] = 'second';
+        self::assertSame(1, PayrollRunSourceDrift::between($frozen, $current)->workedTimeChanged);
     }
 
     public function testIdenticalSourcesReportNoChange(): void

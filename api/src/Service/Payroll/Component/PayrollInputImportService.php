@@ -312,6 +312,9 @@ final class PayrollInputImportService
         if (preg_match('/^[A-Z0-9][A-Z0-9._-]{0,63}$/D', $componentCode) !== 1) {
             throw new \InvalidArgumentException('component_code není platný.');
         }
+        if (\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved($componentCode)) {
+            throw new \InvalidArgumentException('Tato složka vzniká pouze výpočtem hodinové mzdy a nelze ji importovat.');
+        }
         $component = $this->imports->resolveComponent(
             $supplierId,
             $componentCode,

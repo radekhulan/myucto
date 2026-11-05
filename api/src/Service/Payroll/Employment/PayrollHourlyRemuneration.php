@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Employment;
 
-/** Evidence hodinového odměňování ještě není podkladem pro automatický výpočet mzdy. */
+/** Společné hranice hodinového odměňování a připravenosti mzdového běhu. */
 final class PayrollHourlyRemuneration
 {
     public const BLOCKER = 'hourly_remuneration_calculation_unsupported';
 
     public const MESSAGE = 'Vztah má v tomto měsíci sjednané hodinové odměňování. '
-        . 'Hodinová sazba je zatím pouze evidovaná; automatický výpočet mzdy není dostupný.';
+        . 'Náhled vypočítá mzdu z doložených hodin; schválení běhu zatím vyžaduje dokončení kontroly minimální mzdy a výkaznictví.';
 
     /**
      * Překryv kterékoliv hodinové revize s obdobím, nikoli jen stav na konci měsíce.

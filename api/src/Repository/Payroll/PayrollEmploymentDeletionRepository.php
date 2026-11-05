@@ -107,6 +107,11 @@ final class PayrollEmploymentDeletionRepository
             'message' => 'Pracovní vztah má zadané mzdové vstupy. '
                 . 'Nejdřív je smažte v Mzdových vstupech, teprve pak půjde vztah smazat.',
         ],
+        'hourly_wage_claim' => [
+            'tables' => ['payroll_hourly_wage_claims', 'payroll_hourly_time_entitlements', 'payroll_hourly_included_consumption', 'payroll_hourly_evidence_revisions'],
+            'code' => 'payroll_employment_has_hourly_wage_claims',
+            'message' => 'Pracovní vztah má evidované nároky na hodinovou mzdu a nelze jej smazat.',
+        ],
         'trip' => [
             'tables' => ['payroll_business_trips'],
             'code' => 'payroll_employment_has_trips',

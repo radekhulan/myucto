@@ -39,6 +39,7 @@ final class PayrollAbsenceValidator
         'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
         'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
         'public_function', 'employee_obstacle_unpaid', 'invalid_termination',
+        'holiday_compensatory_time_off',
     ];
 
     private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
@@ -57,7 +58,7 @@ final class PayrollAbsenceValidator
      * nesmí přejít přes konec kalendářního čtvrtletí; zbytek {@see self::absence()}.
      */
     public const TYPES_WITHIN_QUARTER = [
-        'vacation', 'employee_obstacle', 'employer_obstacle',
+        'vacation', 'employee_obstacle', 'employer_obstacle', 'holiday_compensatory_time_off',
     ];
 
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
@@ -121,6 +122,9 @@ final class PayrollAbsenceValidator
             // (§ 114 odst. 1 zákoníku práce) — přesčas se už zaplatil mzdou,
             // volnem se nahrazuje jen příplatek. Proto `none`, ne přehlédnutí.
             'compensatory_time_off' => 'none',
+            // § 115: placené volno se váže na konkrétní nárok. Schválení absence
+            // samo peníze netvoří; náhradu a průměr ověří hodinový claim před během.
+            'holiday_compensatory_time_off' => 'hourly_claim',
             // Za neomluveně zameškanou dobu mzda ani náhrada nepřísluší —
             // zaměstnanec v ní nepracoval a žádná překážka v práci to nekryje.
             'unexcused' => 'none',
@@ -486,6 +490,13 @@ final class PayrollAbsenceValidator
                 "Rozhodné období pro {$year}/Q{$quarter} musí být {$expectedFrom} až {$expectedTo}."
             );
         }
+        $units = isset($body['worked_duration_units']) ? $this->nonNegativeInt($body, 'worked_duration_units') : null;
+        $minutes = $units === null ? $this->nonNegativeInt($body, 'worked_minutes')
+            : \MyInvoice\Service\Payroll\Time\PayrollDuration::exactMinutes($units);
+        if ($units !== null && isset($body['worked_minutes'])
+            && $this->nonNegativeInt($body, 'worked_minutes') !== $minutes) {
+            throw new \InvalidArgumentException('Přesná odpracovaná doba neodpovídá uvedeným minutám.');
+        }
         return [
             'employment_id' => $this->positiveInt($body, 'employment_id'),
             'applicable_year' => $year,
@@ -494,7 +505,8 @@ final class PayrollAbsenceValidator
             'decisive_to' => $to,
             'gross_earnings_minor' => $this->nonNegativeInt($body, 'gross_earnings_minor'),
             'longer_period_allocated_minor' => $this->nonNegativeInt($body, 'longer_period_allocated_minor'),
-            'worked_minutes' => $this->nonNegativeInt($body, 'worked_minutes'),
+            'worked_minutes' => $minutes,
+            ...($units === null ? [] : ['worked_duration_units' => $units]),
             'worked_days' => $this->nonNegativeInt($body, 'worked_days'),
             'probable_hourly_minor' => $this->nullablePositiveInt(
                 $body['probable_hourly_minor'] ?? null,
@@ -570,6 +582,8 @@ final class PayrollAbsenceValidator
     private const FIELD_LABELS = [
         'gross_earnings_minor' => 'Započitatelná mzda',
         'worked_hours_milli' => 'Odpracované hodiny',
+        'worked_minutes' => 'Odpracované minuty',
+        'worked_duration_units' => 'Přesná odpracovaná doba',
         'worked_days' => 'Odpracované dny',
         'employment_id' => 'Pracovní vztah',
         'employee_id' => 'Zaměstnanec',

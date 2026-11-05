@@ -572,9 +572,6 @@ final class PayrollEmploymentRepository
                     $employmentId,
                     (int) $previous['id'],
                 );
-                if ($predecessor !== null) {
-                    $this->assertModeChangeStartsMonth($predecessor['remuneration_type'] ?? null, $data['remuneration_type'], $movedFrom);
-                }
                 $this->assertEffectiveFromMovable(
                     $movedFrom,
                     $storedTo,
@@ -2107,19 +2104,9 @@ final class PayrollEmploymentRepository
         }
     }
 
-    private function assertModeChangeStartsMonth(?string $previous, ?string $next, string $effectiveFrom): void
-    {
-        if (($previous === 'hourly') !== ($next === 'hourly') && substr($effectiveFrom, 8, 2) !== '01') {
-            throw new \InvalidArgumentException('Změna na hodinové odměňování nebo z něj musí začít prvním dnem měsíce.');
-        }
-    }
-
     /** @param array<string,mixed>|null $previous @param array<string,mixed> $data @param array<string,mixed> $employment */
     private function assertRemunerationChange(int $supplierId, int $employmentId, ?array $previous, array $data, array $employment, ?int $correctingId, ?string $effectiveTo): void
     {
-        if ($previous !== null) {
-            $this->assertModeChangeStartsMonth($previous['remuneration_type'] ?? null, $data['remuneration_type'], (string) $data['effective_from']);
-        }
         if ($data['remuneration_type'] !== 'hourly') return;
         $stmt = $this->db->pdo()->prepare(
             'SELECT recurring.id FROM payroll_recurring_components recurring FORCE INDEX (idx_payroll_recurring_effective)

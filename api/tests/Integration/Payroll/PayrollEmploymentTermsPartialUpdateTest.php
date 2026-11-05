@@ -137,37 +137,42 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         self::assertNull($terms['change_reason']);
     }
 
-    public function testModeChangeMustStartMonthButHourlyRateMayChangeMidMonth(): void
+    public function testModeAndRateCanChangeMidMonthWithoutLosingHistory(): void
     {
         $employment = $this->activeEmployment();
         $payload = ['row_version' => $employment['row_version'], 'effective_from' => '2026-03-15',
             'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000,
             'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'];
-        $response = $this->action->addTerms($this->request('PUT', '/terms', $payload), new Response(), ['id' => (string) $employment['id']]);
-        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
-        $payload['effective_from'] = '2026-03-01';
         $hourly = $this->call('addTerms', $employment, $payload);
+        self::assertSame('2026-03-15', $hourly['terms'][0]['effective_from']);
+        self::assertSame('2026-03-14', $hourly['terms'][1]['effective_to']);
+        self::assertSame(4000000, $hourly['terms'][1]['monthly_gross_minor']);
+        self::assertNull($hourly['terms'][0]['monthly_gross_minor']);
         $stmt = $this->db->pdo()->prepare('SELECT monthly_gross_minor FROM payroll_employments WHERE supplier_id = ? AND id = ?');
         $stmt->execute([$this->supplierId, $employment['id']]);
         self::assertNull($stmt->fetchColumn());
-        $moved = $this->action->correctTerms($this->request('PATCH', '/terms/current', [
+        $hourly = $this->call('correctTerms', $hourly, [
             'row_version' => $hourly['row_version'], 'correct_effective_from' => true,
-            'effective_from' => '2026-03-15',
-        ]), new Response(), ['id' => (string) $employment['id']]);
-        self::assertSame(422, $moved->getStatusCode(), (string) $moved->getBody());
+            'effective_from' => '2026-03-16', 'change_reason' => 'Syntetická oprava data',
+        ]);
+        self::assertSame('2026-03-16', $hourly['terms'][0]['effective_from']);
+        self::assertSame('2026-03-15', $hourly['terms'][1]['effective_to']);
         $bearer = $this->action->addTerms($this->request('PUT', '/terms', [
             'row_version' => $hourly['row_version'], 'effective_from' => '2026-04-01',
             'monthly_gross_minor' => 3000000, 'change_reason' => 'Syntetický pokus',
         ])->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'), new Response(), ['id' => (string) $employment['id']]);
         self::assertSame(422, $bearer->getStatusCode());
         self::assertStringContainsString('U hodinového vztahu', (string) $bearer->getBody());
-        $rate = $this->call('addTerms', $hourly, ['row_version' => $hourly['row_version'], 'effective_from' => '2026-03-15', 'hourly_rate_minor' => 21000]);
+        $rate = $this->call('addTerms', $hourly, ['row_version' => $hourly['row_version'], 'effective_from' => '2026-03-20', 'hourly_rate_minor' => 21000]);
         self::assertSame(21000, $rate['terms'][0]['hourly_rate_minor']);
         self::assertSame(20000, $rate['terms'][1]['hourly_rate_minor']);
-        $response = $this->action->correctTerms($this->request('PATCH', '/terms/current', [
-            'row_version' => $rate['row_version'], 'remuneration_type' => 'monthly', 'hourly_rate_minor' => null, 'monthly_gross_minor' => 3000000,
-        ]), new Response(), ['id' => (string) $employment['id']]);
-        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        $monthly = $this->call('addTerms', $rate, [
+            'row_version' => $rate['row_version'], 'effective_from' => '2026-04-10',
+            'remuneration_type' => 'monthly', 'hourly_rate_minor' => null, 'monthly_gross_minor' => 3000000,
+        ]);
+        self::assertSame('2026-04-10', $monthly['terms'][0]['effective_from']);
+        self::assertSame(3000000, $monthly['terms'][0]['monthly_gross_minor']);
+        self::assertNull($monthly['terms'][0]['hourly_rate_minor']);
     }
 
     public function testLegacyToExplicitMonthlyCanStartMidMonth(): void

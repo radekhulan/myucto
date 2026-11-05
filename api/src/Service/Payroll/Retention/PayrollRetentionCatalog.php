@@ -243,7 +243,8 @@ final class PayrollRetentionCatalog
                 'payroll_net_results',
                 'payroll_annual_settlement_outcomes',
             ],
-            'employment_tables' => [],
+            'employment_tables' => ['payroll_hourly_wage_claims', 'payroll_hourly_wage_materializations',
+                'payroll_hourly_time_entitlements', 'payroll_hourly_time_entitlement_revisions', 'payroll_hourly_included_consumption'],
             'note' => 'Povinnost VÉST mzdový list plyne z § 38j zákona č. 586/1992 Sb.; '
                 . 'lhůtu pro jeho uschování stanoví až předpis o sociálním zabezpečení, '
                 . 'a to pro účely důchodového pojištění. Je to nejdelší lhůta v celé '
@@ -571,6 +572,7 @@ final class PayrollRetentionCatalog
                 'payroll_jmhz_work_month_revisions',
                 'payroll_time_month_import_summaries',
                 'payroll_time_month_manual_summaries',
+                'payroll_hourly_evidence_revisions',
             ],
             'note' => 'Zmrazená revize pracovního měsíce pro JMHZ patří sem, a ne pod '
                 . 'evidenci pro důchodové pojištění: nese fond pracovní doby, evidenční dny '

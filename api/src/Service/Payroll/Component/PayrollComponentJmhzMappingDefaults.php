@@ -61,6 +61,8 @@ final class PayrollComponentJmhzMappingDefaults
         // Tarifní mzdy — základ mzdy bez ohledu na způsob odměňování.
         'MZDA_MESICNI' => '10329',
         'MZDA_HODINOVA' => '10329',
+        'MZDA_HODINOVA_ZAKLAD' => '10329',
+        'MZDA_DOSAZENA_PRESCAS' => '10329',
         'MZDA_UKOLOVA' => '10329',
         // Prémie a odměny nepravidelné.
         'ODMENA' => '10331',
@@ -72,6 +74,7 @@ final class PayrollComponentJmhzMappingDefaults
         'PRIPLATEK_NOCNI' => '10334',
         'PRIPLATEK_VIKEND' => '10335',
         'PRIPLATEK_SVATEK' => '10336',
+        'NAHRADA_MZDY_VOLNO_ZA_SVATEK' => '10339',
         // Příplatek za ztížené pracovní prostředí vlastní detailní uzel v JMHZ
         // nemá, zůstává tedy na sběrném součtu příplatků.
         'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',

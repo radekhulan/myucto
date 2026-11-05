@@ -102,9 +102,11 @@ use PDO;
  *         mzda a odpracovaná doba z uzavřených běhů od vzniku zaměstnání,
  *         tedy i z měsíců čtvrtletí, pro které se průměr zjišťuje (věta
  *         první: „od počátku", ne „v" rozhodném období),
- *      3. sjednaná měsíční mzda z podmínek vztahu přepočtená na hodinu
+ *      3. sjednaná hodinová sazba jako podklad k individuálnímu posouzení
+ *         účetní, včetně obvyklých dalších složek odměňování,
+ *      4. sjednaná měsíční mzda z podmínek vztahu přepočtená na hodinu
  *         koeficientem § 356 odst. 2 (věta druhá: obvyklá výše složek mzdy),
- *      4. spodní mez, hodinová minimální mzda (§ 357 odst. 1) — dohoda bez
+ *      5. spodní mez, hodinová minimální mzda (§ 357 odst. 1) — dohoda bez
  *         sjednané měsíční mzdy v prvním měsíci, měsíc bez příjmu.
  *
  *    Odvozuje se JEN u nového vztahu: každý měsíc rozhodného období bez běhu
@@ -171,6 +173,7 @@ final class AverageEarningDerivationService
     public const PROBABLE_SOURCE_TERMS = 'terms';
     public const PROBABLE_SOURCE_ACHIEVED_WAGE = 'achieved_wage';
     public const PROBABLE_SOURCE_AGREED_MONTHLY_GROSS = 'agreed_monthly_gross';
+    public const PROBABLE_SOURCE_AGREED_HOURLY_RATE = 'agreed_hourly_rate';
     public const PROBABLE_SOURCE_MINIMUM_WAGE = 'minimum_wage';
 
     public function __construct(
@@ -235,6 +238,7 @@ final class AverageEarningDerivationService
             }
             $months[] = ['period_start' => $periodStart] + self::monthFromRow($run, $periodStart);
         }
+        $months = $this->settledDurationReallocations($supplierId, $employmentId, $months);
         $minimumWorkedDays = AbsenceRuleset::forDate($this->rulesets, $applicationStart->format('Y-m-d'))
             ->averageEarningMinimumWorkedDays();
 
@@ -253,7 +257,8 @@ final class AverageEarningDerivationService
                     $applicationStart,
                     (string) $employmentStart,
                 ),
-            ]) ?? self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'))
+            ]) ?? self::probableFromAgreedHourlyRate($terms, $applicationStart->format('Y-m-d'))
+                ?? self::probableFromAgreedGross($terms, $applicationStart->format('Y-m-d'))
                 ?? self::probableFromMinimumWage(
                     MinimumWageFloor::forDate($this->rulesets, $applicationStart->format('Y-m-d')),
                 );
@@ -333,17 +338,17 @@ final class AverageEarningDerivationService
     public static function probableFromAchievedWage(array $months): ?array
     {
         $grossMinor = 0;
-        $workedMinutes = 0;
+        $workedUnits = 0;
         $used = [];
         foreach ($months as $month) {
             if ((array) ($month['blockers'] ?? []) !== []
                 || !is_int($month['gross_earnings_minor'] ?? null)
-                || !is_int($month['worked_minutes'] ?? null)
+                || self::durationUnits($month) === null
             ) {
                 return null;
             }
             $grossMinor += $month['gross_earnings_minor'];
-            $workedMinutes += $month['worked_minutes'];
+            $workedUnits = PayrollDuration::add($workedUnits, self::durationUnits($month));
             $used[] = [
                 'period_start' => $month['period_start'] ?? null,
                 'revision_id' => $month['revision_id'] ?? null,
@@ -351,22 +356,24 @@ final class AverageEarningDerivationService
                 'work_summary_sha256' => $month['work_summary_sha256'] ?? null,
             ];
         }
-        if ($used === [] || $grossMinor <= 0 || $workedMinutes <= 0) {
+        if ($used === [] || $grossMinor <= 0 || $workedUnits <= 0) {
             return null;
         }
-        if ($grossMinor > intdiv(PHP_INT_MAX, 60)) {
+        $workedMinutes = PayrollDuration::exactMinutes($workedUnits);
+        $factor = $workedMinutes === null ? PayrollDuration::UNITS_PER_HOUR : 60;
+        if ($grossMinor > intdiv(PHP_INT_MAX, $factor)) {
             return null;
         }
 
         return [
             // Stejná aritmetika jako skutečný průměr v AverageEarningCalculator.
-            'hourly_minor' => RoundingMode::HalfUp->roundFraction($grossMinor * 60, $workedMinutes),
+            'hourly_minor' => RoundingMode::HalfUp->roundFraction($grossMinor * $factor, $workedMinutes ?? $workedUnits),
             'rationale' => sprintf(
                 'Pravděpodobný výdělek podle § 355 odst. 2 zákoníku práce z hrubé mzdy dosažené'
                     . ' od počátku rozhodného období: započitatelná mzda %s Kč za %s odpracovaných'
                     . ' hodin (uzavřené mzdové běhy za %s).',
                 self::czk($grossMinor),
-                self::hours($workedMinutes),
+                $workedMinutes === null ? self::exactHours($workedUnits) : self::hours($workedMinutes),
                 implode(', ', array_map(
                     static fn (array $month): string => self::monthLabel((string) $month['period_start']),
                     $used,
@@ -376,6 +383,23 @@ final class AverageEarningDerivationService
             'effective_from' => null,
             'source' => self::PROBABLE_SOURCE_ACHIEVED_WAGE,
             'months' => $used,
+        ];
+    }
+
+    /** Sazba je podkladem k individuálnímu posouzení, nikoli hotovým průměrem. @param list<array<string,mixed>> $terms */
+    public static function probableFromAgreedHourlyRate(array $terms, string $applicationStart): ?array
+    {
+        $term = self::termForApplication($terms, $applicationStart);
+        $rate = self::nullableInt($term['hourly_rate_minor'] ?? null);
+        if (($term['remuneration_type'] ?? null) !== 'hourly' || $rate === null || $rate <= 0) {
+            return null;
+        }
+        return [
+            'hourly_minor' => $rate,
+            'rationale' => sprintf('Podklad pro individuální stanovení pravděpodobného výdělku podle § 355 ZP: sjednaná sazba %s Kč/h. Před schválením posuďte také ostatní obvyklé složky odměňování a částku podle nich upravte.', self::czk($rate)),
+            'term_id' => isset($term['id']) ? (int) $term['id'] : null,
+            'effective_from' => $term['effective_from'] ?? null,
+            'source' => self::PROBABLE_SOURCE_AGREED_HOURLY_RATE,
         ];
     }
 
@@ -496,6 +520,41 @@ final class AverageEarningDerivationService
             $months[] = ['period_start' => $periodStart] + self::monthFromRow($row, $periodStart);
         }
 
+        return $this->settledDurationReallocations($supplierId, $employmentId, $months);
+    }
+
+    /** § 353: později zúčtovaný přesčas přesouvá do rozhodného období i dobu práce. */
+    private function settledDurationReallocations(int $supplierId, int $employmentId, array $months): array
+    {
+        if ($months === []) return [];
+        $periods = array_column($months, 'period_start');
+        $reallocation = (new \MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger($this->db))
+            ->approvedDurationReallocations($supplierId, [$employmentId], min($periods), max($periods))[$employmentId] ?? null;
+        return self::applyDurationReallocation($months, $reallocation);
+    }
+
+    /** @param list<array<string,mixed>> $months @return list<array<string,mixed>> */
+    public static function applyDurationReallocation(array $months, ?array $reallocation): array
+    {
+        if ($reallocation === null) return $months;
+        foreach ($months as &$month) {
+            $delta = $reallocation['periods'][$month['period_start']] ?? 0;
+            if ($delta === 0) continue;
+            $units = self::durationUnits($month);
+            if (!is_int($delta) || $units === null || ($delta < 0 && $units < -$delta)
+                || ($delta > 0 && $units > PHP_INT_MAX - $delta)) {
+                $month['blockers'][] = 'hourly_overtime_duration_mismatch';
+            } else {
+                $month['worked_duration_units'] = $units + $delta;
+                $month['worked_minutes'] = PayrollDuration::exactMinutes($units + $delta);
+            }
+            $month['settled_overtime_duration_delta_units'] = $delta;
+            $month['work_summary_sha256'] = hash('sha256', CanonicalJson::encode([
+                'work_summary_sha256' => $month['work_summary_sha256'],
+                'settled_overtime_source_hash' => $reallocation['source_hash'],
+                'settled_overtime_duration_delta_units' => $delta,
+            ]));
+        }
         return $months;
     }
 
@@ -517,6 +576,26 @@ final class AverageEarningDerivationService
     private static function hours(int $minutes): string
     {
         return number_format($minutes / 60, 2, ',', ' ');
+    }
+
+    /** Přesný zlomek se v odůvodnění nezaokrouhluje na jinou dobu. */
+    private static function exactHours(int $units): string
+    {
+        return sprintf('%d + %d/3000', intdiv($units, PayrollDuration::UNITS_PER_HOUR), $units % PayrollDuration::UNITS_PER_HOUR);
+    }
+
+    /** Společný převod historických minut a nových přesných podkladů. @param array<string,mixed> $month */
+    public static function durationUnits(array $month): ?int
+    {
+        $units = $month['worked_duration_units'] ?? null;
+        $minutes = $month['worked_minutes'] ?? null;
+        if ($units !== null) {
+            if (!is_int($units) || $units < 0) {
+                return null;
+            }
+            return $minutes !== null && (!is_int($minutes) || PayrollDuration::exactMinutes($units) !== $minutes) ? null : $units;
+        }
+        return is_int($minutes) && $minutes >= 0 ? PayrollDuration::fromMinutes($minutes) : null;
     }
 
     /**
@@ -618,7 +697,7 @@ final class AverageEarningDerivationService
         /** @var array<string,bool> $blockers */
         $blockers = [];
         $grossMinor = 0;
-        $workedMinutes = 0;
+        $workedUnits = 0;
         $workedDays = 0;
         $sources = [];
         $takeoverPeriods = [];
@@ -647,8 +726,13 @@ final class AverageEarningDerivationService
                 $blockers['worked_days_not_provided'] = true;
                 continue;
             }
+            $units = self::durationUnits($month);
+            if ($units === null) {
+                $blockers['worked_time_not_derivable'] = true;
+                continue;
+            }
             $grossMinor += (int) $month['gross_earnings_minor'];
-            $workedMinutes += (int) $month['worked_minutes'];
+            $workedUnits = PayrollDuration::add($workedUnits, $units);
             $workedDays += (int) $month['worked_days'];
         }
 
@@ -662,7 +746,7 @@ final class AverageEarningDerivationService
             }
             // Kalkulátor skutečný průměr bez kladné mzdy a kladné doby odmítne;
             // navrhnout nulu, se kterou formulář spadne, je horší než mlčet.
-            if ($grossMinor <= 0 || $workedMinutes <= 0) {
+            if ($grossMinor <= 0 || $workedUnits <= 0) {
                 $blockers['worked_time_missing'] = true;
             }
         }
@@ -713,7 +797,8 @@ final class AverageEarningDerivationService
             'gross_earnings_minor' => $actual ? $grossMinor : null,
             // § 358 ZP se z evidence odvodit nedá — viz docblock třídy.
             'longer_period_allocated_minor' => null,
-            'worked_minutes' => $actual ? $workedMinutes : null,
+            'worked_minutes' => $actual ? PayrollDuration::exactMinutes($workedUnits) : null,
+            'worked_duration_units' => $actual ? $workedUnits : null,
             'worked_days' => $actual ? $workedDays : null,
             // Měsíce vzaté z převzatých mezd předchozího programu. Jejich hrubá
             // mzda není započitatelná mzda podle § 354 ZP — účetní ji musí před
@@ -732,6 +817,8 @@ final class AverageEarningDerivationService
                     'work_summary_id' => $month['work_summary_id'] ?? null,
                     'takeover' => ($month['takeover'] ?? false) === true,
                     'blockers' => $month['blockers'],
+                    ...(isset($month['settled_overtime_duration_delta_units'])
+                        ? ['settled_overtime_duration_delta_units' => $month['settled_overtime_duration_delta_units']] : []),
                 ],
                 $months,
             ),
@@ -903,11 +990,6 @@ final class AverageEarningDerivationService
             if ($confirmed !== null && $confirmed !== PayrollDuration::roundedMillihours($worked['worked_duration_units'])) {
                 return ['blockers' => ['work_summary_hours_mismatch']] + $context;
             }
-            // Úložiště průměrů zatím vyžaduje celé minuty. Přesný podklad
-            // zachováváme, ale nenabízíme zápis se zaokrouhlenou jinou dobou.
-            if ($worked['worked_minutes'] === null) {
-                return ['blockers' => ['worked_time_not_whole_minutes']] + $context;
-            }
             return $context;
         }
 
@@ -958,9 +1040,7 @@ final class AverageEarningDerivationService
             }
             $context['worked_minutes'] = $worked['worked_minutes'];
             $context['worked_days'] = $worked['worked_days'];
-            return $worked['worked_minutes'] === null
-                ? ['blockers' => ['worked_time_not_whole_minutes']] + $context
-                : $context;
+            return $context;
         }
 
         if ($worked['kind'] === PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY) {
@@ -1098,7 +1178,7 @@ final class AverageEarningDerivationService
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, effective_from,
                     probable_hourly_earning_minor, probable_earning_rationale,
-                    monthly_gross_minor, weekly_hours
+                    monthly_gross_minor, weekly_hours, remuneration_type, hourly_rate_minor
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?',
         );

@@ -586,7 +586,24 @@ final class PayrollInputRepository
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
-    public function create(int $supplierId, array $data, ?int $userId): array
+    public function create(int $supplierId, array $data, ?int $userId, bool $sourceAlreadyGuarded = false): array
+    {
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
+        try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
+            $result = $this->createUnchecked($supplierId, $data, $userId);
+            if ($owns) $pdo->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed> */
+    private function createUnchecked(int $supplierId, array $data, ?int $userId): array
     {
         $this->assertValidReferences($supplierId, $data);
         try {
@@ -636,7 +653,25 @@ final class PayrollInputRepository
         int $id,
         array $data,
         int $expectedVersion,
+        bool $sourceAlreadyGuarded = false,
     ): ?array {
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) $pdo->beginTransaction();
+        try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
+            $result = $this->updateUnchecked($supplierId, $id, $data, $expectedVersion);
+            if ($owns) $pdo->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed>|null */
+    private function updateUnchecked(int $supplierId, int $id, array $data, int $expectedVersion): ?array
+    {
         $this->assertValidReferences($supplierId, $data);
         $current = $this->find($supplierId, $id);
         if ($current === null) {
@@ -879,7 +914,7 @@ final class PayrollInputRepository
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
-    public function createApproved(int $supplierId, array $data, ?int $userId): array
+    public function createApproved(int $supplierId, array $data, ?int $userId, bool $sourceAlreadyGuarded = false): array
     {
         $this->assertValidReferences($supplierId, $data);
         $pdo = $this->db->pdo();
@@ -888,6 +923,7 @@ final class PayrollInputRepository
             $pdo->beginTransaction();
         }
         try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
             $employeeId = PayrollTimeValue::int($data['employee_id'] ?? null, 'employee_id');
             $componentId = PayrollTimeValue::int($data['component_id'] ?? null, 'component_id');
             $amountMinor = PayrollTimeValue::int($data['amount_minor'] ?? null, 'amount_minor');
@@ -968,6 +1004,69 @@ final class PayrollInputRepository
     }
 
     /**
+     * Interní hromadný zápis chráněných výsledků hodinové mzdy. Volající drží
+     * v jedné transakci zámky vztahů a vlastní nároky za příslušné období.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,int> externí identifikátor => id vstupu
+     */
+    public function createApprovedHourlyBatch(int $supplierId, string $periodStart, array $rows, ?int $userId): array
+    {
+        if ($rows === []) return [];
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) throw new \LogicException('Hodinové mzdové vstupy vyžadují transakci.');
+        $codes = array_values(array_unique(array_map(static fn (array $row): string => (string) $row['component_code'], $rows)));
+        foreach ($codes as $code) {
+            if (!in_array($code, \MyInvoice\Service\Payroll\PayrollHourlyWageComponents::GENERATED, true)) throw new \InvalidArgumentException('Neznámá složka hodinového výpočtu.');
+        }
+        $codeIn = implode(',', array_fill(0, count($codes), '?'));
+        $stmt = $pdo->prepare("SELECT *, id AS component_id, row_version AS component_row_version FROM payroll_component_definitions WHERE supplier_id = ? AND code IN ($codeIn) AND is_active = 1 AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?) ORDER BY code, valid_from DESC FOR UPDATE");
+        $stmt->execute([$supplierId, ...$codes, $periodStart, $periodStart]);
+        $components = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) $row['code'];
+            if (isset($components[$code])) throw new \InvalidArgumentException('Mzdová složka nemá jednoznačnou účinnou verzi.');
+            $expectedKind = in_array($code, ['MZDA_HODINOVA_ZAKLAD', 'MZDA_DOSAZENA_PRESCAS'], true) ? 'hourly_wage'
+                : (str_starts_with($code, 'PRIPLATEK_') ? 'premium' : 'compensation');
+            if ($row['component_kind'] !== $expectedKind || $row['annual_limit_minor'] !== null || $row['exemption_basket'] !== null) {
+                throw new \InvalidArgumentException('Chráněná složka hodinové mzdy nemá platnou klasifikaci.');
+            }
+            $components[$code] = $row;
+        }
+        $values = [];
+        $params = [];
+        $externalIds = [];
+        $employmentIds = [];
+        foreach ($rows as $row) {
+            $code = (string) ($row['component_code'] ?? '');
+            if (!isset($components[$code]) || !in_array($code, \MyInvoice\Service\Payroll\PayrollHourlyWageComponents::GENERATED, true)) {
+                throw new \InvalidArgumentException('Chybí chráněná mzdová složka pro hodinový výpočet.');
+            }
+            $component = $components[$code];
+            $plan = $this->approvalPlan($pdo, $supplierId, $component, (int) $row['employee_id'], (int) $row['amount_minor'], $periodStart);
+            $snapshot = (string) $row['source_snapshot_json'];
+            $external = (string) $row['external_id'];
+            $externalIds[] = 'time:' . $external;
+            $employmentIds[(int) $row['employment_id']] = true;
+            $values[] = '(?, ?, ?, ?, ?, ?, ?, NULL, "time", ?, ?, ?, ?, "approved", ?, ?, ?, ?, ?, ?, ?, NOW())';
+            array_push($params, $supplierId, $row['employee_id'], $row['employment_id'], $component['component_id'],
+                $periodStart, $row['source_period_start'], $row['amount_minor'], $external, $snapshot,
+                hash('sha256', $snapshot, true), $userId);
+            array_push($params, ...$plan['columns']);
+            $params[] = $userId;
+        }
+        $pdo->prepare('INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, source_period_start, amount_minor, quantity_milliunits, source_kind, external_id, source_snapshot_json, source_snapshot_hash, created_by, status, component_snapshot_json, component_snapshot_hash, benefit_basket, benefit_exempt_minor, benefit_taxable_minor, benefit_allocation_json, approved_by, approved_at) VALUES ' . implode(',', $values))->execute($params);
+        $employeeIn = implode(',', array_fill(0, count($employmentIds), '?'));
+        $externalIn = implode(',', array_fill(0, count($externalIds), '?'));
+        $select = $pdo->prepare("SELECT id, external_id FROM payroll_inputs FORCE INDEX (uq_payroll_input_external) WHERE supplier_id = ? AND employment_id IN ($employeeIn) AND period_start = ? AND external_dedupe_key IN ($externalIn)");
+        $select->execute([$supplierId, ...array_keys($employmentIds), $periodStart, ...$externalIds]);
+        $ids = [];
+        foreach ($select->fetchAll(PDO::FETCH_ASSOC) as $item) $ids[(string) $item['external_id']] = (int) $item['id'];
+        if (count($ids) !== count($rows)) throw new \RuntimeException('Vložené hodinové mzdové vstupy se nepodařilo jednoznačně načíst.');
+        return $ids;
+    }
+
+    /**
      * Přepíše mzdový vstup a schválí ho — opět JEDNÍM zápisem, jeden bump verze.
      *
      * Bere koncept i vlastní dosud nezamčený schválený vstup. Vracet schválený
@@ -987,6 +1086,7 @@ final class PayrollInputRepository
         array $data,
         int $expectedVersion,
         ?int $userId,
+        bool $sourceAlreadyGuarded = false,
     ): ?array {
         $this->assertValidReferences($supplierId, $data);
         $pdo = $this->db->pdo();
@@ -995,6 +1095,7 @@ final class PayrollInputRepository
             $pdo->beginTransaction();
         }
         try {
+            if (!$sourceAlreadyGuarded) (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, (string) $data['period_start'], [$data]);
             $stmt = $pdo->prepare(
                 'SELECT id, status, row_version, period_start
                    FROM payroll_inputs
@@ -2537,6 +2638,9 @@ final class PayrollInputRepository
      */
     public function assertValidReferences(int $supplierId, array $data): void
     {
+        if (str_starts_with(strtolower((string) ($data['external_id'] ?? '')), 'hourly-wage:')) {
+            throw new \InvalidArgumentException('Identifikátor hourly-wage: je vyhrazen výpočtu hodinové mzdy.');
+        }
         $stmt = $this->db->pdo()->prepare(
             'SELECT employment.status, component.code
                FROM payroll_employments employment
@@ -2568,6 +2672,9 @@ final class PayrollInputRepository
             throw new \InvalidArgumentException(
                 'Pracovní vztah je archivovaný nebo nenastoupil; mzdový vstup na něj založit nelze.'
             );
+        }
+        if (\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved((string) $row['code'])) {
+            throw new \InvalidArgumentException('Tato složka vzniká pouze výpočtem hodinové mzdy a nelze ji zadat ručně ani importem.');
         }
         if (in_array((string) $row['code'], self::ABSENCE_ONLY_CODES, true)
             && !in_array((string) ($data['source_kind'] ?? ''), ['absence', 'correction'], true)

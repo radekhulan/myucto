@@ -36,6 +36,11 @@ final class PayrollHourlyWageCalculator
         if ($context->employmentId <= 0 || !in_array($context->employmentType, ['employment', 'small_scale_employment', 'dpp', 'dpc'], true)) {
             throw new \InvalidArgumentException('Druh pracovního vztahu nepodporuje hodinovou mzdu.');
         }
+        if ($context->settlementOnly) {
+            if (!\MyInvoice\Http\IsoDate::isValid($context->periodStart) || substr($context->periodStart, 8) !== '01') throw new \InvalidArgumentException('Období vypořádání není platné.');
+            if (($context->entitlementContext['holiday_time_off_grants'] ?? []) !== [] || ($context->entitlementContext['overtime_time_off_allocations'] ?? []) !== []) $this->assertSource($context);
+            return (new PayrollHourlyEntitlementCalculator())->calculate($context, [], [], $hash);
+        }
         $partitioner = new PayrollHourlyTimePartitioner();
         $terms = $partitioner->terms($context->terms, $context->periodStart);
         if (array_filter($terms, static fn(array $term): bool => ($term['remuneration_type'] ?? null) === 'hourly') === []) {

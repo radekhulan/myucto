@@ -23,7 +23,8 @@ use PDO;
  * migrace 1851 jediná měřitelná veličina. Počítá se proto:
  *
  *  - vlastní evidence MyÚčta: potvrzené odpracované hodiny pracovního souhrnu
- *    měsíce (táž hodnota, která odchází do měsíčního hlášení),
+ *    měsíce; u zvoleného ručního zdroje přesné jednotky schválené aktuální revize
+ *    bez závislosti na zaokrouhlené projekci JMHZ,
  *  - převzaté hodiny za měsíce před začátkem vedení mezd (hranici vykládá
  *    {@see PayrollHistoricalPeriodService::precedesStart()}).
  *
@@ -74,13 +75,15 @@ final class PayrollAgreementAnnualHours
     }
 
     /**
-     * @param array{own_minutes:int,takeover_minutes:int,total_minutes:int,manual_review_required?:bool} $hours
-     * @return array{year:int,total_minutes:?int,takeover_minutes:int,limit_minutes:int,warning_minutes:int,remaining_minutes:?int,status:string}
+     * @param array{own_minutes:?int,takeover_minutes:int,total_minutes:?int,manual_review_required?:bool,total_duration_units?:?int} $hours
+     * @return array<string,mixed>
      */
     public static function summary(int $year, array $hours): array
     {
         $total = $hours['total_minutes'];
         $manualReview = $hours['manual_review_required'] ?? false;
+        $hasExact = array_key_exists('total_duration_units', $hours);
+        $units = $hasExact ? $hours['total_duration_units'] : null;
 
         return [
             'year' => $year,
@@ -88,8 +91,12 @@ final class PayrollAgreementAnnualHours
             'takeover_minutes' => $hours['takeover_minutes'],
             'limit_minutes' => self::LIMIT_MINUTES,
             'warning_minutes' => self::WARNING_MINUTES,
-            'remaining_minutes' => $manualReview ? null : max(0, self::LIMIT_MINUTES - $total),
-            'status' => $manualReview ? self::STATUS_MANUAL_REVIEW_REQUIRED : self::status($total),
+            'remaining_minutes' => $manualReview ? null : ($hasExact ? PayrollDuration::exactMinutes(max(0, PayrollDuration::fromMinutes(self::LIMIT_MINUTES) - $units)) : max(0, self::LIMIT_MINUTES - $total)),
+            'status' => $manualReview ? self::STATUS_MANUAL_REVIEW_REQUIRED : ($hasExact ? self::statusUnits($units) : self::status($total)),
+            ...($hasExact ? [
+                'total_duration_units' => $manualReview ? null : $units,
+                'remaining_duration_units' => $manualReview ? null : max(0, PayrollDuration::fromMinutes(self::LIMIT_MINUTES) - $units),
+            ] : []),
         ];
     }
 
@@ -146,7 +153,7 @@ final class PayrollAgreementAnnualHours
      * Odpracované minuty na DPP za rok do konce `$periodStart` včetně, podle osob.
      *
      * @param list<int> $employeeIds
-     * @return array<int,array{own_minutes:int,takeover_minutes:int,total_minutes:int}>
+     * @return array<int,array{own_minutes:?int,takeover_minutes:int,total_minutes:?int,own_duration_units?:?int,total_duration_units?:?int,manual_review_required?:bool}>
      */
     public function yearToDate(int $supplierId, array $employeeIds, string $periodStart): array
     {
@@ -164,7 +171,7 @@ final class PayrollAgreementAnnualHours
      *
      * @param list<int> $employeeIds
      * @param list<int> $employmentIds
-     * @return array<int,array{own_minutes:int,takeover_minutes:int,total_minutes:int}>
+     * @return array<int,array{own_minutes:?int,takeover_minutes:int,total_minutes:?int,own_duration_units?:?int,total_duration_units?:?int,manual_review_required?:bool}>
      */
     public function yearWithoutMonth(int $supplierId, array $employeeIds, string $periodStart, array $employmentIds): array
     {
@@ -180,7 +187,7 @@ final class PayrollAgreementAnnualHours
     /**
      * @param list<int> $employeeIds
      * @param list<int> $excludedEmploymentIds
-     * @return array<int,array{own_minutes:int,takeover_minutes:int,total_minutes:int}>
+     * @return array<int,array{own_minutes:?int,takeover_minutes:int,total_minutes:?int,own_duration_units?:?int,total_duration_units?:?int,manual_review_required?:bool}>
      */
     private function workedMinutes(
         int $supplierId,
@@ -242,27 +249,17 @@ final class PayrollAgreementAnnualHours
                 AND employment.relation_type = 'dpp'
                 AND employment.employee_id IN ({$in})
                 AND month_row.period_start >= ? AND month_row.period_start <= ?{$exclusion}
+                AND month_row.work_source <> 'manual_summary'
               GROUP BY employment.employee_id, month_row.period_start",
         );
         $own->execute([$supplierId, ...$employeeIds, $yearStart, $periodStart, ...$exclusionParams]);
 
         $result = self::combine($employeeIds, $takeoverRows, $own->fetchAll(PDO::FETCH_ASSOC));
-        // Ruční souhrn může obsahovat zlomky minut a nemusí mít potvrzené JMHZ.
-        // Minutový součet proto není úplný podklad pro posouzení limitu.
-        $manual = $this->db->pdo()->prepare(
-            "SELECT DISTINCT employment.employee_id
-               FROM payroll_employments employment FORCE INDEX (idx_payroll_employment_employee)
-               JOIN payroll_time_months month_row FORCE INDEX (uq_payroll_time_month_period) ON month_row.supplier_id = employment.supplier_id
-                AND month_row.employment_id = employment.id
-              WHERE employment.supplier_id = ? AND employment.relation_type = 'dpp'
-                AND employment.employee_id IN ({$in}) AND month_row.period_start >= ? AND month_row.period_start <= ?
-                AND month_row.work_source = 'manual_summary'{$exclusion}",
+        return self::withManualMonths(
+            $result,
+            (new PayrollAgreementManualHours($this->db))->forEmployees($supplierId, $employeeIds, $yearStart, $periodStart, $excludedMonth, $excludedEmploymentIds),
+            $takeoverRows,
         );
-        $manual->execute([$supplierId, ...$employeeIds, $yearStart, $periodStart, ...$exclusionParams]);
-        foreach ($manual->fetchAll(PDO::FETCH_COLUMN) as $employeeId) {
-            $result[(int) $employeeId]['manual_review_required'] = true;
-        }
-        return $result;
     }
 
     /**
@@ -273,7 +270,7 @@ final class PayrollAgreementAnnualHours
      * @param list<int> $employeeIds
      * @param list<array<string,mixed>> $takeoverRows `employee_id`, `period_start`, `minutes`
      * @param list<array<string,mixed>> $ownRows `employee_id`, `period_start`, `millihours`
-     * @return array<int,array{own_minutes:int,takeover_minutes:int,total_minutes:int}>
+     * @return array<int,array{own_minutes:?int,takeover_minutes:int,total_minutes:?int,own_duration_units?:?int,total_duration_units?:?int,manual_review_required?:bool}>
      */
     public static function combine(array $employeeIds, array $takeoverRows, array $ownRows): array
     {
@@ -299,6 +296,58 @@ final class PayrollAgreementAnnualHours
         }
 
         return $result;
+    }
+
+    /** Přesné porovnání, i když roční součet překročí limit jen o tisícinu hodiny. */
+    public static function statusUnits(int $units): string
+    {
+        return match (true) {
+            $units > PayrollDuration::fromMinutes(self::LIMIT_MINUTES) => self::STATUS_EXCEEDED,
+            $units >= PayrollDuration::fromMinutes(self::WARNING_MINUTES) => self::STATUS_APPROACHING,
+            default => self::STATUS_OK,
+        };
+    }
+
+    /** @param array<int,array<string,mixed>> $prior @param list<array<string,mixed>> $manual @param list<array<string,mixed>> $takeoverRows @return array<int,array<string,mixed>> */
+    public static function withManualMonths(array $prior, array $manual, array $takeoverRows): array
+    {
+        $takenOver = [];
+        foreach ($takeoverRows as $row) $takenOver[(int) $row['employee_id']][(string) $row['period_start']] = true;
+        $own = [];
+        $unknown = [];
+        foreach ($manual as $month) {
+            $id = (int) $month['employee_id'];
+            if (isset($takenOver[$id][(string) $month['period_start']])) continue;
+            $own[$id] ??= PayrollDuration::fromMinutes($prior[$id]['own_minutes']);
+            if ($month['worked_duration_units'] === null) { $unknown[$id] = true; continue; }
+            $own[$id] = PayrollDuration::add($own[$id], $month['worked_duration_units']);
+        }
+        foreach ($own as $id => $units) {
+            $total = PayrollDuration::add($units, PayrollDuration::fromMinutes($prior[$id]['takeover_minutes']));
+            $prior[$id]['own_duration_units'] = isset($unknown[$id]) ? null : $units;
+            $prior[$id]['total_duration_units'] = isset($unknown[$id]) ? null : $total;
+            $prior[$id]['own_minutes'] = isset($unknown[$id]) ? null : PayrollDuration::exactMinutes($units);
+            $prior[$id]['total_minutes'] = isset($unknown[$id]) ? null : PayrollDuration::exactMinutes($total);
+            if (isset($unknown[$id])) $prior[$id]['manual_review_required'] = true;
+        }
+        return $prior;
+    }
+
+    /** Import přidává celé minuty, ale nesmí zahodit již doložený zlomek jiné části roku. */
+    public static function addOwnMinutes(array $hours, int $minutes): array
+    {
+        if (array_key_exists('total_duration_units', $hours)) {
+            if ($hours['manual_review_required'] ?? false) return $hours;
+            $extra = PayrollDuration::fromMinutes($minutes);
+            $hours['own_duration_units'] = PayrollDuration::add($hours['own_duration_units'], $extra);
+            $hours['total_duration_units'] = PayrollDuration::add($hours['total_duration_units'], $extra);
+            $hours['own_minutes'] = PayrollDuration::exactMinutes($hours['own_duration_units']);
+            $hours['total_minutes'] = PayrollDuration::exactMinutes($hours['total_duration_units']);
+        } else {
+            $hours['own_minutes'] += $minutes;
+            $hours['total_minutes'] += $minutes;
+        }
+        return $hours;
     }
 
     /**
@@ -329,8 +378,7 @@ final class PayrollAgreementAnnualHours
             $employeeId = (int) $row['employee_id'];
             $employmentId = (int) $row['employment_id'];
             $total = $hours[$employeeId]['total_minutes'] ?? 0;
-            $status = ($hours[$employeeId]['manual_review_required'] ?? false)
-                ? self::STATUS_MANUAL_REVIEW_REQUIRED : self::status($total);
+            $status = self::summary((int) substr($periodStart, 0, 4), $hours[$employeeId])['status'];
             if ($status === self::STATUS_OK) {
                 continue;
             }
@@ -345,8 +393,11 @@ final class PayrollAgreementAnnualHours
                     (int) substr($periodStart, 0, 4),
                     $total,
                     $hours[$employeeId]['takeover_minutes'] ?? 0,
+                    $hours[$employeeId]['total_duration_units'] ?? null,
                 ),
-                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
+                $status === self::STATUS_MANUAL_REVIEW_REQUIRED
+                    ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId . '&hours=1'
+                    : "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
             );
         }
 
@@ -368,16 +419,17 @@ final class PayrollAgreementAnnualHours
         int $year,
         int $totalMinutes,
         int $takeoverMinutes,
+        ?int $totalDurationUnits = null,
     ): string {
         return match ($status) {
-            self::STATUS_MANUAL_REVIEW_REQUIRED => 'Roční limit DPP nelze z ručního měsíčního souhrnu přesně vyhodnotit. Ověřte odpracované hodiny podle podkladů.',
-            self::STATUS_EXCEEDED => self::message($name, $year, $totalMinutes, $takeoverMinutes),
-            self::STATUS_APPROACHING => self::approachingMessage($name, $year, $totalMinutes, $takeoverMinutes),
+            self::STATUS_MANUAL_REVIEW_REQUIRED => 'Roční limit DPP nelze vyhodnotit: ruční podklad je neúplný nebo neschválený. Ověřte odpracované hodiny podle podkladů.',
+            self::STATUS_EXCEEDED => self::message($name, $year, $totalMinutes, $takeoverMinutes, $totalDurationUnits),
+            self::STATUS_APPROACHING => self::approachingMessage($name, $year, $totalMinutes, $takeoverMinutes, $totalDurationUnits),
             default => '',
         };
     }
 
-    public static function approachingMessage(string $name, int $year, int $totalMinutes, int $takeoverMinutes): string
+    public static function approachingMessage(string $name, int $year, int $totalMinutes, int $takeoverMinutes, ?int $totalDurationUnits = null): string
     {
         return sprintf(
             '%s: na dohodách o provedení práce má v roce %d odpracováno %s h%s z 300 h, které § 75 zákoníku '
@@ -385,16 +437,16 @@ final class PayrollAgreementAnnualHours
                 . 'další práci tak, aby limit nepřekročil(a), nebo včas upravte smluvní vztah v kartě zaměstnance.',
             $name === '' ? 'Zaměstnanec' : $name,
             $year,
-            self::hours($totalMinutes),
+            $totalDurationUnits === null ? self::hours($totalMinutes) : PayrollAgreementManualHours::hours($totalDurationUnits),
             $takeoverMinutes > 0
                 ? sprintf(' (z toho %s h převzatých z předchozího programu)', self::hours($takeoverMinutes))
                 : '',
             self::WARNING_PERCENT,
-            self::hours(max(0, self::LIMIT_MINUTES - $totalMinutes)),
+            $totalDurationUnits === null ? self::hours(max(0, self::LIMIT_MINUTES - $totalMinutes)) : PayrollAgreementManualHours::hours(max(0, PayrollDuration::fromMinutes(self::LIMIT_MINUTES) - $totalDurationUnits)),
         );
     }
 
-    public static function message(string $name, int $year, int $totalMinutes, int $takeoverMinutes): string
+    public static function message(string $name, int $year, int $totalMinutes, int $takeoverMinutes, ?int $totalDurationUnits = null): string
     {
         return sprintf(
             '%s: na dohodách o provedení práce odpracoval(a) v roce %d celkem %s h%s — víc než 300 h, '
@@ -403,7 +455,7 @@ final class PayrollAgreementAnnualHours
                 . 'v kartě zaměstnance.',
             $name === '' ? 'Zaměstnanec' : $name,
             $year,
-            self::hours($totalMinutes),
+            $totalDurationUnits === null ? self::hours($totalMinutes) : PayrollAgreementManualHours::hours($totalDurationUnits),
             $takeoverMinutes > 0
                 ? sprintf(' (z toho %s h převzatých z předchozího programu)', self::hours($takeoverMinutes))
                 : '',

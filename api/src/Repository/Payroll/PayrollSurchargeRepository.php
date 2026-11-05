@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use DomainException;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 
 /**
@@ -20,6 +21,36 @@ use PDO;
 final class PayrollSurchargeRepository
 {
     public function __construct(private readonly Connection $db) {}
+
+    /** @param list<int> $employmentIds @return array<int,list<array<string,mixed>>> */
+    public function policiesForMany(int $supplierId, array $employmentIds, string $from, string $through, bool $lock = false): array
+    {
+        if ($employmentIds === []) return [];
+        $ids = array_values(array_unique(array_map('intval', $employmentIds)));
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT * FROM payroll_employment_surcharge_policies FORCE INDEX (idx_payroll_surcharge_policy_effective)
+            WHERE supplier_id = ? AND employment_id IN ($in) AND valid_from <= ?
+              AND (valid_to IS NULL OR valid_to >= ?)
+            ORDER BY employment_id, valid_from, id" . ($lock ? ' FOR UPDATE' : ''));
+        $stmt->execute([$supplierId, ...$ids, $through, $from]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $result[(int) $row['employment_id']][] = self::policyRow($row);
+        return $result;
+    }
+
+    /** Druh vztahu s hodinovými podmínkami zasahujícími do měněné zásady. */
+    public function hourlyPolicyRelation(int $supplierId, int $employmentId, string $from): ?string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT employment.relation_type FROM payroll_employments employment
+            WHERE employment.supplier_id = ? AND employment.id = ? AND EXISTS (
+                SELECT 1 FROM payroll_employment_terms term FORCE INDEX (idx_payroll_employment_term_effective)
+                WHERE term.supplier_id = employment.supplier_id AND term.employment_id = employment.id
+                  AND term.remuneration_type = 'hourly' AND (term.effective_to IS NULL OR term.effective_to >= ?)
+            )");
+        $stmt->execute([$supplierId, $employmentId, $from]);
+        $type = $stmt->fetchColumn();
+        return is_string($type) ? $type : null;
+    }
 
     /**
      * Zápisy docházky jednoho vztahu v UTC okně.
@@ -108,7 +139,7 @@ final class PayrollSurchargeRepository
 
         return $row === false
             ? null
-            : PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
+            : self::policyRow($row);
     }
 
     /**
@@ -180,10 +211,10 @@ final class PayrollSurchargeRepository
         );
         $stmt->execute([$supplierId, $employmentId]);
 
-        return PayrollTimeValue::rows(
+        return array_map(self::policyRow(...), PayrollTimeValue::rows(
             $stmt->fetchAll(PDO::FETCH_ASSOC),
             'payroll_employment_surcharge_policies',
-        );
+        ));
     }
 
     /**
@@ -202,6 +233,7 @@ final class PayrollSurchargeRepository
         string $validFrom,
         array $data,
         ?int $userId,
+        ?callable $beforeWrite = null,
     ): int {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -209,6 +241,12 @@ final class PayrollSurchargeRepository
             $pdo->beginTransaction();
         }
         try {
+            if ($beforeWrite !== null) {
+                $lock = $pdo->prepare('SELECT id FROM payroll_employments WHERE supplier_id = ? AND id = ? FOR UPDATE');
+                $lock->execute([$supplierId, $employmentId]);
+                if ($lock->fetchColumn() === false) throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
+                $beforeWrite();
+            }
             $close = $pdo->prepare(
                 'UPDATE payroll_employment_surcharge_policies
                     SET valid_to = DATE_SUB(?, INTERVAL 1 DAY),
@@ -239,8 +277,8 @@ final class PayrollSurchargeRepository
                      overtime_fixed_hourly_minor, holiday_fixed_hourly_minor,
                      night_fixed_hourly_minor, weekend_fixed_hourly_minor,
                      difficult_environment_fixed_hourly_minor, standby_rate_bp,
-                     agreement_reference, note, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     agreement_reference, note, created_by, hourly_terms_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -263,6 +301,7 @@ final class PayrollSurchargeRepository
                 $data['agreement_reference'] ?? null,
                 $data['note'] ?? null,
                 $userId,
+                isset($data['hourly_terms']) ? CanonicalJson::encode($data['hourly_terms']) : null,
             ]);
             $id = (int) $pdo->lastInsertId();
             if ($ownsTransaction) {
@@ -292,7 +331,7 @@ final class PayrollSurchargeRepository
 
         return $row === false
             ? null
-            : PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
+            : self::policyRow($row);
     }
 
     /**
@@ -312,6 +351,7 @@ final class PayrollSurchargeRepository
         int $policyId,
         array $data,
         int $expectedVersion,
+        ?callable $beforeWrite = null,
     ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -319,6 +359,12 @@ final class PayrollSurchargeRepository
             $pdo->beginTransaction();
         }
         try {
+            if ($beforeWrite !== null) {
+                $lock = $pdo->prepare('SELECT id FROM payroll_employments WHERE supplier_id = ? AND id = ? FOR UPDATE');
+                $lock->execute([$supplierId, $employmentId]);
+                if ($lock->fetchColumn() === false) throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
+                $beforeWrite();
+            }
             $current = $this->lockPolicy($supplierId, $employmentId, $policyId);
             $currentVersion = (int) $current['row_version'];
             if ($currentVersion !== $expectedVersion) {
@@ -344,6 +390,7 @@ final class PayrollSurchargeRepository
                         standby_rate_bp = ?,
                         agreement_reference = ?,
                         note = ?,
+                        hourly_terms_json = ?,
                         row_version = row_version + 1
                   WHERE supplier_id = ? AND employment_id = ? AND id = ? AND row_version = ?'
             );
@@ -364,6 +411,7 @@ final class PayrollSurchargeRepository
                 $data['standby_rate_bp'] ?? null,
                 $data['agreement_reference'] ?? null,
                 $data['note'] ?? null,
+                isset($data['hourly_terms']) ? CanonicalJson::encode($data['hourly_terms']) : null,
                 $supplierId,
                 $employmentId,
                 $policyId,
@@ -404,6 +452,7 @@ final class PayrollSurchargeRepository
         int $policyId,
         string $validTo,
         int $expectedVersion,
+        ?callable $beforeWrite = null,
     ): array {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -411,6 +460,12 @@ final class PayrollSurchargeRepository
             $pdo->beginTransaction();
         }
         try {
+            if ($beforeWrite !== null) {
+                $lock = $pdo->prepare('SELECT id FROM payroll_employments WHERE supplier_id = ? AND id = ? FOR UPDATE');
+                $lock->execute([$supplierId, $employmentId]);
+                if ($lock->fetchColumn() === false) throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
+                $beforeWrite();
+            }
             $current = $this->lockPolicy($supplierId, $employmentId, $policyId);
             $currentVersion = (int) $current['row_version'];
             if ($currentVersion !== $expectedVersion) {
@@ -512,5 +567,15 @@ final class PayrollSurchargeRepository
         if ($stmt->fetchColumn() !== false) {
             throw new PayrollSurchargePolicyHistoryLockedException();
         }
+    }
+
+    /** Nový sloupec nepřidává prázdné klíče do dosavadních podkladů příplatků. @param array<string,mixed> $row @return array<string,mixed> */
+    private static function policyRow(array $row): array
+    {
+        if (($row['hourly_terms_json'] ?? null) !== null) {
+            $row['hourly_terms'] = json_decode((string) $row['hourly_terms_json'], true, flags: JSON_THROW_ON_ERROR);
+        }
+        unset($row['hourly_terms_json']);
+        return PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
     }
 }

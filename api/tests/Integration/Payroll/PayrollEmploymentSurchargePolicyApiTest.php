@@ -202,6 +202,88 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
         );
     }
 
+    public function testHourlyContractMetadataSurvivesCorrectionWithoutResubmission(): void
+    {
+        $this->addHourlyTerms();
+        $metadata = self::hourlyMetadata();
+        $created = $this->create(['overtime_mode' => 'included_in_wage', 'hourly_terms' => $metadata]);
+        self::assertSame(0, $created['hourly_terms']['included_overtime']['opening_used_duration_units']);
+        self::assertArrayNotHasKey('prior_consumed_duration_units', $created['hourly_terms']['included_overtime']);
+        $updated = $this->action->update($this->request('PUT')->withParsedBody($this->payload([
+            'overtime_mode' => 'included_in_wage', 'row_version' => 1, 'note' => 'Oprava poznámky',
+        ])), new Response(), $this->args((int) $created['id']));
+        self::assertSame(200, $updated->getStatusCode(), (string) $updated->getBody());
+        self::assertSame($created['hourly_terms'], $this->json($updated)['policy']['hourly_terms']);
+        $history = $this->create(['valid_from' => '2026-04-01']);
+        self::assertArrayNotHasKey('hourly_terms', $history);
+        $old = $this->db->pdo()->prepare('SELECT hourly_terms_json FROM payroll_employment_surcharge_policies WHERE supplier_id = ? AND id = ?');
+        $old->execute([$this->supplierId, $created['id']]);
+        self::assertSame($created['hourly_terms'], json_decode((string) $old->fetchColumn(), true));
+    }
+
+    public function testAgreementCannotAcquireStatutoryOvertimeAndMonthlyHasNoHourlyMetadata(): void
+    {
+        $payload = $this->payload(['overtime_mode' => 'included_in_wage', 'hourly_terms' => self::hourlyMetadata()]);
+        $response = $this->action->create($this->request('POST')->withParsedBody($payload), new Response(), ['id' => (string) $this->employmentId]);
+        self::assertSame(422, $response->getStatusCode());
+        $this->addHourlyTerms();
+        $this->db->pdo()->prepare('UPDATE payroll_employments SET relation_type = "dpp" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $response = $this->action->create($this->request('POST')->withParsedBody($payload), new Response(), ['id' => (string) $this->employmentId]);
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('§ 114', $this->json($response)['error']['message']);
+    }
+
+    private function addHourlyTerms(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on, weekly_hours,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-01-01", 40, "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+    }
+
+    public function testHourlyPolicyCannotRewriteSettledPayroll(): void
+    {
+        $this->addHourlyTerms();
+        $policy = $this->create(['overtime_mode' => 'included_in_wage', 'hourly_terms' => self::hourlyMetadata()]);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_runs (supplier_id, period_start, payment_date, status, current_revision_no)
+            VALUES (?, "2026-06-01", "2026-07-15", "posted", 1)')->execute([$this->supplierId]);
+        $run = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_run_revisions
+            (supplier_id, run_id, revision_no, status, schema_version, ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash)
+            VALUES (?, ?, 1, "approved", "test", ?, "{}", ?, ?)')
+            ->execute([$this->supplierId, $run, str_repeat('a', 64), hash('sha256', '{}'), random_bytes(32)]);
+        $revision = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_run_employments (supplier_id, revision_id, employee_id, employment_id, period_start, input_json, input_hash)
+            SELECT supplier_id, ?, employee_id, id, "2026-06-01", "{}", ? FROM payroll_employments WHERE supplier_id = ? AND id = ?')
+            ->execute([$revision, hash('sha256', '{}'), $this->supplierId, $this->employmentId]);
+        $response = $this->action->update($this->request('PUT')->withParsedBody($this->payload([
+            'row_version' => 1, 'overtime_mode' => 'included_in_wage', 'hourly_terms' => self::hourlyMetadata(),
+        ])), new Response(), $this->args((int) $policy['id']));
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertStringContainsString('2026', $this->json($response)['error']['message']);
+        $response = $this->action->close($this->request('POST')->withParsedBody([
+            'row_version' => 1, 'valid_to' => '2026-05-31',
+        ]), new Response(), $this->args((int) $policy['id']));
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $response = $this->action->create($this->request('POST')->withParsedBody($this->payload([
+            'valid_from' => '2026-05-01',
+        ])), new Response(), ['id' => (string) $this->employmentId]);
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $stored = $pdo->prepare('SELECT row_version, valid_to FROM payroll_employment_surcharge_policies WHERE supplier_id = ? AND id = ?');
+        $stored->execute([$this->supplierId, $policy['id']]);
+        self::assertSame(['row_version' => 1, 'valid_to' => null], $stored->fetch(\PDO::FETCH_ASSOC));
+    }
+
+    private static function hourlyMetadata(): array
+    {
+        return ['included_overtime' => ['agreement_kind' => 'contract', 'agreement_reference' => 'Syntetická smlouva',
+            'scope_kind' => 'annual_hours', 'calendar_year' => 2026, 'annual_limit_duration_units' => 450000,
+            'opening_used_duration_units' => 0, 'opening_as_of' => '2026-01-01', 'opening_reference' => 'Doložený začátek roku',
+            'prior_consumed_duration_units' => 123]];
+    }
+
     public function testMissingPolicyIsNotFound(): void
     {
         $response = $this->action->update(

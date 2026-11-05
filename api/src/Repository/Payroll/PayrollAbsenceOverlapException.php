@@ -19,6 +19,7 @@ final class PayrollAbsenceOverlapException extends \RuntimeException
         'employee_obstacle' => 'překážka na straně zaměstnance',
         'employer_obstacle' => 'překážka na straně zaměstnavatele',
         'compensatory_time_off' => 'náhradní volno',
+        'holiday_compensatory_time_off' => 'placené náhradní volno za svátek',
         'unexcused' => 'neomluvená absence',
         'other' => 'jiná nepřítomnost',
         'public_function' => 'výkon veřejné funkce',

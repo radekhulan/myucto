@@ -96,7 +96,7 @@ final class PayrollWorkedTimeEvidence
         if ($entryIds !== []) {
             $in = implode(',', array_fill(0, count($entryIds), '?'));
             $period = new \DateTimeImmutable($periodStart, new \DateTimeZone('UTC'));
-            $stmt = $this->db->pdo()->prepare("SELECT id, employment_id, starts_at_utc, ends_at_utc, timezone_name, break_minutes, category, status FROM payroll_time_entries WHERE supplier_id = ? AND employment_id IN ($in) AND starts_at_utc >= ? AND starts_at_utc < ? AND status <> 'superseded' ORDER BY employment_id, starts_at_utc, id" . $suffix);
+            $stmt = $this->db->pdo()->prepare("SELECT id, employment_id, starts_at_utc, ends_at_utc, timezone_name, break_minutes, category, difficulty_factor_count, status FROM payroll_time_entries WHERE supplier_id = ? AND employment_id IN ($in) AND starts_at_utc >= ? AND starts_at_utc < ? AND status <> 'superseded' ORDER BY employment_id, starts_at_utc, id" . $suffix);
             $stmt->execute([$supplierId, ...$entryIds, $period->modify('-1 day')->format('Y-m-d H:i:s'), $period->modify('first day of next month')->modify('+1 day')->format('Y-m-d H:i:s')]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $entry) {
                 $local = (new \DateTimeImmutable($entry['starts_at_utc'], new \DateTimeZone('UTC')))->setTimezone(new \DateTimeZone($entry['timezone_name']));

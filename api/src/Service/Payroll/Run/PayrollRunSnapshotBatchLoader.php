@@ -49,25 +49,48 @@ final class PayrollRunSnapshotBatchLoader
     ): array {
         $rows = $this->fetch(
             'SELECT term.id, term.row_version, term.effective_from, term.effective_to,
-                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis_kind, term.remuneration_basis,
+                    term.remuneration_type, term.hourly_rate_minor, term.monthly_gross_minor, term.weekly_hours, term.workload_basis_points, term.remuneration_basis_kind, term.remuneration_basis,
                     term.employment_id AS ' . self::GROUP_KEY . '
                FROM payroll_employment_terms term
               WHERE term.supplier_id = ? AND term.employment_id IN (%s)
-                AND term.remuneration_type = "hourly"
                 AND term.effective_from <= ?
                 AND (term.effective_to IS NULL OR term.effective_to >= ?)
+                AND EXISTS (SELECT 1 FROM payroll_employment_terms hourly FORCE INDEX (idx_payroll_employment_term_effective)
+                     WHERE hourly.supplier_id = term.supplier_id AND hourly.employment_id = term.employment_id
+                       AND hourly.remuneration_type = "hourly" AND hourly.effective_from <= ?
+                       AND (hourly.effective_to IS NULL OR hourly.effective_to >= ?))
               ORDER BY term.effective_from, term.id',
             [$supplierId],
             $employmentIds,
-            [$periodEnd, $periodStart],
+            [$periodEnd, $periodStart, $periodEnd, $periodStart],
         );
         foreach ($rows as &$row) {
-            foreach (['id', 'row_version', 'hourly_rate_minor'] as $field) {
-                $row[$field] = (int) $row[$field];
+            foreach (['id', 'row_version', 'hourly_rate_minor', 'monthly_gross_minor', 'workload_basis_points'] as $field) {
+                $row[$field] = $row[$field] === null ? null : (int) $row[$field];
             }
         }
         unset($row);
 
+        return $this->grouped($rows);
+    }
+
+    /** @param list<int> $employmentIds @return array<int,list<array<string,mixed>>> */
+    public function remunerationTerms(int $supplierId, array $employmentIds, string $periodStart, string $periodEnd): array
+    {
+        $rows = $this->fetch(
+            'SELECT term.id, term.row_version, term.effective_from, term.effective_to,
+                    term.remuneration_type, term.hourly_rate_minor, term.monthly_gross_minor, term.weekly_hours, term.workload_basis_points, term.remuneration_basis_kind, term.remuneration_basis,
+                    term.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_employment_terms term
+              WHERE term.supplier_id = ? AND term.employment_id IN (%s)
+                AND term.effective_from <= ? AND (term.effective_to IS NULL OR term.effective_to >= ?)
+              ORDER BY term.effective_from, term.id',
+            [$supplierId], $employmentIds, [$periodEnd, $periodStart],
+        );
+        foreach ($rows as &$row) foreach (['id', 'row_version', 'hourly_rate_minor', 'monthly_gross_minor', 'workload_basis_points'] as $field) {
+            $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        unset($row);
         return $this->grouped($rows);
     }
 

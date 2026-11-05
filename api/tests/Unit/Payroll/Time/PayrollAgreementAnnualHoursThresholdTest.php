@@ -17,6 +17,43 @@ use PHPUnit\Framework\TestCase;
  */
 final class PayrollAgreementAnnualHoursThresholdTest extends TestCase
 {
+    public function testKnownManualFractionExceedsAnnualLimitWithoutInventingMinutes(): void
+    {
+        $prior = [1 => ['own_minutes' => 0, 'takeover_minutes' => 0, 'total_minutes' => 0]];
+        $hours = PayrollAgreementAnnualHours::withManualMonths($prior, [['employee_id' => 1, 'period_start' => '2026-10-01', 'worked_duration_units' => 900003]], []);
+        $summary = PayrollAgreementAnnualHours::summary(2026, $hours[1]);
+        self::assertSame('exceeded', $summary['status']);
+        self::assertSame(900003, $summary['total_duration_units']);
+        self::assertSame(0, $summary['remaining_duration_units']);
+        self::assertNull($summary['total_minutes']);
+        self::assertSame(0, $summary['remaining_minutes']);
+        self::assertSame($prior, PayrollAgreementAnnualHours::withManualMonths($prior, [], []));
+    }
+
+    public function testKnownZeroAndUnknownManualMonthAreDifferent(): void
+    {
+        $prior = [1 => ['own_minutes' => 0, 'takeover_minutes' => 0, 'total_minutes' => 0]];
+        foreach ([0 => 'ok', 'unknown' => 'manual_review_required'] as $value => $status) {
+            $hours = PayrollAgreementAnnualHours::withManualMonths($prior, [['employee_id' => 1, 'period_start' => '2026-10-01', 'worked_duration_units' => $value === 'unknown' ? null : 0]], []);
+            $summary = PayrollAgreementAnnualHours::summary(2026, $hours[1]);
+            self::assertSame($status, $summary['status']);
+            self::assertSame($value === 'unknown' ? null : 0, $summary['total_duration_units']);
+        }
+    }
+
+    public function testAttendancePreviewPreservesManualFractionWhenAddingLegacyImportMinutes(): void
+    {
+        $prior = PayrollAgreementAnnualHours::withManualMonths([1 => ['own_minutes' => 0, 'takeover_minutes' => 0, 'total_minutes' => 0]], [['employee_id' => 1, 'period_start' => '2026-10-01', 'worked_duration_units' => 897003]], []);
+        $persons = AttendanceImportService::annotateAgreementHours([[
+            'display_name' => 'Syntetická dohoda', 'match' => ['status' => 'linked', 'employment_id' => 11, 'employee_id' => 1],
+            'warnings' => [], '_metrics' => ['worked_hours' => ['millihours' => 1000, 'source' => 'A1']],
+        ]], [['employment_id' => 11, 'relation_type' => 'dpp']], $prior, 2026);
+        self::assertSame(900003, $persons[0]['dpp_annual_hours']['total_duration_units']);
+        self::assertSame(60, $persons[0]['dpp_annual_hours']['imported_minutes']);
+        self::assertSame('exceeded', $persons[0]['dpp_annual_hours']['status']);
+        self::assertStringContainsString('300,001 h', $persons[0]['warnings'][0]);
+    }
+
     public function testWarningThresholdIsEightyPercentOfTheLimit(): void
     {
         self::assertSame(300 * 60, PayrollAgreementAnnualHours::LIMIT_MINUTES);

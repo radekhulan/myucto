@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
+use MyInvoice\Service\Payroll\PayrollHourlyWagePreview;
 use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -1041,6 +1042,7 @@ final class PayrollQuickInputRepository
             $employmentIdsOnPage,
         );
         $workedTime = $this->workedTimeForPage($supplierId, $periodStart, $periodEnd, $rows, $employmentIdsOnPage);
+        $hourlyPreviews = (new PayrollHourlyWagePreview($this->db))->forMany($supplierId, $periodStart, $rows);
 
         $items = [];
         foreach ($rows as $row) {
@@ -1061,6 +1063,9 @@ final class PayrollQuickInputRepository
                 $claims[$employmentId] ?? [],
             );
             $item['worked_time'] = $workedTime[$employmentId];
+            $preview = $hourlyPreviews[$employmentId] ?? null;
+            if ($preview !== null) unset($preview['_source_snapshot']);
+            $item['hourly_wage_preview'] = $preview;
             $items[] = $item;
         }
         return ['period' => $period, 'items' => $items, 'total' => $total];
@@ -1311,6 +1316,25 @@ final class PayrollQuickInputRepository
             $pdo->beginTransaction();
         }
         try {
+            $requestedIds = array_values(array_unique(array_map(static fn (array $row): int => (int) $row['employment_id'], $rows)));
+            sort($requestedIds, SORT_NUMERIC);
+            $claimed = [];
+            if ($requestedIds !== []) {
+                $in = implode(',', array_fill(0, count($requestedIds), '?'));
+                $lock = $pdo->prepare("SELECT id FROM payroll_employments WHERE supplier_id = ? AND id IN ($in) ORDER BY id FOR UPDATE");
+                $lock->execute([$supplierId, ...$requestedIds]);
+                $lock->fetchAll(PDO::FETCH_COLUMN);
+                $query = $pdo->prepare("SELECT claim.employment_id, claim.purpose,
+                    SUM(CASE WHEN m.input_id IS NULL OR input.status <> 'cancelled' THEN m.delta_amount_minor ELSE 0 END) AS amount,
+                    SUM(CASE WHEN m.input_id IS NULL OR input.status <> 'cancelled' THEN m.duration_delta_units ELSE 0 END) AS duration
+                    FROM payroll_hourly_wage_claims claim
+                    JOIN payroll_hourly_wage_materializations m ON m.supplier_id = claim.supplier_id AND m.claim_id = claim.id
+                    LEFT JOIN payroll_inputs input ON input.supplier_id = m.supplier_id AND input.id = m.input_id
+                    WHERE claim.supplier_id = ? AND claim.employment_id IN ($in) AND claim.work_period_start = ? AND claim.claim_source = 'hourly_calculation'
+                    GROUP BY claim.employment_id, claim.purpose HAVING amount <> 0 OR duration <> 0");
+                $query->execute([$supplierId, ...$requestedIds, $period . '-01']);
+                foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $claim) $claimed[(int) $claim['employment_id']][(string) $claim['purpose']] = true;
+            }
             $current = $this->forEmployments(
                 $supplierId,
                 $period,
@@ -1321,6 +1345,9 @@ final class PayrollQuickInputRepository
             );
             $items = [];
             foreach ($current['items'] as $item) {
+                $purposes = $claimed[(int) $item['employment_id']] ?? [];
+                $item['_hourly_claimed'] = isset($purposes['ordinary_base']) || isset($purposes['achieved_overtime']);
+                $item['_hourly_overtime_claimed'] = isset($purposes['achieved_overtime']) || isset($purposes['premium_overtime']);
                 $items[(int) $item['employment_id']] = $item;
             }
             $closedRuns = $this->closedRuns->closingRuns($supplierId, $period, array_keys($items));
@@ -1376,6 +1403,10 @@ final class PayrollQuickInputRepository
                     $userId,
                     $autoApprove,
                 ): void {
+                    if (($item['_hourly_claimed'] ?? false) && $row['base_amount_minor'] !== null
+                        && $row['base_amount_minor'] !== $item['base_amount_minor']) {
+                        throw new \DomainException('Základní mzda je již spravována výpočtem hodinové mzdy.');
+                    }
                     if (($item['hourly_remuneration_in_period'] ?? false) === true) {
                         if ($row['base_amount_minor'] !== null
                             && $row['base_amount_minor'] !== (int) $item['base_amount_minor']
@@ -1435,6 +1466,10 @@ final class PayrollQuickInputRepository
                     }
                     $overtimeAmount = $row['overtime_amount_minor'];
                     $hours = $row['overtime_hours_milli'];
+                    if (($item['_hourly_overtime_claimed'] ?? false)
+                        && (($hours !== null && $hours !== 0) || ($overtimeAmount !== null && $overtimeAmount !== 0))) {
+                        throw new \DomainException('Přesčasová mzda je již spravována výpočtem hodinové mzdy.');
+                    }
                     if ((bool) $item['overtime_managed_elsewhere']) {
                         if ($row['overtime_mode'] !== 'amount'
                             || (int) $overtimeAmount !== (int) $item['overtime_amount_minor']) {
@@ -2772,6 +2807,11 @@ final class PayrollQuickInputRepository
         ?int $userId,
         bool $autoApprove,
     ): void {
+        if (($item['_hourly_claimed'] ?? false)
+            && in_array($definitions[$code]['component_kind'] ?? null, ['base_wage', 'hourly_wage'], true)
+            && (($entry['amount_minor'] ?? null) !== null || ($entry['revert'] ?? false))) {
+            throw new \DomainException('Základní mzda je již spravována výpočtem hodinové mzdy.');
+        }
         if (in_array($code, self::managedCodes(), true)) {
             throw new \InvalidArgumentException(
                 "Složku {$code} zadávejte v jejím vlastním poli rychlého vstupu."
@@ -3558,9 +3598,9 @@ final class PayrollQuickInputRepository
             // editace téhož pole by pak spadla na 409 „změnil to jiný uživatel".
             // Schválený vstup proto vzniká rovnou, jedním INSERTem.
             if ($autoApprove) {
-                $this->inputs->createApproved($supplierId, $data, $userId);
+                $this->inputs->createApproved($supplierId, $data, $userId, sourceAlreadyGuarded: true);
             } else {
-                $this->inputs->create($supplierId, $data, $userId);
+                $this->inputs->create($supplierId, $data, $userId, sourceAlreadyGuarded: true);
             }
             return;
         }
@@ -3647,8 +3687,9 @@ final class PayrollQuickInputRepository
                 $data,
                 $currentVersion,
                 $userId,
+                sourceAlreadyGuarded: true,
             )
-            : $this->inputs->update($supplierId, (int) $row['id'], $data, $currentVersion);
+            : $this->inputs->update($supplierId, (int) $row['id'], $data, $currentVersion, sourceAlreadyGuarded: true);
         if ($updated === null) {
             throw new PayrollInputConflictException($currentVersion);
         }

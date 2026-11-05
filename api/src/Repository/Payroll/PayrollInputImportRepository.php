@@ -211,6 +211,8 @@ final class PayrollInputImportRepository
             $pdo->beginTransaction();
         }
         try {
+            $guardRows = array_map(static fn (array $row): array => $row['payload'], $validRows);
+            (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, $periodStart, $guardRows);
             try {
                 $stmt = $pdo->prepare(
                     'INSERT INTO payroll_input_imports

@@ -11,6 +11,32 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollAbsenceValidatorTest extends TestCase
 {
+    public function testHolidayTimeOffDefersCompensationToLinkedHourlyClaim(): void
+    {
+        $data = $this->validator()->absence(['employment_id' => 1, 'absence_type' => 'holiday_compensatory_time_off',
+            'date_from' => '2026-06-03', 'date_to' => '2026-06-03']);
+        self::assertSame('hourly_claim', $data['compensation_policy']);
+        self::assertNull($data['average_snapshot_id']);
+        self::assertSame(10000, $data['compensation_rate_basis_points']);
+        $overtime = $this->validator()->absence(['employment_id' => 1, 'absence_type' => 'compensatory_time_off',
+            'date_from' => '2026-06-03', 'date_to' => '2026-06-03']);
+        self::assertSame('none', $overtime['compensation_policy']);
+    }
+
+    public function testExactAverageTimeDoesNotInventRoundedMinutes(): void
+    {
+        $body = ['employment_id' => 1, 'applicable_year' => 2026, 'applicable_quarter' => 2,
+            'decisive_from' => '2026-01-01', 'decisive_to' => '2026-03-31',
+            'gross_earnings_minor' => 3_200_000, 'longer_period_allocated_minor' => 0,
+            'worked_duration_units' => 480053, 'worked_days' => 21];
+        $data = $this->validator()->average($body);
+        self::assertSame(480053, $data['worked_duration_units']);
+        self::assertNull($data['worked_minutes']);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('neodpovídá');
+        $this->validator()->average($body + ['worked_minutes' => 9601]);
+    }
+
     public function testSecondQuarterRequiresExactPreviousCalendarQuarter(): void
     {
         $data = $this->validator()->average([

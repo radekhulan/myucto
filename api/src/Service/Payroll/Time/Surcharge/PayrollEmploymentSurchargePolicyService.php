@@ -65,6 +65,7 @@ final class PayrollEmploymentSurchargePolicyService
     public function __construct(
         private readonly PayrollSurchargeRepository $repository,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly \MyInvoice\Repository\Payroll\PayrollEmploymentRepository $employments,
     ) {}
 
     /**
@@ -138,13 +139,15 @@ final class PayrollEmploymentSurchargePolicyService
         ?int $userId,
     ): array {
         $validFrom = self::date($input['valid_from'] ?? null, 'valid_from');
+        $data = $this->agreedFields($input, $validFrom);
 
         $id = $this->repository->savePolicy(
             $supplierId,
             $employmentId,
             $validFrom,
-            $this->agreedFields($input, $validFrom),
+            $data,
             $userId,
+            fn() => $this->assertHourlyPolicyWritable($supplierId, $employmentId, $validFrom, $data['hourly_terms']),
         );
 
         $policies = $this->repository->policiesForEmployment($supplierId, $employmentId);
@@ -178,13 +181,18 @@ final class PayrollEmploymentSurchargePolicyService
         $existing = $this->repository->findPolicy($supplierId, $employmentId, $policyId)
             ?? throw new PayrollSurchargePolicyNotFoundException();
         $validFrom = self::date($existing['valid_from'] ?? null, 'valid_from');
+        if (!array_key_exists('hourly_terms', $input)) {
+            $input['hourly_terms'] = $existing['hourly_terms'] ?? null;
+        }
+        $data = $this->agreedFields($input, $validFrom);
 
         return $this->repository->updatePolicy(
             $supplierId,
             $employmentId,
             $policyId,
-            $this->agreedFields($input, $validFrom),
+            $data,
             self::rowVersion($input),
+            fn() => $this->assertHourlyPolicyWritable($supplierId, $employmentId, $validFrom, $data['hourly_terms']),
         );
     }
 
@@ -200,12 +208,14 @@ final class PayrollEmploymentSurchargePolicyService
         int $policyId,
         array $input,
     ): array {
+        $validTo = self::date($input['valid_to'] ?? null, 'valid_to');
         return $this->repository->closePolicy(
             $supplierId,
             $employmentId,
             $policyId,
-            self::date($input['valid_to'] ?? null, 'valid_to'),
+            $validTo,
             self::rowVersion($input),
+            fn() => $this->assertHourlyPolicyWritable($supplierId, $employmentId, (new \DateTimeImmutable($validTo))->modify('+1 day')->format('Y-m-d'), null),
         );
     }
 
@@ -282,6 +292,7 @@ final class PayrollEmploymentSurchargePolicyService
             'difficult_environment_factors' => $factors,
             'agreement_reference' => self::nullableString($input, 'agreement_reference', 191),
             'note' => self::nullableString($input, 'note', 500),
+            'hourly_terms' => \MyInvoice\Service\Payroll\PayrollHourlyAgreementTerms::normalize($input['hourly_terms'] ?? null, $validFrom, $overtime->value),
         ];
         foreach (self::RATE_FIELDS as $field => $kind) {
             $agreed[$field] = $rates[$kind->value];
@@ -291,6 +302,23 @@ final class PayrollEmploymentSurchargePolicyService
         }
 
         return $agreed;
+    }
+
+    /** @param ?array<string,mixed> $terms */
+    private function assertHourlyPolicyWritable(int $supplierId, int $employmentId, string $from, ?array $terms): void
+    {
+        $relation = $this->repository->hourlyPolicyRelation($supplierId, $employmentId, $from);
+        if ($relation === null) {
+            if ($terms !== null) throw new \InvalidArgumentException('Rozsahy zahrnutých plnění se zadávají u hodinově odměňovaného vztahu.');
+            return;
+        }
+        $this->employments->assertTermsOpenFrom($supplierId, $employmentId, $from, null);
+        if (($terms['included_overtime'] ?? null) !== null && !in_array($relation, ['employment', 'small_scale_employment'], true)) {
+            throw new \InvalidArgumentException('DPP a DPČ nemají přesčasový nárok podle § 114 zákoníku práce.');
+        }
+        if (($terms['included_agreement_premiums'] ?? []) !== [] && !in_array($relation, ['dpp', 'dpc'], true)) {
+            throw new \InvalidArgumentException('Zahrnuté příplatky podle § 138 se sjednávají jen v odměně DPP nebo DPČ.');
+        }
     }
 
     /** @param array<string,mixed> $input */

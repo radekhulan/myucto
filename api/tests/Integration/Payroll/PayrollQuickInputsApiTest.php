@@ -107,6 +107,23 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(['entries'], $worked['available_sources']);
     }
 
+    public function testMonthlyBaseRemainsEditableWithRetiredHourlyClaim(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare('INSERT INTO payroll_hourly_wage_claims (supplier_id, employment_id, work_period_start, purpose, claim_source) VALUES (?, ?, "2026-06-01", "premium_overtime", "hourly_calculation")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $item = $this->firstRow('2026-06');
+        $saved = $this->action->save($this->request('PUT')->withParsedBody(['period' => '2026-06', 'rows' => [[
+            'employment_id' => $this->employmentId, 'employment_row_version' => $item['employment_row_version'],
+            'base_amount_minor' => 4300000, 'overtime_mode' => 'amount', 'overtime_hours_milli' => null,
+            'overtime_amount_minor' => 0, 'bonus_amount_minor' => 0,
+            'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+        ]]]), new Response());
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertSame(4300000, (int) $this->quickInput('MZDA_MESICNI')['amount_minor']);
+    }
+
     public function testManualHoursCannotSilentlyKeepMaterializedSurcharge(): void
     {
         $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')

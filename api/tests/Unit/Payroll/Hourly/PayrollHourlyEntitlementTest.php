@@ -217,6 +217,67 @@ final class PayrollHourlyEntitlementTest extends TestCase
         self::assertSame(10500, $this->claim($expired, 'premium_overtime')['payable_minor']);
     }
 
+    public function testHistoricalOvertimeSettlesAtDeadlineWithWorkQuarterAverageAndCurrentFloor(): void
+    {
+        $evidence = $this->evidence();
+        $historical = ['id' => 51, 'revision' => 4, 'kind' => 'overtime', 'work_date' => '2026-04-10',
+            'due_on' => '2026-07-31', 'available_duration_units' => 3000, 'average_basis' => 'work_quarter',
+            'current_minimum_hourly_minor' => 13440, 'average_earning' => ['id' => 2, 'revision_no' => 1, 'hourly_minor' => 10000],
+            'ruleset' => $evidence['ruleset'], 'policy' => [...$evidence['policy_versions'][0], 'overtime_mode' => 'time_off']];
+        $evidence['historical_overtime'] = [$historical];
+        $base = $this->context($evidence);
+        $context = new PayrollHourlyWageContext(...[...get_object_vars($base), 'terms' => [], 'segments' => [], 'workedTimeEvidence' => null, 'settlementOnly' => true]);
+        $result = (new PayrollHourlyWageCalculator())->calculate($context);
+        self::assertTrue($result->complete, json_encode($result->blockers));
+        self::assertSame(['premium_overtime', 'holiday_time_off_compensation'], array_column($result->claims, 'purpose'));
+        $claim = $this->claim($result, 'premium_overtime');
+        self::assertSame(3400, $claim['payable_minor']);
+        self::assertSame(0, $claim['worked_duration_units']);
+        self::assertSame('work_quarter', $claim['segments'][0]['average_basis']);
+        self::assertSame(13440, $claim['segments'][0]['average_hourly_minor']);
+        self::assertSame('overtime_premium_settlement', $result->entitlements[0]['kind']);
+        self::assertSame(51, $result->entitlements[0]['entitlement_id']);
+        $evidence['historical_overtime'][0]['available_duration_units'] = 0;
+        $again = (new PayrollHourlyWageCalculator())->calculate(new PayrollHourlyWageContext(...[...get_object_vars($context), 'entitlementContext' => $evidence]));
+        self::assertSame(0, $this->claim($again, 'premium_overtime')['payable_minor']);
+        self::assertSame([], $again->entitlements);
+    }
+
+    public function testHistoricalOvertimeAllocationNeedsNoAverageAndUnknownAllocationIsNotZero(): void
+    {
+        $evidence = $this->evidence();
+        $evidence['historical_overtime'] = [['id' => 51, 'revision' => 4, 'kind' => 'overtime', 'work_date' => '2026-04-10', 'due_on' => '2026-07-31', 'available_duration_units' => 3000]];
+        $evidence['overtime_time_off_allocations'] = [[...$this->schedule('2026-07-10'), 'work_date' => '2026-04-10', 'granted_on' => '2026-07-10', 'duration_units' => 3000, 'absence_id' => 9, 'reference' => 'Syntetické čerpání']];
+        $base = $this->context($evidence);
+        $context = new PayrollHourlyWageContext(...[...get_object_vars($base), 'settlementOnly' => true]);
+        $calculator = new PayrollHourlyWageCalculator();
+        $result = $calculator->calculate($context);
+        self::assertTrue($result->complete, json_encode($result->blockers));
+        self::assertSame(0, $this->claim($result, 'premium_overtime')['payable_minor']);
+        self::assertSame('overtime_time_off_allocation', $result->entitlements[0]['kind']);
+        $evidence['overtime_time_off_allocations'] = null;
+        self::assertFalse($calculator->calculate(new PayrollHourlyWageContext(...[...get_object_vars($context), 'entitlementContext' => $evidence]))->complete);
+        $evidence['overtime_time_off_allocations'] = [];
+        self::assertFalse($calculator->calculate(new PayrollHourlyWageContext(...[...get_object_vars($context), 'entitlementContext' => $evidence]))->complete);
+    }
+
+    public function testIncludedOvertimeRequiresSalaryItselfToBeContractuallyAgreed(): void
+    {
+        $segments = [$this->segment(worked: 30000, overtime: 3000)];
+        $evidence = $this->evidence($segments);
+        $evidence['policy_versions'][0]['overtime_mode'] = 'included';
+        $evidence['policy_versions'][0]['included_overtime'] = $this->includedOvertime();
+        $calculator = new PayrollHourlyWageCalculator();
+        foreach (['wage_statement', 'internal_regulation', null] as $basis) {
+            $result = $calculator->calculate($this->context($evidence, $segments, [[...$this->term(), 'remuneration_basis_kind' => $basis]]));
+            self::assertFalse($result->complete);
+            self::assertContains('hourly_included_overtime_salary_not_agreed', array_column($result->blockers, 'code'));
+        }
+        foreach (['contract', 'collective_agreement', 'agreement'] as $basis) {
+            self::assertTrue($calculator->calculate($this->context($evidence, $segments, [[...$this->term(), 'remuneration_basis_kind' => $basis]]))->complete);
+        }
+    }
+
     private function context(?array $evidence, ?array $segments = null, ?array $terms = null, string $employmentType = 'employment'): PayrollHourlyWageContext
     {
         $segments ??= [$this->segment()];
@@ -271,7 +332,7 @@ final class PayrollHourlyEntitlementTest extends TestCase
     private function term(): array
     {
         return ['id' => 1, 'row_version' => 1, 'effective_from' => '2026-01-01', 'effective_to' => null,
-            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'monthly_gross_minor' => null];
+            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'monthly_gross_minor' => null, 'remuneration_basis_kind' => 'contract'];
     }
 
     private function claim(object $result, string $purpose): array

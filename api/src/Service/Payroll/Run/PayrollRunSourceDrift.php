@@ -54,6 +54,7 @@ final readonly class PayrollRunSourceDrift
         $frozenEvidence = [];
         $frozenHourlyTerms = [];
         $frozenWorkedTime = [];
+        $frozenHourlyContexts = [];
         $frozenTimeMonths = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
@@ -70,6 +71,12 @@ final readonly class PayrollRunSourceDrift
                 $frozenEmployments[(int) ($employment['employment']['id'] ?? 0)] = true;
                 $frozenHourlyTerms[(int) ($employment['employment']['id'] ?? 0)] =
                     $employment['hourly_remuneration_terms'] ?? [];
+                if (array_key_exists('hourly_settlement_terms', $employment)) {
+                    $frozenSettlementTerms[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_settlement_terms'];
+                }
+                if (array_key_exists('hourly_entitlement_context', $employment)) {
+                    $frozenHourlyContexts[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_entitlement_context'];
+                }
                 $frozenTimeMonths[(int) ($employment['employment']['id'] ?? 0)] = $employment['time_month'] ?? null;
                 if (array_key_exists('worked_time_evidence', $employment)) {
                     $frozenWorkedTime[(int) ($employment['employment']['id'] ?? 0)] = $employment['worked_time_evidence'];
@@ -117,6 +124,9 @@ final readonly class PayrollRunSourceDrift
         }
 
         $remunerationChanged = 0;
+        foreach (($frozenSettlementTerms ?? []) as $employmentId => $terms) {
+            if (self::fingerprint($terms) !== self::fingerprint($current['hourly_settlement_terms'][$employmentId] ?? [])) ++$remunerationChanged;
+        }
         if (isset($current['hourly_remuneration_terms'])) {
             foreach ($frozenHourlyTerms as $employmentId => $terms) {
                 if (self::fingerprint($terms) !== self::fingerprint(
@@ -128,9 +138,19 @@ final readonly class PayrollRunSourceDrift
         }
 
         $workedTimeChanged = 0;
+        foreach (($current['hourly_settlement_terms'] ?? []) as $employmentId => $terms) {
+            if (isset($frozenEmployments[$employmentId]) && !array_key_exists($employmentId, $frozenHourlyContexts)) ++$workedTimeChanged;
+        }
         if (isset($current['worked_time_evidence'])) {
             foreach ($frozenWorkedTime as $employmentId => $evidence) {
                 if (self::fingerprint($evidence) !== self::fingerprint($current['worked_time_evidence'][$employmentId] ?? null)) {
+                    ++$workedTimeChanged;
+                }
+            }
+        }
+        if (isset($current['hourly_entitlement_context'])) {
+            foreach ($frozenHourlyContexts as $employmentId => $context) {
+                if (self::fingerprint($context) !== self::fingerprint($current['hourly_entitlement_context'][$employmentId] ?? null)) {
                     ++$workedTimeChanged;
                 }
             }

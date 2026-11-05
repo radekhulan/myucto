@@ -168,6 +168,265 @@ final class PayrollRunPersistenceTest extends TestCase
         $this->inputId = $this->approvedInput(120_000, 'BASE', 'manual');
     }
 
+    public function testHourlyBatchCreatesApprovedFrozenInputsAndReservesTheirCodes(): void
+    {
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $inputs = $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $rows = [];
+        foreach (['MZDA_HODINOVA_ZAKLAD' => 150000, 'MZDA_DOSAZENA_PRESCAS' => -10000,
+            'PRIPLATEK_NOCNI' => 3000, 'NAHRADA_MZDY_SVATEK' => 12000, 'NAHRADA_MZDY_VOLNO_ZA_SVATEK' => 7000] as $code => $amount) {
+            $rows[] = ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+                'component_code' => $code, 'source_period_start' => null, 'amount_minor' => $amount,
+                'external_id' => 'hourly-wage:synthetic:' . $code, 'source_snapshot_json' => '{"synthetic":true}'];
+        }
+        $inserted = $inputs->createApprovedHourlyBatch($this->supplierId, '2026-06-01', $rows, $this->actors[0]);
+        self::assertCount(5, $inserted);
+        foreach ($inserted as $id) {
+            $input = $inputs->find($this->supplierId, $id);
+            self::assertSame('approved', $input['status']);
+        }
+        $component = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $component->execute([$this->supplierId, 'MZDA_HODINOVA_ZAKLAD']);
+        $this->expectException(\InvalidArgumentException::class);
+        $inputs->create($this->supplierId, ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => (int) $component->fetchColumn(), 'period_start' => '2026-06-01', 'source_period_start' => null,
+            'amount_minor' => 1, 'quantity_milliunits' => null, 'source_kind' => 'time', 'external_id' => 'spoof'], $this->actors[0]);
+    }
+
+    public function testExternalHourlyWagePrefixCannotImpersonateLedgerInput(): void
+    {
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $query = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $query->execute([$this->supplierId, 'PRIPLATEK_NOCNI']);
+        $data = ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => (int) $query->fetchColumn(), 'period_start' => '2026-06-01', 'source_period_start' => null,
+            'amount_minor' => 100, 'quantity_milliunits' => null, 'source_kind' => 'time', 'external_id' => 'hourly-wage:fake'];
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('vyhrazen');
+        $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class)->create($this->supplierId, $data, $this->actors[0]);
+    }
+
+    public function testHourlyClaimRejectsOtherBaseWageButKeepsUnrelatedComponentsWritable(): void
+    {
+        $this->db->pdo()->prepare("INSERT INTO payroll_hourly_wage_claims (supplier_id, employment_id, work_period_start, purpose, claim_source) VALUES (?, ?, '2026-06-01', 'ordinary_base', 'hourly_calculation')")
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare("UPDATE payroll_employment_terms SET remuneration_type = 'hourly', hourly_rate_minor = 20000, monthly_gross_minor = NULL, remuneration_basis_kind = 'contract', remuneration_basis = 'Syntetická smlouva' WHERE supplier_id = ? AND employment_id = ? AND effective_from <= '2026-06-01' AND (effective_to IS NULL OR effective_to >= '2026-06-01')")
+            ->execute([$this->supplierId, $this->employmentId]);
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $inputs = $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $stmt = $this->db->pdo()->prepare('SELECT id, code FROM payroll_component_definitions WHERE supplier_id = ? AND code IN ("MZDA_HODINOVA", "ODMENA")');
+        $stmt->execute([$this->supplierId]);
+        $ids = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $component) $ids[$component['code']] = (int) $component['id'];
+        $data = ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId, 'component_id' => $ids['ODMENA'],
+            'period_start' => '2026-06-01', 'source_period_start' => null, 'amount_minor' => 100,
+            'quantity_milliunits' => null, 'source_kind' => 'manual', 'external_id' => null];
+        self::assertSame('draft', $inputs->create($this->supplierId, $data, $this->actors[0])['status']);
+        $data['component_id'] = $ids['MZDA_HODINOVA'];
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('hodinový nárok');
+        $inputs->create($this->supplierId, $data, $this->actors[0]);
+    }
+
+    public function testHourlyEntitlementLedgerExcludesDraftAndRestoresReplacedPeriodAllocation(): void
+    {
+        $run = $this->createRun();
+        $pdo = $this->db->pdo();
+        $ledger = new \MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger($this->db);
+        $insertRevision = function (int $revision, string $key, string $status) use ($pdo, $run): void {
+            $pdo->prepare('INSERT INTO payroll_run_revisions (supplier_id, run_id, revision_no, revision_kind, status, schema_version, ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash, approved_at) VALUES (?, ?, ?, "regular", ?, "test.v1", REPEAT("a",64), "{}", REPEAT("b",64), ?, ?)')
+                ->execute([$this->supplierId, $run['id'], $revision, $status, $key, $status === 'approved' ? sprintf('2026-07-%02d 10:00:00', $revision) : null]);
+        };
+        $key1 = hash('sha256', 'entitlement-1', true);
+        $ledger->appendForRevision($this->supplierId, '2026-06-01', [$this->employmentId], [$this->employmentId => [
+            'entitlements' => [['kind' => 'holiday_time_off_accrual', 'entitlement_key' => 'holiday:' . $this->employmentId . ':2026-06-01',
+                'work_date' => '2026-06-01', 'duration_units' => 10000, 'due_on' => '2026-09-30']],
+            'included_allocations' => [],
+        ]], $key1, $this->actors[0]);
+        $insertRevision(1, $key1, 'approved');
+        $initial = $ledger->loadMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-12-31');
+        $entitlement = $initial[$this->employmentId]['entitlements'][0];
+        self::assertSame(10000, $entitlement['available_duration_units']);
+        self::assertTrue($ledger->hasOutstanding($this->supplierId, $this->employmentId, '2026-07-01', 'holiday'));
+        self::assertFalse($ledger->hasOutstanding($this->otherSupplierId, $this->employmentId, '2026-07-01'));
+        $key2 = hash('sha256', 'entitlement-2', true);
+        $ledger->appendForRevision($this->supplierId, '2026-07-01', [$this->employmentId], [$this->employmentId => [
+            'entitlements' => [['kind' => 'holiday_time_off_allocation', 'entitlement_id' => $entitlement['id'],
+                'entitlement_revision' => $entitlement['revision'], 'duration_units' => 4000, 'work_date' => '2026-06-01',
+                'granted_on' => '2026-07-08', 'absence_id' => 1]], 'included_allocations' => [],
+        ]], $key2, $this->actors[0]);
+        $insertRevision(2, $key2, 'approved');
+        $after = $ledger->loadMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-12-31');
+        self::assertSame(6000, $after[$this->employmentId]['entitlements'][0]['available_duration_units']);
+        $forCorrection = $ledger->loadMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-12-31', '2026-07-01');
+        self::assertSame(10000, $forCorrection[$this->employmentId]['entitlements'][0]['available_duration_units']);
+        $key3 = hash('sha256', 'entitlement-3', true);
+        $ledger->appendForRevision($this->supplierId, '2026-07-01', [$this->employmentId], [$this->employmentId => [
+            'entitlements' => [['kind' => 'holiday_time_off_allocation', 'entitlement_id' => $entitlement['id'],
+                'entitlement_revision' => $after[$this->employmentId]['entitlements'][0]['revision'], 'duration_units' => 9000,
+                'work_date' => '2026-06-01', 'granted_on' => '2026-07-08', 'absence_id' => 1]], 'included_allocations' => [],
+        ]], $key3, $this->actors[0]);
+        $insertRevision(3, $key3, 'snapshot');
+        $unchanged = $ledger->loadMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-12-31');
+        self::assertSame(6000, $unchanged[$this->employmentId]['entitlements'][0]['available_duration_units']);
+        self::assertSame([], $ledger->byIds($this->otherSupplierId, $this->employmentId, [$entitlement['id']]));
+    }
+
+    public function testOvertimeSettlementAndTimeOffHaveSeparateBalances(): void
+    {
+        $run = $this->createRun();
+        $pdo = $this->db->pdo();
+        $ledger = new \MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger($this->db);
+        $insert = function (int $number, string $key) use ($pdo, $run): void {
+            $pdo->prepare('INSERT INTO payroll_run_revisions (supplier_id, run_id, revision_no, status, schema_version, ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash, approved_at) VALUES (?, ?, ?, "approved", "test.v1", REPEAT("a",64), "{}", REPEAT("b",64), ?, ?)')
+                ->execute([$this->supplierId, $run['id'], $number, $key, sprintf('2026-07-%02d 10:00:00', $number)]);
+        };
+        $first = hash('sha256', 'overtime-accrual', true);
+        $ledger->appendForRevision($this->supplierId, '2026-06-01', [$this->employmentId], [$this->employmentId => [
+            'entitlements' => [['kind' => 'overtime_time_off_accrual', 'entitlement_key' => 'overtime:' . $this->employmentId . ':2026-06-01',
+                'work_date' => '2026-06-01', 'duration_units' => 10000, 'due_on' => '2026-09-30']], 'included_allocations' => [],
+        ]], $first, $this->actors[0]);
+        $insert(1, $first);
+        $entitlement = $ledger->loadMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-12-31')[$this->employmentId]['entitlements'][0];
+        // Historický nárok lze doložit i v měsíčním období bez evidence pracovní doby.
+        $action = $this->container->get(\MyInvoice\Action\Payroll\PayrollHourlyEvidenceAction::class);
+        $role = new EffectiveRole(0, 'Test', 'staff', true, ['payroll' => AccessLevel::READ->value, 'payroll.time.write' => AccessLevel::WRITE->value]);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/payroll/employments/' . $this->employmentId . '/hourly-evidence')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->actors[0], 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')->withAttribute('auth.effective_role', $role);
+        $args = ['id' => (string) $this->employmentId];
+        $view = $action->show($request->withQueryParams(['period' => '2026-07']), new Response(), $args);
+        self::assertSame(200, $view->getStatusCode(), (string) $view->getBody());
+        $source = json_decode((string) $view->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('settlement_only', $source['work_source']);
+        self::assertTrue($source['can_write']);
+        $body = ['period' => '2026-07', 'row_version' => 0, 'reason' => 'Doložené vypořádání',
+            'work_source_hash' => $source['work_source_hash'], 'premium_segments' => [], 'nonworked_holidays' => [],
+            'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => []];
+        $saved = $action->save($request->withMethod('POST')->withParsedBody($body), new Response(), $args);
+        self::assertSame(201, $saved->getStatusCode(), (string) $saved->getBody());
+        $rows = $this->container->get(PayrollRunSnapshotBuilder::class)->employmentRows($this->supplierId, '2026-07-01', '2026-07-31', null);
+        $preview = (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->forMany($this->supplierId, '2026-07-01', $rows);
+        self::assertTrue($preview[$this->employmentId]['settlement_only']);
+        self::assertTrue($preview[$this->employmentId]['complete'], json_encode($preview[$this->employmentId]['blockers'], JSON_THROW_ON_ERROR));
+        self::assertNull($preview[$this->employmentId]['_source_snapshot']['worked_time_evidence']);
+        $settlementRun = $this->productionService->createRun($this->supplierId, '2026-07-01', '2026-08-15', null, $this->actors[0]);
+        // Předchozí hodinový základ ve stejném období se změnou režimu vyrovná záporným rozdílem.
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $inputRepo = $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class);
+        $oldIds = $inputRepo->createApprovedHourlyBatch($this->supplierId, '2026-07-01', [[
+            'employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_code' => 'MZDA_HODINOVA_ZAKLAD', 'source_period_start' => null, 'amount_minor' => 15000,
+            'external_id' => 'hourly-wage:old:1', 'source_snapshot_json' => '{}']], $this->actors[0]);
+        $pdo->prepare("INSERT INTO payroll_hourly_wage_claims (supplier_id, employment_id, work_period_start, purpose, claim_source) VALUES (?, ?, '2026-07-01', 'ordinary_base', 'hourly_calculation')")->execute([$this->supplierId, $this->employmentId]);
+        $oldClaim = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO payroll_hourly_wage_materializations (supplier_id, claim_id, employment_id, sequence_no, accounting_period_start, run_id, input_id, full_amount_minor, delta_amount_minor, evidence_hash, source_snapshot_json, source_snapshot_hash, created_by, full_duration_units, duration_delta_units, command_key_hash) VALUES (?, ?, ?, 1, '2026-07-01', ?, ?, 15000, 15000, ?, '{}', ?, ?, 10000, 10000, ?)")
+            ->execute([$this->supplierId, $oldClaim, $this->employmentId, $settlementRun['id'], $oldIds['hourly-wage:old:1'], hash('sha256', 'old', true), hash('sha256', '{}', true), $this->actors[0], hash('sha256', 'old-command', true)]);
+        $component = $pdo->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $component->execute([$this->supplierId, 'ODMENA']);
+        $foreignInput = $inputRepo->createApproved($this->supplierId, ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => (int) $component->fetchColumn(), 'period_start' => '2026-07-01', 'source_period_start' => null,
+            'amount_minor' => 100, 'quantity_milliunits' => null, 'source_kind' => 'manual', 'external_id' => null], $this->actors[0]);
+        $pdo->prepare('UPDATE payroll_inputs SET status = "locked" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $foreignInput['id']]);
+        try {
+            $this->productionService->lockInputs($this->supplierId, (int) $settlementRun['id'], (int) $settlementRun['row_version'], 'foreign-lock', $this->actors[0]);
+            self::fail('Cizí zámek nesmí obejít materializace hodinového nároku.');
+        } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
+            self::assertStringContainsString('uzamčené jiným během', $e->getMessage());
+        }
+        $pdo->prepare('UPDATE payroll_inputs SET status = "cancelled" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $foreignInput['id']]);
+        $locked = $this->productionService->lockInputs($this->supplierId, (int) $settlementRun['id'], (int) $settlementRun['row_version'], 'settlement-lock', $this->actors[0]);
+        $count = $pdo->prepare('SELECT COUNT(*) FROM payroll_hourly_wage_materializations WHERE supplier_id = ? AND run_id = ?');
+        $count->execute([$this->supplierId, $settlementRun['id']]);
+        $written = (int) $count->fetchColumn();
+        self::assertGreaterThan(0, $written);
+        $net = $pdo->prepare('SELECT SUM(delta_amount_minor), SUM(duration_delta_units) FROM payroll_hourly_wage_materializations WHERE supplier_id = ? AND claim_id = ?');
+        $net->execute([$this->supplierId, $oldClaim]);
+        self::assertSame([0, 0], array_map('intval', $net->fetch(PDO::FETCH_NUM)));
+        $replayed = $this->productionService->lockInputs($this->supplierId, (int) $settlementRun['id'], (int) $settlementRun['row_version'], 'settlement-lock', $this->actors[0]);
+        self::assertSame($locked->run['row_version'], $replayed->run['row_version']);
+        $count->execute([$this->supplierId, $settlementRun['id']]);
+        self::assertSame($written, (int) $count->fetchColumn());
+        $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);
+        $components->ensureDefaults($this->supplierId);
+        $component = $pdo->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $component->execute([$this->supplierId, 'MZDA_MESICNI']);
+        $baseId = (int) $component->fetchColumn();
+        self::assertGreaterThan(0, $baseId);
+        $manualBase = $this->container->get(\MyInvoice\Repository\Payroll\PayrollInputRepository::class)->create($this->supplierId, [
+            'employee_id' => $this->employeeId, 'employment_id' => $this->employmentId, 'component_id' => $baseId,
+            'period_start' => '2026-07-01', 'source_period_start' => null, 'amount_minor' => 1500000,
+            'quantity_milliunits' => null, 'source_kind' => 'manual', 'external_id' => null], $this->actors[0]);
+        self::assertSame('draft', $manualBase['status']);
+        $second = hash('sha256', 'overtime-settlement', true);
+        $ledger->appendForRevision($this->supplierId, '2026-07-01', [$this->employmentId], [$this->employmentId => [
+            'entitlements' => [
+                ['kind' => 'overtime_time_off_allocation', 'entitlement_id' => $entitlement['id'], 'entitlement_revision' => $entitlement['revision'], 'work_date' => '2026-06-01', 'duration_units' => 4000],
+                ['kind' => 'overtime_premium_settlement', 'entitlement_id' => $entitlement['id'], 'entitlement_revision' => $entitlement['revision'], 'work_date' => '2026-06-01', 'duration_units' => 3000],
+            ], 'included_allocations' => [],
+        ]], $second, $this->actors[0]);
+        $insert(2, $second);
+        $after = $ledger->byIds($this->supplierId, $this->employmentId, [$entitlement['id']])[$entitlement['id']];
+        self::assertSame(4000, $after['allocated_duration_units']);
+        self::assertSame(3000, $after['settled_duration_units']);
+        self::assertSame(3000, $after['available_duration_units']);
+        $restored = $ledger->loadMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-12-31', '2026-07-01');
+        self::assertSame(10000, $restored[$this->employmentId]['entitlements'][0]['available_duration_units']);
+    }
+
+    public function testHourlyAverageReallocationUsesApprovedHistoryBeforeQuarterAndIgnoresDraft(): void
+    {
+        $run = $this->createRun();
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO payroll_hourly_wage_claims (supplier_id, employment_id, work_period_start, purpose, claim_source) VALUES (?, ?, '2026-03-01', 'achieved_overtime', 'hourly_calculation')")
+            ->execute([$this->supplierId, $this->employmentId]);
+        $claimId = (int) $pdo->lastInsertId();
+        foreach ([['2026-03-01', 3000, 'approved'], ['2026-04-01', 4500, 'approved'], ['2026-04-01', 9000, 'snapshot']] as $index => [$period, $units, $status]) {
+            $number = $index + 1;
+            $key = hash('sha256', 'duration-' . $number, true);
+            $pdo->prepare('INSERT INTO payroll_run_revisions (supplier_id, run_id, revision_no, revision_kind, status, schema_version, ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash, idempotency_key_hash, approved_at) VALUES (?, ?, ?, "regular", ?, "test.v1", REPEAT("a",64), "{}", REPEAT("b",64), ?, ?)')
+                ->execute([$this->supplierId, $run['id'], $number, $status, $key, $status === 'approved' ? sprintf('2026-07-%02d 10:00:00', $number) : null]);
+            $pdo->prepare('INSERT INTO payroll_hourly_wage_materializations (supplier_id, claim_id, employment_id, sequence_no, accounting_period_start, run_id, input_id, full_amount_minor, delta_amount_minor, evidence_hash, source_snapshot_json, source_snapshot_hash, full_duration_units, duration_delta_units, command_key_hash) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, 0, ?, "{}", ?, ?, 0, ?)')
+                ->execute([$this->supplierId, $claimId, $this->employmentId, $number, $period, $run['id'], str_repeat('a', 32), str_repeat('b', 32), $units, $key]);
+        }
+        $ledger = new \MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger($this->db);
+        $first = $ledger->approvedDurationReallocations($this->supplierId, [$this->employmentId], '2026-01-01', '2026-03-01');
+        $second = $ledger->approvedDurationReallocations($this->supplierId, [$this->employmentId], '2026-04-01', '2026-06-01');
+        self::assertSame(-1500, $first[$this->employmentId]['periods']['2026-03-01']);
+        self::assertSame(1500, $second[$this->employmentId]['periods']['2026-04-01']);
+        self::assertCount(1, $second[$this->employmentId]['sources']);
+        self::assertSame(64, strlen($second[$this->employmentId]['source_hash']));
+    }
+
+    public function testMixedHourlyMonthlyPartsUseDocumentedFullFundWithoutInventingAbsences(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 20000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetická smlouva", effective_to = "2026-06-15" WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-06-16", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_work_calendars (supplier_id, employment_id, name, schedule_type, week_pattern, weekly_minutes, valid_from) VALUES (?, ?, "Syntetický rozvrh", "regular", ?, 2400, "2026-01-01")')
+            ->execute([$this->supplierId, $this->employmentId, '{"1":480,"2":480,"3":480,"4":480,"5":480,"6":0,"7":0}']);
+        $terms = (new \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBatchLoader($this->db))->hourlyRemunerationTerms($this->supplierId, [$this->employmentId], '2026-06-01', '2026-06-30');
+        self::assertCount(2, $terms[$this->employmentId]);
+        $employment = [['employment_id' => $this->employmentId, 'start_date' => '2026-01-01', 'end_date' => null]];
+        $service = new \MyInvoice\Service\Payroll\PayrollHourlyMonthlyParts($this->db);
+        $parts = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms);
+        self::assertSame('supported', $parts[$this->employmentId]['source']['status']);
+        self::assertSame(528000, $parts[$this->employmentId]['parts'][0]['fund_duration_units']);
+        self::assertSame(264000, $parts[$this->employmentId]['parts'][0]['retained_duration_units']);
+        $pdo->prepare('INSERT INTO payroll_absences (supplier_id, employment_id, absence_type, date_from, date_to, status) VALUES (?, ?, "unpaid_leave", "2026-06-18", "2026-06-18", "requested")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $blocked = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms);
+        self::assertSame('unavailable', $blocked[$this->employmentId]['source']['status']);
+        self::assertSame([], $blocked[$this->employmentId]['parts']);
+    }
+
     public function testHourlyDpcAndSmallScaleKeepAgreedIncomeUnknownInsteadOfStaleMonthlyProjection(): void
     {
         $this->db->pdo()->prepare('UPDATE payroll_employments SET monthly_gross_minor = 900000 WHERE supplier_id = ? AND id = ?')

@@ -17,20 +17,30 @@ final class AverageEarningCalculator
         string $applicationDate,
         int $grossEarningsMinor,
         int $longerPeriodAllocatedMinor,
-        int $workedMinutes,
+        ?int $workedMinutes,
         int $workedDays,
         ?int $probableHourlyMinor = null,
         ?string $probableRationale = null,
         ?int $weeklyMinutes = null,
+        ?int $workedDurationUnits = null,
     ): AverageEarningResult {
+        if ($workedDurationUnits !== null) {
+            if (PayrollDuration::exactMinutes($workedDurationUnits) !== $workedMinutes) {
+                throw new InvalidArgumentException('Přesná odpracovaná doba neodpovídá uvedeným minutám.');
+            }
+        } elseif ($workedMinutes === null) {
+            throw new InvalidArgumentException('Odpracovaná doba musí být doložena v minutách nebo přesných jednotkách.');
+        }
         $result = $this->calculateExact(
             $applicationDate, $grossEarningsMinor, $longerPeriodAllocatedMinor,
-            PayrollDuration::fromMinutes($workedMinutes), $workedDays,
+            $workedDurationUnits ?? PayrollDuration::fromMinutes($workedMinutes), $workedDays,
             $probableHourlyMinor, $probableRationale, $weeklyMinutes,
         );
         // Staré volání zachovává i tvar stopy uložených měsíčních průměrů.
         $trace = $result->trace;
-        unset($trace['worked_duration_units']);
+        if ($workedDurationUnits === null) {
+            unset($trace['worked_duration_units']);
+        }
         return new AverageEarningResult($result->sourceKind, $result->averageHourlyMinor, $result->supportStatus, $trace);
     }
 
@@ -77,7 +87,7 @@ final class AverageEarningCalculator
                 [
                     'worked_days' => $workedDays,
                     'worked_minutes' => PayrollDuration::exactMinutes($workedDurationUnits),
-                'worked_duration_units' => $workedDurationUnits,
+                    'worked_duration_units' => $workedDurationUnits,
                     'minimum_worked_days' => $minimumWorkedDays,
                     'probable_hourly_minor' => $probableHourlyMinor,
                     'rationale' => $rationale,

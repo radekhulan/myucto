@@ -42,6 +42,8 @@ final class PayrollInputImportsAction
                 $this->string($body, 'source_name'),
                 $this->content($body),
             );
+        } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
+            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -63,6 +65,8 @@ final class PayrollInputImportsAction
                 $this->content($body),
                 $this->userId($request),
             );
+        } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
+            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }

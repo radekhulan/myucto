@@ -95,6 +95,40 @@ final class PayrollAgreementAnnualHoursTest extends TestCase
         self::assertSame('warning', PayrollRunReadinessImpact::describe('dpp_annual_hours_exceeded')['severity']);
     }
 
+    public function testApprovedManualFractionCountsWithoutJmhzAndCrossesAnnualLimitExactly(): void
+    {
+        $this->manualMonth($this->firstAgreement, 900003);
+        $service = new PayrollAgreementAnnualHours($this->db);
+        $summary = $service->yearSummaries($this->supplierId, [$this->employeeId], 2026)[$this->employeeId];
+        self::assertSame('exceeded', $summary['status']);
+        self::assertSame(900003, $summary['total_duration_units']);
+        self::assertNull($summary['total_minutes']);
+        self::assertSame(0, $summary['remaining_minutes']);
+        self::assertSame('dpp_annual_hours_exceeded', $this->validations()[0]->code);
+        self::assertStringContainsString('300,001 h', $this->validations()[0]->message);
+        self::assertContains($this->employeeId, $service->employeesNearLimit($this->supplierId, 2026));
+    }
+
+    public function testSelectedManualZeroReplacesArchivedJmhzHours(): void
+    {
+        $this->ownMonth($this->firstAgreement, 10, 350000);
+        $this->manualMonth($this->firstAgreement, 0);
+        $summary = (new PayrollAgreementAnnualHours($this->db))->yearSummaries($this->supplierId, [$this->employeeId], 2026)[$this->employeeId];
+        self::assertSame('ok', $summary['status']);
+        self::assertSame(0, $summary['total_minutes']);
+        self::assertSame(0, $summary['total_duration_units']);
+    }
+
+    public function testReopenedManualRevisionDoesNotReuseTheOldKnownHours(): void
+    {
+        $this->manualMonth($this->firstAgreement, 900003);
+        $this->db->pdo()->prepare("UPDATE payroll_time_months SET status = 'open', revision_no = 2, approved_at = NULL, approved_by = NULL WHERE supplier_id = ? AND employment_id = ? AND period_start = '2026-10-01'")->execute([$this->supplierId, $this->firstAgreement]);
+        $summary = (new PayrollAgreementAnnualHours($this->db))->yearSummaries($this->supplierId, [$this->employeeId], 2026)[$this->employeeId];
+        self::assertSame('manual_review_required', $summary['status']);
+        self::assertNull($summary['total_duration_units']);
+        self::assertNull($summary['total_minutes']);
+    }
+
     public function testManualSummaryMakesAnnualLimitExplicitlyUnknown(): void
     {
         $this->db->pdo()->prepare("INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source) VALUES (?, ?, '2026-10-01', 'manual_summary')")
@@ -282,6 +316,18 @@ final class PayrollAgreementAnnualHoursTest extends TestCase
         self::assertSame('approaching', $persons[0]['dpp_annual_hours']['status']);
         self::assertCount(1, $persons[0]['warnings']);
         self::assertStringContainsString('260 h', $persons[0]['warnings'][0]);
+    }
+
+    private function manualMonth(int $employmentId, int $units): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, status, revision_no, work_source, approved_at, approved_by) SELECT ?, ?, '2026-10-01', 'approved', 1, 'manual_summary', NOW(), MIN(id) FROM users ON DUPLICATE KEY UPDATE work_source = 'manual_summary'")->execute([$this->supplierId, $employmentId]);
+        $statement = $pdo->prepare("SELECT id, revision_no FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = '2026-10-01'");
+        $statement->execute([$this->supplierId, $employmentId]);
+        $month = $statement->fetch(\PDO::FETCH_ASSOC);
+        $pdo->prepare("INSERT INTO payroll_time_month_manual_summaries (supplier_id, time_month_id, time_month_revision_no, employment_id, period_start, content_sha256, reason) VALUES (?, ?, ?, ?, '2026-10-01', REPEAT('a', 64), 'Syntetický ruční výkaz')")->execute([$this->supplierId, $month['id'], $month['revision_no'], $employmentId]);
+        $summary = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO payroll_time_month_manual_segments (supplier_id, summary_id, sequence_no, date_from, date_to, worked_duration_units) VALUES (?, ?, 1, '2026-10-01', '2026-10-31', ?)")->execute([$this->supplierId, $summary, $units]);
     }
 
     private function ownMonth(int $employmentId, int $month, int $workedMillihours): void

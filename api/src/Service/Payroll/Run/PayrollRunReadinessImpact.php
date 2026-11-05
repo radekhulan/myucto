@@ -96,6 +96,7 @@ final class PayrollRunReadinessImpact
         'dpp_annual_hours_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // § 76 odst. 2 ZP — průměr DPČ nad polovinu stanovené týdenní doby.
         'dpc_weekly_average_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        'dpc_weekly_average_manual_review_required' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'recurring_component_without_input' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],

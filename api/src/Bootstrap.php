@@ -467,6 +467,7 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
                     ),
+                    $c->get(\MyInvoice\Service\Payroll\PayrollHourlyWageMaterializer::class),
                 ),
             // Překlopení běhu do `paid` ze skutečnosti v platebním ledgeru.
             // Volitelné parametry výš PHP-DI neautowiruje, tady je jen

@@ -654,6 +654,8 @@ final class RoutePermissionMap
         ['PUT', '#^/api/payroll/employments/[0-9]+/termination$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/employments/[0-9]+/termination/(leave-settlement|leave-settlement/reverse|severance-input|survivors|death-tax-assessment)$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/employments/[0-9]+/termination/survivors/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/employments/[0-9]+/hourly-evidence$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/employments/[0-9]+/hourly-evidence$#', 'payroll.time.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/surcharge-policies$#', 'payroll.employment.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/surcharge-policies$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/employments/[0-9]+/surcharge-policies/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],

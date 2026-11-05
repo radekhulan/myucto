@@ -118,6 +118,7 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentSurchargePolicyAction;
+use MyInvoice\Action\Payroll\PayrollHourlyEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentTerminationAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
@@ -2486,6 +2487,8 @@ final class Routes
             $g->post('/employments/{id:[0-9]+}/termination/survivors', [PayrollEmploymentTerminationAction::class, 'addSurvivor']);
             $g->delete('/employments/{id:[0-9]+}/termination/survivors/{survivorId:[0-9]+}', [PayrollEmploymentTerminationAction::class, 'removeSurvivor']);
             $g->post('/employments/{id:[0-9]+}/termination/death-tax-assessment', [PayrollEmploymentTerminationAction::class, 'assessDeathTax']);
+            $g->get('/employments/{id:[0-9]+}/hourly-evidence', [PayrollHourlyEvidenceAction::class, 'show']);
+            $g->post('/employments/{id:[0-9]+}/hourly-evidence', [PayrollHourlyEvidenceAction::class, 'save']);
             $g->get(
                 '/employments/{id:[0-9]+}/surcharge-policies',
                 [PayrollEmploymentSurchargePolicyAction::class, 'list'],
