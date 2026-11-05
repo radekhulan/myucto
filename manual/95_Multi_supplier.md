@@ -167,7 +167,7 @@ dodavatele, takže odpovědi klientů jdou rovnou na firemní poštu. Vlastní l
 3. Nahrajte **Logo** (PNG, JPG nebo SVG, nejvýše 1 MiB, ideálně do 200 KiB). Logo vyměníte tlačítkem **Nahradit logo**, odstraníte tlačítkem **Odebrat**.
 4. Zvolte **Akcent barvu** (hex `#RRGGBB`, color picker nebo textové pole; odkaz **↺ default** vrací výchozí).
 5. Zkontrolujte živý náhled e-mailu (přepínač jazyka **CS / EN**, tlačítko **↻** pro ruční obnovení).
-6. Pokud doklady tisknete černobíle, zapněte **Úsporná černobílá faktura (PDF)**. PDF faktury a výkazu pak
+6. Pokud doklady tisknete černobíle, zapněte **Úsporná černobílá faktura (nestandardní vzhled)**. PDF faktury a výkazu pak
    nemá barevné ani tmavé plochy a akcent barvu nahradí černá ([§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura)).
    Volba je na brandingu nezávislá, funguje i při vypnutém **Použít vlastní branding**.
 
@@ -492,7 +492,7 @@ ručně, viz [Číslo dokladu - ruční zadání](15_Faktura_editor.md#cislo-dok
 | **Použít vlastní branding** | Přepínač vpravo nahoře (výchozí vypnuto = MyÚčto branding). Pokud je zapnutý, hlavička e-mailů i PDF se sestaví z polí níže. |
 | **Logo** | Nahrání PNG / JPG / SVG (nejvýše 1 MiB, ideálně do 200 KiB). Pro raster je ideální výška 240 px (v e-mailu se zobrazí jako 48 px pro 5× retinu). SVG: originál se uloží pro PDF (vektor = ostré v libovolném zoomu), pro e-mail se na serveru převede na průhledné PNG (Outlook a Gmail SVG odstraňují), primárně přes PHP rozšíření `Imagick` (Windows i Linux), záložně přes nástroj `rsvg-convert` (`librsvg2-bin`). Logo se v e-mailu připojí jako CID inline obrázek, takže se zobrazí bez výzvy „Display images" v Gmailu a Outlooku. |
 | **Akcent barva** | Hex `#RRGGBB`: akcentová barva celého e-mailu (částky, tlačítka, odkazy, náhradní „M" box) i PDF faktury (linka pod hlavičkou, hlavička tabulky položek, řádky „Celkem" a „K úhradě", popisky, QR a banky, nadpis a odkaz výkazu víceprací). Uplatní se jen při zapnutém brandingu; jinak výchozí `#3B2D83` (fialová MyÚčto). Sémantické barvy (dobropis červená, zelené „Schválit" a „Uhrazeno", oranžová „po splatnosti") zůstávají. Color picker, textové pole a odkaz **↺ default**. |
-| **Úsporná černobílá faktura (PDF)** | Výchozí vypnuto. Zapnutá volba připojí k PDF faktury a výkazu černobílý stylopis místo akcent barvy: bez plných ploch, černý text, tenké čáry, dobropis a storno rozlišené textem. Platí pro koncepty a nově vytvořená PDF, nezávisle na přepínači brandingu. Logo zůstává, jak je nahrané. |
+| **Úsporná černobílá faktura (nestandardní vzhled)** | Výchozí vypnuto. Zapnutá volba připojí k PDF faktury a výkazu černobílý stylopis místo akcent barvy: bez plných ploch, černý text, tenké čáry, dobropis a storno rozlišené textem. Platí pro koncepty a nově vytvořená PDF, nezávisle na přepínači brandingu. Logo zůstává, jak je nahrané. |
 
 V hlavičce se pak vykreslí logo vlevo (místo fialového „M" boxu, `max-height: 48px`), **název** dodavatele
 (zobrazované jméno, záložně název firmy) a **podtitulek** (tagline dodavatele, pokud je vyplněn).

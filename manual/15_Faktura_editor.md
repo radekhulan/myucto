@@ -555,7 +555,7 @@ informace: částky faktury počítá dál cena řádku. Na PDF ji rozepíše vo
 [§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura). Se [slevou z celé faktury](#sleva-z-cele-faktury)
 se nesčítá.
 
-**Sleva v % u řádku.** Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny (nestandardní vzhled)**
+**Sleva v % u řádku.** Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny**
 (`Nastavení → Doklady`) má tabulka položek za cenou sloupec **Sleva %**, a to u skladového
 i ručně zadaného řádku. Zadejte slevu 0 až 100 % (nejvýš dvě desetinná místa, víc se
 zaokrouhlí, znak % můžete připsat). Cena za jednotku se přepočte z ceníkové ceny

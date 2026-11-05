@@ -1183,7 +1183,7 @@ async function confirmTaxRepDelete() {
             </label>
             <p class="text-xs text-neutral-500 mt-1 ml-6">{{ t('refundInvoice.settings_hint') }}</p>
           </div>
-          <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2" :model-value="supplier"
+          <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2" :model-value="supplier" part="main"
             @change="Object.assign(supplier, $event)" />
           <div v-if="auth.canWrite('settings.payment_qr')" class="md:col-span-2 border-t border-neutral-200 pt-4 space-y-3">
             <div>
@@ -1340,6 +1340,9 @@ async function confirmTaxRepDelete() {
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('settings.proforma_payment_document_hint') }}</p>
           </div>
+          <!-- Nestandardní vzhled PDF až na úplném konci záložky. -->
+          <PdfAppearanceSettings v-if="auth.canWrite('settings.branding')" class="md:col-span-2 border-t border-neutral-200 pt-4" :model-value="supplier" part="nonstandard"
+            @change="Object.assign(supplier, $event)" />
           </template>
         </div>
 

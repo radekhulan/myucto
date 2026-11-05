@@ -363,14 +363,14 @@ Vygenerované PDF obsahuje:
    nebo šarže s expirací a množstvím („Šarže: …“), viz [§ 37.5.1](37_Sklad.md#3751-vydej-fakturou).
    Textový řádek ([§ 15.9.3](15_Faktura_editor.md#1593-polozky)) se tiskne přes celou
    šířku tabulky, bez množství a cen.
-   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny (nestandardní vzhled)** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
+   Se zapnutou volbou **Na PDF faktury rozepsat slevu z ceníkové ceny** (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`,
    výchozí vypnuto) má tabulka místo sloupce Cena/j sloupce **Cena/j před slevou**, **Sleva**
    a **Cena/j po slevě**, pokud má faktura aspoň jednu položku se slevou z ceníkové ceny.
    Položka bez ceníkové ceny nebo s přirážkou ukáže jen výslednou cenu. U faktury s cenami
    včetně DPH jsou obě ceny bez DPH. Ceníková cena nemění částky dokladu ani export ISDOC
    a POHODA. Slevu lze zadat i přímo u řádku v editoru, viz
    [§ 15.9.3](15_Faktura_editor.md#1593-polozky).
-   Faktury s mnoha položkami zhustí volba **Kompaktní řádky položek na PDF faktury**
+   Faktury s mnoha položkami zhustí volba **Kompaktní řádky položek na PDF faktury (nestandardní vzhled)**
    (interně `Firma → Nastavení`, klientsky `Firma → Nastavení firmy → Branding`, výchozí vypnuto): tabulka položek má menší odsazení a písmo,
    sloupec popisu je širší na úkor rezervy číselných sloupců (milionové částky se do nich
    pořád vejdou) a rozpis balení („celkem 80 ks“) i sériová čísla a šarže se tisknou drobným
@@ -404,7 +404,7 @@ Vygenerované PDF obsahuje:
 > (dobropis červená, storno šedá).
 
 **Úsporná černobílá faktura.** Pro tisk na černobílé tiskárně zapněte v `Firma → Branding`
-volbu **Úsporná černobílá faktura (PDF)**. PDF faktury i výkazu víceprací pak nemá žádné
+volbu **Úsporná černobílá faktura (nestandardní vzhled)**. PDF faktury i výkazu víceprací pak nemá žádné
 barevné ani tmavé plochy (hlavička tabulky položek, řádky **Celkem** a **K úhradě**, bloky
 dodavatele a odběratele, platební panel, poznámky, přepočet do CZK ani podbarvené sudé
 řádky). Text je černý, oddělení dělají tenké čáry, odběratele a platební panel ohraničuje
