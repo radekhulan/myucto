@@ -17,7 +17,6 @@ import MembershipReconciliation from './MembershipReconciliation.vue'
 const props = defineProps<{ supplier: number; canManage: boolean }>()
 const { t, tm, rt } = useI18n()
 
-
 const members = ref<MemberRow[]>([])
 const nextAfter = ref<number | null>(null)
 const periods = ref<AccountingPeriod[]>([])
@@ -157,7 +156,6 @@ const createActions = computed<ActionItem[]>(() => [
       </fieldset>
       <ActionBar :actions="createActions" />
     </section>
-
 
     <div :class="selected ? 'grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : ''" data-section="members-layout">
     <div v-if="selected" ref="detailPane" class="min-w-0 scroll-mt-4 self-start lg:sticky lg:top-4 lg:order-last" data-section="member-detail-pane">

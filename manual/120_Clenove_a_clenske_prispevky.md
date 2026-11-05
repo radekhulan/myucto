@@ -34,7 +34,7 @@ Zvolte **Zobrazit náhled**, zkontrolujte člena, období, částku a účty a p
 
 Pohledávky se zobrazují po stránkách. Přehled rozlišuje předepsanou částku a prokázaný otevřený zůstatek. Úhrada je doložená teprve přes skutečné párování s nativním bankovním nebo pokladním dokladem.
 
-Párování se nedělá na této stránce. Otevřete opis účtu pohledávky v hlavní knize, přepněte na **Otevřené položky - párování** a spojte řádek předpisu s řádkem platby do okruhu (kap. 55.8.5.1). Úhrada se prokáže jen u okruhu, ve kterém je jediná pohledávka z této evidence.
+Párování se nedělá na této stránce. Otevřete opis účtu pohledávky v hlavní knize, přepněte na **Otevřené položky - párování** a spojte řádek předpisu s řádkem platby do okruhu ([kap. 55.8.5.1](55_Hlavni_kniha.md)). Úhrada se prokáže jen u okruhu, ve kterém je jediná pohledávka z této evidence.
 
 U neprokázané nebo nejednoznačné úhrady se částka nevydává za potvrzený dluh. Opravte párování v opisu účtu pohledávky.
 
