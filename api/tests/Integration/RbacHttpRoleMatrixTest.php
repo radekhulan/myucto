@@ -167,6 +167,11 @@ final class RbacHttpRoleMatrixTest extends TestCase
             ['PUT', '/api/settings/supplier', [], $staffSettingsWriteAllowed],
             ['POST', '/api/invoices/999999/send', [], $writeAllowed],
             ['POST', '/api/purchase-invoices', [], $writeAllowed],
+            // Účetní profily druhů a vlastní kontace úhrad: samostatné právo other_items,
+            // které testovací role nemají (účetnictví ho nezahrnuje).
+            ['GET', '/api/accounting/other-items/kinds/999999999/posting-profiles', null, $isSuperadmin],
+            ['PUT', '/api/accounting/other-items/kinds/999999999/posting-profiles', [], $isSuperadmin],
+            ['PUT', '/api/accounting/other-items/999999999/posting-overrides', [], $isSuperadmin],
         ] as [$method, $path, $body, $allowed]) {
             $response = $this->request($method, $path, $session, $body);
             $this->assertPermissionDecision($response, $allowed, "{$variant}: {$method} {$path}");

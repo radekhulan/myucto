@@ -3186,7 +3186,10 @@ final class Routes
             $g->put   ('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'update']);
             $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'updateBuiltin']);
             $g->delete('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'delete']);
-            $g->get   ('/other-items/schedules',               [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
+            $g->get   ('/other-items/kinds/{id:[0-9]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'postingProfiles']);
+            $g->put   ('/other-items/kinds/{id:[0-9]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'savePostingProfiles']);
+            $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'saveBuiltinPostingProfiles']);
+            $g->get   ('/other-items/schedules',              [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
             $g->get   ('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'get']);
             $g->delete('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'delete']);
             $g->post  ('/other-items/schedules/{id:[0-9]+}/generate', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'generate']);
@@ -3194,12 +3197,15 @@ final class Routes
             $g->post  ('/other-items/{item_id:[0-9]+}/schedule', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'create']);
             $g->get   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'installments']);
             $g->put   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'setInstallments']);
+            $g->post  ('/other-items/{item_id:[0-9]+}/installments/plan', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'planInstallments']);
             $g->get   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'get']);
             $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
+            $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);
             $g->post  ('/other-items/{id:[0-9]+}/repost',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'repost']);
+            $g->put   ('/other-items/{id:[0-9]+}/posting-overrides', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'setPostingOverrides']);
             $g->get   ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocations']);
             $g->get   ('/other-items/{id:[0-9]+}/payment-candidates', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'paymentCandidates']);
             $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);

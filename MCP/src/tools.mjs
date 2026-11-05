@@ -17,7 +17,8 @@
  * Výjimkou jsou KONCEPTY OSTATNÍCH POHLEDÁVEK A ZÁVAZKŮ
  * (other-item-tools.mjs): založení, úprava a smazání konceptu, splátkový
  * kalendář a opakování bez automatického účtování. Do deníku se tím nic
- * nezapisuje. Potvrzení a zaúčtování, storno, přeúčtování, párování úhrad,
+ * nezapisuje. Přiřazení úhrady k ostatní položce (allocate_other_item_payment) jen
+ * spáruje existující platbu. Potvrzení a zaúčtování, storno, přeúčtování, odpárování úhrad,
  * generování opakování ani zapnutí automatického účtování v katalogu nejsou
  * a server je tokenu odmítne (`BEARER_WRITE_EXCEPTIONS` je výčet metoda + cesta).
  * Druhou výjimkou jsou ANALYTICKÉ ÚČTY OSNOVY (create_analytic_account,

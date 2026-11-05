@@ -848,7 +848,7 @@ final class StatementImporter
             $matchIds[] = $txId;
         }
         foreach ($this->matcher->matchBatch($matchIds) as $txId => $result) {
-            if (in_array($result['status'], ['auto_exact', 'auto_partial'], true)) {
+            if (in_array($result['status'], ['auto_exact', 'auto_partial'], true) || !empty($result['other_item_id'])) {
                 $matched++;
             }
             $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($result['requires_review']));

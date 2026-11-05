@@ -1138,7 +1138,12 @@
         "2234_bank_posting_rule_dimensions.sql",
         "2235_cash_register_foreign_opening.sql",
         "2236_invoice_defaults_role_permission.sql",
-        "2237_sessions_admin_last_seen.sql"
+        "2237_other_item_payment_matching.sql",
+        "2238_other_item_posting_profiles.sql",
+        "2239_other_item_auto_matching.sql",
+        "2240_payment_order_other_items.sql",
+        "2241_other_item_installment_components.sql",
+        "2242_sessions_admin_last_seen.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3410,6 +3415,7 @@
                 "mode_set_manually_at": "datetime NULL DEFAULT NULL",
                 "name": "varchar(120) NOT NULL",
                 "operation_type": "varchar(40) NULL DEFAULT NULL",
+                "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "priority": "smallint(5) unsigned NOT NULL DEFAULT 100",
                 "rejected_streak": "tinyint(3) unsigned NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -3421,11 +3427,13 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_bpr_user": "BTREE (created_by)",
                 "idx_bpr_bank_account": "BTREE (bank_account_id)",
+                "idx_bpr_other_item": "BTREE (other_item_id)",
                 "idx_bpr_supplier": "BTREE (supplier_id, is_active, direction)",
                 "uq_bpr_template": "UNIQUE BTREE (supplier_id, system_template_key)"
             },
             "foreign_keys": {
                 "fk_bpr_bank_account": "(bank_account_id) -> supplier_bank_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_bpr_other_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_bpr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_bpr_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
@@ -10131,11 +10139,15 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "amount": "decimal(14,2) NOT NULL",
+                "auto_match_reason": "varchar(40) NULL DEFAULT NULL",
                 "bank_transaction_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "cash_document_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "fee_amount": "decimal(14,2) NOT NULL DEFAULT 0.00",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "installment_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "interest_amount": "decimal(14,2) NOT NULL DEFAULT 0.00",
                 "other_item_id": "bigint(20) unsigned NOT NULL",
                 "payment_on": "date NOT NULL",
                 "reversed_on": "date NULL DEFAULT NULL",
@@ -10147,6 +10159,7 @@
                 "idx_other_allocation_active": "BTREE (supplier_id, other_item_id, reversed_on)",
                 "idx_other_allocation_bank": "BTREE (bank_transaction_id)",
                 "idx_other_allocation_cash": "BTREE (cash_document_id)",
+                "idx_other_allocation_installment": "BTREE (installment_id)",
                 "idx_other_allocation_supplier": "BTREE (supplier_id, payment_on)",
                 "uq_other_item_bank": "UNIQUE BTREE (other_item_id, bank_transaction_id)",
                 "uq_other_item_cash": "UNIQUE BTREE (other_item_id, cash_document_id)"
@@ -10154,14 +10167,37 @@
             "foreign_keys": {
                 "fk_other_allocation_bank": "(bank_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_other_allocation_cash": "(cash_document_id) -> cash_documents (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_allocation_installment": "(installment_id) -> other_item_installments (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_allocation_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_other_allocation_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_other_allocation_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
-                "chk_other_allocation_amount": "`amount` > 0",
+                "chk_other_allocation_amounts": "`amount` >= 0 and `interest_amount` >= 0 and `fee_amount` >= 0 and `amount` + `interest_amount` + `fee_amount` > 0",
                 "chk_other_allocation_target": "`bank_transaction_id` is not null <> (`cash_document_id` is not null)"
             }
+        },
+        "other_item_auto_match_blocks": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "bank_transaction_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (bank_transaction_id, other_item_id)",
+                "idx_other_auto_block_item": "BTREE (other_item_id)",
+                "idx_other_auto_block_supplier": "BTREE (supplier_id, bank_transaction_id)"
+            },
+            "foreign_keys": {
+                "fk_other_auto_block_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_auto_block_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_auto_block_tx": "(bank_transaction_id) -> bank_transactions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "other_item_installments": {
             "type": "BASE TABLE",
@@ -10170,9 +10206,12 @@
             "columns": {
                 "amount": "decimal(14,2) NOT NULL",
                 "due_on": "date NOT NULL",
+                "fee_amount": "decimal(14,2) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "interest_amount": "decimal(14,2) NULL DEFAULT NULL",
                 "other_item_id": "bigint(20) unsigned NOT NULL",
                 "position": "smallint(5) unsigned NOT NULL",
+                "principal_amount": "decimal(14,2) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -10185,7 +10224,8 @@
                 "fk_other_installment_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_other_installment_amount": "`amount` > 0"
+                "chk_other_installment_amount": "`amount` > 0",
+                "chk_other_installment_components": "`principal_amount` is null and `interest_amount` is null and `fee_amount` is null or `principal_amount` is not null and `interest_amount` is not null and `fee_amount` is not null and `principal_amount` >= 0 and `interest_amount` >= 0 and `fee_amount` >= 0 and `principal_amount` + `interest_amount` + `fee_amount` = `amount`"
             }
         },
         "other_item_kinds": {
@@ -10207,6 +10247,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_other_item_kind_user": "BTREE (created_by)",
+                "idx_other_item_kind_tenant": "BTREE (id, supplier_id)",
                 "uq_other_item_kind_builtin": "UNIQUE BTREE (supplier_id, side, builtin_code)",
                 "uq_other_item_kind_name": "UNIQUE BTREE (supplier_id, side, name)"
             },
@@ -10239,6 +10280,74 @@
             },
             "checks": {
                 "chk_other_item_posting_amount": "`amount` > 0"
+            }
+        },
+        "other_item_posting_overrides": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "debit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "description_template": "varchar(255) NULL DEFAULT NULL",
+                "dimensions_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "event": "varchar(30) NOT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "other_item_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_item_posting_override_created": "BTREE (created_by)",
+                "fk_other_item_posting_override_item": "BTREE (other_item_id, supplier_id)",
+                "idx_other_item_posting_override_tenant": "BTREE (supplier_id, other_item_id)",
+                "uq_other_item_posting_override": "UNIQUE BTREE (other_item_id, event)"
+            },
+            "foreign_keys": {
+                "fk_other_item_posting_override_created": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_posting_override_item": "(other_item_id, supplier_id) -> other_items (id, supplier_id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "dimensions_json": "json_valid(`dimensions_json`)"
+            }
+        },
+        "other_item_posting_profiles": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "credit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "debit_account_code": "varchar(20) NULL DEFAULT NULL",
+                "description_template": "varchar(255) NULL DEFAULT NULL",
+                "dimensions_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "event": "varchar(30) NOT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "kind_id": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_other_item_posting_profile_created": "BTREE (created_by)",
+                "fk_other_item_posting_profile_updated": "BTREE (updated_by)",
+                "idx_other_item_posting_profile_kind": "BTREE (kind_id, supplier_id)",
+                "uq_other_item_posting_profile": "UNIQUE BTREE (supplier_id, kind_id, event)"
+            },
+            "foreign_keys": {
+                "fk_other_item_posting_profile_created": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_item_posting_profile_kind": "(kind_id, supplier_id) -> other_item_kinds (id, supplier_id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_item_posting_profile_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_item_posting_profile_updated": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "dimensions_json": "json_valid(`dimensions_json`)"
             }
         },
         "other_item_schedule_occurrences": {
@@ -10310,6 +10419,8 @@
                 "amount": "decimal(14,2) NOT NULL",
                 "amount_czk": "decimal(14,2) NULL DEFAULT NULL",
                 "counter_account_code": "varchar(20) NULL DEFAULT NULL",
+                "counterparty_account": "varchar(40) NULL DEFAULT NULL",
+                "counterparty_bank_code": "varchar(4) NULL DEFAULT NULL",
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "currency": "char(3) NOT NULL DEFAULT 'CZK'",
@@ -10344,6 +10455,7 @@
                 "fk_other_item_partner": "BTREE (partner_id)",
                 "fk_other_item_reversal": "BTREE (reversal_entry_id)",
                 "fk_other_item_updated_by": "BTREE (updated_by)",
+                "idx_other_item_counterparty": "BTREE (supplier_id, counterparty_account)",
                 "idx_other_item_kind": "BTREE (kind_id, supplier_id)",
                 "idx_other_item_open": "BTREE (supplier_id, side, status, due_on)",
                 "idx_other_item_partner": "BTREE (supplier_id, partner_id, status)",
@@ -10573,6 +10685,8 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "message": "varchar(140) NULL DEFAULT NULL",
+                "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "other_item_installment_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "payee_account_number": "varchar(34) NULL DEFAULT NULL",
                 "payee_bank_code": "varchar(10) NULL DEFAULT NULL",
                 "payee_bic": "varchar(11) NULL DEFAULT NULL",
@@ -10590,14 +10704,18 @@
                 "idx_poi_invoice": "BTREE (purchase_invoice_id)",
                 "idx_poi_issued_invoice": "BTREE (invoice_id)",
                 "idx_poi_order": "BTREE (payment_order_id)",
+                "idx_poi_other_installment": "BTREE (other_item_installment_id)",
+                "idx_poi_other_item": "BTREE (other_item_id, other_item_installment_id)",
                 "idx_poi_tax_advance": "BTREE (tax_advance_schedule_id)",
                 "idx_poi_tax_submission": "BTREE (tax_submission_id)"
             },
             "foreign_keys": {
+                "fk_poi_other_installment": "(other_item_installment_id) -> other_item_installments (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_poi_other_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_poi_tax_submission": "(tax_submission_id) -> tax_submissions (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_poi_single_target": "(`purchase_invoice_id` is not null) + (`invoice_id` is not null) + (`tax_submission_id` is not null) + (`tax_advance_schedule_id` is not null) = 1"
+                "chk_poi_single_target": "(`purchase_invoice_id` is not null) + (`invoice_id` is not null) + (`tax_submission_id` is not null) + (`tax_advance_schedule_id` is not null) + (`other_item_id` is not null) = 1"
             }
         },
         "payment_orders": {
@@ -26065,6 +26183,7 @@
                 "anthropic_extractions_count": "int(10) unsigned NOT NULL DEFAULT 0",
                 "anthropic_workspace_id": "varchar(128) NULL DEFAULT NULL",
                 "auto_generate_recurring": "tinyint(1) NOT NULL DEFAULT 1",
+                "auto_match_other_items": "tinyint(1) NOT NULL DEFAULT 0",
                 "auto_post_invoices": "tinyint(1) NOT NULL DEFAULT 0",
                 "auto_post_purchases": "tinyint(1) NOT NULL DEFAULT 0",
                 "auto_send_reminders": "tinyint(1) NOT NULL DEFAULT 0",

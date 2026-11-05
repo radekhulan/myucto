@@ -7,6 +7,8 @@ import { useToast } from '@/composables/useToast'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import Modal from '@/components/ui/Modal.vue'
 import { kindSettingLabel } from '@/utils/otherItemKind'
+import { accountingApi, type ChartAccount } from '@/api/accounting'
+import OtherItemKindPostingProfile from '@/components/accounting/OtherItemKindPostingProfile.vue'
 
 /**
  * Druhy ostatních pohledávek a závazků — vestavěné i vlastní v jednom seznamu. Každý druh
@@ -30,6 +32,11 @@ const renaming = reactive<Record<string, string>>({})
 /** Druh, kterému se právě zadává prefix nové vlastní řady. */
 const seriesFor = ref<string | null>(null)
 const seriesPrefix = ref('')
+/** Druh s rozbaleným účetním profilem; profily má jen podvojné účetnictví (server je jinak nevrací). */
+const postingFor = ref<string | null>(null)
+const accounts = ref<ChartAccount[]>([])
+const hasPosting = computed(() => kinds.value.some(kind => kind.posting_profiles !== undefined))
+const hasProfile = (kind: OtherItemKind) => Object.values(kind.posting_profiles ?? {}).some(profile => profile !== null)
 
 const keyOf = (kind: OtherItemKind) => kind.builtin ? `${kind.side}:${kind.builtin_code}` : `custom:${kind.id}`
 const label = (kind: OtherItemKind) => kindSettingLabel(t, kind)
@@ -113,6 +120,27 @@ async function enableSeries(kind: OtherItemKind) {
   if (await save(kind, { own_series: true, prefix })) seriesFor.value = null
 }
 
+async function togglePosting(kind: OtherItemKind) {
+  const key = keyOf(kind)
+  if (postingFor.value === key) {
+    postingFor.value = null
+    return
+  }
+  if (accounts.value.length === 0) {
+    try {
+      accounts.value = await accountingApi.listAccounts()
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error?.message || t('common.error'))
+    }
+  }
+  postingFor.value = key
+}
+
+async function onPostingSaved() {
+  await load()
+  emit('changed')
+}
+
 function remove(kind: OtherItemKind) {
   if (kind.id === null || !window.confirm(t('other_items.kinds.confirm_delete', { name: kind.name }))) return
   void run(() => otherItemKindsApi.remove(kind.id!))
@@ -137,7 +165,8 @@ onMounted(load)
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <tr v-for="kind in bySide(side)" :key="keyOf(kind)" :class="{ 'text-neutral-400': !kind.is_active }">
+            <template v-for="kind in bySide(side)" :key="keyOf(kind)">
+            <tr :class="{ 'text-neutral-400': !kind.is_active }">
               <td class="px-2 py-2">
                 <input v-if="renaming[keyOf(kind)] !== undefined" v-model="renaming[keyOf(kind)]" maxlength="100"
                   class="h-8 w-full rounded-md border border-neutral-300 bg-surface px-2" @keydown.enter.prevent="rename(kind)" @blur="rename(kind)" />
@@ -164,7 +193,12 @@ onMounted(load)
                 <template v-else>{{ t(side === 'payable' ? 'other_items.kinds.company_series_payable' : 'other_items.kinds.company_series_receivable') }}</template>
               </td>
               <td class="px-2 py-2">
-                <div v-if="canWrite" class="flex flex-wrap justify-end gap-1">
+                <div class="flex flex-wrap justify-end gap-1">
+                  <button v-if="hasPosting" type="button" :class="[btnOutlineSm(hasProfile(kind) ? 'primary' : 'neutral'), 'whitespace-nowrap']" data-test="kind-posting-toggle" @click="togglePosting(kind)">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+                    {{ t('other_items.posting.kinds.button') }}
+                  </button>
+                <template v-if="canWrite">
                   <button v-if="!kind.builtin" type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" :title="t('common.edit')" @click="renaming[keyOf(kind)] = kind.name ?? ''">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                   </button>
@@ -179,9 +213,16 @@ onMounted(load)
                   <button v-if="!kind.builtin && (!kind.own_series || canManageSeries)" type="button" :disabled="saving" :class="[btnOutlineSm('danger'), 'whitespace-nowrap']" :title="t('common.delete')" @click="remove(kind)">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                   </button>
+                </template>
                 </div>
               </td>
             </tr>
+            <tr v-if="postingFor === keyOf(kind)">
+              <td colspan="3" class="px-2 pb-3">
+                <OtherItemKindPostingProfile :kind="kind" :accounts="accounts" :can-write="canWrite" @saved="onPostingSaved" />
+              </td>
+            </tr>
+            </template>
           </tbody>
         </table>
       </section>

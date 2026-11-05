@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use PDO;
 
@@ -26,16 +27,23 @@ final class OtherItemBankMatchService
         private readonly Connection $db,
         private readonly OtherItemService $items,
         private readonly BankPostingService $bankPosting,
+        private readonly OtherItemRepository $repository,
+        private readonly OtherItemPostingResolver $postingResolver,
     ) {}
 
     /**
      * Otevřené ostatní položky, které jde k pohybu přiřadit. Bez hledání nabídne shodu
-     * zbývající částky nebo variabilního symbolu, s hledáním položky podle čísla, VS,
-     * partnera či názvu bez ohledu na částku.
+     * VS, účtu protistrany, částky otevřené splátky nebo celého zbývajícího dluhu,
+     * s hledáním položky podle čísla, VS, partnera či názvu bez ohledu na částku.
+     * Pořadí a důvod shody určuje {@see OtherItemPaymentCandidateRanker}.
+     *
+     * Částka splátky se v předvýběru porovnává s celou splátkou; zbytek částečně
+     * uhrazené splátky najde položku jen přes VS, účet nebo hledání.
      *
      * @return list<array{type:string,id:int,ref:?string,amount:float,currency:string,
      *   converted_amount:null,converted_currency:null,issue_date:string,due_date:?string,
-     *   party:?string,paid:bool,currency_mismatch:bool,side:string}>
+     *   party:?string,paid:bool,currency_mismatch:bool,side:string,match_score:int,
+     *   match_confidence:float,match_reasons:list<string>,installment:?array<string,mixed>}>
      */
     public function candidates(int $supplierId, int $txId, string $search = '', int $limit = 25): array
     {
@@ -43,6 +51,7 @@ final class OtherItemBankMatchService
         if ($tx === null) return [];
         $limit = max(1, min(50, $limit));
         $free = round(abs((float) $tx['amount']) - (float) $tx['used_amount'], 2);
+        $account = OtherItemCounterpartyAccount::fromTransaction($tx['counterparty_account'], $tx['counterparty_bank']);
         $remaining = 'oi.amount - oi.settled_outside_amount - COALESCE(p.paid_amount, 0)';
         $params = [$supplierId, $supplierId, (float) $tx['amount'] > 0 ? 'receivable' : 'payable'];
         $where = '';
@@ -57,12 +66,17 @@ final class OtherItemBankMatchService
             $where .= ' AND (oi.document_no LIKE ? OR oi.variable_symbol LIKE ? OR oi.partner_name LIKE ? OR oi.title LIKE ?)';
             array_push($params, $term, $term, $term, $term);
         } else {
-            $where .= " AND (ABS({$remaining} - ?) <= ? OR (oi.variable_symbol <> '' AND oi.variable_symbol = ?))";
-            array_push($params, $free, self::AMOUNT_TOLERANCE, (string) ($tx['variable_symbol'] ?? ''));
+            $where .= " AND (ABS({$remaining} - ?) <= ? OR (oi.variable_symbol <> '' AND oi.variable_symbol = ?)
+                OR EXISTS (SELECT 1 FROM other_item_installments i
+                            WHERE i.supplier_id = oi.supplier_id AND i.other_item_id = oi.id AND ABS(i.amount - ?) <= ?)
+                OR (? <> '' AND oi.counterparty_account = ?))";
+            array_push($params, $free, self::AMOUNT_TOLERANCE, (string) ($tx['variable_symbol'] ?? ''),
+                $free, self::AMOUNT_TOLERANCE, (string) ($account['account'] ?? ''), (string) ($account['account'] ?? ''));
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT oi.id, oi.document_no, oi.title, oi.partner_name, oi.issued_on, oi.due_on, oi.side,
-                    oi.journal_entry_id, oi.account_code, {$remaining} AS remaining_amount
+                    oi.journal_entry_id, oi.account_code, oi.variable_symbol, oi.counterparty_account,
+                    oi.counterparty_bank_code, {$remaining} AS remaining_amount
                FROM other_items oi
           LEFT JOIN (SELECT other_item_id, SUM(amount) paid_amount FROM other_item_allocations
                       WHERE supplier_id = ? AND reversed_on IS NULL GROUP BY other_item_id) p
@@ -77,10 +91,31 @@ final class OtherItemBankMatchService
         array_push($params, $free, self::AMOUNT_TOLERANCE);
         $stmt->execute($params);
         $posted = $this->hasLiveEntry($supplierId, $txId);
-        $rows = [];
+        $found = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             // Pohyb zaúčtovaný jinam by potvrzení odmítlo, stejně filtruje výběr z detailu položky.
             if ($posted && !$this->postedOnItemAccount($supplierId, $txId, $row)) continue;
+            $found[] = $row;
+        }
+        $coverage = $this->repository->installmentCoverage($supplierId, array_map(
+            static fn (array $row): int => (int) $row['id'], $found));
+        $payment = [
+            'amount' => $free, 'variable_symbol' => $tx['variable_symbol'],
+            'counterparty_account' => $tx['counterparty_account'], 'counterparty_bank' => $tx['counterparty_bank'],
+            'payment_on' => $tx['posted_at'],
+        ];
+        $rows = [];
+        foreach ($found as $row) {
+            // Rozdělené splátky: zbývá zaplatit i úrok a poplatek, nejen jistina (saldo).
+            $row['remaining_amount'] = OtherItemService::payableOf($row, $coverage[(int) $row['id']] ?? []);
+            $match = OtherItemPaymentCandidateRanker::evaluate($payment, [
+                'variable_symbol' => $row['variable_symbol'], 'counterparty_account' => $row['counterparty_account'],
+                'counterparty_bank_code' => $row['counterparty_bank_code'],
+                'remaining_amount' => (float) $row['remaining_amount'],
+                'installments' => $coverage[(int) $row['id']] ?? [],
+            ]);
+            // Předvýběr podle celé splátky propustí i už uhrazenou splátku; bez hledání nemá důvod.
+            if ($search === '' && $match['score'] === 0) continue;
             $rows[] = [
                 'type' => 'other_item',
                 'id' => (int) $row['id'],
@@ -95,8 +130,13 @@ final class OtherItemBankMatchService
                 'paid' => false,
                 'currency_mismatch' => false,
                 'side' => (string) $row['side'],
+                'match_score' => $match['score'],
+                'match_confidence' => $match['confidence'],
+                'match_reasons' => $match['reasons'],
+                'installment' => $match['installment'],
             ];
         }
+        usort($rows, static fn (array $a, array $b): int => $b['match_score'] <=> $a['match_score']);
         return $rows;
     }
 
@@ -135,11 +175,14 @@ final class OtherItemBankMatchService
                     ? 'Příchozí platbu lze přiřadit jen pohledávce.'
                     : 'Odchozí platbu lze přiřadit jen závazku.', 409);
             }
-            $amount = round(min(abs((float) $tx['amount']) - (float) $tx['used_amount'],
-                (float) $item['remaining_amount']), 2);
+            // Rozdělené splátky: platí se jistina, úrok i poplatek, saldo snižuje jen jistina.
+            $payable = OtherItemService::payableOf($item,
+                $this->repository->installmentCoverage($supplierId, [$itemId])[$itemId] ?? []);
+            $amount = round(min(abs((float) $tx['amount']) - (float) $tx['used_amount'], $payable), 2);
             if ($amount <= 0) {
                 throw new OtherItemException('overpayment', 'Položka už nemá co uhradit.', 409);
             }
+            $split = $this->items->splitPayment($supplierId, $item, $amount);
             $account = $this->items->settlementAccountCode($supplierId, $item);
             if ($account !== null && !$this->hasLiveEntry($supplierId, $txId)) {
                 if (abs((float) $tx['amount']) - (float) $tx['used_amount'] - $amount > 0.005) {
@@ -151,12 +194,10 @@ final class OtherItemBankMatchService
                     throw new OtherItemException('posting_forbidden',
                         'Platbu je potřeba zaúčtovat a k tomu chybí oprávnění k účetnictví.', 403);
                 }
-                $this->bankPosting->postManual($supplierId, $txId, $side === 'receivable'
-                    ? ['debit_account_code' => '221', 'credit_account_code' => $account]
-                    : ['debit_account_code' => $account, 'credit_account_code' => '221'], $meta);
+                $this->postPayment($supplierId, $txId, $itemId, $item, $account, $split, $meta, $userId);
             }
             // Položka ze zůstatku nemá vlastní zápis a allocate() její zaúčtování nekontroluje.
-            $this->items->assertBankPaymentPosted($supplierId, $txId, $item, $amount);
+            $this->items->assertBankPaymentPosted($supplierId, $txId, $item, $split['principal']);
             $result = $this->items->allocate($supplierId, $itemId,
                 ['bank_transaction_id' => $txId, 'amount' => $amount], $userId);
             if ($ownTx) $pdo->commit();
@@ -168,22 +209,74 @@ final class OtherItemBankMatchService
     }
 
     /**
+     * Zaúčtuje pohyb podle kontace úhrady z banky (vlastní kontace položky, profil druhu,
+     * výchozí 221 / účet položky; 221 doplní analytiku podle účtu výpisu). Strana položky je
+     * vždy účet položky (saldokonto). Úhrada rozdělené splátky dá JEDEN zápis s dvojicí řádků
+     * na každou složku: jistina proti účtu položky, úrok a poplatek proti jejich účtům
+     * ({@see OtherItemPostingResolver::component}); peněžní účet je u všech stejný.
+     *
+     * @param array<string,mixed> $item
+     * @param array{principal:float,interest:float,fee:float} $split
+     * @param array<string,mixed> $meta
+     */
+    private function postPayment(int $supplierId, int $txId, int $itemId, array $item, string $account,
+        array $split, array $meta, ?int $userId): void
+    {
+        $rule = $this->postingResolver->payment($supplierId, $item, OtherItemPostingEvent::PaymentBank, $account);
+        $description = $rule['description'] !== null ? ['description' => $rule['description']] : [];
+        if ($split['interest'] + $split['fee'] <= 0) {
+            $posted = $this->bankPosting->postManual($supplierId, $txId, [
+                'debit_account_code' => $rule['debit_account_code'],
+                'credit_account_code' => $rule['credit_account_code'],
+                ...$description,
+            ], $meta);
+            if ($rule['source'] !== OtherItemPostingResolver::SOURCE_DEFAULT) {
+                $this->items->logPostingProvenance($supplierId, $itemId, $rule, (int) $posted['entry_id'], $userId);
+            }
+            return;
+        }
+        $money = $rule['money_account_code'];
+        $incoming = $item['side'] === 'receivable';
+        $parts = [['account' => $account, 'amount' => $split['principal']]];
+        $components = [];
+        foreach ([OtherItemPostingEvent::Interest, OtherItemPostingEvent::Fee] as $event) {
+            $components[$event->value] = $this->postingResolver->component($supplierId, $item, $event);
+            $parts[] = ['account' => $components[$event->value]['account_code'], 'amount' => $split[$event->value]];
+        }
+        $lines = [];
+        foreach ($parts as $part) {
+            if ($part['amount'] <= 0) continue;
+            $lines[] = ['account_code' => $incoming ? $money : $part['account'], 'side' => 'debit', 'amount' => $part['amount']];
+            $lines[] = ['account_code' => $incoming ? $part['account'] : $money, 'side' => 'credit', 'amount' => $part['amount']];
+        }
+        $posted = $this->bankPosting->postManual($supplierId, $txId, ['lines' => $lines, ...$description], $meta);
+        foreach ([$rule, ...array_values($components)] as $applied) {
+            if ($applied['source'] !== OtherItemPostingResolver::SOURCE_DEFAULT) {
+                $this->items->logPostingProvenance($supplierId, $itemId, $applied, (int) $posted['entry_id'], $userId);
+            }
+        }
+    }
+
+    /**
      * Pohyb firmy volný k přiřazení ({@see OtherItemService::freeBankPaymentSql}) s jeho
      * již přiřazenou částkou; `locked_item_ids` jsou položky, ke kterým se smí vrátit po stornu.
      *
-     * @return array{id:int,amount:float,variable_symbol:?string,used_amount:float,locked_item_ids:list<int>}|null
+     * @return array{id:int,amount:float,variable_symbol:?string,counterparty_account:?string,
+     *     counterparty_bank:?string,posted_at:?string,used_amount:float,locked_item_ids:list<int>}|null
      */
     private function freeTransaction(int $supplierId, int $txId, bool $lock): ?array
     {
         if ($lock && $this->bankPosting->lockTransaction($supplierId, $txId) === null) return null;
         $stmt = $this->db->pdo()->prepare(
-            'SELECT bt.id, bt.amount, bt.variable_symbol, COALESCE(a.used_amount, 0) used_amount,
+            'SELECT bt.id, bt.amount, bt.variable_symbol, bt.counterparty_account, bt.counterparty_bank, bt.posted_at,
+                    COALESCE(a.used_amount, 0) used_amount,
                     (SELECT GROUP_CONCAT(DISTINCT previous.other_item_id) FROM other_item_allocations previous
                       WHERE previous.supplier_id = bs.supplier_id AND previous.bank_transaction_id = bt.id
                         AND previous.reversed_on IS NOT NULL) locked_item_ids
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
-          LEFT JOIN (SELECT bank_transaction_id, SUM(amount) used_amount FROM other_item_allocations
+          LEFT JOIN (SELECT bank_transaction_id, SUM(' . OtherItemService::ALLOCATION_TOTAL_SQL . ') used_amount
+                       FROM other_item_allocations
                       WHERE supplier_id = ? AND bank_transaction_id = ? AND reversed_on IS NULL
                       GROUP BY bank_transaction_id) a
                  ON a.bank_transaction_id = bt.id
@@ -197,6 +290,9 @@ final class OtherItemBankMatchService
             'id' => (int) $row['id'],
             'amount' => (float) $row['amount'],
             'variable_symbol' => $row['variable_symbol'] !== null ? (string) $row['variable_symbol'] : null,
+            'counterparty_account' => $row['counterparty_account'] !== null ? (string) $row['counterparty_account'] : null,
+            'counterparty_bank' => $row['counterparty_bank'] !== null ? (string) $row['counterparty_bank'] : null,
+            'posted_at' => $row['posted_at'] !== null ? substr((string) $row['posted_at'], 0, 10) : null,
             'used_amount' => (float) $row['used_amount'],
             'locked_item_ids' => $row['locked_item_ids'] !== null
                 ? array_map('intval', explode(',', (string) $row['locked_item_ids'])) : [],

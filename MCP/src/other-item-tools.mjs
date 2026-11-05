@@ -5,8 +5,9 @@
  * Token smí založit, upravit a smazat KONCEPT, připojit k němu dokument
  * (smlouvu), nastavit jeho dimenze, splátkový kalendář
  * a založit nebo pozastavit opakování bez automatického účtování. Nic z toho
- * nezapisuje do deníku. Potvrzení a zaúčtování, storno, přeúčtování, párování
- * úhrad, generování opakování a zapnutí automatického účtování tu nejsou
+ * nezapisuje do deníku. Výjimkou je přiřazení úhrady (allocate_other_item_payment):
+ * spáruje existující platbu s potvrzenou položkou, nic neúčtuje. Potvrzení a zaúčtování,
+ * storno, přeúčtování, odpárování úhrad, generování opakování a zapnutí automatického účtování tu nejsou
  * a server je tokenu odmítne (ApiScopeMiddleware::BEARER_WRITE_EXCEPTIONS).
  *
  * Kontroly tvaru (součet kontace, součet a pořadí splátek, stav dokladu) běží
@@ -44,6 +45,32 @@ const POSTING_LINES = {
   }, ['account_code', 'amount']),
 };
 
+const PAYMENT_RULE = nullable({
+  type: 'object',
+  additionalProperties: false,
+  description: 'Vlastní kontace úhrady. Strana položky zůstává prázdná (úhrada jde vždy proti účtu položky), '
+    + 'peněžní účet je u pohledávky debit_account_code, u závazku credit_account_code. null vrátí kontaci zděděnou '
+    + 'z druhu.',
+  properties: {
+    debit_account_code: nullable(str('MD.', { maxLength: 20 })),
+    credit_account_code: nullable(str('D.', { maxLength: 20 })),
+    description_template: nullable(str('Popis zápisu se zástupnými znaky {title}, {document_no}, {partner}, '
+      + '{variable_symbol}.', { maxLength: 255 })),
+  },
+});
+
+const POSTING_OVERRIDES = {
+  type: 'object',
+  additionalProperties: false,
+  description: 'Vlastní kontace úhrad konceptu (jen podvojné účetnictví). Vynechaná událost se nemění. Bez vlastní '
+    + 'kontace platí účetní profil druhu (list_other_item_kinds, posting_profiles), jinak výchozí 221 / 211. '
+    + 'Kontaci vzniku nesou account_code, counter_account_code a posting_lines; prázdné doplní profil druhu.',
+  properties: {
+    payment_bank: { ...PAYMENT_RULE, description: `Úhrada z banky (221 nebo analytika). ${PAYMENT_RULE.description}` },
+    payment_cash: { ...PAYMENT_RULE, description: `Úhrada z pokladny (211 nebo analytika). ${PAYMENT_RULE.description}` },
+  },
+};
+
 const ITEM_INPUT = {
   side: str('receivable = pohledávka (dluží firmě někdo jiný), payable = závazek (firma dluží).', {
     enum: ['receivable', 'payable'],
@@ -61,21 +88,27 @@ const ITEM_INPUT = {
   due_on: date('Splatnost (YYYY-MM-DD).'),
   amount: num('Celková částka v Kč na haléře. Agenda je jen v CZK.', { exclusiveMinimum: 0 }),
   variable_symbol: nullable(str('Variabilní symbol, jen číslice.', { pattern: '^[0-9]{1,20}$' })),
+  counterparty_account: nullable(str('Účet protistrany pro párování úhrad: český účet ve tvaru '
+    + '„předčíslí-číslo/kód banky" (ověří se modulo 11) nebo IBAN. Prázdná hodnota účet smaže.', { maxLength: 60 })),
+  counterparty_bank_code: nullable(str('Kód banky českého účtu, když ho counterparty_account neobsahuje za lomítkem. '
+    + 'U IBANu se nezadává.', { pattern: '^[0-9]{4}$' })),
   account_code: nullable(str('Rozvahový účet pohledávky nebo závazku (např. 378, 379, 461). '
-    + 'Musí být aktivní a odpovídat straně; ověří se při zaúčtování.', { maxLength: 20 })),
+    + 'Musí být aktivní a odpovídat straně; ověří se při zaúčtování. Prázdný doplní účetní profil druhu, '
+    + 'bez profilu 315 nebo 325.', { maxLength: 20 })),
   counter_account_code: nullable(str('Jediný protiúčet (jednořádková kontace). Nekombinuj s posting_lines.', {
     maxLength: 20,
   })),
   posting_lines: POSTING_LINES,
   note: nullable(str('Interní poznámka.', { maxLength: 10000 })),
+  posting_overrides: POSTING_OVERRIDES,
 };
 
 /** Pole hlavičky, která PUT přepisuje vždy celá. Kontace se skládá zvlášť. */
 const HEAD_KEYS = [
   'side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
-  'due_on', 'amount', 'variable_symbol', 'account_code', 'note',
+  'due_on', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
 ];
-const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines'];
+const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines', 'posting_overrides'];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -142,10 +175,15 @@ function updateBody(current, a) {
   if (body.kind_id !== undefined) body.kind_id = numeric(body.kind_id);
   // Jiný vestavěný druh než other bez kind_id = přepnutí z vlastního druhu (shodně se serverem).
   if (a.kind !== undefined && a.kind !== 'other' && a.kind_id === undefined) body.kind_id = null;
+  // Nový účet nese kód banky za lomítkem nebo je to IBAN; uložený kód by mu odporoval (shodně se serverem).
+  if (a.counterparty_account !== undefined && a.counterparty_bank_code === undefined) body.counterparty_bank_code = null;
   if (a.issued_on !== undefined && a.accounting_on === undefined
     && current?.accounting_on && current.accounting_on === current.issued_on) {
     body.accounting_on = a.issued_on;
   }
+
+  // Vlastní kontace úhrad: server vynechanou událost nemění, proto jde jen to, co model poslal.
+  if (a.posting_overrides !== undefined) body.posting_overrides = a.posting_overrides;
 
   if (a.posting_lines !== undefined) {
     assertPostingLines(a.posting_lines, body.amount);
@@ -197,6 +235,7 @@ function assertInstallments(item, rows) {
   }
   let previous = '';
   let sum = 0;
+  let split = false;
   for (const [i, row] of rows.entries()) {
     if (!isDate(row?.due_on)) {
       throw new Error(`NEPROVEDENO: splátka ${i + 1} má neplatné datum „${row?.due_on}" (čekám YYYY-MM-DD).`);
@@ -212,15 +251,39 @@ function assertInstallments(item, rows) {
     if (c === null) {
       throw new Error(`NEPROVEDENO: splátka ${i + 1} musí mít kladnou částku na haléře.`);
     }
-    sum += c;
+    const parts = componentCents(row, i);
+    if (parts !== null && parts.principal + parts.interest + parts.fee !== c) {
+      throw new Error(`NEPROVEDENO: splátka ${i + 1}: jistina, úrok a poplatek dávají `
+        + `${czk(parts.principal + parts.interest + parts.fee)}, ale částka splátky je ${czk(c)}.`);
+    }
+    sum += parts === null ? c : parts.principal;
+    if (parts !== null) split = true;
     previous = row.due_on;
   }
   const total = cents(item.amount);
   if (sum !== total) {
-    throw new Error(`NEPROVEDENO: součet splátek ${czk(sum)} neodpovídá částce dokladu `
+    throw new Error(`NEPROVEDENO: součet ${split ? 'jistiny ' : ''}splátek ${czk(sum)} neodpovídá částce dokladu `
       + `${total === null ? String(item.amount) : czk(total)} (rozdíl ${czk((total ?? 0) - sum)}). `
-      + 'U úvěru a leasingu patří do kalendáře jen jistina; úroky a poplatky nejsou součástí částky dokladu.');
+      + 'U úvěru a leasingu je částkou dokladu jistina; úrok a poplatek patří do interest_amount a fee_amount '
+      + 'splátky (s jistinou v principal_amount).');
   }
+}
+
+const COMPONENTS = ['principal_amount', 'interest_amount', 'fee_amount'];
+
+/** Složky splátky v haléřích; null, když splátka rozdělená není. */
+function componentCents(row, i) {
+  if (!COMPONENTS.some((key) => row?.[key] !== undefined && row?.[key] !== null)) return null;
+  const out = {};
+  for (const key of COMPONENTS) {
+    const value = row[key] ?? 0;
+    const c = value === 0 ? 0 : cents(value);
+    if (c === null) {
+      throw new Error(`NEPROVEDENO: splátka ${i + 1}: ${key} musí být nezáporná částka na haléře.`);
+    }
+    out[key.replace('_amount', '')] = c;
+  }
+  return out;
 }
 
 const read = (name, title, description, properties, path, query = () => null, required = []) => ({
@@ -253,7 +316,9 @@ export const OTHER_ITEM_TOOLS = [
       return q;
     }),
   read('get_other_item', 'Detail ostatní pohledávky nebo závazku',
-    'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky.',
+    'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky. `posting_rules` ukazuje '
+    + 'účinnou kontaci vzniku a úhrad s původem (item = vlastní, kind = účetní profil druhu, default = výchozí), '
+    + '`posting_overrides` vlastní kontaci úhrad.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
     'Spárované bankovní a pokladní úhrady dokladu. Párování se dělá ve webovém rozhraní.',
@@ -272,7 +337,9 @@ export const OTHER_ITEM_TOOLS = [
   read('list_other_item_kinds', 'Druhy ostatních položek',
     'Vestavěné druhy (builtin_code = hodnota `kind`) a vlastní druhy firmy po stranách, s příznakem vlastní číselné '
     + 'řady (own_series, series_prefix) a skrytí (is_active). `id` vlastního druhu se zadává jako `kind_id`, vestavěný '
-    + 'druh se volí přes `kind`. Nastavení druhů se mění ve webovém rozhraní.',
+    + 'druh se volí přes `kind`. V podvojném účetnictví nese druh účetní profil (`posting_profiles`: vznik, úhrada '
+    + 'z banky a z pokladny; null na straně položky = účet položky) a vestavěný druh nezávazný návrh '
+    + '(`posting_suggestion`). Nastavení druhů a profilů se mění ve webovém rozhraní.',
     {}, () => `${BASE}/kinds`),
   read('list_other_item_schedules', 'Opakování ostatních položek',
     'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování.',
@@ -404,9 +471,12 @@ export const OTHER_ITEM_TOOLS = [
       'Nastaví splátkový kalendář dokladu a NAHRADÍ JÍM CELÝ DOSAVADNÍ KALENDÁŘ; pošli vždy všechny splátky, '
       + 'ne jen změněné. Kalendář lze vyčíst z dokumentu (úvěrová nebo leasingová smlouva, splátkový '
       + 'kalendář banky): asistent ho z přiloženého dokumentu analyzuje a pošle jako data. Pravidla: 2 až 120 '
-      + 'splátek, vzestupné termíny ne dříve než datum vzniku dokladu, kladné částky na haléře a součet přesně '
-      + 'rovný částce dokladu (u úvěru jen jistina, úroky ne). Jen u neuhrazeného dokladu. Splátky slouží '
-      + `k plánu cashflow a do deníku nic nezapisují. ${NO_POSTING} Zrušení kalendáře: clear_other_item_installments.`,
+      + 'splátek, vzestupné termíny ne dříve než datum vzniku dokladu a kladné částky na haléře. Splátku úvěru '
+      + 'nebo leasingu lze rozdělit na jistinu, úrok a poplatek (principal_amount, interest_amount, fee_amount; '
+      + 'jejich součet je částka splátky). Částka dokladu je jistina: součet jistiny (u nerozdělené splátky celé '
+      + 'částky) musí být přesně částka dokladu. Jen u neuhrazeného dokladu. Kalendář slouží k plánu cashflow, '
+      + 'úrok a poplatek se zaúčtují až s úhradou splátky v aplikaci. '
+      + `${NO_POSTING} Zrušení kalendáře: clear_other_item_installments.`,
     inputSchema: schema({
       item_id: id('ID dokladu.'),
       installments: {
@@ -416,7 +486,10 @@ export const OTHER_ITEM_TOOLS = [
         maxItems: 120,
         items: schema({
           due_on: date('Termín splátky (YYYY-MM-DD).'),
-          amount: num('Částka splátky v Kč na haléře.', { exclusiveMinimum: 0 }),
+          amount: num('Částka splátky v Kč na haléře (u rozdělené splátky jistina + úrok + poplatek).', { exclusiveMinimum: 0 }),
+          principal_amount: nullable(num('Jistina splátky v Kč na haléře.', { minimum: 0 })),
+          interest_amount: nullable(num('Úrok splátky v Kč na haléře.', { minimum: 0 })),
+          fee_amount: nullable(num('Poplatek splátky v Kč na haléře.', { minimum: 0 })),
         }, ['due_on', 'amount']),
       },
     }, ['item_id', 'installments']),
@@ -426,7 +499,10 @@ export const OTHER_ITEM_TOOLS = [
       const item = await c.get(`${BASE}/${seg(a.item_id)}`, null, tool);
       assertInstallments(item, rows);
       return c.put(`${BASE}/${seg(a.item_id)}/installments`, {
-        items: rows.map((row) => ({ due_on: row.due_on, amount: row.amount })),
+        items: rows.map((row) => (COMPONENTS.some((key) => row[key] !== undefined && row[key] !== null)
+          ? { due_on: row.due_on, amount: row.amount, principal_amount: row.principal_amount ?? 0,
+            interest_amount: row.interest_amount ?? 0, fee_amount: row.fee_amount ?? 0 }
+          : { due_on: row.due_on, amount: row.amount })),
       }, tool);
     },
   },
@@ -449,6 +525,41 @@ export const OTHER_ITEM_TOOLS = [
       }
       requireConfirm(a, `Zrušit se má splátkový kalendář (${existing.length} splátek)`, itemLabel(item));
       return { cleared: existing, result: await c.put(`${BASE}/${seg(a.item_id)}/installments`, { items: [] }, tool) };
+    },
+  },
+  {
+    name: 'allocate_other_item_payment',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Přiřadit úhradu k ostatní položce',
+    description:
+      'Přiřadí jednu bankovní transakci (`bank_transaction_id`) NEBO jeden pokladní doklad (`cash_document_id`) '
+      + 'k potvrzené nebo zaúčtované ostatní položce na zadanou částku. Kandidáty vypíše other_item_payment_candidates. '
+      + 'Splátku, kterou úhrada hradí, určí server sám: otevřená splátka se zbytkem přesně ve výši částky, jinak první '
+      + 'otevřená; přebytek pokryje další splátky. Server odmítne přeplatek, jinou měnu než Kč, platbu opačného směru, '
+      + 'platbu bez volné částky i koncept. Je to zápis do evidence úhrad a vyžaduje potvrzení uživatele; nic se nezaúčtuje, '
+      + 'jen se spáruje existující platba. Odpárování a účtování řeší účetní ve webovém rozhraní.',
+    inputSchema: schema({
+      item_id: id('ID ostatní položky.'),
+      bank_transaction_id: id('ID bankovní transakce z other_item_payment_candidates. Zadej právě jedno z '
+        + 'bank_transaction_id a cash_document_id.'),
+      cash_document_id: id('ID pokladního dokladu z other_item_payment_candidates.'),
+      amount: num('Přiřazená částka v Kč na haléře; nejvýše zbývající dluh položky a volná část platby.',
+        { exclusiveMinimum: 0 }),
+    }, ['item_id', 'amount']),
+    write: true,
+    run: (c, a, tool) => {
+      if ((a.bank_transaction_id === undefined) === (a.cash_document_id === undefined)) {
+        throw new Error('NEPROVEDENO: zadej právě jedno z bank_transaction_id a cash_document_id.');
+      }
+      if (!Number.isFinite(a.amount) || a.amount <= 0 || Math.round(a.amount * 100) / 100 !== a.amount) {
+        throw new Error('NEPROVEDENO: amount musí být kladná částka na haléře.');
+      }
+      return c.post(`${BASE}/${seg(a.item_id)}/allocations`, {
+        ...(a.bank_transaction_id !== undefined ? { bank_transaction_id: a.bank_transaction_id } : {}),
+        ...(a.cash_document_id !== undefined ? { cash_document_id: a.cash_document_id } : {}),
+        amount: a.amount,
+      }, tool);
     },
   },
   {
