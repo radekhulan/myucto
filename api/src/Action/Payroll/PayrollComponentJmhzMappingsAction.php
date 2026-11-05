@@ -14,6 +14,7 @@ use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzTargetCatalog;
@@ -35,6 +36,7 @@ final class PayrollComponentJmhzMappingsAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DemoMode $demo,
     ) {}
 
     public function targets(Request $request, Response $response): Response
@@ -63,8 +65,11 @@ final class PayrollComponentJmhzMappingsAction
         // specifikace se instaluje teprve při zápisu mapování), takže dřív by
         // nebylo na co mapovat. Účetní tak vidí předvyplněný stav rovnou tady
         // a může ho přepsat; doplňuje se jen tam, kde ještě žádná volba není.
-        foreach ($this->mappingDefaults->apply($supplierId) as $default) {
-            $this->audit($request, 'payroll.component_jmhz_mapping.default_applied', $default, null);
+        // Ukázka je jen ke čtení, tam se předvyplnění neukládá.
+        if (!$this->demo->enabled()) {
+            foreach ($this->mappingDefaults->apply($supplierId) as $default) {
+                $this->audit($request, 'payroll.component_jmhz_mapping.default_applied', $default, null);
+            }
         }
         $mappings = $this->mappings->listForSupplier($supplierId);
         $unverified = $this->mappingDefaults->unverifiedBonusDefaults($supplierId);
