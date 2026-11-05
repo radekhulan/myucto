@@ -281,7 +281,7 @@ onMounted(load)
   <div>
     <header class="flex flex-wrap items-center justify-between gap-3 mb-4"><div><h1 class="text-2xl font-semibold">{{ t('users.title') }}</h1><p class="text-sm text-neutral-500">{{ t('users.subtitle') }}</p></div><button v-if="tab === 'users'" :class="btnFilled('primary')" @click="openCreate"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path :d="ICONS.plus" /></svg>{{ t('users.new') }}</button></header>
     <!-- Přepínač pohledů je záložka, ne tlačítko: tlačítka na stránce jsou akce. -->
-    <div role="tablist" class="mb-4 flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('users.title')">
+    <div role="tablist" class="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-neutral-200" :aria-label="t('users.title')">
       <button v-for="item in USER_TABS" :key="item.key" type="button" role="tab" :data-tab="item.key" :data-sessions-tab="item.key === 'sessions' ? '' : undefined"
         :aria-selected="tab === item.key" :tabindex="tab === item.key ? 0 : -1"
         class="-mb-px inline-flex cursor-pointer items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2 text-sm transition-colors"
