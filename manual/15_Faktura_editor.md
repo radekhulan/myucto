@@ -837,7 +837,8 @@ Přidejte řádky a výkaz uložte. Součet práce se přenáší jako jedna pol
 cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 
 Výkaz může používat **šablonu účtování výkazů** s paušálem a pásmy hodin. Šablony
-spravujete na stránce `Prodej → Šablony účtování výkazů` pod **Ceníkem**. Zobrazení
+spravujete na stránce `Prodej → Šablony výkazů`: bez skladu ji otevřete z **Ceníku**, se zapnutým
+skladem je přímo v menu **Prodej**. Zobrazení
 vyžaduje právo **Ceník** ke čtení; úprava a archivace vyžadují právo zápisu. Po výběru šablony se
 v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
 `RRRR-MM`. Tlačítkem **Připravit přenos** zařadíte účtovací položky k uložení;

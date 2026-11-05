@@ -1882,7 +1882,7 @@
     "vat_hint": "Smíšené užívání vyžaduje poměrný odpočet podle § 75 ZDPH, soukromé vozidlo odpočet nemá. Tankování, jehož doklad uplatňuje jiný odpočet, se zobrazí s upozorněním."
   },
   "nav": {
-    "work_report_billing_templates": "Šablony účtování výkazů",
+    "work_report_billing_templates": "Šablony výkazů",
     "ai_assistant": "AI asistent",
     "group_stats": "Všechny firmy",
     "main_menu": "Hlavní menu",
@@ -41391,7 +41391,7 @@
     "hint": "Platí pro detail faktury, PDF, veřejný náhled a schvalování výkazu práce. Popis je vždy viditelný. Skrytí sloupců nemění uložené sazby ani částku faktury. Výkaz materiálu má vlastní podobu."
   },
   "work_report_billing": {
-    "templates": "Šablony účtování výkazů",
+    "templates": "Šablony výkazů",
     "templates_subtitle": "Paušály a hodinová pásma pro účtování výkazů práce na fakturách.",
     "empty": "Zatím nemáte žádnou šablonu účtování výkazů.",
     "name": "Název",

@@ -1882,7 +1882,7 @@
     "vat_hint": "Mixed use requires a proportional deduction under § 75 of the VAT Act, a private vehicle has no deduction. Refuellings whose document claims a different deduction are flagged."
   },
   "nav": {
-    "work_report_billing_templates": "Work report billing templates",
+    "work_report_billing_templates": "Work report templates",
     "ai_assistant": "AI assistant",
     "group_stats": "All companies",
     "main_menu": "Main menu",
@@ -41391,7 +41391,7 @@
     "hint": "Applies to the invoice detail, PDF, public preview and work report approval. The description is always visible. Hiding columns does not change stored rates or the invoice amount. The material report keeps its own layout."
   },
   "work_report_billing": {
-    "templates": "Work report billing templates",
+    "templates": "Work report templates",
     "templates_subtitle": "Fixed fees and hourly bands for billing work reports on invoices.",
     "empty": "You have no work report billing templates yet.",
     "name": "Name",
