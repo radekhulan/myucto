@@ -214,17 +214,32 @@ uplatnit." Prohlášení poplatníka musí být v daném měsíci **Podepsáno**
    **Platí od**.
 3. Klikněte na **Uložit vše**. Předchozí hodnota zůstane v historii.
 
-**Ostatní podmínky vztahu** (úvazek, účtárna, druh činnosti, režim pojištění,
-místo výkonu práce):
+**Podmínky konkrétního vztahu** (odměňování, úvazek, účtárna, druh činnosti,
+režim pojištění, místo výkonu práce):
 
 1. Otevřete kartu pracovního vztahu a upravte pole v části **Základní údaje**,
    případně ve sbalené části **Další údaje**.
-2. Vyplňte **Účinnost podmínek od**. Nová verze může začít nejdřív den po
-   začátku poslední verze. Pole **Důvod změny** je nepovinné.
+2. Při změně sjednaných podmínek zvolte uložení nové verze a vyplňte
+   **Účinnost podmínek od**. Nová verze může začít nejdřív den po začátku
+   poslední verze. Opravu chybně zadaného údaje bez změny účinnosti ukládejte
+   jako opravu aktuální verze; již zúčtované podmínky tímto způsobem měnit nejde.
 3. Klikněte na **Uložit vše**.
 
 **Jak poznáte, že je hotovo:** V časové ose vztahu přibude nová verze
 podmínek a předchozí je uzavřená dnem před novou účinností.
+
+**Hodinová mzda a odměna.** Na kartě pracovního vztahu zvolte hodinový způsob
+odměňování, zadejte **Sjednanou hodinovou sazbu (Kč/h)** a **Smluvní podklad**
+(například označení mzdového výměru nebo dohody). Sazba může mít dvě desetinná
+místa. Každý souběžný vztah má vlastní způsob odměňování a vlastní historii.
+U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
+pravděpodobným hodinovým výdělkem.
+
+Evidence hodinové sazby zatím nevytváří mzdu z odpracovaných hodin. Mzdový běh,
+do jehož období hodinové podmínky zasahují, proto nelze schválit.
+Rychlý vstup ani pravidelné složky místo sazby nepoužijí dřívější měsíční mzdu.
+Dosavadní ruční a importované hotové částky bez přepnutí vztahu na nový
+hodinový způsob odměňování zůstávají podporované.
 
 > [!TIP]
 > Změna mzdy ani úvazku se ČSSZ nehlásí, projeví se v nejbližším měsíčním
@@ -894,7 +909,8 @@ A1 i změna A3) jen pětimístnou kategorii. Se čtyřmístným kódem se přihl
 zastaví a vyzve k výběru kategorie; aplikace ji sama nedoplní, protože
 podskupina má obvykle několik kategorií.
 
-Karta vztahu má v hlavním sloupci **Základní údaje** (pravidelná hrubá mzda,
+Karta vztahu má v hlavním sloupci **Základní údaje** (způsob odměňování,
+měsíční částka nebo sjednaná hodinová sazba s podkladem sjednání,
 týdenní pracovní doba, **Úvazek (%)**, **Výjimka z výměry dovolené (týdny)**,
 pravděpodobný výdělek, **Mzdová účtárna**, **Druh činnosti**, **Bližší určení
 pracovněprávního vztahu**, **Režim nároku na stravování**, primární vztah)

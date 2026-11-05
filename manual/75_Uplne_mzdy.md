@@ -10,6 +10,11 @@ dokumenty, platby, zaúčtování a zákonná podání. Kroky jsou oddělené z�
 Výpočet mzdy sám neodešle peníze, nezaúčtuje doklad a nepodá hlášení. Každý
 další krok spouštíte vědomě.
 
+Na [kartě pracovního vztahu](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu)
+lze evidovat také hodinovou mzdu nebo hodinovou odměnu s účinností a historií.
+Samotná evidence sazby zatím nepočítá mzdu z hodin a nedovolí schválit běh
+zahrnující takto odměňovaný vztah.
+
 ## 75.1 Kdy to potřebujete
 
 Kapitolu otevřete, když:
