@@ -331,9 +331,11 @@ v návrhu nebo ve frontě **K doúčtování**.
 
 Podrobnosti o pořadí pojistek a limitech jsou v [§ 96.16.8](#96168-automaticke-uctovani-podrobnosti).
 
-### Ceníky práce pro výkazy
+### Šablony účtování výkazů
 
-V `Firma → Nastavení`, na záložce **Doklady**, spravujte **Ceníky práce pro výkazy**.
+Na stránce `Prodej → Šablony účtování výkazů`, hned pod **Ceníkem**, spravujte účtování práce.
+Zobrazení vyžaduje právo **Ceník** ke čtení; přidání, úprava a smazání právo **Ceník** k zápisu.
+Stránka je dostupná i firmám se zapnutým skladem.
 Přidat lze pojmenované ceníky v měně firmy. Ceník může obsahovat pevný paušál včetně
 počtu hodin a navazující pásma hodinových sazeb; poslední pásmo je bez horního limitu.
 U položek lze nastavit popis s proměnnými `{nazev}`, `{zakazka}`, `{obdobi}`, `{limit}`,

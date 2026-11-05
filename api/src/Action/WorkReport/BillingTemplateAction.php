@@ -19,7 +19,7 @@ final class BillingTemplateAction
         $supplierId = SupplierGuard::currentId($request);
         $id = isset($args['id']) ? (int) $args['id'] : null;
         if ($id !== null && $this->repo->find($id, $supplierId) === null) return Json::error($response, 'not_found', 'Cenové ujednání nenalezeno.', 404);
-        if ($request->getMethod() === 'GET') return Json::ok($response, $this->repo->list($supplierId));
+        if (in_array($request->getMethod(), ['GET', 'HEAD'], true)) return Json::ok($response, $this->repo->list($supplierId));
         if ($request->getMethod() === 'DELETE') {
             $this->repo->delete($supplierId, $id);
             return Json::ok($response, null);

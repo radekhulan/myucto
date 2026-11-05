@@ -31,8 +31,9 @@ import { useToast } from '@/composables/useToast'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { apiErrorMessage } from '@/api/errors'
 import { useSupplierStore } from '@/stores/supplier'
+import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
 import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
-import { workReportBillingApi, type WorkReportBillingSnapshot } from '@/api/workReportBilling'
+import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
 import { projectsApi } from '@/api/projects'
 import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
 import type { WorkReportDisplayOptions } from '@/api/invoices'
@@ -65,6 +66,8 @@ const billingSnapshot = ref<WorkReportBillingSnapshot | null>(null)
 const billingTemplateId = ref<number | null>(null)
 const billingPeriod = ref('')
 const billingStale = ref(false)
+const billingReportId = ref<number | null>(null)
+const billingCurrentPreview = ref<WorkReportBillingPreview | null>(null)
 const billingPending = ref(false)
 const billingLegacyItemId = ref<number | null>(null)
 const invoiceItems = ref<InvoiceItem[]>([])
@@ -150,6 +153,8 @@ async function load() {
     ])
     invoiceItems.value = inv.items.filter(item => item.item_kind !== 'discount')
     billingLegacyItemId.value = null
+    billingReportId.value = wr?.id ?? null
+    billingCurrentPreview.value = wr?.billing_preview ?? null
     billingSnapshot.value = wr?.billing_snapshot ?? null
     billingTemplateId.value = wr?.billing_template_id ?? null
     billingPeriod.value = wr?.billing_period ?? (inv.tax_date || inv.issue_date || '').slice(0, 7)
@@ -310,6 +315,9 @@ function syncRow(
 async function save() {
   if (modalContent.value && !validateDurationInputs(modalContent.value)) return
   if (!canSave.value) return
+  if (billingSaveNeedsConfirmation({ snapshot: billingSnapshot.value, stale: billingStale.value, pending: billingPending.value,
+    reportId: billingReportId.value, preview: billingCurrentPreview.value, invoiceItems: invoiceItems.value })
+    && !confirm(t('work_report_billing.save_unsynced_confirm', { description: wrTitle.value || t('invoice.work_report') }))) return
   saving.value = true
   error.value = ''
   try {

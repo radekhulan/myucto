@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import type { WorkReportBillingSnapshot } from '@/api/workReportBilling'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+defineProps<{ readOnly?: boolean }>()
 const model = defineModel<WorkReportBillingSnapshot>({ required: true })
 const { t } = useI18n()
 function addBand() {
@@ -12,7 +13,7 @@ function addBand() {
 }
 </script>
 <template>
-  <div class="space-y-3">
+  <fieldset :disabled="readOnly" class="space-y-3">
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <label class="text-sm text-neutral-700">{{ t('work_report_billing.name') }}<input v-model="model.name" maxlength="100" required class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface" /></label>
       <label class="text-sm text-neutral-700">{{ t('work_report_billing.currency') }}<input v-model="model.currency" maxlength="3" required class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface uppercase" /></label>
@@ -25,11 +26,11 @@ function addBand() {
       <div class="flex flex-wrap items-end gap-3">
         <label class="text-sm text-neutral-700 flex-1 min-w-36">{{ t('work_report_billing.up_to_hours') }}<input v-if="i < model.bands.length - 1" v-model.number="band.up_to_hours" type="number" min="0" step="0.01" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded bg-surface" /><span v-else class="block mt-1 h-9 py-2 text-neutral-500">{{ t('work_report_billing.unlimited') }}</span></label>
         <label class="text-sm text-neutral-700 flex-1 min-w-36">{{ t('invoice.wr_rate') }}<input v-model.number="band.rate" type="number" min="0" step="0.000001" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded bg-surface" /></label>
-        <button v-if="model.bands.length > 1 || model.fixed_fee !== null" type="button" :class="btnOutline('danger')" :title="t('common.delete')" @click="model.bands.splice(i, 1); model.bands.length && (model.bands[model.bands.length - 1]!.up_to_hours = null)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('common.delete') }}</button>
+        <button v-if="!readOnly && (model.bands.length > 1 || model.fixed_fee !== null)" type="button" :class="btnOutline('danger')" :title="t('common.delete')" @click="model.bands.splice(i, 1); model.bands.length && (model.bands[model.bands.length - 1]!.up_to_hours = null)"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('common.delete') }}</button>
       </div>
       <label class="block text-sm text-neutral-700">{{ t('work_report_billing.description') }}<input v-model="band.description" maxlength="500" class="mt-1 w-full h-9 px-2 border border-neutral-300 rounded bg-surface" /></label>
     </div>
-    <button type="button" :class="btnOutline('primary')" @click="addBand"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('work_report_billing.add_band') }}</button>
+    <button v-if="!readOnly" type="button" :class="btnOutline('primary')" @click="addBand"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('work_report_billing.add_band') }}</button>
     <p class="text-xs text-neutral-500">{{ t('work_report_billing.placeholders') }}</p>
-  </div>
+  </fieldset>
 </template>

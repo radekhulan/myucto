@@ -41227,6 +41227,7 @@
     "keep_items": "Keep all other items",
     "prices_incl_vat": "Prices and amounts include VAT.",
     "prices_excl_vat": "Prices and amounts exclude VAT.",
-    "saved_copy": "Saved template copy"
+    "saved_copy": "Saved template copy",
+    "save_unsynced_confirm": "Billing for work report “{description}” has not been transferred yet or has changed. Save the report without updating the invoice items?"
   }
 }

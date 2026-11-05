@@ -1014,8 +1014,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
         ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
-        ['GET', '#^/api/work-report-billing-templates(/|$)#', 'projects', AccessLevel::READ],
-        ['*', '#^/api/work-report-billing-templates(/|$)#', 'settings.company.write', AccessLevel::WRITE],
+        ['GET', '#^/api/work-report-billing-templates(/|$)#', 'price_list', AccessLevel::READ],
+        ['*', '#^/api/work-report-billing-templates(/|$)#', 'price_list', AccessLevel::WRITE],
         ['POST', '#^/api/work-report-billing-preview$#', 'invoices', AccessLevel::READ],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
@@ -1158,8 +1158,8 @@ final class RoutePermissionMap
             return new RoutePermission(self::PERMISSION, 'price_list', $read ? AccessLevel::READ : AccessLevel::WRITE,
                 $picker ? ['invoices', 'recurring'] : []);
         }
-        if ($method === 'GET' && $path === '/api/work-report-billing-templates') {
-            return new RoutePermission(self::PERMISSION, 'projects', AccessLevel::READ, ['invoices', 'settings.company']);
+        if (in_array($method, ['GET', 'HEAD'], true) && $path === '/api/work-report-billing-templates') {
+            return new RoutePermission(self::PERMISSION, 'price_list', AccessLevel::READ, ['invoices', 'projects']);
         }
         if ($method === 'GET' && preg_match('#^/api/codebooks/(currencies|units|vat-rates)$#D', $path) === 1) {
             return new RoutePermission(self::PERMISSION, 'settings.company', AccessLevel::READ,

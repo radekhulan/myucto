@@ -41227,6 +41227,7 @@
     "keep_items": "Zachovat všechny ostatní položky",
     "prices_incl_vat": "Ceny a částky včetně DPH.",
     "prices_excl_vat": "Ceny a částky bez DPH.",
-    "saved_copy": "Uložená kopie šablony"
+    "saved_copy": "Uložená kopie šablony",
+    "save_unsynced_confirm": "Účtování výkazu „{description}“ dosud nebylo přeneseno nebo se změnilo. Uložit výkaz bez aktualizace položek faktury?"
   }
 }

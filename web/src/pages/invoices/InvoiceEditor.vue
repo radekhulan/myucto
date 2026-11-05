@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { billingSaveNeedsConfirmation } from '@/components/work-reports/billingSaveConfirmation'
 import ReportBillingEditor from '@/components/work-reports/ReportBillingEditor.vue'
 import { workReportBillingApi, type WorkReportBillingSnapshot, type WorkReportBillingPreview } from '@/api/workReportBilling'
 import WorkReportDisplaySettings from '@/components/invoices/WorkReportDisplaySettings.vue'
 import type { WorkReportDisplayOptions } from '@/api/invoices'
 import { useWindowTitle } from '@/composables/useWindowTitle'
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId, toRaw } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { invoicesApi, type Invoice, type InvoicePayload, type InvoiceItem, type WorkReportItem, type WorkReportMaterial, type InvoiceAttachment, type PaymentMethod, type InvoiceRoundingMode, type PaymentScheduleRow, type CashSettlementResult } from '@/api/invoices'
 import { useHotkey } from '@/composables/useHotkey'
@@ -1375,6 +1376,19 @@ async function loadInvoiceVatRates(): Promise<VatRate[]> {
   return codebooksApi.vatRates(country, form.value.issue_date).catch(() => [])
 }
 
+// Pozná jen nezměněné řádky vytvořené editorem; ruční ani načtené položky se nezahazují.
+const automaticItemBaselines = new WeakMap<InvoiceItem, string>()
+function automaticItemSignature(item: InvoiceItem): string {
+  return JSON.stringify({ ...toRaw(item), order_index: 0 })
+}
+function rememberAutomaticItem(item: InvoiceItem): void {
+  automaticItemBaselines.set(toRaw(item), automaticItemSignature(item))
+}
+function isUntouchedAutomaticItem(item: InvoiceItem): boolean {
+  return !item.id && !item.stock_item_id && !item.small_asset_id && !item.asset_id
+    && automaticItemBaselines.get(toRaw(item)) === automaticItemSignature(item)
+}
+
 function blankItem(): InvoiceItem {
   // Dobropis = záporné množství (sleva/refundace), default -1
   const qty = form.value.invoice_type === 'credit_note' ? -1 : 1
@@ -1384,7 +1398,7 @@ function blankItem(): InvoiceItem {
   const rate = (projectRate && projectRate > 0) ? projectRate
     : (clientRate && clientRate > 0) ? clientRate
     : 0
-  return {
+  const item: InvoiceItem = {
     description: '',
     quantity: qty,
     duration_minutes: null,
@@ -1406,6 +1420,8 @@ function blankItem(): InvoiceItem {
     oss_supply_type: 'goods',
     oss_original_period: null,
   }
+  rememberAutomaticItem(item)
+  return item
 }
 
 // Náhled čísla faktury — backend zná aktuální counter pro per-supplier templ.
@@ -1804,9 +1820,11 @@ async function applyClientDefaults(clientId: number) {
   // „Prázdná položka" = prázdný popis; rate mohl naplnit předchozí klient/projekt, přesto chceme refresh.
   if (!form.value.project_id && c.hourly_rate && c.hourly_rate > 0) {
     if (form.value.items.length === 1 && !isTextItem(form.value.items[0]) && (form.value.items[0].description || '').trim() === '') {
+      const wasAutomatic = isUntouchedAutomaticItem(form.value.items[0])
       form.value.items[0].unit_price_without_vat = c.hourly_rate
       form.value.items[0].unit = defaultItemUnit()
       onItemUnitChange(form.value.items[0])
+      if (wasAutomatic) rememberAutomaticItem(form.value.items[0])
     }
     if (wrItems.value.length === 1 && (wrItems.value[0].description || '').trim() === '') {
       wrItems.value[0].rate = c.hourly_rate
@@ -1858,9 +1876,11 @@ async function applyProjectDefaults(projectId: number) {
   }
   // Pokud má jen jednu prázdnou položku (bez popisu), refresh sazby z projektu.
   if (form.value.items.length === 1 && !isTextItem(form.value.items[0]) && (form.value.items[0].description || '').trim() === '') {
+    const wasAutomatic = isUntouchedAutomaticItem(form.value.items[0])
     form.value.items[0].unit_price_without_vat = p.hourly_rate
     form.value.items[0].unit = defaultItemUnit()
     onItemUnitChange(form.value.items[0])
+    if (wasAutomatic) rememberAutomaticItem(form.value.items[0])
   }
   if (wrItems.value.length === 1 && (wrItems.value[0].description || '').trim() === '') {
     wrItems.value[0].rate = p.hourly_rate
@@ -2212,7 +2232,7 @@ const isRefundInvoice = computed(() =>
 
 const hasNonPositiveAmountToPay = computed(() =>
   requiresPositiveAmountToPay.value && computed_totals.value.amount_to_pay <= 0 && !isRefundInvoice.value
-    && !(!isEdit.value && form.value.items.length === 0 && wrBillingPending.value && wrBillingPendingAmount.value > 0)
+    && !(amountItems(form.value.items).length === 0 && wrBillingPending.value && wrBillingPendingAmount.value > 0)
 )
 
 // Per-row check: záporné množství a záporná cena současně backend odmítne;
@@ -2286,6 +2306,8 @@ const wrBillingSnapshot = ref<WorkReportBillingSnapshot | null>(null)
 const wrBillingTemplateId = ref<number | null>(null)
 const wrBillingPeriod = ref('')
 const wrBillingStale = ref(false)
+const wrBillingReportId = ref<number | null>(null)
+const wrBillingCurrentPreview = ref<WorkReportBillingPreview | null>(null)
 const wrBillingPending = ref(false)
 const wrBillingPendingAmount = ref(0)
 const billingDraftId = ref<number | null>(null)
@@ -2315,6 +2337,8 @@ async function loadWorkReport() {
   if (!invoiceId.value) return
   const wr = await invoicesApi.getWorkReport(invoiceId.value)
   if (wr) {
+    wrBillingReportId.value = wr.id
+    wrBillingCurrentPreview.value = wr.billing_preview ?? null
     wrBillingSnapshot.value = wr.billing_snapshot ?? null
     wrBillingTemplateId.value = wr.billing_template_id ?? null
     wrBillingPeriod.value = wr.billing_period ?? (form.value.tax_date || form.value.issue_date || '').slice(0, 7)
@@ -2460,7 +2484,11 @@ async function deleteWorkReport() {
  * Vrací null = OK, jinak warning string pro confirm().
  */
 function checkWorkReportSync(): string | null {
-  if (wrBillingSnapshot.value) return null
+  if (wrBillingSnapshot.value) {
+    return billingSaveNeedsConfirmation({ snapshot: wrBillingSnapshot.value, stale: wrBillingStale.value, pending: wrBillingPending.value,
+      reportId: wrBillingReportId.value, preview: wrBillingCurrentPreview.value, invoiceItems: form.value.items })
+      ? t('work_report_billing.save_unsynced_confirm', { description: wrTitle.value || t('invoice.work_report') }) : null
+  }
   if (!wrOpen.value || wrItemsValid.value.length === 0) return null
   const totalHours = Math.round(wrTotalHours.value * 100) / 100
   const totalAmount = Math.round(wrTotalAmount.value * 100) / 100
@@ -2706,8 +2734,9 @@ async function submit() {
   if (!validateDurationInputs(paneDom.root())) return
   // Tiše vyhoď prázdné řádky (bez popisu i bez ceny) — uživatel přidal řádek a nezapsal ho.
   // Zároveň smaž z form.value.items, ať checkWorkReportSync vidí stejnou množinu jako payload.
-  if (wrBillingPending.value && !isEdit.value && form.value.items.length === 1 && !form.value.items[0]?.description.trim()
-    && !form.value.items[0]?.stock_item_id && !form.value.items[0]?.small_asset_id && !form.value.items[0]?.asset_id) form.value.items = []
+  // Částku dodá až ručně vyžádaný přenos výkazu. Nedokončený automatický řádek
+  // s předvyplněnou sazbou není plnění; upravený řádek dál musí projít validací popisu.
+  if (wrBillingPending.value) form.value.items = form.value.items.filter(item => !isUntouchedAutomaticItem(item))
   form.value.items = form.value.items.filter(it =>
     (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0
   )

@@ -2,12 +2,13 @@ import { defineComponent, h, KeepAlive, nextTick, ref, type Component } from 'vu
 import { mount, flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import BillingTemplateSelect from './BillingTemplateSelect.vue'
-import WorkReportBillingTemplates from '@/components/settings/WorkReportBillingTemplates.vue'
+import WorkReportBillingTemplates from '@/components/work-reports/WorkReportBillingTemplates.vue'
 import { newBillingSnapshot, workReportBillingApi, type WorkReportBillingTemplate } from '@/api/workReportBilling'
 vi.mock('@/api/workReportBilling', async importOriginal => ({
   ...await importOriginal<typeof import('@/api/workReportBilling')>(),
   workReportBillingApi: { list: vi.fn() },
 }))
+vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: vi.fn().mockResolvedValue([]) } }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }) }))
 function template(name: string): WorkReportBillingTemplate { return { ...newBillingSnapshot(), id: 7, name } }

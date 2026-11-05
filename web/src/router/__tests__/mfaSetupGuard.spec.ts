@@ -208,6 +208,18 @@ describe('router guard vynuceného nastavení MFA', () => {
     },
   )
 
+  it.each(['client', 'staff'])('šablony účtování jsou pro %s dostupné podle čtecího práva Ceníku i se skladem', async roleType => {
+    const auth = signIn({ role: { type: roleType } })
+    for (const stockEnabled of [false, true]) {
+      useSupplierStore().setAvailable([{ id: 7, accounting_mode: 'double_entry', stock_enabled: stockEnabled }] as never, 7)
+      for (const level of [0, 1, 2]) {
+        auth.permissions = { price_list: level }
+        const result = await authorizationGuard(resolveTarget({ name: 'admin-work-report-billing-templates' }))
+        expect(result === true).toBe(level > 0)
+      }
+    }
+  })
+
   it.each(['client', 'staff'])('opens operational settings for independent %s grants and denies read/revocation', async (roleType) => {
     const auth = signIn({ role: { type: roleType } })
     useSupplierStore().setAvailable([{ id: 7, accounting_mode: 'double_entry', stock_enabled: false }] as never, 7)

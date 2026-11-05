@@ -834,13 +834,16 @@ V editoru klikněte na ikonu **Přidat výkaz práce** v řádku položky. Zobra
 Přidejte řádky a výkaz uložte. Součet práce se přenáší jako jedna položka `1 ks × celková
 cena práce`. Podrobný čas a sazby zůstávají ve výkazu.
 
-Výkaz může používat **ceník práce** s paušálem a pásmy hodin. Po výběru ceníku se
+Výkaz může používat **šablonu účtování** s paušálem a pásmy hodin ze stránky
+`Prodej → Šablony účtování výkazů`. Po výběru šablony se
 v rekapitulaci zobrazí paušál a účtované hodiny podle pásem; období vyplňte jako měsíc
 `RRRR-MM`. Tlačítko **Přenést do faktury** připraví položky, ale přenos se provede až
 po uložení faktury. Při nahrazení starší souhrnné položky ji vyberte v nabídce, jinak
 by se mohla částka účtovat dvakrát. Propojené položky mají stabilní vazbu na výkaz a
-na PDF odkazují na jeho podrobný rozpis. Pokud se výkaz od posledního přenosu změnil,
-aplikace přenos zablokuje; nejprve zkontrolujte výkaz a připravte nový přenos.
+na PDF odkazují na jeho podrobný rozpis. Při ukládání nepřeneseného nebo změněného
+účtování se aplikace zeptá, zda chcete pokračovat bez aktualizace položek faktury.
+Pokud už jste přenos připravili tlačítkem, další potvrzení se nezobrazuje. Nesoulad
+výkazu a položek blokuje vystavení faktury; nejprve zkontrolujte výkaz a přeneste jej znovu.
 
 Jednotlivý výkaz si uchovává vlastní kopii ceníku. Změna firemního ceníku tedy nemění
 již uložený výkaz. Paušál se účtuje i při nulovém počtu hodin, nevyčerpané hodiny se

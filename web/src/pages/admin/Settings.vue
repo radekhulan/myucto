@@ -17,7 +17,6 @@ import { renderVarsymbolTemplate, hasCounterPlaceholder, templatesCollide } from
 import { DEFAULT_NOTE_MAX_LENGTH } from '@/pages/invoices/invoiceDefaultNote'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import AutomationPolicyBox from '@/components/settings/AutomationPolicyBox.vue'
-import WorkReportBillingTemplates from '@/components/settings/WorkReportBillingTemplates.vue'
 import CompanyEmailTemplates from '@/components/settings/CompanyEmailTemplates.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -1256,7 +1255,6 @@ async function confirmTaxRepDelete() {
           </div>
           <div class="md:col-span-2">
             <WorkReportDisplaySettings v-model="supplier.work_report_display_options" />
-            <WorkReportBillingTemplates v-if="auth.canWrite('settings.company.write')" :currency="supplier.default_currency" />
           </div>
           <div class="md:col-span-2">
             <label class="flex items-center gap-2 text-sm">

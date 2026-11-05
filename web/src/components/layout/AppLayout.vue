@@ -357,6 +357,7 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/recurring', label: t('nav.recurring'), icon: ICONS.recurring, newTo: '/recurring/new' },
           { to: '/projects', label: t('nav.projects'), icon: ICONS.projects, newTo: '/projects/new' },
           ...(!isStockEnabled ? [{ to: '/admin/price-list', label: t('nav.price_list'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
+          { to: '/admin/work-report-billing-templates', label: t('work_report_billing.templates'), icon: ICONS.log, permission: 'price_list' as PermissionKey, access: 'read' },
         ],
       },
       {
@@ -487,6 +488,7 @@ const navSections = computed<NavSection[]>(() => {
           permission: 'price_list' as PermissionKey,
           access: 'read' as const,
         }] : []),
+        { to: '/admin/work-report-billing-templates', label: t('work_report_billing.templates'), icon: ICONS.log, permission: 'price_list' as PermissionKey, access: 'read' },
         // 3) Export vydaných (reorg UX 2026-07, vytažené z Nástrojů).
         { to: '/invoices/export',  label: t('nav.export'),     icon: ICONS.exports, dividerBefore: true },
       ],
