@@ -40,15 +40,17 @@ final class PayrollHourlyMinimumInputs
                 }
             }
             $treatment = PayrollComponentMinimumWage::resolve($classification)['treatment'];
-            if ($treatment === 'included' && $row['source_period_start'] !== null && $row['source_period_start'] !== $periodStart) {
-                $treatment = 'manual_review';
-            }
+            // Minimum se posuzuje za měsíc výkonu práce; plnění za jiný měsíc
+            // (například odměna za únor zúčtovaná v březnu) do něj nepatří.
+            $otherPeriod = $row['source_period_start'] !== null && $row['source_period_start'] !== $periodStart;
+            if ($otherPeriod) $treatment = 'excluded';
             $id = (int) $row['employment_id'];
             $key = (int) $row['id'] . ':' . ($row['source_period_start'] ?? '') . ':' . $treatment;
             $result[$id][$key] ??= ['component_id' => (int) $row['id'], 'version' => (int) $row['row_version'],
                 'input_ids' => [], 'amount_minor' => 0, 'minimum_wage_treatment' => $treatment,
                 'component_code' => (string) $row['code'], 'source_period_start' => $row['source_period_start'],
-                'classification_reason' => $row['minimum_wage_reason'] ?? null];
+                'classification_reason' => $row['minimum_wage_reason'] ?? null,
+                ...($otherPeriod ? ['exclusion_reason' => 'source_period_other'] : [])];
             $result[$id][$key]['input_ids'][] = (int) $row['input_id'];
             $old = $result[$id][$key]['amount_minor'];
             $amount = (int) $row['amount_minor'];

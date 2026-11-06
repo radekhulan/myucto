@@ -10,7 +10,10 @@ use MyInvoice\Service\Payroll\Time\PayrollCalendarFundService;
 use MyInvoice\Service\Payroll\Time\PayrollDuration;
 use PDO;
 
-/** Jen část měsíční mzdy, kterou dokládá úplný pravidelný rozvrh bez absencí. */
+/**
+ * Jen část měsíční mzdy, kterou dokládá úplný pravidelný rozvrh bez absencí.
+ * Fond pro měsíční posouzení minima na absencích nezávisí.
+ */
 final class PayrollHourlyMonthlyParts
 {
     public function __construct(private readonly Connection $db) {}
@@ -57,9 +60,10 @@ final class PayrollHourlyMonthlyParts
             $result[$id] = ['parts' => [], 'source' => $source];
             if (count($rows) !== 1) continue;
             $calendar = $rows[0];
+            $absent = (int) $calendar['has_absences'] !== 0;
             if ($calendar['schedule_type'] !== 'regular' || $calendar['valid_from'] > $periodStart
                 || ($calendar['valid_to'] !== null && $calendar['valid_to'] < $end)
-                || (int) $calendar['has_overrides'] !== 0 || (int) $calendar['has_absences'] !== 0) continue;
+                || (int) $calendar['has_overrides'] !== 0 || ($absent && !isset($minimumFunds[$id]))) continue;
             $pattern = json_decode((string) $calendar['week_pattern'], true, flags: JSON_THROW_ON_ERROR);
             if (!is_array($pattern)) continue;
             $days = $fund->month(substr($periodStart, 0, 7), $pattern)['days'];
@@ -76,7 +80,7 @@ final class PayrollHourlyMonthlyParts
             $start = max($periodStart, (string) ($employment['actual_start_date'] ?? $employment['start_date'] ?? $periodStart));
             $finish = min($end, (string) ($employment['end_date'] ?? $end));
             $parts = [];
-            foreach ($terms as $term) {
+            foreach ($absent ? [] : $terms as $term) {
                 if (($term['remuneration_type'] ?? null) === 'hourly') continue;
                 $from = max($periodStart, (string) $term['effective_from']);
                 $to = min($end, (string) ($term['effective_to'] ?? $end));
@@ -93,7 +97,7 @@ final class PayrollHourlyMonthlyParts
                     if (!isset($term['weekly_hours']) || PayrollDuration::parseHours((string) $term['weekly_hours']) !== PayrollDuration::fromMinutes($weeklyPatternMinutes)) $minimumFundUsable = false;
                 } catch (\InvalidArgumentException|\OverflowException) { $minimumFundUsable = false; }
             }
-            $result[$id] = ['parts' => $parts, 'source' => ['status' => 'supported', 'calendar' => $calendar, 'parts' => $parts,
+            $result[$id] = ['parts' => $parts, 'source' => ['status' => $absent ? 'minimum_fund_only' : 'supported', 'calendar' => $calendar, 'parts' => $parts,
                 'full_fund_duration_units' => PayrollDuration::fromMinutes($full), 'minimum_fund_usable' => $minimumFundUsable]];
         }
         return $result;

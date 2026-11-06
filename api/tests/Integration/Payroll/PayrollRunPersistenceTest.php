@@ -409,7 +409,9 @@ final class PayrollRunPersistenceTest extends TestCase
         $items = $loader->forMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
         $byId = [];
         foreach ($items as $item) $byId[$item['input_ids'][0]] = $item;
-        self::assertSame('manual_review', $byId[$this->inputId]['minimum_wage_treatment']);
+        // Plnění za jiný měsíc se do posouzení minima výkonu práce nezapočítá a neblokuje.
+        self::assertSame('excluded', $byId[$this->inputId]['minimum_wage_treatment']);
+        self::assertSame('source_period_other', $byId[$this->inputId]['exclusion_reason']);
         self::assertSame('included', $byId[(int) $row['id']]['minimum_wage_treatment']);
         self::assertSame('Syntetický podklad', $byId[(int) $row['id']]['classification_reason']);
         self::assertSame([], $loader->forMany($this->otherSupplierId, [$this->employmentId], '2026-06-01')[$this->employmentId]);
@@ -784,6 +786,12 @@ final class PayrollRunPersistenceTest extends TestCase
         $blocked = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms);
         self::assertSame('unavailable', $blocked[$this->employmentId]['source']['status']);
         self::assertSame([], $blocked[$this->employmentId]['parts']);
+        // Fond pro měsíční posouzení minima na absenci nezávisí; měsíční část dál chybí.
+        $terms[$this->employmentId][0]['weekly_hours'] = '40';
+        $minimum = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms, false, [$this->employmentId]);
+        self::assertSame([], $minimum[$this->employmentId]['parts']);
+        self::assertTrue($minimum[$this->employmentId]['source']['minimum_fund_usable']);
+        self::assertSame(528000, $minimum[$this->employmentId]['source']['full_fund_duration_units']);
     }
 
     public function testHourlyDpcAndSmallScaleKeepAgreedIncomeUnknownInsteadOfStaleMonthlyProjection(): void

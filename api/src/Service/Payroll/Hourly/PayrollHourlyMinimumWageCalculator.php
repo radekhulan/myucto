@@ -50,7 +50,10 @@ final class PayrollHourlyMinimumWageCalculator
                     $amount = $worked === 0 ? new PayrollExactFraction(0) : PayrollExactFraction::product([$rate, $worked], [PayrollDuration::UNITS_PER_HOUR]);
                 } else {
                     $contract = self::positive($part['contractual_weekly_duration_units'] ?? null);
-                    $fund = self::positive($part['full_month_fund_duration_units'] ?? null);
+                    if (($part['full_month_fund_duration_units'] ?? null) === null) {
+                        throw new PayrollHourlyCalculationException('hourly_minimum_monthly_fund_missing', 'Měsíční posouzení minima potřebuje úplný pravidelný rozvrh vztahu na celý měsíc, který odpovídá sjednané týdenní době. Upravte rozvrh, nebo zvolte hodinové posouzení.');
+                    }
+                    $fund = self::positive($part['full_month_fund_duration_units']);
                     if ($contract > $standard * 50 || $worked > $fund) throw new PayrollHourlyCalculationException('hourly_minimum_monthly_fund_invalid', 'Doložený měsíční fond nebo sjednaná doba neodpovídá posuzované běžné práci.');
                     $amount = PayrollExactFraction::product([self::positive($part['minimum_monthly_minor'] ?? null), $contract, $worked], [$standard, 50, $fund]);
                 }
@@ -67,7 +70,7 @@ final class PayrollHourlyMinimumWageCalculator
                 if (!in_array($treatment, ['included', 'excluded'], true)) throw new PayrollHourlyCalculationException('hourly_minimum_component_treatment_missing', 'Určete, zda se další mzdová složka započítává do minimální mzdy.', ['component_id' => $row['component_id'] ?? null]);
                 if ($treatment === 'excluded') {
                     // Vrácení vyloučené náhrady nemění započitatelnou mzdu ani neblokuje její minimum.
-                    $evidence['excluded'][] = [...$row, 'reason' => 'component_excluded', 'raw_numerator_minor' => $amount, 'raw_denominator' => 1, 'analytical_minor' => $amount];
+                    $evidence['excluded'][] = [...$row, 'reason' => $row['exclusion_reason'] ?? 'component_excluded', 'raw_numerator_minor' => $amount, 'raw_denominator' => 1, 'analytical_minor' => $amount];
                     continue;
                 }
                 if ($amount < 0) throw new PayrollHourlyCalculationException('hourly_minimum_negative_net_earning', 'Čistá opravená částka započitatelné mzdové složky je záporná; doložte její správné přiřazení před posouzením minima.', ['component_id' => $row['component_id'] ?? null]);
