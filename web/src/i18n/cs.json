@@ -4705,6 +4705,17 @@
           "kind_not_manually_enterable": "Tenhle druh příplatku se v rychlém měsíčním vstupu nezadává."
         }
       },
+        "surcharge_fix": {
+          "basis_missing": "Zadat průměrný výdělek",
+          "clear_only": "Zadat průměrný výdělek",
+          "holiday_arrangement_missing": "Doplnit zásady příplatků na kartě vztahu",
+          "holiday_compensatory_time_off": "Zásady příplatků na kartě vztahu",
+          "wage_includes_surcharge": "Zásady příplatků na kartě vztahu",
+          "claimed_by_attendance": "Otevřít docházku",
+          "managed_elsewhere": "Otevřít mzdové vstupy",
+          "kind_not_manually_enterable": "Týká se",
+          "more": "a další ({count})"
+        },
       "bonus": "Bonus / odměna",
       "bonus_amount": "Bonus / odměna (Kč)",
       "gross_preview": "Náhled hrubého příjmu",

@@ -4705,6 +4705,17 @@
           "kind_not_manually_enterable": "This surcharge is not entered in the quick monthly input."
         }
       },
+        "surcharge_fix": {
+          "basis_missing": "Enter the average earnings",
+          "clear_only": "Enter the average earnings",
+          "holiday_arrangement_missing": "Set the surcharge policy on the employment card",
+          "holiday_compensatory_time_off": "Surcharge policy on the employment card",
+          "wage_includes_surcharge": "Surcharge policy on the employment card",
+          "claimed_by_attendance": "Open attendance",
+          "managed_elsewhere": "Open payroll inputs",
+          "kind_not_manually_enterable": "Applies to",
+          "more": "and {count} more"
+        },
       "bonus": "Bonus / reward",
       "bonus_amount": "Bonus / reward (CZK)",
       "gross_preview": "Gross income preview",

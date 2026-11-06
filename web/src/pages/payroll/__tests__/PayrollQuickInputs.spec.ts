@@ -1144,6 +1144,12 @@ describe('PayrollQuickInputs', () => {
 
     const note = wrapper.get('[data-testid="quick-surcharge-column-note-holiday"]')
     expect(note.text()).toContain('holiday_arrangement_missing')
+    // Kde to řešit: dotčení lidé s odkazem na kartu vztahu.
+    const people = wrapper.get('[data-testid="quick-surcharge-column-note-people-holiday"]')
+    expect(people.text()).toContain('payroll.quick_inputs.surcharge_fix.holiday_arrangement_missing')
+    const links = people.findAll('a')
+    expect(links).toHaveLength(2)
+    expect(links[1]!.attributes('data-to')).toContain('employment=13')
     // V buňce žádná značka pod polem: neaktivní pole s placeholderem,
     // důvod v `title` pole a pro odečítače v `sr-only`.
     for (const id of [12, 13]) {

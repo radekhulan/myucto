@@ -28,6 +28,7 @@ import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
 import PayrollWorkedHoursSummary from '@/components/payroll/PayrollWorkedHoursSummary.vue'
 import PayrollHourlyWagePreview from '@/components/payroll/PayrollHourlyWagePreview.vue'
 import { uniqueBy } from './payrollFieldFeedback'
+import { averageEarningsTarget } from './payrollRemediation'
 import PayrollWorkedHoursPanel from '@/components/payroll/PayrollWorkedHoursPanel.vue'
 import {
   payrollPeriodRange,
@@ -822,15 +823,43 @@ function surchargePlaceholder(row: UiRow, kind: PayrollQuickSurchargeKind): stri
     : t('payroll.quick_inputs.surcharges.unavailable_placeholder')
 }
 
+/**
+ * Kam vede náprava konkrétního důvodu: průměr se zadává v nepřítomnostech,
+ * zásady příplatků na kartě vztahu, docházka v docházce. Bez cíle (druh, který
+ * se tu nezadává) zůstane jen jméno.
+ */
+function surchargeFixTarget(row: UiRow, key: string): string | null {
+  if (key === 'basis_missing' || key === 'clear_only') {
+    return averageEarningsTarget(row.employment_id)
+  }
+  if (['holiday_arrangement_missing', 'holiday_compensatory_time_off', 'wage_includes_surcharge'].includes(key)) {
+    return `/payroll/people?person=${row.employee_id}&employment=${row.employment_id}`
+  }
+  if (key === 'claimed_by_attendance') return `/payroll/time?period=${period.value}&employment=${row.employment_id}`
+  if (key === 'managed_elsewhere') return `/payroll/components?tab=inputs&period=${period.value}`
+  return null
+}
+
+const SURCHARGE_NOTE_PEOPLE_LIMIT = 6
+
 /** Sloupce, ke kterým se nad tabulkou vypisuje společné vysvětlení. */
 const surchargeNoteColumns = computed(() => SURCHARGE_KINDS
   .filter(kind => surchargeColumnNotes.value[kind] !== undefined)
-  .map(kind => ({
-    kind,
-    label: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
-    section: t(`payroll.quick_inputs.surcharges.sections.${kind}`),
-    text: t(`payroll.quick_inputs.surcharges.unavailable.${surchargeColumnNotes.value[kind]}`),
-  })))
+  .map(kind => {
+    const key = surchargeColumnNotes.value[kind]!
+    const affected = rows.value.filter(row => surchargeUnavailableKey(row, kind) === key)
+    return {
+      kind,
+      label: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
+      section: t(`payroll.quick_inputs.surcharges.sections.${kind}`),
+      text: t(`payroll.quick_inputs.surcharges.unavailable.${key}`),
+      fixLabel: t(`payroll.quick_inputs.surcharge_fix.${key}`),
+      people: affected.slice(0, SURCHARGE_NOTE_PEOPLE_LIMIT).map(row => ({
+        id: row.employment_id, name: row.full_name, to: surchargeFixTarget(row, key),
+      })),
+      more: Math.max(0, affected.length - SURCHARGE_NOTE_PEOPLE_LIMIT),
+    }
+  }))
 
 function formatMoney(value: number): string {
   return formatMoneyMinor(value)
@@ -2073,6 +2102,14 @@ onMounted(() => {
               <span class="font-medium text-neutral-900">{{ note.label }}</span>
               <span class="text-neutral-500"> ({{ note.section }})</span>
               <span> - {{ note.text }}</span>
+              <span v-if="note.people.length" class="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5" :data-testid="`quick-surcharge-column-note-people-${note.kind}`">
+                <span class="text-neutral-500">{{ note.fixLabel }}:</span>
+                <template v-for="person in note.people" :key="person.id">
+                  <RouterLink v-if="person.to" :to="person.to" class="whitespace-nowrap font-medium text-primary-700 underline hover:text-primary-800">{{ person.name }}</RouterLink>
+                  <span v-else class="whitespace-nowrap">{{ person.name }}</span>
+                </template>
+                <span v-if="note.more" class="text-neutral-500">{{ t('payroll.quick_inputs.surcharge_fix.more', { count: note.more }) }}</span>
+              </span>
             </li>
           </ul>
         </div>
