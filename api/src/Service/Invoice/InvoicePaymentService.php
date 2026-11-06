@@ -299,10 +299,10 @@ final class InvoicePaymentService
         try {
             $locked = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? FOR UPDATE');
             $locked->execute([$invoiceId]);
-            // Bankovní a pokladní úhrada faktury kryté ostatní pohledávkou patří pohledávce
-            // (migrace 2246); faktura ji jen zrcadlí ({@see InvoiceOtherItemPayments}).
+            // Úhrada faktury kryté ostatní pohledávkou patří pohledávce (migrace 2246); faktura
+            // ji jen zrcadlí ({@see InvoiceOtherItemPayments}). Jiná platba by ji přeplatila.
             $otherItemId = $locked->fetchColumn();
-            if (in_array($opts['source'] ?? '', ['bank', 'cash'], true) && $otherItemId !== null && $otherItemId !== false) {
+            if ($otherItemId !== null && $otherItemId !== false) {
                 throw new \RuntimeException('Faktura je navázaná na ostatní pohledávku. Úhradu spárujte s pohledávkou, faktura ji převezme.');
             }
             if (($opts['source'] ?? '') === 'bank') {

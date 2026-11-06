@@ -146,6 +146,23 @@ final class InvoiceOtherItemLinkTest extends TestCase
         $this->container->get(InvoicePaymentService::class)->recordPayment($invoice, self::AMOUNT, '2099-03-12', ['source' => 'bank']);
     }
 
+    public function testManualOrMarkPaidPaymentCannotOverpayLinkedInvoice(): void
+    {
+        $invoice = $this->invoice();
+        $this->links->link($this->supplierId, $invoice, $this->postedItem(), $this->userId);
+        $service = $this->container->get(InvoicePaymentService::class);
+
+        foreach (['manual', 'mark_paid'] as $source) {
+            try {
+                $service->recordPayment($invoice, self::AMOUNT, '2099-03-12', ['source' => $source]);
+                self::fail("Platba {$source} na navázané faktuře měla být odmítnuta.");
+            } catch (\RuntimeException $e) {
+                self::assertStringContainsString('ostatní pohledávku', $e->getMessage());
+            }
+        }
+        self::assertSame([], $this->payments($invoice));
+    }
+
     public function testUnlinkLeavesInvoiceUnpostedAndUnpaid(): void
     {
         $item = $this->postedItem();
