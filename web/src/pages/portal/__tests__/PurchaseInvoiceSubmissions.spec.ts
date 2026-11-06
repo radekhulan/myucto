@@ -42,7 +42,7 @@ function submission(id: number, status: PurchaseInvoiceSubmission['status'] = 's
 async function mountPage(items: PurchaseInvoiceSubmission[]) {
   m.list.mockResolvedValueOnce({ items })
   const wrapper = shallowMount(PurchaseInvoiceSubmissions, {
-    global: { stubs: { SubmissionPreview: false, Modal: { template: '<div role="dialog"><slot /></div>' } } },
+    global: { stubs: { SubmissionPreview: false, PdfFrame: false, Modal: { template: '<div role="dialog"><slot /></div>' } } },
   })
   await flushPromises()
   return wrapper

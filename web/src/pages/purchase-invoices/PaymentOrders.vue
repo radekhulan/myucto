@@ -28,6 +28,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
+import PdfFrame from '@/components/documents/PdfFrame.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankPaymentSubmission from '@/components/bank/BankPaymentSubmission.vue'
@@ -1036,8 +1037,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                 <tr v-if="pdfPreviewId === c.id">
                   <td></td>
                   <td colspan="6" class="px-4 py-3 bg-neutral-50">
-                    <iframe :src="pdfPreviewUrlFor(c.id)" class="w-full h-[75vh] border border-neutral-200 rounded bg-neutral-100"
-                      :title="c.vendor_invoice_number || 'PDF'"></iframe>
+                    <PdfFrame :src="pdfPreviewUrlFor(c.id)" class="block w-full h-[75vh] border border-neutral-200 rounded bg-neutral-100"
+                      :title="c.vendor_invoice_number || 'PDF'" />
                   </td>
                 </tr>
                 <!-- Inline QR k platbě -->
@@ -1180,8 +1181,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
               </div>
               <!-- Inline PDF náhled (mobile) -->
               <div v-if="pdfPreviewId === c.id" class="mt-2">
-                <iframe :src="pdfPreviewUrlFor(c.id)" class="w-full h-[70vh] border border-neutral-200 rounded bg-neutral-100"
-                  :title="c.vendor_invoice_number || 'PDF'"></iframe>
+                <PdfFrame :src="pdfPreviewUrlFor(c.id)" class="block w-full h-[70vh] border border-neutral-200 rounded bg-neutral-100"
+                  :title="c.vendor_invoice_number || 'PDF'" />
               </div>
               <!-- Inline QR (mobile) -->
               <div v-if="qrPreviewId === c.id" class="mt-2 flex flex-col items-center gap-1">
