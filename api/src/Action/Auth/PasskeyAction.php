@@ -54,6 +54,9 @@ final class PasskeyAction
         private readonly PasskeySessionTransitionService $sessionTransitions,
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly MfaRecoveryCodeService $recoveryCodes,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly \MyInvoice\Security\UserRoleProfile $roleProfile,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcFlowStore $oidcFlows,
     ) {}
 
     public function credentials(Request $request, Response $response): Response
@@ -106,7 +109,10 @@ final class PasskeyAction
         $hasStrongFactor = (int) $user['totp_enabled'] === 1
             || $this->credentials->countActiveForUser($context['user_id']) > 0;
         $requireNoActivePasskey = false;
-        if ($hasStrongFactor) {
+        // Účet bez silného faktoru se prokazuje heslem, nebo proofem z přihlášení
+        // u poskytovatele identity (uživatel přihlášený přes Entra heslo nemá).
+        $proofSupplied = trim((string) ($body['step_up_token'] ?? '')) !== '';
+        if ($hasStrongFactor || $proofSupplied) {
             try {
                 $proof = $this->stepUp->consume(
                     trim((string) ($body['step_up_token'] ?? '')),
@@ -319,6 +325,35 @@ final class PasskeyAction
                 );
             $verifiedUserId = (int) $completed['user']['id'];
             $this->bruteForce->recordPasskeySuccess($verifiedUserId);
+            // Passkey bez hesla je taky místní přihlášení a nesmí obejít firmu,
+            // která vyžaduje poskytovatele identity. Sezení už vzniklo v transakci
+            // ceremonie, proto se hned zruší.
+            $requiredProvider = $this->loginPolicy->requiredProviderForUser($verifiedUserId, null);
+            if ($requiredProvider !== null
+                && $this->loginPolicy->isBreakGlass($this->roleProfile->forUser($verifiedUserId)['system_key'] ?? null)
+            ) {
+                $requiredProvider = null;
+            }
+            if ($requiredProvider !== null) {
+                $this->sessions->destroy((string) $completed['session']['token']);
+                $this->logger->log('auth.login_failed', $verifiedUserId, 'user', $verifiedUserId, [
+                    'reason' => 'sso_required', 'provider' => $requiredProvider, 'login_method' => 'passkey',
+                ], $this->clientIp($request), $request->getHeaderLine('User-Agent'));
+                return Json::error(
+                    $response,
+                    'sso_required',
+                    'Váš účet se přihlašuje přes poskytovatele identity organizace.',
+                    403,
+                    ['provider' => $requiredProvider],
+                );
+            }
+            // Přihlášení přes Google, Apple či Seznam dokončené passkey: lístek,
+            // kterým prohlížeč prošel prvním krokem, se tím spotřebuje, ať po vydání
+            // sezení nezůstane platný v historii prohlížeče.
+            $ssoTicket = trim((string) ($body['sso_ticket'] ?? ''));
+            if (preg_match('/^[a-f0-9]{64}$/D', $ssoTicket) === 1) {
+                $this->oidcFlows->consumeTicket($ssoTicket);
+            }
             return $this->loginIssuer->issuePrepared(
                 $response,
                 $completed['user'],

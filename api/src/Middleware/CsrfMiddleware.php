@@ -95,6 +95,14 @@ final class CsrfMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        // Návrat přihlášení od Apple: prohlížeč ho POSTuje z appleid.apple.com
+        // (response_mode=form_post), Origin je tedy cizí z principu. Akce nic
+        // nemění a jen přesměruje na GET návrat, kde se ověří state i vazba
+        // na prohlížeč (OidcAction::formCallback).
+        if ($path === '/api/auth/oidc/apple/callback' && $method === 'POST') {
+            return $handler->handle($request);
+        }
+
         // Origin / Referer check (i pro exempt routes)
         $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
         $appUrl = $domain instanceof TenantDomainContext

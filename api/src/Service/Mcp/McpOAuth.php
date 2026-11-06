@@ -47,16 +47,18 @@ final class McpOAuth
         string $challenge,
         string $scope,
         string $resource,
+        ?string $issuedAuthMethod = null,
     ): string {
         $code = self::randomToken('mi_mcp_code_');
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO mcp_oauth_codes
-             (code_hash, client_id, user_id, supplier_id, redirect_uri, code_challenge, scope, resource, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))'
+             (code_hash, client_id, user_id, supplier_id, redirect_uri, code_challenge, scope, resource,
+              issued_auth_method, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))'
         );
         $stmt->execute([
             hash('sha256', $code), $clientId, $userId, $supplierId,
-            $redirectUri, $challenge, $scope, $resource, time() + 300,
+            $redirectUri, $challenge, $scope, $resource, $issuedAuthMethod, time() + 300,
         ]);
         return $code;
     }
@@ -103,8 +105,8 @@ final class McpOAuth
                 'MCP OAuth ' . substr($clientId, 0, 20), (string) $row['scope'],
                 new \DateTimeImmutable('+1 hour'),
             );
-            $pdo->prepare("UPDATE api_tokens SET audience = 'mcp' WHERE id = ?")
-                ->execute([$access['id']]);
+            $pdo->prepare("UPDATE api_tokens SET audience = 'mcp', issued_auth_method = ? WHERE id = ?")
+                ->execute([$row['issued_auth_method'] ?? null, $access['id']]);
             $pdo->prepare(
                 'INSERT INTO mcp_oauth_grants
                  (client_id, user_id, supplier_id, scope, resource, refresh_hash, access_token_id, expires_at)

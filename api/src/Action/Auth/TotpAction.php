@@ -181,8 +181,11 @@ final class TotpAction
         // TOTP tu aktivní být nemůže (409 výš), takže jediný silný faktor je passkey.
         // Počítá se bez ohledu na aktuální MFA politiku: zakázaný passkey nesmí
         // tiše přepnout na slabší heslovou větev.
-        if ($this->credentials->countActiveForUser($userId) > 0) {
-            return ['step_up_token' => trim((string) ($body['step_up_token'] ?? ''))];
+        // Proof z přihlášení u poskytovatele identity zastoupí heslo i u účtu bez
+        // passkey; spotřebuje se stejně jako passkey proof (MfaProtectedOperationService).
+        $stepUpToken = trim((string) ($body['step_up_token'] ?? ''));
+        if ($this->credentials->countActiveForUser($userId) > 0 || $stepUpToken !== '') {
+            return ['step_up_token' => $stepUpToken];
         }
 
         $enrollmentToken = trim((string) ($body['enrollment_token'] ?? ''));

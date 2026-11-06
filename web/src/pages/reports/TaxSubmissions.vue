@@ -47,6 +47,8 @@ import {
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpReturn } from '@/security/oidc'
 
 // `tax` je stránka Daně → Podání, `payroll` záložka mzdových vyúčtování pod Mzdami.
 // Archiv je jeden a odesílá se touž cestou; liší se jen tím, co obrazovka ukazuje.
@@ -153,6 +155,14 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+
+// Ověření přes Microsoft vede přes přesměrování; kontext říká, který ze tří
+// dialogů se po návratu otevře. Proof pak jde stejným polem jako passkey proof.
+const SSO_SCOPE = 'tax-submissions'
+const ssoProof = ref('')
+function ssoVerified(token: string): boolean {
+  return token !== '' && token === ssoProof.value
+}
 
 async function verifyEpoPasskey(target: 'step' | 'submit' | 'recovery') {
   if (!passkeySupported) return
@@ -1749,9 +1759,37 @@ const submissionActions = computed<ActionItem[]>(() => {
   ]
 })
 
+/** Návrat z ověření přes Microsoft: znovu otevře dialog, ze kterého uživatel odešel. */
+async function resumeSsoStepUp(returned: { token: string; detail: string }) {
+  const [dialog, ...rest] = returned.detail.split(':')
+  const itemId = Number(rest[rest.length - 1])
+  const item = items.value.find(candidate => candidate.id === itemId) ?? null
+  if (dialog === 'credential') {
+    await openCredentialModal()
+    stepPasskeyToken.value = returned.token
+  } else if ((dialog === 'test' || dialog === 'submit') && item) {
+    if (dialog === 'test') openTestModal(item)
+    else openSubmitModal(item)
+    if (!submitModalOpen.value) return
+    submitPasskeyToken.value = returned.token
+  } else if (dialog === 'recovery' && item) {
+    const mode = rest[0]
+    if (mode === 'state_password') openStatePassword(item)
+    else if (mode === 'confirmation' || mode === 'not_submitted') openRecoveryModal(item, mode)
+    if (!recoveryModalOpen.value) return
+    recoveryPasskeyToken.value = returned.token
+  } else {
+    return
+  }
+  ssoProof.value = returned.token
+  toast.info(t('sso.step_up_done'))
+}
+
 onMounted(async () => {
   restoreHandoffLinks()
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
   await Promise.all([load(), loadCredentials(), loadEpoEnvironment()])
+  if (ssoReturn) await resumeSsoStepUp(ssoReturn)
 })
 </script>
 
@@ -2674,7 +2712,7 @@ onMounted(async () => {
           </div>
 
           <div class="grid sm:grid-cols-2 gap-3 rounded-lg border border-neutral-200 p-4">
-            <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+            <div v-if="hasPasskey && !ssoVerified(stepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
               <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">
                 ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
               </div>
@@ -2690,6 +2728,10 @@ onMounted(async () => {
               </template>
               <p v-else class="text-xs text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
             </div>
+            <SsoStepUpOption v-if="ssoVerified(stepPasskeyToken) || !stepPasskeyToken" class="sm:col-span-2"
+              operation="epo.certificate" :context="`${SSO_SCOPE}:credential`"
+              :verified="ssoVerified(stepPasskeyToken)" :disabled="credentialBusy || passkeyBusy !== ''"
+              @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
             <template v-if="!stepPasskeyToken">
               <label class="text-xs text-neutral-600">
                 {{ t('reports.submissions.current_password') }}
@@ -2846,7 +2888,7 @@ onMounted(async () => {
               <span>{{ t('reports.submissions.resolve_not_submitted_check') }}</span>
             </label>
           </template>
-          <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3">
+          <div v-if="hasPasskey && !ssoVerified(recoveryPasskeyToken)" class="flex flex-wrap items-center gap-3">
             <div v-if="recoveryPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
             </div>
@@ -2862,6 +2904,10 @@ onMounted(async () => {
             </template>
             <p v-else class="text-sm text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified(recoveryPasskeyToken) || !recoveryPasskeyToken"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:recovery:${recoveryMode}:${expandedId}`"
+            :verified="ssoVerified(recoveryPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
+            @verified="(proof: string) => { recoveryPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!recoveryPasskeyToken">
             <label class="block text-sm">
               {{ t('reports.submissions.current_password') }}
@@ -2951,7 +2997,7 @@ onMounted(async () => {
           <div v-else class="rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800">
             {{ t('reports.submissions.direct_test_signature_warning') }}
           </div>
-          <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3">
+          <div v-if="hasPasskey && !ssoVerified(submitPasskeyToken)" class="flex flex-wrap items-center gap-3">
             <div v-if="submitPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
             </div>
@@ -2967,6 +3013,10 @@ onMounted(async () => {
             </template>
             <p v-else class="text-sm text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified(submitPasskeyToken) || !submitPasskeyToken"
+            operation="epo.certificate" :context="`${SSO_SCOPE}:${submitMode}:${expandedId}`"
+            :verified="ssoVerified(submitPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
+            @verified="(proof: string) => { submitPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!submitPasskeyToken">
             <label class="block text-sm">
               {{ t('reports.submissions.current_password') }}

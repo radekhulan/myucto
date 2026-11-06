@@ -194,6 +194,8 @@ final class GlobalSeedTables
         // se uživatel s vynuceným MFA po resetu nepřihlásil.
         'users', 'sessions', 'trusted_devices', 'login_otps',
         'webauthn_credentials', 'mfa_recovery_codes', 'totp_used_steps',
+        // Propojení s poskytovatelem identity je přihlašovací metoda účtu.
+        'user_external_identities',
         'user_preferences', 'saved_filters', 'user_favorites',
         // Dynamické role a per-firma override zůstávají spolu s uživateli.
         'roles', 'role_permissions', 'user_suppliers',
@@ -422,6 +424,7 @@ final class GlobalSeedTables
         'manufacturers',
         'mfa_step_up_proofs',
         'oauth_sessions',
+        'oidc_link_invites', 'oidc_login_flows',
         'migration_batch_items', 'migration_parallel_checks',
         'money_s3_import_map', 'money_s3_imports',
         'monthly_report_sends',

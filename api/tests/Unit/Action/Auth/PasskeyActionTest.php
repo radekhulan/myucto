@@ -797,6 +797,9 @@ final class PasskeyActionTest extends TestCase
             $this->sessionTransitions,
             $this->protectedOperations,
             $this->recoveryCodes,
+            $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            new \MyInvoice\Security\UserRoleProfile($this->db),
+            $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class),
         );
     }
 

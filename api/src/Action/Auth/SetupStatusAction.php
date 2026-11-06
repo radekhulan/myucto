@@ -33,6 +33,7 @@ final class SetupStatusAction
         // v /api/health.
         private readonly ManagedModeGuard $managed,
         private readonly OverduePolicy $overduePolicy,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry $oidcProviders,
         private readonly MaintenanceNoticeService $maintenanceNotices,
     ) {}
 
@@ -60,6 +61,8 @@ final class SetupStatusAction
                 (bool) $this->config->get('auth.passwordless_login.enabled', false)
                 && $this->passkeys->isAvailable()
                 && $this->mfaPolicy->isMethodAllowed('passkey'),
+            // Tlačítka přihlášení u poskytovatelů identity; bez zapnutého OIDC prázdné.
+            'sso_providers' => $this->oidcProviders->isEnabled() ? $this->oidcProviders->publicList() : [],
             'captcha'     => [
                 'provider'   => $this->config->get('captcha.provider', 'none'),
                 'site_key'   => $this->config->get('captcha.site_key', ''),

@@ -39,6 +39,7 @@ final class SetupStatusActionTest extends TestCase
             $policy,
             new ManagedModeGuard(new Config([])),
             new OverduePolicy(new Config(['invoices' => ['overdue_includes_today' => true]])),
+            new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry(new \MyInvoice\Infrastructure\Config\Config([])),
             $this->noNotices(),
         );
 
@@ -68,6 +69,7 @@ final class SetupStatusActionTest extends TestCase
             $policy,
             new ManagedModeGuard(new Config([])),
             new OverduePolicy(new Config([])),
+            new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry(new \MyInvoice\Infrastructure\Config\Config([])),
             $this->noNotices(),
         );
 

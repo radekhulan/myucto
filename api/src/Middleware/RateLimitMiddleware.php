@@ -268,6 +268,20 @@ final class RateLimitMiddleware implements MiddlewareInterface
         ) {
             return ['rl:domain-login:' . sha1($path) . ':ip:' . $this->ipBucket($ip), 10, 60];
         }
+        // Přihlášení u poskytovatele identity: zahájení i návrat jsou GET bez
+        // session, každý stojí zápis do DB a návrat i dotaz na poskytovatele.
+        if (str_starts_with($path, '/api/auth/oidc/') && $method === 'GET'
+            && (str_ends_with($path, '/login') || str_ends_with($path, '/callback'))
+        ) {
+            return ['rl:oidc:' . sha1($path) . ':ip:' . $this->ipBucket($ip),
+                (int) ($rl['login_per_min_per_ip'] ?? 10) * 2, 60];
+        }
+        if ($path === '/api/auth/oidc/apple/callback' && $method === 'POST') {
+            return ['rl:oidc-form:ip:' . $this->ipBucket($ip), (int) ($rl['login_per_min_per_ip'] ?? 10) * 2, 60];
+        }
+        if (str_starts_with($path, '/api/auth/oidc/') && $method !== 'GET' && $userId > 0) {
+            return ['rl:oidc-self:' . sha1($path) . ':user:' . $userId, 20, 60];
+        }
         if ($path === '/api/auth/domain-login/authorize' && $method === 'POST' && $userId > 0) {
             return ['rl:domain-login-authorize:user:' . $userId, 20, 60];
         }

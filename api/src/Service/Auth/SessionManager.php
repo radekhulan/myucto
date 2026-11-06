@@ -101,15 +101,23 @@ final class SessionManager
         $csrf = bin2hex(random_bytes(32));
         $familyId = random_bytes(32);
         $deviceClass = SessionDeviceClass::fromUserAgent($userAgent);
-        $expiresAt = $cutoff->epochSeconds + ($lifetimeDays * 86400);
+        $lifetimeSeconds = $lifetimeDays * 86400;
+        // Uživatele zablokovaného u poskytovatele identity nemáme jak odhlásit,
+        // takže sezení, kterým poskytovatel nahradil celé přihlášení (Entra ID),
+        // platí kratší dobu. U Googlu a dalších rozhoduje i místní druhý faktor. Platí i pro sezení
+        // vlastní domény odvozené z canonical sezení (DomainLoginService).
+        if (SessionAuthContext::isExternalMethod($authContext->authMethod) && $authContext->assuranceLevel === 'strong') {
+            $lifetimeSeconds = min($lifetimeSeconds, $this->externalSessionLifetimeSeconds());
+        }
+        $expiresAt = $cutoff->epochSeconds + $lifetimeSeconds;
         $stmt = $pdo->prepare(
             'INSERT INTO sessions
                 (id, user_id, csrf_token, ip, user_agent, device_class, supplier_domain_id,
                  created_at, last_seen, expires_at,
                  auth_method, assurance_level, mfa_verified_at, auth_credential_id,
-                 last_user_activity_at, session_family_id, generation)
+                 last_user_activity_at, session_family_id, generation, external_identity_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
-                     ?, ?, ?, ?, ?, ?, ?)'
+                     ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $token,
@@ -129,6 +137,7 @@ final class SessionManager
             $cutoff->utcSql,
             $familyId,
             1,
+            $authContext->externalIdentityId,
         ]);
         $this->enforceConcurrencyLimit($pdo, $cutoff, $userId, $deviceClass, $supplierDomainId, $familyId);
 
@@ -138,6 +147,12 @@ final class SessionManager
             'expires_at' => $expiresAt,
             'issued_at' => $cutoff->utc,
         ];
+    }
+
+    public function externalSessionLifetimeSeconds(): int
+    {
+        $hours = (int) $this->config->get('auth.oidc.session_lifetime_hours', 12);
+        return max(1, min(720, $hours)) * 3600;
     }
 
     /**
@@ -173,7 +188,7 @@ final class SessionManager
                     s.auth_credential_id, s.last_user_activity_at, s.locked_at,
                     s.lock_reason, s.last_unlock_at, s.last_unlock_method,
                     HEX(s.session_family_id) AS session_family_id,
-                    s.generation, s.replaced_at, s.revoked_at,
+                    s.generation, s.replaced_at, s.revoked_at, s.external_identity_id,
                     UTC_TIMESTAMP(6) AS evaluated_at,
                     UNIX_TIMESTAMP(CURRENT_TIMESTAMP(6)) AS evaluated_at_epoch,
                     u.id AS account_id, u.email AS account_email,
@@ -648,11 +663,13 @@ final class SessionManager
                  created_at, last_seen, expires_at,
                  auth_method, assurance_level, mfa_verified_at, auth_credential_id,
                  last_user_activity_at, locked_at, lock_reason, last_unlock_at,
-                 last_unlock_method, session_family_id, generation, replaced_at, revoked_at)
+                 last_unlock_method, session_family_id, generation, replaced_at, revoked_at,
+                 external_identity_id)
              SELECT ?, user_id, ?, ip, user_agent, device_class, supplier_domain_id,
                     created_at, FROM_UNIXTIME(?), expires_at,
                     auth_method, assurance_level, mfa_verified_at, auth_credential_id,
-                    ?, NULL, NULL, ?, ?, session_family_id, generation + 1, NULL, NULL
+                    ?, NULL, NULL, ?, ?, session_family_id, generation + 1, NULL, NULL,
+                    external_identity_id
                FROM sessions
               WHERE id = ? AND user_id = ?
                 AND locked_at IS NOT NULL AND replaced_at IS NULL AND revoked_at IS NULL'

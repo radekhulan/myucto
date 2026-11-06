@@ -7,6 +7,8 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
+import { takeSsoStepUpProof } from '@/security/oidc'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 
@@ -141,7 +143,7 @@ async function submitCreate() {
   }
   // Účet bez passkey i TOTP nemá čím udělat step-up — backend v takovém případě
   // vyžaduje re-auth heslem, ať na vydání tokenu nestačí samotná session.
-  if (!needsStepUp.value && form.value.password === '') {
+  if (!needsStepUp.value && !passkeyStepUpToken.value && form.value.password === '') {
     createError.value = t('api_tokens.password_required')
     return
   }
@@ -335,7 +337,17 @@ function fmtTime(iso: string | null): string {
   return iso.replace('T', ' ').slice(0, 16)
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  // Návrat z ověření přes účet organizace: formulář se otevře znovu s proofem,
+  // vyplněné údaje se ale přesměrováním ztratily a uživatel je zadá znovu.
+  const proof = takeSsoStepUpProof('api_token.create')
+  if (proof && canManageTokens.value) {
+    openCreate()
+    passkeyStepUpToken.value = proof
+    toast.info(t('sso.step_up_done'))
+  }
+})
 </script>
 
 <template>
@@ -602,7 +614,7 @@ onMounted(load)
 
           <!-- Účet s passkey nebo TOTP se prokáže step-upem; heslo se ptá jen tam,
                kde uživatel žádný silný faktor nemá (jinak by session stačila sama). -->
-          <label v-if="!needsStepUp" class="block text-sm">
+          <label v-if="!needsStepUp && !passkeyStepUpToken" class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('api_tokens.password') }}</span>
             <input v-model="form.password" type="password" autocomplete="current-password"
               class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
@@ -629,6 +641,12 @@ onMounted(load)
               class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-lg tracking-widest text-center" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.totp_hint') }}</p>
           </label>
+
+          <div v-if="passkeyStepUpToken && !hasPasskey" class="text-sm font-medium text-success-600">
+            ✓ {{ t('sso.step_up_verified') }}
+          </div>
+          <SsoStepUpOption v-else-if="!passkeyStepUpToken" operation="api_token.create" :disabled="createBusy || passkeyBusy"
+            @verified="(proof: string) => { passkeyStepUpToken = proof }" />
         </div>
 
         <div v-if="createError"

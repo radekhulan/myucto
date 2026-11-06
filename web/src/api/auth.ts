@@ -101,6 +101,16 @@ export interface SupplierBrief {
   payroll_enabled?: boolean
 }
 
+export interface SsoProvider {
+  id: string
+  label: string
+  /**
+   * Plné přihlášení včetně MFA u poskytovatele (Entra ID): smí potvrzovat citlivé
+   * operace a firma ho může vynutit. Ostatní poskytovatelé jsou jen první faktor.
+   */
+  strong?: boolean
+}
+
 export interface SetupStatus {
   needs_setup: boolean
   version: string
@@ -119,6 +129,8 @@ export interface SetupStatus {
     password: string
   }
   passwordless_login_enabled: boolean
+  /** Poskytovatelé identity (OpenID Connect); prázdné = přihlášení přes organizaci vypnuté. */
+  sso_providers?: SsoProvider[]
   /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
   maintenance_notices?: import('@/api/maintenanceNotice').MaintenanceNotice[]
   captcha: {
@@ -142,8 +154,10 @@ export interface DomainContext {
 }
 
 export interface LoginPayload {
-  email: string
-  password: string
+  email?: string
+  password?: string
+  /** Lístek z návratu od poskytovatele, který je jen prvním faktorem; nahrazuje e-mail a heslo. */
+  sso_ticket?: string
   totp?: string
   email_otp?: string
   /** Záložní jednorázový kód — break-glass při ztraceném silném faktoru. */
@@ -398,10 +412,13 @@ export const authApi = {
       cf_turnstile_response: captchaToken,
     }).then(r => r.data),
 
-  passkeyLoginVerify: (flowToken: string, credential: Record<string, any>) =>
+  // `ssoTicket`: přihlášení přes Google, Apple či Seznam dokončené passkey;
+  // server lístek po vydání sezení spotřebuje.
+  passkeyLoginVerify: (flowToken: string, credential: Record<string, any>, ssoTicket?: string) =>
     api.post<AuthSessionContract>('/auth/webauthn/login/verify', {
       flow_token: flowToken,
       credential,
+      ...(ssoTicket ? { sso_ticket: ssoTicket } : {}),
     }).then(r => r.data),
 
   sessionStatus: () =>

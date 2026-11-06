@@ -119,7 +119,7 @@ test('security management renders inside the shared profile tabs', async () => {
   ].join('\n')
   const authApi = await readFile(new URL('api/auth.ts', root), 'utf8')
 
-  assert.match(profile, /type Tab = 'password' \| 'totp' \| 'passkeys' \| 'session-lock' \| 'shortcuts'/)
+  assert.match(profile, /type Tab = 'password' \| 'totp' \| 'passkeys' \| 'sso' \| 'session-lock' \| 'shortcuts'/)
   assert.match(profile, /<Passkeys\b[^>]*v-else-if="tab === 'passkeys'"[^>]*\/>/)
   assert.match(profile, /<KeyboardShortcuts v-else embedded \/>/)
   assert.match(profile, /sessionSecurity\.apply\(result\.session\)/)
@@ -145,7 +145,7 @@ test('passkey management fields have visible associated labels', async () => {
 
 test('revoking a passkey refreshes the shared user profile and session security', async () => {
   const passkeys = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
-  const revoke = passkeys.match(/async function revoke\(item: PasskeyCredential\) \{([\s\S]*?)\n\}/)?.[1] || ''
+  const revoke = passkeys.match(/async function revoke\(item: PasskeyCredential(?:, ssoProof = '')?\) \{([\s\S]*?)\r?\n\}/)?.[1] || ''
 
   assert.match(
     revoke,
@@ -253,7 +253,8 @@ test('revoking the last strong factor is blocked before the step-up, not after i
   assert.match(blocked, /auth\.requireMfa/)
   assert.match(blocked, /list\.value\.length === 1/)
   assert.match(blocked, /totpAllowed\.value && hasTotp\.value/)
-  assert.match(page, /:disabled="busy \|\| revokeBlocked \|\| stepUpMethods\.length === 0"/)
+  // Bez místní metody zbývá ověření přes Microsoft, je-li identita propojená.
+  assert.match(page, /:disabled="busy \|\| revokeBlocked \|\| \(stepUpMethods\.length === 0 && !ssoAvailable\)"/)
   assert.match(page, /revoke_last_factor/)
 })
 
@@ -284,7 +285,7 @@ test('the second-factor step hides the passwordless passkey entry point', async 
   )
   assert.match(
     login,
-    /v-if="auth\.setupStatus\?\.passwordless_login_enabled && !secondFactorPending"/,
+    /v-if="auth\.setupStatus\?\.passwordless_login_enabled && !secondFactorPending(?: && !ssoTicket)?"/,
   )
 })
 
@@ -307,7 +308,7 @@ test('the login second factor offers exactly the methods the server named', asyn
 
 test('a cancelled ceremony during revoke points at the TOTP alternative', async () => {
   const page = await readFile(new URL('pages/Passkeys.vue', root), 'utf8')
-  const revoke = page.match(/async function revoke\(item: PasskeyCredential\) \{([\s\S]*?)\r?\n\}/)?.[1] || ''
+  const revoke = page.match(/async function revoke\(item: PasskeyCredential(?:, ssoProof = '')?\) \{([\s\S]*?)\r?\n\}/)?.[1] || ''
 
   // Zrušený dialog není „operace se nepodařila" — uživatel typicky klíč nemá.
   assert.match(revoke, /webAuthnErrorKey\(e\)/)

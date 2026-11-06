@@ -1227,6 +1227,10 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->diagnosticLogger()),
             \MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataClient(new \GuzzleHttp\Client()),
+            \MyInvoice\Service\Auth\Oidc\OidcHttpClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Auth\Oidc\OidcHttpClient(new \GuzzleHttp\Client()),
+            \MyInvoice\Service\Auth\Oidc\JwksCache::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Auth\Oidc\JwksCache($c->get(\MyInvoice\Service\Auth\Oidc\OidcHttpClient::class)),
             // Zdroje automatického stavu tachometru; nový zdroj se přidá sem.
             \MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry([

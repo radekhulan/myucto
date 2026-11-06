@@ -22,6 +22,8 @@ import {
 } from '@/api/payroll'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { takeSsoStepUpReturn } from '@/security/oidc'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -334,7 +336,20 @@ async function remove() {
   }
 }
 
-onMounted(load)
+// Ověření přes Microsoft: proof platí pro prostředí, ze kterého uživatel odešel.
+const SSO_SCOPE = 'payroll-signing'
+const ssoProof = ref('')
+const ssoVerified = computed(() => stepPasskeyToken.value !== '' && stepPasskeyToken.value === ssoProof.value)
+
+onMounted(async () => {
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
+  await load()
+  if (ssoReturn && ssoReturn.detail === environment.value) {
+    stepPasskeyToken.value = ssoReturn.token
+    ssoProof.value = ssoReturn.token
+    success.value = t('sso.step_up_done')
+  }
+})
 </script>
 
 <template>
@@ -618,7 +633,7 @@ onMounted(load)
             <p class="text-sm font-medium text-neutral-800 sm:col-span-2">
               {{ t('payroll.submissions.signing.step_up.title') }}
             </p>
-            <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3 sm:col-span-2">
+            <div v-if="hasPasskey && !ssoVerified" class="flex flex-wrap items-center gap-3 sm:col-span-2">
               <p v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">
                 {{ t('payroll.submissions.signing.step_up.passkey_verified') }}
               </p>
@@ -645,6 +660,15 @@ onMounted(load)
                 {{ t('payroll.submissions.signing.step_up.passkey_unsupported') }}
               </p>
             </div>
+            <SsoStepUpOption
+              v-if="ssoVerified || !stepPasskeyToken"
+              class="sm:col-span-2"
+              operation="epo.certificate"
+              :context="`${SSO_SCOPE}:${environment}`"
+              :verified="ssoVerified"
+              :disabled="passkeyBusy || busy"
+              @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }"
+            />
             <template v-if="!stepPasskeyToken">
               <label class="block text-xs text-neutral-600">
                 {{ t('payroll.submissions.signing.step_up.password') }}

@@ -25,6 +25,8 @@ import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpReturn } from '@/security/oidc'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -207,7 +209,39 @@ async function load() {
   }
 }
 
-onMounted(load)
+// Ověření přes Microsoft: po návratu se proof vrátí do sekce, odkud uživatel odešel
+// (trezor certifikátů, nebo rozepsaný podpisový profil).
+const SSO_SCOPE = 'electronic-signatures'
+const ssoProof = ref('')
+function ssoVerified(token: string): boolean {
+  return token !== '' && token === ssoProof.value
+}
+const signingProfileSsoContext = computed(() =>
+  `${SSO_SCOPE}:profile:${editingSigningProfile.value ?? 'new'}`,
+)
+
+async function resumeSsoStepUp(returned: { token: string; detail: string }) {
+  if (returned.detail === 'vault') {
+    certificateStepPasskeyToken.value = returned.token
+  } else if (returned.detail.startsWith('profile:')) {
+    const id = returned.detail.slice('profile:'.length)
+    const profile = signingProfiles.value.find(candidate => String(candidate.id) === id)
+    if (profile) startEditSigningProfile(profile)
+    else if (id === 'new') startCreateSigningProfile()
+    else return
+    signingProfileVaultPasskeyToken.value = returned.token
+  } else {
+    return
+  }
+  ssoProof.value = returned.token
+  toast.info(t('sso.step_up_done'))
+}
+
+onMounted(async () => {
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
+  await load()
+  if (ssoReturn) await resumeSsoStepUp(ssoReturn)
+})
 
 function signingProfileUsageLabel(usage: SigningProfileUsage): string {
   return t(`settings.signing_profile_usage_${usage}`)
@@ -1141,7 +1175,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
         </div>
 
         <div class="mt-4 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="hasPasskey && !ssoVerified(certificateStepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="certificateStepPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('settings.certificate_vault_passkey_verified') }}
             </div>
@@ -1155,6 +1189,10 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
           </div>
+          <SsoStepUpOption v-if="ssoVerified(certificateStepPasskeyToken) || !certificateStepPasskeyToken"
+            class="sm:col-span-2" operation="epo.certificate" :context="`${SSO_SCOPE}:vault`"
+            :verified="ssoVerified(certificateStepPasskeyToken)" :disabled="certificatePasskeyBusy || certificateBusy"
+            @verified="(proof: string) => { certificateStepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!certificateStepPasskeyToken">
             <label class="text-xs text-neutral-600">
               {{ t('settings.certificate_vault_step_up_password') }}
@@ -1550,7 +1588,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   </label>
                   <div v-if="signingProfileVaultPasskeyToken" class="flex items-end text-sm font-medium text-success-600"
                     data-testid="signing-vault-passkey-verified">
-                    ✓ {{ t('settings.certificate_vault_passkey_verified') }}
+                    ✓ {{ ssoVerified(signingProfileVaultPasskeyToken) ? t('sso.step_up_verified') : t('settings.certificate_vault_passkey_verified') }}
                   </div>
                   <div v-else class="grid grid-cols-2 gap-2">
                     <label class="text-xs text-neutral-700">
@@ -1576,6 +1614,9 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <span v-if="passkeySupported" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
                   <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
+                <SsoStepUpOption v-if="!signingProfileVaultPasskeyToken" class="mt-3" operation="epo.certificate"
+                  :context="signingProfileSsoContext" :disabled="signingProfileVaultPasskeyBusy || signingProfileSaving"
+                  @verified="(proof: string) => { signingProfileVaultPasskeyToken = proof; ssoProof = proof }" />
                 <p v-if="usablePersonalCertificates.length === 0" class="mt-2 text-xs text-warning-700">
                   {{ t('settings.signing_vault_empty_hint') }}
                 </p>
