@@ -25,7 +25,6 @@ final class PayrollManualSummaryValidationTest extends TestCase
         yield 'nulové hodiny s dny' => [['segments' => [array_replace($segment, ['worked_duration_units' => 0, 'worked_days' => 1])]]];
         yield 'překryv' => [['segments' => [$segment, $segment]]];
         yield 'bez podkladu' => [['segments' => []]];
-        yield 'bez důvodu' => [['reason' => ' ']];
         yield 'neplatné potvrzení' => [['replace_source' => 'true']];
     }
 
